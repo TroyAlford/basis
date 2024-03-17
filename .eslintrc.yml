@@ -1,0 +1,8 @@
+extends:
+  - ./libraries/eslint-plugin
+ignorePatterns:
+  - node_modules
+parserOptions:
+  project: ./tsconfig.json
+  tsconfigRootDir: .
+root: true
