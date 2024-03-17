@@ -1,0 +1,9 @@
+{
+	"name": "@basis/react",
+	"dependencies": {
+		"react": "^18"
+	},
+	"peerDependencies": {
+		"@basis/utilities": "workspace:*"
+	}
+}

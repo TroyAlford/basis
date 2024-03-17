@@ -1,0 +1,19 @@
+{
+  "license": "MIT",
+  "main": "index.js",
+  "name": "basis",
+  "version": "1.0.0",
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^13.9.0",
+    "@types/bun": "^1.0.8",
+    "@types/react": "^18.2.66",
+    "typescript": "^5.4.2"
+  },
+  "scripts": {
+    "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces"
+  },
+  "workspaces": [
+    "libraries/*",
+    "packages/*"
+  ]
+}
