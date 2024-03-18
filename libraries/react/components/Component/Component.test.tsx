@@ -27,17 +27,17 @@ describe('Component', () => {
 	describe('classNames', () => {
 		test('from the classNames getter', () => {
 			const { node } = render(<TestComponent />)
-			expect(node.matches('.foo.bar.baz')).toBeTrue()
+			expect(node).toHaveClass('foo', 'bar', 'baz')
 		})
 
 		test('from the component name', () => {
 			const { node } = render(<TestComponent />)
-			expect(node.matches('.test-component')).toBeTrue()
+			expect(node).toHaveClass('test-component')
 		})
 
 		test('from the className prop', () => {
 			const { node } = render(<TestComponent className="qux" />)
-			expect(node.matches('.qux')).toBeTrue()
+			expect(node).toHaveClass('qux')
 		})
 	})
 
