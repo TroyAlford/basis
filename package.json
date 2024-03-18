@@ -8,9 +8,11 @@
 		"@types/bun": "^1.0.8",
 		"@types/react": "^18",
 		"@types/react-dom": "^18",
+		"bun-types": "^1.0.33",
 		"typescript": "^5"
 	},
 	"scripts": {
+		"test:develop": "bun test --watch --coverage",
 		"up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces"
 	},
 	"workspaces": [

@@ -3,18 +3,28 @@ import * as React from 'react'
 import { render } from '../../testing/render'
 import { Component } from './Component'
 
-class TestComponent extends Component {
+class TestComponent extends Component<{ tag?: string }> {
 	get classNames() { return ' foo bar baz ' }
 	get content() { return this.props.children ?? 'content' }
+	get tag() { return this.props.tag ?? 'div' }
 }
 
 describe('Component', () => {
-	test('renders a div by default', () => {
-		const { node } = render(<TestComponent />)
-		expect(node.tagName).toBe('DIV')
+	test('renders the specified tag', () => {
+		const div = render(<TestComponent />)
+		expect(div.node.tagName).toBe('DIV')
+
+		const span = render(<TestComponent tag="span" />)
+		expect(span.node.tagName).toBe('SPAN')
 	})
 
-	describe('renders classNames', () => {
+	test('nodeRef', () => {
+		const ref = React.createRef<HTMLDivElement>()
+		const { node } = render(<TestComponent nodeRef={ref} />)
+		expect(ref.current).toBe(node as HTMLDivElement)
+	})
+
+	describe('classNames', () => {
 		test('from the classNames getter', () => {
 			const { node } = render(<TestComponent />)
 			expect(node.matches('.foo.bar.baz')).toBeTrue()
@@ -28,6 +38,28 @@ describe('Component', () => {
 		test('from the className prop', () => {
 			const { node } = render(<TestComponent className="qux" />)
 			expect(node.matches('.qux')).toBeTrue()
+		})
+	})
+
+	describe('data attributes', () => {
+		test('from the data prop', () => {
+			const { node } = render(<TestComponent data={{ bar: 42, baz: 'qux', foo: true }} />)
+			expect(node).toHaveAttribute('data-foo', 'true')
+			expect(node).toHaveAttribute('data-bar', '42')
+			expect(node).toHaveAttribute('data-baz', 'qux')
+		})
+
+		test('from data-* attributes', () => {
+			const foo = render(<TestComponent data-foo />)
+			expect(foo.node).toHaveAttribute('data-foo', 'true')
+
+			const bar = render(<TestComponent data-bar={42} />)
+			expect(bar.node).toHaveAttribute('data-bar', '42')
+		})
+
+		test('data attributes override matching data-* attributes', () => {
+			const { node } = render(<TestComponent data-foo data={{ foo: false }} />)
+			expect(node).toHaveAttribute('data-foo', 'false')
 		})
 	})
 

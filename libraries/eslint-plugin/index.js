@@ -50,6 +50,7 @@ module.exports = { // eslint-disable-line
 			{ format: ['PascalCase'], selector: 'typeLike' },
 		],
 		'@typescript-eslint/no-explicit-any': 'error',
+		'@typescript-eslint/no-namespace': 'off',
 		'@typescript-eslint/no-shadow': 'error',
 		'@typescript-eslint/no-unused-vars': 'error',
 		'array-bracket-newline': ['error', 'consistent'],

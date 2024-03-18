@@ -14,7 +14,7 @@ export interface ComponentProps {
 	 */
 	data?: Record<string, boolean | number | string>,
 	/** An optional ref to the component's root element. */
-	rootNodeRef?: React.RefObject<HTMLElement>,
+	nodeRef?: React.RefObject<HTMLElement>,
 }
 
 /**
@@ -29,14 +29,14 @@ export abstract class Component<Props = object, State = object, SnapShot = objec
 	extends React.Component<Props & ComponentProps, State, SnapShot>
 {
 	static defaultProps: ComponentProps = {
-		rootNodeRef: React.createRef<HTMLElement>(),
+		nodeRef: React.createRef<HTMLElement>(),
 	}
 
 	/** Getter for class names. */
 	get classNames(): string | Set<string> { return '' }
 
 	/** Getter for root element. */
-	get rootNode(): HTMLElement | null { return this.props.rootNodeRef?.current }
+	get rootNode(): HTMLElement | null { return this.props.nodeRef?.current }
 
 	/** Getter for initialState. */
 	get initialState(): State { return {} as State }
@@ -55,13 +55,13 @@ export abstract class Component<Props = object, State = object, SnapShot = objec
 
 	render(): React.ReactNode {
 		const Tag = this.tag
-		const { className, data, rootNodeRef, ...props } = this.props
+		const { className, data, nodeRef: rootNodeRef, ...props } = this.props
 
 		return ( // @ts-expect-error - we are assuming a props match
 			<Tag
 				ref={rootNodeRef}
-				{...dataAttributes(data)}
 				{...props}
+				{...dataAttributes(data)}
 				className={classNames(
 					// @ts-expect-error - displayName is a valid static on React.Component
 					kebabCase(this.constructor.displayName ?? this.constructor.name),

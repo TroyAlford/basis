@@ -1,5 +1,5 @@
 [test]
 preload = [
 	"./config/happydom.ts",
-	"./libraries/react/testing/bun.console.ts"
+	"./libraries/react/testing/bun"
 ]

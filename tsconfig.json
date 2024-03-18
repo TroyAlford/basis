@@ -3,6 +3,10 @@
 		"jsx": "react",
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
-		"target": "ES2022"
+		"target": "ES2022",
+		"types": [
+			"bun-types",
+			"./libraries/react/testing/bun",
+		]
 	}
 }
