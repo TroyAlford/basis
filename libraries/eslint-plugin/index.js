@@ -101,6 +101,7 @@ module.exports = { // eslint-disable-line
 			reservedFirst: ['key', 'ref'],
 			shorthandFirst: true,
 		}],
+		'react/prop-types': 'off',
 		'semi': ['error', 'never'],
 		'semi-style': 'off',
 		'sort-imports': 'off',
