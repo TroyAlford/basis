@@ -1,3 +1,2 @@
-import { GlobalRegistrator } from '@happy-dom/global-registrator'
-
-GlobalRegistrator.register()
+import('@happy-dom/global-registrator')
+	.then(({ GlobalRegistrator }) => GlobalRegistrator.register())

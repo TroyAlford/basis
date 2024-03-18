@@ -1,7 +1,6 @@
 {
 	"compilerOptions": {
-		"jsx": "react-jsx",
-		"jsxImportSource": "@library",
+		"jsx": "react",
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
 		"target": "ES2022"
