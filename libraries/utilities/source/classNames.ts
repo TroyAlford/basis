@@ -22,17 +22,17 @@ export function classNames(...values: ClassName[]): string {
 				case (isNil(declaration)):
 					return []
 				case (typeof declaration === 'string'):
-					return declaration.trim() || []
+					return declaration.trim().split(/\s+/g)
 				case (declaration instanceof Set):
-					return Array.from(declaration)
+					return classNames(...declaration)
 				case (declaration instanceof Map):
-					return Array.from(declaration.entries()).reduce(reducer, [])
+					return classNames(...Array.from(declaration.entries()).reduce(reducer, []))
 				case (typeof declaration === 'object'):
-					return Object.entries(declaration).reduce(reducer, [])
+					return classNames(...Object.entries(declaration).reduce(reducer, []))
 				default:
 					return []
 			}
 		})
 	)
-	return Array.from(classes).join(' ')
+	return Array.from(classes).filter(Boolean).join(' ')
 }

@@ -5,21 +5,26 @@ describe('classNames', () => {
 	test('handles strings', () => {
 		expect(classNames('foo', 'bar')).toBe('foo bar')
 		expect(classNames('foo', 'bar', 'baz')).toBe('foo bar baz')
+		expect(classNames(' foo bar ', 'foo', 'bar')).toBe('foo bar')
 	})
 
 	test('handles sets', () => {
 		expect(classNames(new Set(['foo', 'bar']))).toBe('foo bar')
 		expect(classNames(new Set(['foo', 'bar']), new Set(['baz']))).toBe('foo bar baz')
+		expect(classNames(new Set([' foo bar ', 'foo', 'bar']), new Set(['baz']))).toBe('foo bar baz')
 	})
 
 	test('handles maps', () => {
 		expect(classNames(new Map([['foo', true], ['bar', false]]))).toBe('foo')
 		expect(classNames(new Map([['foo', true], ['bar', false]]), new Map([['baz', true]]))).toBe('foo baz')
+		expect(classNames(new Map([[' foo bar ', true], ['bar', true]]), new Map([['baz', true]]))).toBe('foo bar baz')
 	})
 
 	test('handles objects', () => {
 		expect(classNames({ bar: false, foo: true })).toBe('foo')
 		expect(classNames({ bar: false, foo: true }, { baz: true })).toBe('foo baz')
+		expect(classNames({ ' foo bar ': true, bar: true, foo: true }, { baz: true }))
+			.toBe('foo bar baz')
 	})
 
 	test('handles mixed', () => {
