@@ -76,7 +76,7 @@ module.exports = { // eslint-disable-line
 		'import/no-unresolved': 'off', // use TS version
 		'import/order': ['error', {
 			'groups': ['builtin', 'external', 'internal', 'parent', 'sibling', 'index'],
-			'newlines-between': 'always',
+			'newlines-between': 'never',
 		}],
 		'import/prefer-default-export': 'off',
 		'indent': 'off',

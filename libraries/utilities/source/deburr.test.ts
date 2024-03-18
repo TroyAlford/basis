@@ -1,5 +1,4 @@
 import { test, expect } from 'bun:test'
-
 import { deburr } from './deburr'
 
 test('deburr', () => {

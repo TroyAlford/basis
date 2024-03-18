@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test'
-
 import { kebabCase } from './kebabCase'
 
 test('kebabCase', () => {

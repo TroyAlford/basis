@@ -1,5 +1,4 @@
 import { describe, test, expect } from "bun:test"
-
 import { dataAttributes } from "./dataAttributes"
 
 describe('dataAttributes', () => {
