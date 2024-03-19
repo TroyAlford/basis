@@ -32,8 +32,8 @@ describe('Component', () => {
 		})
 
 		test('from the component name', () => {
-			const { node } = render(<TestComponent />)
-			expect(node).toHaveClass('test-component')
+			const testComponent = render(<TestComponent />)
+			expect(testComponent.node).toHaveClass('test-component')
 
 			TestComponent.displayName = 'Qux'
 			const qux = render(<TestComponent />)
