@@ -4,6 +4,7 @@ import { render } from '../../testing/render'
 import { Component } from './Component'
 
 class TestComponent extends Component<{ tag?: string }> {
+	static displayName = null
 	get classNames() { return ' foo bar baz ' }
 	get content() { return this.props.children ?? 'content' }
 	get tag() { return this.props.tag ?? 'div' }
@@ -33,6 +34,11 @@ describe('Component', () => {
 		test('from the component name', () => {
 			const { node } = render(<TestComponent />)
 			expect(node).toHaveClass('test-component')
+
+			TestComponent.displayName = 'Qux'
+			const qux = render(<TestComponent />)
+			expect(qux.node).toHaveClass('qux')
+			expect(qux.node).not.toHaveClass('test-component')
 		})
 
 		test('from the className prop', () => {
