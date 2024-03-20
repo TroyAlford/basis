@@ -1,3 +1,7 @@
+export { classNames } from './source/classNames'
 export { dataAttributes } from './source/dataAttributes'
 export { deburr } from './source/deburr'
+export { isNil } from './source/isNil'
 export { kebabCase } from './source/kebabCase'
+export { matchURI } from './source/matchURI'
+export { parseURI } from './source/parseURI'
