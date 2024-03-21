@@ -92,6 +92,7 @@ module.exports = { // eslint-disable-line
 		'no-trailing-spaces': 'error',
 		'no-var': 'error',
 		'prefer-destructuring': ['error', { AssignmentExpression: { array: false, object: false } }],
+		'quotes': ['error', 'single', { avoidEscape: true }],
 		'react/jsx-indent': ['error', 'tab', { checkAttributes: true, indentLogicalExpressions: true }],
 		'react/jsx-indent-props': ['error', 'tab'],
 		'react/jsx-max-props-per-line': 'off',

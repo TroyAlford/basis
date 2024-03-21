@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { dataAttributes, kebabCase } from '@basis/utilities'
-import { classNames } from '@basis/utilities/source/classNames'
+import { classNames } from '@basis/utilities'
 
 export interface ComponentProps {
 	/** The children of the component. */
@@ -36,7 +36,7 @@ export abstract class Component<Props = object, State = object, SnapShot = objec
 	get classNames(): string | Set<string> { return '' }
 
 	/** Getter for root element. */
-	get rootNode(): HTMLElement | null { return this.props.nodeRef?.current }
+	get rootNode(): HTMLElement | null { return this.routeParams.nodeRef?.current }
 
 	/** Getter for initialState. */
 	get initialState(): State { return {} as State }
@@ -51,11 +51,11 @@ export abstract class Component<Props = object, State = object, SnapShot = objec
 	/**
 	 * Renders the component's content. This getter is called once per render.
 	*/
-	get content(): React.ReactNode { return this.props.children }
+	get content(): React.ReactNode { return this.routeParams.children }
 
 	render(): React.ReactNode {
 		const Tag = this.tag
-		const { className, data, nodeRef: rootNodeRef, ...props } = this.props
+		const { className, data, nodeRef: rootNodeRef, ...props } = this.routeParams
 
 		return ( // @ts-expect-error - we are assuming a props match
 			<Tag
@@ -69,7 +69,7 @@ export abstract class Component<Props = object, State = object, SnapShot = objec
 					className,
 					this.classNames,
 				)}
-				data={this.props.data}
+				data={this.routeParams.data}
 			>
 				{this.content}
 			</Tag>
