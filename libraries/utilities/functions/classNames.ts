@@ -1,4 +1,4 @@
-import { isNil } from "./isNil"
+import { isNil } from './isNil'
 
 type ClassName = (
 	| string

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseURI } from "./parseURI"
+import { parseURI } from './parseURI'
 
 describe('parseURI', () => {
 	test('should parse a URI', () => {
