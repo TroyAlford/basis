@@ -1,11 +1,11 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { Server as BunServer } from 'bun'
-import { HttpVerb, parseTemplateURI } from '@basis/utilities'
+import { HttpVerb, parseTemplateURI, parseURI } from '@basis/utilities'
 import { renderToReadableStream } from 'react-dom/server'
 import React from 'react'
 import { IndexHTML } from '@basis/react'
-import { URI } from '../types/URI'
+import { URI } from '@basis/utilities/types/URI'
 import { APIRoute } from '../types/APIRoute'
 
 export class Server {
@@ -17,18 +17,6 @@ export class Server {
 
 	/** Absolute path to the folder to serve static assets from */
 	#assets: string = null
-
-	parse(unparsed: string): URI {
-		const url = new URL(unparsed)
-		const [type, ...rest] = url.pathname.split('/').filter(Boolean)
-		return {
-			path: url.pathname,
-			query: new URLSearchParams(url.search),
-			route: rest.join('/'),
-			toString() { return `${this.path}?${this.query}` },
-			type,
-		}
-	}
 
 	async download(uri: URI) {
 		if (!this.#assets) return Server.NotFound
@@ -78,7 +66,7 @@ export class Server {
 	start = ({ port = 80 } = {}) => {
 		this.#server = Bun.serve({
 			fetch: async (request: Request) => {
-				const parsed = this.parse(request.url)
+				const parsed = parseURI(request.url)
 
 				switch (parsed.type) {
 					case 'api': return this.invoke(parsed, request.method)
