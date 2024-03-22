@@ -4,6 +4,7 @@
 	"dependencies": {
 		"react": "^18",
 		"react-dom": "^18",
+		"@basis/react": "workspace:*",
 		"@basis/utilities": "workspace:*"
 	}
 }

@@ -1,24 +1,24 @@
 {
-	"license": "MIT",
-	"main": "index.js",
-	"name": "basis",
-	"version": "1.0.0",
-	"devDependencies": {
-		"@happy-dom/global-registrator": "^13.9.0",
-		"@types/bun": "^1.0.8",
-		"@types/react": "^18",
-		"@types/react-dom": "^18",
-		"bun-types": "^1.0.33",
-		"typescript": "^5"
-	},
-	"scripts": {
-		"server": "bun ./libraries/server/server.ts",
-		"test:develop": "bun test --watch",
-		"up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces"
-	},
-	"workspaces": [
-		"libraries/*",
-		"testing/*",
-		"packages/*"
-	]
+  "license": "MIT",
+  "main": "index.js",
+  "name": "basis",
+  "version": "1.0.0",
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^13.9.0",
+    "@types/bun": "^1.0.8",
+    "@types/react": "^18.2.67",
+    "@types/react-dom": "^18.2.22",
+    "bun-types": "^1.0.33",
+    "typescript": "^5"
+  },
+  "scripts": {
+    "server": "bun ./libraries/server/server.ts",
+    "test:develop": "bun test --watch",
+    "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces"
+  },
+  "workspaces": [
+    "libraries/*",
+    "testing/*",
+    "packages/*"
+  ]
 }

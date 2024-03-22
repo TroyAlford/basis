@@ -1,5 +1,5 @@
 import { matchTemplateURI, parseTemplateURI } from '@basis/utilities'
-import React from 'react'
+import * as React from 'react'
 
 type Route<Props extends object = object> = {
 	component: React.ComponentType<Props>,
