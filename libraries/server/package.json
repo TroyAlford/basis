@@ -1,11 +1,9 @@
 {
-	"name": "@basis/react",
+	"name": "@basis/server",
 	"main": "./index.ts",
 	"dependencies": {
 		"react": "^18",
-		"react-dom": "^18"
-	},
-	"peerDependencies": {
+		"react-dom": "^18",
 		"@basis/utilities": "workspace:*"
 	}
 }

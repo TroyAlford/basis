@@ -12,11 +12,13 @@
 		"typescript": "^5"
 	},
 	"scripts": {
-		"test:develop": "bun test --watch --coverage",
+		"server": "bun ./libraries/server/server.ts",
+		"test:develop": "bun test --watch",
 		"up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces"
 	},
 	"workspaces": [
 		"libraries/*",
+		"testing/*",
 		"packages/*"
 	]
 }
