@@ -3,7 +3,7 @@ import * as fs from 'node:fs'
 import React from 'react'
 import { Server as BunServer } from 'bun'
 import { renderToReadableStream } from 'react-dom/server'
-import { HttpVerb, parseURI } from '@basis/utilities'
+import { HttpVerb, parseTemplateURI } from '@basis/utilities'
 import { IndexHTML } from '@basis/react'
 
 export type APIRoute<Params extends object = object> = {
@@ -94,7 +94,7 @@ export class Server {
 		for (const [template, { handler, verbs }] of this.#apis.entries()) {
 			if (!verbs.has(method as HttpVerb)) continue
 
-			const params = parseURI(uri.route, template)
+			const params = parseTemplateURI(uri.route, template)
 			if (!params) continue
 
 			return handler(params)

@@ -1,4 +1,4 @@
-export const parseURI = <Token extends string = string>(
+export const parseTemplateURI = <Token extends string = string>(
 	uri: string,
 	template: string,
 ): Record<Token, string> => {
