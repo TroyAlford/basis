@@ -7,6 +7,8 @@ import React from 'react'
 import { IndexHTML } from '@basis/react'
 import { URI } from '@basis/utilities/types/URI'
 import { APIRoute } from '../types/APIRoute'
+import { ping } from '../apis/ping'
+import { health } from '../apis/health'
 
 export class Server {
 	static BadRequest = new Response(null, { status: 400, statusText: 'Bad Request' })
@@ -17,6 +19,11 @@ export class Server {
 
 	/** Absolute path to the folder to serve static assets from */
 	#assets: string = null
+
+	constructor() {
+		this.api([HttpVerb.Get], 'ping', ping)
+		this.api([HttpVerb.Get], 'health', health)
+	}
 
 	async download(uri: URI) {
 		if (!this.#assets) return Server.NotFound

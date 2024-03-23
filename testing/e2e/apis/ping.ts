@@ -1,1 +1,0 @@
-export const ping = () => new Response('PONG!')

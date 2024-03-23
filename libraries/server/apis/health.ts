@@ -1,0 +1,1 @@
+export const health = () => new Response('ok', { status: 200 })
