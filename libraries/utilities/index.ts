@@ -1,6 +1,8 @@
 export { classNames } from './functions/classNames'
 export { dataAttributes } from './functions/dataAttributes'
 export { deburr } from './functions/deburr'
+export { decode, encode } from './functions/encode'
+export { hash } from './functions/hash'
 export { isNil } from './functions/isNil'
 export { kebabCase } from './functions/kebabCase'
 export { parseMilliseconds } from './functions/parseMilliseconds'
