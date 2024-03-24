@@ -1,4 +1,4 @@
-import { parseTemplateURI } from '@basis/utilities'
+import { parseTemplateURI, parseURI } from '@basis/utilities'
 import * as React from 'react'
 
 type Props = {
@@ -20,15 +20,16 @@ type State = {
 export class Router extends React.Component<Props, State> {
 	static Route = class Route<P> extends React.Component<RouteProps<P>> {}
 
-	state = { currentURL: window.location.toString() }
+	get currentURL() { return parseURI(window.location.toString()).toString() }
+	state = { currentURL: this.currentURL }
 
 	componentDidMount = () => window.addEventListener('popstate', this.#handlePopState)
 	componentWillUnmount = () => window.removeEventListener('popstate', this.#handlePopState)
 
-	#handlePopState = () => this.setState({ currentURL: window.location.toString() })
+	#handlePopState = () => this.setState({ currentURL: this.currentURL })
 
 	#renderRoute = () => {
-		const { currentURL } = this.state
+		const { currentURL } = this
 		const route = React.Children.toArray(this.props.children).find(child => {
 			if (!React.isValidElement(child) || child.type !== Router.Route) return false
 			return !!parseTemplateURI(currentURL, child.props.template)
