@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
 import { Router } from './Router'
@@ -6,6 +6,12 @@ import { Router } from './Router'
 const TestComponent = () => <span>Test!</span>
 
 describe('Router', () => {
+	const location = spyOn(window.location, 'toString')
+
+	beforeEach(() => {
+		location.mockClear()
+	})
+
 	describe('matches routes', () => {
 		test.each([
 			['/pages/foo', { slug: 'foo' }],
@@ -15,7 +21,7 @@ describe('Router', () => {
 			['/error/404', { code: '404' }],
 			['/error/500', { code: '500' }],
 		])('and passes templated params as props', (url, props) => {
-			Object.assign(window, { location: { pathname: url } })
+			location.mockReturnValue(url)
 			const { find } = render<Router>(
 				<Router>
 					<Router.Route component={<TestComponent />} template="/pages/:slug" />
@@ -28,17 +34,17 @@ describe('Router', () => {
 		})
 
 		test('renders a new route when the path changes', () => {
-			Object.assign(window, { location: { pathname: '/foo/123' } })
-			const { find, instance } = render<Router>(
+			location.mockReturnValue('/foo/123')
+			const { find, instance, update } = render<Router>(
 				<Router>
 					<Router.Route component={TestComponent} template="/foo/:id" />
 					<Router.Route component={TestComponent} template="/bar/:id" />
 				</Router>
 			)
-			instance.setState({ currentURL: '/foo/123' })
 			expect(find(TestComponent).props).toEqual({ id: '123' })
 
 			instance.setState({ currentURL: '/bar/234' })
+			update()
 			expect(find(TestComponent).props).toEqual({ id: '234' })
 		})
 	})

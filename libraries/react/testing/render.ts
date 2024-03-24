@@ -56,6 +56,8 @@ export function render<
 		) as N,
 		root,
 		unmount,
-		update: (updatedJSX: JSX.Element = jsx) => render<C, N>(updatedJSX, root),
+		update: (updatedJSX: JSX.Element = React.cloneElement(jsx, jsx.props)) => (
+			render<C, N>(updatedJSX, root)
+		),
 	}
 }

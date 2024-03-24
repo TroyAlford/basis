@@ -20,12 +20,12 @@ type State = {
 export class Router extends React.Component<Props, State> {
 	static Route = class Route<P> extends React.Component<RouteProps<P>> {}
 
-	state = { currentURL: window.location.pathname }
+	state = { currentURL: window.location.toString() }
 
 	componentDidMount = () => window.addEventListener('popstate', this.#handlePopState)
 	componentWillUnmount = () => window.removeEventListener('popstate', this.#handlePopState)
 
-	#handlePopState = () => this.setState({ currentURL: window.location.pathname })
+	#handlePopState = () => this.setState({ currentURL: window.location.toString() })
 
 	#renderRoute = () => {
 		const { currentURL } = this.state
