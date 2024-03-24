@@ -25,22 +25,25 @@ export interface ComponentProps {
  * @template State
  * @template SnapShot
  */
-export abstract class Component<Props = object, State = object, SnapShot = object>
-	extends React.Component<Props & ComponentProps, State, SnapShot>
+export abstract class Component<Props = object, State = object>
+	extends React.Component<Props & ComponentProps, State>
 {
+	static get contextType() { return window?.ApplicationContext }
 	static defaultProps: ComponentProps = {
 		nodeRef: React.createRef<HTMLElement>(),
 	}
 
+	declare context: ApplicationContext
+
 	/** Getter for class names. */
-	get classNames(): string | Set<string> { return '' }
+	get classNames(): Set<string> { return new Set<string>() }
 
 	/** Getter for root element. */
 	get rootNode(): HTMLElement | null { return this.props.nodeRef?.current }
 
 	/** Getter for initialState. */
-	get initialState(): State { return {} as State }
-	state = this.initialState
+	get defaultState(): State { return {} as State }
+	state = this.defaultState
 
 	/**
 	 * The basic HTMLElement tag name or React component constructor of the component's root node.
@@ -48,10 +51,10 @@ export abstract class Component<Props = object, State = object, SnapShot = objec
 	 */
 	get tag(): string | React.ComponentType<Props & ComponentProps> { return 'div' }
 
-	/**
-	 * Renders the component's content. This getter is called once per render.
-	*/
-	get content(): React.ReactNode { return this.props.children }
+	/** Renders the component's content. Called once per render. */
+	content(children?: React.ReactNode): React.ReactNode {
+		return children
+	}
 
 	render(): React.ReactNode {
 		const Tag = this.tag
@@ -71,7 +74,7 @@ export abstract class Component<Props = object, State = object, SnapShot = objec
 				)}
 				data={this.props.data}
 			>
-				{this.content}
+				{this.content(this.props.children)}
 			</Tag>
 		)
 	}

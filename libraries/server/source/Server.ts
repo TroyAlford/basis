@@ -15,17 +15,27 @@ export class Server {
 	static NotFound = new Response(null, { status: 404, statusText: 'Not Found' })
 
 	#apis = new Map<string, APIRoute>()
+	#assets: string = null
 	#server: BunServer = null
 
-	/** Absolute path to the folder to serve static assets from */
-	#assets: string = null
-
 	constructor() {
-		this.api([HttpVerb.Get], 'ping', ping)
 		this.api([HttpVerb.Get], 'health', health)
+		this.api([HttpVerb.Get], 'ping', ping)
 	}
 
-	async download(uri: URI) {
+	async handleAPI(uri: URI, method: string) {
+		for (const [template, { handler, verbs }] of this.#apis.entries()) {
+			if (!verbs.has(method as HttpVerb)) continue
+
+			const params = parseTemplateURI(uri.route, template)
+			if (!params) continue
+
+			return handler(params)
+		}
+
+		return Server.BadRequest
+	}
+	async handleAsset(uri: URI) {
 		if (!this.#assets) return Server.NotFound
 
 		const asset = Bun.file(path.join(this.#assets, uri.route))
@@ -50,19 +60,7 @@ export class Server {
 			return Server.NotFound
 		}
 	}
-	async invoke(uri: URI, method: string) {
-		for (const [template, { handler, verbs }] of this.#apis.entries()) {
-			if (!verbs.has(method as HttpVerb)) continue
-
-			const params = parseTemplateURI(uri.route, template)
-			if (!params) continue
-
-			return handler(params)
-		}
-
-		return Server.BadRequest
-	}
-	async ui() {
+	async handleUI() {
 		const stream = await renderToReadableStream(
 			React.createElement(IndexHTML),
 			{ bootstrapModules: ['./hydrate.tsx'] },
@@ -76,9 +74,9 @@ export class Server {
 				const parsed = parseURI(request.url)
 
 				switch (parsed.type) {
-					case 'api': return this.invoke(parsed, request.method)
-					case 'assets': return this.download(parsed)
-					default: return this.ui()
+					case 'api': return this.handleAPI(parsed, request.method)
+					case 'assets': return this.handleAsset(parsed)
+					default: return this.handleUI()
 				}
 			},
 			port,
@@ -86,12 +84,16 @@ export class Server {
 
 		process.on('SIGINT', this.stop)
 		process.on('SIGTERM', this.stop)
+
+		return this
 	}
 	stop = () => {
 		process.off('SIGINT', this.stop)
 		process.off('SIGTERM', this.stop)
 
 		this.#server?.stop()
+
+		return this
 	}
 
 	api<Params extends object = object>(

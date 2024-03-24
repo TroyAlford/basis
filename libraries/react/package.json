@@ -1,6 +1,7 @@
 {
 	"name": "@basis/react",
 	"main": "./index.ts",
+	"types": "./index.d.ts",
 	"dependencies": {
 		"react": "^18",
 		"react-dom": "^18"

@@ -5,9 +5,9 @@ import { Component } from './Component'
 
 class TestComponent extends Component<{ tag?: string }> {
 	static displayName = null
-	get classNames() { return ' foo bar baz ' }
-	get content() { return this.props.children ?? 'content' }
+	get classNames() { return super.classNames.add(' foo bar baz ') }
 	get tag() { return this.props.tag ?? 'div' }
+	content(children) { return children ?? 'content' }
 }
 
 describe('Component', () => {
@@ -78,6 +78,13 @@ describe('Component', () => {
 		test('from the children prop', () => {
 			const { node } = render(<TestComponent>children</TestComponent>)
 			expect(node.textContent).toBe('children')
+		})
+	})
+
+	describe('context', () => {
+		test('default context', () => {
+			const { instance } = render(<TestComponent />)
+			expect(instance.context).toEqual({})
 		})
 	})
 })

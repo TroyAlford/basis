@@ -6,7 +6,8 @@
 		"target": "ES2022",
 		"types": [
 			"bun-types",
-			"./libraries/react/testing/bun",
+			"./libraries/react",
+			"./libraries/react/testing/bun"
 		]
 	}
 }
