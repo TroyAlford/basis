@@ -4,11 +4,11 @@
   "name": "basis",
   "version": "1.0.0",
   "devDependencies": {
-    "@happy-dom/global-registrator": "^13.9.0",
-    "@types/bun": "^1.0.8",
-    "@types/react": "^18.2.67",
+    "@happy-dom/global-registrator": "^13",
+    "@types/bun": "^1.0.10",
+    "@types/react": "^18.2.69",
     "@types/react-dom": "^18.2.22",
-    "bun-types": "^1.0.33",
+    "bun-types": "^1.0.35",
     "typescript": "^5"
   },
   "scripts": {
