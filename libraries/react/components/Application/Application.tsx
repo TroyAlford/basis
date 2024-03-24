@@ -1,11 +1,20 @@
 import React from 'react'
 import { deepEquals } from '@basis/utilities'
 import { Component } from '../Component/Component'
+// import { Router } from '../Router/Router'
+
+type Props = {
+	routes?: Iterable<[string, Component]>,
+}
 
 export class Application<
-	Props extends object = object,
-	State extends object = object,
-> extends Component<Props, State & { context: ApplicationContext }> {
+	P extends object = object,
+	S extends object = object,
+> extends Component<P & Props, S & { context: ApplicationContext }> {
+	static defaultProps = {
+		...Component.defaultProps,
+		routes: [],
+	}
 	Context = React.createContext<ApplicationContext>(this.defaultContext)
 
 	get defaultContext(): ApplicationContext {
@@ -33,6 +42,7 @@ export class Application<
 		const { Provider } = this.Context
 		return (
 			<Provider value={this.state.context}>
+				{/* <Router routes={this.props.routes} /> */}
 				{children}
 			</Provider>
 		)

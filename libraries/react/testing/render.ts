@@ -56,6 +56,6 @@ export function render<
 		) as N,
 		root,
 		unmount,
-		update: (updatedJSX: JSX.Element) => render<C, N>(updatedJSX, root),
+		update: (updatedJSX: JSX.Element = jsx) => render<C, N>(updatedJSX, root),
 	}
 }
