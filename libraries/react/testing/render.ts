@@ -26,7 +26,7 @@ export function render<
 	const unmount = () => ReactDOM.unmountComponentAtNode(root)
 	/* eslint-enable react/no-deprecated */
 
-	function* search<I>(ctor: Ctor<I>) {
+	function* search<I>(ctor: Ctor<I> | string) {
 		// @ts-expect-error - accessing private/hidden methods
 		const rootNode = instance?._reactInternals ?? instance?._reactInternalFiber
 		const queue: Array<Fiber> = [rootNode]
@@ -46,7 +46,7 @@ export function render<
 	}
 
 	return {
-		find: <I>(ctor: Ctor<I>) => search<I>(ctor).next()?.value ?? null,
+		find: <I>(ctor: Ctor<I> | string) => search<I>(ctor).next()?.value ?? null,
 		findAll: <I>(ctor: Ctor<I>): Array<I> => Array.from(search<I>(ctor)),
 		instance,
 		node: (

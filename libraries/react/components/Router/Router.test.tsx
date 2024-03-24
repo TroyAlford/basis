@@ -49,5 +49,61 @@ describe('Router', () => {
 			update()
 			expect(find(TestComponent).props).toEqual({ id: '234' })
 		})
+
+		test('includes query params in the props', () => {
+			location.mockReturnValue(formatURL('foo/123?bar=baz'))
+			const { find, instance, update } = render<Router>(
+				<Router>
+					<Router.Route component={TestComponent} template="/foo/:id" />
+				</Router>
+			)
+			expect(find(TestComponent).props).toEqual({ bar: 'baz', id: '123' })
+
+			location.mockReturnValue(formatURL('foo/123?bar=baz&qux=quux'))
+			instance.setState({ currentURL: instance.currentURL })
+			update()
+			expect(find(TestComponent).props).toEqual({ bar: 'baz', id: '123', qux: 'quux' })
+		})
+	})
+
+	test.each([
+		['props.component', { component: TestComponent }],
+		['props.component', { component: <TestComponent /> }],
+		['props.render', { render: props => <TestComponent {...props} /> }],
+	])('%s renders with props', (_, props) => {
+		location.mockReturnValue(formatURL('foo/123?bar=baz'))
+		const { find, instance, update } = render<Router>(
+			<Router>
+				<Router.Route {...props} template="/:type/:id" />
+			</Router>
+		)
+		const component = find(TestComponent)
+		expect(component.props).toEqual({ bar: 'baz', id: '123', type: 'foo' })
+
+		location.mockReturnValue(formatURL('bar/234?baz=qux'))
+		instance.setState({ currentURL: instance.currentURL })
+		update()
+		expect(find(TestComponent).props).toEqual({ baz: 'qux', id: '234', type: 'bar' })
+	})
+
+	test('renders null when no route matches', () => {
+		location.mockReturnValue(formatURL('baz/123'))
+		const { find, instance, update } = render<Router>(
+			<Router>
+				<Router.Route component={TestComponent} template="/foo/:id" />
+				<Router.Route component={TestComponent} template="/bar/:id" />
+			</Router>
+		)
+		expect(find(TestComponent)).toBeNull()
+
+		location.mockReturnValue(formatURL('foo/123'))
+		instance.setState({ currentURL: instance.currentURL })
+		update()
+		expect(find(TestComponent)).not.toBeNull()
+
+		location.mockReturnValue(formatURL('baz/123'))
+		instance.setState({ currentURL: instance.currentURL })
+		update()
+		expect(find(TestComponent)).toBeNull()
 	})
 })
