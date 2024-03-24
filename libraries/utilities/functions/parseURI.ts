@@ -7,7 +7,7 @@ export function parseURI(unparsed: string): URI {
 		path: url.pathname,
 		query: new URLSearchParams(url.search),
 		route: rest.join('/'),
-		toString() { return `${this.path}?${this.query}` },
+		toString() { return [this.path, this.query.toString()].filter(Boolean).join('?') },
 		type,
 	}
 }

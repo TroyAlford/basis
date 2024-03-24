@@ -106,4 +106,19 @@ describe('Router', () => {
 		update()
 		expect(find(TestComponent)).toBeNull()
 	})
+
+	test('responds to popstate events', () => {
+		location.mockReturnValue(formatURL('foo/123'))
+		const { instance } = render<Router>(
+			<Router>
+				<Router.Route component={TestComponent} template="/foo/:id" />
+				<Router.Route component={TestComponent} template="/bar/:id" />
+			</Router>
+		)
+		expect(instance.state.currentURL).toBe('/foo/123')
+
+		location.mockReturnValue(formatURL('bar/234'))
+		window.dispatchEvent(new PopStateEvent('popstate'))
+		expect(instance.state.currentURL).toBe('/bar/234')
+	})
 })
