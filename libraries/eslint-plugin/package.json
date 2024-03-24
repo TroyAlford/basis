@@ -2,6 +2,8 @@
 	"name": "@basis/eslint-plugin",
 	"main": "./index.js",
 	"dependencies": {
+		"@typescript-eslint/eslint-plugin": "^7.2.0",
+		"@typescript-eslint/parser": "^7.2.0",
 		"eslint-plugin-import-newlines": "^1.4.0",
 		"eslint-plugin-import": "^2.29.1",
 		"eslint-plugin-jsdoc": "^48.2.1",
@@ -10,8 +12,6 @@
 		"eslint": "^8.57.0"
 	},
 	"peerDependencies": {
-		"@typescript-eslint/eslint-plugin": "^7.2.0",
-		"@typescript-eslint/parser": "^7.2.0",
 		"typescript": "^5"
 	}
 }

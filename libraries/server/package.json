@@ -1,7 +1,7 @@
 {
 	"name": "@basis/server",
 	"main": "./index.ts",
-	"dependencies": {
+	"peerDependencies": {
 		"react": "^18",
 		"react-dom": "^18",
 		"@basis/react": "workspace:*",
