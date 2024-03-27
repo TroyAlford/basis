@@ -3,7 +3,7 @@ import * as React from 'react'
 import { render } from '../../testing/render'
 import { Component } from './Component'
 
-class TestComponent extends Component<{ tag?: string }> {
+class TestComponent extends Component<{ tag?: keyof React.ReactHTML }> {
 	static displayName = null
 	get classNames() { return super.classNames.add(' foo bar baz ') }
 	get tag() { return this.props.tag ?? 'div' }

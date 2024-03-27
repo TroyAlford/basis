@@ -25,31 +25,45 @@ export interface ComponentProps {
  * @template State
  * @template SnapShot
  */
-export abstract class Component<Props = object, State = object>
-	extends React.Component<Props & ComponentProps, State>
-{
+export abstract class Component<
+	/** The props of the component. */
+	Props = object,
+	/** The root element type of the component. */
+	Element extends HTMLElement = HTMLDivElement,
+	/** The state of the component. */
+	State = object,
+> extends React.Component<Props & ComponentProps, State> {
 	static get contextType() { return window?.ApplicationContext }
 	static defaultProps: ComponentProps = {
+		data: {},
 		nodeRef: React.createRef<HTMLElement>(),
 	}
 
 	declare context: ApplicationContext
 
+	/** Getter for attributes. */
+	get attributes(): React.HTMLAttributes<Element> { return {} }
+
 	/** Getter for class names. */
 	get classNames(): Set<string> { return new Set<string>() }
 
-	/** Getter for root element. */
-	get rootNode(): HTMLElement | null { return this.props.nodeRef?.current }
+	/** Getter for data attributes. */
+	get data(): Record<string, boolean | number | string> {
+		return { ...this.props.data ?? {} }
+	}
 
 	/** Getter for initialState. */
 	get defaultState(): State { return {} as State }
 	state = this.defaultState
 
+	/** Getter for root element. */
+	get rootNode(): HTMLElement | null { return this.props.nodeRef?.current }
+
 	/**
-	 * The basic HTMLElement tag name or React component constructor of the component's root node.
+	 * The React.ReactHTML tag name of component's root node.
 	 * @default 'div', which renders an `HTMLDivElement`
 	 */
-	get tag(): string | React.ComponentType<Props & ComponentProps> { return 'div' }
+	get tag(): React.ReactHTMLElement<Element>['type'] { return 'div' }
 
 	/** Renders the component's content. Called once per render. */
 	content(children?: React.ReactNode): React.ReactNode {
@@ -58,13 +72,13 @@ export abstract class Component<Props = object, State = object>
 
 	render(): React.ReactNode {
 		const Tag = this.tag
-		const { className, data, nodeRef: rootNodeRef, ...props } = this.props
+		const { className, nodeRef: rootNodeRef } = this.props
 
 		return ( // @ts-expect-error - we are assuming a props match
-			<Tag
+			<Tag // @ts-expect-error - we are assuming a props match
 				ref={rootNodeRef}
-				{...props}
-				{...dataAttributes(data)}
+				{...this.attributes}
+				{...dataAttributes(this.data)}
 				className={classNames(
 					// @ts-expect-error - displayName is a valid static on React.Component
 					kebabCase(this.constructor.displayName ?? this.constructor.name),
@@ -72,7 +86,6 @@ export abstract class Component<Props = object, State = object>
 					className,
 					this.classNames,
 				)}
-				data={this.props.data}
 			>
 				{this.content(this.props.children)}
 			</Tag>
