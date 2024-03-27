@@ -1,4 +1,4 @@
-export { Application } from './components/Application/Application'
+export { ApplicationBase } from './components/ApplicationBase/ApplicationBase'
 export { Component } from './components/Component/Component'
 export { IndexHTML } from './components/IndexHTML/IndexHTML'
 export { Router } from './components/Router/Router'
@@ -10,7 +10,7 @@ declare global {
 	interface ApplicationContext {}
 
 	interface Window {
+		ApplicationBase: import('./components/ApplicationBase/ApplicationBase').ApplicationBase,
 		ApplicationContext: React.Context<ApplicationContext>,
-		application: import('./components/Application/Application').Application,
 	}
 }

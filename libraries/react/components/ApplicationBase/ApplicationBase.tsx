@@ -1,22 +1,21 @@
 import React from 'react'
 import { deepEquals } from '@basis/utilities'
 import { Component } from '../Component/Component'
-// import { Router } from '../Router/Router'
 
 type Props = {
 	routes?: Iterable<[string, Component]>,
 }
 
-export class Application<
-	P extends object = object,
-	S extends object = object,
-> extends Component<P & Props, S & { context: ApplicationContext }> {
+export class ApplicationBase<P extends object = object, S extends object = object>
+	extends Component<P & Props, HTMLElement, S & { context: ApplicationContext }>
+{
 	static defaultProps = {
 		...Component.defaultProps,
 		routes: [],
 	}
 	Context = React.createContext<ApplicationContext>(this.defaultContext)
 
+	get classNames() { return super.classNames.add('application') }
 	get defaultContext(): ApplicationContext {
 		return {} as ApplicationContext
 	}
@@ -26,14 +25,13 @@ export class Application<
 			context: this.defaultContext,
 		}
 	}
-
-	get classNames() { return super.classNames.add('application') }
+	get tag() { return 'main' as keyof React.ReactHTML }
 
 	constructor(props) {
 		super(props)
 
 		if (typeof window !== 'undefined') {
-			window.application = this
+			window.ApplicationBase = this
 			window.ApplicationContext = this.Context
 		}
 	}

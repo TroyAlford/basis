@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
 import { Component } from '../Component/Component'
-import { Application } from './Application'
+import { ApplicationBase } from './ApplicationBase'
 
-export class TestApplication extends Application {
+export class TestApplication extends ApplicationBase {
 	get defaultContext() {
 		return {
 			...super.defaultContext,
@@ -65,7 +65,7 @@ describe('Application', () => {
 		test('window.application & window.ApplicationContext', () => {
 			const { instance } = render<TestApplication>(<TestApplication />)
 
-			expect(window.application).toBe(instance)
+			expect(window.ApplicationBase).toBe(instance)
 			expect(window.ApplicationContext).toBe(instance.Context)
 		})
 	})
