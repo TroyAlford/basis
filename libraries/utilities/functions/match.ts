@@ -1,10 +1,17 @@
 export const _ = Symbol('placeholder')
 const INITIAL = Symbol('INITIAL')
 
+type ArrayLikeMatcher<U> = (
+	& { [K in `${number}`]?: U | typeof _ }
+	& { length?: number | typeof _ }
+)
 type NumberMatcher = number | { max?: number, min?: number }
 type StringMatcher = string | RegExp
 type ArrayMatcher<T> = T extends Array<infer U>
-	? Array<U | typeof _>
+	? (
+		| Array<U | typeof _>
+		| ArrayLikeMatcher<U>
+	)
 	: never
 type ObjectMatcher<T> = T extends object
 	? { [K in keyof T]?: T[K] | typeof _ }
@@ -29,6 +36,7 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 	constructor(private value: Value) {}
 
 	when<M = Value>(matcher: M | Matcher<M>) {
+		this.placeholders.length = 0
 		if (this.result === INITIAL && !this.matched) this.matched = this.evaluate(matcher)
 		return this as Pick<Match<Value, Return, M>, 'and' | 'or' | 'then'>
 	}
@@ -40,6 +48,7 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 
 	or<M = Narrowed>(matcher: M | Matcher<M>) {
 		if (this.result === INITIAL && !this.matched) this.matched = this.evaluate(matcher)
+		if (!this.matched) this.placeholders.length = 0
 		return this as Pick<Match<Value, Return, M | Narrowed>, 'or' | 'then'>
 	}
 
@@ -62,7 +71,6 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 	/* eslint-disable @typescript-eslint/no-explicit-any */
 	private evaluate<M>(matcher: Matcher<M>): boolean {
 		const queue: Array<[unknown, any]> = [[matcher, this.value]]
-		this.placeholders.length = 0
 
 		while (queue.length) {
 			const [matchOn, value] = queue.shift()
@@ -84,6 +92,28 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 				for (let i = 0; i < matchOn.length; i++) {
 					queue.push([matchOn[i], value[i]])
 				}
+				continue
+			}
+
+			// Handling array-like object matching
+			if (this.#isArrayLikeObject(matchOn) && Array.isArray(value)) {
+				const { length, ...indices } = matchOn
+
+				// Check if the length matches, or if length is a placeholder
+				if (length !== _ && typeof length !== 'number') return false
+				if (length !== value.length) return false
+
+				// Iterate over the indices and match them against the value array
+				for (const key in indices) {
+					const index = parseInt(key, 10)
+
+					// Ensure the key is a valid array index
+					if (isNaN(index) || index < 0 || index >= value.length) return false
+
+					// Push the corresponding pairs into the queue for further evaluation
+					queue.push([indices[key], value[index]])
+				}
+
 				continue
 			}
 
@@ -129,6 +159,12 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 	}
 	/* eslint-enable @typescript-eslint/no-explicit-any */
 
+	#isArrayLikeObject(value: unknown): value is ArrayLikeMatcher<unknown> {
+		return (
+			this.#isObject<Record<string, unknown>>(value) &&
+			typeof (value as { length: unknown }).length === 'number'
+		)
+	}
 	#isNumberMatcher(matcher: unknown): matcher is NumberMatcher {
 		if (typeof matcher === 'number') return true
 		return typeof matcher === 'object' && ('max' in matcher || 'min' in matcher)
