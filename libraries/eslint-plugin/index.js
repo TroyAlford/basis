@@ -59,6 +59,7 @@ module.exports = { // eslint-disable-line
 		'comma-dangle': ['error', 'always-multiline'],
 		'consistent-return': 'error',
 		'default-case': 'off',
+		'eol-last': ['error', 'always'],
 		'func-names': 'off',
 		'import-newlines/enforce': ['error', { items: Infinity, semi: false }],
 		'import/extensions': ['error', {
@@ -74,7 +75,8 @@ module.exports = { // eslint-disable-line
 		}],
 		'import/no-default-export': 'error',
 		'import/no-extraneous-dependencies': 'error',
-		'import/no-unresolved': 'off', // use TS version
+		'import/no-unresolved': 'off',
+		// use TS version
 		'import/order': ['error', {
 			'groups': ['builtin', 'external', 'internal', 'parent', 'sibling', 'index'],
 			'newlines-between': 'never',
