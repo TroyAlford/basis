@@ -51,9 +51,11 @@ export default pluginTypescript.config(
 			}],
 			'@stylistic/newline-per-chained-call': 'off',
 			'@stylistic/no-confusing-arrow': ['error', { allowParens: true }],
+			'@stylistic/no-extra-semi': 'error',
 			'@stylistic/no-fallthrough': 'off',
 			'@stylistic/no-mixed-spaces-and-tabs': ['error', 'smart-tabs'],
 			'@stylistic/no-namespace': 'off',
+			'@stylistic/space-in-parens': ['error', 'never'],
 			'@typescript-eslint/class-literal-property-style': 'off',
 			'@typescript-eslint/member-ordering': ['error', {
 				classes: 'never',
@@ -77,6 +79,7 @@ export default pluginTypescript.config(
 				properties: 'always',
 			}],
 			'consistent-return': 'error',
+			'eol-last': ['error', 'always'],
 			'import-newlines/enforce': ['error', { items: Infinity, semi: false }],
 			'import/extensions': ['error', {
 				css: 'always',
@@ -111,6 +114,11 @@ export default pluginTypescript.config(
 			'sort-keys': 'off',
 			'sort-keys-fix/sort-keys-fix': 'error',
 			'sort-vars': ['error', { ignoreCase: true }],
+			'space-before-function-paren': ['error', {
+				anonymous: 'never',
+				asyncArrow: 'always',
+				named: 'never',
+			}],
 			'spaced-comment': ['error', 'always', { markers: ['/'] }],
 		},
 		settings: {

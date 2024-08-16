@@ -16,7 +16,7 @@ interface State {
 }
 
 export class Router extends React.Component<Props, State> {
-	static Route = class Route<P> extends React.Component<RouteProps<P>> {}
+	static Route = class Route<P> extends React.Component<RouteProps<P>> { }
 
 	get currentURL() { return parseURI(window.location.toString()).toString() }
 
