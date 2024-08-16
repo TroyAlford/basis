@@ -4,7 +4,7 @@ export const waitFor = <T>(
 		interval?: number,
 		maxAttempts?: number,
 		timeout?: number,
-	} = {}
+	} = {},
 ): Promise<T> => new Promise<T>((resolve, reject) => {
 	const { interval = 1000, maxAttempts = 3, timeout = 10000 } = options
 	const TIMERS = {

@@ -1,22 +1,23 @@
-import { parseTemplateURI, parseURI } from '@basis/utilities'
 import * as React from 'react'
+import { parseTemplateURI, parseURI } from '@basis/utilities'
+
 import './history'
 
-type Props = {
+interface Props {
 	children: React.ReactNode,
 }
 
-type RouteProps<P = object> = {
+interface RouteProps<P = object> {
 	children: (params: P) => React.ReactNode,
 	template: string,
 }
 
-type State = {
+interface State {
 	currentURL: string,
 }
 
 export class Router extends React.Component<Props, State> {
-	static Route = class Route<P> extends React.Component<RouteProps<P>> {}
+	static Route = class Route<P> extends React.Component<RouteProps<P>> { }
 
 	get currentURL() { return parseURI(window.location.toString()).toString() }
 

@@ -1,4 +1,4 @@
-export type URI = {
+export interface URI {
 	/**
 	 * Requested resource path, without the origin
 	 * @example /api/foo/bar

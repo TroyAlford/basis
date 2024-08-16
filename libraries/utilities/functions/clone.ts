@@ -7,7 +7,7 @@ export function clone<V = object>(value: V): V {
 	if (value instanceof Date) return new Date(value.getTime()) as V
 	if (value instanceof RegExp) return new RegExp(value.source, value.flags) as V
 
-	const queue: Array<{ path: string, source: unknown, target: unknown }> = []
+	const queue: { path: string, source: unknown, target: unknown }[] = []
 	const cloned = {} as V
 	queue.push({ path: '', source: value, target: cloned })
 

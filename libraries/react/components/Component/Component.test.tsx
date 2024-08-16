@@ -6,7 +6,7 @@ import { Component } from './Component'
 class TestComponent extends Component<{ tag?: keyof React.ReactHTML }> {
 	static displayName = null
 	get classNames() { return super.classNames.add(' foo bar baz ') }
-	get tag() { return this.props.tag ?? 'div' }
+	readonly tag: keyof React.ReactHTML = this.props.tag ?? 'div'
 	content(children) { return children ?? 'content' }
 }
 

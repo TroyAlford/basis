@@ -6,7 +6,7 @@ export interface ComponentProps {
 	/** The children of the component. */
 	children?: React.ReactNode,
 	/** Optional class name(s) to output on the component's root element. */
-	className?: string | Set<string> | { [key: string]: boolean | (() => boolean) },
+	className?: string | Set<string> | Record<string, boolean | (() => boolean)>,
 	/**
 	 * An optional object of data-* attributes to output on the component's root element.
 	 * @example { foo: true, bar: 42, baz: 'qux' }
@@ -49,7 +49,13 @@ export abstract class Component<
 
 	/** Getter for data attributes. */
 	get data(): Record<string, boolean | number | string> {
-		return { ...this.props.data ?? {} }
+		return {
+			...Object.entries(this.props).reduce((data, [key, value]) => {
+				if (key.startsWith('data-')) data[key] = value
+				return data
+			}, {}),
+			...this.props.data ?? {},
+		}
 	}
 
 	/** Getter for initialState. */
@@ -63,7 +69,7 @@ export abstract class Component<
 	 * The React.ReactHTML tag name of component's root node.
 	 * @default 'div', which renders an `HTMLDivElement`
 	 */
-	get tag(): React.ReactHTMLElement<Element>['type'] { return 'div' }
+	readonly tag: keyof React.ReactHTML = 'div'
 
 	/** Renders the component's content. Called once per render. */
 	content(children?: React.ReactNode): React.ReactNode {

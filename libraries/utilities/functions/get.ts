@@ -1,7 +1,7 @@
 export function get<O = unknown, V = unknown>(
 	path: string,
 	from: O,
-	defaultValue?: V
+	defaultValue?: V,
 ): V | undefined {
 	let value = from
 	for (const key of path.split('.')) {

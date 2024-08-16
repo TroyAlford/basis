@@ -1,16 +1,16 @@
+import { BuildArtifact, Server as BunServer } from 'bun'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { BuildArtifact, Server as BunServer } from 'bun'
-import { HttpVerb, parseTemplateURI, parseURI } from '@basis/utilities'
-import { renderToReadableStream } from 'react-dom/server'
 import React from 'react'
+import { renderToReadableStream } from 'react-dom/server'
 import { IndexHTML } from '@basis/react'
+import { HttpVerb, parseTemplateURI, parseURI } from '@basis/utilities'
 import { URI } from '@basis/utilities/types/URI'
-import { APIRoute } from '../types/APIRoute'
-import { ping } from '../apis/ping'
 import { health } from '../apis/health'
+import { ping } from '../apis/ping'
+import { APIRoute } from '../types/APIRoute'
 
-type FileOutput = {
+interface FileOutput {
 	name: string,
 	output: BuildArtifact,
 }
@@ -135,7 +135,7 @@ export class Server {
 				'process.env.NODE_ENV': JSON.stringify(Bun.env.NODE_ENV),
 			},
 			entrypoints: this.#scripts.map(([, file]) => (
-				path.isAbsolute(file) ? file : path.join(this.#root, file))
+				path.isAbsolute(file) ? file : path.join(this.#root, file)),
 			),
 			minify: {
 				identifiers: false,
@@ -147,8 +147,8 @@ export class Server {
 		}).then(build => (
 			build.outputs
 				.filter(o => o.kind === 'entry-point')
-				.map<FileOutput>((output, index) => ({ name: this.#scripts[index][0], output })
-			)
+				.map<FileOutput>((output, index) => ({ name: this.#scripts[index][0], output }),
+				)
 		))
 	}
 	#checkPath(absolutePath) {
@@ -160,7 +160,7 @@ export class Server {
 	api<Params extends object = object>(
 		verbs: HttpVerb[],
 		template: string,
-		handler: (params: Params) => Response
+		handler: (params: Params) => Response,
 	) {
 		this.#apis.set(template, { handler, verbs: new Set(verbs) })
 		return this

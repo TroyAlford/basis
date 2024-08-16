@@ -7,9 +7,9 @@ type ArrayLikeMatcher<U> = (
 )
 type NumberMatcher = number | { max?: number, min?: number }
 type StringMatcher = string | RegExp
-type ArrayMatcher<T> = T extends Array<infer U>
+type ArrayMatcher<T> = T extends (infer U)[]
 	? (
-		| Array<U | typeof _>
+		| (U | typeof _)[]
 		| ArrayLikeMatcher<U>
 	)
 	: never
@@ -68,9 +68,8 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 			: predicate
 	}
 
-	/* eslint-disable @typescript-eslint/no-explicit-any */
 	private evaluate<M>(matcher: Matcher<M>): boolean {
-		const queue: Array<[unknown, any]> = [[matcher, this.value]]
+		const queue: [unknown, unknown][] = [[matcher, this.value]]
 
 		while (queue.length) {
 			const [matchOn, value] = queue.shift()
@@ -157,7 +156,7 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 
 		return true
 	}
-	/* eslint-enable @typescript-eslint/no-explicit-any */
+
 
 	#isArrayLikeObject(value: unknown): value is ArrayLikeMatcher<unknown> {
 		return (

@@ -1,6 +1,6 @@
 import { Component } from '../Component/Component'
 
-type Props = {
+interface Props {
 	replace?: boolean,
 	to: string,
 }
@@ -9,7 +9,7 @@ export class Link extends Component<Props, HTMLAnchorElement> {
 	get attributes() {
 		return { href: this.props.to } as React.HTMLAttributes<HTMLAnchorElement>
 	}
-	get tag() { return 'a' as keyof React.ReactHTML }
+	readonly tag: keyof React.ReactHTML = 'a'
 
 	componentDidMount(): void {
 		const options = { capture: true, passive: false }
