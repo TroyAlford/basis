@@ -4,7 +4,7 @@ type ClassName = (
 	| string
 	| Set<string>
 	| Map<string, boolean | (() => boolean)>
-	| { [key: string]: boolean | (() => boolean) }
+	| Record<string, boolean | (() => boolean)>
 )
 
 const reducer = (
@@ -32,7 +32,7 @@ export function classNames(...values: ClassName[]): string {
 				default:
 					return []
 			}
-		})
+		}),
 	)
 	return Array.from(classes).filter(Boolean).join(' ')
 }

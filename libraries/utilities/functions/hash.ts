@@ -1,4 +1,4 @@
-type Options = {
+interface Options {
 	characters: string,
 	length: number,
 	padWith: string,

@@ -2,13 +2,12 @@ import React from 'react'
 import { deepEquals } from '@basis/utilities'
 import { Component } from '../Component/Component'
 
-type Props = {
+interface Props {
 	routes?: Iterable<[string, Component]>,
 }
 
 export class ApplicationBase<P extends object = object, S extends object = object>
-	extends Component<P & Props, HTMLElement, S & { context: ApplicationContext }>
-{
+	extends Component<P & Props, HTMLElement, S & { context: ApplicationContext }> {
 	static defaultProps = {
 		...Component.defaultProps,
 		routes: [],
@@ -25,7 +24,7 @@ export class ApplicationBase<P extends object = object, S extends object = objec
 			context: this.defaultContext,
 		}
 	}
-	get tag() { return 'main' as keyof React.ReactHTML }
+	readonly tag: keyof React.ReactHTML = 'main'
 
 	constructor(props) {
 		super(props)

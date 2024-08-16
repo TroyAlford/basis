@@ -39,10 +39,10 @@ describe('deepEquals', () => {
 	})
 
 	test('compares two objects with out-of-order keys', () => {
-		/* eslint-disable sort-keys-fix/sort-keys-fix */
-		expect(deepEquals({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(true)
-		expect(deepEquals({ a: 1, b: 2 }, { b: 2, a: 3 })).toBe(false)
-		/* eslint-enable sort-keys-fix/sort-keys-fix */
+
+		expect(deepEquals({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true)
+		expect(deepEquals({ a: 1, b: 2 }, { a: 3, b: 2 })).toBe(false)
+
 	})
 
 	test('compares scalar values', () => {

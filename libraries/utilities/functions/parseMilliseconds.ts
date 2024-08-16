@@ -5,7 +5,7 @@ const DAY = HOUR * 24
 const WEEK = DAY * 7
 const YEAR = DAY * 365.25
 
-export type TimeComponents = {
+export interface TimeComponents {
 	days: number,
 	hours: number,
 	minutes: number,

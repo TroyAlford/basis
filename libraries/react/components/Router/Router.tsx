@@ -2,16 +2,16 @@ import { parseTemplateURI, parseURI } from '@basis/utilities'
 import * as React from 'react'
 import './history'
 
-type Props = {
+interface Props {
 	children: React.ReactNode,
 }
 
-type RouteProps<P = object> = {
+interface RouteProps<P = object> {
 	children: (params: P) => React.ReactNode,
 	template: string,
 }
 
-type State = {
+interface State {
 	currentURL: string,
 }
 

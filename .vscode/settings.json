@@ -9,4 +9,8 @@
 		"typescript",
 		"typescriptreact"
 	],
+	"eslint.workingDirectories": [
+		"./"
+	],
+	"eslint.useESLintClass": true,
 }

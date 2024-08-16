@@ -8,7 +8,7 @@ export { Simulate } from './testing/Simulate'
 export { waitFor } from './testing/waitFor'
 
 declare global {
-	interface ApplicationContext {}
+	type ApplicationContext = Record<string, unknown>;
 
 	interface Window {
 		ApplicationBase: import('./components/ApplicationBase/ApplicationBase').ApplicationBase,
