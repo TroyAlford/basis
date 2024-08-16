@@ -1,14 +1,14 @@
+import { BuildArtifact, Server as BunServer } from 'bun'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { BuildArtifact, Server as BunServer } from 'bun'
-import { HttpVerb, parseTemplateURI, parseURI } from '@basis/utilities'
-import { renderToReadableStream } from 'react-dom/server'
 import React from 'react'
+import { renderToReadableStream } from 'react-dom/server'
 import { IndexHTML } from '@basis/react'
+import { HttpVerb, parseTemplateURI, parseURI } from '@basis/utilities'
 import { URI } from '@basis/utilities/types/URI'
-import { APIRoute } from '../types/APIRoute'
-import { ping } from '../apis/ping'
 import { health } from '../apis/health'
+import { ping } from '../apis/ping'
+import { APIRoute } from '../types/APIRoute'
 
 interface FileOutput {
 	name: string,

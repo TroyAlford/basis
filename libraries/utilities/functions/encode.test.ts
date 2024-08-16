@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { encode, decode } from './encode'
+import { decode,encode } from './encode'
 
 describe('encode/decode', () => {
 	test.each([

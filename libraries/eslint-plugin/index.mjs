@@ -1,10 +1,12 @@
+import eslint from '@eslint/js'
+import pluginStylistic from '@stylistic/eslint-plugin'
 import pluginImport from 'eslint-plugin-import'
 import pluginImportNewlines from 'eslint-plugin-import-newlines'
 import pluginJSDoc from 'eslint-plugin-jsdoc'
+import pluginNamedImportSpacing from 'eslint-plugin-named-import-spacing'
+import pluginImportSort from 'eslint-plugin-simple-import-sort'
 import pluginSortKeys from 'eslint-plugin-sort-keys-fix'
-import pluginStylistic from '@stylistic/eslint-plugin'
 import pluginTypescript from 'typescript-eslint'
-import eslint from '@eslint/js'
 
 export default pluginTypescript.config(
 	eslint.configs.recommended,
@@ -21,6 +23,8 @@ export default pluginTypescript.config(
 			'import': pluginImport,
 			'import-newlines': pluginImportNewlines,
 			'jsdoc': pluginJSDoc,
+			'named-import-spacing': pluginNamedImportSpacing,
+			'simple-import-sort': pluginImportSort,
 			'sort-keys-fix': pluginSortKeys,
 		},
 		rules: {
@@ -88,6 +92,7 @@ export default pluginTypescript.config(
 				json: 'always',
 				png: 'always',
 				scss: 'always',
+				sql: 'always',
 				svg: 'always',
 				ts: 'never',
 				tsx: 'never',
@@ -95,11 +100,8 @@ export default pluginTypescript.config(
 			'import/no-default-export': 'error',
 			'import/no-extraneous-dependencies': 'error',
 			'import/no-unresolved': 'off',
-			'import/order': ['error', {
-				'groups': ['builtin', 'external', 'internal', 'parent', 'sibling', 'index'],
-				'newlines-between': 'never',
-			}],
 			'import/prefer-default-export': 'off',
+			'named-import-spacing/named-import-spacing': 'error',
 			'no-console': 'error',
 			'no-shadow': 'error',
 			'no-trailing-spaces': 'error',
@@ -110,6 +112,9 @@ export default pluginTypescript.config(
 			'quotes': ['error', 'single', { avoidEscape: true }],
 			'semi': ['error', 'never'],
 			'semi-style': 'off',
+			'simple-import-sort/imports': ['error', {
+				groups: [['^[a-z@]', '^@basis/', '^([.]+[/])+', '.s?css$']],
+			}],
 			'sort-imports': 'off',
 			'sort-keys': 'off',
 			'sort-keys-fix/sort-keys-fix': 'error',

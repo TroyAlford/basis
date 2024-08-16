@@ -1,5 +1,6 @@
-import { parseTemplateURI, parseURI } from '@basis/utilities'
 import * as React from 'react'
+import { parseTemplateURI, parseURI } from '@basis/utilities'
+
 import './history'
 
 interface Props {
