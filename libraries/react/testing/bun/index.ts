@@ -5,6 +5,6 @@ import { toHaveClass } from './matchers/toHaveClass'
 import './extensions/console'
 
 expect.extend({
-	toHaveAttribute,
-	toHaveClass,
+  toHaveAttribute,
+  toHaveClass,
 })

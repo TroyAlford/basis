@@ -4,87 +4,87 @@ import { render } from '../../testing/render'
 import { Component } from './Component'
 
 class TestComponent extends Component<{ tag?: keyof React.ReactHTML }> {
-	static displayName = null
-	get classNames() { return super.classNames.add(' foo bar baz ') }
-	readonly tag: keyof React.ReactHTML = this.props.tag ?? 'div'
-	content(children) { return children ?? 'content' }
+  static displayName = null
+  get classNames() { return super.classNames.add(' foo bar baz ') }
+  readonly tag: keyof React.ReactHTML = this.props.tag ?? 'div'
+  content(children) { return children ?? 'content' }
 }
 
 describe('Component', () => {
-	test('renders the specified tag', () => {
-		const div = render(<TestComponent />)
-		expect(div.node.tagName).toBe('DIV')
+  test('renders the specified tag', () => {
+    const div = render(<TestComponent />)
+    expect(div.node.tagName).toBe('DIV')
 
-		const span = render(<TestComponent tag="span" />)
-		expect(span.node.tagName).toBe('SPAN')
-	})
+    const span = render(<TestComponent tag="span" />)
+    expect(span.node.tagName).toBe('SPAN')
+  })
 
-	test('nodeRef', () => {
-		const ref = React.createRef<HTMLDivElement>()
-		const { node } = render(<TestComponent nodeRef={ref} />)
-		expect(ref.current).toBe(node as HTMLDivElement)
-	})
+  test('nodeRef', () => {
+    const ref = React.createRef<HTMLDivElement>()
+    const { node } = render(<TestComponent nodeRef={ref} />)
+    expect(ref.current).toBe(node as HTMLDivElement)
+  })
 
-	describe('classNames', () => {
-		test('from the classNames getter', () => {
-			const { node } = render(<TestComponent />)
-			expect(node).toHaveClass('foo', 'bar', 'baz')
-		})
+  describe('classNames', () => {
+    test('from the classNames getter', () => {
+      const { node } = render(<TestComponent />)
+      expect(node).toHaveClass('foo', 'bar', 'baz')
+    })
 
-		test('from the component name', () => {
-			const testComponent = render(<TestComponent />)
-			expect(testComponent.node).toHaveClass('test-component')
+    test('from the component name', () => {
+      const testComponent = render(<TestComponent />)
+      expect(testComponent.node).toHaveClass('test-component')
 
-			TestComponent.displayName = 'Qux'
-			const qux = render(<TestComponent />)
-			expect(qux.node).toHaveClass('qux')
-			expect(qux.node).not.toHaveClass('test-component')
-		})
+      TestComponent.displayName = 'Qux'
+      const qux = render(<TestComponent />)
+      expect(qux.node).toHaveClass('qux')
+      expect(qux.node).not.toHaveClass('test-component')
+    })
 
-		test('from the className prop', () => {
-			const { node } = render(<TestComponent className="qux" />)
-			expect(node).toHaveClass('qux')
-		})
-	})
+    test('from the className prop', () => {
+      const { node } = render(<TestComponent className="qux" />)
+      expect(node).toHaveClass('qux')
+    })
+  })
 
-	describe('data attributes', () => {
-		test('from the data prop', () => {
-			const { node } = render(<TestComponent data={{ bar: 42, baz: 'qux', foo: true }} />)
-			expect(node).toHaveAttribute('data-foo', 'true')
-			expect(node).toHaveAttribute('data-bar', '42')
-			expect(node).toHaveAttribute('data-baz', 'qux')
-		})
+  describe('data attributes', () => {
+    test('from the data prop', () => {
+      const { node } = render(<TestComponent data={{ bar: 42, baz: 'qux', foo: true }} />)
+      expect(node).toHaveAttribute('data-foo', 'true')
+      expect(node).toHaveAttribute('data-bar', '42')
+      expect(node).toHaveAttribute('data-baz', 'qux')
+    })
 
-		test('from data-* attributes', () => {
-			const foo = render(<TestComponent data-foo />)
-			expect(foo.node).toHaveAttribute('data-foo', 'true')
+    test('from data-* attributes', () => {
+      const foo = render(<TestComponent data-foo />)
+      expect(foo.node).toHaveAttribute('data-foo', 'true')
 
-			const bar = render(<TestComponent data-bar={42} />)
-			expect(bar.node).toHaveAttribute('data-bar', '42')
-		})
+      const bar = render(<TestComponent data-bar={42} />)
+      expect(bar.node).toHaveAttribute('data-bar', '42')
+    })
 
-		test('data attributes override matching data-* attributes', () => {
-			const { node } = render(<TestComponent data-foo data={{ foo: false }} />)
-			expect(node).toHaveAttribute('data-foo', 'false')
-		})
-	})
+    test('data attributes override matching data-* attributes', () => {
+      const { node } = render(<TestComponent data-foo data={{ foo: false }} />)
+      expect(node).toHaveAttribute('data-foo', 'false')
+    })
+  })
 
-	describe('renders content', () => {
-		test('from the content getter', () => {
-			const { node } = render(<TestComponent />)
-			expect(node.textContent).toBe('content')
-		})
+  describe('renders content', () => {
+    test('from the content getter', () => {
+      const { node } = render(<TestComponent />)
+      expect(node.textContent).toBe('content')
+    })
 
-		test('from the children prop', () => {
-			const { node } = render(<TestComponent>children</TestComponent>)
-			expect(node.textContent).toBe('children')
-		})
-	})
+    test('from the children prop', () => {
+      const { node } = render(<TestComponent>children</TestComponent>)
+      expect(node.textContent).toBe('children')
+    })
+  })
 
-	describe('context', () => {
-		test('default context', () => {
-			const { instance } = render(<TestComponent />)
-			expect(instance.context).toEqual({})
-		})
-	})
+  describe('context', () => {
+    test('default context', () => {
+      const { instance } = render(<TestComponent />)
+      expect(instance.context).toEqual({})
+    })
+  })
 })

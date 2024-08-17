@@ -11,7 +11,7 @@ declare global {
 	type ApplicationContext = Record<string, unknown>;
 
 	interface Window {
-		ApplicationBase: import('./components/ApplicationBase/ApplicationBase').ApplicationBase,
-		ApplicationContext: React.Context<ApplicationContext>,
+	  ApplicationBase: import('./components/ApplicationBase/ApplicationBase').ApplicationBase,
+	  ApplicationContext: React.Context<ApplicationContext>,
 	}
 }
