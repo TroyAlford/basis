@@ -82,6 +82,7 @@ export default pluginTypescript.config(
       'camelcase': ['error', {
         properties: 'always',
       }],
+      'comma-spacing': ['error', { after: true, before: false }],
       'consistent-return': 'error',
       'eol-last': ['error', 'always'],
       'import-newlines/enforce': ['error', { items: Infinity, semi: false }],
