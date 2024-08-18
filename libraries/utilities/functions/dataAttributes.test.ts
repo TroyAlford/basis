@@ -1,11 +1,12 @@
-import { describe, expect,test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { dataAttributes } from './dataAttributes'
 
 describe('dataAttributes', () => {
   test('kebab-cases names', () => {
-    expect(dataAttributes({ 'fooBar': true })).toEqual({ 'data-foo-bar': true })
+    expect(dataAttributes({ fooBar: true })).toEqual({ 'data-foo-bar': true })
     expect(dataAttributes({ 'foo-bar': true })).toEqual({ 'data-foo-bar': true })
-    expect(dataAttributes({ 'foo_bar': true })).toEqual({ 'data-foo-bar': true })
+    // eslint-disable-next-line camelcase
+    expect(dataAttributes({ foo_bar: true })).toEqual({ 'data-foo-bar': true })
   })
 
   test('handles empty input', () => {
@@ -20,8 +21,8 @@ describe('dataAttributes', () => {
   })
 
   test('handles functions', () => {
-    expect(dataAttributes({ 'foo': () => true })).toEqual({ 'data-foo': true })
-    expect(dataAttributes({ 'foo': () => 'bar' })).toEqual({ 'data-foo': 'bar' })
-    expect(dataAttributes({ 'foo': () => 42 })).toEqual({ 'data-foo': 42 })
+    expect(dataAttributes({ foo: () => true })).toEqual({ 'data-foo': true })
+    expect(dataAttributes({ foo: () => 'bar' })).toEqual({ 'data-foo': 'bar' })
+    expect(dataAttributes({ foo: () => 42 })).toEqual({ 'data-foo': 42 })
   })
 })

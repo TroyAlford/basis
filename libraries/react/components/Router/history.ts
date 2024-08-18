@@ -1,4 +1,3 @@
-
 (() => {
   if (typeof window === 'undefined') return
 

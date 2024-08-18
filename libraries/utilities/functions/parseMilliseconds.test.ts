@@ -1,5 +1,5 @@
-import { describe, expect,test } from 'bun:test'
-import { parseMilliseconds,TimeComponents } from './parseMilliseconds'
+import { describe, expect, test } from 'bun:test'
+import { parseMilliseconds, TimeComponents } from './parseMilliseconds'
 
 describe('parseMilliseconds', () => {
   const ZERO: TimeComponents = {

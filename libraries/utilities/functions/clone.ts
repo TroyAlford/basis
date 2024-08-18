@@ -1,6 +1,11 @@
 import { get } from './get'
 import { set } from './set'
 
+/**
+ * Clone an object.
+ * @param value the value to clone
+ * @returns the cloned value
+ */
 export function clone<V = object>(value: V): V {
   if (typeof value !== 'object' || value === null) return value
   if (Array.isArray(value)) return value.map(item => clone(item)) as V

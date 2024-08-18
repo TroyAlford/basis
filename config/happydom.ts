@@ -12,7 +12,5 @@ beforeEach(() => {
   global.window = new Window() as Window & typeof globalThis
   global.document = global.window.document
   global.fetch = global.window.fetch
-  Object.defineProperty(global.window, 'location', {
-    get: () => new URL('https://example.com'),
-  })
+  Object.defineProperty(global.window, 'location', { get: () => new URL('https://example.com') })
 })

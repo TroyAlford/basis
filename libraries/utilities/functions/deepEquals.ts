@@ -1,5 +1,11 @@
 type CompareItem<T> = [T, T]
 
+/**
+ * Deeply compare two objects for equality
+ * @param one the first object to compare
+ * @param two the second object to compare
+ * @returns true if the objects are deeply equal
+ */
 export function deepEquals<T>(one: T, two: T): boolean {
   const queue: CompareItem<T>[] = [[one, two]]
 

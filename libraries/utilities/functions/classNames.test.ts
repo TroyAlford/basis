@@ -23,7 +23,7 @@ describe('classNames', () => {
   test('handles objects', () => {
     expect(classNames({ bar: false, foo: true })).toBe('foo')
     expect(classNames({ bar: false, foo: true }, { baz: true })).toBe('foo baz')
-    expect(classNames({ ' foo bar ': true, bar: true, foo: true }, { baz: true }))
+    expect(classNames({ ' foo bar ': true, 'bar': true, 'foo': true }, { baz: true }))
       .toBe('foo bar baz')
   })
 

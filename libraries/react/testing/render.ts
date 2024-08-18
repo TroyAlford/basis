@@ -15,15 +15,31 @@ interface Fiber {
   type?: Ctor<unknown> | string,
 }
 
+/**
+ * Render a JSX element to the DOM
+ * @param jsx the JSX element to render
+ * @param target the target element to render the JSX element to
+ * @returns the rendered JSX element
+ */
 export function render<
   C extends React.Component | React.FunctionComponent = React.Component,
-  N extends Element | Element[] = HTMLElement,
+  N extends Element | Element[] = HTMLElement
 >(jsx: JSX.Element, target?: HTMLElement) {
   const root = target ?? document.createElement('div')
 
   const instance = ReactDOM.render<PropsOf<C>>(jsx, root) as unknown as C
   const unmount = () => ReactDOM.unmountComponentAtNode(root)
 
+  /**
+   * Search for a component instance in the rendered tree
+   * @param ctor the constructor of the component to search for
+   * @yields the component instance
+   * @returns the component instance
+   * @example
+   * const { find } = render(<App />)
+   * const app = find(App)
+   * console.log(app)
+   */
   function* search<I>(ctor: Ctor<I> | string) {
     // @ts-expect-error - accessing private/hidden methods
     const rootNode = instance?._reactInternals ?? instance?._reactInternalFiber
@@ -33,7 +49,7 @@ export function render<
       const node = queue.shift()
 
       if (node?.type === ctor && node?.return !== null) {
-        yield (node?.stateNode ?? { props: node?.memoizedProps}) as I
+        yield (node?.stateNode ?? { props: node?.memoizedProps }) as I
       }
 
       if (node?.sibling) queue.push(node.sibling)
@@ -54,8 +70,7 @@ export function render<
     ) as N,
     root,
     unmount,
-    update: (updatedJSX: JSX.Element = React.cloneElement(jsx, jsx.props)) => (
-      render<C, N>(updatedJSX, root)
-    ),
+    update: (updatedJSX: JSX.Element = React.cloneElement(jsx, jsx.props)) => render<C, N>(updatedJSX, root)
+    ,
   }
 }

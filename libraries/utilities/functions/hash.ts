@@ -12,6 +12,12 @@ const DEFAULTS: Options = {
   prefix: '',
 }
 
+/**
+ * Hashes a value into a string
+ * @param value the value to hash
+ * @param options the options to hash with
+ * @returns the hashed value
+ */
 export function hash(value: unknown, options: Partial<Options> = {}): string {
   const { characters, length, prefix, padWith }: Options = { ...DEFAULTS, ...options }
   if ([null, undefined].includes(value)) return null

@@ -1,4 +1,4 @@
-import { describe, expect,test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { set } from './set'
 
 describe('set', () => {
@@ -11,7 +11,7 @@ describe('set', () => {
   test('sets numeric keys on pre-existing objects and arrays', () => {
     const o = {}
     set('0', o, 5)
-    expect(o).toEqual({ '0': 5 })
+    expect(o).toEqual({ 0: 5 })
 
     const a = []
     set('0', a, 5)
@@ -24,6 +24,6 @@ describe('set', () => {
     expect(o).toEqual({ a: { b: { c: 5 } } })
 
     set('a.n.0', o, 5)
-    expect(o).toEqual({ a: { b: { c: 5 }, n: { '0': 5 } } })
+    expect(o).toEqual({ a: { b: { c: 5 }, n: { 0: 5 } } })
   })
 })

@@ -20,10 +20,18 @@ describe('Router', () => {
     const router = (
       <Router>
         <Router.Route template="/pages/:slug">
-          {({ slug }) => <div className="page">{slug}</div>}
+          {({ slug }) => (
+            <div className="page">
+              {slug}
+            </div>
+          )}
         </Router.Route>
         <Router.Route template="/error/:code">
-          {({ code }) => <div className="error">{code}</div>}
+          {({ code }) => (
+            <div className="error">
+              {code}
+            </div>
+          )}
         </Router.Route>
         <Router.Route template="/:type/:id">
           {({ type, id }) => <div data-id={id} data-type={type} />}

@@ -1,3 +1,9 @@
+/**
+ * Parse a URI using a template
+ * @param uri uri to parse
+ * @param template template to parse the uri with
+ * @returns the parsed URI
+ */
 export const parseTemplateURI = <Token extends string = string>(
   uri: string,
   template: string,

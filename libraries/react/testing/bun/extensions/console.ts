@@ -4,9 +4,7 @@ global.FILTERED_WARNINGS = [
   /ReactDOM.render is no longer supported in React 18/,
 ]
 
-const filter = (message: string) => (
-  !global.FILTERED_WARNINGS.some(regex => regex.test(message))
-)
+const filter = (message: string) => !global.FILTERED_WARNINGS.some(regex => regex.test(message))
 
 beforeEach(() => {
   spyOn(console, 'error').mockImplementation(filter)

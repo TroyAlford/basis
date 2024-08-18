@@ -12,14 +12,13 @@ const formatMilliseconds = (ms: number): string => {
   ].filter(Boolean).join(' ')
 }
 
-
 export const health = () => new Response(JSON.stringify({
   bun: Bun.version,
   uptime: {
     nanoseconds: Bun.nanoseconds(),
     pretty: formatMilliseconds(Bun.nanoseconds() / 1_000_000),
   },
-}),{
+}), {
   headers: { 'Content-Type': 'application/json' },
   status: 200,
 })

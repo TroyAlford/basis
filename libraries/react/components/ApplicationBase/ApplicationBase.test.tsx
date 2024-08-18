@@ -19,7 +19,7 @@ describe('Application', () => {
       const { find, instance } = render<TestApplication>(
         <TestApplication>
           <span>Foo!</span>
-        </TestApplication>,
+        </TestApplication>
       )
       const provider = find(instance.Context.Provider)
       expect(provider.props).toMatchObject({
@@ -46,12 +46,12 @@ describe('Application', () => {
     })
 
     test('correctly binds child Component instances', () => {
-      class TestComponent extends Component {}
+      class TestComponent extends Component { }
 
       const { find, instance } = render<TestApplication>(
         <TestApplication>
           <TestComponent />
-        </TestApplication>,
+        </TestApplication>
       )
       const component = find(TestComponent)
       expect(component.context).toBe(instance.state.context)

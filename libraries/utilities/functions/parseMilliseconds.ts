@@ -30,6 +30,7 @@ const ZERO: TimeComponents = {
 /**
  * Parse milliseconds into years, weeks, days, hours, minutes, seconds, and milliseconds.
  * @param milliseconds The milliseconds to parse.
+ * @returns The parsed time components.
  */
 export function parseMilliseconds(milliseconds: number): TimeComponents {
   if (typeof milliseconds !== 'number') return { ...ZERO }

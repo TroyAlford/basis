@@ -1,10 +1,10 @@
 import { isNil } from './isNil'
 
 type ClassName = (
-	| string
-	| Set<string>
-	| Map<string, boolean | (() => boolean)>
-	| Record<string, boolean | (() => boolean)>
+  | string
+  | Set<string>
+  | Map<string, boolean | (() => boolean)>
+  | Record<string, boolean | (() => boolean)>
 )
 
 const reducer = (
@@ -15,24 +15,27 @@ const reducer = (
   return classes
 }
 
+/**
+ * Generate a string of class names from a variety of input types
+ * @param values the class names to combine
+ * @returns the combined class names
+ */
 export function classNames(...values: ClassName[]): string {
-  const classes = new Set<string>(
-    values.flatMap(declaration => {
-      switch (true) {
-        case (isNil(declaration)):
-          return []
-        case (typeof declaration === 'string'):
-          return declaration.trim().split(/\s+/g)
-        case (declaration instanceof Set):
-          return classNames(...declaration)
-        case (declaration instanceof Map):
-          return classNames(...Array.from(declaration.entries()).reduce(reducer, []))
-        case (typeof declaration === 'object'):
-          return classNames(...Object.entries(declaration).reduce(reducer, []))
-        default:
-          return []
-      }
-    }),
-  )
+  const classes = new Set<string>(values.flatMap(declaration => {
+    switch (true) {
+      case isNil(declaration):
+        return []
+      case typeof declaration === 'string':
+        return declaration.trim().split(/\s+/g)
+      case declaration instanceof Set:
+        return classNames(...declaration)
+      case declaration instanceof Map:
+        return classNames(...Array.from(declaration.entries()).reduce(reducer, []))
+      case typeof declaration === 'object':
+        return classNames(...Object.entries(declaration).reduce(reducer, []))
+      default:
+        return []
+    }
+  }))
   return Array.from(classes).filter(Boolean).join(' ')
 }

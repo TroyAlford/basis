@@ -55,7 +55,7 @@ export class Server {
     try {
       if (uri.query.has('v', version)) {
         return new Response(asset, {
-          headers: { 'Content-Type': asset.type, ETag: version },
+          headers: { 'Content-Type': asset.type, 'ETag': version },
           status: 200,
         })
       } else {
@@ -76,22 +76,20 @@ export class Server {
         .then(text => this.#modules.set(uri.route, text))
     }
 
-    return new Response(this.#modules.get(uri.route), {
-      headers: { 'Content-Type': 'application/javascript' },
-    })
+    return new Response(this.#modules.get(uri.route), { headers: { 'Content-Type': 'application/javascript' } })
   }
   async handleScripts(uri: URI) {
     const script = (await this.#build).find(s => s.name === uri.route)
     if (!script) return Server.NotFound
-    return new Response(await script.output.text(), {
-      headers: { 'Content-Type': script.output.type },
-    })
+    return new Response(await script.output.text(), { headers: { 'Content-Type': script.output.type } })
   }
   async handleUI() {
     const stream = await renderToReadableStream(React.createElement(IndexHTML), {
       bootstrapModules: [
-        // `/modules/react@18/umd/react.${Bun.env.NODE_ENV}.js`,
-        // `/modules/react-dom@18/umd/react-dom.${Bun.env.NODE_ENV}.js`,
+        /*
+         * `/modules/react@18/umd/react.${Bun.env.NODE_ENV}.js`,
+         * `/modules/react-dom@18/umd/react-dom.${Bun.env.NODE_ENV}.js`,
+         */
         '/scripts/hydrate',
       ],
     })
@@ -131,12 +129,9 @@ export class Server {
   rebuild() {
     if (!this.#scripts.length) return
     this.#build = Bun.build({
-      define: {
-        'process.env.NODE_ENV': JSON.stringify(Bun.env.NODE_ENV),
-      },
+      define: { 'process.env.NODE_ENV': JSON.stringify(Bun.env.NODE_ENV) },
       entrypoints: this.#scripts.map(([, file]) => (
-        path.isAbsolute(file) ? file : path.join(this.#root, file)),
-      ),
+        path.isAbsolute(file) ? file : path.join(this.#root, file))),
       minify: {
         identifiers: false,
         syntax: true,
@@ -144,12 +139,9 @@ export class Server {
       },
       naming: '[name].[hash].[ext]',
       sourcemap: 'external',
-    }).then(build => (
-      build.outputs
-        .filter(o => o.kind === 'entry-point')
-        .map<FileOutput>((output, index) => ({ name: this.#scripts[index][0], output }),
-        )
-    ))
+    }).then(build => build.outputs
+      .filter(o => o.kind === 'entry-point')
+      .map<FileOutput>((output, index) => ({ name: this.#scripts[index][0], output })))
   }
   #checkPath(absolutePath) {
     if (!fs.existsSync(absolutePath)) {

@@ -2,16 +2,16 @@ export const _ = Symbol('placeholder')
 const INITIAL = Symbol('INITIAL')
 
 type ArrayLikeMatcher<U> = (
-	& { [K in `${number}`]?: U | typeof _ }
-	& { length?: number | typeof _ }
+  & { [K in `${number}`]?: U | typeof _ }
+  & { length?: number | typeof _ }
 )
 type NumberMatcher = number | { max?: number, min?: number }
 type StringMatcher = string | RegExp
 type ArrayMatcher<T> = T extends (infer U)[]
   ? (
-		| (U | typeof _)[]
-		| ArrayLikeMatcher<U>
-  )
+      | (U | typeof _)[]
+      | ArrayLikeMatcher<U>
+    )
   : never
 type ObjectMatcher<T> = T extends object
   ? { [K in keyof T]?: T[K] | typeof _ }
@@ -24,10 +24,19 @@ type Matcher<T> =
   | StringMatcher
   | ((value: T) => boolean)
 
-type Known<T> = T extends unknown ? (unknown extends T ? never : T) : T;
-type ThenFn<T, R> = (value: T, placeholders: unknown[]) => R;
-type ElseFn<T, R> = (value: T) => R;
+type Known<T> = T extends unknown ? (unknown extends T ? never : T) : T
+type ThenFn<T, R> = (value: T, placeholders: unknown[]) => R
+type ElseFn<T, R> = (value: T) => R
 
+/**
+ * Match a value against a series of matchers
+ * @param value the value to match
+ * @returns a match object
+ * @example match(5)
+ *   .when(5).then('five')
+ *   .or(6).then('six')
+ *   .else('unknown')
+ */
 class Match<Value, Return = unknown, Narrowed = unknown> {
   private matched = false
   private result: unknown | typeof INITIAL = INITIAL
@@ -135,8 +144,8 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
       }
 
       if (
-        this.#isObject<Record<string, unknown>>(matchOn)
-				&& this.#isObject<Record<string, unknown>>(value)
+        this.#isObject<Record<string, unknown>>(matchOn) &&
+        this.#isObject<Record<string, unknown>>(value)
       ) {
         for (const key in matchOn) {
           if (
@@ -157,11 +166,10 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
     return true
   }
 
-
   #isArrayLikeObject(value: unknown): value is ArrayLikeMatcher<unknown> {
     return (
       this.#isObject<Record<string, unknown>>(value) &&
-			typeof (value as { length: unknown }).length === 'number'
+      typeof (value as { length: unknown }).length === 'number'
     )
   }
   #isNumberMatcher(matcher: unknown): matcher is NumberMatcher {
@@ -174,6 +182,4 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 }
 
 // Helper function to initiate the match
-export const match = <Value, Return>(value: Value) => (
-  new Match<Value, Return, unknown>(value)
-)
+export const match = <Value, Return>(value: Value) => new Match<Value, Return, unknown>(value)
