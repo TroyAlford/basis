@@ -4,7 +4,7 @@
 	"types": "./index.ts",
 	"peerDependencies": {
 		"@basis/utilities": "workspace:*",
-		"react": "^18",
-		"react-dom": "^18"
+    "react": "*",
+		"react-dom": "*"
 	}
 }

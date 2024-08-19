@@ -2,10 +2,10 @@
 	"name": "@basis/server",
 	"main": "./index.ts",
 	"peerDependencies": {
-		"react": "^18",
-		"react-dom": "^18",
 		"@basis/react": "workspace:*",
-		"@basis/utilities": "workspace:*"
+		"@basis/utilities": "workspace:*",
+		"react": "*",
+		"react-dom": "*"
 	},
 	"devDependencies": {
 		"@types/bun": "^1.1.6"
