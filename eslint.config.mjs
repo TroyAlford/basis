@@ -1,3 +1,3 @@
-import eslintPlugin from './libraries/eslint-plugin/index.mjs'
+import eslintPlugin from './libraries/eslint-plugin/dist/index.mjs'
 
 export default eslintPlugin

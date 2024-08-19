@@ -5,7 +5,6 @@ import('@happy-dom/global-registrator')
 
 beforeEach(() => {
   // reset NODE_ENV
-  process.env.NODE_ENV = 'test'
   Bun.env.NODE_ENV = 'test'
 
   // reset global window

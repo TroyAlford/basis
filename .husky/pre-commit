@@ -1,0 +1,12 @@
+#!/usr/bin/env bun
+
+# Automatically rebuild
+bun run --filter='*' build
+
+if [ $? -eq 0 ]; then
+  echo "pre-commit SUCCESS: auto-built all files"
+  exit 0
+else
+  echo "pre-commit FAILED: auto-build failed"
+  exit 1
+fi

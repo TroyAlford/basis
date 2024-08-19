@@ -3,6 +3,16 @@
     "source.fixAll.eslint",
   ],
   "editor.insertSpaces": true,
+  "emeraldwalk.runonsave": {
+    "commands": [
+      {
+        "match": "./libraries/eslint-plugin/.*.ts",
+        "cmd": "$(command -v bun) --filter=@basis/eslint-plugin run build",
+        "isAsync": true,
+        "shell": true,
+      }
+    ]
+  },
   "eslint.validate": [
     "javascript",
     "javascriptreact",

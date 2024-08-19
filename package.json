@@ -6,15 +6,20 @@
   "devDependencies": {
     "@happy-dom/global-registrator": "^14",
     "@types/bun": "^1.1.6",
-    "@types/react": "^18.2.69",
-    "@types/react-dom": "^18.2.22",
-    "bun-types": "^1.0.35",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "bun-types": "^1.1.24",
+    "husky": "^9.1.4",
     "typescript": "^5.5.4"
   },
+  "private": true,
   "scripts": {
-    "server": "bun ./libraries/server/server.ts",
     "test:develop": "bun test --watch",
     "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces"
+  },
+  "resolutions": {
+    "react": "18.3.0",
+    "react-dom": "18.3.0"
   },
   "workspaces": [
     "libraries/*",
