@@ -23,7 +23,7 @@ interface Fiber {
  */
 export function render<
   C extends React.Component | React.FunctionComponent = React.Component,
-  N extends Element | Element[] = HTMLElement
+  N extends Element | Element[] = HTMLElement,
 >(jsx: JSX.Element, target?: HTMLElement) {
   const root = target ?? document.createElement('div')
 

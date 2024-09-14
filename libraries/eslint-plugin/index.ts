@@ -202,6 +202,7 @@ export default pluginTypescript.config(
       '@stylistic/ts/indent': ['error', 2, {
         ObjectExpression: 1,
         SwitchCase: 1,
+        ignoredNodes: ['TSTypeParameterInstantiation'],
         offsetTernaryExpressions: true,
       }],
       '@stylistic/ts/key-spacing': ['error', { afterColon: true, beforeColon: false }],

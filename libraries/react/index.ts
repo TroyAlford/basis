@@ -1,4 +1,4 @@
-export { ApplicationBase } from './components/ApplicationBase/ApplicationBase'
+import type { ApplicationBase } from './components/ApplicationBase/ApplicationBase'
 export { Component } from './components/Component/Component'
 export { IndexHTML } from './components/IndexHTML/IndexHTML'
 export { Link } from './components/Link/Link'
@@ -11,7 +11,7 @@ declare global {
   type ApplicationContext = Record<string, unknown>
 
   interface Window {
-    ApplicationBase: import('./components/ApplicationBase/ApplicationBase').ApplicationBase,
+    ApplicationBase: ApplicationBase,
     ApplicationContext: React.Context<ApplicationContext>,
   }
 }

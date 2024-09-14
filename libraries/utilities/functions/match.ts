@@ -144,15 +144,15 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
       }
 
       if (
-        this.#isObject<Record<string, unknown>>(matchOn) &&
-        this.#isObject<Record<string, unknown>>(value)
+        this.#isObject<Record<string, unknown>>(matchOn)
+        && this.#isObject<Record<string, unknown>>(value)
       ) {
         for (const key in matchOn) {
           if (
           // If matcher declares a key undefined, it must not exist in the value
-            (matchOn[key] === undefined && value[key] !== undefined) ||
+            (matchOn[key] === undefined && value[key] !== undefined)
             // Otherwise, it must exist in the value
-            !(key in value)
+            || !(key in value)
           ) return false
 
           queue.unshift([matchOn[key], value[key]])
@@ -168,8 +168,8 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 
   #isArrayLikeObject(value: unknown): value is ArrayLikeMatcher<unknown> {
     return (
-      this.#isObject<Record<string, unknown>>(value) &&
-      typeof (value as { length: unknown }).length === 'number'
+      this.#isObject<Record<string, unknown>>(value)
+      && typeof (value as { length: unknown }).length === 'number'
     )
   }
   #isNumberMatcher(matcher: unknown): matcher is NumberMatcher {

@@ -1,4 +1,4 @@
-import { URI } from '../types/URI'
+import type { URI } from '../types/URI'
 
 /**
  * Parse a URI into its components

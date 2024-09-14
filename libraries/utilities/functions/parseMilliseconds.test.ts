@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { parseMilliseconds, TimeComponents } from './parseMilliseconds'
+import type { TimeComponents } from './parseMilliseconds'
+import { parseMilliseconds } from './parseMilliseconds'
 
 describe('parseMilliseconds', () => {
   const ZERO: TimeComponents = {

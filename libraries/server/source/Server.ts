@@ -1,14 +1,14 @@
-import { BuildArtifact, Server as BunServer } from 'bun'
+import type { BuildArtifact, Server as BunServer } from 'bun'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import React from 'react'
-import { renderToReadableStream } from 'react-dom/server'
+import { renderToString } from 'react-dom/server'
 import { IndexHTML } from '@basis/react'
 import { HttpVerb, parseTemplateURI, parseURI } from '@basis/utilities'
-import { URI } from '@basis/utilities/types/URI'
+import type { URI } from '@basis/utilities/types/URI'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
-import { APIRoute } from '../types/APIRoute'
+import type { APIRoute } from '../types/APIRoute'
 
 interface FileOutput {
   name: string,
@@ -71,29 +71,35 @@ export class Server {
   }
   async handleModule(uri: URI) {
     if (!this.#modules.has(uri.route)) {
-      await fetch(`https://unpkg.com/${uri.route}`)
-        .then(response => response.text())
-        .then(text => this.#modules.set(uri.route, text))
+      const response = await fetch(`https://unpkg.com/${uri.route}`)
+      if (!response.ok) return Server.NotFound
+
+      const text = await response.text()
+      this.#modules.set(uri.route, text)
     }
 
-    return new Response(this.#modules.get(uri.route), { headers: { 'Content-Type': 'application/javascript' } })
+    return new Response(this.#modules.get(uri.route), {
+      headers: {
+        'Content-Length': this.#modules.get(uri.route).length.toString(),
+        'Content-Type': 'application/javascript',
+        'Via': '@basis/server; proxying unpkg.com',
+      },
+    })
   }
   async handleScripts(uri: URI) {
     const script = (await this.#build).find(s => s.name === uri.route)
     if (!script) return Server.NotFound
-    return new Response(await script.output.text(), { headers: { 'Content-Type': script.output.type } })
+    return new Response(await script.output.text(), {
+      headers: { 'Content-Type': script.output.type },
+      status: 200,
+      statusText: 'OK',
+    })
   }
   async handleUI() {
-    const stream = await renderToReadableStream(React.createElement(IndexHTML), {
-      bootstrapModules: [
-        /*
-         * `/modules/react@18/umd/react.${Bun.env.NODE_ENV}.js`,
-         * `/modules/react-dom@18/umd/react-dom.${Bun.env.NODE_ENV}.js`,
-         */
-        '/scripts/hydrate',
-      ],
-    })
-    return new Response(stream, { headers: { 'Content-Type': 'text/html' } })
+    const html = await renderToString(React.createElement(IndexHTML, {
+      scripts: this.#scripts.map(([, file]) => file),
+    }))
+    return new Response(html, { headers: { 'Content-Type': 'text/html' } })
   }
 
   start = ({ port = 80 } = {}) => {
@@ -129,9 +135,10 @@ export class Server {
   rebuild() {
     if (!this.#scripts.length) return
     this.#build = Bun.build({
-      define: { 'process.env.NODE_ENV': JSON.stringify(Bun.env.NODE_ENV) },
+      define: { 'Bun.env.NODE_ENV': JSON.stringify(Bun.env.NODE_ENV ?? 'production') },
       entrypoints: this.#scripts.map(([, file]) => (
-        path.isAbsolute(file) ? file : path.join(this.#root, file))),
+        path.isAbsolute(file) ? file : path.join(this.#root, file)
+      )),
       minify: {
         identifiers: false,
         syntax: true,
@@ -166,8 +173,10 @@ export class Server {
     this.#assets = absolute
     return this
   }
-  hydrator(filePath: string) {
-    const absolute = path.isAbsolute(filePath) ? filePath : path.join(this.#root, filePath)
+  main(filePath: string) {
+    const absolute = path.isAbsolute(filePath)
+      ? filePath
+      : path.join(this.#root, filePath)
     this.#checkPath(absolute)
     this.#scripts.push(['hydrate', absolute])
     this.rebuild()
