@@ -7,6 +7,7 @@ import pluginNamedImportSpacing from 'eslint-plugin-named-import-spacing'
 import pluginImportSort from 'eslint-plugin-simple-import-sort'
 import pluginSortDestructureKeys from 'eslint-plugin-sort-destructure-keys'
 import pluginSortKeys from 'eslint-plugin-sort-keys-fix'
+import pluginTypescriptSortKeys from 'eslint-plugin-typescript-sort-keys'
 import pluginTypescript, { type ConfigWithExtends } from 'typescript-eslint'
 import pluginBasis from './rules/index.ts'
 
@@ -35,6 +36,7 @@ const plugin = ({ files, rules }: PluginOptions) => {
       'simple-import-sort': pluginImportSort,
       'sort-destructure-keys': pluginSortDestructureKeys,
       'sort-keys-fix': pluginSortKeys,
+      'typescript-sort-keys': pluginTypescriptSortKeys,
     },
     rules,
     settings: {
@@ -245,7 +247,6 @@ export default pluginTypescript.config(
       '@typescript-eslint/member-ordering': ['error', {
         classes: 'never',
         interfaces: {
-          memberTypes: ['signature', 'constructor', 'field', 'method'],
           order: 'alphabetically',
         },
         typeLiterals: {
@@ -271,13 +272,14 @@ export default pluginTypescript.config(
       'no-return-assign': 'error',
       'no-shadow': 'error',
       'no-unused-vars': 'off',
-      // use TS version
       'no-var': 'error',
       'prefer-destructuring': ['error', { AssignmentExpression: { array: false, object: false } }],
       'simple-import-sort/imports': ['error', { groups: [['^[a-z@]', '^@basis/', '^([.]+[/])+', '.s?css$']] }],
       'sort-destructure-keys/sort-destructure-keys': ['error', { caseSensitive: false }],
       'sort-keys-fix/sort-keys-fix': 'error',
       'sort-vars': ['error', { ignoreCase: true }],
+      'typescript-sort-keys/interface': 'error',
+      'typescript-sort-keys/string-enum': 'error',
     },
   }),
   plugin({

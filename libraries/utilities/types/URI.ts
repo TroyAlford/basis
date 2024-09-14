@@ -18,14 +18,14 @@ export interface URI {
    */
   route: string,
   /**
+   * Full URL
+   * @example /api/foo/bar?baz=qux
+   */
+  toString(): string,
+  /**
    * Requested resource type prefix
    * @example /api/foo/bar -> api
    * @example /assets/foo/bar -> assets
    */
   type: string,
-  /**
-   * Full URL
-   * @example /api/foo/bar?baz=qux
-   */
-  toString(): string,
 }
