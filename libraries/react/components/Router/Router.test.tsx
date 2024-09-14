@@ -5,15 +5,38 @@ import { render } from '../../testing/render'
 import { Router } from './Router'
 
 describe('Router', () => {
-  const formatURL = (url: string) => `http://example.com/${url}`
-  let location: Mock<Location['toString']>
+  let pushState: Mock<History['pushState']>
+  let replaceState: Mock<History['replaceState']>
 
   beforeEach(() => {
-    location = spyOn(window.location, 'toString')
+    Object.defineProperty(window, 'location', {
+      value: {
+        href: 'http://example.com/',
+        pathname: '/',
+        search: '',
+        toString: function() { return this.href },
+      },
+      writable: true,
+    })
+
+    pushState = spyOn(window.history, 'pushState').mockImplementation((state, title, url) => {
+      const [path, search] = url.toString().split('?')
+      window.location.pathname = path
+      window.location.search = search ? '?' + search : ''
+      window.location.href = 'http://example.com' + window.location.pathname + window.location.search
+    })
+
+    replaceState = spyOn(window.history, 'replaceState').mockImplementation((state, title, url) => {
+      const [path, search] = url.toString().split('?')
+      window.location.pathname = path
+      window.location.search = search ? '?' + search : ''
+      window.location.href = 'http://example.com' + window.location.pathname + window.location.search
+    })
   })
 
   afterEach(() => {
-    location.mockRestore()
+    pushState.mockRestore()
+    replaceState.mockRestore()
   })
 
   describe('matches routes', () => {
@@ -34,7 +57,7 @@ describe('Router', () => {
           )}
         </Router.Route>
         <Router.Route template="/:type/:id">
-          {({ type, id }) => <div data-id={id} data-type={type} />}
+          {({ id, type }) => <div data-id={id} data-type={type} />}
         </Router.Route>
       </Router>
     )
@@ -47,36 +70,39 @@ describe('Router', () => {
       ['error/404', '.error', '404'],
       ['error/500', '.error', '500'],
     ])('and passes templated params as props', (url, selector, textContent) => {
-      location.mockReturnValue(formatURL(url))
+      window.location.pathname = '/' + url
       const { node } = render<Router>(router)
       expect(node.matches(selector)).toBe(true)
       expect(node.textContent).toBe(textContent)
     })
 
-    test('renders a new route when the path changes', () => {
-      location.mockReturnValue(formatURL('bar/234'))
+    test('renders a new route when the path changes', async () => {
+      window.history.pushState({}, '', '/bar/234')
       const rendered = render<Router>(router)
-      expect(rendered.node.outerHTML)
-        .toEqual('<div data-id="234" data-type="bar"></div>')
+      expect(rendered.node.outerHTML).toEqual('<div data-id="234" data-type="bar"></div>')
 
-      location.mockReturnValue(formatURL('qux/456'))
-      expect(rendered.update().node.outerHTML)
-        .toEqual('<div data-id="456" data-type="qux"></div>')
+      window.history.pushState({}, '', '/qux/456')
+
+      // Wait for the state to update
+      await new Promise(resolve => setTimeout(resolve, 0))
+      rendered.update()
+
+      expect(rendered.node.outerHTML).toEqual('<div data-id="456" data-type="qux"></div>')
     })
 
     test('renders null when no route matches', () => {
-      location.mockReturnValue(formatURL('non/matching/route'))
+      window.location.pathname = '/non/matching/route'
       const { node } = render<Router>(router)
       expect(node).toBeNull()
     })
 
     test('responds to popstate events', () => {
-      location.mockReturnValue(formatURL('foo/123'))
+      window.location.pathname = '/foo/123'
       const rendered = render<Router>(router)
       expect(rendered.node.outerHTML)
         .toEqual('<div data-id="123" data-type="foo"></div>')
 
-      location.mockReturnValue(formatURL('bar/234'))
+      window.location.pathname = '/bar/234'
       window.dispatchEvent(new PopStateEvent('popstate'))
       expect(rendered.update().node.outerHTML)
         .toEqual('<div data-id="234" data-type="bar"></div>')
