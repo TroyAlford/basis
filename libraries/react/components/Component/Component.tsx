@@ -32,14 +32,13 @@ export abstract class Component<
   /** The root element type of the component. */
   Element extends HTMLElement = HTMLDivElement,
   /** The state of the component. */
-  State = object
+  State = object,
 > extends React.Component<Props & ComponentProps, State> {
   static get contextType() { return window?.ApplicationContext }
   static defaultProps: ComponentProps = {
     data: {},
     nodeRef: React.createRef<HTMLElement>(),
   }
-
   declare context: ApplicationContext
 
   /**

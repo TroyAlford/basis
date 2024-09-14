@@ -5,6 +5,7 @@ import pluginImportNewlines from 'eslint-plugin-import-newlines'
 import pluginJSDoc from 'eslint-plugin-jsdoc'
 import pluginNamedImportSpacing from 'eslint-plugin-named-import-spacing'
 import pluginImportSort from 'eslint-plugin-simple-import-sort'
+import pluginSortDestructureKeys from 'eslint-plugin-sort-destructure-keys'
 import pluginSortKeys from 'eslint-plugin-sort-keys-fix'
 import pluginTypescript, { type ConfigWithExtends } from 'typescript-eslint'
 import pluginBasis from './rules/index.ts'
@@ -32,6 +33,7 @@ const plugin = ({ files, rules }: PluginOptions) => {
       '@stylistic/ts': pluginStylistic as unknown,
       '@typescript-eslint': pluginTypescript.plugin,
       'simple-import-sort': pluginImportSort,
+      'sort-destructure-keys': pluginSortDestructureKeys,
       'sort-keys-fix': pluginSortKeys,
     },
     rules,
@@ -55,6 +57,7 @@ const plugin = ({ files, rules }: PluginOptions) => {
 }
 
 export default pluginTypescript.config(
+  { ignores: ['./dist/**'] },
   eslint.configs.recommended,
   pluginJSDoc.configs['flat/recommended-typescript'],
   ...pluginTypescript.configs.strict,
@@ -121,11 +124,7 @@ export default pluginTypescript.config(
       '@stylistic/js/semi-style': ['error', 'last'],
       '@stylistic/js/sort-imports': 'off',
       '@stylistic/js/sort-keys': 'off',
-      '@stylistic/js/space-before-function-paren': ['error', {
-        anonymous: 'never',
-        asyncArrow: 'always',
-        named: 'never',
-      }],
+      '@stylistic/js/space-before-function-paren': 'off',
       '@stylistic/js/space-in-parens': ['error', 'never'],
       '@stylistic/js/space-unary-ops': ['error', { nonwords: false, words: true }],
       '@stylistic/js/spaced-comment': ['error', 'always', { markers: ['/'] }],
@@ -212,7 +211,8 @@ export default pluginTypescript.config(
         multiline: { delimiter: 'comma', requireLast: true },
         singleline: { delimiter: 'comma', requireLast: false },
       }],
-      '@stylistic/ts/no-extra-parens': 'off', // this rule breaks arrows that return nested expressions
+      '@stylistic/ts/no-extra-parens': 'off',
+      // this rule breaks arrows that return nested expressions
       '@stylistic/ts/no-extra-semi': 'error',
       '@stylistic/ts/no-tabs': ['error', { allowIndentationTabs: false }],
       '@stylistic/ts/object-curly-newline': ['error', {
@@ -270,10 +270,12 @@ export default pluginTypescript.config(
       'no-console': 'error',
       'no-return-assign': 'error',
       'no-shadow': 'error',
-      'no-unused-vars': 'off', // use TS version
+      'no-unused-vars': 'off',
+      // use TS version
       'no-var': 'error',
       'prefer-destructuring': ['error', { AssignmentExpression: { array: false, object: false } }],
       'simple-import-sort/imports': ['error', { groups: [['^[a-z@]', '^@basis/', '^([.]+[/])+', '.s?css$']] }],
+      'sort-destructure-keys/sort-destructure-keys': ['error', { caseSensitive: false }],
       'sort-keys-fix/sort-keys-fix': 'error',
       'sort-vars': ['error', { ignoreCase: true }],
     },

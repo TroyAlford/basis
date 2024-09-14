@@ -17,7 +17,7 @@ export function clone<V = object>(value: V): V {
   queue.push({ path: '', source: value, target: cloned })
 
   while (queue.length > 0) {
-    const { source, path } = queue.shift()
+    const { path, source } = queue.shift()
 
     Object.keys(source).forEach(key => {
       const fullPath = path ? `${path}.${key}` : key

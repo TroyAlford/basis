@@ -1,7 +1,7 @@
 import { parseMilliseconds } from '@basis/utilities'
 
 const formatMilliseconds = (ms: number): string => {
-  const { years, weeks, days, hours, minutes, seconds } = parseMilliseconds(ms)
+  const { days, hours, minutes, seconds, weeks, years } = parseMilliseconds(ms)
   return [
     years && `${years}y`,
     weeks && `${weeks}w`,

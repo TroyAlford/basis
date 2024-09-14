@@ -19,7 +19,7 @@ const DEFAULTS: Options = {
  * @returns the hashed value
  */
 export function hash(value: unknown, options: Partial<Options> = {}): string {
-  const { characters, length, prefix, padWith }: Options = { ...DEFAULTS, ...options }
+  const { characters, length, padWith, prefix }: Options = { ...DEFAULTS, ...options }
   if ([null, undefined].includes(value)) return null
 
   const json = JSON.stringify(value)
