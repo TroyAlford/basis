@@ -22,6 +22,14 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+  eslint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asdf-setup
+      - name: Run ESLint
+        run: bun eslint
+
   run-tests:
     runs-on: ubuntu-latest
     steps:
@@ -29,9 +37,21 @@ jobs:
       - uses: ./.github/actions/asdf-setup
       - run: bun test
 
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asdf-setup
+      - name: Run TypeScript Type Check
+        run: bun tsc
+
   required:
     if: always()
-    needs: [check-pr-title, run-tests]
+    needs:
+      - check-pr-title
+      - eslint
+      - run-tests
+      - type-check
     runs-on: ubuntu-latest
     steps:
       - name: Check if required jobs passed or were skipped
