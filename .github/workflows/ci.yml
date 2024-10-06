@@ -19,10 +19,10 @@ jobs:
       - name: Post PR comment
         uses: actions/github-script@v5
         id: comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           script: |
-            const { GitHub, context } = require('@actions/github');
-            const github = new GitHub(${{ secrets.GITHUB_TOKEN }});
             const title = context.payload.pull_request.title;
             const isValid = '${{ steps.enforce-convco.outputs.valid }}';
             const commentBody = isValid === 'true' 
