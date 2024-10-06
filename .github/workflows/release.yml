@@ -23,22 +23,32 @@ jobs:
         with:
           plugins: '["bun@latest"]'
 
-      - name: Check Conventional Commits
-        uses: ./.github/actions/enforce-convco
-
       - name: Determine new version
         id: version
         run: |
           # Use bunx to run convco to determine the next version
-          version=$(bunx convco version --dry-run | grep "tagging release" | awk '{print $3}')
-          echo "version=$version" >> $GITHUB_ENV
+          version=$(bunx standard-version --dry-run | grep "tagging release" | awk '{print $4}' | sed 's/^v//')
+          echo "version=$version" >> $GITHUB_OUTPUT
 
       - name: Generate changelog
         id: changelog
         run: |
-          # Generate changelog using convco
-          changelog=$(bunx convco changelog --from $(git describe --tags --abbrev=0) --to HEAD)
-          echo "changelog=$changelog" >> $GITHUB_ENV
+          # Fetch the latest changes from the remote
+          git fetch origin main
+
+          # Check if there are any tags
+          if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+            # Get the latest tag
+            latest_tag=$(git describe --tags --abbrev=0)
+            # Generate changelog with commit messages since the latest tag up to origin/main
+            changelog=$(git log $latest_tag..origin/main --pretty=format:"%s" --no-merges)
+          else
+            # No tags found, generate changelog from the beginning of the repo up to origin/main
+            changelog=$(git log origin/main --pretty=format:"%s" --no-merges)
+          fi
+
+          # Output the changelog
+          echo "changelog=$changelog" >> $GITHUB_OUTPUT
 
       - name: Create Release
         env:
