@@ -23,15 +23,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           script: |
-            const { getOctokit } = require('@actions/github');
-            const github = getOctokit(process.env.GITHUB_TOKEN);
+            const { context, getOctokit } = require('@actions/github'); // Import context and getOctokit
+            const octokit = getOctokit(process.env.GITHUB_TOKEN); // Use getOctokit to create an instance
             const title = context.payload.pull_request.title;
             const isValid = '${{ steps.enforce-convco.outputs.valid }}';
             const commentBody = isValid === 'true' 
               ? '✅ The PR title is valid.'
               : '❌ The PR title does not meet the required format.';
             
-            const comments = await github.issues.listComments({
+            const comments = await octokit.issues.listComments({
               ...context.repo,
               issue_number: context.payload.pull_request.number,
             });
@@ -39,13 +39,13 @@ jobs:
             const existingComment = comments.data.find(comment => comment.body.includes('PR title check'));
 
             if (existingComment) {
-              await github.issues.updateComment({
+              await octokit.issues.updateComment({
                 ...context.repo,
                 comment_id: existingComment.id,
                 body: commentBody,
               });
             } else {
-              await github.issues.createComment({
+              await octokit.issues.createComment({
                 ...context.repo,
                 issue_number: context.payload.pull_request.number,
                 body: commentBody,
