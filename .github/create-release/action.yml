@@ -1,0 +1,37 @@
+name: 'Create Convco Release'
+description: 'Create a new release based on Conventional Commits'
+
+inputs:
+  github-token:
+    description: 'GitHub token for creating the release'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check Conventional Commits
+      uses: ./.github/actions/enforce-convco
+
+    - name: Generate new version
+      id: version
+      uses: convco/convco-version-action@v1
+      with:
+        bump: true
+
+    - name: Generate changelog
+      id: changelog
+      uses: convco/convco-changelog-action@v1
+
+    - name: Create Release
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh release create v${{ steps.version.outputs.version }} \
+          --title "Release ${{ steps.version.outputs.version }}" \
+          --notes "${{ steps.changelog.outputs.changelog }}"
+      shell: bash

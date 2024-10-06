@@ -1,0 +1,14 @@
+name: 'Check Conventional Commits'
+description: 'Check if the commits are following the Conventional Commits specification'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check Conventional Commits
+      uses: webiny/action-conventional-commits@v1.1.0
+      shell: bash
