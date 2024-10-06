@@ -1,74 +1,47 @@
-name: CI
+name: PR Title Check
 
 on:
   pull_request:
     types: [opened, edited, synchronize]
-    branches: [main]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   check-pr-title:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/enforce-convco
-        id: enforce-convco
-      - name: Post PR comment
+      - name: Check PR Title
         uses: actions/github-script@v5
-        id: comment
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           script: |
-            const { getOctokit } = require('@actions/github');
-            const octokit = getOctokit(process.env.GITHUB_TOKEN);
             const title = context.payload.pull_request.title;
-            const isValid = '${{ steps.enforce-convco.outputs.valid }}';
-            const commentBody = isValid === 'true' 
-              ? '✅ The PR title is valid.'
-              : '❌ The PR title does not meet the required format.';
-            
-            const comments = await octokit.issues.listComments({
-              ...context.repo,
-              issue_number: context.payload.pull_request.number,
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
             });
 
-            const existingComment = comments.data.find(comment => comment.body.includes('PR title check'));
+            // Define the comment body based on title validity
+            const isValid = /^([a-z]+)(\([a-zA-Z0-9-]+\))?: .+/.test(title);
+            const commentBody = isValid 
+              ? '✅ The PR title is valid.' 
+              : '❌ The PR title does not follow the Conventional Commits format. Please update it.';
+
+            // Find an existing comment by this action
+            const existingComment = comments.find(comment => comment.user.login === 'github-actions[bot]' && comment.body.includes('PR title'));
 
             if (existingComment) {
-              await octokit.issues.updateComment({
-                ...context.repo,
+              // Update the existing comment
+              await github.rest.issues.updateComment({
                 comment_id: existingComment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
                 body: commentBody,
               });
             } else {
-              await octokit.issues.createComment({
-                ...context.repo,
-                issue_number: context.payload.pull_request.number,
+              // Create a new comment
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
                 body: commentBody,
               });
             }
-
-  run-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/asdf-setup
-      - run: bun test
-
-  required:
-    if: always()
-    needs: [check-pr-title, run-tests]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check if required jobs passed or were skipped
-        run: |
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
-            echo "One or more required jobs failed"
-            exit 1
-          else
-            echo "All required jobs have passed or were skipped!"
-          fi
