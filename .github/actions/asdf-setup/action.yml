@@ -29,7 +29,7 @@ runs:
 
         # Install additional plugins if specified
         if [ "${{ inputs.plugins }}" != "[]" ]; then
-          echo "${{ inputs.plugins }}" | jq -r '.[]' | while IFS='@' read -r plugin version; do
+          echo "${{ inputs.plugins }}" | jq -c '.[]' | while IFS='@' read -r plugin version; do
             if ! asdf plugin list | grep -q "^$plugin$"; then
               asdf plugin add "$plugin"
             fi
