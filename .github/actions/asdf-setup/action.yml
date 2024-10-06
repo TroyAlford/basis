@@ -27,18 +27,20 @@ runs:
           done < .tool-versions
         fi
 
-        # Reshim all tools
-        asdf reshim
-
         # Install additional plugins if specified
         if [ "${{ inputs.plugins }}" != "[]" ]; then
           echo "${{ inputs.plugins }}" | jq -r '.[]' | while IFS='@' read -r plugin version; do
             if ! asdf plugin list | grep -q "^$plugin$"; then
               asdf plugin add "$plugin"
             fi
-            asdf install "$plugin" "$version"
-            asdf global "$plugin" "$version"
-            asdf reshim "$plugin"
+            if [ "$version" = "latest" ]; then
+              asdf install "$plugin"
+              latest_version=$(asdf list "$plugin" | tail -n 1)
+              asdf global "$plugin" "$latest_version"
+            else
+              asdf install "$plugin" "$version"
+              asdf global "$plugin" "$version"
+            fi
           done
         fi
 
@@ -47,8 +49,10 @@ runs:
           asdf plugin add jq
           asdf install jq latest
           asdf global jq latest
-          asdf reshim jq
         fi
+
+        # Reshim all tools
+        asdf reshim
 
     - name: Determine package manager and set cache key
       id: pkg-manager
