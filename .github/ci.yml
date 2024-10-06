@@ -22,7 +22,7 @@ jobs:
       - uses: ./.github/actions/asdf-setup
       - run: bun test
 
-  all-tests-must-pass:
+  required:
     if: always()
     needs: [check-pr-title, run-tests]
     runs-on: ubuntu-latest
