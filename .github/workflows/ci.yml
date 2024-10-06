@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, edited, synchronize]
     branches: [main]
 
 concurrency:
@@ -14,6 +15,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/enforce-convco
+        id: enforce-convco
+      - name: Post PR comment
+        uses: actions/github-script@v5
+        id: comment
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            const isValid = '${{ steps.enforce-convco.outputs.valid }}'; // Assuming your action outputs a valid flag
+            const commentBody = isValid === 'true' 
+              ? '✅ The PR title is valid.' 
+              : '❌ The PR title does not meet the required format.';
+            
+            const comments = await github.issues.listComments({
+              ...context.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+
+            const existingComment = comments.data.find(comment => comment.body.includes('PR title check'));
+
+            if (existingComment) {
+              await github.issues.updateComment({
+                ...context.repo,
+                comment_id: existingComment.id,
+                body: commentBody,
+              });
+            } else {
+              await github.issues.createComment({
+                ...context.repo,
+                issue_number: context.payload.pull_request.number,
+                body: commentBody,
+              });
+            }
 
   run-tests:
     runs-on: ubuntu-latest
