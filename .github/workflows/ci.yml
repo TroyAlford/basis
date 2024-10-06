@@ -23,8 +23,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           script: |
-            const { context, getOctokit } = require('@actions/github'); // Import context and getOctokit
-            const octokit = getOctokit(process.env.GITHUB_TOKEN); // Use getOctokit to create an instance
+            const { getOctokit } = require('@actions/github');
+            const octokit = getOctokit(process.env.GITHUB_TOKEN);
             const title = context.payload.pull_request.title;
             const isValid = '${{ steps.enforce-convco.outputs.valid }}';
             const commentBody = isValid === 'true' 
