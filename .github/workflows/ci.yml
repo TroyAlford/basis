@@ -20,7 +20,7 @@ jobs:
         uses: actions/github-script@v5
         id: comment
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}  # Ensure the token is passed
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const title = context.payload.pull_request.title;
             const isValid = '${{ steps.enforce-convco.outputs.valid }}'; // Assuming your action outputs a valid flag
