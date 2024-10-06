@@ -26,6 +26,7 @@ runs:
         # Ensure jq is installed
         if ! asdf plugin list | grep -q "^jq$"; then
           asdf plugin add jq
+          asdf install jq latest
           asdf global jq latest
           asdf reshim jq
         fi
