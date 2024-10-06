@@ -1,14 +1,22 @@
-name: PR Title Check
+name: CI
 
 on:
   pull_request:
     types: [opened, edited, synchronize]
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check-pr-title:
     runs-on: ubuntu-latest
     steps:
-      - name: Check PR Title
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/enforce-convco
+        id: enforce-convco
+      - name: PR Title Comment
         uses: actions/github-script@v5
         with:
           script: |
@@ -29,7 +37,6 @@ jobs:
             const existingComment = comments.find(comment => comment.user.login === 'github-actions[bot]' && comment.body.includes('PR title'));
 
             if (existingComment) {
-              // Update the existing comment
               await github.rest.issues.updateComment({
                 comment_id: existingComment.id,
                 owner: context.repo.owner,
@@ -37,7 +44,6 @@ jobs:
                 body: commentBody,
               });
             } else {
-              // Create a new comment
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
@@ -45,3 +51,25 @@ jobs:
                 body: commentBody,
               });
             }
+
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asdf-setup
+      - run: bun test
+
+  required:
+    if: always()
+    needs: [check-pr-title, run-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if required jobs passed or were skipped
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more required jobs failed"
+            exit 1
+          else
+            echo "All required jobs have passed or were skipped!"
+          fi
+
