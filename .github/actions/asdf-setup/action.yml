@@ -36,26 +36,38 @@ runs:
       shell: bash
       run: |
         if [ -f package.json ]; then
-          PACKAGE_MANAGER=$(jq -r '.packageManager | if type == "string" then split("@")[0] else empty end // empty' package.json)
-          case $PACKAGE_MANAGER in
-            npm)
-              echo "manager=npm" >> $GITHUB_OUTPUT
-              echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
-              ;;
-            yarn)
-              echo "manager=yarn" >> $GITHUB_OUTPUT
-              echo "lock_file=yarn.lock" >> $GITHUB_OUTPUT
-              ;;
-            bun)
-              echo "manager=bun" >> $GITHUB_OUTPUT
-              echo "lock_file=bun.lockb" >> $GITHUB_OUTPUT
-              ;;
-            *)
-              # Default to npm if packageManager is not specified or is invalid
-              echo "manager=npm" >> $GITHUB_OUTPUT
-              echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
-              ;;
-          esac
+          if [ -f bun.lockb ]; then
+            echo "manager=bun" >> $GITHUB_OUTPUT
+            echo "lock_file=bun.lockb" >> $GITHUB_OUTPUT
+          elif [ -f yarn.lock ]; then
+            echo "manager=yarn" >> $GITHUB_OUTPUT
+            echo "lock_file=yarn.lock" >> $GITHUB_OUTPUT
+          elif [ -f package-lock.json ]; then
+            echo "manager=npm" >> $GITHUB_OUTPUT
+            echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
+          else
+            # If no lock file is found, fall back to packageManager field
+            PACKAGE_MANAGER=$(jq -r '.packageManager | if type == "string" then split("@")[0] else empty end // empty' package.json)
+            case $PACKAGE_MANAGER in
+              npm)
+                echo "manager=npm" >> $GITHUB_OUTPUT
+                echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
+                ;;
+              yarn)
+                echo "manager=yarn" >> $GITHUB_OUTPUT
+                echo "lock_file=yarn.lock" >> $GITHUB_OUTPUT
+                ;;
+              bun)
+                echo "manager=bun" >> $GITHUB_OUTPUT
+                echo "lock_file=bun.lockb" >> $GITHUB_OUTPUT
+                ;;
+              *)
+                # Default to npm if packageManager is not specified or is invalid
+                echo "manager=npm" >> $GITHUB_OUTPUT
+                echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
+                ;;
+            esac
+          fi
         else
           echo "No package.json found. Skipping package manager determination."
           exit 0
