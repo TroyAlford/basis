@@ -1,0 +1,82 @@
+name: 'Check Conventional Commits and PR Title'
+description: 'Check if the commits and PR title are following the Conventional Commits specification'
+
+inputs:
+  github-token:
+    description: 'GitHub token with permissions to comment on PRs'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check PR Title
+      id: check_pr_title
+      uses: amannn/action-semantic-pull-request@v5
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      with:
+        validateSingleCommit: true
+      continue-on-error: true
+
+    - name: Comment on PR
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const isValid = ${{ steps.check_pr_title.outcome == 'success' }};
+          const successMessage = '✅ The PR title follows the Conventional Commits format.';
+          const errorMessage = `❌ The PR title does not follow the Conventional Commits format. Please update it.
+
+          Your PR title should follow this format:
+          \`<type>(<optional scope>): <description>\`
+
+          Where:
+          - \`<type>\` is one of: feat, fix, docs, style, refactor, perf, test, chore, etc.
+          - \`<optional scope>\` is optional and represents the scope of the change (e.g., component name, module)
+          - \`<description>\` is a short description of the change
+
+          Examples:
+          - \`feat(auth): add login functionality\`
+          - \`fix: resolve issue with data loading\`
+          - \`docs: update README with new instructions\`
+
+          For more information, please refer to the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).`;
+
+          const commentBody = isValid ? successMessage : errorMessage;
+
+          const { data: comments } = await github.rest.issues.listComments({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+          });
+
+          const existingComment = comments.find(comment => 
+            comment.user.login === 'github-actions[bot]' && 
+            comment.body.includes('PR title')
+          );
+
+          if (existingComment) {
+            await github.rest.issues.updateComment({
+              comment_id: existingComment.id,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: commentBody,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: commentBody,
+            });
+          }
+
+    - name: Exit with error if PR title is invalid
+      if: steps.check_pr_title.outcome == 'failure'
+      shell: bash
+      run: exit 1

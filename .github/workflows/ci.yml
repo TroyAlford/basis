@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+    branches: [main]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/enforce-convco
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asdf-setup
+      - run: bun test
+
+  required:
+    if: always()
+    needs: [check-pr-title, run-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if required jobs passed or were skipped
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more required jobs failed"
+            exit 1
+          else
+            echo "All required jobs have passed or were skipped!"
+          fi
+

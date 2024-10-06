@@ -1,0 +1,102 @@
+name: ASDF Setup & Install
+description: Run asdf setup & install dependencies
+
+runs:
+  using: composite
+
+  steps:
+    - uses: actions/checkout@v3
+    - uses: asdf-vm/actions/setup@v2
+
+    - name: Install ASDF plugins & tools
+      shell: bash
+      run: |
+        # Install plugins and tools from .tool-versions
+        while read -r tool version; do
+          asdf plugin add "$tool"
+        done < <(cat .tool-versions | tr -s ' ')
+
+        asdf install
+
+        # Reshim all tools
+        while read -r tool version; do
+          asdf reshim "$tool"
+        done < <(cat .tool-versions | tr -s ' ')
+
+        # Ensure jq is installed
+        if ! asdf plugin list | grep -q "^jq$"; then
+          asdf plugin add jq
+          asdf install jq latest
+          asdf global jq latest
+          asdf reshim jq
+        fi
+
+    - name: Determine package manager and set cache key
+      id: pkg-manager
+      shell: bash
+      run: |
+        if [ -f package.json ]; then
+          if [ -f bun.lockb ]; then
+            echo "manager=bun" >> $GITHUB_OUTPUT
+            echo "lock_file=bun.lockb" >> $GITHUB_OUTPUT
+          elif [ -f yarn.lock ]; then
+            echo "manager=yarn" >> $GITHUB_OUTPUT
+            echo "lock_file=yarn.lock" >> $GITHUB_OUTPUT
+          elif [ -f package-lock.json ]; then
+            echo "manager=npm" >> $GITHUB_OUTPUT
+            echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
+          else
+            # If no lock file is found, fall back to packageManager field
+            PACKAGE_MANAGER=$(jq -r '.packageManager | if type == "string" then split("@")[0] else empty end // empty' package.json)
+            case $PACKAGE_MANAGER in
+              npm)
+                echo "manager=npm" >> $GITHUB_OUTPUT
+                echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
+                ;;
+              yarn)
+                echo "manager=yarn" >> $GITHUB_OUTPUT
+                echo "lock_file=yarn.lock" >> $GITHUB_OUTPUT
+                ;;
+              bun)
+                echo "manager=bun" >> $GITHUB_OUTPUT
+                echo "lock_file=bun.lockb" >> $GITHUB_OUTPUT
+                ;;
+              *)
+                # Default to npm if packageManager is not specified or is invalid
+                echo "manager=npm" >> $GITHUB_OUTPUT
+                echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
+                ;;
+            esac
+          fi
+        else
+          echo "No package.json found. Skipping package manager determination."
+          exit 0
+        fi
+
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      if: steps.pkg-manager.outputs.manager
+      with:
+        path: |
+          **/node_modules
+        key: ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-${{ hashFiles('**/${{ steps.pkg-manager.outputs.lock_file }}') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-
+
+    - name: Install dependencies
+      if: steps.pkg-manager.outputs.manager
+      shell: bash
+      env:
+        HUSKY: '0'
+      run: |
+        case ${{ steps.pkg-manager.outputs.manager }} in
+          npm)
+            npm ci
+            ;;
+          yarn)
+            yarn install --frozen-lockfile
+            ;;
+          bun)
+            bun install --frozen-lockfile
+            ;;
+        esac
