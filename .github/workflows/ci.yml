@@ -15,42 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/enforce-convco
-        id: enforce-convco
-      - name: PR Title Comment
-        uses: actions/github-script@v5
         with:
-          script: |
-            const title = context.payload.pull_request.title;
-            const { data: comments } = await github.rest.issues.listComments({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-            });
-
-            // Define the comment body based on title validity
-            const isValid = /^([a-z]+)(\([a-zA-Z0-9-]+\))?: .+/.test(title);
-            const commentBody = isValid 
-              ? '✅ The PR title is valid.' 
-              : '❌ The PR title does not follow the Conventional Commits format. Please update it.';
-
-            // Find an existing comment by this action
-            const existingComment = comments.find(comment => comment.user.login === 'github-actions[bot]' && comment.body.includes('PR title'));
-
-            if (existingComment) {
-              await github.rest.issues.updateComment({
-                comment_id: existingComment.id,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: commentBody,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: commentBody,
-              });
-            }
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   run-tests:
     runs-on: ubuntu-latest
