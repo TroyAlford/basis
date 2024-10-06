@@ -17,6 +17,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/create-release
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
