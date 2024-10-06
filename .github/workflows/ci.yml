@@ -22,6 +22,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            console.log('Context', JSON.stringify(context, null, 2));
             const title = context.payload.pull_request.title;
             const isValid = '${{ steps.enforce-convco.outputs.valid }}'; // Assuming your action outputs a valid flag
             const commentBody = isValid === 'true' 
