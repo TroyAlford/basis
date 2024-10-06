@@ -20,11 +20,11 @@ jobs:
         uses: actions/github-script@v5
         id: comment
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            console.log('Context', JSON.stringify(context, null, 2));
+            const { GitHub, context } = require('@actions/github');
+            const github = new GitHub(${{ secrets.GITHUB_TOKEN }});
             const title = context.payload.pull_request.title;
-            const isValid = '${{ steps.enforce-convco.outputs.valid }}'; // Assuming your action outputs a valid flag
+            const isValid = '${{ steps.enforce-convco.outputs.valid }}';
             const commentBody = isValid === 'true' 
               ? '✅ The PR title is valid.' 
               : '❌ The PR title does not meet the required format.';
