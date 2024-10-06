@@ -36,7 +36,7 @@ runs:
       shell: bash
       run: |
         if [ -f package.json ]; then
-          PACKAGE_MANAGER=$(jq -r '.packageManager | split("@")[0] // empty' package.json)
+          PACKAGE_MANAGER=$(jq -r '.packageManager | if type == "string" then split("@")[0] else empty end // empty' package.json)
           case $PACKAGE_MANAGER in
             npm)
               echo "manager=npm" >> $GITHUB_OUTPUT
@@ -51,6 +51,7 @@ runs:
               echo "lock_file=bun.lockb" >> $GITHUB_OUTPUT
               ;;
             *)
+              # Default to npm if packageManager is not specified or is invalid
               echo "manager=npm" >> $GITHUB_OUTPUT
               echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
               ;;
