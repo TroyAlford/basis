@@ -49,3 +49,14 @@ The plugin enforces a solid set of base rules that emphasize:
 For a detailed list of all the rules and their configurations, refer to the source code in the [index.ts](./index.ts).
 
 This setup allows you to maintain a high standard of code quality while providing the flexibility to adapt the rules to your specific project requirements.
+
+## Ignored Directories
+
+This ESLint configuration automatically ignores files in the following directories:
+
+- `node_modules`
+- `.cache`
+- `build`
+- `dist`
+
+This includes any such directories nested inside monorepo workspaces, ensuring that ESLint does not process files that are typically generated or external dependencies.

@@ -58,8 +58,10 @@ const plugin = ({ files, rules }: PluginOptions) => {
   return config
 }
 
+const IGNORE_PATHS = ['node_modules', '.cache', 'build', 'dist']
+
 export default pluginTypescript.config(
-  { ignores: ['./dist/**'] },
+  { ignores: IGNORE_PATHS.flatMap(path => [`${path}/**`, `**/${path}/**`]) },
   eslint.configs.recommended,
   pluginJSDoc.configs['flat/recommended-typescript'],
   ...pluginTypescript.configs.strict,
