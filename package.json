@@ -18,8 +18,8 @@
     "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces"
   },
   "resolutions": {
-    "react": "18.3.0",
-    "react-dom": "18.3.0"
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   },
   "workspaces": [
     "libraries/*",
