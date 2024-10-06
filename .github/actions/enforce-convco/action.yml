@@ -1,5 +1,5 @@
-name: 'Check Conventional Commits and PR Title'
-description: 'Check if the commits and PR title are following the Conventional Commits specification'
+name: 'Check Convco PR Title'
+description: 'Check if the PR title follows the Conventional Commits specification'
 
 inputs:
   github-token:
@@ -9,10 +9,9 @@ inputs:
 runs:
   using: "composite"
   steps:
+
     - name: Checkout
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
 
     - name: Check PR Title
       id: check_pr_title
@@ -20,7 +19,8 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
       with:
-        validateSingleCommit: true
+        ignoreCommits: true
+        validateSingleCommit: false
       continue-on-error: true
 
     - name: Comment on PR
