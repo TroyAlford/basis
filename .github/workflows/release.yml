@@ -15,46 +15,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: ASDF Setup
-        uses: ./.github/actions/asdf-setup
-        with:
-          plugins: '["bun@latest"]'
-
-      - name: Determine new version
-        id: version
-        run: |
-          # Use bunx to run convco to determine the next version
-          version=$(bunx standard-version --dry-run | grep "tagging release" | awk '{print $4}' | sed 's/^v//')
-          echo "version=$version" >> $GITHUB_OUTPUT
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          # Fetch the latest changes from the remote
-          git fetch origin main
-
-          # Check if there are any tags
-          if git describe --tags --abbrev=0 >/dev/null 2>&1; then
-            # Get the latest tag
-            latest_tag=$(git describe --tags --abbrev=0)
-            # Generate changelog with commit messages since the latest tag up to origin/main
-            changelog=$(git log $latest_tag..origin/main --pretty=format:"%s" --no-merges)
-          else
-            # No tags found, generate changelog from the beginning of the repo up to origin/main
-            changelog=$(git log origin/main --pretty=format:"%s" --no-merges)
-          fi
-
-          # Output the changelog
-          printf "changelog<<EOF\n%s\nEOF\n" "$changelog" >> $GITHUB_ENV
-
       - name: Create Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create v${{ steps.version.outputs.version }} \
-            --title "Release ${{ steps.version.outputs.version }}" \
-            --notes "${{ steps.changelog.outputs.changelog }}"
-        shell: bash
+        uses: ./.github/actions/create-release
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
