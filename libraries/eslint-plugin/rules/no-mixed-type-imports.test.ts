@@ -22,23 +22,15 @@ describe('no-mixed-type-imports', () => {
 
   test('outputs with/out semicolons, based on input line', () => {
     const semi = lint("import { a, type b, c } from 'module';")
-    console.log('Semi result:', {
-      fixed: semi.fixed,
-      output: semi.output.split(/\r?\n/).map(line => line.trim()),
-    })
     expect(semi.fixed).toBe(true)
-    expect(semi.output.split(/\r?\n/).map(line => line.trim())).toEqual([
+    expect(semi.output.split(/\n/)).toEqual([
       "import type { b } from 'module';",
       "import { a, c } from 'module';",
     ])
 
     const noSemi = lint("import { a, type b, c } from 'module'")
-    console.log('NoSemi result:', {
-      fixed: noSemi.fixed,
-      output: noSemi.output.split(/\r?\n/).map(line => line.trim()),
-    })
     expect(noSemi.fixed).toBe(true)
-    expect(noSemi.output.split(/\r?\n/).map(line => line.trim())).toEqual([
+    expect(noSemi.output.split(/\n/)).toEqual([
       "import type { b } from 'module'",
       "import { a, c } from 'module'",
     ])
