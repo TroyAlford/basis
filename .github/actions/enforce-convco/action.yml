@@ -29,9 +29,25 @@ runs:
         github-token: ${{ inputs.github-token }}
         script: |
           const isValid = ${{ steps.check_pr_title.outcome == 'success' }};
-          const commentBody = isValid
-            ? '✅ The PR title follows the Conventional Commits format.'
-            : '❌ The PR title does not follow the Conventional Commits format. Please update it.';
+          const successMessage = '✅ The PR title follows the Conventional Commits format.';
+          const errorMessage = `❌ The PR title does not follow the Conventional Commits format. Please update it.
+
+          Your PR title should follow this format:
+          \`<type>(<optional scope>): <description>\`
+
+          Where:
+          - \`<type>\` is one of: feat, fix, docs, style, refactor, perf, test, chore, etc.
+          - \`<optional scope>\` is optional and represents the scope of the change (e.g., component name, module)
+          - \`<description>\` is a short description of the change
+
+          Examples:
+          - \`feat(auth): add login functionality\`
+          - \`fix: resolve issue with data loading\`
+          - \`docs: update README with new instructions\`
+
+          For more information, please refer to the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).`;
+
+          const commentBody = isValid ? successMessage : errorMessage;
 
           const { data: comments } = await github.rest.issues.listComments({
             issue_number: context.issue.number,
