@@ -6,9 +6,6 @@ runs:
   steps:
     - name: Checkout
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
 
     - name: Check Conventional Commits
       uses: webiny/action-conventional-commits@v1.1.0
-      shell: bash

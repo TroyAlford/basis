@@ -11,19 +11,24 @@ runs:
     - name: Install ASDF plugins & tools
       shell: bash
       run: |
-        if ! grep -q "^jq " .tool-versions; then
-          echo "jq latest" >> .tool-versions
-        fi
-
+        # Install plugins and tools from .tool-versions
         while read -r tool version; do
           asdf plugin add "$tool"
         done < <(cat .tool-versions | tr -s ' ')
 
         asdf install
 
+        # Reshim all tools
         while read -r tool version; do
           asdf reshim "$tool"
         done < <(cat .tool-versions | tr -s ' ')
+
+        # Ensure jq is installed
+        if ! asdf plugin list | grep -q "^jq$"; then
+          asdf plugin add jq
+          asdf install jq latest
+          asdf reshim jq
+        fi
 
     - name: Determine package manager and set cache key
       id: pkg-manager
