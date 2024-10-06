@@ -1,0 +1,83 @@
+name: ASDF Setup & Install
+description: Run asdf setup & install dependencies
+
+runs:
+  using: composite
+
+  steps:
+    - uses: actions/checkout@v3
+    - uses: asdf-vm/actions/setup@v2
+
+    - name: Install ASDF plugins & tools
+      shell: bash
+      run: |
+        if ! grep -q "^jq " .tool-versions; then
+          echo "jq latest" >> .tool-versions
+        fi
+
+        while read -r tool version; do
+          asdf plugin add "$tool"
+        done < <(cat .tool-versions | tr -s ' ')
+
+        asdf install
+
+        while read -r tool version; do
+          asdf reshim "$tool"
+        done < <(cat .tool-versions | tr -s ' ')
+
+    - name: Determine package manager and set cache key
+      id: pkg-manager
+      shell: bash
+      run: |
+        if [ -f package.json ]; then
+          PACKAGE_MANAGER=$(jq -r '.packageManager | split("@")[0] // empty' package.json)
+          case $PACKAGE_MANAGER in
+            npm)
+              echo "manager=npm" >> $GITHUB_OUTPUT
+              echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
+              ;;
+            yarn)
+              echo "manager=yarn" >> $GITHUB_OUTPUT
+              echo "lock_file=yarn.lock" >> $GITHUB_OUTPUT
+              ;;
+            bun)
+              echo "manager=bun" >> $GITHUB_OUTPUT
+              echo "lock_file=bun.lockb" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "manager=npm" >> $GITHUB_OUTPUT
+              echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
+              ;;
+          esac
+        else
+          echo "No package.json found. Skipping package manager determination."
+          exit 0
+        fi
+
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      if: steps.pkg-manager.outputs.manager
+      with:
+        path: |
+          **/node_modules
+        key: ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-${{ hashFiles('**/${{ steps.pkg-manager.outputs.lock_file }}') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-
+
+    - name: Install dependencies
+      if: steps.pkg-manager.outputs.manager
+      shell: bash
+      env:
+        HUSKY: '0'
+      run: |
+        case ${{ steps.pkg-manager.outputs.manager }} in
+          npm)
+            npm ci
+            ;;
+          yarn)
+            yarn install --frozen-lockfile
+            ;;
+          bun)
+            bun install --frozen-lockfile
+            ;;
+        esac

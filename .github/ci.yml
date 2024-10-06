@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asdf-setup
+      - run: bun test
+
+  all-tests-must-pass:
+    if: always()
+    needs: [check-pr-title, run-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if required jobs passed or were skipped
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more required jobs failed"
+            exit 1
+          else
+            echo "All required jobs have passed or were skipped!"
+          fi
