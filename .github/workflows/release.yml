@@ -48,7 +48,7 @@ jobs:
           fi
 
           # Output the changelog
-          echo "changelog=$changelog" >> $GITHUB_OUTPUT
+          printf "changelog<<EOF\n%s\nEOF\n" "$changelog" >> $GITHUB_ENV
 
       - name: Create Release
         env:
