@@ -2,29 +2,21 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
+    branches: [ 'main' ]
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  release-please:
+  release:
     runs-on: ubuntu-latest
     steps:
-      - uses: google-github-actions/release-please-action@v3
-        id: release
-        with:
-          release-type: node
-          package-name: basis
-          changelog-types: |
-            [
-              {"type":"feat","section":"Features","hidden":false},
-              {"type":"fix","section":"Bug Fixes","hidden":false},
-              {"type":"docs","section":"Documentation","hidden":false},
-              {"type":"chore","section":"Miscellaneous","hidden":false}
-            ]
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-        if: ${{ steps.release.outputs.release_created }}
+      - name: Create Release
+        uses: ./.github/actions/create-release
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}

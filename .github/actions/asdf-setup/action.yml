@@ -1,5 +1,11 @@
 name: ASDF Setup & Install
-description: Run asdf setup & install dependencies
+description: Run ASDF setup & install dependencies
+
+inputs:
+  plugins:
+    description: 'JSON string of ASDF plugins and their versions to install'
+    required: false
+    default: '[]'
 
 runs:
   using: composite
@@ -12,24 +18,41 @@ runs:
       shell: bash
       run: |
         # Install plugins and tools from .tool-versions
-        while read -r tool version; do
-          asdf plugin add "$tool"
-        done < <(cat .tool-versions | tr -s ' ')
+        if [ -f .tool-versions ]; then
+          while read -r tool version; do
+            if ! asdf plugin list | grep -q "^$tool$"; then
+              asdf plugin add "$tool"
+            fi
+            asdf install "$tool" "$version"
+          done < .tool-versions
+        fi
 
-        asdf install
-
-        # Reshim all tools
-        while read -r tool version; do
-          asdf reshim "$tool"
-        done < <(cat .tool-versions | tr -s ' ')
+        # Install additional plugins if specified
+        if [ '${{ inputs.plugins }}' != "[]" ]; then
+          echo '${{ inputs.plugins }}' | jq -r '.[]' | while IFS='@' read -r plugin version; do
+            if ! asdf plugin list | grep -q "^$plugin$"; then
+              asdf plugin add "$plugin"
+            fi
+            if [ "$version" = "latest" ]; then
+              asdf install "$plugin" latest
+              latest_version=$(asdf list "$plugin" | grep -v "No versions installed" | tail -n 1 | tr -d ' *')
+              asdf global "$plugin" "$latest_version"
+            else
+              asdf install "$plugin" "$version"
+              asdf global "$plugin" "$version"
+            fi
+          done
+        fi
 
         # Ensure jq is installed
         if ! asdf plugin list | grep -q "^jq$"; then
           asdf plugin add jq
           asdf install jq latest
           asdf global jq latest
-          asdf reshim jq
         fi
+
+        # Reshim all tools
+        asdf reshim
 
     - name: Determine package manager and set cache key
       id: pkg-manager
@@ -46,7 +69,6 @@ runs:
             echo "manager=npm" >> $GITHUB_OUTPUT
             echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
           else
-            # If no lock file is found, fall back to packageManager field
             PACKAGE_MANAGER=$(jq -r '.packageManager | if type == "string" then split("@")[0] else empty end // empty' package.json)
             case $PACKAGE_MANAGER in
               npm)
@@ -62,7 +84,6 @@ runs:
                 echo "lock_file=bun.lockb" >> $GITHUB_OUTPUT
                 ;;
               *)
-                # Default to npm if packageManager is not specified or is invalid
                 echo "manager=npm" >> $GITHUB_OUTPUT
                 echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
                 ;;
