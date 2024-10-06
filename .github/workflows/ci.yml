@@ -23,7 +23,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           script: |
-            const { context, getOctokit } = require('@actions/github');
+            const { getOctokit } = require('@actions/github');
             const github = getOctokit(process.env.GITHUB_TOKEN);
             const title = context.payload.pull_request.title;
             const isValid = '${{ steps.enforce-convco.outputs.valid }}';
