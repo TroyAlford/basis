@@ -12,7 +12,7 @@ runs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        fetch-depth: 10
+        fetch-depth: 0  # Fetch full history
 
     - name: Fetch all tags
       run: git fetch --tags origin
@@ -27,12 +27,15 @@ runs:
       id: version
       shell: bash
       run: |
+        # Fetch all tags and ensure the repository is not in a shallow state
+        git fetch --tags
+
         # Calculate the next version using standard-version
         version=$(bunx standard-version --dry-run | grep "tagging release" | awk '{print $4}' | sed 's/^v//')
         echo "version=$version" >> $GITHUB_OUTPUT
 
-        # Determine the latest version
-        latest_version=$(git describe --tags --abbrev=0 | sed 's/^v//')
+        # Determine the latest version using git describe with fallback
+        latest_version=$(git describe --tags --abbrev=0 --always | sed 's/^v//')
 
         # Determine if a new release is needed by comparing versions
         release_needed=$([ "$version" != "$latest_version" ] && echo "true" || echo "false")
@@ -51,9 +54,9 @@ runs:
         git fetch origin main
 
         # Check if there are any tags
-        if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+        if git describe --tags --abbrev=0 --always >/dev/null 2>&1; then
           # Get the latest tag
-          latest_tag=$(git describe --tags --abbrev=0)
+          latest_tag=$(git describe --tags --abbrev=0 --always)
           # Generate changelog with commit messages since the latest tag up to origin/main
           changelog=$(git log $latest_tag..origin/main --pretty=format:"%s" --no-merges)
         else
