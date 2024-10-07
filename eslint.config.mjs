@@ -1,3 +1,3 @@
-import eslintPlugin from './libraries/eslint-plugin/dist/index.mjs'
+import { config } from './libraries/eslint-plugin/dist/index.mjs'
 
-export default eslintPlugin
+export default config // eslint-disable-line @import/no-default-export
