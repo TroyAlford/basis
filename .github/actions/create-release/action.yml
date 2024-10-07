@@ -12,8 +12,11 @@ runs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
-        tags: true
+        fetch-depth: 0  # Fetch all history for all branches and tags
+
+    - name: Fetch all tags
+      run: git fetch --tags
+      shell: bash
 
     - name: ASDF Setup
       uses: ./.github/actions/asdf-setup
