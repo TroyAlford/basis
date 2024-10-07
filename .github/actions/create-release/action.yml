@@ -27,8 +27,20 @@ runs:
         version=$(bunx standard-version --dry-run | grep "tagging release" | awk '{print $4}' | sed 's/^v//')
         echo "version=$version" >> $GITHUB_OUTPUT
 
+        # Fetch the latest tag
+        latest_tag=$(git describe --tags --abbrev=0)
+
+        # Check if the new version is the same as the latest tag
+        if [ "$version" == "$latest_tag" ]; then
+          echo "release_needed=false" >> $GITHUB_OUTPUT
+          echo "No release necessary. The version $version is already the latest tag."
+        else
+          echo "release_needed=true" >> $GITHUB_OUTPUT
+        fi
+
     - name: Generate changelog
       id: changelog
+      if: steps.version.outputs.release_needed == 'true'
       shell: bash
       run: |
         # Fetch the latest changes from the remote
@@ -49,6 +61,7 @@ runs:
         printf "changelog<<EOF\n%s\nEOF\n" "$changelog" >> $GITHUB_ENV
 
     - name: Create Release
+      if: steps.version.outputs.release_needed == 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
