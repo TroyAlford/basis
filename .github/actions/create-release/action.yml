@@ -12,7 +12,11 @@ runs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
+        fetch-depth: 0  # Fetch full history
+
+    - name: Fetch all tags
+      run: git fetch --tags origin
+      shell: bash
 
     - name: ASDF Setup
       uses: ./.github/actions/asdf-setup
@@ -23,17 +27,18 @@ runs:
       id: version
       shell: bash
       run: |
-        # Use bunx to run convco to determine the next version
+        # Fetch all tags and ensure the repository is not in a shallow state
+        git fetch --tags
+        git fetch --unshallow
+
+        # Calculate the next version using standard-version
         version=$(bunx standard-version --dry-run | grep "tagging release" | awk '{print $4}' | sed 's/^v//')
         echo "version=$version" >> $GITHUB_OUTPUT
 
-        # Fetch the latest tag
-        latest_tag=$(git describe --tags --abbrev=0)
-
-        # Check if the new version is the same as the latest tag
-        if [ "$version" == "$latest_tag" ]; then
+        # Check if the tag already exists
+        if git rev-parse "v$version" >/dev/null 2>&1; then
+          echo "No release necessary; the tag v$version already exists."
           echo "release_needed=false" >> $GITHUB_OUTPUT
-          echo "No release necessary. The version $version is already the latest tag."
         else
           echo "release_needed=true" >> $GITHUB_OUTPUT
         fi
@@ -47,9 +52,9 @@ runs:
         git fetch origin main
 
         # Check if there are any tags
-        if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+        if git describe --tags --abbrev=0 --always >/dev/null 2>&1; then
           # Get the latest tag
-          latest_tag=$(git describe --tags --abbrev=0)
+          latest_tag=$(git describe --tags --abbrev=0 --always)
           # Generate changelog with commit messages since the latest tag up to origin/main
           changelog=$(git log $latest_tag..origin/main --pretty=format:"%s" --no-merges)
         else
