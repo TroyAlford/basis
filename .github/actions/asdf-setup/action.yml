@@ -11,7 +11,7 @@ runs:
   using: composite
 
   steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: asdf-vm/actions/setup@v3
 
     - name: Install ASDF plugins & tools
