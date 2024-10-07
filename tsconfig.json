@@ -1,15 +1,26 @@
 {
   "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": true,
+    "downlevelIteration": true,
     "jsx": "react",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "noEmit": true,
+    "rootDir": ".",
+    "skipDefaultLibCheck": true,
+    "skipLibCheck": true,
     "target": "ES2022",
     "types": [
       "bun-types",
       "./libraries/react",
       "./libraries/react/testing/bun"
     ]
-  }
+  },
+  "exclude": [
+    ".cache",
+    "build",
+    "dist",
+    "node_modules"
+  ]
 }

@@ -1,3 +1,4 @@
+/* eslint-disable @import/no-default-export */
 import eslint from '@eslint/js'
 import pluginStylistic from '@stylistic/eslint-plugin'
 import pluginImport from 'eslint-plugin-import'
@@ -9,7 +10,7 @@ import pluginSortDestructureKeys from 'eslint-plugin-sort-destructure-keys'
 import pluginSortKeys from 'eslint-plugin-sort-keys-fix'
 import pluginTypescriptSortKeys from 'eslint-plugin-typescript-sort-keys'
 import pluginTypescript, { type ConfigWithExtends } from 'typescript-eslint'
-import pluginBasis from './rules/index.ts'
+import pluginBasis from './rules'
 
 interface PluginOptions {
   files?: ConfigWithExtends['files'],
@@ -58,8 +59,10 @@ const plugin = ({ files, rules }: PluginOptions) => {
   return config
 }
 
+const IGNORE_PATHS = ['node_modules', '.cache', 'build', 'dist']
+
 export default pluginTypescript.config(
-  { ignores: ['./dist/**'] },
+  { ignores: IGNORE_PATHS.flatMap(path => [`${path}/**`, `**/${path}/**`]) },
   eslint.configs.recommended,
   pluginJSDoc.configs['flat/recommended-typescript'],
   ...pluginTypescript.configs.strict,

@@ -1,7 +1,7 @@
 import * as parser from '@typescript-eslint/parser'
 import { Linter } from '@typescript-eslint/utils/ts-eslint'
 import { describe, expect, test } from 'bun:test'
-import { noMixedTypeImports } from './no-mixed-type-imports.ts'
+import { noMixedTypeImports } from './no-mixed-type-imports'
 
 describe('no-mixed-type-imports', () => {
   const lint = (code: string) => {
