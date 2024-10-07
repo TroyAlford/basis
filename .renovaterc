@@ -1,0 +1,13 @@
+{
+  "extends": ["config:base"],
+  "automerge": true,
+  "automergeType": "pr",
+  "requiredStatusChecks": null,
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "labels": ["dependencies"],
+  "packageRules": [{
+    "automerge": true,
+    "matchUpdateTypes": ["minor", "patch"]
+  }]
+}
