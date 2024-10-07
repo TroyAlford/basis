@@ -13,6 +13,7 @@ runs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        tags: true
 
     - name: ASDF Setup
       uses: ./.github/actions/asdf-setup
@@ -23,19 +24,19 @@ runs:
       id: version
       shell: bash
       run: |
-        # Use bunx to run convco to determine the next version
+        # Calculate the next version using standard-version
         version=$(bunx standard-version --dry-run | grep "tagging release" | awk '{print $4}' | sed 's/^v//')
         echo "version=$version" >> $GITHUB_OUTPUT
 
-        # Fetch the latest tag
-        latest_tag=$(git describe --tags --abbrev=0)
+        # Determine the latest version
+        latest_version=$(git describe --tags --abbrev=0 | sed 's/^v//')
 
-        # Check if the new version is the same as the latest tag
-        if [ "$version" == "$latest_tag" ]; then
-          echo "release_needed=false" >> $GITHUB_OUTPUT
-          echo "No release necessary. The version $version is already the latest tag."
-        else
-          echo "release_needed=true" >> $GITHUB_OUTPUT
+        # Determine if a new release is needed by comparing versions
+        release_needed=$([ "$version" != "$latest_version" ] && echo "true" || echo "false")
+
+        echo "release_needed=$release_needed" >> $GITHUB_OUTPUT
+        if [ "$release_needed" == "false" ]; then
+          echo "No release necessary; $version is already the latest version."
         fi
 
     - name: Generate changelog
