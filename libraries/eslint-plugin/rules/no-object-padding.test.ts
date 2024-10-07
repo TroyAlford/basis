@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Linter } from 'eslint'
-import { noObjectPadding } from './no-object-padding.ts'
+import { noObjectPadding } from './no-object-padding'
 
 describe('no-object-padding', () => {
   const lint = (code: string) => {

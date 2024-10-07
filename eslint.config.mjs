@@ -1,3 +1,4 @@
-import { config } from './libraries/eslint-plugin/dist/index.mjs'
+/* eslint-disable @import/extensions, @import/no-default-export */
+import basisConfig from './libraries/eslint-plugin/dist/index.js'
 
-export default config // eslint-disable-line @import/no-default-export
+export default basisConfig

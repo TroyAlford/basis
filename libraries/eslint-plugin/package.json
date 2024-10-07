@@ -4,7 +4,9 @@
   "name": "@basis/eslint-plugin",
   "type": "module",
   "scripts": {
-    "build": "bun build . --target=node --external=eslint --minify --outfile=./dist/index.mjs"
+    "build": "bun build:tsc && bun build:fix-extensions",
+    "build:tsc": "bun tsc ./index.ts --allowSyntheticDefaultImports --downLevelIteration --esModuleInterop --module ESNext --moduleResolution bundler --outDir ./dist --skipLibCheck",
+    "build:fix-extensions": "bun scripts/fix-extensions.ts"
   },
   "dependencies": {
     "@eslint/eslintrc": "^3.0.0",
