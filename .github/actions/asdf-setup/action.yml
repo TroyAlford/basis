@@ -95,7 +95,7 @@ runs:
         fi
 
     - name: Cache dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       if: steps.pkg-manager.outputs.manager
       with:
         path: |
