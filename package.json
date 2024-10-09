@@ -2,7 +2,11 @@
   "license": "MIT",
   "main": "index.js",
   "name": "basis",
+  "private": true,
   "version": "1.0.0",
+  "dependencies": {
+    "eslint": "^9.12.0"
+  },
   "devDependencies": {
     "@happy-dom/global-registrator": "^15.0.0",
     "@types/bun": "^1.1.10",
@@ -12,21 +16,17 @@
     "husky": "^9.1.6",
     "typescript": "^5.6.2"
   },
-  "private": true,
-  "scripts": {
-    "test:develop": "bun test --watch",
-    "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces"
-  },
   "resolutions": {
     "react": "18.3.1",
     "react-dom": "18.3.1"
+  },
+  "scripts": {
+    "test:develop": "bun test --watch",
+    "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces"
   },
   "workspaces": [
     "libraries/*",
     "testing/*",
     "packages/*"
-  ],
-  "dependencies": {
-    "eslint": "^9.12.0"
-  }
+  ]
 }
