@@ -14,7 +14,7 @@ describe('Router', () => {
         href: 'http://example.com/',
         pathname: '/',
         search: '',
-        toString: function() { return this.href },
+        toString() { return this.href },
       },
       writable: true,
     })

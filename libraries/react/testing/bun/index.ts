@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it, test } from 'bun:test'
 import { toHaveAttribute } from './matchers/toHaveAttribute'
 import { toHaveClass } from './matchers/toHaveClass'
-
+import { toHaveTextContent } from './matchers/toHaveTextContent'
 global.afterAll = afterAll
 global.describe = describe
 global.it = it
@@ -12,4 +12,5 @@ import './extensions/console'
 expect.extend({
   toHaveAttribute,
   toHaveClass,
+  toHaveTextContent,
 })
