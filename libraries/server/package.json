@@ -8,6 +8,6 @@
 		"react-dom": "*"
 	},
 	"devDependencies": {
-		"@types/bun": "^1.1.10"
+		"@types/bun": "^1.1.13"
 	}
 }

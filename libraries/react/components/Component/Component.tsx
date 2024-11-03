@@ -1,6 +1,5 @@
 import * as React from 'react'
-import { dataAttributes, kebabCase } from '@basis/utilities'
-import { classNames } from '@basis/utilities'
+import { classNames, dataAttributes, kebabCase } from '@basis/utilities'
 
 export interface ComponentProps {
   /** The children of the component. */

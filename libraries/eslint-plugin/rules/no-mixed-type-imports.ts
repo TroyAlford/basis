@@ -16,7 +16,10 @@ export const noMixedTypeImports = createRule({
 
       node.specifiers.forEach(specifier => {
         if (specifier.type !== 'ImportSpecifier') return
-        imports[specifier.importKind].add(specifier.imported.name)
+        const importedName = specifier.imported.type === 'Identifier'
+          ? specifier.imported.name
+          : specifier.imported.value
+        imports[specifier.importKind].add(importedName)
       })
 
       if (!imports.type.size || !imports.value.size) return

@@ -3,6 +3,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
+import { pluginGlobals } from '@basis/bun-plugins/pluginGlobals'
 import { IndexHTML } from '@basis/react'
 import { HttpVerb, parseTemplateURI, parseURI } from '@basis/utilities'
 import type { URI } from '@basis/utilities/types/URI'
@@ -87,8 +88,11 @@ export class Server {
     })
   }
   async handleScripts(uri: URI) {
-    const script = (await this.#build).find(s => s.name === uri.route)
+    const built = await this.#build
+
+    const script = built.find(s => s.name === uri.route)
     if (!script) return Server.NotFound
+
     return new Response(await script.output.text(), {
       headers: { 'Content-Type': script.output.type },
       status: 200,
@@ -132,25 +136,37 @@ export class Server {
     return this
   }
 
-  rebuild() {
+  async rebuild() {
     if (!this.#scripts.length) return
+
     this.#build = Bun.build({
       define: { 'Bun.env.NODE_ENV': JSON.stringify(Bun.env.NODE_ENV ?? 'production') },
       entrypoints: this.#scripts.map(([, file]) => (
         path.isAbsolute(file) ? file : path.join(this.#root, file)
       )),
+      external: ['react', 'react-dom'],
       minify: {
         identifiers: false,
         syntax: true,
         whitespace: true,
       },
       naming: '[name].[hash].[ext]',
+      plugins: [
+        pluginGlobals({
+          'react': 'window.React',
+          'react-dom': 'window.ReactDOM',
+          'react-dom/client': 'window.ReactDOM',
+        }),
+      ],
       sourcemap: 'external',
     }).then(build => build.outputs
       .filter(o => o.kind === 'entry-point')
-      .map<FileOutput>((output, index) => ({ name: this.#scripts[index][0], output })))
+      .map<FileOutput>((output, index) => ({
+        name: this.#scripts[index][0],
+        output,
+      })))
   }
-  #checkPath(absolutePath) {
+  #checkPath(absolutePath: string) {
     if (!fs.existsSync(absolutePath)) {
       throw new Error(`Path "${absolutePath}" does not exist`)
     }
@@ -178,7 +194,7 @@ export class Server {
       ? filePath
       : path.join(this.#root, filePath)
     this.#checkPath(absolute)
-    this.#scripts.push(['hydrate', absolute])
+    this.#scripts.push(['index.js', absolute])
     this.rebuild()
     return this
   }
