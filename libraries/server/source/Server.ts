@@ -161,10 +161,14 @@ export class Server {
       sourcemap: 'external',
     }).then(build => build.outputs
       .filter(o => o.kind === 'entry-point')
-      .map<FileOutput>((output, index) => ({
-        name: this.#scripts[index][0],
-        output,
-      })))
+      .map<FileOutput>((output, index) => {
+        const outputText = output.text.bind(output)
+        output.text = () => outputText().then(text => (
+          text.replace(/jsx_dev_runtime\d*\.jsxDEV/g, 'React.createElement')
+            .replace(/jsx_dev_runtime\d*\.Fragment/g, 'React.Fragment')
+        ))
+        return ({ name: this.#scripts[index][0], output })
+      }))
   }
   #checkPath(absolutePath: string) {
     if (!fs.existsSync(absolutePath)) {

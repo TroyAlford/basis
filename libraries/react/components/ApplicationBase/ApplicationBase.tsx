@@ -24,7 +24,7 @@ export class ApplicationBase<P extends object = object, S extends object = objec
       context: this.defaultContext,
     }
   }
-  readonly tag: keyof React.ReactHTML = 'main'
+  readonly tag: keyof React.ReactHTML = 'div'
 
   constructor(props) {
     super(props)
@@ -35,7 +35,7 @@ export class ApplicationBase<P extends object = object, S extends object = objec
     }
   }
 
-  content(children) {
+  content(children?: React.ReactNode) {
     const { Provider } = this.Context
     return (
       <Provider value={this.state.context}>
