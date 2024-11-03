@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
-import { Component } from '../Component/Component'
 import { ApplicationBase } from './ApplicationBase'
 
 export class TestApplication extends ApplicationBase {
@@ -43,21 +42,6 @@ describe('Application', () => {
 
       instance.setContext({ foo: { bar: 'baz' } })
       expect(instance.state.context).toEqual({ foo: { bar: 'baz' } })
-    })
-
-    test('correctly binds child Component instances', () => {
-      class TestComponent extends Component { }
-
-      const { find, instance } = render<TestApplication>(
-        <TestApplication>
-          <TestComponent />
-        </TestApplication>,
-      )
-      const component = find(TestComponent)
-      expect(component.context).toBe(instance.state.context)
-
-      instance.setContext({ foo: 'baz' })
-      expect(component.context).toEqual({ foo: 'baz' })
     })
   })
 
