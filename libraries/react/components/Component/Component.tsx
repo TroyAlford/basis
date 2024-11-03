@@ -33,12 +33,10 @@ export abstract class Component<
   /** The state of the component. */
   State = object,
 > extends React.Component<Props & ComponentProps, State> {
-  static get contextType() { return window?.ApplicationContext }
   static defaultProps: ComponentProps = {
     data: {},
     nodeRef: React.createRef<HTMLElement>(),
   }
-  declare context: ApplicationContext
 
   /**
    * Getter for attributes.

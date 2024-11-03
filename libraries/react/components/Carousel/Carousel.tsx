@@ -1,58 +1,14 @@
 import * as React from 'react'
 import { match } from '@basis/utilities/functions/match'
+import { noop } from '@basis/utilities/functions/noop'
+import { Align } from '../../types/Align'
+import type { ImageConfig } from '../../types/ImageConfig'
+import type { ImageInput } from '../../types/ImageInput'
+import { Size } from '../../types/Size'
+import { loadImage } from '../../utilities/loadImage'
 import { Component } from '../Component/Component'
+import { Image } from '../Image/Image'
 import './Carousel.scss'
-
-/**
- * Determines how images should be sized within the carousel container
- */
-enum Size {
-  /** Maintain aspect ratio and fit entirely within container */
-  Contain = 'contain',
-  /** Cover entire container, cropping if necessary */
-  Fill = 'fill',
-}
-
-/**
- * Determines how images should be aligned within the carousel container
- */
-enum Align {
-  /** Center both horizontally and vertically */
-  Center = 'center',
-  /** Align to right edge */
-  East = 'e',
-  /** Align to top edge */
-  North = 'n',
-  /** Align to top-right corner */
-  NorthEast = 'ne',
-  /** Align to top-left corner */
-  NorthWest = 'nw',
-  /** Align to bottom edge */
-  South = 's',
-  /** Align to bottom-right corner */
-  SouthEast = 'se',
-  /** Align to bottom-left corner */
-  SouthWest = 'sw',
-  /** Align to left edge */
-  West = 'w',
-}
-
-/**
- * Configuration object for a single carousel image
- */
-interface ImageConfig {
-  /** Optional alignment override for this specific image */
-  align?: Align,
-  /** Optional size override for this specific image */
-  size?: Size,
-  /** URL of the image to display */
-  url: string,
-}
-
-/**
- * Acceptable image input types - either a URL string or an ImageConfig object
- */
-type ImageInput = string | ImageConfig
 
 /**
  * Props for the Carousel component
@@ -60,6 +16,10 @@ type ImageInput = string | ImageConfig
 interface Props {
   /** Default alignment for all images */
   align?: Align,
+  /** Default alt text for images that don't specify their own */
+  altText?: string,
+  /** Children should be img elements */
+  children?: React.ReactNode,
   /** Array of image URLs or image configs */
   images?: ImageInput[],
   /** Optional callback when image changes */
@@ -116,6 +76,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     ...Component.defaultProps,
     align: Align.Center,
     images: [],
+    onImageChange: noop,
     size: Size.Contain,
   }
 
@@ -141,16 +102,52 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
   get currentImage(): ImageConfig | null {
     const input = this.images[this.state.currentIndex]
     if (!input) return null
-    return typeof input === 'string' ? { url: input } : input
+    return typeof input === 'string'
+      ? { altText: this.props.altText, url: input }
+      : { ...input, altText: input.altText || this.props.altText }
   }
 
-  get images(): ImageInput[] {
-    const { children, images } = this.props
-    if (images?.length) return images
+  get images(): ImageConfig[] {
+    const { children, images = [] } = this.props
+    const childImages = React.Children.toArray(children)
+      .filter((child): child is React.ReactElement => (
+        React.isValidElement(child)
+        && (child.type === 'img' || child.type === Image)
+      ))
+      .map<ImageConfig>(element => {
+        const { props } = element
+        const url = props.src
+        const altText = props.alt || props.altText || this.props.altText
 
-    return React.Children.toArray(children)
-      .filter(child => typeof child === 'string')
-      .map(url => url as string)
+        let align = props['data-align']
+        let size = props['data-size']
+
+        if (element.type === Image) {
+          align = props.align
+          size = props.size
+        }
+
+        align = match(align)
+          .when(v => Object.values(Align).includes(v as Align)).then(v => v as Align)
+          .when(v => Object.keys(Align).includes(v)).then(v => Align[v as keyof typeof Align])
+          .else(undefined)
+
+        size = match(size)
+          .when(v => Object.values(Size).includes(v as Size)).then(v => v as Size)
+          .when(v => Object.keys(Size).includes(v)).then(v => Size[v as keyof typeof Size])
+          .else(undefined)
+
+        return { align, altText, size, url }
+      })
+
+    return [
+      ...images.map(image => (
+        typeof image === 'string'
+          ? { altText: this.props.altText, url: image }
+          : image
+      )),
+      ...childImages,
+    ]
   }
 
   get attributes(): React.HTMLAttributes<HTMLDivElement> {
@@ -163,19 +160,14 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
           .when('ArrowRight').then(this.next)
           .when('Escape').then(this.closeLightbox)
       },
-      onWheel: (e: React.WheelEvent<HTMLDivElement>) => {
-        e.preventDefault()
-        if (e.deltaY > 0) this.next()
-        else if (e.deltaY < 0) this.prev()
-      },
     }
   }
 
-  private handleTouchStart = (e: React.TouchEvent) => {
+  public handleTouchStart = (e: React.TouchEvent) => {
     this.setState({ touchStart: e.touches[0].clientX })
   }
 
-  private handleTouchMove = (e: React.TouchEvent) => {
+  public handleTouchMove = (e: React.TouchEvent) => {
     if (this.state.touchStart === null) return
 
     const diff = this.state.touchStart - e.touches[0].clientX
@@ -186,7 +178,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     }
   }
 
-  private handleTouchEnd = () => {
+  public handleTouchEnd = () => {
     this.setState({ touchStart: null })
   }
 
@@ -228,15 +220,67 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     }
   }
 
+  componentDidMount() {
+    this.rootNode?.addEventListener('wheel', this.handleWheel, { passive: false })
+    // Preload all images
+    this.preloadImages()
+  }
+
+  componentWillUnmount() {
+    this.rootNode?.removeEventListener('wheel', this.handleWheel)
+  }
+
+  private handleWheel = (event: WheelEvent) => {
+    event.preventDefault()
+
+    if (event.deltaX > 0 || event.deltaY > 0) {
+      this.next()
+    } else if (event.deltaX < 0 || event.deltaY < 0) {
+      this.prev()
+    }
+  }
+
+  private preloadImages = () => {
+    // Get all unique image URLs
+    const urls = new Set(this.images.map(img => img.url))
+
+    // Start loading any images that aren't already loaded/loading
+    urls.forEach(url => {
+      if (!Image.Cache.Resolved.has(url) && !Image.Cache.Loading.has(url)) {
+        const loadingPromise = loadImage(url).then(img => {
+          Image.Cache.Loading.delete(url)
+          Image.Cache.Resolved.set(url, img)
+          return img
+        }).catch(error => {
+          Image.Cache.Loading.delete(url)
+          throw error
+        })
+        Image.Cache.Loading.set(url, loadingPromise)
+      }
+    })
+  }
+
   content() {
     const { currentIndex, fullSize: isFullSize, lightbox: isLightboxOpen } = this.state
     const { currentImage } = this
     if (!currentImage) return null
 
+    const totalImages = this.images.length
+    const imageNumber = currentIndex + 1
+    const imageDescription = `Image ${imageNumber} of ${totalImages}`
+
+    // Use currentImage.altText if available, fall back to props.altText
+    const altText = currentImage.altText || this.props.altText || ''
+
     return (
       <>
-        <img
-          alt=""
+        <Image
+          align={currentImage.align}
+          alt={altText}
+          aria-current="true"
+          aria-description={imageDescription}
+          aria-roledescription="slide"
+          size={currentImage.size}
           src={currentImage.url}
           onClick={this.handleImageClick}
           onTouchEnd={this.handleTouchEnd}
@@ -245,23 +289,45 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
         />
         {isLightboxOpen && (
           <div
+            aria-label="Image lightbox"
+            aria-modal="true"
             className="lightbox-overlay"
             data-full-size={isFullSize}
+            role="dialog"
             onClick={this.handleLightboxClick}
           >
-            <img
-              alt=""
+            <Image
+              key={currentImage.url}
+              align={currentImage.align}
+              alt={altText}
+              aria-description={imageDescription}
+              size={currentImage.size}
               src={currentImage.url}
               onClick={this.handleImageClick}
               onTouchEnd={this.handleTouchEnd}
               onTouchMove={this.handleTouchMove}
               onTouchStart={this.handleTouchStart}
             />
-            <div className="navigation">
-              <div className="prev" onClick={this.prev} />
-              <div className="next" onClick={this.next} />
+            {altText && (
+              <div className="lightbox-caption">
+                {altText}
+              </div>
+            )}
+            <div aria-label="Image navigation" className="navigation">
+              <div
+                aria-label="Previous image"
+                className="prev"
+                role="button"
+                onClick={this.prev}
+              />
+              <div
+                aria-label="Next image"
+                className="next"
+                role="button"
+                onClick={this.next}
+              />
             </div>
-            <div className="indicators">
+            <div aria-hidden="true" className="indicators">
               {this.images.map((_, i) => (
                 <div
                   key={i}
