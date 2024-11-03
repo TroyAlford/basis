@@ -2,16 +2,13 @@ export const _ = Symbol('placeholder')
 const INITIAL = Symbol('INITIAL')
 
 type ArrayLikeMatcher<U> = (
-  & { [K in `${number}`]?: U | typeof _ }
+  & Partial<Record<`${number}`, U | typeof _>>
   & { length?: number | typeof _ }
 )
 type NumberMatcher = number | { max?: number, min?: number }
 type StringMatcher = string | RegExp
 type ArrayMatcher<T> = T extends (infer U)[]
-  ? (
-      | (U | typeof _)[]
-      | ArrayLikeMatcher<U>
-    )
+  ? ((U | typeof _)[] | ArrayLikeMatcher<U>)
   : never
 type ObjectMatcher<T> = T extends object
   ? { [K in keyof T]?: T[K] | typeof _ }
@@ -42,7 +39,7 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
   private result: unknown | typeof INITIAL = INITIAL
   private placeholders: unknown[] = []
 
-  constructor(private value: Value) {}
+  constructor(private value: Value) { }
 
   when<M = Value>(matcher: M | Matcher<M>) {
     this.placeholders.length = 0
@@ -149,7 +146,7 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
       ) {
         for (const key in matchOn) {
           if (
-          // If matcher declares a key undefined, it must not exist in the value
+            // If matcher declares a key undefined, it must not exist in the value
             (matchOn[key] === undefined && value[key] !== undefined)
             // Otherwise, it must exist in the value
             || !(key in value)
