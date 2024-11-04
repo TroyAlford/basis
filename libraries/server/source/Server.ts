@@ -10,6 +10,7 @@ import type { URI } from '@basis/utilities/types/URI'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
 import type { APIRoute } from '../types/APIRoute'
+import { transformJsxDev } from './utilities/transformJsxDev'
 
 interface FileOutput {
   name: string,
@@ -161,10 +162,11 @@ export class Server {
       sourcemap: 'external',
     }).then(build => build.outputs
       .filter(o => o.kind === 'entry-point')
-      .map<FileOutput>((output, index) => ({
-        name: this.#scripts[index][0],
-        output,
-      })))
+      .map<FileOutput>((output, index) => {
+        const outputText = output.text.bind(output)
+        output.text = () => outputText().then(transformJsxDev)
+        return ({ name: this.#scripts[index][0], output })
+      }))
   }
   #checkPath(absolutePath: string) {
     if (!fs.existsSync(absolutePath)) {

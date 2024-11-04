@@ -1,5 +1,6 @@
 import * as React from 'react'
-import { hydrateRoot } from 'react-dom/client'
+import { createRoot } from 'react-dom/client'
 import { Application } from './components/Application'
 
-hydrateRoot(document.getElementById('root'), <Application />)
+createRoot(document.getElementById('root'))
+  .render(<Application />)

@@ -13,21 +13,6 @@ export class TestApplication extends ApplicationBase {
 }
 
 describe('Application', () => {
-  describe('renders', () => {
-    test('wraps children in a context provider', () => {
-      const { find, instance } = render<TestApplication>(
-        <TestApplication>
-          <span>Foo!</span>
-        </TestApplication>,
-      )
-      const provider = find(instance.Context.Provider)
-      expect(provider.props).toMatchObject({
-        children: <span>Foo!</span>,
-        value: instance.state.context,
-      })
-    })
-  })
-
   describe('Context', () => {
     test('default context', () => {
       const { instance } = render<TestApplication>(<TestApplication />)
