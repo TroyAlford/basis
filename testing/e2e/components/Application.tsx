@@ -1,24 +1,21 @@
 import * as React from 'react'
-import { ApplicationBase, Link, Router } from '@basis/react'
+import { ApplicationBase, Link } from '@basis/react'
+import './Application.scss'
 
 export class Application extends ApplicationBase {
-  content() {
+  layout(content: React.ReactNode) {
     return (
       <>
-        <h1>Application</h1>
-        <Router>
-          <Router.Route template="/:type/:id">
-            {params => (
-              <>
-                <p>
-                  {JSON.stringify(params)}
-                </p>
-                <Link to="/foo/123">Foo</Link>
-                <Link to="/bar/234">Bar</Link>
-              </>
-            )}
-          </Router.Route>
-        </Router>
+        <header>
+          <h1>Application</h1>
+          <nav>
+            <Link to="/foo/123">Foo</Link>
+            <Link to="/bar/234">Bar</Link>
+          </nav>
+        </header>
+        <main>
+          {content}
+        </main>
       </>
     )
   }

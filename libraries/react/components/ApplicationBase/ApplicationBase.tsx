@@ -1,16 +1,25 @@
 import React from 'react'
 import { deepEquals } from '@basis/utilities'
 import { Component } from '../Component/Component'
+import { Router } from '../Router/Router'
 
 interface Props {
-  routes?: Iterable<[string, Component]>,
+  defaultRoute?: string,
 }
 
-export class ApplicationBase<P extends object = object, S extends object = object>
-  extends Component<P & Props, HTMLElement, S & { context: ApplicationContext }> {
+interface RouteDefinition {
+  component: React.ComponentType,
+  exact?: boolean,
+  redirectTo?: string,
+}
+
+export class ApplicationBase<
+  P extends object = object,
+  S extends object = object,
+> extends Component<P & Props, HTMLElement, S & { context: ApplicationContext }> {
   static defaultProps = {
     ...Component.defaultProps,
-    routes: [],
+    defaultRoute: '/',
   }
   Context = React.createContext<ApplicationContext>(this.defaultContext)
 
@@ -35,12 +44,49 @@ export class ApplicationBase<P extends object = object, S extends object = objec
     }
   }
 
-  content(children?: React.ReactNode) {
+  /**
+   * Override this getter to define routes
+   * @returns Record of route templates to their configurations
+   */
+  protected get routes(): Record<string, RouteDefinition> {
+    return {}
+  }
+
+  /**
+   * Override this to provide the layout wrapper
+   * @param content The router content to be wrapped
+   * @returns The layout wrapper
+   */
+  protected layout(content: React.ReactNode): React.ReactNode {
+    return content
+  }
+
+  private renderRoutes(): React.ReactNode[] {
+    return Object.entries(this.routes).map(([template, config]) => (
+      <Router.Route
+        key={template}
+        exact={config.exact}
+        redirectTo={config.redirectTo}
+        template={template}
+      >
+        {(params: Record<string, string>) => {
+          const RouteComponent = config.component
+          return <RouteComponent {...params} />
+        }}
+      </Router.Route>
+    ))
+  }
+
+  content() {
     const { Provider } = this.Context
+
     return (
       <Provider value={this.state.context}>
-        {/* <Router routes={this.props.routes} /> */}
-        {children}
+        {this.layout(
+          <Router>
+            {this.renderRoutes()}
+          </Router>,
+        )}
       </Provider>
     )
   }
