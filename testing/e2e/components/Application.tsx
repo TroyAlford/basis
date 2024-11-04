@@ -11,6 +11,7 @@ export class Application extends ApplicationBase {
           <nav>
             <Link to="/foo/123">Foo</Link>
             <Link to="/bar/234">Bar</Link>
+            <Link to="/baz/345">Qux</Link>
           </nav>
         </header>
         <main>

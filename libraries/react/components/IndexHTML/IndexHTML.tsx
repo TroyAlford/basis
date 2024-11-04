@@ -15,6 +15,7 @@ export const IndexHTML = () => (
       <script defer src={`/modules/react@${version}/umd/react.${bundle}.js`} />
       <script defer src={`/modules/react-dom@${version}/umd/react-dom.${bundle}.js`} />
       <script defer src="/scripts/index.js" />
+      <script defer src="/scripts/hmr.js" />
     </head>
     <body>
       <div id="root" />
