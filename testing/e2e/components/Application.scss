@@ -1,9 +1,7 @@
 .application.component {
-  header {
-    nav {
-      a {
-        color: red;
-      }
+  > header {
+    > nav {
+      > a { color: red; }
     }
   }
 }

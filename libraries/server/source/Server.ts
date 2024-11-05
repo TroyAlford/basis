@@ -21,9 +21,9 @@ export class Server {
   #assets: string = null
   #builder: Builder
   #modules = new Map<string, string>()
+  #root: string = process.cwd()
   #scripts: [string, string][] = []
   #server: BunServer = null
-  #root: string = process.cwd()
   #websockets = new Set<WebSocket>()
 
   constructor() {

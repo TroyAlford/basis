@@ -3,6 +3,7 @@ import type { FSWatcher } from 'chokidar'
 import { watch } from 'chokidar'
 import * as path from 'node:path'
 import { pluginGlobals } from '@basis/bun-plugins/pluginGlobals'
+import { pluginSASS } from '@basis/bun-plugins/pluginSASS'
 import { transformJsxDev } from './utilities/transformJsxDev'
 
 interface BuildOutput {
@@ -20,9 +21,9 @@ interface BuilderOptions {
 export class Builder {
   #build: Promise<BuildOutput[]>
   #entrypoints: [string, string][] = []
+  #onRebuild: BuilderOptions['onRebuild']
   #root: string
   #watcher: FSWatcher | null = null
-  #onRebuild: BuilderOptions['onRebuild']
 
   constructor({ onRebuild, root = process.cwd() }: BuilderOptions = {}) {
     this.#root = root
@@ -95,6 +96,7 @@ export class Builder {
             'react-dom': 'window.ReactDOM',
             'react-dom/client': 'window.ReactDOM',
           }),
+          pluginSASS(this.#root),
         ],
         sourcemap: 'external',
       }).then(async build => {
