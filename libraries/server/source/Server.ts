@@ -1,37 +1,51 @@
-import type { BuildArtifact, Server as BunServer } from 'bun'
+import type { Server as BunServer } from 'bun'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
-import { pluginGlobals } from '@basis/bun-plugins/pluginGlobals'
 import { IndexHTML } from '@basis/react'
 import { HttpVerb, parseTemplateURI, parseURI } from '@basis/utilities'
 import type { URI } from '@basis/utilities/types/URI'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
 import type { APIRoute } from '../types/APIRoute'
-import { transformJsxDev } from './utilities/transformJsxDev'
+import { Builder } from './Builder'
 
-interface FileOutput {
-  name: string,
-  output: BuildArtifact,
-}
-
+/* eslint-disable no-console */
+/* TODO: add a proper logger */
 export class Server {
   static BadRequest = new Response(null, { status: 400, statusText: 'Bad Request' })
   static NotFound = new Response(null, { status: 404, statusText: 'Not Found' })
 
   #apis = new Map<string, APIRoute>()
   #assets: string = null
-  #build: Promise<FileOutput[]>
+  #builder: Builder
   #modules = new Map<string, string>()
+  #root: string = process.cwd()
   #scripts: [string, string][] = []
   #server: BunServer = null
-  #root: string = process.cwd()
+  #websockets = new Set<WebSocket>()
 
   constructor() {
+    this.#builder = new Builder({
+      onRebuild: () => {
+        console.log('[HMR] Rebuild complete')
+        const message = JSON.stringify({
+          timestamp: Date.now(),
+          type: 'hmr',
+        })
+        this.#websockets.forEach(ws => ws.send(message))
+      },
+      root: this.#root,
+    })
+
     this.api([HttpVerb.Get], 'health', health)
     this.api([HttpVerb.Get], 'ping', ping)
+
+    // Add HMR client to the build and track it
+    const hmrPath = path.join(__dirname, 'hmr.ts')
+    this.#scripts.push(['hmr.js', hmrPath])
+    this.#builder.add('hmr.js', hmrPath)
   }
 
   async handleAPI(uri: URI, method: string) {
@@ -89,8 +103,7 @@ export class Server {
     })
   }
   async handleScripts(uri: URI) {
-    const built = await this.#build
-
+    const built = await this.#builder.getOutputs()
     const script = built.find(s => s.name === uri.route)
     if (!script) return Server.NotFound
 
@@ -102,7 +115,7 @@ export class Server {
   }
   async handleUI() {
     const html = await renderToString(React.createElement(IndexHTML, {
-      scripts: this.#scripts.map(([, file]) => file),
+      scripts: this.#scripts.map(([name]) => name),
     }))
     return new Response(html, { headers: { 'Content-Type': 'text/html' } })
   }
@@ -110,6 +123,15 @@ export class Server {
   start = ({ port = 80 } = {}) => {
     this.#server = Bun.serve({
       fetch: async (request: Request) => {
+        // Check for WebSocket upgrade requests first
+        if (request.headers.get('upgrade') === 'websocket') {
+          const upgraded = this.#server.upgrade(request)
+          if (!upgraded) {
+            return new Response('WebSocket upgrade failed', { status: 400 })
+          }
+          return undefined // Bun handles the upgrade
+        }
+
         const uri = parseURI(request.url)
 
         switch (uri.type) {
@@ -121,6 +143,19 @@ export class Server {
         }
       },
       port,
+      websocket: {
+        close: ws => {
+          console.log('[WS] Client disconnected')
+          this.#websockets.delete(ws)
+        },
+        message: (ws, message) => {
+          console.log('[WS] Received message:', message)
+        },
+        open: ws => {
+          console.log('[WS] Client connected')
+          this.#websockets.add(ws)
+        },
+      },
     })
 
     process.on('SIGINT', this.stop)
@@ -132,41 +167,46 @@ export class Server {
     process.off('SIGINT', this.stop)
     process.off('SIGTERM', this.stop)
 
+    this.#builder.stop()
     this.#server?.stop()
 
     return this
   }
 
-  async rebuild() {
-    if (!this.#scripts.length) return
+  main(filePath: string) {
+    const absolute = path.isAbsolute(filePath)
+      ? filePath
+      : path.join(this.#root, filePath)
+    this.#checkPath(absolute)
 
-    this.#build = Bun.build({
-      define: { 'Bun.env.NODE_ENV': JSON.stringify(Bun.env.NODE_ENV ?? 'production') },
-      entrypoints: this.#scripts.map(([, file]) => (
-        path.isAbsolute(file) ? file : path.join(this.#root, file)
-      )),
-      external: ['react', 'react-dom'],
-      minify: {
-        identifiers: false,
-        syntax: true,
-        whitespace: true,
+    // Store the script for potential root changes
+    this.#scripts.push(['index.js', absolute])
+    this.#builder.add('index.js', absolute)
+      .then(builder => builder.initialBuild())
+    return this
+  }
+  root(absolutePath: string) {
+    this.#checkPath(absolutePath)
+    this.#root = absolutePath
+
+    // Create a new builder with the updated root
+    this.#builder = new Builder({
+      onRebuild: () => {
+        console.log('[HMR] Rebuild complete')
+        const message = JSON.stringify({ type: 'hmr' })
+        this.#websockets.forEach(ws => ws.send(message))
       },
-      naming: '[name].[hash].[ext]',
-      plugins: [
-        pluginGlobals({
-          'react': 'window.React',
-          'react-dom': 'window.ReactDOM',
-          'react-dom/client': 'window.ReactDOM',
-        }),
-      ],
-      sourcemap: 'external',
-    }).then(build => build.outputs
-      .filter(o => o.kind === 'entry-point')
-      .map<FileOutput>((output, index) => {
-        const outputText = output.text.bind(output)
-        output.text = () => outputText().then(transformJsxDev)
-        return ({ name: this.#scripts[index][0], output })
-      }))
+      root: this.#root,
+    })
+
+    // Re-add any existing entry points
+    if (this.#scripts.length) {
+      for (const [name, file] of this.#scripts) {
+        this.#builder.add(name, file)
+      }
+    }
+
+    return this
   }
   #checkPath(absolutePath: string) {
     if (!fs.existsSync(absolutePath)) {
@@ -189,21 +229,6 @@ export class Server {
     }
 
     this.#assets = absolute
-    return this
-  }
-  main(filePath: string) {
-    const absolute = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(this.#root, filePath)
-    this.#checkPath(absolute)
-    this.#scripts.push(['index.js', absolute])
-    this.rebuild()
-    return this
-  }
-  root(absolutePath: string) {
-    this.#checkPath(absolutePath)
-    this.#root = absolutePath
-    this.rebuild()
     return this
   }
 }

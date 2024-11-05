@@ -4,8 +4,11 @@ const version = React.version
 const bundle = Bun.env.NODE_ENV !== 'production'
   ? 'development'
   : 'production.min'
+interface Props {
+  scripts: string[],
+}
 
-export const IndexHTML = () => (
+export const IndexHTML: React.FC<Props> = ({ scripts = [] }) => (
   <html lang="en">
     <head>
       <meta charSet="UTF-8" />
@@ -14,7 +17,9 @@ export const IndexHTML = () => (
       <title>Document</title>
       <script defer src={`/modules/react@${version}/umd/react.${bundle}.js`} />
       <script defer src={`/modules/react-dom@${version}/umd/react-dom.${bundle}.js`} />
-      <script defer src="/scripts/index.js" />
+      {scripts.map(script => (
+        <script key={script} defer src={`/scripts/${script}`} />
+      ))}
     </head>
     <body>
       <div id="root" />
