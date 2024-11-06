@@ -29,11 +29,14 @@ runs:
       with:
         plugins: '["bun@latest"]'
 
+    - name: Install version computation dependencies
+      shell: bash
+      run: |
+        bun add -d conventional-recommended-bump semver
+
     - name: Determine new version and update package.json
       id: version
       shell: bash
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         # Step 1: Get current versions
         echo "📦 Current Versions:"
@@ -48,49 +51,20 @@ runs:
         echo "  • package.json: v$current_version"
         echo "  • Latest tag:   $latest_tag"
 
-        # Step 2: Compute new version
+        # Step 2: Show commits and compute new version
         echo -e "\n📋 Commits since $latest_tag:"
-        # Include merge commits and show full commit messages
         git log $latest_tag..HEAD --pretty=format:"  • %s%n    %b" | sed '/^[[:space:]]*$/d'
 
         echo -e "\n🔄 Computing next version..."
-        # Create a temporary copy of package.json for version computation
-        cp package.json package.json.temp
-        jq --arg version "$latest_version" '.version = $version' package.json.temp > package.json.temp2 && mv package.json.temp2 package.json.temp
-
-        # Use standard-version to compute next version
-        if ! bunx standard-version \
-          --dry-run \
-          --skip.commit \
-          --skip.tag \
-          --skip.changelog \
-          --release-as auto \
-          > version_output.txt 2>&1; then
-          echo "Error: Failed to determine new version"
-          cat version_output.txt  # Show the error output
-          rm -f package.json.temp version_output.txt
-          exit 1
-        fi
-
-        # Extract the computed new version and validate it
-        new_version=$(grep "bumping version in package.json from" version_output.txt | awk -F "to " '{print $2}')
-        if [ -z "$new_version" ] || [ "$new_version" = "null" ]; then
-          echo "Error: Failed to compute new version"
-          echo "standard-version output:"
-          cat version_output.txt
-          rm -f package.json.temp version_output.txt
-          exit 1
-        fi
+        
+        # Install and use conventional-recommended-bump CLI
+        bunx conventional-recommended-bump -p conventionalcommits --tag-prefix v > bump_type.txt
+        bump_type=$(cat bump_type.txt)
+        
+        # Use semver CLI to compute next version
+        new_version=$(bunx semver "$latest_version" -i "$bump_type")
         
         # Step 3: Report versions and bump type
-        if [ "$(echo $latest_version | cut -d. -f1)" != "$(echo $new_version | cut -d. -f1)" ]; then
-          bump_type="major"
-        elif [ "$(echo $latest_version | cut -d. -f2)" != "$(echo $new_version | cut -d. -f2)" ]; then
-          bump_type="minor"
-        else
-          bump_type="patch"
-        fi
-        
         echo -e "\n📈 Version Impact:"
         echo "  • Current:  $latest_tag"
         echo "  • Next:     v$new_version"
@@ -108,11 +82,14 @@ runs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git remote set-url origin "https://x-access-token:${env.GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             
-            # Run standard-version for real
-            if ! bunx standard-version --release-as auto --skip.tag; then
-              echo "Error: Failed to create release"
-              exit 1
-            fi
+            # Update package.json
+            jq --arg version "$new_version" '.version = $version' package.json > package.json.tmp && mv package.json.tmp package.json
+            
+            # Commit and push
+            git add package.json
+            git commit -m "chore(release): v$new_version"
+            git tag -a "v$new_version" -m "Release v$new_version"
+            git push origin HEAD:main --tags
             
             echo "release_needed=true" >> $GITHUB_OUTPUT
           else
@@ -122,7 +99,7 @@ runs:
         fi
 
         # Cleanup
-        rm -f package.json.temp version_output.txt
+        rm -f bump_type.txt
         echo "version=$new_version" >> $GITHUB_OUTPUT
 
     - name: Commit and Push Changes
