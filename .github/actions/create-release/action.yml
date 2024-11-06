@@ -27,14 +27,3 @@ runs:
       uses: grumpy-programmer/conventional-commits-semver-release@v1
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-
-    - name: Create Release
-      if: ${{ steps.semver.outputs.released == 'true' }}
-      uses: ncipollo/release-action@v1.12.0
-      with:
-        body: "See the changelog for details."
-        draft: false
-        prerelease: false
-        release_name: Release ${{ steps.semver.outputs.version }}
-        tag_name: ${{ steps.semver.outputs.version }}
-        token: ${{ inputs.github-token }}
