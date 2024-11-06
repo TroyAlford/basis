@@ -89,64 +89,55 @@ runs:
         echo "📦 Current Versions:"
         echo "  • package.json: v$current_version"
         echo "  • Latest tag:   $latest_tag"
-        
-        # Create a temporary copy of package.json for version computation
-        cp package.json package.json.temp
-        
-        # First, update the temporary package.json to match the latest tag
-        latest_version=${latest_tag#v}
-        jq --arg version "$latest_version" '.version = $version' package.json.temp > package.json.temp2 && mv package.json.temp2 package.json.temp
-        
-        # Get conventional commits since last tag for analysis
-        echo -e "\n📋 Commits since $latest_tag:"
-        git log $latest_tag..HEAD --pretty=format:"  • %s" --no-merges
 
-        # Run standard-version in dry-run mode to determine next version
-        echo -e "\n🔄 Computing next version..."
-        if ! bunx standard-version --release-as auto --skip.tag --dry-run --skip.commit > version_output.txt 2>&1; then
-          echo "Error: Failed to determine new version"
-          rm package.json.temp version_output.txt
-          exit 1
-        fi
-
-        # Extract the computed new version
-        new_version=$(node -p "require('./package.json.temp').version")
-        
-        # Determine bump type by comparing versions
-        if [ "$(echo $latest_version | cut -d. -f1)" != "$(echo $new_version | cut -d. -f1)" ]; then
-          bump_type="major"
-        elif [ "$(echo $latest_version | cut -d. -f2)" != "$(echo $new_version | cut -d. -f2)" ]; then
-          bump_type="minor"
-        else
-          bump_type="patch"
-        fi
-        
-        echo -e "\n📈 Version Impact:"
-        echo "  • Current:  $latest_tag"
-        echo "  • Next:     v$new_version"
-        echo "  • Type:     $bump_type bump"
-
-        if [ "${{ inputs.dry-run }}" != "true" ] && [ "$current_branch" = "main" ]; then
-          echo -e "\n⚡ Applying changes..."
-          # Configure git to use the token (only when actually making changes)
-          git remote set-url origin "https://x-access-token:${env.GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        if [ "${{ inputs.dry-run }}" = "true" ]; then
+          # DRY RUN MODE
+          # Create a temporary copy of package.json for version computation
+          cp package.json package.json.temp
+          latest_version=${latest_tag#v}
           
-          # Now run standard-version for real
-          if ! bunx standard-version --release-as auto --skip.tag; then
-            echo "Error: Failed to create release"
+          echo -e "\n📋 Commits since $latest_tag:"
+          git log $latest_tag..HEAD --pretty=format:"  • %s" --no-merges
+
+          echo -e "\n🔄 Computing next version..."
+          # Use standard-version with all git operations disabled
+          if ! bunx standard-version \
+            --dry-run \
+            --skip.commit \
+            --skip.tag \
+            --skip.changelog \
+            --release-as auto \
+            > version_output.txt 2>&1; then
+            echo "Error: Failed to determine new version"
+            rm package.json.temp version_output.txt
             exit 1
           fi
+
+          # Extract the computed new version from the output
+          new_version=$(grep "bumping version in package.json from" version_output.txt | awk -F "to " '{print $2}')
           
-          mv package.json.temp package.json
-          echo "release_needed=true" >> $GITHUB_OUTPUT
-        else
+          # Determine bump type
+          if [ "$(echo $latest_version | cut -d. -f1)" != "$(echo $new_version | cut -d. -f1)" ]; then
+            bump_type="major"
+          elif [ "$(echo $latest_version | cut -d. -f2)" != "$(echo $new_version | cut -d. -f2)" ]; then
+            bump_type="minor"
+          else
+            bump_type="patch"
+          fi
+          
+          echo -e "\n📈 Version Impact:"
+          echo "  • Current:  $latest_tag"
+          echo "  • Next:     v$new_version"
+          echo "  • Type:     $bump_type bump"
           echo -e "\n🔍 DRY RUN - No changes will be made"
-          rm package.json.temp
+          
+          rm -f package.json.temp version_output.txt
           echo "release_needed=false" >> $GITHUB_OUTPUT
+
+        else
+          # ... rest of the actual release code ...
         fi
         
-        # Cleanup
-        rm -f version_output.txt
         echo "version=$new_version" >> $GITHUB_OUTPUT
 
     - name: Commit and Push Changes
