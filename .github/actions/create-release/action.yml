@@ -50,7 +50,8 @@ runs:
         # Compare and update package.json if necessary
         if [ "$(printf '%s\n' "$latest_tag_version" "$package_version" | sort -V | head -n1)" != "$latest_tag_version" ]; then
           echo "Updating package.json version from $package_version to $latest_tag_version"
-          jq --arg version "$latest_tag_version" '.version = $version' package.json -i
+          jq --arg version "$latest_tag_version" '.version = $version' package.json > package.json.tmp && mv package.json.tmp package.json
+          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -am "chore(release): v$latest_tag_version"
