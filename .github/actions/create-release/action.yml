@@ -50,7 +50,8 @@ runs:
 
         # Step 2: Compute new version
         echo -e "\n📋 Commits since $latest_tag:"
-        git log $latest_tag..HEAD --pretty=format:"  • %s" --no-merges
+        # Include merge commits and show full commit messages
+        git log $latest_tag..HEAD --pretty=format:"  • %s%n    %b" | sed '/^[[:space:]]*$/d'
 
         echo -e "\n🔄 Computing next version..."
         # Create a temporary copy of package.json for version computation
@@ -66,12 +67,20 @@ runs:
           --release-as auto \
           > version_output.txt 2>&1; then
           echo "Error: Failed to determine new version"
+          cat version_output.txt  # Show the error output
           rm -f package.json.temp version_output.txt
           exit 1
         fi
 
-        # Extract the computed new version
+        # Extract the computed new version and validate it
         new_version=$(grep "bumping version in package.json from" version_output.txt | awk -F "to " '{print $2}')
+        if [ -z "$new_version" ] || [ "$new_version" = "null" ]; then
+          echo "Error: Failed to compute new version"
+          echo "standard-version output:"
+          cat version_output.txt
+          rm -f package.json.temp version_output.txt
+          exit 1
+        fi
         
         # Step 3: Report versions and bump type
         if [ "$(echo $latest_version | cut -d. -f1)" != "$(echo $new_version | cut -d. -f1)" ]; then
