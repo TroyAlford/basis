@@ -2,6 +2,10 @@ name: 'Create Convco Release'
 description: 'Create a new release based on Conventional Commits'
 
 inputs:
+  dry-run:
+    description: 'Run in dry-run mode without making actual changes'
+    required: false
+    default: 'false'
   github-token:
     description: 'GitHub token for creating the release'
     required: true
@@ -78,27 +82,50 @@ runs:
         fi
         echo "Latest tag: $latest_tag"
         
-        # First, update package.json to match the latest tag
-        latest_version=${latest_tag#v}
-        jq --arg version "$latest_version" '.version = $version' package.json > package.json.tmp && mv package.json.tmp package.json
+        # Create a temporary copy of package.json for dry run
+        cp package.json package.json.temp
         
-        # Now run standard-version to determine the next version
-        if ! bunx standard-version --release-as auto --skip.tag; then
+        # First, update the temporary package.json to match the latest tag
+        latest_version=${latest_tag#v}
+        jq --arg version "$latest_version" '.version = $version' package.json.temp > package.json.temp2 && mv package.json.temp2 package.json.temp
+        
+        echo "[DRY RUN] Would update package.json version to match latest tag: $latest_version"
+        
+        # Now run standard-version in dry-run mode on the temp file
+        if ! bunx standard-version --release-as auto --skip.tag --dry-run; then
           echo "Error: Failed to determine new version"
+          rm package.json.temp
           exit 1
         fi
 
-        # Get and validate the new version
-        new_version=$(node -p "require('./package.json').version")
-        echo "New version after standard-version: $new_version"
+        # Get the would-be new version
+        new_version=$(node -p "require('./package.json.temp').version")
+        echo "[DRY RUN] Would create new version: $new_version"
         
         if [ -z "$new_version" ] || [ "$new_version" = "null" ] || [ "$new_version" = "$latest_version" ]; then
           echo "Error: Invalid or unchanged version detected"
+          rm package.json.temp
           exit 1
+        fi
+
+        # Only make actual changes if not in dry-run mode
+        if [ "${{ inputs.dry-run }}" != "true" ] && [ "$current_branch" = "main" ]; then
+          echo "On main branch and not in dry-run mode - applying changes"
+          mv package.json.temp package.json
+          echo "release_needed=true" >> $GITHUB_OUTPUT
+        else
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            echo "[DRY RUN] Running in dry-run mode"
+          fi
+          echo "[DRY RUN] Changes that would be made:"
+          echo "  - Would update package.json version from $(node -p "require('./package.json').version") to $new_version"
+          echo "  - Would create new release tag v$new_version"
+          echo "  - Would generate changelog and create GitHub release"
+          rm package.json.temp
+          echo "release_needed=false" >> $GITHUB_OUTPUT
         fi
         
         echo "version=$new_version" >> $GITHUB_OUTPUT
-        echo "release_needed=true" >> $GITHUB_OUTPUT
 
     - name: Commit and Push Changes
       if: steps.version.outputs.release_needed == 'true'
