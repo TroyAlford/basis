@@ -68,14 +68,9 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
-        # Configure git user
+        # Configure git user (needed for standard-version)
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-
-        if [ "${{ inputs.dry-run }}" != "true" ] && [ "$current_branch" = "main" ]; then
-          # Configure git to use the token (only when actually making changes)
-          git remote set-url origin "https://x-access-token:${{ env.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-        fi
 
         # Get current branch name
         current_branch=$(git rev-parse --abbrev-ref HEAD)
@@ -108,7 +103,7 @@ runs:
 
         # Run standard-version in dry-run mode to determine next version
         echo -e "\n🔄 Computing next version..."
-        if ! bunx standard-version --release-as auto --skip.tag --dry-run > version_output.txt 2>&1; then
+        if ! bunx standard-version --release-as auto --skip.tag --dry-run --skip.commit > version_output.txt 2>&1; then
           echo "Error: Failed to determine new version"
           rm package.json.temp version_output.txt
           exit 1
@@ -133,6 +128,15 @@ runs:
 
         if [ "${{ inputs.dry-run }}" != "true" ] && [ "$current_branch" = "main" ]; then
           echo -e "\n⚡ Applying changes..."
+          # Configure git to use the token (only when actually making changes)
+          git remote set-url origin "https://x-access-token:${env.GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          
+          # Now run standard-version for real
+          if ! bunx standard-version --release-as auto --skip.tag; then
+            echo "Error: Failed to create release"
+            exit 1
+          fi
+          
           mv package.json.temp package.json
           echo "release_needed=true" >> $GITHUB_OUTPUT
         else
