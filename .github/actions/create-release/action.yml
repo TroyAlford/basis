@@ -15,7 +15,9 @@ runs:
         fetch-depth: 0  # Fetch full history
 
     - name: Fetch all tags
-      run: git fetch --tags origin
+      run: |
+        git fetch --prune --unshallow --tags origin
+        git fetch --all
       shell: bash
 
     - name: ASDF Setup
@@ -27,12 +29,22 @@ runs:
       id: sync-version
       shell: bash
       run: |
-        # Get the latest tag version
-        latest_tag=$(git describe --tags --abbrev=0)
+        # List tags for debugging
+        echo "Available tags:"
+        git tag -l
+        
+        # Try to get the latest tag, with fallback
+        if ! latest_tag=$(git describe --tags --abbrev=0 2>/dev/null); then
+          echo "Warning: Could not find any tags. Using initial version."
+          latest_tag="v0.0.0"
+        fi
+        
+        echo "Latest tag: $latest_tag"
         latest_tag_version=${latest_tag#v}
-
+        
         # Get the current package.json version
         package_version=$(node -p "require('./package.json').version")
+        echo "Package.json version: $package_version"
 
         # Compare and update package.json if necessary
         if [ "$(printf '%s\n' "$latest_tag_version" "$package_version" | sort -V | head -n1)" != "$latest_tag_version" ]; then
