@@ -66,6 +66,10 @@ runs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
+        # Get current branch name
+        current_branch=$(git rev-parse --abbrev-ref HEAD)
+        echo "Current branch: $current_branch"
+        
         # Get latest tag using git tag sorting
         latest_tag=$(git tag -l 'v*' --sort=-v:refname | head -n1)
         if [ -z "$latest_tag" ]; then
