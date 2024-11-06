@@ -6,6 +6,7 @@ on:
     branches: [main]
 
 permissions:
+  contents: write
   issues: write
   pull-requests: write
 
@@ -62,4 +63,3 @@ jobs:
           else
             echo "All required jobs have passed or were skipped!"
           fi
-

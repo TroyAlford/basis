@@ -1,119 +1,40 @@
-name: 'Create Convco Release'
-description: 'Create a new release based on Conventional Commits'
+name: 'Create Release'
+description: 'Creates a new release based on conventional commits'
 
 inputs:
   github-token:
     description: 'GitHub token for creating the release'
     required: true
 
+outputs:
+  release_created:
+    description: 'Whether a release was created'
+    value: ${{ steps.semver.outputs.released }}
+  version:
+    description: 'The version that was released'
+    value: ${{ steps.semver.outputs.version }}
+
 runs:
   using: "composite"
   steps:
-    - name: Checkout
+    - name: Checkout with full history
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch full history
+        fetch-depth: 0
 
-    - name: Fetch all tags
-      run: |
-        git fetch --prune --unshallow --tags origin
-        git fetch --all
-      shell: bash
-
-    - name: ASDF Setup
-      uses: ./.github/actions/asdf-setup
-      with:
-        plugins: '["bun@latest"]'
-
-    - name: Sync package.json version with latest tag
-      id: sync-version
-      shell: bash
-      run: |
-        # List tags for debugging
-        echo "Available tags:"
-        git tag -l
-        
-        # Try to get the latest tag, with fallback
-        if ! latest_tag=$(git describe --tags --abbrev=0 2>/dev/null); then
-          echo "Warning: Could not find any tags. Using initial version."
-          latest_tag="v0.0.0"
-        fi
-        
-        echo "Latest tag: $latest_tag"
-        latest_tag_version=${latest_tag#v}
-        
-        # Get the current package.json version
-        package_version=$(node -p "require('./package.json').version")
-        echo "Package.json version: $package_version"
-
-        # Compare and update package.json if necessary
-        if [ "$(printf '%s\n' "$latest_tag_version" "$package_version" | sort -V | head -n1)" != "$latest_tag_version" ]; then
-          echo "Updating package.json version from $package_version to $latest_tag_version"
-          jq --arg version "$latest_tag_version" '.version = $version' package.json -i
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore(release): v${{ steps.version.outputs.version }}"
-          git push origin HEAD:main
-        fi
-
-    - name: Determine new version and update package.json
-      id: version
-      shell: bash
-      run: |
-        # Use standard-version to bump version and update package.json
-        bunx standard-version --release-as auto --skip.tag
-
-        # Get the new version from package.json
-        version=$(node -p "require('./package.json').version")
-        echo "version=$version" >> $GITHUB_OUTPUT
-
-        # Check if the tag already exists
-        if git rev-parse "v$version" >/dev/null 2>&1; then
-          echo "No release necessary; the tag v$version already exists."
-          echo "release_needed=false" >> $GITHUB_OUTPUT
-        else
-          echo "release_needed=true" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Commit and Push Changes
-      if: steps.version.outputs.release_needed == 'true'
-      shell: bash
+    - name: Determine Next Version
+      id: semver
+      uses: grumpy-programmer/conventional-commits-semver-release@v1
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git commit -am "chore: release v${{ steps.version.outputs.version }}"
-        git push origin HEAD:main
-
-    - name: Generate changelog
-      id: changelog
-      if: steps.version.outputs.release_needed == 'true'
-      shell: bash
-      run: |
-        # Fetch the latest changes from the remote
-        git fetch origin main
-
-        # Check if there are any tags
-        if git describe --tags --abbrev=0 --always >/dev/null 2>&1; then
-          # Get the latest tag
-          latest_tag=$(git describe --tags --abbrev=0 --always)
-          # Generate changelog with commit messages since the latest tag up to origin/main
-          changelog=$(git log $latest_tag..origin/main --pretty=format:"%s" --no-merges)
-        else
-          # No tags found, generate changelog from the beginning of the repo up to origin/main
-          changelog=$(git log origin/main --pretty=format:"%s" --no-merges)
-        fi
-
-        # Output the changelog
-        printf "changelog<<EOF\n%s\nEOF\n" "$changelog" >> $GITHUB_ENV
 
     - name: Create Release
-      if: steps.version.outputs.release_needed == 'true'
-      shell: bash
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
-      run: |
-        gh release create v${{ steps.version.outputs.version }} \
-          --title "Release ${{ steps.version.outputs.version }}" \
-          --notes "${{ steps.changelog.outputs.changelog }}"
+      if: ${{ steps.semver.outputs.released == 'true' }}
+      uses: ncipollo/release-action@v1.12.0
+      with:
+        body: "See the changelog for details."
+        draft: false
+        prerelease: false
+        release_name: Release ${{ steps.semver.outputs.version }}
+        tag_name: ${{ steps.semver.outputs.version }}
+        token: ${{ inputs.github-token }}
