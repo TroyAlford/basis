@@ -60,11 +60,23 @@ runs:
       id: version
       shell: bash
       run: |
+        # Configure git user
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
         # Use standard-version to bump version and update package.json
-        bunx standard-version --release-as auto --skip.tag
+        if ! bunx standard-version --release-as auto --skip.tag; then
+          echo "Error: Failed to determine new version"
+          exit 1
+        fi
 
         # Get the new version from package.json
         version=$(node -p "require('./package.json').version")
+        if [ -z "$version" ] || [ "$version" = "null" ]; then
+          echo "Error: Invalid version detected"
+          exit 1
+        fi
+        
         echo "version=$version" >> $GITHUB_OUTPUT
 
         # Check if the tag already exists
