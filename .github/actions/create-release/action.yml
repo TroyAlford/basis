@@ -1,146 +1,45 @@
-name: 'Create Convco Release'
-description: 'Create a new release based on Conventional Commits'
+name: 'Create Release'
+description: 'Creates a new release based on conventional commits'
 
 inputs:
+  github-token:
+    description: 'GitHub token for creating the release'
+    required: true
   dry-run:
     description: 'Run in dry-run mode without making actual changes'
     required: false
     default: 'false'
-  github-token:
-    description: 'GitHub token for creating the release'
-    required: true
+
+outputs:
+  version:
+    description: 'The version that was or would be released'
+    value: ${{ steps.semver.outputs.version }}
+  release_needed:
+    description: 'Whether a release is needed'
+    value: ${{ steps.semver.outputs.released }}
 
 runs:
   using: "composite"
   steps:
-    - name: Checkout
+    - name: Checkout with full history
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch full history
+        fetch-depth: 0
 
-    - name: Fetch all tags
-      run: |
-        git fetch --prune --tags origin
-        git fetch --all
-      shell: bash
-
-    - name: ASDF Setup
-      uses: ./.github/actions/asdf-setup
-      with:
-        plugins: '["bun@latest"]'
-
-    - name: Install version computation dependencies
-      shell: bash
-      run: |
-        bun add -d conventional-recommended-bump semver
-
-    - name: Determine new version and update package.json
-      id: version
-      shell: bash
-      run: |
-        # Step 1: Get current versions
-        echo "📦 Current Versions:"
-        current_version=$(node -p "require('./package.json').version")
-        latest_tag=$(git tag -l 'v*' --sort=-v:refname | head -n1)
-        if [ -z "$latest_tag" ]; then
-          echo "No tags found. Using v0.0.0 as base version."
-          latest_tag="v0.0.0"
-        fi
-        latest_version=${latest_tag#v}
-        
-        echo "  • package.json: v$current_version"
-        echo "  • Latest tag:   $latest_tag"
-
-        # Step 2: Show commits and compute new version
-        echo -e "\n📋 Commits since $latest_tag:"
-        git log $latest_tag..HEAD --pretty=format:"  • %s%n    %b" | sed '/^[[:space:]]*$/d'
-
-        echo -e "\n🔄 Computing next version..."
-        
-        # Install and use conventional-recommended-bump CLI
-        bunx conventional-recommended-bump -p conventionalcommits --tag-prefix v > bump_type.txt
-        bump_type=$(cat bump_type.txt)
-        
-        # Use semver CLI to compute next version
-        new_version=$(bunx semver "$latest_version" -i "$bump_type")
-        
-        # Step 3: Report versions and bump type
-        echo -e "\n📈 Version Impact:"
-        echo "  • Current:  $latest_tag"
-        echo "  • Next:     v$new_version"
-        echo "  • Type:     $bump_type bump"
-
-        # Step 4: Make changes if not in dry-run mode
-        if [ "${{ inputs.dry-run }}" = "true" ]; then
-          echo -e "\n🔍 DRY RUN - No changes will be made"
-          echo "release_needed=false" >> $GITHUB_OUTPUT
-        else
-          if [ "$current_branch" = "main" ]; then
-            echo -e "\n⚡ Applying changes..."
-            # Configure git
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git remote set-url origin "https://x-access-token:${env.GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-            
-            # Update package.json
-            jq --arg version "$new_version" '.version = $version' package.json > package.json.tmp && mv package.json.tmp package.json
-            
-            # Commit and push
-            git add package.json
-            git commit -m "chore(release): v$new_version"
-            git tag -a "v$new_version" -m "Release v$new_version"
-            git push origin HEAD:main --tags
-            
-            echo "release_needed=true" >> $GITHUB_OUTPUT
-          else
-            echo "Not on main branch - skipping release"
-            echo "release_needed=false" >> $GITHUB_OUTPUT
-          fi
-        fi
-
-        # Cleanup
-        rm -f bump_type.txt
-        echo "version=$new_version" >> $GITHUB_OUTPUT
-
-    - name: Commit and Push Changes
-      if: steps.version.outputs.release_needed == 'true'
-      shell: bash
+    - name: Determine Next Version
+      id: semver
+      uses: grumpy-programmer/conventional-commits-semver-release@v1
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git commit -am "chore: release v${{ steps.version.outputs.version }}"
-        git push origin HEAD:main
-
-    - name: Generate changelog
-      id: changelog
-      if: steps.version.outputs.release_needed == 'true'
-      shell: bash
-      run: |
-        # Fetch the latest changes from the remote
-        git fetch origin main
-
-        # Check if there are any tags
-        if git describe --tags --abbrev=0 --always >/dev/null 2>&1; then
-          # Get the latest tag
-          latest_tag=$(git describe --tags --abbrev=0 --always)
-          # Generate changelog with commit messages since the latest tag up to origin/main
-          changelog=$(git log $latest_tag..origin/main --pretty=format:"%s" --no-merges)
-        else
-          # No tags found, generate changelog from the beginning of the repo up to origin/main
-          changelog=$(git log origin/main --pretty=format:"%s" --no-merges)
-        fi
-
-        # Output the changelog
-        printf "changelog<<EOF\n%s\nEOF\n" "$changelog" >> $GITHUB_ENV
+        DRY_RUN: ${{ inputs.dry-run }}
 
     - name: Create Release
-      if: steps.version.outputs.release_needed == 'true'
-      shell: bash
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
-      run: |
-        gh release create v${{ steps.version.outputs.version }} \
-          --title "Release ${{ steps.version.outputs.version }}" \
-          --notes "${{ steps.changelog.outputs.changelog }}"
+      if: ${{ inputs.dry-run != 'true' && steps.semver.outputs.released == 'true' }}
+      uses: ncipollo/release-action@v1.12.0
+      with:
+        tag_name: ${{ steps.semver.outputs.version }}
+        release_name: Release ${{ steps.semver.outputs.version }}
+        body: "See the changelog for details."
+        draft: false
+        prerelease: false
+        token: ${{ inputs.github-token }}
