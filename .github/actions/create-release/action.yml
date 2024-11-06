@@ -5,18 +5,14 @@ inputs:
   github-token:
     description: 'GitHub token for creating the release'
     required: true
-  dry-run:
-    description: 'Run in dry-run mode without making actual changes'
-    required: false
-    default: 'false'
 
 outputs:
-  version:
-    description: 'The version that was or would be released'
-    value: ${{ steps.semver.outputs.version }}
-  release_needed:
-    description: 'Whether a release is needed'
+  release_created:
+    description: 'Whether a release was created'
     value: ${{ steps.semver.outputs.released }}
+  version:
+    description: 'The version that was released'
+    value: ${{ steps.semver.outputs.version }}
 
 runs:
   using: "composite"
@@ -31,15 +27,14 @@ runs:
       uses: grumpy-programmer/conventional-commits-semver-release@v1
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-        DRY_RUN: ${{ inputs.dry-run }}
 
     - name: Create Release
-      if: ${{ inputs.dry-run != 'true' && steps.semver.outputs.released == 'true' }}
+      if: ${{ steps.semver.outputs.released == 'true' }}
       uses: ncipollo/release-action@v1.12.0
       with:
-        tag_name: ${{ steps.semver.outputs.version }}
-        release_name: Release ${{ steps.semver.outputs.version }}
         body: "See the changelog for details."
         draft: false
         prerelease: false
+        release_name: Release ${{ steps.semver.outputs.version }}
+        tag_name: ${{ steps.semver.outputs.version }}
         token: ${{ inputs.github-token }}

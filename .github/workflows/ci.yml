@@ -63,15 +63,3 @@ jobs:
           else
             echo "All required jobs have passed or were skipped!"
           fi
-
-  check-release-impact:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check Release Impact
-        uses: ./.github/actions/create-release
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          dry-run: true
