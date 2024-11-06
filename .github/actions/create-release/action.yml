@@ -66,24 +66,35 @@ runs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
-        # Get current version before standard-version runs
-        current_version=$(node -p "require('./package.json').version")
-        echo "Current version before standard-version: $current_version"
-
-        # Use standard-version to bump version and update package.json
+        # Get latest tag using git tag sorting
+        latest_tag=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+        if [ -z "$latest_tag" ]; then
+          echo "No tags found. Using v0.0.0 as base version."
+          latest_tag="v0.0.0"
+        fi
+        echo "Latest tag: $latest_tag"
+        
+        # First, update package.json to match the latest tag
+        latest_version=${latest_tag#v}
+        jq --arg version "$latest_version" '.version = $version' package.json > package.json.tmp && mv package.json.tmp package.json
+        
+        # Now run standard-version to determine the next version
         if ! bunx standard-version --release-as auto --skip.tag; then
           echo "Error: Failed to determine new version"
           exit 1
         fi
 
-        # Get the new version and validate it
-        version=$(node -p "require('./package.json').version")
-        echo "New version after standard-version: $version"
+        # Get and validate the new version
+        new_version=$(node -p "require('./package.json').version")
+        echo "New version after standard-version: $new_version"
         
-        if [ -z "$version" ] || [ "$version" = "null" ] || [ "$version" = "$current_version" ]; then
+        if [ -z "$new_version" ] || [ "$new_version" = "null" ] || [ "$new_version" = "$latest_version" ]; then
           echo "Error: Invalid or unchanged version detected"
           exit 1
         fi
+        
+        echo "version=$new_version" >> $GITHUB_OUTPUT
+        echo "release_needed=true" >> $GITHUB_OUTPUT
 
     - name: Commit and Push Changes
       if: steps.version.outputs.release_needed == 'true'
