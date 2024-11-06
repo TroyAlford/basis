@@ -23,16 +23,36 @@ runs:
       with:
         plugins: '["bun@latest"]'
 
-    - name: Determine new version
+    - name: Sync package.json version with latest tag
+      id: sync-version
+      shell: bash
+      run: |
+        # Get the latest tag version
+        latest_tag=$(git describe --tags --abbrev=0)
+        latest_tag_version=${latest_tag#v}
+
+        # Get the current package.json version
+        package_version=$(node -p "require('./package.json').version")
+
+        # Compare and update package.json if necessary
+        if [ "$(printf '%s\n' "$latest_tag_version" "$package_version" | sort -V | head -n1)" != "$latest_tag_version" ]; then
+          echo "Updating package.json version from $package_version to $latest_tag_version"
+          jq --arg version "$latest_tag_version" '.version = $version' package.json -i
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): v${{ steps.version.outputs.version }}"
+          git push origin HEAD:main
+        fi
+
+    - name: Determine new version and update package.json
       id: version
       shell: bash
       run: |
-        # Fetch all tags and ensure the repository is not in a shallow state
-        git fetch --tags
-        git fetch --unshallow
+        # Use standard-version to bump version and update package.json
+        bunx standard-version --release-as auto --skip.tag
 
-        # Calculate the next version using standard-version
-        version=$(bunx standard-version --dry-run | grep "tagging release" | awk '{print $4}' | sed 's/^v//')
+        # Get the new version from package.json
+        version=$(node -p "require('./package.json').version")
         echo "version=$version" >> $GITHUB_OUTPUT
 
         # Check if the tag already exists
@@ -42,6 +62,17 @@ runs:
         else
           echo "release_needed=true" >> $GITHUB_OUTPUT
         fi
+
+    - name: Commit and Push Changes
+      if: steps.version.outputs.release_needed == 'true'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git commit -am "chore: release v${{ steps.version.outputs.version }}"
+        git push origin HEAD:main
 
     - name: Generate changelog
       id: changelog
