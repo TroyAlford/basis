@@ -65,10 +65,17 @@ runs:
     - name: Determine new version and update package.json
       id: version
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         # Configure git user
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        if [ "${{ inputs.dry-run }}" != "true" ] && [ "$current_branch" = "main" ]; then
+          # Configure git to use the token (only when actually making changes)
+          git remote set-url origin "https://x-access-token:${{ env.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+        fi
 
         # Get current branch name
         current_branch=$(git rev-parse --abbrev-ref HEAD)
@@ -80,51 +87,62 @@ runs:
           echo "No tags found. Using v0.0.0 as base version."
           latest_tag="v0.0.0"
         fi
-        echo "Latest tag: $latest_tag"
         
-        # Create a temporary copy of package.json for dry run
+        # Get current package.json version
+        current_version=$(node -p "require('./package.json').version")
+        
+        echo "📦 Current Versions:"
+        echo "  • package.json: v$current_version"
+        echo "  • Latest tag:   $latest_tag"
+        
+        # Create a temporary copy of package.json for version computation
         cp package.json package.json.temp
         
         # First, update the temporary package.json to match the latest tag
         latest_version=${latest_tag#v}
         jq --arg version "$latest_version" '.version = $version' package.json.temp > package.json.temp2 && mv package.json.temp2 package.json.temp
         
-        echo "[DRY RUN] Would update package.json version to match latest tag: $latest_version"
-        
-        # Now run standard-version in dry-run mode on the temp file
-        if ! bunx standard-version --release-as auto --skip.tag --dry-run; then
+        # Get conventional commits since last tag for analysis
+        echo -e "\n📋 Commits since $latest_tag:"
+        git log $latest_tag..HEAD --pretty=format:"  • %s" --no-merges
+
+        # Run standard-version in dry-run mode to determine next version
+        echo -e "\n🔄 Computing next version..."
+        if ! bunx standard-version --release-as auto --skip.tag --dry-run > version_output.txt 2>&1; then
           echo "Error: Failed to determine new version"
-          rm package.json.temp
+          rm package.json.temp version_output.txt
           exit 1
         fi
 
-        # Get the would-be new version
+        # Extract the computed new version
         new_version=$(node -p "require('./package.json.temp').version")
-        echo "[DRY RUN] Would create new version: $new_version"
         
-        if [ -z "$new_version" ] || [ "$new_version" = "null" ] || [ "$new_version" = "$latest_version" ]; then
-          echo "Error: Invalid or unchanged version detected"
-          rm package.json.temp
-          exit 1
+        # Determine bump type by comparing versions
+        if [ "$(echo $latest_version | cut -d. -f1)" != "$(echo $new_version | cut -d. -f1)" ]; then
+          bump_type="major"
+        elif [ "$(echo $latest_version | cut -d. -f2)" != "$(echo $new_version | cut -d. -f2)" ]; then
+          bump_type="minor"
+        else
+          bump_type="patch"
         fi
+        
+        echo -e "\n📈 Version Impact:"
+        echo "  • Current:  $latest_tag"
+        echo "  • Next:     v$new_version"
+        echo "  • Type:     $bump_type bump"
 
-        # Only make actual changes if not in dry-run mode
         if [ "${{ inputs.dry-run }}" != "true" ] && [ "$current_branch" = "main" ]; then
-          echo "On main branch and not in dry-run mode - applying changes"
+          echo -e "\n⚡ Applying changes..."
           mv package.json.temp package.json
           echo "release_needed=true" >> $GITHUB_OUTPUT
         else
-          if [ "${{ inputs.dry-run }}" = "true" ]; then
-            echo "[DRY RUN] Running in dry-run mode"
-          fi
-          echo "[DRY RUN] Changes that would be made:"
-          echo "  - Would update package.json version from $(node -p "require('./package.json').version") to $new_version"
-          echo "  - Would create new release tag v$new_version"
-          echo "  - Would generate changelog and create GitHub release"
+          echo -e "\n🔍 DRY RUN - No changes will be made"
           rm package.json.temp
           echo "release_needed=false" >> $GITHUB_OUTPUT
         fi
         
+        # Cleanup
+        rm -f version_output.txt
         echo "version=$new_version" >> $GITHUB_OUTPUT
 
     - name: Commit and Push Changes
