@@ -33,8 +33,9 @@ runs:
         echo "Available tags:"
         git tag -l
         
-        # Try to get the latest tag, with fallback
-        if ! latest_tag=$(git describe --tags --abbrev=0 2>/dev/null); then
+        # Get latest tag using git tag sorting
+        latest_tag=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+        if [ -z "$latest_tag" ]; then
           echo "Warning: Could not find any tags. Using initial version."
           latest_tag="v0.0.0"
         fi
@@ -52,7 +53,7 @@ runs:
           jq --arg version "$latest_tag_version" '.version = $version' package.json -i
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore(release): v${{ steps.version.outputs.version }}"
+          git commit -am "chore(release): v$latest_tag_version"
           git push origin HEAD:main
         fi
 
@@ -64,27 +65,23 @@ runs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
+        # Get current version before standard-version runs
+        current_version=$(node -p "require('./package.json').version")
+        echo "Current version before standard-version: $current_version"
+
         # Use standard-version to bump version and update package.json
         if ! bunx standard-version --release-as auto --skip.tag; then
           echo "Error: Failed to determine new version"
           exit 1
         fi
 
-        # Get the new version from package.json
+        # Get the new version and validate it
         version=$(node -p "require('./package.json').version")
-        if [ -z "$version" ] || [ "$version" = "null" ]; then
-          echo "Error: Invalid version detected"
-          exit 1
-        fi
+        echo "New version after standard-version: $version"
         
-        echo "version=$version" >> $GITHUB_OUTPUT
-
-        # Check if the tag already exists
-        if git rev-parse "v$version" >/dev/null 2>&1; then
-          echo "No release necessary; the tag v$version already exists."
-          echo "release_needed=false" >> $GITHUB_OUTPUT
-        else
-          echo "release_needed=true" >> $GITHUB_OUTPUT
+        if [ -z "$version" ] || [ "$version" = "null" ] || [ "$version" = "$current_version" ]; then
+          echo "Error: Invalid or unchanged version detected"
+          exit 1
         fi
 
     - name: Commit and Push Changes
