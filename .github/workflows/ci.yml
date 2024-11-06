@@ -66,6 +66,9 @@ jobs:
   check-release-impact:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Check Release Impact
         uses: ./.github/actions/create-release
         with:
