@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { Milliseconds } from './constants/Milliseconds'
+import { Milliseconds } from '../constants/Milliseconds'
 import { formatMilliseconds } from './formatMilliseconds'
 
 test('formatMilliseconds', () => {
