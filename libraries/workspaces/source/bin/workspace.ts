@@ -2,6 +2,7 @@
 /* eslint-disable no-console */
 import { parseArgs } from 'node:util'
 import { buildPackage } from '../functions/buildPackage'
+import { filterByPatterns } from '../functions/filterByPatterns'
 import { findWorkspace } from '../functions/findWorkspace'
 import { getAllWorkspaces } from '../functions/getAllWorkspaces'
 import { getChangedFiles } from '../functions/getChangedFiles'
@@ -24,29 +25,6 @@ const [command, packageName] = positionals
 if (!command) {
   console.error('Usage: workspace <command> [package] [options]')
   process.exit(1)
-}
-
-/**
- * Filters an array of items by the patterns provided in the `only` and `not` options.
- * @param items - The array of items to filter.
- * @returns The filtered array of items.
- */
-function filterByPatterns(items: string[]): string[] {
-  let filtered = items
-
-  // Apply inclusion patterns if any
-  if (values.only.length > 0) {
-    const includePatterns = values.only.map(pattern => new RegExp(pattern))
-    filtered = filtered.filter(item => includePatterns.some(pattern => pattern.test(item)))
-  }
-
-  // Apply exclusion patterns if any
-  if (values.not.length > 0) {
-    const excludePatterns = values.not.map(pattern => new RegExp(pattern))
-    filtered = filtered.filter(item => !excludePatterns.some(pattern => pattern.test(item)))
-  }
-
-  return filtered.sort()
 }
 
 switch (command) {
@@ -109,13 +87,13 @@ switch (command) {
 
   case 'changed':
     getChangedWorkspaces()
-      .then(packages => console.log(JSON.stringify(filterByPatterns(packages))))
+      .then(packages => console.log(JSON.stringify(filterByPatterns(packages, values))))
       .catch(console.error)
     break
 
   case 'changed-files':
     getChangedFiles()
-      .then(files => console.log(JSON.stringify(filterByPatterns(files))))
+      .then(files => console.log(JSON.stringify(filterByPatterns(files, values))))
       .catch(console.error)
     break
 
@@ -137,7 +115,7 @@ switch (command) {
 
   case 'list':
     getAllWorkspaces()
-      .then(packages => console.log(JSON.stringify(filterByPatterns(packages))))
+      .then(packages => console.log(JSON.stringify(filterByPatterns(packages, values))))
       .catch(console.error)
     break
 
