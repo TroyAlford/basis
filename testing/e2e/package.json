@@ -1,10 +1,10 @@
 {
-	"name": "@/test",
-	"dependencies": {
+  "name": "@/test",
+  "dependencies": {
     "@basis/react": "workspace:*",
-		"@basis/server": "workspace:*",
-		"@basis/utilities": "workspace:*",
-		"react": "*",
-		"react-dom": "*"
-	}
+    "@basis/server": "workspace:*",
+    "@basis/utilities": "workspace:*",
+    "react": "*",
+    "react-dom": "*"
+  }
 }

@@ -73,6 +73,16 @@ bun ws build @basis/utilities
 
 # Specify version and output directory
 bun ws build @basis/utilities -v 1.0.0 -o dist
+
+# Build with license handling
+bun ws build @basis/utilities --license auto    # Use local LICENSE or inherit from root
+bun ws build @basis/utilities --license inherit # Always use root LICENSE
+bun ws build @basis/utilities --license none    # Skip license handling
+
+# Build all packages
+bun ws build-all                    # Build all workspaces
+bun ws build-all --only '^@basis/'  # Build only @basis packages
+bun ws build-all -v 1.0.0          # Build all with specific version
 ```
 
 ### Filtering
