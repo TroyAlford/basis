@@ -56,7 +56,7 @@ jobs:
       - name: Identify Changed Packages
         id: changes
         run: |
-          changed=$(bun scripts/getChangedWorkspaces.ts)
+          changed=$(bun workspace changed --only '^@basis/')
           echo "packages=$changed" >> $GITHUB_OUTPUT
       - name: Build Changed Packages
         run: |
@@ -64,7 +64,7 @@ jobs:
           if [[ -n "$packages" ]]; then
             for package in $(echo "$packages" | jq -r '.[]'); do
               echo "Building $package"
-              bun run scripts/buildPackage.ts -n "$package" -v "0.0.0-test"
+              bun workspace build "$package" -v "0.0.0-test"
             done
           else
             echo "No packages changed"

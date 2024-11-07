@@ -1,0 +1,81 @@
+name: Build & Publish Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      shouldPublish:
+        description: 'Publish packages to npm after building'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/asdf-setup
+
+      - name: Get Latest Tag
+        id: latest_tag
+        run: |
+          tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "tag=${tag#v}" >> $GITHUB_OUTPUT
+
+      - name: Check NPM Token
+        if: inputs.shouldPublish
+        id: npm_token
+        run: |
+          if [[ -n "${{ secrets.NPM_TOKEN }}" ]]; then
+            echo "token_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ NPM_TOKEN secret is not set. Skipping npm publication."
+            echo "token_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure NPM
+        if: inputs.shouldPublish && steps.npm_token.outputs.token_exists == 'true'
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+
+      - name: Get All Workspaces
+        id: workspaces
+        run: |
+          packages=$(bun workspace list --only '^@basis/')
+          echo "packages=$packages" >> $GITHUB_OUTPUT
+
+      - name: Build All Packages
+        run: |
+          packages='${{ steps.workspaces.outputs.packages }}'
+          version='${{ steps.latest_tag.outputs.tag }}'
+          
+          for package in $(echo "$packages" | jq -r '.[]'); do
+            echo "Building $package@$version"
+            bun workspace build "$package" -v "$version"
+          done
+
+      - name: Publish Packages
+        if: inputs.shouldPublish && steps.npm_token.outputs.token_exists == 'true'
+        run: |
+          packages='${{ steps.workspaces.outputs.packages }}'
+          version='${{ steps.latest_tag.outputs.tag }}'
+          
+          for package in $(echo "$packages" | jq -r '.[]'); do
+            if npm view "$package@$version" version 2>/dev/null; then
+              echo "⚠️ Version $version of $package already exists on npm. Skipping."
+              continue
+            fi
+            
+            echo "Publishing $package@$version"
+            cd "$(bun workspace find "$package")"
+            npm publish --access public
+            cd -
+          done

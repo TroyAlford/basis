@@ -58,7 +58,7 @@ jobs:
         if: steps.release_created.outputs.should_publish == 'true' && steps.npm_token.outputs.token_exists == 'true'
         id: changes
         run: |
-          changed=$(bun scripts/getChangedWorkspaces.ts)
+          changed=$(bun workspace changed --only '^@basis/')
           echo "packages=$changed" >> $GITHUB_OUTPUT
 
       - name: Build and Publish Changed Packages
@@ -69,10 +69,10 @@ jobs:
           
           for package in $(echo "$packages" | jq -r '.[]'); do
             echo "Building $package@$version"
-            bun run scripts/buildPackage.ts -n "$package" -v "$version"
+            bun workspace build "$package" -v "$version"
             
             echo "Publishing $package@$version"
-            cd "$(bun scripts/getWorkspacePath.ts -n "$package")"
+            cd "$(bun workspace find "$package")"
             npm publish --access public
             cd -
           done
