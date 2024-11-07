@@ -12,12 +12,21 @@ import pluginTypescriptSortKeys from 'eslint-plugin-typescript-sort-keys'
 import pluginTypescript, { type ConfigWithExtends } from 'typescript-eslint'
 import pluginBasis from './rules'
 
+/** Plugin options */
 interface PluginOptions {
+  /** Files to include */
   files?: ConfigWithExtends['files'],
+  /** Rules to apply */
   rules: ConfigWithExtends['rules'],
 }
 
-const plugin = ({ files, rules }: PluginOptions) => {
+/**
+ * Creates an ESLint configuration for the basis plugin.
+ * @param options - The plugin options.
+ * @returns The ESLint configuration.
+ */
+const plugin = (options: PluginOptions): ConfigWithExtends => {
+  const { files, rules } = options
   const config: ConfigWithExtends = {
     languageOptions: {
       ecmaVersion: 'latest',

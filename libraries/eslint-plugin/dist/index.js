@@ -36,8 +36,13 @@ import pluginSortKeys from 'eslint-plugin-sort-keys-fix';
 import pluginTypescriptSortKeys from 'eslint-plugin-typescript-sort-keys';
 import pluginTypescript from 'typescript-eslint';
 import pluginBasis from './rules/index.js';
-var plugin = function (_a) {
-    var files = _a.files, rules = _a.rules;
+/**
+ * Creates an ESLint configuration for the basis plugin.
+ * @param options - The plugin options.
+ * @returns The ESLint configuration.
+ */
+var plugin = function (options) {
+    var files = options.files, rules = options.rules;
     var config = {
         languageOptions: {
             ecmaVersion: 'latest',
