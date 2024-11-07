@@ -1,5 +1,5 @@
-import { Milliseconds } from './constants/Milliseconds'
-import { parseMilliseconds } from './functions/parseMilliseconds'
+import { Milliseconds } from '../constants/Milliseconds'
+import { parseMilliseconds } from './parseMilliseconds'
 
 /**
  * Formats a number of milliseconds into a human-readable string
