@@ -53,14 +53,30 @@ jobs:
           echo "packages=$packages" >> $GITHUB_OUTPUT
 
       - name: Build All Packages
+        id: build
         run: |
           packages='${{ steps.workspaces.outputs.packages }}'
           version='${{ steps.latest_tag.outputs.tag }}'
+          failed_packages=()
           
           for package in $(echo "$packages" | jq -r '.[]'); do
             echo "Building $package@$version"
-            bun workspace build "$package" -v "$version"
+            if bun workspace build "$package" -v "$version"; then
+              echo "✅ Successfully built $package"
+            else
+              echo "::error::Failed to build $package"
+              failed_packages+=("$package")
+            fi
           done
+          
+          if [ ${#failed_packages[@]} -gt 0 ]; then
+            echo "::group::Failed Package Builds"
+            echo "The following packages failed to build:"
+            printf '%s\n' "${failed_packages[@]}"
+            echo "::endgroup::"
+            echo "failed_packages=${failed_packages[*]}" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
       - name: Publish Packages
         if: inputs.shouldPublish && steps.npm_token.outputs.token_exists == 'true'
