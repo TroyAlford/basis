@@ -10,33 +10,33 @@ To use this ESLint plugin in your project, follow these steps:
 
 1. **Install the Plugin**: Add `TroyAlford/basis` to your project's dependencies at a specific tagged version.
 
-   ```bash
-   npm install TroyAlford/basis@<tag>
-   ```
+```bash
+npm install TroyAlford/basis@<tag>
+```
 
 2. **Create a Root-Level ESLint Configuration**: In your project's root directory, create a file named `eslint.config.mjs` that references the plugin.
 
-   ```javascript
-   import eslintPlugin from './node_modules/TroyAlford/basis/libraries/eslint-plugin/dist/index.mjs'
+```javascript
+import eslintPlugin from './node_modules/TroyAlford/basis/libraries/eslint-plugin/dist/index.mjs'
 
-   export default eslintPlugin
-   ```
+export default eslintPlugin
+```
 
 3. **Customize the Configuration**: You can override the base rules provided by the plugin to suit your project's specific needs. Here's an example of how to extend and customize the configuration:
 
-   ```javascript
-   import eslintPlugin from './node_modules/TroyAlford/basis/libraries/eslint-plugin/dist/index.mjs'
+```javascript
+import eslintPlugin from './node_modules/TroyAlford/basis/libraries/eslint-plugin/dist/index.mjs'
 
-   export default {
-     ...eslintPlugin,
-     rules: {
-       ...eslintPlugin.rules,
-       'no-console': 'warn', // Override the rule to allow console statements with a warning
-       'quotes': ['error', 'double'], // Change the quotes rule to enforce double quotes
-       'semi': ['error', 'always'], // Enforce the use of semicolons
-     },
-   }
-   ```
+export default {
+  ...eslintPlugin,
+  rules: {
+    ...eslintPlugin.rules,
+    'no-console': 'warn', // Override the rule to allow console statements with a warning
+    'quotes': ['error', 'double'], // Change the quotes rule to enforce double quotes
+    'semi': ['error', 'always'], // Enforce the use of semicolons
+  },
+}
+```
 
 ## Style and Rules
 
