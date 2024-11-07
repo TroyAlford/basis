@@ -1,13 +1,12 @@
 /* eslint-disable consistent-return, no-console */
 import chalk from 'chalk'
-import { parseArgs } from 'node:util'
 import { resolve } from 'path'
-import { pluginGlobals } from '../libraries/bun-plugins/pluginGlobals'
-import { pluginSASS } from '../libraries/bun-plugins/pluginSASS'
-import { formatBytes, formatMilliseconds } from '../libraries/utilities'
+import { pluginGlobals, pluginSASS } from '@basis/bun-plugins'
+import { formatBytes, formatMilliseconds } from '@basis/utilities'
+import type { PackageJSON } from '../types/PackageJSON'
 import { findWorkspace } from './findWorkspace'
-import type { PackageJSON } from './PackageJSON'
 
+/** Build options */
 interface BuildOptions {
   /** External dependencies */
   external?: string[],
@@ -24,7 +23,7 @@ interface BuildOptions {
  * @param options - Build options
  * @returns Build result
  */
-async function buildPackage(options: BuildOptions) {
+export async function buildPackage(options: BuildOptions) {
   const startTime = performance.now()
   const { external = [], name, outdir = 'dist', version } = options
 
@@ -90,7 +89,6 @@ async function buildPackage(options: BuildOptions) {
     // Update the package.json in-place
     const updatedPackageJson: PackageJSON = {
       ...packageJson,
-      // Ensure only built files are published
       files: [
         `${outdir}/*.js`,
         `${outdir}/*.js.map`,
@@ -104,7 +102,6 @@ async function buildPackage(options: BuildOptions) {
       version,
     }
 
-    // Write the updated package.json back to its original location
     await Bun.write(
       packageJsonPath,
       JSON.stringify(updatedPackageJson, null, 2),
@@ -132,21 +129,3 @@ async function buildPackage(options: BuildOptions) {
     process.exit(1)
   }
 }
-
-const { values } = parseArgs({
-  allowPositionals: false,
-  args: Bun.argv.slice(2),
-  options: {
-    external: { default: [], multiple: true, short: 'x', type: 'string' },
-    name: { required: true, short: 'n', type: 'string' },
-    outdir: { default: 'dist', short: 'o', type: 'string' },
-    version: { required: true, short: 'v', type: 'string' },
-  },
-})
-
-buildPackage({
-  external: values.external,
-  name: values.name,
-  outdir: values.outdir,
-  version: values.version,
-}).catch(console.error)
