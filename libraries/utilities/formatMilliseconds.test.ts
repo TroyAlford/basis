@@ -1,27 +1,28 @@
 import { expect, test } from 'bun:test'
-import { formatMilliseconds, MS } from './formatMilliseconds'
+import { Milliseconds } from './constants/Milliseconds'
+import { formatMilliseconds } from './formatMilliseconds'
 
 test('formatMilliseconds', () => {
   const cases = [
     [0, '0ms'],
     [500, '500ms'],
     [999, '999ms'],
-    [MS.SECOND, '1.00s'],
-    [1.5 * MS.SECOND, '1.50s'],
-    [MS.MINUTE, '00:01:00.000'],
-    [MS.HOUR, '01:00:00.000'],
-    [MS.HOUR + MS.SECOND, '01:00:01.000'],
-    [MS.DAY, '1d 00:00:00.000'],
-    [MS.DAY + MS.HOUR + MS.SECOND, '1d 01:00:01.000'],
-    [MS.YEAR, '1y 00:00:00.000'],
+    [Milliseconds.PerSecond, '1.00s'],
+    [1.5 * Milliseconds.PerSecond, '1.50s'],
+    [Milliseconds.PerMinute, '00:01:00.000'],
+    [Milliseconds.PerHour, '01:00:00.000'],
+    [Milliseconds.PerHour + Milliseconds.PerSecond, '01:00:01.000'],
+    [Milliseconds.PerDay, '1d 00:00:00.000'],
+    [Milliseconds.PerDay + Milliseconds.PerHour + Milliseconds.PerSecond, '1d 01:00:01.000'],
+    [Milliseconds.PerYear, '1y 00:00:00.000'],
     // Complex case
     [
-      (2_024 * MS.YEAR)
-      + (5 * MS.WEEK)
-      + (4 * MS.DAY)
-      + (3 * MS.HOUR)
-      + (2 * MS.MINUTE)
-      + (1 * MS.SECOND)
+      (2_024 * Milliseconds.PerYear)
+      + (5 * Milliseconds.PerWeek)
+      + (4 * Milliseconds.PerDay)
+      + (3 * Milliseconds.PerHour)
+      + (2 * Milliseconds.PerMinute)
+      + (1 * Milliseconds.PerSecond)
       + 500, // 500ms
       '2024y5w4d 03:02:01.500',
     ],

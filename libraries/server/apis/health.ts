@@ -1,22 +1,11 @@
-import { parseMilliseconds } from '@basis/utilities'
-
-const formatMilliseconds = (ms: number): string => {
-  const { days, hours, minutes, seconds, weeks, years } = parseMilliseconds(ms)
-  return [
-    years && `${years}y`,
-    weeks && `${weeks}w`,
-    days && `${days}d`,
-    hours && `${hours}h`,
-    minutes && `${minutes}m`,
-    seconds && `${seconds}s`,
-  ].filter(Boolean).join(' ')
-}
+import { formatMilliseconds } from '@basis/utilities'
+import { Milliseconds } from '@basis/utilities/constants/Milliseconds'
 
 export const health = () => new Response(JSON.stringify({
   bun: Bun.version,
   uptime: {
     nanoseconds: Bun.nanoseconds(),
-    pretty: formatMilliseconds(Bun.nanoseconds() / 1_000_000),
+    pretty: formatMilliseconds(Bun.nanoseconds() * Milliseconds.PerNanosecond),
   },
 }), {
   headers: { 'Content-Type': 'application/json' },
