@@ -2,6 +2,15 @@
 
 CLI tools and utilities for managing workspaces in a monorepo.
 
+## Features
+
+- Workspace discovery and management
+- Smart dependency tracking
+- Automated license handling
+- Change detection
+- Filtered builds
+- Git integration
+
 ## Installation
 
 ```bash
