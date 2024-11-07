@@ -43,9 +43,11 @@ export function formatMilliseconds(ms: number): string {
 
   const formattedTime = `${time}.${milliseconds.toString().padStart(3, '0')}`
 
-  if (sign === -1) {
-    return `-${parts.length > 0 ? `${parts.join('')} ${formattedTime}` : formattedTime}`
-  }
+  const formatted = parts.length > 0
+    ? `${parts.join('')} ${formattedTime}`
+    : formattedTime
 
-  return parts.length > 0 ? `${parts.join('')} ${formattedTime}` : formattedTime
+  return sign === -1
+    ? `-${formatted}`
+    : formatted
 }
