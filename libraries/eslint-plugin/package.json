@@ -3,6 +3,9 @@
   "module": "./index.mjs",
   "name": "@basis/eslint-plugin",
   "type": "module",
+  "engines": {
+    "bun": "*"
+  },
   "scripts": {
     "build": "bun build:tsc && bun build:fix-extensions",
     "build:tsc": "bun tsc ./index.ts --allowSyntheticDefaultImports --downLevelIteration --esModuleInterop --module ESNext --moduleResolution bundler --outDir ./dist --skipLibCheck",
