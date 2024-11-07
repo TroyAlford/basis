@@ -15,8 +15,64 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/asdf-setup
 
       - name: Create Release
+        id: create_release
         uses: ./.github/actions/create-release
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Only run publish steps if a new version was created
+      - name: Check if Version Created
+        id: release_created
+        run: |
+          if [[ -n "${{ steps.create_release.outputs.released }}" ]]; then
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+            echo "version=${{ steps.create_release.outputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "No new version created. Skipping publication."
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check NPM Token
+        if: steps.release_created.outputs.should_publish == 'true'
+        id: npm_token
+        run: |
+          if [[ -n "${{ secrets.NPM_TOKEN }}" ]]; then
+            echo "token_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ NPM_TOKEN secret is not set. Skipping npm publication."
+            echo "token_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure NPM
+        if: steps.release_created.outputs.should_publish == 'true' && steps.npm_token.outputs.token_exists == 'true'
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+          
+      - name: Identify Changed Packages
+        if: steps.release_created.outputs.should_publish == 'true' && steps.npm_token.outputs.token_exists == 'true'
+        id: changes
+        run: |
+          changed=$(bun workspace changed --only '^@basis/')
+          echo "packages=$changed" >> $GITHUB_OUTPUT
+
+      - name: Build and Publish Changed Packages
+        if: steps.release_created.outputs.should_publish == 'true' && steps.npm_token.outputs.token_exists == 'true'
+        run: |
+          packages='${{ steps.changes.outputs.packages }}'
+          version='${{ steps.release_created.outputs.version }}'
+          
+          for package in $(echo "$packages" | jq -r '.[]'); do
+            echo "Building $package@$version"
+            bun workspace build "$package" -v "$version"
+            
+            echo "Publishing $package@$version"
+            cd "$(bun workspace find "$package")"
+            npm publish --access public
+            cd -
+          done

@@ -46,6 +46,30 @@ jobs:
       - name: Run TypeScript Type Check
         run: bun tsc
 
+  build-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/asdf-setup
+      - name: Identify Changed Packages
+        id: changes
+        run: |
+          changed=$(bun workspace changed --only '^@basis/')
+          echo "packages=$changed" >> $GITHUB_OUTPUT
+      - name: Build Changed Packages
+        run: |
+          packages='${{ steps.changes.outputs.packages }}'
+          if [[ -n "$packages" ]]; then
+            for package in $(echo "$packages" | jq -r '.[]'); do
+              echo "Building $package"
+              bun workspace build "$package" -v "0.0.0-test"
+            done
+          else
+            echo "No packages changed"
+          fi
+
   required:
     if: always()
     needs:
@@ -53,6 +77,7 @@ jobs:
       - eslint
       - run-tests
       - type-check
+      - build-packages
     runs-on: ubuntu-latest
     steps:
       - name: Check if required jobs passed or were skipped

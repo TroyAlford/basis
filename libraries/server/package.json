@@ -2,19 +2,20 @@
 	"name": "@basis/server",
 	"main": "./index.ts",
 	"peerDependencies": {
+		"@basis/bun-plugins": "workspace:*",
 		"@basis/react": "workspace:*",
 		"@basis/utilities": "workspace:*",
-		"react": "*",
-		"react-dom": "*"
+		"react-dom": "*",
+		"react": "*"
 	},
 	"devDependencies": {
+		"@babel/generator": "*",
+		"@babel/parser": "*",
+		"@babel/traverse": "*",
+		"@babel/types": "*",
 		"@types/bun": "^1.1.13"
 	},
 	"dependencies": {
-		"@babel/generator": "^7.26.2",
-		"@babel/parser": "^7.26.2",
-		"@babel/traverse": "^7.25.9",
-		"@babel/types": "^7.26.0",
 		"chokidar": "^4.0.1"
 	}
 }
