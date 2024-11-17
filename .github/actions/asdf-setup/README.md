@@ -33,10 +33,20 @@ jobs:
 
 1. **Checkout Code**: Uses the `actions/checkout` action to clone the repository.
 2. **Setup ASDF**: Uses the `asdf-vm/actions/setup` action to set up ASDF.
-3. **Install ASDF Plugins & Tools**: Installs plugins and tools listed in `.tool-versions`.
-4. **Determine Package Manager**: Identifies the package manager and lock file used in the project.
-5. **Cache Dependencies**: Caches the `node_modules` directory based on the lock file.
-6. **Install Dependencies**: Installs project dependencies using the identified package manager.
+3. **Cache ASDF Components**: Caches ASDF plugins and shims to speed up workflow execution.
+4. **Install ASDF Plugins & Tools**: Installs plugins and tools listed in `.tool-versions`.
+5. **Determine Package Manager**: Identifies the package manager and lock file used in the project.
+6. **Cache Dependencies**: Caches the `node_modules` directory based on the lock file.
+7. **Install Dependencies**: Installs project dependencies using the identified package manager.
+
+## Caching Strategy
+
+The action implements two-level caching for ASDF components:
+
+- **Plugins Cache**: Caches the `~/.asdf/plugins` directory to avoid re-downloading plugins on subsequent runs
+- **Shims Cache**: Caches the `~/.asdf/shims` directory to preserve executable shortcuts
+
+Both caches are keyed based on the operating system and the contents of `.tool-versions` file, ensuring cache invalidation when tools are updated.
 
 ## Notes
 
