@@ -52,7 +52,17 @@ jobs:
           packages=$(bun workspace list --only '^@basis/')
           echo "packages=$packages" >> $GITHUB_OUTPUT
 
-      - name: Build All Packages
+      - name: Build @basis/bun-plugins
+        run: |
+          version='${{ steps.latest_tag.outputs.tag }}'
+          echo "Building @basis/bun-plugins@$version"
+          if ! bun workspace build "@basis/bun-plugins" -v "$version"; then
+            echo "::error::Failed to build @basis/bun-plugins"
+            exit 1
+          fi
+          echo "✅ Successfully built @basis/bun-plugins"
+
+      - name: Build Remaining Packages
         id: build
         run: |
           packages='${{ steps.workspaces.outputs.packages }}'
@@ -60,6 +70,11 @@ jobs:
           failed_packages=()
           
           for package in $(echo "$packages" | jq -r '.[]'); do
+            # Skip bun-plugins as it's already built
+            if [ "$package" = "@basis/bun-plugins" ]; then
+              continue
+            fi
+            
             echo "Building $package@$version"
             if bun workspace build "$package" -v "$version"; then
               echo "✅ Successfully built $package"
@@ -82,9 +97,6 @@ jobs:
         if: inputs.shouldPublish && steps.npm_token.outputs.token_exists == 'true'
         shell: bash
         run: |
-          # Ensure jq is in PATH
-          source ~/.asdf/asdf.sh
-          
           packages='${{ steps.workspaces.outputs.packages }}'
           version='${{ steps.latest_tag.outputs.tag }}'
           
