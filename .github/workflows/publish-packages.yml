@@ -80,7 +80,11 @@ jobs:
 
       - name: Publish Packages
         if: inputs.shouldPublish && steps.npm_token.outputs.token_exists == 'true'
+        shell: bash
         run: |
+          # Ensure jq is in PATH
+          source ~/.asdf/asdf.sh
+          
           packages='${{ steps.workspaces.outputs.packages }}'
           version='${{ steps.latest_tag.outputs.tag }}'
           
