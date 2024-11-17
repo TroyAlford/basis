@@ -14,6 +14,22 @@ runs:
     - uses: actions/checkout@v4
     - uses: asdf-vm/actions/setup@v3
 
+    - name: Cache ASDF plugins
+      uses: actions/cache@v4
+      with:
+        path: ~/.asdf/plugins
+        key: ${{ runner.os }}-asdf-plugins-${{ hashFiles('.tool-versions') }}
+        restore-keys: |
+          ${{ runner.os }}-asdf-plugins-
+
+    - name: Cache ASDF shims
+      uses: actions/cache@v4
+      with:
+        path: ~/.asdf/shims
+        key: ${{ runner.os }}-asdf-shims-${{ hashFiles('.tool-versions') }}
+        restore-keys: |
+          ${{ runner.os }}-asdf-shims-
+
     - name: Install ASDF plugins & tools
       shell: bash
       run: |
