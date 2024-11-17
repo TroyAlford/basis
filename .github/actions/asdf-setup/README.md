@@ -41,7 +41,7 @@ jobs:
 
 ## Caching Strategy
 
-The action implements two-level caching for ASDF components:
+The action implements caching for ASDF components:
 
 - **Plugins Cache**: Caches the `~/.asdf/plugins` directory to avoid re-downloading plugins on subsequent runs
 - **Shims Cache**: Caches the `~/.asdf/shims` directory to preserve executable shortcuts
