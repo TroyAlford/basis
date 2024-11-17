@@ -70,6 +70,10 @@ runs:
         # Reshim all tools
         asdf reshim
 
+        # Add ASDF to shell environment
+        echo 'source ~/.asdf/asdf.sh' >> $GITHUB_ENV
+        source ~/.asdf/asdf.sh
+
     - name: Determine package manager and set cache key
       id: pkg-manager
       shell: bash
