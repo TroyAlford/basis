@@ -42,6 +42,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - uses: ./.github/actions/asdf-setup
       - name: Run TypeScript Type Check
         run: bun tsc
@@ -49,25 +52,31 @@ jobs:
   build-packages:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: ./.github/actions/asdf-setup
-      - name: Identify Changed Packages
+
+      - name: Identify Changed Workspaces
         id: changes
         run: |
           changed=$(bun workspace changed --only '^@basis/')
-          echo "packages=$changed" >> $GITHUB_OUTPUT
-      - name: Build Changed Packages
+          echo "Changed workspaces: $changed"
+          echo "workspaces=$changed" >> $GITHUB_OUTPUT
+      - name: Build Changed Workspaces
         run: |
-          packages='${{ steps.changes.outputs.packages }}'
-          if [[ -n "$packages" ]]; then
-            for package in $(echo "$packages" | jq -r '.[]'); do
-              echo "Building $package"
-              bun workspace build "$package" -v "0.0.0-test"
+          workspaces='${{ steps.changes.outputs.workspaces }}'
+          echo "Workspaces to build: $workspaces"
+          if [[ -n "$workspaces" && "$workspaces" != "[]" ]]; then
+            for workspace in $(echo "$workspaces" | jq -r '.[]'); do
+              echo "Building $workspace"
+              bun workspace build "$workspace" -v "0.0.0-test"
             done
           else
-            echo "No packages changed"
+            echo "No workspaces changed"
           fi
 
   required:

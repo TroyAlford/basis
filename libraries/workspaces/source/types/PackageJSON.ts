@@ -15,6 +15,8 @@ export interface PackageJSON {
   peerDependencies?: Record<string, string>,
   /** Package scripts */
   scripts?: Record<string, string>,
+  /** Package source */
+  source?: string,
   /** Package types */
   types?: string,
   /** Package version */

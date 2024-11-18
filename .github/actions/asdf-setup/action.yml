@@ -60,12 +60,10 @@ runs:
           done
         fi
 
-        # Ensure jq is installed
-        if ! asdf plugin list | grep -q "^jq$"; then
-          asdf plugin add jq
-          asdf install jq latest
-          asdf global jq latest
-        fi
+        # Install jq explicitly
+        asdf plugin add jq || true # Add plugin if not exists
+        asdf install jq latest
+        asdf global jq latest
 
         # Reshim all tools
         asdf reshim
