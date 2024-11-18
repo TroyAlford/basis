@@ -52,16 +52,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: ./.github/actions/asdf-setup
+          fetch-tags: true
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Fetch main branch
+        run: |
+          git fetch origin main:main
       - name: Identify Changed Packages
         id: changes
         run: |
           changed=$(bun workspace changed --only '^@basis/')
+          echo "Changed packages: $changed"
           echo "packages=$changed" >> $GITHUB_OUTPUT
       - name: Build Changed Packages
         run: |
           packages='${{ steps.changes.outputs.packages }}'
-          if [[ -n "$packages" ]]; then
+          echo "Packages to build: $packages"
+          if [[ -n "$packages" && "$packages" != "[]" ]]; then
             for package in $(echo "$packages" | jq -r '.[]'); do
               echo "Building $package"
               bun workspace build "$package" -v "0.0.0-test"
