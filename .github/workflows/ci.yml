@@ -63,7 +63,6 @@ jobs:
       - name: Identify Changed Workspaces
         id: changes
         run: |
-          git fetch --tags origin
           changed=$(bun workspace changed --only '^@basis/')
           echo "Changed workspaces: $changed"
           echo "workspaces=$changed" >> $GITHUB_OUTPUT
