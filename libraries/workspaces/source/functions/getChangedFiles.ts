@@ -46,7 +46,8 @@ export async function getChangedFiles(): Promise<string[]> {
       if (headResult.exitCode !== 0) return []
 
       const head = headResult.stdout.toString().trim()
-      const committedResult = await $`git diff --name-only ${tag}..${head}`.nothrow()
+      const committedResult = await $`git diff --name-only ${tag}..${head}`
+        .quiet().nothrow()
       const stagedResult = await $`git diff --name-only --cached`
         .quiet().nothrow()
       const unstagedResult = await $`git diff --name-only`
@@ -68,13 +69,15 @@ export async function getChangedFiles(): Promise<string[]> {
     }
 
     // SCENARIO 3: Use initial commit
-    const firstCommitResult = await $`git rev-list --max-parents=0 HEAD`.nothrow()
+    const firstCommitResult = await $`git rev-list --max-parents=0 HEAD`
+      .quiet().nothrow()
     if (firstCommitResult.exitCode !== 0) return []
 
     const firstCommit = firstCommitResult.stdout.toString().trim()
     if (!firstCommit) return []
 
-    const committedResult = await $`git diff --name-only ${firstCommit}..HEAD`.nothrow()
+    const committedResult = await $`git diff --name-only ${firstCommit}..HEAD`
+      .quiet().nothrow()
     if (committedResult.exitCode !== 0) return []
 
     return committedResult.stdout.toString().split('\n')
