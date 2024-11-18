@@ -87,8 +87,18 @@ switch (command) {
 
   case 'changed':
     getChangedWorkspaces()
-      .then(packages => console.log(JSON.stringify(filterByPatterns(packages, values))))
-      .catch(console.error)
+      .then(packages => {
+        const filtered = filterByPatterns(packages, values)
+        if (filtered.length === 0) {
+          console.log('[]')
+        } else {
+          console.log(JSON.stringify(filtered))
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error)
+        process.exit(1)
+      })
     break
 
   case 'changed-files':
