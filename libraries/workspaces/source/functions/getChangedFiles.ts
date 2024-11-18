@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 import { $ } from 'bun'
 import { fetchAllTags } from './fetchAllTags'
 
@@ -8,123 +7,80 @@ import { fetchAllTags } from './fetchAllTags'
  */
 export async function getChangedFiles(): Promise<string[]> {
   try {
-    // Make sure we have all tags from the remote
     await fetchAllTags()
 
-    /*
-     * SCENARIO 1: Try to find merge base with main
-     * This will work if we're on a branch that was created from main
-     * or if we're on main itself
-     */
-    const mergeBaseResult = await $`git merge-base HEAD origin/main`.nothrow()
+    // SCENARIO 1: Try to find merge base with main
+    const mergeBaseResult = await $`git merge-base HEAD origin/main`
+      .quiet().nothrow()
     if (mergeBaseResult.exitCode === 0) {
       const mergeBase = mergeBaseResult.stdout.toString().trim()
-      console.error('Debug: Found merge base with main:', mergeBase)
+      const committedResult = await $`git diff --name-only ${mergeBase}..HEAD`
+        .quiet().nothrow()
+      const stagedResult = await $`git diff --name-only --cached`
+        .quiet().nothrow()
+      const unstagedResult = await $`git diff --name-only`
+        .quiet().nothrow()
 
-      /*
-       * Get three types of changes:
-       * 1. Committed changes since the branch diverged from main
-       */
-      const committedResult = await $`git diff --name-only ${mergeBase}..HEAD`.nothrow()
       const committedChanges = committedResult.exitCode === 0
         ? committedResult.stdout.toString().split('\n')
         : []
-
-      // 2. Changes staged but not committed
-      const stagedResult = await $`git diff --name-only --cached`.nothrow()
       const stagedChanges = stagedResult.exitCode === 0
         ? stagedResult.stdout.toString().split('\n')
         : []
-
-      // 3. Changes in working directory, not staged
-      const unstagedResult = await $`git diff --name-only`.nothrow()
       const unstagedChanges = unstagedResult.exitCode === 0
         ? unstagedResult.stdout.toString().split('\n')
         : []
 
-      // Combine all changes, remove duplicates and empty lines
       return [...new Set([...committedChanges, ...stagedChanges, ...unstagedChanges])]
         .map(line => line.trim())
         .filter(Boolean)
     }
 
-    /*
-     * SCENARIO 2: No merge base found, try using latest tag
-     * This is typically used when we're in a detached HEAD state
-     * or when the branch history is complex
-     */
-    const tagResult = await $`git describe --tags --abbrev=0`.nothrow()
+    // SCENARIO 2: Try using latest tag
+    const tagResult = await $`git describe --tags --abbrev=0`
+      .quiet().nothrow()
     if (tagResult.exitCode === 0) {
       const tag = tagResult.stdout.toString().trim()
-      const headResult = await $`git rev-parse HEAD`.nothrow()
-      if (headResult.exitCode !== 0) {
-        console.error('Debug: Failed to get HEAD commit')
-        return []
-      }
-      const head = headResult.stdout.toString().trim()
-      console.error('Debug: Using latest tag for comparison:', tag)
+      const headResult = await $`git rev-parse HEAD`
+        .quiet().nothrow()
+      if (headResult.exitCode !== 0) return []
 
-      /*
-       * Get all types of changes since the last tag:
-       * 1. Committed changes since the tag
-       */
+      const head = headResult.stdout.toString().trim()
       const committedResult = await $`git diff --name-only ${tag}..${head}`.nothrow()
+      const stagedResult = await $`git diff --name-only --cached`
+        .quiet().nothrow()
+      const unstagedResult = await $`git diff --name-only`
+        .quiet().nothrow()
+
       const committedChanges = committedResult.exitCode === 0
         ? committedResult.stdout.toString().split('\n')
         : []
-
-      // 2. Changes staged but not committed
-      const stagedResult = await $`git diff --name-only --cached`.nothrow()
       const stagedChanges = stagedResult.exitCode === 0
         ? stagedResult.stdout.toString().split('\n')
         : []
-
-      // 3. Changes in working directory, not staged
-      const unstagedResult = await $`git diff --name-only`.nothrow()
       const unstagedChanges = unstagedResult.exitCode === 0
         ? unstagedResult.stdout.toString().split('\n')
         : []
 
-      // Combine all changes, remove duplicates and empty lines
       return [...new Set([...committedChanges, ...stagedChanges, ...unstagedChanges])]
         .map(line => line.trim())
         .filter(Boolean)
     }
 
-    /*
-     * SCENARIO 3: No tags exist yet
-     * This is typically only on initial repository setup
-     * Compare against the very first commit
-     */
-    console.error('Debug: No merge base or tags found - comparing against initial commit')
+    // SCENARIO 3: Use initial commit
     const firstCommitResult = await $`git rev-list --max-parents=0 HEAD`.nothrow()
-    if (firstCommitResult.exitCode !== 0) {
-      console.error('Failed to find initial commit')
-      return []
-    }
+    if (firstCommitResult.exitCode !== 0) return []
 
     const firstCommit = firstCommitResult.stdout.toString().trim()
-    if (!firstCommit) {
-      console.error('Got empty initial commit hash')
-      return []
-    }
-    console.error('Debug: Using initial commit as base:', firstCommit)
+    if (!firstCommit) return []
 
-    // Compare everything since the first commit
     const committedResult = await $`git diff --name-only ${firstCommit}..HEAD`.nothrow()
-    if (committedResult.exitCode !== 0) {
-      console.error('Failed to get changes since initial commit:', committedResult.stderr.toString())
-      return []
-    }
+    if (committedResult.exitCode !== 0) return []
 
-    const committedChanges = committedResult.stdout.toString().split('\n')
-    console.error('Debug: Found', committedChanges.length, 'changed files since initial commit')
-
-    return committedChanges
+    return committedResult.stdout.toString().split('\n')
       .map(line => line.trim())
       .filter(Boolean)
-  } catch (error) {
-    console.error('Error getting changed files:', error)
+  } catch {
     return []
   }
 }
