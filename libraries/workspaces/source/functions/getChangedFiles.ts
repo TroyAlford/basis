@@ -13,25 +13,35 @@ export async function getChangedFiles(): Promise<string[]> {
     await fetchAllTags()
 
     /*
-     * SCENARIO 1: We're on a PR branch
-     * Check if HEAD is NOT an ancestor of main (meaning we're on a branch)
-     * exitCode of 1 means we're on a branch diverged from main
+     * SCENARIO 1: Try to find merge base with main
+     * This will work if we're on a branch that was created from main
+     * or if we're on main itself
      */
-    const mergeBaseCheck = await $`git merge-base --is-ancestor HEAD origin/main`.nothrow()
-    const hasMergeBase = mergeBaseCheck.exitCode === 1
-    if (hasMergeBase) {
-      // Find the common ancestor commit between our branch and main
-      const mergeBase = await $`git merge-base HEAD origin/main`.text()
+    const mergeBaseResult = await $`git merge-base HEAD origin/main`.nothrow()
+    if (mergeBaseResult.exitCode === 0) {
+      const mergeBase = mergeBaseResult.stdout.toString().trim()
+      console.log('Found merge base with main:', mergeBase)
 
       /*
        * Get three types of changes:
        * 1. Committed changes since the branch diverged from main
        */
-      const committedChanges = (await $`git diff --name-only ${mergeBase.trim()}..HEAD`.text()).split('\n')
+      const committedResult = await $`git diff --name-only ${mergeBase}..HEAD`.nothrow()
+      const committedChanges = committedResult.exitCode === 0
+        ? committedResult.stdout.toString().split('\n')
+        : []
+
       // 2. Changes staged but not committed
-      const stagedChanges = (await $`git diff --name-only --cached`.text()).split('\n')
+      const stagedResult = await $`git diff --name-only --cached`.nothrow()
+      const stagedChanges = stagedResult.exitCode === 0
+        ? stagedResult.stdout.toString().split('\n')
+        : []
+
       // 3. Changes in working directory, not staged
-      const unstagedChanges = (await $`git diff --name-only`.text()).split('\n')
+      const unstagedResult = await $`git diff --name-only`.nothrow()
+      const unstagedChanges = unstagedResult.exitCode === 0
+        ? unstagedResult.stdout.toString().split('\n')
+        : []
 
       // Combine all changes, remove duplicates and empty lines
       return [...new Set([...committedChanges, ...stagedChanges, ...unstagedChanges])]
@@ -40,41 +50,67 @@ export async function getChangedFiles(): Promise<string[]> {
     }
 
     /*
-     * SCENARIO 2: We're on main branch or a tag
-     * Try to get the most recent tag
+     * SCENARIO 2: No merge base found, try using latest tag
+     * This is typically used when we're in a detached HEAD state
+     * or when the branch history is complex
      */
-    const lastTag = await $`git describe --tags --abbrev=0`.text().catch(() => '')
-    if (!lastTag.trim()) {
-      // SCENARIO 3: No tags exist yet
-      console.warn('No tags found and not a PR - comparing against initial commit')
-      // Find the very first commit in the repository
-      const firstCommit = await $`git rev-list --max-parents=0 HEAD`.text()
-      // Compare everything since the first commit
-      const committedChanges = (await $`git diff --name-only ${firstCommit.trim()}..HEAD`.text()).split('\n')
-      return committedChanges
+    const tagResult = await $`git describe --tags --abbrev=0`.nothrow()
+    if (tagResult.exitCode === 0) {
+      const tag = tagResult.stdout.toString().trim()
+      const headResult = await $`git rev-parse HEAD`.nothrow()
+      if (headResult.exitCode !== 0) {
+        console.error('Failed to get HEAD commit')
+        return []
+      }
+      const head = headResult.stdout.toString().trim()
+      console.log('Using latest tag for comparison:', tag)
+
+      /*
+       * Get all types of changes since the last tag:
+       * 1. Committed changes since the tag
+       */
+      const committedResult = await $`git diff --name-only ${tag}..${head}`.nothrow()
+      const committedChanges = committedResult.exitCode === 0
+        ? committedResult.stdout.toString().split('\n')
+        : []
+
+      // 2. Changes staged but not committed
+      const stagedResult = await $`git diff --name-only --cached`.nothrow()
+      const stagedChanges = stagedResult.exitCode === 0
+        ? stagedResult.stdout.toString().split('\n')
+        : []
+
+      // 3. Changes in working directory, not staged
+      const unstagedResult = await $`git diff --name-only`.nothrow()
+      const unstagedChanges = unstagedResult.exitCode === 0
+        ? unstagedResult.stdout.toString().split('\n')
+        : []
+
+      // Combine all changes, remove duplicates and empty lines
+      return [...new Set([...committedChanges, ...stagedChanges, ...unstagedChanges])]
         .map(line => line.trim())
         .filter(Boolean)
     }
 
-    // SCENARIO 2 (continued): We have a tag to compare against
-    const tag = lastTag.trim()
-    // Get the current commit hash
-    const head = (await $`git rev-parse HEAD`.text()).trim()
-    // Get the commit hash that the tag points to
-    const tagCommit = (await $`git rev-parse ${tag}`.text()).trim()
-
     /*
-     * Get all types of changes since the last tag:
-     * 1. Committed changes since the tag
+     * SCENARIO 3: No tags exist yet
+     * This is typically only on initial repository setup
+     * Compare against the very first commit
      */
-    const committedChanges = (await $`git diff --name-only ${tagCommit} ${head}`.text()).split('\n')
-    // 2. Staged changes
-    const stagedChanges = (await $`git diff --name-only --cached`.text()).split('\n')
-    // 3. Unstaged changes
-    const unstagedChanges = (await $`git diff --name-only`.text()).split('\n')
+    console.warn('No merge base or tags found - comparing against initial commit')
+    const firstCommitResult = await $`git rev-list --max-parents=0 HEAD`.nothrow()
+    if (firstCommitResult.exitCode !== 0) {
+      console.error('Failed to find initial commit')
+      return []
+    }
 
-    // Combine all changes, remove duplicates and empty lines
-    return [...new Set([...committedChanges, ...stagedChanges, ...unstagedChanges])]
+    // Compare everything since the first commit
+    const committedResult = await $`git diff --name-only ${firstCommitResult.stdout.toString().trim()}..HEAD`.nothrow()
+    const committedChanges = committedResult.exitCode === 0
+      ? committedResult.stdout.toString().split('\n')
+      : []
+
+    return committedChanges
       .map(line => line.trim())
       .filter(Boolean)
   } catch (error) {
