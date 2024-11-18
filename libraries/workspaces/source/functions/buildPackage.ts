@@ -58,6 +58,12 @@ export async function buildPackage(options: BuildOptions) {
 
   // Check for package-specific build script
   if (packageJson.scripts?.build) {
+    // Check if this package should be skipped
+    if (packageJson.scripts.build.includes('SKIP')) {
+      console.log(chalk.yellow(`⏭️  Skipping build for ${name} (build disabled)`))
+      return { skipped: true }
+    }
+
     console.log(`Using package build script for ${name}...`)
     const process = Bun.spawn(['bun', 'run', 'build'], {
       cwd: packagePath,
@@ -210,6 +216,7 @@ export async function buildPackage(options: BuildOptions) {
       files,
       main: `${outdir}/index.js`,
       module: `${outdir}/index.js`,
+      source: 'index.ts',
       types: `${outdir}/index.d.ts`,
       version,
     }

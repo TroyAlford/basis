@@ -69,10 +69,19 @@ jobs:
           
           for package in $(echo "$packages" | jq -r '.[]'); do
             echo "Building $package@$version"
-            bun workspace build "$package" -v "$version"
-            
-            echo "Publishing $package@$version"
-            cd "$(bun workspace find "$package")"
-            npm publish --access public
-            cd -
+            result=$(bun workspace build "$package" -v "$version" 2>&1)
+            if [[ $result == *"Skipping build"* ]]; then
+              echo "⏭️ Skipping $package (build disabled)"
+              continue
+            elif [ $? -eq 0 ]; then
+              echo "✅ Successfully built $package"
+              
+              echo "Publishing $package@$version"
+              cd "$(bun workspace find "$package")"
+              npm publish --access public
+              cd -
+            else
+              echo "::error::Failed to build $package"
+              exit 1
+            fi
           done
