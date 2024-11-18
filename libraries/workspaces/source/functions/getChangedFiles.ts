@@ -104,11 +104,22 @@ export async function getChangedFiles(): Promise<string[]> {
       return []
     }
 
+    const firstCommit = firstCommitResult.stdout.toString().trim()
+    if (!firstCommit) {
+      console.error('Got empty initial commit hash')
+      return []
+    }
+    console.log('Using initial commit as base:', firstCommit)
+
     // Compare everything since the first commit
-    const committedResult = await $`git diff --name-only ${firstCommitResult.stdout.toString().trim()}..HEAD`.nothrow()
-    const committedChanges = committedResult.exitCode === 0
-      ? committedResult.stdout.toString().split('\n')
-      : []
+    const committedResult = await $`git diff --name-only ${firstCommit}..HEAD`.nothrow()
+    if (committedResult.exitCode !== 0) {
+      console.error('Failed to get changes since initial commit:', committedResult.stderr.toString())
+      return []
+    }
+
+    const committedChanges = committedResult.stdout.toString().split('\n')
+    console.log(`Found ${committedChanges.length} changed files since initial commit`)
 
     return committedChanges
       .map(line => line.trim())
