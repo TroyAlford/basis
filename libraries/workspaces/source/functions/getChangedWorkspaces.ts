@@ -1,6 +1,7 @@
 import { resolve } from 'path'
 import type { PackageJSON } from '../types/PackageJSON'
 import type { WorkspaceInfo } from '../types/WorkspaceInfo'
+import { fetchAllTags } from './fetchAllTags'
 import { getChangedFiles } from './getChangedFiles'
 import { getWorkspaceInfo } from './getWorkspaceInfo'
 
@@ -42,6 +43,7 @@ function isPackageAffected(
  * @returns The names of the changed workspaces
  */
 export async function getChangedWorkspaces(): Promise<string[]> {
+  await fetchAllTags()
   const [changedFiles, info] = await Promise.all([
     getChangedFiles(),
     getWorkspaceInfo(),

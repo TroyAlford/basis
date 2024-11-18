@@ -51,10 +51,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Fetch Tags
-        run: |
-          git fetch --prune --unshallow --tags origin
-          echo "Available tags: $(git tag -l)"
       - uses: ./.github/actions/asdf-setup
 
       - name: Identify Changed Packages
