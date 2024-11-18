@@ -89,11 +89,7 @@ switch (command) {
     getChangedWorkspaces()
       .then(packages => {
         const filtered = filterByPatterns(packages, values)
-        if (filtered.length === 0) {
-          console.log('[]')
-        } else {
-          console.log(JSON.stringify(filtered))
-        }
+        console.log(JSON.stringify(filtered))
       })
       .catch(error => {
         console.error('Error:', error)
