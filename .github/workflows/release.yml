@@ -67,15 +67,15 @@ jobs:
           
           for workspace in $(echo "$workspaces" | jq -r '.[]'); do
             echo "Building $workspace@$version"
-            build_output=$(bun workspace build "$workspace" -v "$version" 2>/dev/null || echo '')
-            if [[ "$build_output" == "SKIP" || "$build_output" == "'SKIP'" ]]; then
+            build_output=$(bun workspace build "$workspace" -v "$version" 2>&1)
+            
+            if [[ "$build_output" == *"SKIP"* ]]; then
               echo "⚠️ Build script is set to SKIP for $workspace. Skipping."
               continue
-            else
-              echo "$build_output"
             fi
             
-            # Check if version already exists on npm
+            echo "$build_output"
+          
             npm_response=$(curl -s "https://registry.npmjs.org/$workspace")
             exists=$(echo "$npm_response" | jq -r ".versions | keys | contains([\"$version\"])")
             if [[ "$exists" == "true" ]]; then
