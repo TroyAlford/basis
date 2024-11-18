@@ -3,89 +3,25 @@ import { fetchAllTags } from './fetchAllTags'
 
 /**
  * Get the changed files in the git repository
+ * @param base - The base commit to compare against
  * @returns The list of changed files
  */
-export async function getChangedFiles(): Promise<string[]> {
+export async function getChangedFiles(
+  base = 'main',
+): Promise<string[]> {
   try {
     await fetchAllTags()
+    await $`git fetch origin ${base}:${base}`.quiet().nothrow()
 
-    // SCENARIO 1: Try to find merge base with main
-    const mergeBaseResult = await $`git merge-base HEAD origin/main`
-      .quiet().nothrow()
-    if (mergeBaseResult.exitCode === 0) {
-      const mergeBase = mergeBaseResult.stdout.toString().trim()
-      const committedResult = await $`git diff --name-only ${mergeBase}..HEAD`
-        .quiet().nothrow()
-      const stagedResult = await $`git diff --name-only --cached`
-        .quiet().nothrow()
-      const unstagedResult = await $`git diff --name-only`
-        .quiet().nothrow()
+    // Get changes between main and current branch
+    const committed = await $`git diff --name-only origin/${base}..HEAD`
+      .quiet().nothrow().text().then(t => t.split('\n')).catch(() => [])
+    const staged = await $`git diff --name-only --cached`
+      .quiet().nothrow().text().then(t => t.split('\n')).catch(() => [])
+    const unstaged = await $`git diff --name-only`
+      .quiet().nothrow().text().then(t => t.split('\n')).catch(() => [])
 
-      const committedChanges = committedResult.exitCode === 0
-        ? committedResult.stdout.toString().split('\n')
-        : []
-      const stagedChanges = stagedResult.exitCode === 0
-        ? stagedResult.stdout.toString().split('\n')
-        : []
-      const unstagedChanges = unstagedResult.exitCode === 0
-        ? unstagedResult.stdout.toString().split('\n')
-        : []
-
-      return [...new Set([...committedChanges, ...stagedChanges, ...unstagedChanges])]
-        .map(line => line.trim())
-        .filter(Boolean)
-    }
-
-    // SCENARIO 2: Try using latest tag
-    const tagResult = await $`git describe --tags --abbrev=0`
-      .quiet().nothrow()
-    if (tagResult.exitCode === 0) {
-      const tag = tagResult.stdout.toString().trim()
-      const headResult = await $`git rev-parse HEAD`
-        .quiet().nothrow()
-      if (headResult.exitCode !== 0) return []
-
-      const head = headResult.stdout.toString().trim()
-      const committedResult = await $`git diff --name-only ${tag}..${head}`
-        .quiet().nothrow()
-      const stagedResult = await $`git diff --name-only --cached`
-        .quiet().nothrow()
-      const unstagedResult = await $`git diff --name-only`
-        .quiet().nothrow()
-
-      const committedChanges = committedResult.exitCode === 0
-        ? committedResult.stdout.toString().split('\n')
-        : []
-      const stagedChanges = stagedResult.exitCode === 0
-        ? stagedResult.stdout.toString().split('\n')
-        : []
-      const unstagedChanges = unstagedResult.exitCode === 0
-        ? unstagedResult.stdout.toString().split('\n')
-        : []
-
-      return [...new Set([...committedChanges, ...stagedChanges, ...unstagedChanges])]
-        .map(line => line.trim())
-        .filter(Boolean)
-    }
-
-    // SCENARIO 3: Use initial commit
-    const firstCommitResult = await $`git rev-list --max-parents=0 HEAD`
-      .quiet().nothrow()
-    if (firstCommitResult.exitCode !== 0) return []
-
-    const firstCommit = firstCommitResult.stdout.toString().trim()
-    if (!firstCommit) return []
-
-    console.error('Debug: Using initial commit:', firstCommit)
-
-    // Use git ls-files instead of diff when comparing against initial commit
-    const allFilesResult = await $`git ls-files`
-      .quiet().nothrow()
-    if (allFilesResult.exitCode !== 0) return []
-
-    console.error('Debug: All tracked files:', allFilesResult.stdout.toString())
-
-    return allFilesResult.stdout.toString().split('\n')
+    return [...new Set([...committed, ...staged, ...unstaged])]
       .map(line => line.trim())
       .filter(Boolean)
   } catch {
