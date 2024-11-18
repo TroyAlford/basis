@@ -3,8 +3,7 @@ import { $ } from 'bun'
 import { fetchAllTags } from './fetchAllTags'
 
 /**
- * Get the changed files in the git repository by comparing the current state
- * against the appropriate base (merge-base with main, latest tag, or initial commit)
+ * Get the changed files in the git repository
  * @returns The list of changed files
  */
 export async function getChangedFiles(): Promise<string[]> {
@@ -20,7 +19,7 @@ export async function getChangedFiles(): Promise<string[]> {
     const mergeBaseResult = await $`git merge-base HEAD origin/main`.nothrow()
     if (mergeBaseResult.exitCode === 0) {
       const mergeBase = mergeBaseResult.stdout.toString().trim()
-      console.log('Found merge base with main:', mergeBase)
+      console.error('Debug: Found merge base with main:', mergeBase)
 
       /*
        * Get three types of changes:
@@ -59,11 +58,11 @@ export async function getChangedFiles(): Promise<string[]> {
       const tag = tagResult.stdout.toString().trim()
       const headResult = await $`git rev-parse HEAD`.nothrow()
       if (headResult.exitCode !== 0) {
-        console.error('Failed to get HEAD commit')
+        console.error('Debug: Failed to get HEAD commit')
         return []
       }
       const head = headResult.stdout.toString().trim()
-      console.log('Using latest tag for comparison:', tag)
+      console.error('Debug: Using latest tag for comparison:', tag)
 
       /*
        * Get all types of changes since the last tag:
@@ -97,7 +96,7 @@ export async function getChangedFiles(): Promise<string[]> {
      * This is typically only on initial repository setup
      * Compare against the very first commit
      */
-    console.warn('No merge base or tags found - comparing against initial commit')
+    console.error('Debug: No merge base or tags found - comparing against initial commit')
     const firstCommitResult = await $`git rev-list --max-parents=0 HEAD`.nothrow()
     if (firstCommitResult.exitCode !== 0) {
       console.error('Failed to find initial commit')
@@ -109,7 +108,7 @@ export async function getChangedFiles(): Promise<string[]> {
       console.error('Got empty initial commit hash')
       return []
     }
-    console.log('Using initial commit as base:', firstCommit)
+    console.error('Debug: Using initial commit as base:', firstCommit)
 
     // Compare everything since the first commit
     const committedResult = await $`git diff --name-only ${firstCommit}..HEAD`.nothrow()
@@ -119,7 +118,7 @@ export async function getChangedFiles(): Promise<string[]> {
     }
 
     const committedChanges = committedResult.stdout.toString().split('\n')
-    console.log(`Found ${committedChanges.length} changed files since initial commit`)
+    console.error('Debug: Found', committedChanges.length, 'changed files since initial commit')
 
     return committedChanges
       .map(line => line.trim())
