@@ -57,11 +57,11 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-          ref: ${{ github.head_ref || github.ref_name }}
+          ref: ${{ github.head_ref }}
       - name: Fetch main branch
-        run: |
-          git remote set-branches --add origin main
-          git fetch origin main:main
+        run: git fetch origin main:main
+      - name: Checkout current branch
+        run: git checkout ${{ github.head_ref }}
       - uses: ./.github/actions/asdf-setup
 
       - name: Identify Changed Workspaces
