@@ -66,6 +66,7 @@ jobs:
           changed=$(bun workspace changed --only '^@basis/')
           echo "Changed workspaces: $changed"
           echo "workspaces=$changed" >> $GITHUB_OUTPUT
+
       - name: Build Changed Workspaces
         run: |
           workspaces='${{ steps.changes.outputs.workspaces }}'

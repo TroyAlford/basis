@@ -17,7 +17,8 @@ export async function getChangedFiles(): Promise<string[]> {
      * Check if HEAD is NOT an ancestor of main (meaning we're on a branch)
      * exitCode of 1 means we're on a branch diverged from main
      */
-    const hasMergeBase = (await $`git merge-base --is-ancestor HEAD origin/main`).exitCode === 1
+    const mergeBaseCheck = await $`git merge-base --is-ancestor HEAD origin/main`.nothrow()
+    const hasMergeBase = mergeBaseCheck.exitCode === 1
     if (hasMergeBase) {
       // Find the common ancestor commit between our branch and main
       const mergeBase = await $`git merge-base HEAD origin/main`.text()
