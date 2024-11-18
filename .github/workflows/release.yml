@@ -15,14 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Fetch main branch
-        run: |
-          git fetch origin main:main
-
+      - name: Fetch Tags
+        run: git fetch --tags
       - uses: ./.github/actions/asdf-setup
 
       - name: Create Release
