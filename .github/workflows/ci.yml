@@ -53,8 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
       - uses: ./.github/actions/asdf-setup
 
       - name: Identify Changed Workspaces
@@ -73,6 +72,7 @@ jobs:
           for workspace in $(echo "$workspaces" | jq -r '.[]'); do
             echo "Building $workspace@$version"
             build_output=$(bun workspace build "$workspace" -v "$version" 2>&1)
+
             if [[ "$build_output" == *"SKIP"* ]]; then
               echo "⚠️ Build script is set to SKIP for $workspace. Skipping."
               continue

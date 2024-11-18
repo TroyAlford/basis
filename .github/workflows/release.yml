@@ -14,10 +14,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: ./.github/actions/asdf-setup
 
       - name: Create Release
@@ -57,10 +55,11 @@ jobs:
         id: changes
         run: |
           changed=$(bun workspace changed --only '^@basis/')
+          echo "Changed workspaces: $changed"
           echo "workspaces=$changed" >> $GITHUB_OUTPUT
 
       - name: Build and Publish Changed Workspaces
-        if: steps.release_created.outputs.should_publish == 'true' && steps.npm_token.outputs.token_exists == 'true'
+        if: steps.changes.outputs.workspaces != '[]' && steps.release_created.outputs.should_publish == 'true' && steps.npm_token.outputs.token_exists == 'true'
         run: |
           workspaces='${{ steps.changes.outputs.workspaces }}'
           version='${{ steps.release_created.outputs.version }}'
