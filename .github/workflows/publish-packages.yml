@@ -19,13 +19,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Fetch Tags
-        run: git fetch --tags
       - uses: ./.github/actions/asdf-setup
 
       - name: Get Latest Tag
         id: latest_tag
         run: |
+          git fetch --prune --unshallow --tags origin
           tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "tag=${tag#v}" >> $GITHUB_OUTPUT
 

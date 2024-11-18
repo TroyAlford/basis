@@ -56,7 +56,6 @@ jobs:
       - name: Identify Changed Packages
         id: changes
         run: |
-          echo "Latest tag: $(git describe --tags --abbrev=0)"
           changed=$(bun workspace changed --only '^@basis/')
           echo "Changed packages: $changed"
           echo "packages=$changed" >> $GITHUB_OUTPUT
