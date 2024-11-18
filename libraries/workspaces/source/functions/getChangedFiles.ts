@@ -13,8 +13,17 @@ export async function getChangedFiles(
     await fetchAllTags()
     await $`git fetch origin ${base}:${base}`.quiet().nothrow()
 
-    // Get changes between main and current branch
-    const committed = await $`git diff --name-only origin/${base}..HEAD`
+    // Check if we're at the tip of the base branch
+    const baseRef = await $`git rev-parse origin/${base}`.quiet().text()
+    const headRef = await $`git rev-parse HEAD`.quiet().text()
+
+    // If we're at the tip, compare with previous commit
+    const compareRef = baseRef.trim() === headRef.trim()
+      ? 'HEAD~1'
+      : `origin/${base}`
+
+    // Get changes between base and current branch
+    const committed = await $`git diff --name-only ${compareRef}..HEAD`
       .quiet().nothrow().text().then(t => t.split('\n')).catch(() => [])
     const staged = await $`git diff --name-only --cached`
       .quiet().nothrow().text().then(t => t.split('\n')).catch(() => [])
