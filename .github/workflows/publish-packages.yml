@@ -22,6 +22,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: ./.github/actions/asdf-setup
 
       - name: Get Latest Tag
