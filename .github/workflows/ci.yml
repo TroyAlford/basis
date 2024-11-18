@@ -54,6 +54,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           ref: ${{ github.event.pull_request.head.sha }}
+      - uses: ./.github/actions/asdf-setup
       - name: Fetch main branch
         run: |
           git fetch origin main:main
