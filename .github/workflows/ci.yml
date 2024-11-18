@@ -52,12 +52,9 @@ jobs:
   build-packages:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          fetch-tags: true
-          ref: ${{ github.head_ref || github.ref_name }}
       - uses: ./.github/actions/asdf-setup
 
       - name: Identify Changed Workspaces
@@ -66,18 +63,23 @@ jobs:
           changed=$(bun workspace changed --only '^@basis/')
           echo "Changed workspaces: $changed"
           echo "workspaces=$changed" >> $GITHUB_OUTPUT
+
       - name: Build Changed Workspaces
+        if: steps.changes.outputs.workspaces != '[]'
         run: |
           workspaces='${{ steps.changes.outputs.workspaces }}'
-          echo "Workspaces to build: $workspaces"
-          if [[ -n "$workspaces" && "$workspaces" != "[]" ]]; then
-            for workspace in $(echo "$workspaces" | jq -r '.[]'); do
-              echo "Building $workspace"
-              bun workspace build "$workspace" -v "0.0.0-test"
-            done
-          else
-            echo "No workspaces changed"
-          fi
+          version='${{ github.run_number }}-alpha'
+
+          for workspace in $(echo "$workspaces" | jq -r '.[]'); do
+            echo "Building $workspace@$version"
+            build_output=$(bun workspace build "$workspace" -v "$version" 2>&1)
+            if [[ "$build_output" == *"SKIP"* ]]; then
+              echo "⚠️ Build script is set to SKIP for $workspace. Skipping."
+              continue
+            fi
+
+            echo "$build_output"
+          done
 
   required:
     if: always()

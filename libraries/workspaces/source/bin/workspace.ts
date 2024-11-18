@@ -87,14 +87,20 @@ switch (command) {
 
   case 'changed':
     getChangedWorkspaces()
-      .then(packages => console.log(JSON.stringify(filterByPatterns(packages, values))))
-      .catch(console.error)
+      .then(packages => {
+        const filtered = filterByPatterns(packages, values)
+        console.log(JSON.stringify(filtered))
+      })
+      .catch(() => { process.exit(1) })
     break
 
   case 'changed-files':
     getChangedFiles()
-      .then(files => console.log(JSON.stringify(filterByPatterns(files, values))))
-      .catch(console.error)
+      .then(files => {
+        const filtered = filterByPatterns(files, values)
+        console.log(JSON.stringify(filtered))
+      })
+      .catch(() => { process.exit(1) })
     break
 
   case 'find':
