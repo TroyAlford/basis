@@ -6,25 +6,40 @@ import { Component } from '../Component/Component'
 import './Image.scss'
 
 interface Props {
+  /** Alignment value. */
   align?: Align,
+  /** Alternative text for the image. */
   alt?: string,
+  /** Click handler. */
   onClick?: (event: React.MouseEvent<HTMLImageElement>) => void,
+  /** Touch end handler. */
   onTouchEnd?: (event: React.TouchEvent<HTMLImageElement>) => void,
+  /** Touch move handler. */
   onTouchMove?: (event: React.TouchEvent<HTMLImageElement>) => void,
+  /** Touch start handler. */
   onTouchStart?: (event: React.TouchEvent<HTMLImageElement>) => void,
+  /** Size value. */
   size?: Size,
+  /** Source URL. */
   src: string,
 }
 
 interface State {
+  /** Error state. */
   error: boolean,
 }
 
+/** A component for displaying an image. */
 export class Image extends Component<Props, HTMLImageElement, State> {
+  /** Align values. */
   static Align = Align
+  /** Size values. */
   static Size = Size
+  /** Cache for loading and resolved images. */
   static Cache = {
+    /** Map of loading promises for images. */
     Loading: new Map<string, Promise<HTMLImageElement>>(),
+    /** Map of resolved images. */
     Resolved: new Map<string, HTMLImageElement>(),
   }
 
@@ -67,17 +82,18 @@ export class Image extends Component<Props, HTMLImageElement, State> {
     }
   }
 
-  componentDidMount() {
+  componentDidMount(): void {
     this.loadImage()
   }
 
-  componentDidUpdate(prevProps: Props) {
+  componentDidUpdate(prevProps: Props): void {
     if (prevProps.src !== this.props.src) {
       this.loadImage()
     }
   }
 
-  private loadImage = async () => {
+  /** Loads an image and updates the component state when it's ready. */
+  private loadImage = async (): Promise<void> => {
     const { src } = this.props
 
     // Already loaded
@@ -108,5 +124,9 @@ export class Image extends Component<Props, HTMLImageElement, State> {
     }
   }
 
+  /**
+   * Returns null, because `<img>` elements do not have content.
+   * @returns null
+   */
   content(): null { return null }
 }

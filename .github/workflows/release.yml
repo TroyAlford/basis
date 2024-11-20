@@ -35,22 +35,6 @@ jobs:
             echo "should_publish=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check NPM Token
-        if: steps.release_created.outputs.should_publish == 'true'
-        id: npm_token
-        run: |
-          if [[ -n "${{ secrets.NPM_TOKEN }}" ]]; then
-            echo "token_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "⚠️ NPM_TOKEN secret is not set. Skipping npm publication."
-            echo "token_exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Configure NPM
-        if: steps.release_created.outputs.should_publish == 'true' && steps.npm_token.outputs.token_exists == 'true'
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
-
       - name: Identify Changed Workspaces
         id: changes
         run: |
@@ -58,41 +42,16 @@ jobs:
           echo "Changed workspaces: $changed"
           echo "workspaces=$changed" >> $GITHUB_OUTPUT
 
-      - name: Build and Publish Changed Workspaces
-        if: steps.changes.outputs.workspaces != '[]' && steps.release_created.outputs.should_publish == 'true' && steps.npm_token.outputs.token_exists == 'true'
+      - name: Publish Changed Workspaces to JSR
+        if: steps.changes.outputs.workspaces != '[]' && steps.release_created.outputs.should_publish == 'true'
         run: |
           workspaces='${{ steps.changes.outputs.workspaces }}'
           version='${{ steps.release_created.outputs.version }}'
           
           for workspace in $(echo "$workspaces" | jq -r '.[]'); do
-            echo "Building $workspace@$version"
-            
-            # Run build and capture its exit status
-            build_output=$(bun workspace build "$workspace" -v "$version" 2>&1) || {
-              echo "::error::Build failed for $workspace"
-              echo "$build_output"
+            echo "Publishing $workspace@$version to JSR"
+            bun ws publish --only "$workspace" --version "$version" || {
+              echo "::error::Failed to publish $workspace to JSR"
               exit 1
             }
-            
-            if [[ "$build_output" == *"SKIP"* ]]; then
-              echo "⚠️ Build script is set to SKIP for $workspace. Skipping."
-              continue
-            fi
-            
-            echo "$build_output"
-          
-            npm_response=$(curl -s "https://registry.npmjs.org/$workspace")
-            exists=$(echo "$npm_response" | jq -r ".versions | keys | contains([\"$version\"])")
-            if [[ "$exists" == "true" ]]; then
-              echo "⚠️ Version $version of $workspace already exists on npm. Skipping."
-              continue
-            fi
-            
-            echo "Publishing $workspace@$version"
-            cd "$(bun workspace find "$workspace")"
-            bun publish --access public --tag latest || {
-              echo "::error::Failed to publish $workspace"
-              exit 1
-            }
-            cd -
           done

@@ -1,6 +1,8 @@
 export interface PackageJSON {
   /** Package dependencies */
   dependencies?: Record<string, string>,
+  /** Package description */
+  description?: string,
   /** Package engines */
   engines?: Record<string, string>,
   /** Package files */

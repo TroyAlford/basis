@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { classNames, dataAttributes, kebabCase } from '@basis/utilities'
 
+/** Props for the Component class. */
 export interface ComponentProps {
   /** The children of the component. */
   children?: React.ReactNode,
@@ -20,10 +21,10 @@ export interface ComponentProps {
 }
 
 /**
- * The abstract base `@basis/react` components extend from.
- * @template Props the props of the component
- * @template State the state of the component
- * @template SnapShot the snapshot of the component
+ * The abstract base class for all components in the @basis/react package.
+ * @template Props The props of the component.
+ * @template Element The root element type of the component.
+ * @template State The state of the component.
  */
 export abstract class Component<
   /** The props of the component. */
@@ -47,13 +48,34 @@ export abstract class Component<
 
   /**
    * Getter for class names.
-   * @returns a Set<string> of class names
+   * @returns a Set<string> of class names. Component automatically adds `component` and a kebab-cased version of the
+   * component's name (using `displayName` or `name`) to the set.
+   * @example
+   * class MyComponent extends Component {
+   *   get classNames() {
+   *     return super.classNames.add('foo')
+   *   }
+   * }
+   * // classNames = Set { 'my-component', 'component', 'foo' }
+   * @example
+   * class MyComponent extends Component {
+   *   static displayName = 'SomeOtherName'
+   *   get classNames() {
+   *     return super.classNames.add('foo')
+   *   }
+   * }
+   * // classNames = Set { 'some-other-name', 'component', 'foo' }
    */
-  get classNames(): Set<string> { return new Set<string>() }
+  get classNames(): Set<string> {
+    return new Set<string>()
+      // @ts-expect-error - displayName is valid in React components, but not typed
+      .add(kebabCase(this.constructor.displayName ?? this.constructor.name))
+      .add('component')
+  }
 
   /**
    * Getter for data attributes.
-   * @returns a Record<string, boolean | number | string> of data attributes
+   * @returns A Record<string, boolean | number | string> of data attributes.
    */
   get data(): Record<string, boolean | number | string> {
     return {
@@ -66,33 +88,37 @@ export abstract class Component<
   }
 
   /**
-   * Getter for initialState.
-   * @returns the initial state of the component
+   * Getter for the initial state of the component.
+   * @returns The initial state of the component.
    */
   get defaultState(): State { return {} as State }
   state = this.defaultState
 
   /**
-   * Getter for root element.
-   * @returns the root element of the component
+   * Getter for the root element of the component.
+   * @returns The root element of the component.
    */
   get rootNode(): HTMLElement | null { return this.props.nodeRef?.current }
 
   /**
-   * The React.ReactHTML tag name of component's root node.
-   * @default 'div', which renders an `HTMLDivElement`
+   * The React.ReactHTML tag name of the component's root node.
+   * @default 'div', which renders an HTMLDivElement.
    */
   readonly tag: keyof React.ReactHTML = 'div'
 
   /**
    * Renders the component's content. Called once per render.
-   * @param children the children of the component
-   * @returns the rendered content
+   * @param children The children of the component.
+   * @returns The rendered content.
    */
   content(children?: React.ReactNode): React.ReactNode {
     return children
   }
 
+  /**
+   * Renders the component.
+   * @returns The rendered React node.
+   */
   render(): React.ReactNode {
     const Tag = this.tag
     const { className, nodeRef: rootNodeRef } = this.props
@@ -102,13 +128,7 @@ export abstract class Component<
         ref={rootNodeRef}
         {...this.attributes}
         {...dataAttributes(this.data)}
-        className={classNames(
-          // @ts-expect-error - displayName is a valid static on React.Component
-          kebabCase(this.constructor.displayName ?? this.constructor.name),
-          'component',
-          className,
-          this.classNames,
-        )}
+        className={classNames(className, this.classNames)}
       >
         {this.content(this.props.children)}
       </Tag>

@@ -5,9 +5,16 @@ const bundle = Bun.env.NODE_ENV !== 'production'
   ? 'development'
   : 'production.min'
 interface Props {
+  /** An array of script URLs to add, deferred. */
   scripts: string[],
 }
 
+/**
+ * Renders the HTML for the index page.
+ * @param props - The component props.
+ * @param props.scripts - An array of script URLs to add, deferred.
+ * @returns The rendered HTML.
+ */
 export const IndexHTML: React.FC<Props> = ({ scripts = [] }) => (
   <html lang="en">
     <head>

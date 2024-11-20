@@ -5,16 +5,23 @@ import * as path from 'node:path'
 import { pluginGlobals, pluginSASS } from '@basis/bun-plugins'
 import { transformJsxDev } from './utilities/transformJsxDev'
 
+/** A build output. */
 interface BuildOutput {
+  /** The name of the entrypoint. */
   name: string,
+  /** The build artifact. */
   output: BuildArtifact,
 }
 
+/** The builder options. */
 interface BuilderOptions {
+  /** The callback to call when the build is rebuilt. */
   onRebuild?: (outputs: BuildOutput[]) => void | Promise<void>,
+  /** The root directory of the project. */
   root?: string,
 }
 
+/** A builder for live-compiling React code from source.. */
 /* eslint-disable no-console */
 /* TODO: add a proper logger */
 export class Builder {
@@ -29,7 +36,11 @@ export class Builder {
     this.#onRebuild = onRebuild
   }
 
-  private async setupWatcher() {
+  /**
+   * Sets up a watcher for the entrypoints.
+   * @returns void
+   */
+  private async setupWatcher(): Promise<void> {
     if (this.#watcher) {
       await this.#watcher.close()
     }
@@ -51,7 +62,7 @@ export class Builder {
 
     let rebuildTimeout: Timer | null = null
 
-    const handleChange = async (changedPath: string) => {
+    const handleChange = async (changedPath: string): Promise<void> => {
       // Only rebuild for TypeScript/JavaScript files
       if (!/\.(tsx?|jsx?)$/.test(changedPath)) return
 
@@ -72,7 +83,11 @@ export class Builder {
       })
   }
 
-  async rebuild() {
+  /**
+   * Rebuilds the build.
+   * @returns The build outputs.
+   */
+  async rebuild(): Promise<BuildOutput[]> {
     if (!this.#entrypoints.length) return []
 
     try {
@@ -121,7 +136,13 @@ export class Builder {
     }
   }
 
-  async add(name: string, filePath: string) {
+  /**
+   * Adds an entrypoint to the builder.
+   * @param name - The name of the entrypoint.
+   * @param filePath - The path to the entrypoint.
+   * @returns The builder.
+   */
+  async add(name: string, filePath: string): Promise<Builder> {
     const absolute = path.isAbsolute(filePath)
       ? filePath
       : path.join(this.#root, filePath)
@@ -131,20 +152,32 @@ export class Builder {
     return this
   }
 
-  async initialBuild() {
+  /**
+   * Performs an initial build.
+   * @returns The build outputs.
+   */
+  async initialBuild(): Promise<BuildOutput[]> {
     await this.rebuild()
     await this.setupWatcher() // Only set up the watcher after initial build
     return this.#build
   }
 
-  async stop() {
+  /**
+   * Stops the watcher.
+   * @returns void
+   */
+  async stop(): Promise<void> {
     if (this.#watcher) {
       await this.#watcher.close()
       this.#watcher = null
     }
   }
 
-  getOutputs() {
+  /**
+   * Gets the build outputs.
+   * @returns The build outputs.
+   */
+  getOutputs(): Promise<BuildOutput[]> {
     return this.#build
   }
 }

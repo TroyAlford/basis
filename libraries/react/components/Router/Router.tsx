@@ -3,36 +3,49 @@ import { parseTemplateURI } from '@basis/utilities'
 import { Component } from '../Component/Component'
 
 interface Props {
+  /** The children to render. */
   children: React.ReactNode,
 }
 
 interface RouteProps<P = object> {
+  /** The children to render. */
   children: (params: P) => React.ReactNode | React.ReactNode,
+  /** Whether to match the exact path. */
   exact?: boolean,
+  /** The URL to redirect to. */
   redirectTo?: string,
+  /** The template to match. */
   template: string,
 }
 
 interface LinkProps {
+  /** The children to render. */
   children: React.ReactNode,
+  /** The URL to navigate to. */
   to: string,
 }
 
 interface SwitchProps {
+  /** The children to render. */
   children: React.ReactNode,
 }
 
 interface RedirectProps {
+  /** The URL to redirect to. */
   to: string,
 }
 
 interface State {
+  /** The current URL. */
   currentURL: string,
 }
 
+/** A component for routing between pages. */
 export class Router extends Component<Props, null, State> {
+  /** A component for matching a route. */
   static Route = class Route<P> extends React.Component<RouteProps<P>> { }
 
+  /** A component for switching between routes. */
   static Switch = class Switch extends React.Component<SwitchProps> {
     render() {
       const child = React.Children.toArray(this.props.children)
@@ -45,9 +58,14 @@ export class Router extends Component<Props, null, State> {
     }
   }
 
+  /** A component for navigating to a URL. */
   static Link = class Link extends React.Component<LinkProps> {
-    handleClick = (e: React.MouseEvent<HTMLAnchorElement, MouseEvent>) => {
-      e.preventDefault()
+    /**
+     * Handles the click event.
+     * @param event - The mouse event.
+     */
+    handleClick = (event: React.MouseEvent<HTMLAnchorElement, MouseEvent>) => {
+      event.preventDefault()
       window.history.pushState({}, '', this.props.to)
     }
 
@@ -61,8 +79,9 @@ export class Router extends Component<Props, null, State> {
     }
   }
 
+  /** A component for redirecting to a URL. */
   static Redirect = class Redirect extends React.Component<RedirectProps> {
-    componentDidMount() {
+    componentDidMount(): void {
       const { to } = this.props
       window.history.replaceState({}, '', to)
     }
@@ -85,14 +104,16 @@ export class Router extends Component<Props, null, State> {
     window.removeEventListener('popstate', this.handleNavigate)
   }
 
-  handleNavigate = () => {
+  /** Handles the navigation. */
+  handleNavigate = (): void => {
     const newURL = window.location.pathname + window.location.search
     if (newURL !== this.state.currentURL) {
       this.setState({ currentURL: newURL })
     }
   }
 
-  patchHistoryMethods = () => {
+  /** Patches the history methods. */
+  patchHistoryMethods = (): void => {
     const { pushState, replaceState } = window.history
 
     window.history.pushState = (...args) => {
@@ -106,7 +127,11 @@ export class Router extends Component<Props, null, State> {
     }
   }
 
-  renderRoute = () => {
+  /**
+   * Renders the route.
+   * @returns The rendered route.
+   */
+  renderRoute = (): React.ReactNode | null => {
     const { currentURL } = this.state
     const route = React.Children.toArray(this.props.children).find(child => {
       if (!React.isValidElement(child) || child.type !== Router.Route) return false
