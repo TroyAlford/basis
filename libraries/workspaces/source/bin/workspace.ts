@@ -5,15 +5,17 @@ import { isNil, match } from '@basis/utilities'
 import { buildPackage } from '../functions/buildPackage'
 import { filterByPatterns } from '../functions/filterByPatterns'
 import { findWorkspace } from '../functions/findWorkspace'
-import { getAllWorkspaces } from '../functions/getAllWorkspaces'
 import { getChangedFiles } from '../functions/getChangedFiles'
 import { getChangedWorkspaces } from '../functions/getChangedWorkspaces'
+import { listWorkspaces } from '../functions/listWorkspaces'
+import { publishJSR } from '../functions/publishJSR'
 import type { Workspace } from '../types/Workspace'
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   args: Bun.argv.slice(2),
   options: {
+    dryRun: { type: 'boolean' },
     license: { default: 'none', type: 'string' },
     not: { default: [], multiple: true, type: 'string' },
     only: { default: [], multiple: true, type: 'string' },
@@ -57,7 +59,7 @@ async function buildPackageWithOptions(name: string, workspace: Workspace) {
         return await buildPackageWithOptions(packageName, workspace)
       })
       .when('build-all').then(async () => {
-        const workspaces = await getAllWorkspaces()
+        const workspaces = await listWorkspaces({ not: values.not, only: values.only })
         const failed: string[] = []
 
         for (const name of workspaces) {
@@ -95,11 +97,11 @@ async function buildPackageWithOptions(name: string, workspace: Workspace) {
 
         return workspace.packagePath
       })
-      .when('list').then(async () => {
-        const workspaces = await getAllWorkspaces()
-        return filterByPatterns(workspaces, values)
+      .when('list').then(() => listWorkspaces({ not: values.not, only: values.only }))
+      .when('publish').then(async () => {
+        if (!values.version) throw new Error('Usage: workspace publish --version <version> [options]')
+        return publishJSR(values)
       })
-      .when('publish').then(async () => null)
       .else(() => {
         throw new Error(`Unknown command: ${command}`)
       })
