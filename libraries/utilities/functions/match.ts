@@ -71,7 +71,7 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
    *   .when({ min: 0, max: 10 }).then('within range')  // Matches range
    *   .when(/^\d+$/).then('is numeric')  // Matches regex
    */
-  when<M = Value>(matcher: M | Matcher<M>) {
+  when<M = Value>(matcher: M | Matcher<M>): Pick<Match<Value, Return, M>, 'and' | 'or' | 'then'> {
     this.placeholders.length = 0
     if (this.result === INITIAL && !this.matched) this.matched = this.evaluate(matcher)
     return this as Pick<Match<Value, Return, M>, 'and' | 'or' | 'then'>
@@ -88,9 +88,9 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
    *   .and(num => num < 10)
    *   .then('between 0 and 10')
    */
-  and<M = Narrowed>(matcher: M | Matcher<M>) {
+  and<M = Narrowed>(matcher: M | Matcher<M>): Pick<Match<Value, Return, M | Narrowed>, 'and' | 'then'> {
     if (this.result === INITIAL && this.matched) this.matched = this.evaluate(matcher)
-    return this as Pick<Match<Value, Return, M | Narrowed>, 'and' | 'then'>
+    return this
   }
 
   /**
@@ -104,10 +104,10 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
    *   .or(10)
    *   .then('five or ten')
    */
-  or<M = Narrowed>(matcher: M | Matcher<M>) {
+  or<M = Narrowed>(matcher: M | Matcher<M>): Pick<Match<Value, Return, M | Narrowed>, 'or' | 'then'> {
     if (this.result === INITIAL && !this.matched) this.matched = this.evaluate(matcher)
     if (!this.matched) this.placeholders.length = 0
-    return this as Pick<Match<Value, Return, M | Narrowed>, 'or' | 'then'>
+    return this
   }
 
   /**
@@ -119,7 +119,9 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
    *   .when(5).then('five')  // Static value
    *   .when(n => n > 0).then(n => `positive: ${n}`)  // Function
    */
-  then<Then = Narrowed>(predicate: Then | ThenFn<Narrowed, Then>) {
+  then<Then = Narrowed>(
+    predicate: Then | ThenFn<Narrowed, Then>,
+  ): Pick<Match<Value, Known<Return | Then>, unknown>, 'else' | 'when'> {
     if (this.result === INITIAL && this.matched) {
       this.result = typeof predicate === 'function'
         ? (predicate as ThenFn<Value, Then>)(this.value, this.placeholders)
@@ -262,4 +264,6 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
  *   .when({ min: 0, max: 10 }).then('small number')
  *   .else('something else')
  */
-export const match = <Value, Return>(value: Value) => new Match<Value, Return, unknown>(value)
+export const match = <Value, Return>(value: Value): Match<Value, Return, unknown> => (
+  new Match<Value, Return, unknown>(value)
+)
