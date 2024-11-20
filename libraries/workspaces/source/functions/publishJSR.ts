@@ -72,6 +72,7 @@ export async function publishJSR(options: Options) {
       const config: Record<string, unknown> = {
         name: packageJson.name,
         version,
+        description: packageJson.description ?? undefined,
         exports: packageJson.source || './index.ts',
         dependencies: dependencies,
         peerDependencies: peerDependencies,
@@ -84,6 +85,7 @@ export async function publishJSR(options: Options) {
         },
       }
       /* eslint-enable sort-keys-fix/sort-keys-fix */
+      if (!packageJson.description) delete config.description
       if (!Object.keys(config.dependencies).length) delete config.dependencies
       if (!Object.keys(config.peerDependencies).length) delete config.peerDependencies
 
