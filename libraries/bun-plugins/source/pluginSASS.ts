@@ -1,3 +1,4 @@
+import type { BunPlugin } from 'bun'
 import * as path from 'node:path'
 import * as sass from 'sass'
 
@@ -28,7 +29,7 @@ import * as sass from 'sass'
  * // compiled CSS content
  * </style>
  */
-export function pluginSASS(root: string) {
+export function pluginSASS(root: string): BunPlugin {
   return {
     name: 'scss',
     setup(build) {
