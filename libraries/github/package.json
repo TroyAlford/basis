@@ -1,6 +1,0 @@
-{
-  "name": "@basis/github",
-  "engines": {
-    "bun": "*"
-  }
-}
