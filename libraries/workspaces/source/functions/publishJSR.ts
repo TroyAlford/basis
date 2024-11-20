@@ -97,7 +97,7 @@ export async function publishJSR(options: Options) {
 
       const flags = [
         '--allow-dirty',
-        dryRun ? '--dryRun' : undefined,
+        dryRun ? '--dry-run' : undefined,
       ].filter(Boolean).join(' ')
 
       console.log(`Publishing ${name} to JSR...`)
