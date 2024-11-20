@@ -2,30 +2,31 @@
 
 ## Overview
 
-The `eslint-plugin` workspace provides a comprehensive set of ESLint rules designed to enforce a consistent coding style across your projects. This plugin is intended to be used as a base configuration that can be easily integrated into your projects by installing the `TroyAlford/basis` package at a specific tagged version. The rules focus on maintaining code quality, readability, and consistency, with an emphasis on modern JavaScript and TypeScript practices.
+The `@basis/eslint-plugin` workspace provides a comprehensive set of ESLint rules designed to enforce a consistent coding style across your projects. This plugin is intended to be used as a base configuration that can be easily integrated into your projects by installing the `@basis/eslint-plugin` package via JSR. The rules focus on maintaining code quality, readability, and consistency, with an emphasis on modern JavaScript and TypeScript practices. This is a flat-config ESLint@9+ configuration that is highly opinionated.
+
+## Installation
+
+```sh
+bunx jsr add @basis/eslint-plugin
+```
+> **Note:** All `@basis` packages, including this one, are published via `jsr` instead of `npm`. This approach ensures a streamlined and efficient package management experience tailored for Bun.
 
 ## Usage
 
 To use this ESLint plugin in your project, follow these steps:
 
-1. **Install the Plugin**: Add `TroyAlford/basis` to your project's dependencies at a specific tagged version.
+1. **Create a Root-Level ESLint Configuration**: In your project's root directory, create a file named `eslint.config.mjs` that references the plugin.
 
-```bash
-npm install TroyAlford/basis@<tag>
-```
-
-2. **Create a Root-Level ESLint Configuration**: In your project's root directory, create a file named `eslint.config.mjs` that references the plugin.
-
-```javascript
-import eslintPlugin from './node_modules/TroyAlford/basis/libraries/eslint-plugin/dist/index.mjs'
+```ts
+import eslintPlugin from './node_modules/@basis/eslint-plugin/dist/index.mjs'
 
 export default eslintPlugin
 ```
 
-3. **Customize the Configuration**: You can override the base rules provided by the plugin to suit your project's specific needs. Here's an example of how to extend and customize the configuration:
+2. **Customize the Configuration**: You can override the base rules provided by the plugin to suit your project's specific needs. Here's an example of how to extend and customize the configuration:
 
-```javascript
-import eslintPlugin from './node_modules/TroyAlford/basis/libraries/eslint-plugin/dist/index.mjs'
+```ts
+import eslintPlugin from './node_modules/@basis/eslint-plugin/dist/index.mjs'
 
 export default {
   ...eslintPlugin,
