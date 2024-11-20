@@ -90,7 +90,8 @@ export async function publishJSR(options: Options) {
         console.log(`Would publish ${name} to JSR from ${packagePath}`)
       } else {
         console.log(`Publishing ${name} to JSR...`)
-        const output = await $`bunx jsr publish`.cwd(packagePath).nothrow()
+        // --allow-dirty is required, because we're updating but not committing jsr.jsonc
+        const output = await $`bunx jsr publish --allow-dirty`.cwd(packagePath).nothrow()
         if (output.exitCode !== 0) {
           throw new Error(`Failed to publish ${name} to JSR: ${output.stderr}`)
         }
