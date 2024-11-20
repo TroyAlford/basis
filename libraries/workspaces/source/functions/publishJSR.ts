@@ -95,16 +95,15 @@ export async function publishJSR(options: Options) {
         JSON.stringify(config, null, 2),
       ].join('\n'))
 
-      // Publish to JSR
-      if (dryRun) {
-        console.log(`Would publish ${name} to JSR from ${packagePath}`)
-      } else {
-        console.log(`Publishing ${name} to JSR...`)
-        // --allow-dirty is required, because we're updating but not committing jsr.jsonc
-        const output = await $`bunx jsr publish --allow-dirty`.cwd(packagePath).nothrow()
-        if (output.exitCode !== 0) {
-          throw new Error(`Failed to publish ${name} to JSR: ${output.stderr}`)
-        }
+      const flags = [
+        '--allow-dirty',
+        dryRun ? '--dryRun' : undefined,
+      ].filter(Boolean).join(' ')
+
+      console.log(`Publishing ${name} to JSR...`)
+      const output = await $`bunx jsr publish ${flags}`.cwd(packagePath).nothrow()
+      if (output.exitCode !== 0) {
+        throw new Error(`Failed to publish ${name} to JSR: ${output.stderr}`)
       }
 
       console.log(`✅ ${dryRun ? 'Prepared' : 'Published'} ${name}`)
