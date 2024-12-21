@@ -13,17 +13,18 @@ export async function getChangedFiles(
     await fetchAllTags()
     await $`git fetch origin ${base}:${base}`.quiet().nothrow()
 
-    // Check if we're on main branch
-    const currentBranch = await $`git branch --show-current`.quiet().text()
-    const isOnMain = currentBranch.trim() === 'main'
+    // Check if we're at the tip of the base branch
+    const baseRef = await $`git rev-parse origin/${base}`.quiet().text()
+    const headRef = await $`git rev-parse HEAD`.quiet().text()
+    const isAtBaseTip = baseRef.trim() === headRef.trim()
 
     let compareRef: string
-    if (isOnMain) {
-      // If we're on main, compare with the latest release tag
+    if (isAtBaseTip) {
+      // If we're at the tip, compare with the latest release tag
       const latestTag = await $`git describe --tags --abbrev=0`.quiet().nothrow().text().catch(() => '')
       compareRef = latestTag.trim() || 'HEAD~1' // Fallback to previous commit if no tags exist
     } else {
-      // If we're not on main, compare with main branch
+      // If we're not at the tip, compare with main branch
       compareRef = `origin/${base}`
     }
 
