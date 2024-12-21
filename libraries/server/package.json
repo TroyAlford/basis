@@ -3,6 +3,9 @@
   "engines": {
     "bun": "*"
   },
+  "exports": {
+    ".": "./index.ts"
+  },
   "peerDependencies": {
     "@basis/bun-plugins": "workspace:*",
     "@basis/react": "workspace:*",

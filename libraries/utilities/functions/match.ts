@@ -1,19 +1,32 @@
+/** Symbol used as a placeholder in pattern matching */
 export const _ = Symbol('placeholder')
+
+/** Symbol used to represent the initial state before any matches */
 const INITIAL = Symbol('INITIAL')
 
+/** Type for matching array-like objects with optional length and indexed values */
 type ArrayLikeMatcher<U> = (
   & Partial<Record<`${number}`, U | typeof _>>
   & { length?: number | typeof _ }
 )
+
+/** Type for matching numbers, either exact values or within a range */
 type NumberMatcher = number | { max?: number, min?: number }
+
+/** Type for matching strings, either exact values or regex patterns */
 type StringMatcher = string | RegExp
+
+/** Type for matching arrays, allowing placeholders for individual elements */
 type ArrayMatcher<T> = T extends (infer U)[]
   ? ((U | typeof _)[] | ArrayLikeMatcher<U>)
   : never
+
+/** Type for matching objects, allowing placeholders for individual properties */
 type ObjectMatcher<T> = T extends object
   ? { [K in keyof T]?: T[K] | typeof _ }
   : never
 
+/** Union type of all possible matcher types that can be used in pattern matching */
 type Matcher<T> =
   | ArrayMatcher<T>
   | NumberMatcher
@@ -21,17 +34,23 @@ type Matcher<T> =
   | StringMatcher
   | ((value: T) => boolean)
 
+/** Utility type to extract known types, filtering out unknown */
 type Known<T> = T extends unknown ? (unknown extends T ? never : T) : T
+
+/** Function type for handling successful matches with access to matched value and placeholders */
 type ThenFn<T, R> = (value: T, placeholders: unknown[]) => R
+
+/** Function type for handling fallback cases with access to the original value */
 type ElseFn<T, R> = (value: T) => R
 
 /**
- * Match a value against a series of matchers
- * @param value the value to match
- * @returns a match object
- * @example match(5)
+ * Creates a new pattern matching chain for a value.
+ * @param value The value to match against patterns
+ * @returns A new Match instance
+ * @example
+ * match(value)
  *   .when(5).then('five')
- *   .or(6).then('six')
+ *   .when(10).then('ten')
  *   .else('unknown')
  */
 class Match<Value, Return = unknown, Narrowed = unknown> {
@@ -41,24 +60,68 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 
   constructor(private value: Value) { }
 
-  when<M = Value>(matcher: M | Matcher<M>) {
+  /**
+   * Starts a new matching condition. If the previous conditions haven't matched,
+   * evaluates the value against the provided matcher.
+   * @param matcher The pattern to match against
+   * @returns The Match instance for chaining
+   * @example
+   * match(value)
+   *   .when(5).then('five')  // Matches exact value
+   *   .when({ min: 0, max: 10 }).then('within range')  // Matches range
+   *   .when(/^\d+$/).then('is numeric')  // Matches regex
+   */
+  when<M = Value>(matcher: M | Matcher<M>): Pick<Match<Value, Return, M>, 'and' | 'or' | 'then'> {
     this.placeholders.length = 0
     if (this.result === INITIAL && !this.matched) this.matched = this.evaluate(matcher)
     return this as Pick<Match<Value, Return, M>, 'and' | 'or' | 'then'>
   }
 
-  and<M = Narrowed>(matcher: M | Matcher<M>) {
+  /**
+   * Adds an additional condition that must also match for the current pattern.
+   * Only evaluated if the previous matcher(s) succeeded.
+   * @param matcher Additional pattern that must also match
+   * @returns The Match instance for chaining
+   * @example
+   * match(value)
+   *   .when(num => num > 0)
+   *   .and(num => num < 10)
+   *   .then('between 0 and 10')
+   */
+  and<M = Narrowed>(matcher: M | Matcher<M>): Pick<Match<Value, Return, M | Narrowed>, 'and' | 'then'> {
     if (this.result === INITIAL && this.matched) this.matched = this.evaluate(matcher)
-    return this as Pick<Match<Value, Return, M | Narrowed>, 'and' | 'then'>
+    return this
   }
 
-  or<M = Narrowed>(matcher: M | Matcher<M>) {
+  /**
+   * Provides an alternative pattern to match if the previous pattern(s) failed.
+   * Only evaluated if the previous matcher(s) failed.
+   * @param matcher Alternative pattern to try matching
+   * @returns The Match instance for chaining
+   * @example
+   * match(value)
+   *   .when(5)
+   *   .or(10)
+   *   .then('five or ten')
+   */
+  or<M = Narrowed>(matcher: M | Matcher<M>): Pick<Match<Value, Return, M | Narrowed>, 'or' | 'then'> {
     if (this.result === INITIAL && !this.matched) this.matched = this.evaluate(matcher)
     if (!this.matched) this.placeholders.length = 0
-    return this as Pick<Match<Value, Return, M | Narrowed>, 'or' | 'then'>
+    return this
   }
 
-  then<Then = Narrowed>(predicate: Then | ThenFn<Narrowed, Then>) {
+  /**
+   * Specifies the result to return if the current pattern matches.
+   * @param predicate Value or function to evaluate for the result
+   * @returns The Match instance for chaining
+   * @example
+   * match(value)
+   *   .when(5).then('five')  // Static value
+   *   .when(n => n > 0).then(n => `positive: ${n}`)  // Function
+   */
+  then<Then = Narrowed>(
+    predicate: Then | ThenFn<Narrowed, Then>,
+  ): Pick<Match<Value, Known<Return | Then>, unknown>, 'else' | 'when'> {
     if (this.result === INITIAL && this.matched) {
       this.result = typeof predicate === 'function'
         ? (predicate as ThenFn<Value, Then>)(this.value, this.placeholders)
@@ -67,6 +130,17 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
     return this as Pick<Match<Value, Known<Return | Then>, unknown>, 'else' | 'when'>
   }
 
+  /**
+   * Provides a default result if no patterns matched.
+   * This is the terminal operation that returns the final result.
+   * @param predicate Default value or function to evaluate
+   * @returns The final result of the pattern matching
+   * @example
+   * match(value)
+   *   .when(5).then('five')
+   *   .else('unknown')  // Static fallback
+   *   .else(v => `unmatched: ${v}`)  // Function fallback
+   */
   else<Else>(predicate: Else | ElseFn<Value, Return | Else>): Return | Else {
     if (this.matched) return this.result as Return
     return typeof predicate === 'function'
@@ -178,5 +252,18 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
   }
 }
 
-// Helper function to initiate the match
-export const match = <Value, Return>(value: Value) => new Match<Value, Return, unknown>(value)
+/**
+ * Creates a new pattern matching chain for a value.
+ * Supports matching against exact values, ranges, regular expressions,
+ * array patterns, object patterns, and custom predicates.
+ * @param value The value to match against patterns
+ * @returns A new Match instance
+ * @example
+ * match(5)
+ *   .when(5).then('five')
+ *   .when({ min: 0, max: 10 }).then('small number')
+ *   .else('something else')
+ */
+export const match = <Value, Return>(value: Value): Match<Value, Return, unknown> => (
+  new Match<Value, Return, unknown>(value)
+)

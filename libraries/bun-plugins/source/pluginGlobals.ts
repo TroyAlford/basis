@@ -102,7 +102,7 @@ function generateExport(globals: PluginGlobalsOptions, name: string): string | u
  *   'legacy-(.*)': (name) => `window.Legacy['${name}']`
  * })
  */
-export const pluginGlobals = (globals: PluginGlobalsOptions = {}) => {
+export function pluginGlobals(globals: PluginGlobalsOptions = {}): BunPlugin {
   const filter = generateResolveFilter(globals)
   return {
     name: 'globals',

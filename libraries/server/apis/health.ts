@@ -1,7 +1,10 @@
-import { formatMilliseconds } from '@basis/utilities'
-import { Milliseconds } from '@basis/utilities/constants/Milliseconds'
+import { formatMilliseconds, Milliseconds } from '@basis/utilities'
 
-export const health = () => new Response(JSON.stringify({
+/**
+ * Returns a response with the health information.
+ * @returns A health response with details about uptime and the current Bun version.
+ */
+export const health = (): Response => new Response(JSON.stringify({
   bun: Bun.version,
   uptime: {
     nanoseconds: Bun.nanoseconds(),

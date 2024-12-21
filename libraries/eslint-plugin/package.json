@@ -2,6 +2,7 @@
   "main": "./index.mjs",
   "module": "./index.mjs",
   "name": "@basis/eslint-plugin",
+  "description": "A comprehensive ESLint plugin for enforcing coding standards and best practices.",
   "type": "module",
   "engines": {
     "bun": "*"

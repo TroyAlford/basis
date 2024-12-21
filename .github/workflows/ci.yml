@@ -49,7 +49,7 @@ jobs:
       - name: Run TypeScript Type Check
         run: bun tsc
 
-  build-packages:
+  publish-dry-run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,22 +63,18 @@ jobs:
           echo "Changed workspaces: $changed"
           echo "workspaces=$changed" >> $GITHUB_OUTPUT
 
-      - name: Build Changed Workspaces
+      - name: Dry Run Publish Changed Workspaces
         if: steps.changes.outputs.workspaces != '[]'
         run: |
           workspaces='${{ steps.changes.outputs.workspaces }}'
           version='${{ github.run_number }}-alpha'
 
           for workspace in $(echo "$workspaces" | jq -r '.[]'); do
-            echo "Building $workspace@$version"
-            build_output=$(bun workspace build "$workspace" -v "$version" 2>&1)
-
-            if [[ "$build_output" == *"SKIP"* ]]; then
-              echo "⚠️ Build script is set to SKIP for $workspace. Skipping."
-              continue
-            fi
-
-            echo "$build_output"
+            echo "Dry run publishing $workspace@$version"
+            bun ws publish --only "$workspace" --version "$version" --dryRun || {
+              echo "::error::Failed to dry run publish $workspace"
+              exit 1
+            }
           done
 
   required:
@@ -88,7 +84,7 @@ jobs:
       - eslint
       - run-tests
       - type-check
-      - build-packages
+      - publish-dry-run
     runs-on: ubuntu-latest
     steps:
       - name: Check if required jobs passed or were skipped

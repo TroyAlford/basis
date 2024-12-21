@@ -1,5 +1,13 @@
 /** Milliseconds constants */
-export const Milliseconds = {
+export const Milliseconds: {
+  readonly PerDay: number,
+  readonly PerHour: number,
+  readonly PerMinute: number,
+  readonly PerNanosecond: number,
+  readonly PerSecond: number,
+  readonly PerWeek: number,
+  readonly PerYear: number,
+} = {
   /**
    * Milliseconds per day
    * @returns Milliseconds per day
@@ -35,4 +43,4 @@ export const Milliseconds = {
    * @returns Milliseconds per year
    */
   get PerYear() { return this.PerDay * 365.25 },
-} as const
+}

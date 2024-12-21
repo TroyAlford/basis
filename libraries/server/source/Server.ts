@@ -4,18 +4,19 @@ import * as path from 'node:path'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
 import { IndexHTML } from '@basis/react'
+import type { URI } from '@basis/utilities'
 import { HttpVerb, parseTemplateURI, parseURI } from '@basis/utilities'
-import type { URI } from '@basis/utilities/types/URI'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
 import type { APIRoute } from '../types/APIRoute'
 import { Builder } from './Builder'
 
+/** A server for live-compiling, serving, and hot reloading React code from source. */
 /* eslint-disable no-console */
 /* TODO: add a proper logger */
 export class Server {
-  static BadRequest = new Response(null, { status: 400, statusText: 'Bad Request' })
-  static NotFound = new Response(null, { status: 404, statusText: 'Not Found' })
+  static BadRequest: Response = new Response(null, { status: 400, statusText: 'Bad Request' })
+  static NotFound: Response = new Response(null, { status: 404, statusText: 'Not Found' })
 
   #apis = new Map<string, APIRoute>()
   #assets: string = null
@@ -48,7 +49,13 @@ export class Server {
     this.#builder.add('hmr.js', hmrPath)
   }
 
-  async handleAPI(uri: URI, method: string) {
+  /**
+   * Processes an API request.
+   * @param uri - The URI to handle.
+   * @param method - The HTTP method to handle.
+   * @returns The API response.
+   */
+  async handleAPI(uri: URI, method: string): Promise<Response> {
     for (const [template, { handler, verbs }] of this.#apis.entries()) {
       if (!verbs.has(method as HttpVerb)) continue
 
@@ -60,7 +67,13 @@ export class Server {
 
     return Server.BadRequest
   }
-  async handleAsset(uri: URI) {
+
+  /**
+   * Handles an asset request.
+   * @param uri - The URI to handle.
+   * @returns The asset response.
+   */
+  async handleAsset(uri: URI): Promise<Response> {
     if (!this.#assets) return Server.NotFound
 
     const asset = Bun.file(path.join(this.#assets, uri.route))
@@ -85,7 +98,13 @@ export class Server {
       return Server.NotFound
     }
   }
-  async handleModule(uri: URI) {
+
+  /**
+   * Handles a module request.
+   * @param uri - The URI to handle.
+   * @returns The module response.
+   */
+  async handleModule(uri: URI): Promise<Response> {
     if (!this.#modules.has(uri.route)) {
       const response = await fetch(`https://unpkg.com/${uri.route}`)
       if (!response.ok) return Server.NotFound
@@ -102,7 +121,13 @@ export class Server {
       },
     })
   }
-  async handleScripts(uri: URI) {
+
+  /**
+   * Handles a script request.
+   * @param uri - The URI to handle.
+   * @returns The script response.
+   */
+  async handleScripts(uri: URI): Promise<Response> {
     const built = await this.#builder.getOutputs()
     const script = built.find(s => s.name === uri.route)
     if (!script) return Server.NotFound
@@ -113,14 +138,25 @@ export class Server {
       statusText: 'OK',
     })
   }
-  async handleUI() {
+
+  /**
+   * Handles a UI request.
+   * @returns The UI response.
+   */
+  async handleUI(): Promise<Response> {
     const html = await renderToString(React.createElement(IndexHTML, {
       scripts: this.#scripts.map(([name]) => name),
     }))
     return new Response(html, { headers: { 'Content-Type': 'text/html' } })
   }
 
-  start = ({ port = 80 } = {}) => {
+  /**
+   * Starts the server.
+   * @param options - The options to start the server with.
+   * @param options.port - The port to start the server on.
+   * @returns The server.
+   */
+  start = ({ port = 80 } = {}): Server => {
     this.#server = Bun.serve({
       fetch: async (request: Request) => {
         // Check for WebSocket upgrade requests first
@@ -163,7 +199,12 @@ export class Server {
 
     return this
   }
-  stop = () => {
+
+  /**
+   * Stops the server.
+   * @returns The server.
+   */
+  stop = (): Server => {
     process.off('SIGINT', this.stop)
     process.off('SIGTERM', this.stop)
 
@@ -173,7 +214,12 @@ export class Server {
     return this
   }
 
-  main(filePath: string) {
+  /**
+   * Sets the main entrypoint for the server.
+   * @param filePath - The path to the entrypoint.
+   * @returns The server.
+   */
+  main(filePath: string): Server {
     const absolute = path.isAbsolute(filePath)
       ? filePath
       : path.join(this.#root, filePath)
@@ -185,7 +231,13 @@ export class Server {
       .then(builder => builder.initialBuild())
     return this
   }
-  root(absolutePath: string) {
+
+  /**
+   * Sets the root directory for the server.
+   * @param absolutePath - The absolute path to the root directory.
+   * @returns The server.
+   */
+  root(absolutePath: string): Server {
     this.#checkPath(absolutePath)
     this.#root = absolutePath
 
@@ -208,21 +260,35 @@ export class Server {
 
     return this
   }
-  #checkPath(absolutePath: string) {
+
+  #checkPath(absolutePath: string): void {
     if (!fs.existsSync(absolutePath)) {
       throw new Error(`Path "${absolutePath}" does not exist`)
     }
   }
 
+  /**
+   * Adds an API route to the server.
+   * @param verbs - The HTTP methods to handle.
+   * @param template - The template URI to handle.
+   * @param handler - The handler for the API route.
+   * @returns The server.
+   */
   api<Params extends object = object>(
     verbs: HttpVerb[],
     template: string,
     handler: (params: Params) => Response,
-  ) {
+  ): Server {
     this.#apis.set(template, { handler, verbs: new Set(verbs) })
     return this
   }
-  assets(folder: string) {
+
+  /**
+   * Sets the assets folder for the server.
+   * @param folder - The folder to set as the assets folder.
+   * @returns The server.
+   */
+  assets(folder: string): Server {
     const absolute = path.isAbsolute(folder) ? folder : path.join(this.#root, folder)
     if (!fs.existsSync(absolute)) {
       throw new Error(`Assets folder "${absolute}" does not exist`)
