@@ -41,10 +41,12 @@ export async function getUnreleasedCommitMessages(): Promise<ConventionalCommit[
     // Get latest tag and its commit hash
     const latestTag = await $`git tag -l | sort -V | tail -n 1`
       .quiet().nothrow().text().then(t => t.trim()).catch(() => '')
+    const latestTagCommit = await $`git rev-list -n 1 ${latestTag}`
+      .quiet().text().then(t => t.trim()).catch(() => '')
 
     // If no tag exists, get all commits
     const range = latestTag
-      ? `$(git rev-list -n 1 ${latestTag})..HEAD`
+      ? `${latestTagCommit}..HEAD`
       : 'HEAD'
 
     /*
