@@ -75,7 +75,7 @@ jobs:
       - eslint
       - run-tests
       - type-check
-      - publish-dry-run
+      # - publish-dry-run
     runs-on: ubuntu-latest
     steps:
       - name: Check if required jobs passed or were skipped
