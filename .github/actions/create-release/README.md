@@ -1,40 +1,43 @@
-# Create Convco Release
+# Create Release
 
 ## Purpose
 
-This action automates the process of creating a new release based on Conventional Commits. It handles versioning and changelog generation, ensuring that releases are consistent and well-documented. This is particularly useful for maintaining a clear project history and facilitating smooth deployments.
+This action creates a GitHub release with automatically generated release notes. It's designed to work in conjunction with the `determine-version` action, creating releases only when needed and with the correct version number.
 
 ## Inputs
 
-- **github-token**: GitHub token for creating the release. (Required)
+- **github-token**: GitHub token for creating the release (Required)
+- **version**: The version to release (Required)
 
 ## Usage Example
 ```yaml
-name: Create Release
-
-on:
-  push:
-    branches:
-      - main
-
 jobs:
-  create_release:
+  release:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      
+      # First determine if a release is needed
+      - name: Determine Version
+        id: version
+        uses: ./.github/actions/determine-version
 
-    - name: Create Release
-      uses: TroyAlford/basis/.github/actions/create-release@main
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      # Then create the release if needed
+      - name: Create Release
+        if: steps.version.outputs.release-needed == 'true'
+        uses: ./.github/actions/create-release
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ steps.version.outputs.next-version }}
 ```
 
-## Versioning
+## Release Notes
 
-Specify the versioning strategy for this action, if applicable.
+Release notes are automatically generated using GitHub's built-in release notes generation, which creates a changelog based on merged pull requests and their labels.
 
-## Contributing
+## Integration
 
-If you want to contribute to this action, please follow the contribution guidelines in the main repository.
+This action is typically used as part of a release workflow, alongside:
+- determine-version: To decide if a release is needed
+- Package publishing actions: To publish updated packages after release

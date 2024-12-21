@@ -1,0 +1,25 @@
+name: 'Determine Version'
+description: 'Determines if a new release is needed based on conventional commits'
+
+outputs:
+  current-version:
+    description: 'The current version'
+    value: ${{ steps.version.outputs.current-version }}
+  next-version:
+    description: 'The next version (same as current if no release needed)'
+    value: ${{ steps.version.outputs.next-version }}
+  release-needed:
+    description: 'Whether a new release is needed'
+    value: ${{ steps.version.outputs.release-needed }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: ./.github/actions/asdf-setup
+    - name: Determine Version
+      id: version
+      shell: bash
+      run: |
+        TEMP_DIR=$(mktemp -d)
+        cp ${{ github.action_path }}/*.ts "$TEMP_DIR/"
+        bun run "$TEMP_DIR/determineVersion.ts"
