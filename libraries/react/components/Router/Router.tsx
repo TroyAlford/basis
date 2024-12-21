@@ -1,103 +1,42 @@
 import * as React from 'react'
 import { parseTemplateURI } from '@basis/utilities'
 import { Component } from '../Component/Component'
+import { Link } from './Link'
+import { Redirect } from './Redirect'
+import { Route } from './Route'
+import { Switch } from './Switch'
 
+/** Props for the Router component */
 interface Props {
-  /** The children to render. */
+  /** The routes to render */
   children: React.ReactNode,
 }
 
-interface RouteProps<P = object> {
-  /** The children to render. */
-  children: (params: P) => React.ReactNode | React.ReactNode,
-  /** Whether to match the exact path. */
-  exact?: boolean,
-  /** The URL to redirect to. */
-  redirectTo?: string,
-  /** The template to match. */
-  template: string,
-}
-
-interface LinkProps {
-  /** The children to render. */
-  children: React.ReactNode,
-  /** The URL to navigate to. */
-  to: string,
-}
-
-interface SwitchProps {
-  /** The children to render. */
-  children: React.ReactNode,
-}
-
-interface RedirectProps {
-  /** The URL to redirect to. */
-  to: string,
-}
-
+/** State for the Router component */
 interface State {
-  /** The current URL. */
+  /** The current URL */
   currentURL: string,
 }
 
-/** A component for routing between pages. */
+/**
+ * A component for client-side routing between pages
+ * @example
+ * <Router>
+ *   <Router.Switch>
+ *     <Router.Route template="/users/:id">
+ *       {params => <UserProfile id={params.id} />}
+ *     </Router.Route>
+ *     <Router.Route template="/">
+ *       <HomePage />
+ *     </Router.Route>
+ *   </Router.Switch>
+ * </Router>
+ */
 export class Router extends Component<Props, null, State> {
-  /** A component for matching a route. */
-  static Route: React.ComponentType<RouteProps<unknown>> = (
-    class Route<P> extends React.Component<RouteProps<P>> { }
-  )
-
-  /** A component for switching between routes. */
-  static Switch: React.ComponentType<SwitchProps> = (
-    class Switch extends React.Component<SwitchProps> {
-      render() {
-        const child = React.Children.toArray(this.props.children)
-          .find(c => React.isValidElement(c))
-        return (
-          <React.Fragment>
-            {child}
-          </React.Fragment>
-        )
-      }
-    }
-  )
-
-  /** A component for navigating to a URL. */
-  static Link: React.ComponentType<LinkProps> = (
-    class Link extends React.Component<LinkProps> {
-      /**
-       * Handles the click event.
-       * @param event - The mouse event.
-       */
-      handleClick = (event: React.MouseEvent<HTMLAnchorElement, MouseEvent>) => {
-        event.preventDefault()
-        window.history.pushState({}, '', this.props.to)
-      }
-
-      render() {
-        const { children, to } = this.props
-        return (
-          <a href={to} onClick={this.handleClick}>
-            {children}
-          </a>
-        )
-      }
-    }
-  )
-
-  /** A component for redirecting to a URL. */
-  static Redirect: React.ComponentType<RedirectProps> = (
-    class Redirect extends React.Component<RedirectProps> {
-      componentDidMount(): void {
-        const { to } = this.props
-        window.history.replaceState({}, '', to)
-      }
-
-      render() {
-        return null
-      }
-    }
-  )
+  static Link = Link
+  static Route = Route
+  static Switch = Switch
+  static Redirect = Redirect
 
   state = {
     currentURL: window.location.pathname + window.location.search,
@@ -112,7 +51,7 @@ export class Router extends Component<Props, null, State> {
     window.removeEventListener('popstate', this.handleNavigate)
   }
 
-  /** Handles the navigation. */
+  /** Handles URL navigation */
   handleNavigate = (): void => {
     const newURL = window.location.pathname + window.location.search
     if (newURL !== this.state.currentURL) {
@@ -120,7 +59,7 @@ export class Router extends Component<Props, null, State> {
     }
   }
 
-  /** Patches the history methods. */
+  /** Patches history methods to trigger navigation handling */
   patchHistoryMethods = (): void => {
     const { pushState, replaceState } = window.history
 
@@ -136,15 +75,15 @@ export class Router extends Component<Props, null, State> {
   }
 
   /**
-   * Renders the route.
-   * @returns The rendered route.
+   * Renders the matching route
+   * @returns The rendered route or null if no match
    */
   renderRoute = (): React.ReactNode | null => {
     const { currentURL } = this.state
     const route = React.Children.toArray(this.props.children).find(child => {
       if (!React.isValidElement(child) || child.type !== Router.Route) return false
       return !!parseTemplateURI(currentURL, child.props.template)
-    }) as React.ReactElement<RouteProps<unknown>> | undefined
+    }) as React.ReactElement<Route<unknown>['props']> | undefined
 
     if (route) {
       const { children, redirectTo, template } = route.props
