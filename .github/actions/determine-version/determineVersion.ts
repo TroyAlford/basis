@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 import { $ } from 'bun'
-import { getCurrentVersion } from '../create-release/getCurrentVersion'
-import { getUnreleasedCommitMessages, isMinorChange, isPatchChange } from '../create-release/getUnreleasedCommitMessages'
+import { getCurrentVersion } from './getCurrentVersion'
+import { getUnreleasedCommitMessages, isMinorChange, isPatchChange } from './getUnreleasedCommitMessages'
 
 /** A semantic version number */
 interface Version {
