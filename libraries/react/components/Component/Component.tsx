@@ -121,11 +121,11 @@ export abstract class Component<
    */
   render(): React.ReactNode {
     const Tag = this.tag
-    const { className, nodeRef: rootNodeRef } = this.props
+    const { className, nodeRef } = this.props
 
     return ( // @ts-expect-error - we are assuming a props match
       <Tag // @ts-expect-error - we are assuming a props match
-        ref={rootNodeRef}
+        ref={nodeRef}
         {...this.attributes}
         {...dataAttributes(this.data)}
         className={classNames(className, this.classNames)}
