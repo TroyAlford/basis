@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { $ } from 'bun'
 import { fetchAllTags } from './fetchAllTags'
 
@@ -6,9 +7,7 @@ import { fetchAllTags } from './fetchAllTags'
  * @param base - The base commit to compare against
  * @returns The list of changed files
  */
-export async function getChangedFiles(
-  base = 'main',
-): Promise<string[]> {
+export async function getChangedFiles(base = 'main'): Promise<string[]> {
   try {
     console.log('\nChecking for changed files...')
 
