@@ -24,18 +24,20 @@ export class ApplicationBase<
   P extends object = object,
   /** The state for the application. */
   S extends object = object,
-> extends Component<P & Props, HTMLElement, S & { context: ApplicationContext }> {
+  /** The context for the application. */
+  C extends object = Record<string, unknown>,
+> extends Component<P & Props, HTMLElement, S & { context: C }> {
   static defaultProps: Partial<Props & Component['props']> = {
     ...Component.defaultProps,
     defaultRoute: '/',
   }
-  Context: React.Context<ApplicationContext> = React.createContext<ApplicationContext>(this.defaultContext)
+  Context: React.Context<C> = React.createContext(this.defaultContext)
 
   get classNames(): Set<string> { return super.classNames.add('application') }
-  get defaultContext(): ApplicationContext {
-    return {} as ApplicationContext
+  get defaultContext(): C {
+    return {} as C
   }
-  get defaultState(): S & { context: ApplicationContext } {
+  get defaultState(): S & { context: C } {
     return {
       ...super.defaultState,
       context: this.defaultContext,
@@ -47,7 +49,9 @@ export class ApplicationBase<
     super(props)
 
     if (typeof window !== 'undefined') {
+      // @ts-expect-error - ApplicationBase is not defined in the global scope
       window.ApplicationBase = this
+      // @ts-expect-error - ApplicationContext is not defined in the global scope
       window.ApplicationContext = this.Context
     }
   }
@@ -110,8 +114,8 @@ export class ApplicationBase<
    * Sets the context.
    * @param updates - The updates to the context
    */
-  setContext(updates: Partial<ApplicationContext>) {
-    const context: ApplicationContext = { ...this.state.context, ...updates }
+  setContext(updates: Partial<C>) {
+    const context: C = { ...this.state.context, ...updates }
     if (deepEquals(this.state.context, context)) return
 
     this.setState(state => ({ ...state, context }))
