@@ -1,8 +1,12 @@
 {
   "name": "@basis/react",
+  "devDependencies": {
+    "@types/react": "^18",
+    "@types/react-dom": "^18"
+  },
   "peerDependencies": {
     "@basis/utilities": "workspace:*",
-    "react": "*",
-    "react-dom": "*"
+    "react": "^18",
+    "react-dom": "^18"
   }
 }
