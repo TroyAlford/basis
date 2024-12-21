@@ -38,8 +38,9 @@ export async function getUnreleasedCommitMessages(): Promise<ConventionalCommit[
   try {
     await $`git fetch --tags origin`.quiet()
 
-    // Get the latest release tag
-    const latestTag = (await $`git describe --tags --abbrev=0`.text()).trim()
+    // Get latest tag by version number (using proper semver sorting)
+    const latestTag = await $`git tag | sort -V | tail -n 1`
+      .quiet().nothrow().text().then(t => t.trim()).catch(() => '')
 
     // If no tag exists, get all commits
     const range = latestTag
