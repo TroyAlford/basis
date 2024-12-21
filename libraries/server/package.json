@@ -14,16 +14,16 @@
     "react": "^18"
   },
   "devDependencies": {
-    "@babel/generator": "*",
-    "@babel/parser": "*",
-    "@babel/traverse": "*",
-    "@babel/types": "*",
+    "@babel/generator": "^7.26.3",
+    "@babel/parser": "^7.26.3",
+    "@babel/traverse": "^7.26.4",
+    "@babel/types": "^7.26.3",
     "@basis/bun-plugins": "workspace:*",
     "@basis/react": "workspace:*",
     "@basis/utilities": "workspace:*",
     "@types/bun": "^1.1.13",
-    "react-dom": "^18",
-    "react": "^18"
+    "react": "^18",
+    "react-dom": "^18"
   },
   "dependencies": {
     "chokidar": "^4.0.1"
