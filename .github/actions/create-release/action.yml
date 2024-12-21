@@ -5,6 +5,9 @@ inputs:
   github-token:
     description: 'GitHub token for creating the release'
     required: true
+  version:
+    description: 'The version to release'
+    required: true
 
 outputs:
   current-version:
@@ -22,21 +25,12 @@ runs:
   steps:
     - uses: ./.github/actions/asdf-setup
 
-    - name: Determine Next Version
-      id: version
-      shell: bash
-      run: |
-        TEMP_DIR=$(mktemp -d)
-        cp ${{ github.action_path }}/*.ts "$TEMP_DIR/"
-        bun run "$TEMP_DIR/getNextVersion.ts"
-
     - name: Create GitHub Release
-      if: steps.version.outputs.release-needed == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
-        version="${{ steps.version.outputs.next-version }}"
+        version="${{ inputs.version }}"
         gh release create "$version" \
           --title "$version" \
           --generate-notes
