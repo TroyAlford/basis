@@ -22,7 +22,7 @@ runs:
         
         # Function to find existing bot comment
         find_comment_id() {
-          gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("PR title")) | .id'
+          gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq '[ .[] | select(.user.login == "github-actions[bot]") | select(.body | contains("PR title")) | .id ][0]'
         }
         
         if [[ ! "$PR_TITLE" =~ $pattern ]]; then
@@ -62,7 +62,7 @@ runs:
         # Find existing comment
         comment_id=$(find_comment_id)
         
-        if [ -n "$comment_id" ]; then
+        if [ -n "$comment_id" ] && [ "$comment_id" != "null" ]; then
           # Update existing comment
           gh api "repos/$REPO/issues/comments/$comment_id" -X PATCH -f body="$message"
         else
