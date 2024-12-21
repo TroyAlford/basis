@@ -31,11 +31,11 @@ export class ApplicationBase<
   }
   Context: React.Context<ApplicationContext> = React.createContext<ApplicationContext>(this.defaultContext)
 
-  get classNames() { return super.classNames.add('application') }
+  get classNames(): Set<string> { return super.classNames.add('application') }
   get defaultContext(): ApplicationContext {
     return {} as ApplicationContext
   }
-  get defaultState() {
+  get defaultState(): S & { context: ApplicationContext } {
     return {
       ...super.defaultState,
       context: this.defaultContext,
@@ -93,9 +93,8 @@ export class ApplicationBase<
    * Renders the application.
    * @returns The rendered application
    */
-  content() {
+  content(): React.ReactNode {
     const { Provider } = this.Context
-
     return (
       <Provider value={this.state.context}>
         {this.layout(

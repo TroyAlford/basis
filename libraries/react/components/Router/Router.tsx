@@ -158,9 +158,11 @@ export class Router extends Component<Props, null, State> {
     return null
   }
 
-  render = () => (
-    <React.Fragment>
-      {this.renderRoute()}
-    </React.Fragment>
-  )
+  render(): React.ReactNode {
+    return (
+      <React.Fragment>
+        {this.renderRoute()}
+      </React.Fragment>
+    )
+  }
 }

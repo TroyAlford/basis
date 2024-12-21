@@ -1,5 +1,7 @@
 {
   "name": "@basis/utilities",
-  "source": "index.ts",
-  "description": "A collection of utility functions for common programming tasks."
+  "description": "A collection of utility functions for common programming tasks.",
+  "exports": {
+    ".": "./index.ts"
+  }
 }

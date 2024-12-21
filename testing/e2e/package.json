@@ -6,5 +6,8 @@
     "@basis/utilities": "workspace:*",
     "react": "*",
     "react-dom": "*"
+  },
+  "scripts": {
+    "publish": "SKIP"
   }
 }

@@ -4,8 +4,8 @@ import * as path from 'node:path'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
 import { IndexHTML } from '@basis/react'
+import type { URI } from '@basis/utilities'
 import { HttpVerb, parseTemplateURI, parseURI } from '@basis/utilities'
-import type { URI } from '@basis/utilities/types/URI'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
 import type { APIRoute } from '../types/APIRoute'
@@ -15,8 +15,8 @@ import { Builder } from './Builder'
 /* eslint-disable no-console */
 /* TODO: add a proper logger */
 export class Server {
-  static BadRequest = new Response(null, { status: 400, statusText: 'Bad Request' })
-  static NotFound = new Response(null, { status: 404, statusText: 'Not Found' })
+  static BadRequest: Response = new Response(null, { status: 400, statusText: 'Bad Request' })
+  static NotFound: Response = new Response(null, { status: 404, statusText: 'Not Found' })
 
   #apis = new Map<string, APIRoute>()
   #assets: string = null

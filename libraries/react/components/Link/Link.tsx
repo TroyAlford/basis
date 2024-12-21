@@ -10,7 +10,7 @@ interface Props {
 
 /** A component for navigating to a URL. */
 export class Link extends Component<Props, HTMLAnchorElement> {
-  get attributes() {
+  get attributes(): React.HTMLAttributes<HTMLAnchorElement> {
     return { href: this.props.to } as React.HTMLAttributes<HTMLAnchorElement>
   }
   readonly tag: keyof React.ReactHTML = 'a'

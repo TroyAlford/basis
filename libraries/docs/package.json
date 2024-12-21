@@ -6,7 +6,8 @@
   "scripts": {
     "start": "parcel index.html --port 1234 --hmr-port 1235",
     "build": "echo 'SKIP'",
-    "build:disabled": "parcel build index.html"
+    "build:disabled": "parcel build index.html",
+    "publish": "SKIP"
   },
   "dependencies": {
     "react": "^18.2.0",

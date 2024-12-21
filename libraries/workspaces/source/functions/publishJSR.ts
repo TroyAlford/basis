@@ -41,6 +41,7 @@ export async function publishJSR(options: Options) {
   const { dryRun = false, license = 'auto', not, only, version } = options
   const published: string[] = []
   const failed: string[] = []
+  const skipped: string[] = []
 
   const workspaces = await listWorkspaces({ not, only })
   for (const name of workspaces) {
@@ -55,6 +56,13 @@ export async function publishJSR(options: Options) {
       }
 
       const { packageJson, packagePath } = workspace
+
+      if (packageJson.scripts?.publish === 'SKIP') {
+        console.log(`Skipping ${name} due to "publish" script set to "SKIP"`)
+        skipped.push(name)
+        continue
+      }
+
       await handleLicense(packagePath, license)
 
       // Separate @basis dependencies and handle versioning
@@ -102,6 +110,7 @@ export async function publishJSR(options: Options) {
 
       const flags = [
         '--allow-dirty',
+        '--allow-slow-types',
         dryRun ? '--dry-run' : undefined,
       ].filter(Boolean).join(' ')
 
@@ -125,6 +134,11 @@ export async function publishJSR(options: Options) {
   if (published.length > 0) {
     console.log(`✅ Successfully ${dryRun ? 'prepared' : 'published'}:`)
     published.forEach(name => console.log(`   ${name}`))
+  }
+
+  if (skipped.length > 0) {
+    console.log('🙈 Skipped packages:')
+    skipped.forEach(name => console.log(`   ${name}`))
   }
 
   if (failed.length > 0) {

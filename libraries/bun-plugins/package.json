@@ -3,6 +3,9 @@
   "engines": {
     "bun": "*"
   },
+  "exports": {
+    ".": "./index.ts"
+  },
   "dependencies": {
     "sass": "^1.80.6"
   }

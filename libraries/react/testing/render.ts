@@ -15,6 +15,19 @@ interface Fiber {
   type?: Ctor<unknown> | string,
 }
 
+interface RenderResult<
+  C extends React.Component | React.FunctionComponent = React.Component,
+  N extends Element | Element[] = HTMLElement,
+> {
+  find: <I>(ctor: Ctor<I> | string) => I | null,
+  findAll: <I>(ctor: Ctor<I>) => I[],
+  instance: C,
+  node: N,
+  root: HTMLElement,
+  unmount: () => void,
+  update: (updatedJSX: JSX.Element) => RenderResult<C, N>,
+}
+
 /**
  * Render a JSX element to the DOM
  * @param jsx the JSX element to render
@@ -24,7 +37,7 @@ interface Fiber {
 export function render<
   C extends React.Component | React.FunctionComponent = React.Component,
   N extends Element | Element[] = HTMLElement,
->(jsx: JSX.Element, target?: HTMLElement) {
+>(jsx: JSX.Element, target?: HTMLElement): RenderResult<C, N> {
   const root = target ?? document.createElement('div')
 
   const instance = ReactDOM.render<PropsOf<C>>(jsx, root) as unknown as C
