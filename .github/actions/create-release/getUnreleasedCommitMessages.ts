@@ -37,7 +37,10 @@ export interface ConventionalCommit {
  */
 export async function getUnreleasedCommitMessages(): Promise<ConventionalCommit[]> {
   try {
-    console.log('Fetching tags and history...')
+    console.log('Fetching full history and tags...')
+    // First unshallow the repository
+    await $`git fetch --unshallow origin`.quiet().nothrow()
+    // Then fetch main and tags
     await $`git fetch origin main:main`.quiet().nothrow()
     await $`git fetch --tags --force origin`.quiet()
 
