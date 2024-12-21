@@ -21,7 +21,20 @@ export async function getChangedFiles(base = 'main'): Promise<string[]> {
     console.log('\nGit Status:')
     console.log('Current SHA:', (await $`git rev-parse HEAD`.text()).trim())
     console.log('Current branch:', (await $`git rev-parse --abbrev-ref HEAD`.text()).trim())
-    console.log('All tags:', (await $`git tag -l`.text()).trim().split('\n').join(', '))
+
+    // Get all tags sorted by version
+    const tags = (await $`git tag -l`.text())
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .sort((a, b) => {
+        const [aMajor, aMinor, aPatch] = a.replace('v', '').split('.').map(Number)
+        const [bMajor, bMinor, bPatch] = b.replace('v', '').split('.').map(Number)
+        return (bMajor - aMajor) || (bMinor - aMinor) || (bPatch - aPatch)
+      })
+
+    console.log('All tags:', tags.join(', '))
+    console.log('Tag count:', tags.length)
 
     // Check if we're at the tip of the base branch
     const baseRef = await $`git rev-parse origin/${base}`.quiet().text()
@@ -35,10 +48,15 @@ export async function getChangedFiles(base = 'main'): Promise<string[]> {
 
     let compareRef: string
     if (isAtBaseTip) {
-      // If we're at the tip, compare with the latest release tag
-      const latestTag = await $`git describe --tags --abbrev=0`.quiet().nothrow().text().catch(() => '')
-      compareRef = latestTag.trim() || 'HEAD~1'
+      /*
+       * If we're at the tip and have tags, compare with latest tag
+       * Otherwise fall back to previous commit
+       */
+      compareRef = tags.length > 0 ? tags[0] : 'HEAD~1'
       console.log('\nOn base branch, comparing with:', compareRef)
+      if (compareRef === 'HEAD~1') {
+        console.log('Warning: No tags found, falling back to previous commit')
+      }
     } else {
       // If we're not at the tip, compare with main branch
       compareRef = `origin/${base}`
