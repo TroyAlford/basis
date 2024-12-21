@@ -11,42 +11,48 @@ permissions:
   pull-requests: write
 
 jobs:
-  release:
+  determine-version:
+    runs-on: ubuntu-latest
+    outputs:
+      release-needed: ${{ steps.version.outputs.release-needed }}
+      next-version: ${{ steps.version.outputs.next-version }}
+      current-version: ${{ steps.version.outputs.current-version }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: ./.github/actions/asdf-setup
+      - name: Determine Version
+        id: version
+        uses: ./.github/actions/determine-version
+
+  create-release:
+    needs: determine-version
+    if: needs.determine-version.outputs.release-needed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: ./.github/actions/asdf-setup
+      - uses: ./.github/actions/create-release
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ needs.determine-version.outputs.next-version }}
+
+  publish:
+    needs: determine-version
+    if: needs.determine-version.outputs.release-needed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: ./.github/actions/asdf-setup
 
-      - name: Create Release
-        id: create_release
-        uses: ./.github/actions/create-release
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Check if Version Created
-        id: release_created
-        run: |
-          if [[ -n "${{ steps.create_release.outputs.released }}" ]]; then
-            echo "should_publish=true" >> $GITHUB_OUTPUT
-            echo "version=${{ steps.create_release.outputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "No new version created. Skipping publication."
-            echo "should_publish=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Identify Changed Workspaces
         id: changes
         run: |
-          changed=$(bun workspace changed)
-          echo "Changed workspaces: $changed"
-          echo "workspaces=$changed" >> $GITHUB_OUTPUT
-
-      - name: Publish Changed Workspaces to JSR
-        if: steps.changes.outputs.workspaces != '[]' && steps.release_created.outputs.should_publish == 'true'
-        run: |
-          workspaces='${{ steps.changes.outputs.workspaces }}'
-          version='${{ steps.release_created.outputs.version }}'
+          workspaces=$(bun workspace changed)
+          echo "Changed workspaces: $workspaces"
+          version='${{ needs.determine-version.outputs.next-version }}'
           
           # Prepare the --only flags for each workspace
           only_flags=$(echo "$workspaces" | jq -r '.[]' | sed 's/^/--only /')

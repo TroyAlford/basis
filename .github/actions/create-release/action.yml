@@ -1,5 +1,5 @@
 name: 'Create Release'
-description: 'Creates a new release based on conventional commits'
+description: 'Creates a new release if needed based on conventional commits'
 
 inputs:
   github-token:
@@ -7,38 +7,36 @@ inputs:
     required: true
 
 outputs:
+  current-version:
+    description: 'The current version before any release'
+    value: ${{ steps.version.outputs.current-version }}
   released:
     description: 'Whether a release was created'
-    value: ${{ steps.version.outputs.released }}
+    value: ${{ steps.version.outputs.release-needed }}
   version:
-    description: 'The version that was released'
-    value: ${{ steps.version.outputs.version }}
+    description: 'The version that was released (or current version if no release created)'
+    value: ${{ steps.version.outputs.next-version }}
 
 runs:
   using: "composite"
   steps:
-    - name: Setup Bun
-      uses: oven-sh/setup-bun@v1
-
-    - name: Setup Action
-      shell: bash
-      run: |
-        TEMP_DIR=$(mktemp -d)
-        cp ${{ github.action_path }}/*.ts "$TEMP_DIR/"
-        echo "ACTION_TEMP_DIR=$TEMP_DIR" >> $GITHUB_ENV
+    - uses: ./.github/actions/asdf-setup
 
     - name: Determine Next Version
       id: version
       shell: bash
-      run: bun run "$ACTION_TEMP_DIR/getNextVersion.ts"
+      run: |
+        TEMP_DIR=$(mktemp -d)
+        cp ${{ github.action_path }}/*.ts "$TEMP_DIR/"
+        bun run "$TEMP_DIR/getNextVersion.ts"
 
     - name: Create GitHub Release
-      if: steps.version.outputs.released == 'true'
+      if: steps.version.outputs.release-needed == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
-        version="${{ steps.version.outputs.version }}"
+        version="${{ steps.version.outputs.next-version }}"
         gh release create "$version" \
           --title "$version" \
           --generate-notes
