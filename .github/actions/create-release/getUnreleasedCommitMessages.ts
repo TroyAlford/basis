@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { $ } from 'bun'
 
 /** The type of conventional commit */
@@ -36,16 +37,34 @@ export interface ConventionalCommit {
  */
 export async function getUnreleasedCommitMessages(): Promise<ConventionalCommit[]> {
   try {
+    console.log('Fetching tags...')
     await $`git fetch --tags --force origin`.quiet()
 
     // Get latest tag and its commit hash
     const latestTag = await $`git tag -l | sort -V | tail -n 1`
       .quiet().nothrow().text().then(t => t.trim()).catch(() => '')
+    console.log('Latest tag:', latestTag)
 
-    // If no tag exists, get all commits
-    const range = latestTag
-      ? `$(git rev-list -n 1 ${latestTag})..HEAD`
-      : 'HEAD'
+    // Determine the range to check
+    let range: string
+    if (latestTag) {
+      const latestTagSHA = await $`git rev-list -n 1 ${latestTag}`
+        .quiet().nothrow().text().then(t => t.trim())
+      console.log('Latest tag SHA:', latestTagSHA)
+
+      const headSHA = await $`git rev-parse HEAD`.quiet().text().then(t => t.trim())
+      console.log('HEAD SHA:', headSHA)
+
+      range = latestTagSHA ? `${latestTagSHA}..HEAD` : 'HEAD'
+      console.log('Using range:', range)
+    } else {
+      range = 'HEAD'
+      console.log('No tags found, using range:', range)
+    }
+
+    // Log all commits in range
+    console.log('\nCommits in range:')
+    await $`git log ${range} --oneline`.quiet()
 
     /*
      * Get all commit messages since the last tag
