@@ -9,21 +9,36 @@ inputs:
 outputs:
   released:
     description: 'Whether a release was created'
-    value: ${{ steps.semver.outputs.released }}
+    value: ${{ steps.version.outputs.released }}
   version:
     description: 'The version that was released'
-    value: ${{ steps.semver.outputs.version }}
+    value: ${{ steps.version.outputs.version }}
 
 runs:
   using: "composite"
   steps:
-    - name: Checkout with full history
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+
+    - name: Setup Action
+      shell: bash
+      run: |
+        TEMP_DIR=$(mktemp -d)
+        cp ${{ github.action_path }}/*.ts "$TEMP_DIR/"
+        echo "ACTION_TEMP_DIR=$TEMP_DIR" >> $GITHUB_ENV
 
     - name: Determine Next Version
-      id: semver
-      uses: grumpy-programmer/conventional-commits-semver-release@v1
+      id: version
+      shell: bash
+      run: bun run "$ACTION_TEMP_DIR/getNextVersion.ts"
+
+    - name: Create GitHub Release
+      if: steps.version.outputs.released == 'true'
+      shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        version="${{ steps.version.outputs.version }}"
+        gh release create "$version" \
+          --title "$version" \
+          --generate-notes
