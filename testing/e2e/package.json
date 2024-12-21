@@ -4,8 +4,8 @@
     "@basis/react": "workspace:*",
     "@basis/server": "workspace:*",
     "@basis/utilities": "workspace:*",
-    "react": "*",
-    "react-dom": "*"
+    "react": "^18",
+    "react-dom": "^18"
   },
   "scripts": {
     "publish": "SKIP"

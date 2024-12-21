@@ -1,0 +1,33 @@
+name: PR Validation
+
+on:
+  pull_request:
+    types: [opened, edited]
+    branches: [main]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  check-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/enforce-convco
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  required:
+    if: always()
+    needs:
+      - check-pr-title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if required jobs passed or were skipped
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more required jobs failed"
+            exit 1
+          else
+            echo "All required jobs have passed or were skipped!"
+          fi

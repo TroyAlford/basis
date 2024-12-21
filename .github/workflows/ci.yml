@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    types: [opened, edited, synchronize]
+    types: [opened, synchronize]
     branches: [main]
 
 permissions:
@@ -15,14 +15,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check-pr-title:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/enforce-convco
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
   eslint:
     runs-on: ubuntu-latest
     steps:
@@ -59,7 +51,7 @@ jobs:
       - name: Identify Changed Workspaces
         id: changes
         run: |
-          changed=$(bun workspace changed --only '^@basis/')
+          changed=$(bun workspace changed)
           echo "Changed workspaces: $changed"
           echo "workspaces=$changed" >> $GITHUB_OUTPUT
 
@@ -67,7 +59,7 @@ jobs:
         if: steps.changes.outputs.workspaces != '[]'
         run: |
           workspaces='${{ steps.changes.outputs.workspaces }}'
-          version='${{ github.run_number }}-alpha'
+          version='0.0.${{ github.run_number }}-alpha'
 
           for workspace in $(echo "$workspaces" | jq -r '.[]'); do
             echo "Dry run publishing $workspace@$version"
@@ -80,7 +72,6 @@ jobs:
   required:
     if: always()
     needs:
-      - check-pr-title
       - eslint
       - run-tests
       - type-check

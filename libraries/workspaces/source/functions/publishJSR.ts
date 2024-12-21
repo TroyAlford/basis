@@ -110,7 +110,6 @@ export async function publishJSR(options: Options) {
 
       const flags = [
         '--allow-dirty',
-        '--allow-slow-types',
         dryRun ? '--dry-run' : undefined,
       ].filter(Boolean).join(' ')
 

@@ -38,7 +38,7 @@ jobs:
       - name: Identify Changed Workspaces
         id: changes
         run: |
-          changed=$(bun workspace changed --only '^@basis/')
+          changed=$(bun workspace changed)
           echo "Changed workspaces: $changed"
           echo "workspaces=$changed" >> $GITHUB_OUTPUT
 

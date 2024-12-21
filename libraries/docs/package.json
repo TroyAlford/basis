@@ -10,9 +10,9 @@
     "publish": "SKIP"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "@basis/react": "workspace:*"
+    "@basis/react": "workspace:*",
+    "react": "^18",
+    "react-dom": "^18"
   },
   "devDependencies": {
     "@parcel/transformer-sass": "2.12.0",
