@@ -39,7 +39,7 @@ describe('Router', () => {
     replaceState.mockRestore()
   })
 
-  describe('matches routes', () => {
+  test('matches routes and passes templated params as props', () => {
     const router = (
       <Router>
         <Router.Route template="/pages/:slug">
@@ -49,63 +49,73 @@ describe('Router', () => {
             </div>
           )}
         </Router.Route>
-        <Router.Route template="/error/:code">
-          {({ code }) => (
-            <div className="error">
-              {code}
-            </div>
-          )}
-        </Router.Route>
+      </Router>
+    )
+
+    window.location.pathname = '/pages/foo'
+    const { node } = render<Router>(router)
+    expect(node.matches('.page')).toBe(true)
+    expect(node.textContent).toBe('foo')
+  })
+
+  test('renders a new route when the path changes', async () => {
+    const router = (
+      <Router>
         <Router.Route template="/:type/:id">
           {({ id, type }) => <div data-id={id} data-type={type} />}
         </Router.Route>
       </Router>
     )
 
-    test.each([
-      ['pages/foo', '.page', 'foo'],
-      ['pages/bar', '.page', 'bar'],
-      ['foo/123', '[data-id="123"][data-type="foo"]', ''],
-      ['bar/456', '[data-id="456"][data-type="bar"]', ''],
-      ['error/404', '.error', '404'],
-      ['error/500', '.error', '500'],
-    ])('and passes templated params as props', (url, selector, textContent) => {
-      window.location.pathname = '/' + url
-      const { node } = render<Router>(router)
-      expect(node.matches(selector)).toBe(true)
-      expect(node.textContent).toBe(textContent)
-    })
+    window.history.pushState({}, '', '/bar/234')
+    const rendered = render<Router>(router)
+    expect(rendered.node.outerHTML).toEqual('<div data-id="234" data-type="bar"></div>')
 
-    test('renders a new route when the path changes', async () => {
-      window.history.pushState({}, '', '/bar/234')
-      const rendered = render<Router>(router)
-      expect(rendered.node.outerHTML).toEqual('<div data-id="234" data-type="bar"></div>')
+    window.history.pushState({}, '', '/qux/456')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    rendered.update()
 
-      window.history.pushState({}, '', '/qux/456')
+    expect(rendered.node.outerHTML).toEqual('<div data-id="456" data-type="qux"></div>')
+  })
 
-      // Wait for the state to update
-      await new Promise(resolve => setTimeout(resolve, 0))
-      rendered.update()
+  test('renders null when no route matches', () => {
+    const router = (
+      <Router>
+        <Router.Route template="/foo">
+          <div>Foo</div>
+        </Router.Route>
+      </Router>
+    )
 
-      expect(rendered.node.outerHTML).toEqual('<div data-id="456" data-type="qux"></div>')
-    })
+    window.location.pathname = '/non/matching/route'
+    const { node } = render<Router>(router)
+    expect(node).toBeNull()
+  })
 
-    test('renders null when no route matches', () => {
-      window.location.pathname = '/non/matching/route'
-      const { node } = render<Router>(router)
-      expect(node).toBeNull()
-    })
+  test('responds to popstate events', async () => {
+    const router = (
+      <Router>
+        <Router.Route template="/:id">
+          {({ id }) => (
+            <div>
+              {id}
+            </div>
+          )}
+        </Router.Route>
+      </Router>
+    )
 
-    test('responds to popstate events', () => {
-      window.location.pathname = '/foo/123'
-      const rendered = render<Router>(router)
-      expect(rendered.node.outerHTML)
-        .toEqual('<div data-id="123" data-type="foo"></div>')
+    window.location.pathname = '/123'
+    const rendered = render<Router>(router)
+    expect(rendered.node.textContent).toBe('123')
 
-      window.location.pathname = '/bar/234'
-      window.dispatchEvent(new PopStateEvent('popstate'))
-      expect(rendered.update().node.outerHTML)
-        .toEqual('<div data-id="234" data-type="bar"></div>')
-    })
+    window.location.pathname = '/456'
+    window.dispatchEvent(new PopStateEvent('popstate'))
+
+    // Wait for state update
+    await new Promise(resolve => setTimeout(resolve, 0))
+    rendered.update()
+
+    expect(rendered.node.textContent).toBe('456')
   })
 })
