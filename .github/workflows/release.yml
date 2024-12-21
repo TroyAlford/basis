@@ -48,10 +48,11 @@ jobs:
           workspaces='${{ steps.changes.outputs.workspaces }}'
           version='${{ steps.release_created.outputs.version }}'
           
-          for workspace in $(echo "$workspaces" | jq -r '.[]'); do
-            echo "Publishing $workspace@$version to JSR"
-            bun ws publish --only "$workspace" --version "$version" || {
-              echo "::error::Failed to publish $workspace to JSR"
-              exit 1
-            }
-          done
+          # Prepare the --only flags for each workspace
+          only_flags=$(echo "$workspaces" | jq -r '.[]' | sed 's/^/--only /')
+          
+          echo "Publishing workspaces to JSR"
+          bun ws publish --version "$version" $only_flags || {
+            echo "::error::Failed to publish workspaces to JSR"
+            exit 1
+          }
