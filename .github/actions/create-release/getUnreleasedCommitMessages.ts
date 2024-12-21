@@ -37,7 +37,8 @@ export interface ConventionalCommit {
  */
 export async function getUnreleasedCommitMessages(): Promise<ConventionalCommit[]> {
   try {
-    console.log('Fetching tags...')
+    console.log('Fetching tags and history...')
+    await $`git fetch origin main:main`.quiet().nothrow()
     await $`git fetch --tags --force origin`.quiet()
 
     // Get latest tag and its commit hash
