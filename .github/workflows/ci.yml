@@ -67,7 +67,7 @@ jobs:
         if: steps.changes.outputs.workspaces != '[]'
         run: |
           workspaces='${{ steps.changes.outputs.workspaces }}'
-          version='${{ github.run_number }}-alpha'
+          version='0.0.${{ github.run_number }}-alpha'
 
           for workspace in $(echo "$workspaces" | jq -r '.[]'); do
             echo "Dry run publishing $workspace@$version"
