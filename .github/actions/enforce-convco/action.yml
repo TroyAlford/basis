@@ -1,82 +1,59 @@
-name: 'Check Convco PR Title'
-description: 'Check if the PR title follows the Conventional Commits specification'
+name: 'Enforce Conventional Commits'
+description: 'Enforces conventional commit format for PR titles'
 
 inputs:
   github-token:
-    description: 'GitHub token with permissions to comment on PRs'
+    description: 'GitHub token for creating comments'
     required: true
 
 runs:
   using: "composite"
   steps:
-
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Check PR Title
-      id: check_pr_title
-      uses: amannn/action-semantic-pull-request@v5
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
-      with:
-        ignoreCommits: true
-        validateSingleCommit: false
-      continue-on-error: true
-
-    - name: Comment on PR
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ inputs.github-token }}
-        script: |
-          const isValid = ${{ steps.check_pr_title.outcome == 'success' }};
-          const successMessage = '✅ The PR title follows the Conventional Commits format.';
-          const errorMessage = `❌ The PR title does not follow the Conventional Commits format. Please update it.
-
-          Your PR title should follow this format:
-          \`<type>(<optional scope>): <description>\`
-
-          Where:
-          - \`<type>\` is one of: feat, fix, docs, style, refactor, perf, test, chore, etc.
-          - \`<optional scope>\` is optional and represents the scope of the change (e.g., component name, module)
-          - \`<description>\` is a short description of the change
-
-          Examples:
-          - \`feat(auth): add login functionality\`
-          - \`fix: resolve issue with data loading\`
-          - \`docs: update README with new instructions\`
-
-          For more information, please refer to the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/).`;
-
-          const commentBody = isValid ? successMessage : errorMessage;
-
-          const { data: comments } = await github.rest.issues.listComments({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-          });
-
-          const existingComment = comments.find(comment => 
-            comment.user.login === 'github-actions[bot]' && 
-            comment.body.includes('PR title')
-          );
-
-          if (existingComment) {
-            await github.rest.issues.updateComment({
-              comment_id: existingComment.id,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody,
-            });
-          } else {
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody,
-            });
-          }
-
-    - name: Exit with error if PR title is invalid
-      if: steps.check_pr_title.outcome == 'failure'
+    - name: Validate PR Title
       shell: bash
-      run: exit 1
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        # Conventional commit pattern
+        pattern="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?(!)?: .+"
+        
+        if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+          # Create detailed error message
+          message="❌ PR title does not follow conventional commit format.
+
+        Your title: \`$PR_TITLE\`
+
+        Please update your PR title to follow this format:
+        \`type: description\` or \`type(scope): description\`
+
+        Valid types:
+        - \`feat\`: Introduces a new feature
+        - \`fix\`: Patches a bug
+        - \`docs\`: Changes to documentation
+        - \`style\`: Changes that don't affect code meaning
+        - \`refactor\`: Code changes that neither fix a bug nor add a feature
+        - \`perf\`: Code changes that improve performance
+        - \`test\`: Adding or correcting tests
+        - \`build\`: Changes affecting build system or dependencies
+        - \`ci\`: Changes to CI configuration files and scripts
+        - \`chore\`: Other changes that don't modify src or test files
+        - \`revert\`: Reverts a previous commit
+
+        Optional additions:
+        - Add a scope in parentheses: \`feat(api): description\`
+        - Add ! for breaking changes: \`feat!: description\` or \`feat(api)!: description\`
+
+        Examples:
+        - \`feat: add user authentication\`
+        - \`fix(api): handle null response\`
+        - \`feat(ui)!: redesign login page\`"
+
+          # Post comment on PR
+          gh pr comment $PR_NUMBER --body "$message"
+          exit 1
+        else
+          # Post success message
+          gh pr comment $PR_NUMBER --body "✅ PR title follows conventional commit format"
+        fi
