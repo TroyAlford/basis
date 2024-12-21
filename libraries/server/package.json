@@ -10,15 +10,20 @@
     "@basis/bun-plugins": "workspace:*",
     "@basis/react": "workspace:*",
     "@basis/utilities": "workspace:*",
-    "react-dom": "*",
-    "react": "*"
+    "react-dom": "^18",
+    "react": "^18"
   },
   "devDependencies": {
     "@babel/generator": "*",
     "@babel/parser": "*",
     "@babel/traverse": "*",
     "@babel/types": "*",
-    "@types/bun": "^1.1.13"
+    "@basis/bun-plugins": "workspace:*",
+    "@basis/react": "workspace:*",
+    "@basis/utilities": "workspace:*",
+    "@types/bun": "^1.1.13",
+    "react-dom": "^18",
+    "react": "^18"
   },
   "dependencies": {
     "chokidar": "^4.0.1"
