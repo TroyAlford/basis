@@ -34,7 +34,9 @@ describe('Application', () => {
     test('window.application & window.ApplicationContext', () => {
       const { instance } = render<TestApplication>(<TestApplication />)
 
+      // @ts-expect-error - window is not defined in the global scope
       expect(window.ApplicationBase).toBe(instance)
+      // @ts-expect-error - window is not defined in the global scope
       expect(window.ApplicationContext).toBe(instance.Context)
     })
   })
