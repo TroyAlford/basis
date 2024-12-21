@@ -12,7 +12,7 @@ export async function getChangedFiles(base = 'main'): Promise<string[]> {
     await $`git fetch origin ${base}:${base}`.quiet().nothrow()
 
     // Get latest tag by version number (using proper semver sorting)
-    const latestTag = await $`git tag | sort -V | tail -n 1`
+    const latestTag = await $`git tag -l | sort -V | tail -n 1`
       .quiet().nothrow().text().then(t => t.trim()).catch(() => '')
 
     // Check if we're at the tip of the base branch
