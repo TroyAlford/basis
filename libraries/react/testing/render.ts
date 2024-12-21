@@ -25,7 +25,7 @@ interface RenderResult<
   node: N,
   root: HTMLElement,
   unmount: () => void,
-  update: (updatedJSX: JSX.Element) => RenderResult<C, N>,
+  update: (updatedJSX?: JSX.Element) => RenderResult<C, N>,
 }
 
 /**
@@ -83,7 +83,6 @@ export function render<
     ) as N,
     root,
     unmount,
-    update: (updatedJSX: JSX.Element = React.cloneElement(jsx, jsx.props)) => render<C, N>(updatedJSX, root)
-    ,
+    update: (updatedJSX: JSX.Element = React.cloneElement(jsx, jsx.props)) => render<C, N>(updatedJSX, root),
   }
 }
