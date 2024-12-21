@@ -1,6 +1,5 @@
 import * as React from 'react'
-import { match } from '@basis/utilities/functions/match'
-import { noop } from '@basis/utilities/functions/noop'
+import { match, noop } from '@basis/utilities'
 import { Align } from '../../types/Align'
 import type { ImageConfig } from '../../types/ImageConfig'
 import type { ImageInput } from '../../types/ImageInput'
