@@ -60,6 +60,11 @@ export async function publishJSR(options: Options) {
       // Separate @basis dependencies and handle versioning
       const dependencies: Record<string, string> = {}
       const peerDependencies: Record<string, string> = { ...packageJson.peerDependencies ?? {} }
+      Object.keys(peerDependencies).forEach(dependency => {
+        if (dependency.startsWith('@basis/')) {
+          peerDependencies[dependency] = options.version
+        }
+      })
       Object.keys(packageJson.dependencies ?? {}).forEach(dependency => {
         if (dependency.startsWith('@basis/')) {
           peerDependencies[dependency] = options.version

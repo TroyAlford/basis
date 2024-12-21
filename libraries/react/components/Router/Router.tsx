@@ -43,53 +43,61 @@ interface State {
 /** A component for routing between pages. */
 export class Router extends Component<Props, null, State> {
   /** A component for matching a route. */
-  static Route = class Route<P> extends React.Component<RouteProps<P>> { }
+  static Route: React.ComponentType<RouteProps<unknown>> = (
+    class Route<P> extends React.Component<RouteProps<P>> { }
+  )
 
   /** A component for switching between routes. */
-  static Switch = class Switch extends React.Component<SwitchProps> {
-    render() {
-      const child = React.Children.toArray(this.props.children)
-        .find(c => React.isValidElement(c))
-      return (
-        <React.Fragment>
-          {child}
-        </React.Fragment>
-      )
+  static Switch: React.ComponentType<SwitchProps> = (
+    class Switch extends React.Component<SwitchProps> {
+      render() {
+        const child = React.Children.toArray(this.props.children)
+          .find(c => React.isValidElement(c))
+        return (
+          <React.Fragment>
+            {child}
+          </React.Fragment>
+        )
+      }
     }
-  }
+  )
 
   /** A component for navigating to a URL. */
-  static Link = class Link extends React.Component<LinkProps> {
-    /**
-     * Handles the click event.
-     * @param event - The mouse event.
-     */
-    handleClick = (event: React.MouseEvent<HTMLAnchorElement, MouseEvent>) => {
-      event.preventDefault()
-      window.history.pushState({}, '', this.props.to)
-    }
+  static Link: React.ComponentType<LinkProps> = (
+    class Link extends React.Component<LinkProps> {
+      /**
+       * Handles the click event.
+       * @param event - The mouse event.
+       */
+      handleClick = (event: React.MouseEvent<HTMLAnchorElement, MouseEvent>) => {
+        event.preventDefault()
+        window.history.pushState({}, '', this.props.to)
+      }
 
-    render() {
-      const { children, to } = this.props
-      return (
-        <a href={to} onClick={this.handleClick}>
-          {children}
-        </a>
-      )
+      render() {
+        const { children, to } = this.props
+        return (
+          <a href={to} onClick={this.handleClick}>
+            {children}
+          </a>
+        )
+      }
     }
-  }
+  )
 
   /** A component for redirecting to a URL. */
-  static Redirect = class Redirect extends React.Component<RedirectProps> {
-    componentDidMount(): void {
-      const { to } = this.props
-      window.history.replaceState({}, '', to)
-    }
+  static Redirect: React.ComponentType<RedirectProps> = (
+    class Redirect extends React.Component<RedirectProps> {
+      componentDidMount(): void {
+        const { to } = this.props
+        window.history.replaceState({}, '', to)
+      }
 
-    render() {
-      return null
+      render() {
+        return null
+      }
     }
-  }
+  )
 
   state = {
     currentURL: window.location.pathname + window.location.search,

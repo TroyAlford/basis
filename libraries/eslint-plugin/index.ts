@@ -1,6 +1,7 @@
 /* eslint-disable @import/no-default-export */
 import eslint from '@eslint/js'
 import pluginStylistic from '@stylistic/eslint-plugin'
+import type { ESLint } from 'eslint'
 import pluginImport from 'eslint-plugin-import'
 import pluginImportNewlines from 'eslint-plugin-import-newlines'
 import pluginJSDoc from 'eslint-plugin-jsdoc'
@@ -9,7 +10,8 @@ import pluginImportSort from 'eslint-plugin-simple-import-sort'
 import pluginSortDestructureKeys from 'eslint-plugin-sort-destructure-keys'
 import pluginSortKeys from 'eslint-plugin-sort-keys-fix'
 import pluginTypescriptSortKeys from 'eslint-plugin-typescript-sort-keys'
-import pluginTypescript, { type ConfigWithExtends } from 'typescript-eslint'
+import type { ConfigWithExtends } from 'typescript-eslint'
+import pluginTypescript from 'typescript-eslint'
 import pluginBasis from './rules'
 
 /** Plugin options */
@@ -298,4 +300,4 @@ export default pluginTypescript.config(
     files: ['*.test.ts', '*.test.tsx'],
     rules: { 'import/no-extraneous-dependencies': ['error', { devDependencies: true }] },
   }),
-)
+) as ESLint.ConfigData

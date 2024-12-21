@@ -4,24 +4,32 @@ import { Component } from '../Component/Component'
 import { Router } from '../Router/Router'
 
 interface Props {
+  /** The URL to redirect to if no route is matched. */
   defaultRoute?: string,
 }
 
+/** A definition for a route. */
 interface RouteDefinition {
+  /** The component to render for the route. */
   component: React.ComponentType,
+  /** Whether the route should be matched exactly. */
   exact?: boolean,
+  /** The URL to redirect to if the route is matched. */
   redirectTo?: string,
 }
 
+/** A base component for an application. */
 export class ApplicationBase<
+  /** The props for the application. */
   P extends object = object,
+  /** The state for the application. */
   S extends object = object,
 > extends Component<P & Props, HTMLElement, S & { context: ApplicationContext }> {
-  static defaultProps = {
+  static defaultProps: Partial<Props & Component['props']> = {
     ...Component.defaultProps,
     defaultRoute: '/',
   }
-  Context = React.createContext<ApplicationContext>(this.defaultContext)
+  Context: React.Context<ApplicationContext> = React.createContext<ApplicationContext>(this.defaultContext)
 
   get classNames() { return super.classNames.add('application') }
   get defaultContext(): ApplicationContext {
@@ -35,7 +43,7 @@ export class ApplicationBase<
   }
   readonly tag: keyof React.ReactHTML = 'div'
 
-  constructor(props) {
+  constructor(props: P & Props) {
     super(props)
 
     if (typeof window !== 'undefined') {
@@ -61,6 +69,10 @@ export class ApplicationBase<
     return content
   }
 
+  /**
+   * Renders the routes.
+   * @returns The rendered routes
+   */
   private renderRoutes(): React.ReactNode[] {
     return Object.entries(this.routes).map(([template, config]) => (
       <Router.Route
@@ -77,6 +89,10 @@ export class ApplicationBase<
     ))
   }
 
+  /**
+   * Renders the application.
+   * @returns The rendered application
+   */
   content() {
     const { Provider } = this.Context
 
@@ -91,6 +107,10 @@ export class ApplicationBase<
     )
   }
 
+  /**
+   * Sets the context.
+   * @param updates - The updates to the context
+   */
   setContext(updates: Partial<ApplicationContext>) {
     const context: ApplicationContext = { ...this.state.context, ...updates }
     if (deepEquals(this.state.context, context)) return
