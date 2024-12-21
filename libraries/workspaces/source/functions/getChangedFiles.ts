@@ -11,7 +11,7 @@ export async function getChangedFiles(base = 'main'): Promise<string[]> {
     await fetchAllTags()
     await $`git fetch origin ${base}:${base}`.quiet().nothrow()
 
-    // Get latest tag by version number (using proper semver sorting)
+    // Get latest tag and its commit hash for comparison
     const latestTag = await $`git tag -l | sort -V | tail -n 1`
       .quiet().nothrow().text().then(t => t.trim()).catch(() => '')
 
@@ -20,15 +20,17 @@ export async function getChangedFiles(base = 'main'): Promise<string[]> {
     const headRef = await $`git rev-parse HEAD`.quiet().text()
     const isAtBaseTip = baseRef.trim() === headRef.trim()
 
-    /*
-     * When on the base branch (e.g. main):
-     * - Compare against the latest tag if one exists
-     * - Fall back to previous commit only if no tags exist
-     * Otherwise compare against the base branch
-     */
-    const compareRef = isAtBaseTip
-      ? (latestTag || 'HEAD~1')
-      : `origin/${base}`
+    let compareRef: string
+    if (isAtBaseTip && latestTag) {
+      // If we're at the tip and have a tag, get its commit hash
+      compareRef = await $`git rev-list -n 1 ${latestTag}`.quiet().text().then(t => t.trim())
+    } else if (isAtBaseTip) {
+      // If we're at the tip but have no tags
+      compareRef = 'HEAD~1'
+    } else {
+      // If we're not at the tip, compare with main branch
+      compareRef = `origin/${base}`
+    }
 
     // Get all changes
     const committed = await $`git diff --name-only ${compareRef}..HEAD`
