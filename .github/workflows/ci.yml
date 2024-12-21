@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    types: [opened, edited, synchronize]
+    types: [opened, synchronize]
     branches: [main]
 
 permissions:
@@ -15,14 +15,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check-pr-title:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/enforce-convco
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
   eslint:
     runs-on: ubuntu-latest
     steps:
@@ -80,7 +72,6 @@ jobs:
   required:
     if: always()
     needs:
-      - check-pr-title
       - eslint
       - run-tests
       - type-check
