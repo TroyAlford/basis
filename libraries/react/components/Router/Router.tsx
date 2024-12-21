@@ -3,7 +3,6 @@ import { parseTemplateURI } from '@basis/utilities'
 import { Component } from '../Component/Component'
 import { Link } from './Link'
 import { Redirect } from './Redirect'
-import type { RouteProps } from './Route'
 import { Route } from './Route'
 import { Switch } from './Switch'
 
@@ -84,7 +83,7 @@ export class Router extends Component<Props, null, State> {
     const route = React.Children.toArray(this.props.children).find(child => {
       if (!React.isValidElement(child) || child.type !== Router.Route) return false
       return !!parseTemplateURI(currentURL, child.props.template)
-    }) as React.ReactElement<RouteProps<unknown>> | undefined
+    }) as React.ReactElement<Route<unknown>['props']> | undefined
 
     if (route) {
       const { children, redirectTo, template } = route.props
