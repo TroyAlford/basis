@@ -15,9 +15,15 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         PR_TITLE: ${{ github.event.pull_request.title }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
       run: |
         # Conventional commit pattern
         pattern="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?(!)?: .+"
+        
+        # Function to find existing bot comment
+        find_comment_id() {
+          gh api "repos/$REPO/issues/$PR_NUMBER/comments" --jq '.[] | select(.user.login == "github-actions[bot]" and contains(.body, "PR title")) | .id'
+        }
         
         if [[ ! "$PR_TITLE" =~ $pattern ]]; then
           # Create detailed error message
@@ -49,11 +55,22 @@ runs:
         - \`feat: add user authentication\`
         - \`fix(api): handle null response\`
         - \`feat(ui)!: redesign login page\`"
-
-          # Post comment on PR
-          gh pr comment $PR_NUMBER --body "$message"
-          exit 1
         else
-          # Post success message
-          gh pr comment $PR_NUMBER --body "✅ PR title follows conventional commit format"
+          message="✅ PR title follows conventional commit format"
+        fi
+
+        # Find existing comment
+        comment_id=$(find_comment_id)
+        
+        if [ -n "$comment_id" ]; then
+          # Update existing comment
+          gh api "repos/$REPO/issues/comments/$comment_id" -X PATCH -f body="$message"
+        else
+          # Create new comment
+          gh pr comment "$PR_NUMBER" --body "$message"
+        fi
+        
+        # Exit with error if title is invalid
+        if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+          exit 1
         fi
