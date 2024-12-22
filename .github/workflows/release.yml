@@ -53,7 +53,8 @@ jobs:
         run: |
           workspaces=$(bun workspace changed)
           echo "Changed workspaces: $workspaces"
-          version='${${{ needs.determine-version.outputs.next-version }}#v}'
+          tag=${{ needs.determine-version.outputs.next-version }}
+          version=${tag#v}
           
           # Prepare the --only flags for each workspace
           only_flags=$(echo "$workspaces" | jq -r '.[]' | sed 's/^/--only /')

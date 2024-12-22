@@ -30,10 +30,10 @@ runs:
       run: |
         echo "📦 Version Information"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🏷️  Current version: ${{ steps.version.outputs.current-version }}"
+        echo "🏷️ Current version: ${{ steps.version.outputs.current-version }}"
         if [[ "${{ steps.version.outputs.release-needed }}" == "true" ]]; then
           echo "🚀 Release needed: Yes"
-          echo "⬆️  Bumping from ${{ steps.version.outputs.current-version }} → ${{ steps.version.outputs.next-version }}"
+          echo "⬆️ Bumping from ${{ steps.version.outputs.current-version }} → ${{ steps.version.outputs.next-version }}"
         else
           echo "✨ Release needed: No"
           echo "💫 Staying at ${{ steps.version.outputs.current-version }}"
