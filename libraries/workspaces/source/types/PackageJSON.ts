@@ -5,6 +5,8 @@ export interface PackageJSON {
   description?: string,
   /** Package engines */
   engines?: Record<string, string>,
+  /** Package exports */
+  exports?: Record<string, string>,
   /** Package files */
   files?: string[],
   /** Package main */

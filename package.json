@@ -35,5 +35,8 @@
     "libraries/*",
     "testing/*",
     "packages/*"
+  ],
+  "trustedDependencies": [
+    "@basis/workspaces"
   ]
 }
