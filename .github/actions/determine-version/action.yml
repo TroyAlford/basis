@@ -16,6 +16,7 @@ runs:
   using: "composite"
   steps:
     - uses: ./.github/actions/asdf-setup
+
     - name: Determine Version
       id: version
       shell: bash
@@ -23,3 +24,18 @@ runs:
         TEMP_DIR=$(mktemp -d)
         cp ${{ github.action_path }}/*.ts "$TEMP_DIR/"
         bun run "$TEMP_DIR/determineVersion.ts"
+
+    - name: Display Version Information
+      shell: bash
+      run: |
+        echo "📦 Version Information"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🏷️  Current version: ${{ steps.version.outputs.current-version }}"
+        if [[ "${{ steps.version.outputs.release-needed }}" == "true" ]]; then
+          echo "🚀 Release needed: Yes"
+          echo "⬆️  Bumping from ${{ steps.version.outputs.current-version }} → ${{ steps.version.outputs.next-version }}"
+        else
+          echo "✨ Release needed: No"
+          echo "💫 Staying at ${{ steps.version.outputs.current-version }}"
+        fi
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
