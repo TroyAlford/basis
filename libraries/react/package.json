@@ -5,7 +5,7 @@
     "react-dom": "^18"
   },
   "peerDependencies": {
-    "@basis/utilities": "jsr:@basis/utilities@2.0.0",
+    "@basis/utilities": "workspace:*",
     "react": "^18",
     "react-dom": "^18"
   }
