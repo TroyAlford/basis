@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { match, noop } from '@basis/utilities'
 import { Align } from '../../types/Align'
 import type { ImageConfig } from '../../types/ImageConfig'
@@ -27,8 +28,6 @@ interface Props {
 interface State {
   /** Index of the currently displayed image. */
   currentIndex: number,
-  /** Whether the lightbox is open. */
-  fullSize: boolean,
   /** Whether the lightbox is open. */
   lightbox: boolean,
   /** X-coordinate of the touch start. */
@@ -64,7 +63,6 @@ interface State {
 export class Carousel extends Component<Props, HTMLDivElement, State> {
   static Align = Align
   static Size = Size
-
   static defaultProps = {
     ...Component.defaultProps,
     align: Align.Center,
@@ -73,28 +71,18 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     size: Size.Contain,
   }
 
-  get data(): Record<string, boolean | number | string> {
+  get attributes(): React.HTMLAttributes<HTMLDivElement> {
     return {
-      ...super.data,
-      'align': this.currentImage?.align ?? this.props.align,
-      'full-size': this.state.fullSize,
-      'lightbox': this.state.lightbox,
-      'size': this.currentImage?.size ?? this.props.size,
-    }
-  }
-
-  get defaultState(): State {
-    return {
-      currentIndex: 0,
-      fullSize: false,
-      lightbox: false,
-      touchStart: null,
+      ...super.attributes,
+      onKeyDown: this.handleKeyDown,
+      onWheel: this.handleWheel,
+      tabIndex: -1, // Make focusable but not tabbable
     }
   }
 
   /**
-   * Getter for the current image being displayed.
-   * @returns The current image configuration or null if no image is available.
+   * Returns the currently displayed image configuration or null if no image is available
+   * @returns The currently displayed image configuration or null.
    */
   get currentImage(): ImageConfig | null {
     const input = this.images[this.state.currentIndex]
@@ -104,9 +92,26 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
       : { ...input, altText: input.altText || this.props.altText }
   }
 
+  get data(): Record<string, boolean | number | string> {
+    return {
+      ...super.data,
+      align: this.currentImage?.align ?? this.props.align,
+      lightbox: this.state.lightbox,
+      size: this.currentImage?.size ?? this.props.size,
+    }
+  }
+
+  get defaultState(): State {
+    return {
+      currentIndex: 0,
+      lightbox: false,
+      touchStart: null,
+    }
+  }
+
   /**
-   * Getter for the list of images to be displayed in the carousel.
-   * @returns An array of ImageConfig objects.
+   * Returns the array of normalized image configurations from both props and children
+   * @returns The array of image configurations.
    */
   get images(): ImageConfig[] {
     const { children, images = [] } = this.props
@@ -151,32 +156,107 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     ]
   }
 
-  get attributes(): React.HTMLAttributes<HTMLDivElement> {
-    return {
-      ...super.attributes,
-      onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
-        if (!this.state.lightbox) return
-        match(e.key)
-          .when('ArrowLeft').then(this.prev)
-          .when('ArrowRight').then(this.next)
-          .when('Escape').then(this.closeLightbox)
-      },
+  componentDidMount(): void {
+    this.preloadImages()
+  }
+
+  componentDidUpdate(_: Props, prevState: State): void {
+    if (prevState.lightbox !== this.state.lightbox) {
+      if (this.state.lightbox) {
+        document.addEventListener('keydown', this.handleGlobalKeyDown)
+        document.addEventListener('wheel', this.handleWheel, { passive: false })
+      } else {
+        document.removeEventListener('keydown', this.handleGlobalKeyDown)
+        document.removeEventListener('wheel', this.handleWheel)
+      }
+    }
+  }
+
+  componentWillUnmount(): void {
+    if (this.state.lightbox) {
+      document.removeEventListener('keydown', this.handleGlobalKeyDown)
+      document.removeEventListener('wheel', this.handleWheel)
+    }
+  }
+
+  /** Closes the lightbox and returns focus to the carousel */
+  closeLightbox = (): void => {
+    this.setState({ lightbox: false }, () => {
+      this.rootNode?.focus()
+    })
+  }
+
+  /**
+   * Handles global keyboard events when lightbox is open
+   * @param event - The keyboard event.
+   */
+  handleGlobalKeyDown = (event: KeyboardEvent): void => {
+    if (!this.state.lightbox) return
+
+    if (event.key === 'Escape') {
+      this.closeLightbox()
     }
   }
 
   /**
-   * Handles the touch start event.
-   * @param event - The touch event.
+   * Handles image click events for opening lightbox and navigation
+   * @param event - The mouse event.
    */
-  public handleTouchStart = (event: React.TouchEvent) => {
-    this.setState({ touchStart: event.touches[0].clientX })
+  handleImageClick = (event: React.MouseEvent<HTMLImageElement>): void => {
+    if (event.button !== 0) return
+
+    if (!this.state.lightbox) {
+      this.setState({ lightbox: true })
+      return
+    }
+
+    this.next()
   }
 
   /**
-   * Handles the touch move event.
+   * Handles middle-click to open image in new tab
+   * @param event - The mouse event.
+   */
+  handleImageMouseDown = (event: React.MouseEvent<HTMLImageElement>): void => {
+    if (event.button !== 1) return
+    window.open(this.currentImage?.url, '_blank')
+  }
+
+  /**
+   * Handles keyboard navigation when carousel has focus
+   * @param event - The keyboard event.
+   */
+  handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    switch (event.key) {
+      case 'ArrowRight':
+        this.next()
+        break
+      case 'ArrowLeft':
+        this.prev()
+        break
+    }
+  }
+
+  /**
+   * Handles clicks on the lightbox background to close it
+   * @param event - The mouse event.
+   */
+  handleLightboxClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    if (event.target === event.currentTarget) {
+      this.closeLightbox()
+    }
+  }
+
+  /** Resets touch tracking state */
+  handleTouchEnd = (): void => {
+    this.setState({ touchStart: null })
+  }
+
+  /**
+   * Handles touch move events for swipe navigation
    * @param event - The touch event.
    */
-  public handleTouchMove = (event: React.TouchEvent) => {
+  handleTouchMove = (event: React.TouchEvent): void => {
     if (this.state.touchStart === null) return
 
     const diff = this.state.touchStart - event.touches[0].clientX
@@ -187,75 +267,19 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     }
   }
 
-  /** Resets the touch start state. */
-  public handleTouchEnd = () => {
-    this.setState({ touchStart: null })
+  /**
+   * Tracks touch start position for swipe navigation
+   * @param event - The touch event.
+   */
+  handleTouchStart = (event: React.TouchEvent): void => {
+    this.setState({ touchStart: event.touches[0].clientX })
   }
 
   /**
-   * Handles the click event for an image.
-   * @param event - The click event.
+   * Handles mouse wheel events for navigation
+   * @param event - The wheel event.
    */
-  private handleImageClick = (event: React.MouseEvent<HTMLImageElement>) => {
-    const { lightbox: isLightboxOpen } = this.state
-
-    if (!isLightboxOpen) {
-      this.setState({ lightbox: true })
-      return
-    }
-
-    const rect = event.currentTarget.getBoundingClientRect()
-    const clickX = event.clientX - rect.left
-
-    if (clickX < rect.width * 0.3) this.prev()
-    else if (clickX > rect.width * 0.7) this.next()
-    else this.setState(state => ({ fullSize: !state.fullSize }))
-  }
-
-  /** Navigates to the next image. */
-  public next = () => {
-    this.setState(state => ({
-      currentIndex: (state.currentIndex + 1) % this.images.length,
-    }), () => this.props.onImageChange?.(this.state.currentIndex))
-  }
-
-  /** Navigates to the previous image. */
-  public prev = () => {
-    this.setState(state => ({
-      currentIndex: (state.currentIndex - 1 + this.images.length) % this.images.length,
-    }), () => this.props.onImageChange?.(this.state.currentIndex))
-  }
-
-  /** Closes the lightbox. */
-  public closeLightbox = () => {
-    this.setState({ fullSize: false, lightbox: false })
-  }
-
-  /**
-   * Handles the click event for the lightbox overlay.
-   * @param event - The click event.
-   */
-  private handleLightboxClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) {
-      this.closeLightbox()
-    }
-  }
-
-  componentDidMount() {
-    this.rootNode?.addEventListener('wheel', this.handleWheel, { passive: false })
-    // Preload all images
-    this.preloadImages()
-  }
-
-  componentWillUnmount() {
-    this.rootNode?.removeEventListener('wheel', this.handleWheel)
-  }
-
-  /**
-   * Handles the wheel event for navigating images.
-   * @param event The wheel event.
-   */
-  private handleWheel = (event: WheelEvent) => {
+  handleWheel = (event: WheelEvent | React.WheelEvent<HTMLDivElement>): void => {
     event.preventDefault()
 
     if (event.deltaX > 0 || event.deltaY > 0) {
@@ -265,12 +289,17 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     }
   }
 
-  /** Preloads images to ensure they are ready for display. */
-  private preloadImages = () => {
-    // Get all unique image URLs
+  /** Advances to the next image */
+  next = (): void => {
+    this.setState(state => ({
+      currentIndex: (state.currentIndex + 1) % this.images.length,
+    }), () => this.props.onImageChange?.(this.state.currentIndex))
+  }
+
+  /** Preloads all images in the carousel */
+  preloadImages = (): void => {
     const urls = new Set(this.images.map(img => img.url))
 
-    // Start loading any images that aren't already loaded/loading
     urls.forEach(url => {
       if (!Image.Cache.Resolved.has(url) && !Image.Cache.Loading.has(url)) {
         const loadingPromise = loadImage(url).then(img => {
@@ -286,21 +315,61 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     })
   }
 
-  /**
-   * Renders the content of the carousel.
-   * @returns The rendered content, including images and lightbox if applicable.
-   */
-  content() {
-    const { currentIndex, fullSize: isFullSize, lightbox: isLightboxOpen } = this.state
+  /** Returns to the previous image */
+  prev = (): void => {
+    this.setState(state => ({
+      currentIndex: (state.currentIndex - 1 + this.images.length) % this.images.length,
+    }), () => this.props.onImageChange?.(this.state.currentIndex))
+  }
+
+  content(): React.ReactNode {
+    const { currentIndex, lightbox: isLightboxOpen } = this.state
     const { currentImage } = this
     if (!currentImage) return null
 
     const totalImages = this.images.length
     const imageNumber = currentIndex + 1
     const imageDescription = `Image ${imageNumber} of ${totalImages}`
-
-    // Use currentImage.altText if available, fall back to props.altText
     const altText = currentImage.altText || this.props.altText || ''
+
+    const lightboxContent = isLightboxOpen && (
+      <div
+        {...this.attributes}
+        aria-label="Image lightbox"
+        aria-modal="true"
+        className="carousel component lightbox"
+        role="dialog"
+        tabIndex={-1}
+        onClick={this.handleLightboxClick}
+      >
+        <button
+          aria-label="Close lightbox"
+          className="close-button"
+          onClick={this.closeLightbox}
+        >
+          ×
+        </button>
+        <div className="image-container">
+          <Image
+            key={currentImage.url}
+            align={currentImage.align}
+            alt={altText}
+            size={currentImage.size}
+            src={currentImage.url}
+            onClick={this.handleImageClick}
+            onTouchEnd={this.handleTouchEnd}
+            onTouchMove={this.handleTouchMove}
+            onTouchStart={this.handleTouchStart}
+          />
+        </div>
+        {this.renderNavigation(currentIndex)}
+        {altText && (
+          <div className="lightbox-caption">
+            {altText}
+          </div>
+        )}
+      </div>
+    )
 
     return (
       <>
@@ -313,62 +382,31 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
           size={currentImage.size}
           src={currentImage.url}
           onClick={this.handleImageClick}
+          onMouseDown={this.handleImageMouseDown}
           onTouchEnd={this.handleTouchEnd}
           onTouchMove={this.handleTouchMove}
           onTouchStart={this.handleTouchStart}
         />
-        {isLightboxOpen && (
-          <div
-            aria-label="Image lightbox"
-            aria-modal="true"
-            className="lightbox-overlay"
-            data-full-size={isFullSize}
-            role="dialog"
-            onClick={this.handleLightboxClick}
-          >
-            <Image
-              key={currentImage.url}
-              align={currentImage.align}
-              alt={altText}
-              aria-description={imageDescription}
-              size={currentImage.size}
-              src={currentImage.url}
-              onClick={this.handleImageClick}
-              onTouchEnd={this.handleTouchEnd}
-              onTouchMove={this.handleTouchMove}
-              onTouchStart={this.handleTouchStart}
-            />
-            {altText && (
-              <div className="lightbox-caption">
-                {altText}
-              </div>
-            )}
-            <div aria-label="Image navigation" className="navigation">
-              <div
-                aria-label="Previous image"
-                className="prev"
-                role="button"
-                onClick={this.prev}
-              />
-              <div
-                aria-label="Next image"
-                className="next"
-                role="button"
-                onClick={this.next}
-              />
-            </div>
-            <div aria-hidden="true" className="indicators">
-              {this.images.map((_, i) => (
-                <div
-                  key={i}
-                  className="dot"
-                  data-active={i === currentIndex}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+        {this.renderNavigation(currentIndex)}
+        {isLightboxOpen && createPortal(lightboxContent, document.body)}
       </>
+    )
+  }
+
+  /**
+   * Renders the navigation controls
+   * @param currentIndex - The index of the current image.
+   * @returns The navigation controls.
+   */
+  renderNavigation(currentIndex: number): React.ReactNode {
+    return (
+      <div aria-label="Image Navigation" className="navigation">
+        <button aria-label="Previous" className="prev" onClick={this.prev}>←</button>
+        <div aria-hidden="true" className="counter">
+          {`${currentIndex + 1} of ${this.images.length}`}
+        </div>
+        <button aria-label="Next" className="next" onClick={this.next}>→</button>
+      </div>
     )
   }
 }

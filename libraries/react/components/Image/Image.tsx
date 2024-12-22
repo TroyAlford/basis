@@ -12,6 +12,8 @@ interface Props {
   alt?: string,
   /** Click handler. */
   onClick?: (event: React.MouseEvent<HTMLImageElement>) => void,
+  /** Mouse down handler. */
+  onMouseDown?: (event: React.MouseEvent<HTMLImageElement>) => void,
   /** Touch end handler. */
   onTouchEnd?: (event: React.TouchEvent<HTMLImageElement>) => void,
   /** Touch move handler. */
@@ -61,6 +63,7 @@ export class Image extends Component<Props, HTMLImageElement, State> {
     return {
       alt: this.props.alt || '',
       onClick: this.props.onClick,
+      onMouseDown: this.props.onMouseDown,
       onTouchEnd: this.props.onTouchEnd,
       onTouchMove: this.props.onTouchMove,
       onTouchStart: this.props.onTouchStart,
