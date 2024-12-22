@@ -1,0 +1,22 @@
+// This file is auto-generated. Do not edit directly.
+{
+  "name": "@basis/react",
+  "version": "2.0.0",
+  "exports": "./index.ts",
+  "dependencies": {
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "peerDependencies": {
+    "@basis/utilities": "2.0.0",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "publish": {
+    "exclude": [
+      "package.json",
+      "*.test.*",
+      "dist"
+    ]
+  }
+}
