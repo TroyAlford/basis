@@ -53,12 +53,12 @@ jobs:
         run: |
           workspaces=$(bun workspace changed)
           echo "Changed workspaces: $workspaces"
-          version='${{ needs.determine-version.outputs.next-version }}'
+          version='${${{ needs.determine-version.outputs.next-version }}#v}'
           
           # Prepare the --only flags for each workspace
           only_flags=$(echo "$workspaces" | jq -r '.[]' | sed 's/^/--only /')
           
-          echo "Publishing workspaces to JSR"
+          echo "Publishing workspaces to JSR as version $version"
           bun ws publish --version "$version" $only_flags || {
             echo "::error::Failed to publish workspaces to JSR"
             exit 1
