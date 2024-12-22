@@ -1,5 +1,6 @@
 /* eslint-disable no-console */
 import { $ } from 'bun'
+import { getCurrentVersion, getCurrentVersionCommit } from './getCurrentVersion'
 
 /** The type of conventional commit */
 export enum ChangeType {
@@ -37,23 +38,13 @@ export interface ConventionalCommit {
  */
 export async function getUnreleasedCommitMessages(): Promise<ConventionalCommit[]> {
   try {
-    console.log('Fetching full history and tags...')
-    // First unshallow the repository
-    await $`git fetch --unshallow origin`.quiet().nothrow()
-    // Then fetch main and tags
-    await $`git fetch origin main:main`.quiet().nothrow()
-    await $`git fetch --tags --force origin`.quiet()
-
-    // Get latest tag and its commit hash
-    const latestTag = await $`git tag -l | sort -V | tail -n 1`
-      .quiet().nothrow().text().then(t => t.trim()).catch(() => '')
+    const latestTag = await getCurrentVersion()
     console.log('Latest tag:', latestTag)
 
     // Determine the range to check
     let range: string
-    if (latestTag) {
-      const latestTagSHA = await $`git rev-list -n 1 ${latestTag}`
-        .quiet().nothrow().text().then(t => t.trim())
+    if (latestTag !== 'v0.0.0') {
+      const latestTagSHA = await getCurrentVersionCommit()
       console.log('Latest tag SHA:', latestTagSHA)
 
       const headSHA = await $`git rev-parse HEAD`.quiet().text().then(t => t.trim())
