@@ -59,14 +59,23 @@ export class Image extends Component<Props, HTMLImageElement, State> {
     }
   }
 
+  get aria(): Record<string, string> {
+    return {
+      ...super.aria,
+      'aria-description': this.props.alt || '',
+    }
+  }
+
   get attributes(): React.ImgHTMLAttributes<HTMLImageElement> {
     return {
+      ...super.attributes,
       alt: this.props.alt || '',
       onClick: this.props.onClick,
       onMouseDown: this.props.onMouseDown,
       onTouchEnd: this.props.onTouchEnd,
       onTouchMove: this.props.onTouchMove,
       onTouchStart: this.props.onTouchStart,
+      role: this.props.alt ? undefined : 'img',
       src: Image.Cache.Resolved.has(this.props.src)
         ? this.props.src
         : undefined,
