@@ -1,5 +1,6 @@
 export { classNames } from './functions/classNames'
 export { clone } from './functions/clone'
+export { Color } from './functions/Color'
 export { dataAttributes } from './functions/dataAttributes'
 export { deburr } from './functions/deburr'
 export { decode, encode } from './functions/encode'

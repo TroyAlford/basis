@@ -6,6 +6,7 @@ import type { ImageConfig } from '../../types/ImageConfig'
 import type { ImageInput } from '../../types/ImageInput'
 import { Size } from '../../types/Size'
 import { loadImage } from '../../utilities/loadImage'
+import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Image } from '../Image/Image'
 import './Carousel.scss'
@@ -66,9 +67,18 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
   static defaultProps = {
     ...Component.defaultProps,
     align: Align.Center,
+    descriptionId: undefined,
     images: [],
     onImageChange: noop,
     size: Size.Contain,
+  }
+
+  get aria(): Record<string, string> {
+    return {
+      'aria-roledescription': 'carousel',
+      'label': 'Image Carousel',
+      'live': 'polite',
+    }
   }
 
   get attributes(): React.HTMLAttributes<HTMLDivElement> {
@@ -76,6 +86,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
       ...super.attributes,
       onKeyDown: this.handleKeyDown,
       onWheel: this.handleWheel,
+      role: 'region',
       tabIndex: -1, // Make focusable but not tabbable
     }
   }
@@ -327,9 +338,6 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     const { currentImage } = this
     if (!currentImage) return null
 
-    const totalImages = this.images.length
-    const imageNumber = currentIndex + 1
-    const imageDescription = `Image ${imageNumber} of ${totalImages}`
     const altText = currentImage.altText || this.props.altText || ''
 
     const lightboxContent = isLightboxOpen && (
@@ -342,13 +350,13 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
         tabIndex={-1}
         onClick={this.handleLightboxClick}
       >
-        <button
+        <Button
           aria-label="Close lightbox"
           className="close-button"
-          onClick={this.closeLightbox}
+          onActivate={this.closeLightbox}
         >
           ×
-        </button>
+        </Button>
         <div className="image-container">
           <Image
             key={currentImage.url}
@@ -377,7 +385,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
           align={currentImage.align}
           alt={altText}
           aria-current="true"
-          aria-description={imageDescription}
+          aria-description={altText}
           aria-roledescription="slide"
           size={currentImage.size}
           src={currentImage.url}
@@ -399,13 +407,30 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
    * @returns The navigation controls.
    */
   renderNavigation(currentIndex: number): React.ReactNode {
+    const totalImages = this.images.length
     return (
-      <div aria-label="Image Navigation" className="navigation">
-        <button aria-label="Previous" className="prev" onClick={this.prev}>←</button>
+      <div
+        aria-label="Image Navigation"
+        className="navigation"
+        role="group"
+      >
+        <Button
+          aria-label={`Previous image (${currentIndex} of ${totalImages})`}
+          className="prev"
+          onActivate={this.prev}
+        >
+          ←
+        </Button>
         <div aria-hidden="true" className="counter">
-          {`${currentIndex + 1} of ${this.images.length}`}
+          {`${currentIndex + 1} of ${totalImages}`}
         </div>
-        <button aria-label="Next" className="next" onClick={this.next}>→</button>
+        <Button
+          aria-label={`Next image (${currentIndex + 2} of ${totalImages})`}
+          className="next"
+          onActivate={this.next}
+        >
+          →
+        </Button>
       </div>
     )
   }

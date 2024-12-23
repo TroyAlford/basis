@@ -1,8 +1,14 @@
 import * as React from 'react'
-import { classNames, dataAttributes, kebabCase } from '@basis/utilities'
+import { classNames, dataAttributes, deepEquals, kebabCase } from '@basis/utilities'
 
 /** Props for the Component class. */
 export interface ComponentProps {
+  /**
+   * An optional object of ARIA attributes to output on the component's root element.
+   * @example { expanded: true, haspopup: true, controls: 'menu-1' }
+   * // aria-expanded="true" aria-haspopup="true" aria-controls="menu-1"
+   */
+  aria?: Record<string, boolean | number | string>,
   /** The children of the component. */
   children?: React.ReactNode,
   /** Optional class name(s) to output on the component's root element. */
@@ -35,8 +41,25 @@ export abstract class Component<
   State = object,
 > extends React.Component<Props & ComponentProps, State> {
   static defaultProps: ComponentProps = {
+    aria: {},
     data: {},
     nodeRef: React.createRef<HTMLElement>(),
+  }
+
+  /**
+   * Getter for ARIA attributes.
+   * @returns A Record<string, boolean | number | string> of ARIA attributes.
+   */
+  get aria(): Record<string, boolean | number | string> {
+    return [
+      ...Object.entries(this.props.aria ?? {}).map(([key, value]) => (
+        [`aria-${key}`, value] as [string, boolean | number | string]
+      )),
+      ...Object.entries(this.props).filter(([key]) => key.startsWith('aria-')),
+    ].reduce((aria, [key, value]) => {
+      aria[key] = value
+      return aria
+    }, {})
   }
 
   /**
@@ -78,13 +101,15 @@ export abstract class Component<
    * @returns A Record<string, boolean | number | string> of data attributes.
    */
   get data(): Record<string, boolean | number | string> {
-    return {
-      ...Object.entries(this.props).reduce((data, [key, value]) => {
-        if (key.startsWith('data-')) data[key] = value
-        return data
-      }, {}),
-      ...this.props.data ?? {},
-    }
+    return [
+      ...Object.entries(this.props.data ?? {}).map(([key, value]) => (
+        [`data-${key}`, value] as [string, boolean | number | string]
+      )),
+      ...Object.entries(this.props).filter(([key]) => key.startsWith('data-')),
+    ].reduce((data, [key, value]) => {
+      data[key] = value
+      return data
+    }, {})
   }
 
   /**
@@ -107,6 +132,16 @@ export abstract class Component<
   readonly tag: keyof React.ReactHTML = 'div'
 
   /**
+   * Determines if the component should update.
+   * @param nextProps The next props.
+   * @param nextState The next state.
+   * @returns Whether the component should update.
+   */
+  shouldComponentUpdate(nextProps: Readonly<Props & ComponentProps>, nextState: Readonly<State>): boolean {
+    return !deepEquals(this.props, nextProps) || !deepEquals(this.state, nextState)
+  }
+
+  /**
    * Renders the component's content. Called once per render.
    * @param children The children of the component.
    * @returns The rendered content.
@@ -127,6 +162,7 @@ export abstract class Component<
       <Tag // @ts-expect-error - we are assuming a props match
         ref={nodeRef}
         {...this.attributes}
+        {...this.aria}
         {...dataAttributes(this.data)}
         className={classNames(className, this.classNames)}
       >

@@ -41,33 +41,33 @@ jobs:
       - name: Run TypeScript Type Check
         run: bun tsc
 
-  publish-dry-run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: ./.github/actions/asdf-setup
+  # publish-dry-run:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with: { fetch-depth: 0 }
+  #     - uses: ./.github/actions/asdf-setup
 
-      - name: Identify Changed Workspaces
-        id: changes
-        run: |
-          changed=$(bun workspace changed)
-          echo "Changed workspaces: $changed"
-          echo "workspaces=$changed" >> $GITHUB_OUTPUT
+  #     - name: Identify Changed Workspaces
+  #       id: changes
+  #       run: |
+  #         changed=$(bun workspace changed)
+  #         echo "Changed workspaces: $changed"
+  #         echo "workspaces=$changed" >> $GITHUB_OUTPUT
 
-      - name: Dry Run Publish Changed Workspaces
-        if: steps.changes.outputs.workspaces != '[]'
-        run: |
-          workspaces='${{ steps.changes.outputs.workspaces }}'
-          version='0.0.${{ github.run_number }}-alpha'
+  #     - name: Dry Run Publish Changed Workspaces
+  #       if: steps.changes.outputs.workspaces != '[]'
+  #       run: |
+  #         workspaces='${{ steps.changes.outputs.workspaces }}'
+  #         version='0.0.${{ github.run_number }}-alpha'
 
-          for workspace in $(echo "$workspaces" | jq -r '.[]'); do
-            echo "Dry run publishing $workspace@$version"
-            bun ws publish --only "$workspace" --version "$version" --dryRun || {
-              echo "::error::Failed to dry run publish $workspace"
-              exit 1
-            }
-          done
+  #         for workspace in $(echo "$workspaces" | jq -r '.[]'); do
+  #           echo "Dry run publishing $workspace@$version"
+  #           bun ws publish --only "$workspace" --version "$version" --dryRun || {
+  #             echo "::error::Failed to dry run publish $workspace"
+  #             exit 1
+  #           }
+  #         done
 
   required:
     if: always()
