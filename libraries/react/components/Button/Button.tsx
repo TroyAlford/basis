@@ -80,8 +80,6 @@ export class Button extends Component<Props, HTMLButtonElement> {
         onActivate(event)
       })
       .when('touchstart').then(() => onActivate(event))
-      .else(() => {
-        console.warn('Button received unexpected event type:', event.type)
-      })
+      .else(noop)
   }
 }
