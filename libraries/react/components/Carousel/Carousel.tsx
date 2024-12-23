@@ -6,6 +6,7 @@ import type { ImageConfig } from '../../types/ImageConfig'
 import type { ImageInput } from '../../types/ImageInput'
 import { Size } from '../../types/Size'
 import { loadImage } from '../../utilities/loadImage'
+import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Image } from '../Image/Image'
 import './Carousel.scss'
@@ -342,13 +343,13 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
         tabIndex={-1}
         onClick={this.handleLightboxClick}
       >
-        <button
+        <Button
           aria-label="Close lightbox"
           className="close-button"
-          onClick={this.closeLightbox}
+          onActivate={this.closeLightbox}
         >
           ×
-        </button>
+        </Button>
         <div className="image-container">
           <Image
             key={currentImage.url}
@@ -401,11 +402,11 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
   renderNavigation(currentIndex: number): React.ReactNode {
     return (
       <div aria-label="Image Navigation" className="navigation">
-        <button aria-label="Previous" className="prev" onClick={this.prev}>←</button>
+        <Button aria-label="Previous" className="prev" onActivate={this.prev}>←</Button>
         <div aria-hidden="true" className="counter">
           {`${currentIndex + 1} of ${this.images.length}`}
         </div>
-        <button aria-label="Next" className="next" onClick={this.next}>→</button>
+        <Button aria-label="Next" className="next" onActivate={this.next}>→</Button>
       </div>
     )
   }

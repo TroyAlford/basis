@@ -1,6 +1,7 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { Carousel } from '@basis/react/components/Carousel/Carousel'
+import { Theme } from '@basis/react/components/Theme/Theme'
 
 export class Documentation extends React.Component {
   render() {
@@ -16,6 +17,7 @@ export class Documentation extends React.Component {
             width: '250px',
           }}
           >
+            <Theme />
             <Carousel altText="Example carousel" size={Carousel.Size.Fill}>
               <img alt="Square 150x150" src="https://picsum.photos/150/150" />
               <img alt="Square 250x250" src="https://picsum.photos/250/250" />
