@@ -67,6 +67,7 @@ export abstract class Component<
     return new Set<string>()
       // @ts-expect-error - displayName is valid in React components, but not typed
       .add(kebabCase(this.constructor.displayName ?? this.constructor.name))
+      .add('component')
   }
 
   /**

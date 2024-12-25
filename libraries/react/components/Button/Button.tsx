@@ -16,7 +16,7 @@ interface Props {
   /** The handler for the unified activation event. */
   onActivate?: (event: React.SyntheticEvent) => void,
   /** The type of the button. */
-  type?: 'button' | 'submit' | 'reset',
+  type?: ButtonType,
 }
 
 /**
@@ -32,7 +32,7 @@ export class Button extends Component<Props, HTMLButtonElement> {
   static defaultProps: Partial<Component<Props>['props']> = {
     disabled: false,
     onActivate: noop,
-    type: 'button',
+    type: ButtonType.Button,
   }
 
   get attributes(): React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -52,12 +52,6 @@ export class Button extends Component<Props, HTMLButtonElement> {
       ...super.aria,
       'aria-disabled': !!this.props.disabled,
     }
-  }
-
-  get classNames(): Set<string> {
-    return super.classNames
-      .add('button')
-      .add(this.props.disabled ? 'disabled' : 'enabled')
   }
 
   /**
