@@ -8,13 +8,14 @@ describe('Button', () => {
     test('renders with default props', () => {
       const { node } = render(<Button>Click me</Button>)
       expect(node.tagName).toBe('BUTTON')
-      expect(node).toHaveClass('button', 'component', 'enabled')
+      expect(node).toHaveClass('button', 'component')
+      expect(node).not.toHaveAttribute('disabled')
       expect(node).toHaveAttribute('type', 'button')
       expect(node.textContent).toBe('Click me')
     })
 
     test('renders with custom type', () => {
-      const { node } = render(<Button type="submit">Submit</Button>)
+      const { node } = render(<Button type={Button.Type.Submit}>Submit</Button>)
       expect(node).toHaveAttribute('type', 'submit')
     })
 

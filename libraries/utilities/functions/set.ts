@@ -5,7 +5,7 @@
  * @param value the value to set
  * @returns the object with the value set
  */
-export function set<V = object>(path: string, object: V, value: unknown): unknown {
+export function set<V = object>(path: string, object: V, value: unknown): V {
   const keys = path.split('.')
 
   let current = object

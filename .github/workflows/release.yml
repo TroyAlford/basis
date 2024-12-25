@@ -39,28 +39,28 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ needs.determine-version.outputs.next-version }}
 
-  publish:
-    needs: determine-version
-    if: needs.determine-version.outputs.release-needed == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: ./.github/actions/asdf-setup
+  # publish:
+  #   needs: determine-version
+  #   if: needs.determine-version.outputs.release-needed == 'true'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with: { fetch-depth: 0 }
+  #     - uses: ./.github/actions/asdf-setup
 
-      - name: Identify Changed Workspaces
-        id: changes
-        run: |
-          workspaces=$(bun workspace changed)
-          echo "Changed workspaces: $workspaces"
-          tag=${{ needs.determine-version.outputs.next-version }}
-          version=${tag#v}
+  #     - name: Identify Changed Workspaces
+  #       id: changes
+  #       run: |
+  #         workspaces=$(bun workspace changed)
+  #         echo "Changed workspaces: $workspaces"
+  #         tag=${{ needs.determine-version.outputs.next-version }}
+  #         version=${tag#v}
           
-          # Prepare the --only flags for each workspace
-          only_flags=$(echo "$workspaces" | jq -r '.[]' | sed 's/^/--only /')
+  #         # Prepare the --only flags for each workspace
+  #         only_flags=$(echo "$workspaces" | jq -r '.[]' | sed 's/^/--only /')
           
-          echo "Publishing workspaces to JSR as version $version"
-          bun ws publish --version "$version" $only_flags || {
-            echo "::error::Failed to publish workspaces to JSR"
-            exit 1
-          }
+  #         echo "Publishing workspaces to JSR as version $version"
+  #         bun ws publish --version "$version" $only_flags || {
+  #           echo "::error::Failed to publish workspaces to JSR"
+  #           exit 1
+  #         }

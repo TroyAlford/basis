@@ -40,7 +40,7 @@ describe('Carousel', () => {
       const { node } = render(<Carousel images={images} />)
 
       const img = node.querySelector<HTMLImageElement>('img.image.component')
-      expect(img?.src).toContain('test1.jpg')
+      expect(img?.src).toMatch(/test1\.jpg/)
     })
 
     test('accepts image config objects', async () => {

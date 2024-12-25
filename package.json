@@ -10,7 +10,7 @@
     "react-dom": "^18"
   },
   "devDependencies": {
-    "@happy-dom/global-registrator": "^15.0.0",
+    "@happy-dom/global-registrator": "^15.11.7",
     "@types/bun": "^1.1.13",
     "@types/react": "^18",
     "@types/react-dom": "^18",
