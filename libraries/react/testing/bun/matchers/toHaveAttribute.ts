@@ -13,15 +13,19 @@ export function toHaveAttribute(
   value?: string | RegExp,
 ): ReturnType {
   const actual = node.getAttribute(name)
-  const pass = value === undefined
-    ? actual !== null
-    : value instanceof RegExp
-      ? value.test(actual)
-      : actual === value
-  return {
-    message: () => (value === undefined
-      ? `expected element to have attribute ${name}`
-      : `expected ${actual} to equal ${value}`),
-    pass,
+  let message = ''
+  let pass = false
+
+  if (value === undefined) {
+    message = `expected element to have attribute ${name}`
+    pass = actual !== null
+  } else if (value instanceof RegExp) {
+    message = `expected ${actual} to equal ${value}`
+    pass = value.test(actual)
+  } else {
+    message = `expected ${actual} to equal ${value}`
+    pass = actual === value
   }
+
+  return { message: () => message, pass }
 }

@@ -1,14 +1,14 @@
 import * as React from 'react'
-import { classNames, dataAttributes, deepEquals, kebabCase } from '@basis/utilities'
+import { classNames, deepEquals, kebabCase } from '@basis/utilities'
+import { filterByPrefix } from '../../utilities/filterByPrefix'
+import { prefixObject } from '../../utilities/prefixObject'
 
 /** Props for the Component class. */
-export interface ComponentProps {
-  /**
-   * An optional object of ARIA attributes to output on the component's root element.
-   * @example { expanded: true, haspopup: true, controls: 'menu-1' }
-   * // aria-expanded="true" aria-haspopup="true" aria-controls="menu-1"
-   */
-  aria?: Record<string, boolean | number | string>,
+export interface ComponentProps<
+  Element extends HTMLElement = HTMLDivElement,
+> {
+  /** ARIA attributes to be prefixed with 'aria-' during render. */
+  aria?: Record<string, unknown>,
   /** The children of the component. */
   children?: React.ReactNode,
   /** Optional class name(s) to output on the component's root element. */
@@ -16,14 +16,10 @@ export interface ComponentProps {
   | string
   | Set<string>
   | Record<string, boolean | (() => boolean)>,
-  /**
-   * An optional object of data-* attributes to output on the component's root element.
-   * @example { foo: true, bar: 42, baz: 'qux' }
-   * // data-foo="true" data-bar="42" data-baz="qux"
-   */
-  data?: Record<string, boolean | number | string>,
+  /** Data attributes to be prefixed with 'data-' during render. */
+  data?: Record<string, unknown>,
   /** An optional ref to the component's root element. */
-  nodeRef?: React.RefObject<HTMLElement>,
+  nodeRef?: React.RefObject<Element>,
 }
 
 /**
@@ -41,25 +37,18 @@ export abstract class Component<
   State = object,
 > extends React.Component<Props & ComponentProps, State> {
   static defaultProps: ComponentProps = {
-    aria: {},
-    data: {},
-    nodeRef: React.createRef<HTMLElement>(),
+    nodeRef: React.createRef<HTMLDivElement>(),
   }
 
   /**
-   * Getter for ARIA attributes.
+   * Getter for ARIA attributes. Values will be prefixed with 'aria-' during render.
    * @returns A Record<string, boolean | number | string> of ARIA attributes.
    */
-  get aria(): Record<string, boolean | number | string> {
-    return [
-      ...Object.entries(this.props.aria ?? {}).map(([key, value]) => (
-        [`aria-${key}`, value] as [string, boolean | number | string]
-      )),
-      ...Object.entries(this.props).filter(([key]) => key.startsWith('aria-')),
-    ].reduce((aria, [key, value]) => {
-      aria[key] = value
-      return aria
-    }, {})
+  get aria(): Record<string, unknown> {
+    return {
+      ...this.props.aria,
+      ...filterByPrefix('aria-', this.props),
+    }
   }
 
   /**
@@ -71,45 +60,24 @@ export abstract class Component<
 
   /**
    * Getter for class names.
-   * @returns a Set<string> of class names. Component automatically adds `component` and a kebab-cased version of the
+   * @returns a Set<string> of class names. Component automatically adds a kebab-cased version of the
    * component's name (using `displayName` or `name`) to the set.
-   * @example
-   * class MyComponent extends Component {
-   *   get classNames() {
-   *     return super.classNames.add('foo')
-   *   }
-   * }
-   * // classNames = Set { 'my-component', 'component', 'foo' }
-   * @example
-   * class MyComponent extends Component {
-   *   static displayName = 'SomeOtherName'
-   *   get classNames() {
-   *     return super.classNames.add('foo')
-   *   }
-   * }
-   * // classNames = Set { 'some-other-name', 'component', 'foo' }
    */
   get classNames(): Set<string> {
     return new Set<string>()
       // @ts-expect-error - displayName is valid in React components, but not typed
       .add(kebabCase(this.constructor.displayName ?? this.constructor.name))
-      .add('component')
   }
 
   /**
-   * Getter for data attributes.
+   * Getter for data attributes. Values will be prefixed with 'data-' during render.
    * @returns A Record<string, boolean | number | string> of data attributes.
    */
-  get data(): Record<string, boolean | number | string> {
-    return [
-      ...Object.entries(this.props.data ?? {}).map(([key, value]) => (
-        [`data-${key}`, value] as [string, boolean | number | string]
-      )),
-      ...Object.entries(this.props).filter(([key]) => key.startsWith('data-')),
-    ].reduce((data, [key, value]) => {
-      data[key] = value
-      return data
-    }, {})
+  get data(): Record<string, unknown> {
+    return {
+      ...this.props.data,
+      ...filterByPrefix('data-', this.props),
+    }
   }
 
   /**
@@ -156,17 +124,17 @@ export abstract class Component<
    */
   render(): React.ReactNode {
     const Tag = this.tag
-    const { className, nodeRef } = this.props
+    const { children, className, nodeRef } = this.props
 
     return ( // @ts-expect-error - we are assuming a props match
       <Tag // @ts-expect-error - we are assuming a props match
         ref={nodeRef}
+        {...prefixObject('aria-', this.aria)}
+        {...prefixObject('data-', this.data)}
         {...this.attributes}
-        {...this.aria}
-        {...dataAttributes(this.data)}
         className={classNames(className, this.classNames)}
       >
-        {this.content(this.props.children)}
+        {this.content(children)}
       </Tag>
     )
   }
