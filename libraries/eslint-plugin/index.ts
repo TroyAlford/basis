@@ -298,6 +298,9 @@ export default pluginTypescript.config(
   }),
   plugin({
     files: ['*.test.ts', '*.test.tsx'],
-    rules: { 'import/no-extraneous-dependencies': ['error', { devDependencies: true }] },
+    rules: {
+      'dot-notation': 'off',
+      'import/no-extraneous-dependencies': ['error', { devDependencies: true }],
+    },
   }),
 ) as ESLint.ConfigData

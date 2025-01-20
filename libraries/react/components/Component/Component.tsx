@@ -96,9 +96,10 @@ export abstract class Component<
 
   /**
    * The React.ReactHTML tag name of the component's root node.
-   * @default 'div', which renders an HTMLDivElement.
+   * @returns The tag name.
    */
-  readonly tag: keyof React.ReactHTML = 'div'
+  // eslint-disable-next-line @typescript-eslint/class-literal-property-style
+  get tag(): keyof React.ReactHTML { return 'div' }
 
   /**
    * Determines if the component should update.

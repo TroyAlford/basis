@@ -307,5 +307,8 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
     }),
     plugin({
         files: ['*.test.ts', '*.test.tsx'],
-        rules: { 'import/no-extraneous-dependencies': ['error', { devDependencies: true }] },
+        rules: {
+            'dot-notation': 'off',
+            'import/no-extraneous-dependencies': ['error', { devDependencies: true }],
+        },
     })], false));

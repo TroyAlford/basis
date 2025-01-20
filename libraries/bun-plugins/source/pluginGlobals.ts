@@ -107,15 +107,14 @@ export function pluginGlobals(globals: PluginGlobalsOptions = {}): BunPlugin {
   return {
     name: 'globals',
     setup(build) {
-      build.onResolve({ filter }, args => ({ namespace: 'globals', path: args.path }))
-      build.onLoad({ filter: /.*/, namespace: 'globals' }, args => {
-        const name = args.path
-        const contents = generateExport(globals, name)
-        if (contents) {
-          return { contents }
-        }
-        return null
-      })
+      build.onResolve({ filter }, args => ({
+        namespace: 'globals',
+        path: args.path,
+      }))
+      build.onLoad(
+        { filter: /.*/, namespace: 'globals' },
+        args => generateExport(globals, args.path) || null,
+      )
     },
   } as BunPlugin
 }

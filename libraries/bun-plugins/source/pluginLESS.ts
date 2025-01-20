@@ -1,6 +1,6 @@
 import type { BunPlugin } from 'bun'
+import * as less from 'less'
 import * as path from 'node:path'
-import * as sass from 'sass'
 
 /**
  * A Bun build plugin that compiles SASS/SCSS files into CSS and injects them into the document head.
@@ -10,41 +10,37 @@ import * as sass from 'sass'
  * @example Basic usage in Bun build configuration
  * ```typescript
  * import { build } from "bun";
- * import { pluginSASS } from "./pluginSASS";
+ * import { pluginLESS } from "./pluginLESS";
  *
  * await build({
  *   entrypoints: ['./src/index.ts'],
  *   plugins: [
- *     pluginSASS()
+ *     pluginLESS()
  *   ]
  * });
  * ```
  * @example Usage in your JavaScript/TypeScript files
  * // Will be compiled and injected at runtime
- * import './styles.scss'
+ * import './styles.less'
  *
  * // Transformed to:
- * <style data-path="path/to/styles.scss">
+ * <style data-path="path/to/styles.less">
  * // compiled CSS content
  * </style>
  */
-export function pluginSASS(): BunPlugin {
+export function pluginLESS(): BunPlugin {
   return {
-    name: 'scss',
+    name: 'less',
     setup({ config: { target = 'browser' }, onLoad }) {
-      onLoad({ filter: /\.scss$/ }, async args => {
-        const result = sass.compile(args.path)
-        // Convert the SCSS import into a JavaScript module that exports the CSS
-        return {
-          contents: target === 'browser' ? `
-            const style = document.createElement('style');
-            style.dataset.path = ${JSON.stringify(path.relative(process.cwd(), args.path))};
-            style.textContent = ${JSON.stringify(result.css)};
-            document.head.appendChild(style);
-          ` : '',
-          loader: 'js',
-        }
-      })
+      onLoad({ filter: /\.less$/ }, async args => ({
+        contents: target === 'browser' ? `
+          const style = document.createElement('style');
+          style.dataset.path = ${JSON.stringify(path.relative(process.cwd(), args.path))};
+          style.textContent = ${JSON.stringify(less.render(args.path).then(result => result.css))};
+          document.head.appendChild(style);
+        ` : '',
+        loader: 'js',
+      }))
     },
   }
 }
