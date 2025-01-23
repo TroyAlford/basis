@@ -110,7 +110,7 @@ export class Builder {
             'react-dom': 'window.ReactDOM',
             'react-dom/client': 'window.ReactDOM',
           }),
-          pluginSASS(this.#root),
+          pluginSASS(),
         ],
         sourcemap: 'external',
       }).then(async build => {

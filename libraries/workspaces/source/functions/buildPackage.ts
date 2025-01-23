@@ -132,7 +132,7 @@ export async function buildPackage(options: BuildOptions) {
           'react-dom': 'window.ReactDOM',
           'react-dom/client': 'window.ReactDOM',
         }),
-        pluginSASS(packagePath),
+        pluginSASS(),
       ],
       target: 'browser',
     }

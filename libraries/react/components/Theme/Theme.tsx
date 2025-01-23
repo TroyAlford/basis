@@ -159,7 +159,7 @@ export class Theme extends Component<Props> {
     ...DEFAULT_THEME,
   }
 
-  readonly tag = 'style' as const
+  get tag(): keyof React.ReactHTML { return 'style' }
 
   componentDidMount(): void {
     if (this.rootNode) this.rootNode.textContent = this.getCSSVariables()

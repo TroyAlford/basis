@@ -13,7 +13,7 @@ export class Link extends Component<Props, HTMLAnchorElement> {
   get attributes(): React.HTMLAttributes<HTMLAnchorElement> {
     return { href: this.props.to } as React.HTMLAttributes<HTMLAnchorElement>
   }
-  readonly tag: keyof React.ReactHTML = 'a'
+  get tag(): keyof React.ReactHTML { return 'a' }
 
   componentDidMount(): void {
     const options = { capture: true, passive: false }
