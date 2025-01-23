@@ -1,12 +1,21 @@
-import type { BunPlugin } from 'bun'
-import * as less from 'less'
+import type { BunPlugin, PluginBuilder } from 'bun'
+import less from 'less'
 import * as path from 'node:path'
 
+interface PluginLESSOptions {
+  /**
+   * Whether to minify the CSS output
+   * @default true in production, false otherwise
+   */
+  minify?: boolean,
+}
+
 /**
- * A Bun build plugin that compiles SASS/SCSS files into CSS and injects them into the document head.
- * The plugin automatically handles .scss file imports in your JavaScript/TypeScript code by compiling
- * the SASS content and creating a runtime script that injects the compiled CSS into the page.
- * @returns A Bun build plugin that handles SASS/SCSS compilation and injection
+ * A Bun build plugin that compiles LESS files into CSS.
+ * The plugin automatically handles .less file imports in your JavaScript/TypeScript code.
+ * The CSS is always inlined in a style tag.
+ * @param options Configuration options for the plugin
+ * @returns A Bun build plugin that handles LESS compilation
  * @example Basic usage in Bun build configuration
  * ```typescript
  * import { build } from "bun";
@@ -14,33 +23,38 @@ import * as path from 'node:path'
  *
  * await build({
  *   entrypoints: ['./src/index.ts'],
- *   plugins: [
- *     pluginLESS()
- *   ]
+ *   plugins: [pluginLESS()]
  * });
  * ```
- * @example Usage in your JavaScript/TypeScript files
- * // Will be compiled and injected at runtime
- * import './styles.less'
- *
- * // Transformed to:
- * <style data-path="path/to/styles.less">
- * // compiled CSS content
- * </style>
  */
-export function pluginLESS(): BunPlugin {
+export function pluginLESS(options: PluginLESSOptions = {}): BunPlugin {
+  const { minify = Bun.env.NODE_ENV === 'production' } = options
+
   return {
     name: 'less',
-    setup({ config: { target = 'browser' }, onLoad }) {
-      onLoad({ filter: /\.less$/ }, async args => ({
-        contents: target === 'browser' ? `
-          const style = document.createElement('style');
-          style.dataset.path = ${JSON.stringify(path.relative(process.cwd(), args.path))};
-          style.textContent = ${JSON.stringify(less.render(args.path).then(result => result.css))};
-          document.head.appendChild(style);
-        ` : '',
-        loader: 'js',
-      }))
+    setup(build: PluginBuilder) {
+      build.onLoad({ filter: /\.less$/ }, async args => {
+        if (build.config.target !== 'browser') {
+          return { contents: '', loader: 'js' }
+        }
+
+        const source = await Bun.file(args.path).text()
+        const result = await less.render(source, {
+          compress: minify,
+          filename: args.path,
+        })
+
+        return {
+          contents: `
+            const style = document.createElement('style');
+            style.dataset.path = ${JSON.stringify(path.relative(process.cwd(), args.path))};
+            style.textContent = ${JSON.stringify(result.css)};
+            document.head.appendChild(style);
+          `,
+          loader: 'js',
+          watchFiles: [args.path],
+        }
+      })
     },
-  }
+  } as BunPlugin
 }

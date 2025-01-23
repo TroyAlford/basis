@@ -1,0 +1,34 @@
+// Bun Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`pluginSASS minified: true 1`] = `
+[
+  "./input.test.js",
+]
+`;
+
+exports[`pluginSASS minified: true 2`] = `
+"// libraries/bun-plugins/source/test/input.test.scss
+var style = document.createElement("style");
+style.dataset.path = "libraries/bun-plugins/source/test/input.test.scss";
+style.textContent = ".parent>.child{background-color:#333;padding:16px}";
+document.head.appendChild(style);
+"
+`;
+
+exports[`pluginSASS minified: false 1`] = `
+[
+  "./input.test.js",
+]
+`;
+
+exports[`pluginSASS minified: false 2`] = `
+"// libraries/bun-plugins/source/test/input.test.scss
+var style = document.createElement("style");
+style.dataset.path = "libraries/bun-plugins/source/test/input.test.scss";
+style.textContent = \`.parent > .child {
+  background-color: #333333;
+  padding: 16px;
+}\`;
+document.head.appendChild(style);
+"
+`;
