@@ -1,0 +1,10 @@
+@color: #333;
+@px: 8px;
+@width: @px * 2;
+
+.parent {
+  > .child {
+    background-color: fade(@color, 80%);
+    padding: @width;
+  }
+} 

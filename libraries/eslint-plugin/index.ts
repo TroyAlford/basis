@@ -230,6 +230,7 @@ export default pluginTypescript.config(
       '@stylistic/ts/no-extra-parens': 'off',
       // this rule breaks arrows that return nested expressions
       '@stylistic/ts/no-extra-semi': 'error',
+
       '@stylistic/ts/no-tabs': ['error', { allowIndentationTabs: false }],
       '@stylistic/ts/object-curly-newline': ['error', {
         ExportDeclaration: { multiline: true },
@@ -253,6 +254,7 @@ export default pluginTypescript.config(
         before: false,
         overrides: { arrow: { after: true, before: true } },
       }],
+      '@typescript-eslint/class-literal-property-style': 'off',
       '@typescript-eslint/consistent-type-imports': ['error', {
         disallowTypeAnnotations: true,
         fixStyle: 'separate-type-imports',
@@ -298,6 +300,9 @@ export default pluginTypescript.config(
   }),
   plugin({
     files: ['*.test.ts', '*.test.tsx'],
-    rules: { 'import/no-extraneous-dependencies': ['error', { devDependencies: true }] },
+    rules: {
+      'dot-notation': 'off',
+      'import/no-extraneous-dependencies': ['error', { devDependencies: true }],
+    },
   }),
 ) as ESLint.ConfigData

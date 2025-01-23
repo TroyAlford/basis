@@ -1,0 +1,12 @@
+@use 'sass:color';
+
+$color: #333;
+$px: 8px;
+$width: $px * 2;
+
+.parent {
+  > .child {
+    background-color: color.adjust($color, $alpha: 0.8);
+    padding: $width;
+  }
+}

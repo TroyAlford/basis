@@ -28,11 +28,17 @@ interface Props {
  */
 export class Button extends Component<Props, HTMLButtonElement> {
   static readonly Type = ButtonType
-  readonly tag: keyof React.ReactHTML = 'button'
   static defaultProps: Partial<Component<Props>['props']> = {
     disabled: false,
     onActivate: noop,
     type: ButtonType.Button,
+  }
+
+  get aria(): Record<string, boolean | number | string> {
+    return {
+      ...super.aria,
+      'aria-disabled': !!this.props.disabled,
+    }
   }
 
   get attributes(): React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -47,12 +53,7 @@ export class Button extends Component<Props, HTMLButtonElement> {
     }
   }
 
-  get aria(): Record<string, boolean | number | string> {
-    return {
-      ...super.aria,
-      'aria-disabled': !!this.props.disabled,
-    }
-  }
+  get tag(): keyof React.ReactHTML { return 'button' }
 
   /**
    * Handles all activation events (click, key, pointer, touch).

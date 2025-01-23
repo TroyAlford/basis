@@ -43,7 +43,8 @@ export class ApplicationBase<
       context: this.defaultContext,
     }
   }
-  readonly tag: keyof React.ReactHTML = 'div'
+
+  get tag(): keyof React.ReactHTML { return 'div' }
 
   constructor(props: P & Props) {
     super(props)

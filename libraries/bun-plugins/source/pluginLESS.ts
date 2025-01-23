@@ -1,8 +1,8 @@
 import type { BunPlugin, PluginBuilder } from 'bun'
+import less from 'less'
 import * as path from 'node:path'
-import * as sass from 'sass'
 
-interface PluginSASSOptions {
+interface PluginLESSOptions {
   /**
    * Whether to minify the CSS output
    * @default true in production, false otherwise
@@ -11,35 +11,37 @@ interface PluginSASSOptions {
 }
 
 /**
- * A Bun build plugin that compiles SASS/SCSS files into CSS.
- * The plugin automatically handles .scss file imports in your JavaScript/TypeScript code.
+ * A Bun build plugin that compiles LESS files into CSS.
+ * The plugin automatically handles .less file imports in your JavaScript/TypeScript code.
  * The CSS is always inlined in a style tag.
  * @param options Configuration options for the plugin
- * @returns A Bun build plugin that handles SASS/SCSS compilation
+ * @returns A Bun build plugin that handles LESS compilation
  * @example Basic usage in Bun build configuration
  * ```typescript
  * import { build } from "bun";
- * import { pluginSASS } from "./pluginSASS";
+ * import { pluginLESS } from "./pluginLESS";
  *
  * await build({
  *   entrypoints: ['./src/index.ts'],
- *   plugins: [pluginSASS()]
+ *   plugins: [pluginLESS()]
  * });
  * ```
  */
-export function pluginSASS(options: PluginSASSOptions = {}): BunPlugin {
+export function pluginLESS(options: PluginLESSOptions = {}): BunPlugin {
   const { minify = Bun.env.NODE_ENV === 'production' } = options
 
   return {
-    name: 'scss',
+    name: 'less',
     setup(build: PluginBuilder) {
-      build.onLoad({ filter: /\.scss$/ }, async args => {
+      build.onLoad({ filter: /\.less$/ }, async args => {
         if (build.config.target !== 'browser') {
           return { contents: '', loader: 'js' }
         }
 
-        const result = sass.compile(args.path, {
-          style: minify ? 'compressed' : 'expanded',
+        const source = await Bun.file(args.path).text()
+        const result = await less.render(source, {
+          compress: minify,
+          filename: args.path,
         })
 
         return {
@@ -54,5 +56,5 @@ export function pluginSASS(options: PluginSASSOptions = {}): BunPlugin {
         }
       })
     },
-  }
+  } as BunPlugin
 }

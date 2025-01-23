@@ -51,7 +51,7 @@ export class Image extends Component<Props, HTMLImageElement, State> {
     size: Size.Natural,
   }
 
-  readonly tag = 'img' as const
+  get tag(): keyof React.ReactHTML { return 'img' }
 
   get defaultState(): State {
     return {
