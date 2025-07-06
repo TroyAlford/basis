@@ -12,7 +12,7 @@ runs:
 
   steps:
     - uses: actions/checkout@v4
-    - uses: asdf-vm/actions/setup@v3
+    - uses: asdf-vm/actions/setup@v4
 
     - name: Cache ASDF plugins
       uses: actions/cache@v4
@@ -60,11 +60,6 @@ runs:
           done
         fi
 
-        # Install jq explicitly
-        asdf plugin add jq || true # Add plugin if not exists
-        asdf install jq latest
-        asdf global jq latest
-
         # Reshim all tools
         asdf reshim
 
@@ -79,16 +74,21 @@ runs:
       shell: bash
       run: |
         if [ -f package.json ]; then
-          if [ -f bun.lockb ]; then
+          # Check for lockfiles in order of preference (most specific first)
+          if [ -f bun.lock ]; then
             echo "manager=bun" >> $GITHUB_OUTPUT
-            echo "lock_file=bun.lockb" >> $GITHUB_OUTPUT
+            echo "lock_file=bun.lock" >> $GITHUB_OUTPUT
           elif [ -f yarn.lock ]; then
             echo "manager=yarn" >> $GITHUB_OUTPUT
             echo "lock_file=yarn.lock" >> $GITHUB_OUTPUT
+          elif [ -f pnpm-lock.yaml ]; then
+            echo "manager=pnpm" >> $GITHUB_OUTPUT
+            echo "lock_file=pnpm-lock.yaml" >> $GITHUB_OUTPUT
           elif [ -f package-lock.json ]; then
             echo "manager=npm" >> $GITHUB_OUTPUT
             echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
           else
+            # Fallback to packageManager field in package.json
             PACKAGE_MANAGER=$(jq -r '.packageManager | if type == "string" then split("@")[0] else empty end // empty' package.json)
             case $PACKAGE_MANAGER in
               npm)
@@ -99,9 +99,13 @@ runs:
                 echo "manager=yarn" >> $GITHUB_OUTPUT
                 echo "lock_file=yarn.lock" >> $GITHUB_OUTPUT
                 ;;
+              pnpm)
+                echo "manager=pnpm" >> $GITHUB_OUTPUT
+                echo "lock_file=pnpm-lock.yaml" >> $GITHUB_OUTPUT
+                ;;
               bun)
                 echo "manager=bun" >> $GITHUB_OUTPUT
-                echo "lock_file=bun.lockb" >> $GITHUB_OUTPUT
+                echo "lock_file=bun.lock" >> $GITHUB_OUTPUT
                 ;;
               *)
                 echo "manager=npm" >> $GITHUB_OUTPUT
@@ -120,6 +124,11 @@ runs:
       with:
         path: |
           **/node_modules
+          ~/.npm
+          ~/.yarn/cache
+          ~/.cache/yarn
+          ~/.pnpm-store
+          ~/.bun/install/cache
         key: ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-${{ hashFiles('**/${{ steps.pkg-manager.outputs.lock_file }}') }}
         restore-keys: |
           ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-
@@ -136,6 +145,9 @@ runs:
             ;;
           yarn)
             yarn install --frozen-lockfile
+            ;;
+          pnpm)
+            pnpm install --frozen-lockfile
             ;;
           bun)
             bun install --frozen-lockfile
