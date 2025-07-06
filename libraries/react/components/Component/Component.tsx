@@ -98,7 +98,6 @@ export abstract class Component<
    * The React.ReactHTML tag name of the component's root node.
    * @returns The tag name.
    */
-  // eslint-disable-next-line @typescript-eslint/class-literal-property-style
   get tag(): keyof React.ReactHTML { return 'div' }
 
   /**
