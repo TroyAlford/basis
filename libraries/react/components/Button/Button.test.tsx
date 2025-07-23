@@ -26,11 +26,11 @@ describe('Button', () => {
   })
 
   describe('event handling', () => {
-    test('calls onActivate when pointer down', () => {
+    test('calls onActivate when clicked', () => {
       const onActivate = mock()
       const { node } = render(<Button onActivate={onActivate}>Click me</Button>)
 
-      node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+      node.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       expect(onActivate).toHaveBeenCalledTimes(1)
     })
 
@@ -62,7 +62,7 @@ describe('Button', () => {
       const onActivate = mock()
       const { node } = render(<Button onActivate={onActivate}>Click me</Button>)
 
-      node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+      node.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }))
       expect(onActivate).toHaveBeenCalledTimes(1)
     })
 
@@ -70,7 +70,7 @@ describe('Button', () => {
       const onActivate = mock()
       const { node } = render(<Button onActivate={onActivate}>Right click</Button>)
 
-      node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 2 }))
+      node.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 2 }))
       expect(onActivate).not.toHaveBeenCalled()
     })
 
@@ -79,7 +79,7 @@ describe('Button', () => {
       const { node } = render(<Button disabled onActivate={onActivate}>Disabled</Button>)
 
       node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
-      node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+      node.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
       expect(onActivate).not.toHaveBeenCalled()
     })
