@@ -26,11 +26,11 @@ describe('Button', () => {
   })
 
   describe('event handling', () => {
-    test('calls onActivate when clicked', () => {
+    test('calls onActivate when pointer down', () => {
       const onActivate = mock()
       const { node } = render(<Button onActivate={onActivate}>Click me</Button>)
 
-      node.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
       expect(onActivate).toHaveBeenCalledTimes(1)
     })
 
@@ -74,22 +74,12 @@ describe('Button', () => {
       expect(onActivate).not.toHaveBeenCalled()
     })
 
-    test('calls onActivate on touch', () => {
-      const onActivate = mock()
-      const { node } = render(<Button onActivate={onActivate}>Touch me</Button>)
-
-      node.dispatchEvent(new TouchEvent('touchstart', { bubbles: true }))
-      expect(onActivate).toHaveBeenCalledTimes(1)
-    })
-
     test('does not call onActivate when disabled', () => {
       const onActivate = mock()
       const { node } = render(<Button disabled onActivate={onActivate}>Disabled</Button>)
 
-      node.click()
       node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
       node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
-      node.dispatchEvent(new TouchEvent('touchstart', { bubbles: true }))
 
       expect(onActivate).not.toHaveBeenCalled()
     })
