@@ -45,8 +45,8 @@ export class Button extends Component<Props, HTMLButtonElement> {
     const { disabled, type } = this.props
     return {
       disabled: !!disabled,
+      onClick: this.handleActivate,
       onKeyDown: this.handleActivate,
-      onPointerDown: this.handleActivate,
       type,
     }
   }
@@ -54,22 +54,24 @@ export class Button extends Component<Props, HTMLButtonElement> {
   get tag(): keyof React.ReactHTML { return 'button' }
 
   /**
-   * Handles all activation events (key, pointer).
+   * Handles all activation events (click, key).
    * @param event - The synthetic event.
    */
   private handleActivate = (event: React.SyntheticEvent): void => {
     const { disabled, onActivate } = this.props
     if (disabled) return
 
+    // Prevent default behavior and stop propagation to avoid interference
+    event.preventDefault()
+    event.stopPropagation()
+
     match(event.type)
+      .when('click').then(() => {
+        onActivate(event)
+      })
       .when('keydown').then(() => {
         const { key } = event as React.KeyboardEvent
         if (!['Enter', ' '].includes(key)) return
-        onActivate(event)
-      })
-      .when('pointerdown').then(() => {
-        const { button } = event as React.PointerEvent
-        if (button !== 0) return
         onActivate(event)
       })
       .else(noop)
