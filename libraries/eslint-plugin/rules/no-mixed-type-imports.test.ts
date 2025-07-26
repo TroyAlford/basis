@@ -20,7 +20,7 @@ describe('no-mixed-type-imports', () => {
     }, { filename: __filename, fix: true })
   }
 
-  test.skipIf(!!process.env.CI)('outputs with/out semicolons, based on input line', () => {
+  test.skipIf(!!Bun.env.CI)('outputs with/out semicolons, based on input line', () => {
     const semi = lint("import { a, type b, c } from 'module';")
     expect(semi.fixed).toBe(true)
     expect(semi.output.split(/\n/)).toEqual([
