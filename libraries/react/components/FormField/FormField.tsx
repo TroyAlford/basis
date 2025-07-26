@@ -216,6 +216,7 @@ export abstract class FormField<
           autoComplete={this.props.autoComplete ? 'on' : 'off'}
           autoFocus={this.props.autoFocus}
           disabled={this.props.disabled}
+          name={String(this.props.field)}
           placeholder={this.props.placeholder}
           readOnly={this.props.readOnly}
           required={this.props.required}
