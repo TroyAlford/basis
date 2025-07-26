@@ -123,7 +123,7 @@ export async function buildPackage(options: BuildOptions) {
     buildConfig = {
       ...baseConfig,
       define: {
-        'Bun.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
+        'Bun.env.NODE_ENV': JSON.stringify(Bun.env.NODE_ENV ?? 'production'),
       },
       external: [...baseConfig.external, 'react', 'react-dom'],
       plugins: [

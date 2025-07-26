@@ -29,7 +29,7 @@ type GlobalResolveFunc = (moduleName: string) => string | undefined
  *   // Maps specific versions of a package to different globals
  *   'lodash-(.*)': (name) => `window.lodash.${name.split('-')[1]}`,
  *   // Conditionally map imports
- *   'my-lib': (name) => process.env.NODE_ENV === 'development'
+ *   'my-lib': (name) => Bun.env.NODE_ENV === 'development'
  *     ? 'window.MyLibDev'
  *     : 'window.MyLib'
  * }

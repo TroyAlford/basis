@@ -40,7 +40,7 @@ const buildConfig = {
   plugins: [
     pluginGlobals({
       // Define global variables
-      'process.env.NODE_ENV': JSON.stringify('production')
+      'Bun.env.NODE_ENV': JSON.stringify('production')
     })
   ]
 }
@@ -49,7 +49,7 @@ const buildConfig = {
   plugins: [
     pluginSASS(),
     pluginGlobals({
-      'process.env.NODE_ENV': JSON.stringify('production')
+      'Bun.env.NODE_ENV': JSON.stringify('production')
     })
   ]
 }
