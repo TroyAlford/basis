@@ -42,6 +42,8 @@ export function pluginLESS(options: PluginLESSOptions = {}): BunPlugin {
         const result = await less.render(source, {
           compress: minify,
           filename: args.path,
+          javascriptEnabled: true,
+          paths: [path.resolve(process.cwd(), 'node_modules')],
         })
 
         return {
