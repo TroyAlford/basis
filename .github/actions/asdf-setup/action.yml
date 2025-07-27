@@ -129,7 +129,7 @@ runs:
           ~/.cache/yarn
           ~/.pnpm-store
           ~/.bun/install/cache
-        key: ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-${{ hashFiles('**/${{ steps.pkg-manager.outputs.lock_file }}') }}
+        key: ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-${{ hashFiles('${{ steps.pkg-manager.outputs.lock_file }}') }}
         restore-keys: |
           ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-
 
