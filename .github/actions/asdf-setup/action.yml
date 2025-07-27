@@ -73,35 +73,23 @@ runs:
       id: pkg-manager
       shell: bash
       run: |
-        echo "Current directory: $(pwd)"
-        echo "Files in current directory:"
-        ls -la
-        
         if [ -f package.json ]; then
-          echo "package.json found"
           # Check for lockfiles in order of preference (most specific first)
           if [ -f bun.lock ]; then
-            echo "bun.lock found"
             echo "manager=bun" >> $GITHUB_OUTPUT
             echo "lock_file=bun.lock" >> $GITHUB_OUTPUT
-            echo "Set manager=bun and lock_file=bun.lock"
           elif [ -f yarn.lock ]; then
-            echo "yarn.lock found"
             echo "manager=yarn" >> $GITHUB_OUTPUT
             echo "lock_file=yarn.lock" >> $GITHUB_OUTPUT
           elif [ -f pnpm-lock.yaml ]; then
-            echo "pnpm-lock.yaml found"
             echo "manager=pnpm" >> $GITHUB_OUTPUT
             echo "lock_file=pnpm-lock.yaml" >> $GITHUB_OUTPUT
           elif [ -f package-lock.json ]; then
-            echo "package-lock.json found"
             echo "manager=npm" >> $GITHUB_OUTPUT
             echo "lock_file=package-lock.json" >> $GITHUB_OUTPUT
           else
-            echo "No lockfile found, checking packageManager field"
             # Fallback to packageManager field in package.json
             PACKAGE_MANAGER=$(jq -r '.packageManager | if type == "string" then split("@")[0] else empty end // empty' package.json)
-            echo "packageManager from package.json: $PACKAGE_MANAGER"
             case $PACKAGE_MANAGER in
               npm)
                 echo "manager=npm" >> $GITHUB_OUTPUT
@@ -138,20 +126,9 @@ runs:
         if [ -f "$LOCK_FILE" ]; then
           HASH=$(sha256sum "$LOCK_FILE" | cut -d' ' -f1)
           echo "hash=$HASH" >> $GITHUB_OUTPUT
-          echo "Generated hash: $HASH for file: $LOCK_FILE"
         else
-          echo "Lock file not found: $LOCK_FILE"
           echo "hash=" >> $GITHUB_OUTPUT
         fi
-
-    - name: Debug cache key
-      shell: bash
-      run: |
-        echo "Manager: ${{ steps.pkg-manager.outputs.manager }}"
-        echo "Lock file: ${{ steps.pkg-manager.outputs.lock_file }}"
-        echo "OS: ${{ runner.os }}"
-        echo "Generated hash: ${{ steps.cache-key.outputs.hash }}"
-        echo "Full cache key: ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-${{ steps.cache-key.outputs.hash }}"
 
     - name: Cache dependencies
       uses: actions/cache@v4
