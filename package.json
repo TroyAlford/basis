@@ -6,22 +6,22 @@
   "version": "1.0.0",
   "dependencies": {
     "eslint": "^9.32.0",
-    "react": "^18",
-    "react-dom": "^18"
+    "react": "^19",
+    "react-dom": "^19"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^18.0.1",
-    "@types/bun": "^1.1.13",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
-    "bun-types": "^1.1.29",
+    "@types/bun": "^1.2.19",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "bun-types": "^1.2.19",
     "chalk": "^5.4.1",
     "husky": "^9.1.7",
     "typescript": "^5.8.3"
   },
-  "resolutions": {
-    "react": "^18",
-    "react-dom": "^18"
+  "overrides": {
+    "react": "^19",
+    "react-dom": "^19"
   },
   "scripts": {
     "docs:start": "bun run --filter @basis/docs start",

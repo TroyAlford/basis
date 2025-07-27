@@ -44,7 +44,7 @@ export class ApplicationBase<
     }
   }
 
-  get tag(): keyof React.ReactHTML { return 'div' }
+  get tag(): Component['tag'] { return 'div' }
 
   constructor(props: P & Props) {
     super(props)
@@ -115,10 +115,10 @@ export class ApplicationBase<
    * Sets the context.
    * @param updates - The updates to the context
    */
-  setContext(updates: Partial<C>) {
+  async setContext(updates: Partial<C>) {
     const context: C = { ...this.state.context, ...updates }
     if (deepEquals(this.state.context, context)) return
 
-    this.setState(state => ({ ...state, context }))
+    await this.setState(state => ({ ...state, context }))
   }
 }

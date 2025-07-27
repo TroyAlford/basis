@@ -2,6 +2,7 @@ import { afterEach, beforeEach, spyOn } from 'bun:test'
 
 global.FILTERED_WARNINGS = [
   /ReactDOM.render is no longer supported in React 18/,
+  /React will try to recreate this component tree from scratch using the error boundary you provided, Mounter./,
 ]
 
 const originalConsole = { ...console }

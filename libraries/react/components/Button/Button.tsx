@@ -51,7 +51,7 @@ export class Button extends Component<Props, HTMLButtonElement> {
     }
   }
 
-  get tag(): keyof React.ReactHTML { return 'button' }
+  get tag(): keyof React.JSX.IntrinsicElements { return 'button' }
 
   /**
    * Handles all activation events (click, key).

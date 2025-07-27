@@ -30,14 +30,14 @@ describe('Redirect', () => {
     replaceState.mockRestore()
   })
 
-  test('redirects to the specified path on mount', () => {
-    render<Redirect>(<Redirect to="/redirect/path" />)
+  test('redirects to the specified path on mount', async () => {
+    await render<Redirect>(<Redirect to="/redirect/path" />)
     expect(window.location.pathname).toBe('/redirect/path')
     expect(replaceState).toHaveBeenCalledTimes(1)
   })
 
-  test('renders nothing', () => {
-    const { node } = render<Redirect>(<Redirect to="/some/path" />)
+  test('renders nothing', async () => {
+    const { node } = await render<Redirect>(<Redirect to="/some/path" />)
     expect(node).toBeNull()
   })
 })

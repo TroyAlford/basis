@@ -1,11 +1,7 @@
 import { clone, noop, set } from '@basis/utilities'
-import type { ComponentProps } from '../Component/Component'
 import { Component } from '../Component/Component'
 
-interface EditorProps<
-  Value,
-  Element extends HTMLElement = HTMLDivElement,
-> extends ComponentProps<Element> {
+interface TProps<Value> {
   /** Field identifier (number or string) */
   field?: number | string,
   /** Initial value for uncontrolled mode */
@@ -33,23 +29,26 @@ interface EditorProps<
   value?: Value,
 }
 
-interface EditorState<TValue> {
+interface TState<Value> {
   /** Current value in uncontrolled mode */
-  current: TValue,
+  current: Value,
 }
+
+type P<V, T> = TProps<V> & T
+type S<V, T> = TState<V> & T
 
 /**
  * Abstract base class for editor components.
  * Extends Component to provide common editor functionality.
  */
-// @ts-expect-error - TS struggles with this typing for some reason
+// @ts-ignore - TS2589: Type instantiation is excessively deep and possibly infinite.
 export abstract class Editor<
-  Value = unknown,
-  Element extends HTMLElement = HTMLDivElement,
-  Props = EditorProps<Value, Element>,
-  State = EditorState<Value>,
-> extends Component<Props & EditorProps<Value, Element>, Element, State & EditorState<Value>> {
-  static defaultProps: Partial<EditorProps<unknown>> = {
+  Value,
+  Element extends HTMLElement = HTMLElement,
+  Props = TProps<Value>,
+  State = TState<Value>,
+> extends Component<P<Value, Props>, Element, S<Value, State>> {
+  static defaultProps: Partial<TProps<unknown> & Component['props']> = {
     ...super.defaultProps,
     onChange: noop,
     readOnly: false,
@@ -60,13 +59,13 @@ export abstract class Editor<
    * @param ctor - The constructor to check
    * @returns Whether the constructor is an Editor
    */
-  static isEditor(ctor: unknown): ctor is new (...args: unknown[]) => Editor {
+  static isEditor(ctor: unknown): ctor is new (...args: unknown[]) => Editor<unknown> {
     if (ctor === Editor) return true
     if (ctor instanceof Editor) return true
     return typeof ctor === 'function' && ctor.prototype instanceof Editor
   }
 
-  get defaultState(): State & EditorState<Value> {
+  get defaultState(): S<Value, State> {
     return {
       ...super.defaultState,
       current: this.props.value ?? this.props.initialValue,
@@ -117,13 +116,13 @@ export abstract class Editor<
    * Handles value changes in both controlled and uncontrolled modes
    * @param value - The new value
    */
-  protected handleChange = (value: Value): void => {
+  protected handleChange = async (value: Value): Promise<void> => {
     const { field = '', onChange = noop } = this.props
 
     if (this.controlled) {
       onChange(value, field, this)
     } else {
-      this.setState({ current: value } as State, () => {
+      await this.setState({ current: value } as State extends TState<Value> ? State : State & TState<Value>, () => {
         onChange(value, field, this)
       })
     }
@@ -134,7 +133,7 @@ export abstract class Editor<
    * @param value - The new value
    * @param path - The path to the nested field
    */
-  protected handleField = (value: unknown, path: string): void => {
+  protected handleField = async (value: unknown, path: string): Promise<void> => {
     const update = clone(this.current)
 
     const parts = path.split('.')
@@ -142,6 +141,6 @@ export abstract class Editor<
     if (!lastPart) return
 
     set(path, update, value)
-    this.handleChange(update)
+    await this.handleChange(update)
   }
 }

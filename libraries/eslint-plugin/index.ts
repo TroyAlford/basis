@@ -254,6 +254,7 @@ export default pluginTypescript.config(
         before: false,
         overrides: { arrow: { after: true, before: true } },
       }],
+      '@typescript-eslint/ban-ts-comment': 'warn',
       '@typescript-eslint/class-literal-property-style': 'off',
       '@typescript-eslint/consistent-type-imports': ['error', {
         disallowTypeAnnotations: true,

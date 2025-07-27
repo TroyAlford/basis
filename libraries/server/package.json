@@ -21,9 +21,9 @@
     "@basis/bun-plugins": "workspace:*",
     "@basis/react": "workspace:*",
     "@basis/utilities": "workspace:*",
-    "@types/bun": "^1.1.13",
-    "react": "^18",
-    "react-dom": "^18"
+    "@types/bun": "^1.2.19",
+    "react": "^19",
+    "react-dom": "^19"
   },
   "dependencies": {
     "chokidar": "^4.0.1"

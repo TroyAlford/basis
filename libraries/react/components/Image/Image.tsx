@@ -51,7 +51,7 @@ export class Image extends Component<Props, HTMLImageElement, State> {
     size: Size.Natural,
   }
 
-  get tag(): keyof React.ReactHTML { return 'img' }
+  get tag(): keyof React.JSX.IntrinsicElements { return 'img' }
 
   get defaultState(): State {
     return {
@@ -116,23 +116,21 @@ export class Image extends Component<Props, HTMLImageElement, State> {
     // Get or create loading promise
     let loadingPromise = Image.Cache.Loading.get(src)
     if (!loadingPromise) {
-      loadingPromise = loadImage(src).then(img => {
+      loadingPromise = loadImage(src).catch(() => {
         Image.Cache.Loading.delete(src)
-        Image.Cache.Resolved.set(src, img)
+        return null
+      }).then(img => {
+        Image.Cache.Loading.delete(src)
+        if (img) Image.Cache.Resolved.set(src, img)
         return img
-      }).catch(error => {
-        Image.Cache.Loading.delete(src)
-        throw error
       })
       Image.Cache.Loading.set(src, loadingPromise)
     }
 
-    // Add our own .then() to handle this instance's update
-    try {
-      await loadingPromise
+    if (await loadingPromise) {
       this.forceUpdate()
-    } catch {
-      this.setState({ error: true })
+    } else {
+      await this.setState({ error: true })
     }
   }
 

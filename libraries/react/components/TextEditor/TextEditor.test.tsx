@@ -4,13 +4,13 @@ import { render } from '../../testing/render'
 import { TextEditor } from './TextEditor'
 
 describe('TextEditor', () => {
-  test('extends FormField with string type', () => {
-    const { node } = render(<TextEditor />)
+  test('extends FormField with string type', async () => {
+    const { node } = await render(<TextEditor />)
     expect(node).toHaveClass('text-editor', 'component')
   })
 
-  test('handles string values correctly', () => {
-    const { node } = render(<TextEditor value="test string" />)
+  test('handles string values correctly', async () => {
+    const { node } = await render(<TextEditor value="test string" />)
     const input = node.querySelector('input') as HTMLInputElement
     expect(input.value).toBe('test string')
   })

@@ -30,8 +30,8 @@ describe('Link', () => {
     pushState.mockRestore()
   })
 
-  test('renders an anchor tag with the correct href', () => {
-    const { node } = render<Link>(
+  test('renders an anchor tag with the correct href', async () => {
+    const { node } = await render<Link>(
       <Link to="/some/path">Click me</Link>,
     )
     expect(node.tagName).toBe('A')
@@ -39,8 +39,8 @@ describe('Link', () => {
     expect(node.textContent).toBe('Click me')
   })
 
-  test('uses pushState for client-side navigation', () => {
-    const { instance } = render<Link>(
+  test('uses pushState for client-side navigation', async () => {
+    const { instance } = await render<Link>(
       <Link to="/new/path">Navigate</Link>,
     )
 
