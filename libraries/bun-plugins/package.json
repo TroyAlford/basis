@@ -7,10 +7,10 @@
     ".": "./index.ts"
   },
   "dependencies": {
-    "less": "^4.2.2",
-    "sass": "1.83.4"
+    "less": "^4.4.0",
+    "sass": "1.89.2"
   },
   "devDependencies": {
-    "@types/less": "^3.0.7"
+    "@types/less": "^3.0.8"
   }
 }
