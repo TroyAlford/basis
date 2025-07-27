@@ -20,6 +20,7 @@
     "typescript": "^5.8.3"
   },
   "overrides": {
+    "chalk": "^5.4.1",
     "react": "^19",
     "react-dom": "^19"
   },
@@ -38,5 +39,8 @@
   ],
   "trustedDependencies": [
     "@basis/workspaces"
-  ]
+  ],
+  "patchedDependencies": {
+    "eslint@9.32.0": "patches/eslint@9.32.0.patch"
+  }
 }
