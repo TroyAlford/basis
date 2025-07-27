@@ -73,7 +73,7 @@ describe('Router', () => {
 
     window.history.pushState({}, '', '/qux/456')
     await new Promise(resolve => setTimeout(resolve, 0))
-    rendered.update()
+    await rendered.update()
 
     expect(rendered.node.outerHTML).toEqual('<div data-id="456" data-type="qux"></div>')
   })
