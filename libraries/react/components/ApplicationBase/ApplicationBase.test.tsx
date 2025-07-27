@@ -14,25 +14,25 @@ export class TestApplication extends ApplicationBase {
 
 describe('Application', () => {
   describe('Context', () => {
-    test('default context', () => {
-      const { instance } = render<TestApplication>(<TestApplication />)
+    test('default context', async () => {
+      const { instance } = await render<TestApplication>(<TestApplication />)
       expect(instance.state.context).toEqual(instance.defaultContext)
     })
 
-    test('setContext', () => {
-      const { instance } = render<TestApplication>(<TestApplication />)
+    test('setContext', async () => {
+      const { instance } = await render<TestApplication>(<TestApplication />)
 
-      instance.setContext({ foo: 'baz' })
+      await instance.setContext({ foo: 'baz' })
       expect(instance.state.context).toEqual({ foo: 'baz' })
 
-      instance.setContext({ foo: { bar: 'baz' } })
+      await instance.setContext({ foo: { bar: 'baz' } })
       expect(instance.state.context).toEqual({ foo: { bar: 'baz' } })
     })
   })
 
   describe('window', () => {
-    test('window.application & window.ApplicationContext', () => {
-      const { instance } = render<TestApplication>(<TestApplication />)
+    test('window.application & window.ApplicationContext', async () => {
+      const { instance } = await render<TestApplication>(<TestApplication />)
 
       // @ts-expect-error - window is not defined in the global scope
       expect(window.ApplicationBase).toBe(instance)

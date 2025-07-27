@@ -5,14 +5,14 @@ import { Theme } from './Theme'
 
 describe('Theme', () => {
   describe('rendering', () => {
-    test('renders with minimal props', () => {
-      const { node } = render(<Theme name="test" />)
+    test('renders with minimal props', async () => {
+      const { node } = await render(<Theme name="test" />)
       expect(node.tagName).toBe('STYLE')
       expect(node.textContent).toContain('[theme="test"]')
     })
 
-    test('renders with all props', () => {
-      const { node } = render(
+    test('renders with all props', async () => {
+      const { node } = await render(
         <Theme
           name="test"
           color={{
@@ -109,8 +109,8 @@ describe('Theme', () => {
   })
 
   describe('color processing', () => {
-    test('processes hex colors', () => {
-      const { node } = render(
+    test('processes hex colors', async () => {
+      const { node } = await render(
         <Theme
           color={{ primary: '#ff0000' }}
           name="test"
@@ -119,8 +119,8 @@ describe('Theme', () => {
       expect(node.textContent).toContain('--basis-color-primary: #ff0000ff')
     })
 
-    test('processes rgb colors', () => {
-      const { node } = render(
+    test('processes rgb colors', async () => {
+      const { node } = await render(
         <Theme
           color={{ primary: 'rgb(255, 0, 0)' }}
           name="test"
@@ -129,8 +129,8 @@ describe('Theme', () => {
       expect(node.textContent).toContain('--basis-color-primary: #ff0000ff')
     })
 
-    test('processes rgba colors', () => {
-      const { node } = render(
+    test('processes rgba colors', async () => {
+      const { node } = await render(
         <Theme
           color={{ primary: 'rgba(255, 0, 0, 0.5)' }}
           name="test"
@@ -139,8 +139,8 @@ describe('Theme', () => {
       expect(node.textContent).toContain('--basis-color-primary: #ff000080')
     })
 
-    test('processes hsl colors', () => {
-      const { node } = render(
+    test('processes hsl colors', async () => {
+      const { node } = await render(
         <Theme
           color={{ primary: 'hsl(0, 100%, 50%)' }}
           name="test"
@@ -149,8 +149,8 @@ describe('Theme', () => {
       expect(node.textContent).toContain('--basis-color-primary: #ff0000ff')
     })
 
-    test('processes hsla colors', () => {
-      const { node } = render(
+    test('processes hsla colors', async () => {
+      const { node } = await render(
         <Theme
           color={{ primary: 'hsla(0, 100%, 50%, 0.5)' }}
           name="test"
@@ -161,8 +161,8 @@ describe('Theme', () => {
   })
 
   describe('value processing', () => {
-    test('adds px to numeric values', () => {
-      const { node } = render(
+    test('adds px to numeric values', async () => {
+      const { node } = await render(
         <Theme
           name="test"
           radius={{ md: 8 }}
@@ -173,8 +173,8 @@ describe('Theme', () => {
       expect(node.textContent).toContain('--basis-radius-md: 8px')
     })
 
-    test('adds % to font sizes', () => {
-      const { node } = render(
+    test('adds % to font sizes', async () => {
+      const { node } = await render(
         <Theme
           fontSize={{ md: 100 }}
           name="test"
@@ -183,8 +183,8 @@ describe('Theme', () => {
       expect(node.textContent).toContain('--basis-font-size-md: 100%')
     })
 
-    test('preserves string values for shadows and transitions', () => {
-      const { node } = render(
+    test('preserves string values for shadows and transitions', async () => {
+      const { node } = await render(
         <Theme
           name="test"
           shadow={{ md: '0 2px 4px rgba(0, 0, 0, 0.1)' }}
@@ -197,8 +197,8 @@ describe('Theme', () => {
   })
 
   describe('theme namespacing', () => {
-    test('namespaces variables under theme attribute', () => {
-      const { node } = render(
+    test('namespaces variables under theme attribute', async () => {
+      const { node } = await render(
         <Theme
           color={{ primary: '#ff0000' }}
           name="light"
@@ -207,8 +207,8 @@ describe('Theme', () => {
       expect(node.textContent).toMatch(/^:root \[theme="light"\] {/)
     })
 
-    test('handles special characters in theme name', () => {
-      const { node } = render(
+    test('handles special characters in theme name', async () => {
+      const { node } = await render(
         <Theme
           color={{ primary: '#ff0000' }}
           name="theme:light@2x"

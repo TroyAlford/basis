@@ -4,8 +4,8 @@ import { render } from '../../testing/render'
 import { Editor } from './Editor'
 
 class TestEditor extends Editor<string> {
-  public testHandleChange(value: string): void {
-    this.handleChange(value)
+  public async testHandleChange(value: string): Promise<void> {
+    await this.handleChange(value)
   }
 
   get data(): Record<string, unknown> {
@@ -22,70 +22,70 @@ class TestEditor extends Editor<string> {
 
 describe('Editor', () => {
   describe('initialization', () => {
-    test('renders with default props', () => {
-      const { node } = render(<TestEditor />)
+    test('renders with default props', async () => {
+      const { node } = await render(<TestEditor />)
       expect(node).toHaveClass('editor')
       expect(node.dataset.value).toBeUndefined()
     })
 
-    test('renders with initial value', () => {
-      const { node } = render(<TestEditor initialValue="test" />)
+    test('renders with initial value', async () => {
+      const { node } = await render(<TestEditor initialValue="test" />)
       expect(node.dataset.value).toBe('test')
       expect(node.textContent).toBe('test')
     })
 
-    test('renders with controlled value', () => {
-      const { node } = render(<TestEditor value="controlled" />)
+    test('renders with controlled value', async () => {
+      const { node } = await render(<TestEditor value="controlled" />)
       expect(node.dataset.value).toBe('controlled')
       expect(node.textContent).toBe('controlled')
     })
 
-    test('renders with field identifier', () => {
-      const { node: numberNode } = render(<TestEditor field={1} />)
+    test('renders with field identifier', async () => {
+      const { node: numberNode } = await render(<TestEditor field={1} />)
       expect(numberNode).toHaveClass('editor', 'index-1')
 
-      const { node: stringNode } = render(<TestEditor field="test-field" />)
+      const { node: stringNode } = await render(<TestEditor field="test-field" />)
       expect(stringNode).toHaveClass('editor', 'test-field')
     })
 
-    test('renders with read-only state', () => {
-      const { node } = render(<TestEditor readOnly />)
+    test('renders with read-only state', async () => {
+      const { node } = await render(<TestEditor readOnly />)
       expect(node).toHaveAttribute('readOnly')
       expect(node).toHaveAttribute('aria-readonly', 'true')
     })
   })
 
   describe('value management', () => {
-    test('handles controlled mode updates', () => {
+    test('handles controlled mode updates', async () => {
       const onChange = mock((value: string) => value)
-      const { update } = render(
+      const { update } = await render(
         <TestEditor
           value="initial"
           onChange={onChange}
         />,
       )
 
-      update(<TestEditor value="updated" onChange={onChange} />)
+      await update(<TestEditor value="updated" onChange={onChange} />)
       expect(onChange).not.toHaveBeenCalled()
     })
 
-    test('handles uncontrolled mode updates', () => {
+    test('handles uncontrolled mode updates', async () => {
       const onChange = mock((value: string) => value)
-      const { instance } = render<TestEditor>(
+      const { instance } = await render<TestEditor>(
         <TestEditor
           initialValue="initial"
           onChange={onChange}
         />,
       )
 
-      instance.testHandleChange('updated')
+      await instance.testHandleChange('updated')
       expect(onChange).toHaveBeenCalledWith('updated', '', instance)
       expect(instance.current).toBe('updated')
     })
 
-    test('handles field updates', () => {
+    test('handles field updates', async () => {
       const onChange = mock((value: string) => value)
-      const { instance } = render<TestEditor>(
+      const { instance } = await render<TestEditor>(
         <TestEditor
           field="test-field"
           initialValue="initial"
@@ -93,7 +93,7 @@ describe('Editor', () => {
         />,
       )
 
-      instance.testHandleChange('updated')
+      await instance.testHandleChange('updated')
       expect(onChange).toHaveBeenCalledWith('updated', 'test-field', instance)
     })
   })
@@ -108,8 +108,8 @@ describe('Editor', () => {
     }
 
     class NestedEditor extends Editor<NestedValue> {
-      public testHandleField(value: unknown, path: string): void {
-        this.handleField(value, path)
+      public async testHandleField(value: unknown, path: string): Promise<void> {
+        await this.handleField(value, path)
       }
 
       renderEditor(): React.ReactNode {
@@ -117,7 +117,7 @@ describe('Editor', () => {
       }
     }
 
-    test('handles nested field updates', () => {
+    test('handles nested field updates', async () => {
       const initialValue = {
         a: {
           b: {
@@ -126,11 +126,11 @@ describe('Editor', () => {
         },
       }
 
-      const { instance } = render<NestedEditor>(
+      const { instance } = await render<NestedEditor>(
         <NestedEditor initialValue={initialValue} />,
       )
 
-      instance.testHandleField('updated', 'a.b.c')
+      await instance.testHandleField('updated', 'a.b.c')
       expect(instance.current).toEqual({
         a: {
           b: {
@@ -140,7 +140,7 @@ describe('Editor', () => {
       })
     })
 
-    test('safely handles invalid paths', () => {
+    test('safely handles invalid paths', async () => {
       const initialValue = {
         a: {
           b: {
@@ -149,7 +149,7 @@ describe('Editor', () => {
         },
       }
 
-      const { instance } = render<NestedEditor>(
+      const { instance } = await render<NestedEditor>(
         <NestedEditor initialValue={initialValue} />,
       )
 

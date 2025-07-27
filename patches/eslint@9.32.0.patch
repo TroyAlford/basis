@@ -1,0 +1,13 @@
+diff --git a/lib/cli-engine/formatters/stylish.js b/lib/cli-engine/formatters/stylish.js
+index 18aa58154e7b863d13ab2b11d861dcc43eff11e7..b411bcd88f5a58348cef7bb2ef5a28e1f2824f07 100644
+--- a/lib/cli-engine/formatters/stylish.js
++++ b/lib/cli-engine/formatters/stylish.js
+@@ -4,7 +4,7 @@
+  */
+ "use strict";
+ 
+-const chalk = require("chalk"),
++const chalk = require("chalk").default,
+ 	util = require("node:util"),
+ 	table = require("../../shared/text-table");
+ 

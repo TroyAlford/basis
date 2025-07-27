@@ -1,42 +1,53 @@
-export const waitFor = <T>(
-  callback: () => T | Promise<T>,
-  options: {
-    interval?: number,
-    maxAttempts?: number,
-    timeout?: number,
-  } = {},
-): Promise<T> => new Promise<T>((resolve, reject) => {
-  const { interval = 1000, maxAttempts = 3, timeout = 10000 } = options
-  const TIMERS = {
-    attempt: null,
-    timeout: null,
-  }
-  let attempts = 0
-  let resolved = false
+type Callback<T> = () => T | Promise<T>
 
-  TIMERS.timeout = setTimeout(reject, timeout)
+interface Options {
+  interval?: number,
+  maxAttempts?: number,
+  timeout?: number,
+}
 
-  const attempt = async () => {
-    if (attempts > maxAttempts) {
-      clearTimeout(TIMERS.attempt)
-      clearTimeout(TIMERS.timeout)
-      return reject()
-    }
-    if (resolved) return true
+export const waitFor = <T>(callback: Callback<T>, options: Options = {}): Promise<T> => (
+  new Promise<T>((resolve, reject) => {
+    const { interval = 20, maxAttempts, timeout = 2_000 } = options
+    const expiry: Timer = setTimeout(
+      () => reject(new Error('waitFor: timeout reached')),
+      timeout,
+    )
 
-    attempts += 1
-    const result = await callback()
+    let attempts = 0
+    let resolved = false
 
-    if (resolved) return true
-    if (result) {
-      clearTimeout(TIMERS.attempt)
-      clearTimeout(TIMERS.timeout)
-      resolved = true
-      return resolve(result)
+    const clear = () => {
+      clearTimeout(expiry)
     }
 
-    return false
-  }
+    const attempt = async () => {
+      if (resolved) return true
+      if (maxAttempts && attempts >= maxAttempts) {
+        clear()
+        return reject(new Error('waitFor: maxAttempts reached'))
+      }
 
-  TIMERS.attempt = setInterval(attempt, interval)
-})
+      attempts += 1
+
+      try {
+        const result = await callback()
+        if (resolved) return true
+        if (result) {
+          resolved = true
+          clear()
+          return resolve(result)
+        } else {
+          setTimeout(attempt, interval)
+        }
+      } catch (error) {
+        clear()
+        reject(error)
+      }
+
+      return false
+    }
+
+    attempt()
+  })
+)

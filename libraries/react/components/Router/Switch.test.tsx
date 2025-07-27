@@ -4,8 +4,8 @@ import { render } from '../../testing/render'
 import { Switch } from './Switch'
 
 describe('Switch', () => {
-  test('renders only the first valid child', () => {
-    const { node } = render<Switch>(
+  test('renders only the first valid child', async () => {
+    const { node } = await render<Switch>(
       <Switch>
         <div>First</div>
         <div>Second</div>
@@ -16,8 +16,8 @@ describe('Switch', () => {
     expect(firstChild.textContent).toBe('First')
   })
 
-  test('handles no valid children', () => {
-    const { node } = render<Switch>(
+  test('handles no valid children', async () => {
+    const { node } = await render<Switch>(
       <Switch>
         {null}
         {undefined}

@@ -17,13 +17,13 @@ test('formatMilliseconds', () => {
     [Milliseconds.PerYear, '1y 00:00:00.000'],
     // Complex case
     [
-      (2_024 * Milliseconds.PerYear)
-      + (5 * Milliseconds.PerWeek)
-      + (4 * Milliseconds.PerDay)
-      + (3 * Milliseconds.PerHour)
-      + (2 * Milliseconds.PerMinute)
-      + (1 * Milliseconds.PerSecond)
-      + 500, // 500ms
+      (2_024 * Milliseconds.PerYear) +
+      (5 * Milliseconds.PerWeek) +
+      (4 * Milliseconds.PerDay) +
+      (3 * Milliseconds.PerHour) +
+      (2 * Milliseconds.PerMinute) +
+      (1 * Milliseconds.PerSecond) +
+      500, // 500ms
       '2024y5w4d 03:02:01.500',
     ],
   ] as const

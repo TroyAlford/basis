@@ -11,15 +11,15 @@
   },
   "dependencies": {
     "@basis/react": "workspace:*",
-    "react": "^18",
-    "react-dom": "^18"
+    "react": "^19",
+    "react-dom": "^19"
   },
   "devDependencies": {
-    "@parcel/transformer-sass": "2.12.0",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
+    "@parcel/transformer-sass": "2.15.4",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
     "buffer": "^6.0.3",
-    "parcel": "^2.9.0",
+    "parcel": "^2.15.4",
     "process": "^0.11.10"
   }
 }

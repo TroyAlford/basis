@@ -5,7 +5,8 @@ import { FormField } from '../FormField/FormField'
  * Number input editor component that extends the FormField base class.
  * Handles number formatting with comma separators.
  */
-export class NumberEditor extends FormField<number> {
+export class NumberEditor
+  extends FormField<number, HTMLInputElement> {
   /**
    * Formats a number with comma separators.
    * @param value The number to format.

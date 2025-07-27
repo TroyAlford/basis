@@ -1,13 +1,10 @@
 import * as React from 'react'
 import { isNil } from '@basis/utilities'
 import { prefixObject } from '../../utilities/prefixObject'
-import type { ComponentProps } from '../Component/Component'
 import { Editor } from '../Editor/Editor'
 
-/**
- * Props for form field components.
- */
-export interface FormFieldProps extends ComponentProps<HTMLDivElement> {
+/** Props for form field components. */
+interface TProps {
   /** Whether to enable browser autocomplete for the input field. @default false */
   autoComplete?: boolean,
   /** Whether to automatically focus the input when the component mounts. @default false */
@@ -44,14 +41,7 @@ export interface FormFieldProps extends ComponentProps<HTMLDivElement> {
   tabIndex?: number,
 }
 
-/**
- * Props for form field components including Editor's typed props.
- */
-type Props<Value> = FormFieldProps & {
-  initialValue?: Value,
-  onChange?: (value: Value, field: number | string, editor: unknown) => void,
-  value?: Value,
-}
+type P<T> = TProps & T
 
 /**
  * Base class for form field components that extends the Editor class.
@@ -59,12 +49,14 @@ type Props<Value> = FormFieldProps & {
  * and form field styling.
  */
 export abstract class FormField<
-  Value = string,
-  Element extends HTMLElement = HTMLDivElement,
-  State extends Record<string, unknown> = Record<string, unknown>,
-> extends Editor<Value, Element, Props<Value>, State> {
+  Value,
+  Element extends HTMLElement,
+  Props = object,
+  State = object,
+> extends Editor<Value, Element, P<Props>, State> {
+
   /** Default props for form field components. */
-  static defaultProps: Partial<FormFieldProps> = {
+  static defaultProps: Partial<TProps> = {
     ...super.defaultProps,
     autoComplete: false,
     autoFocus: false,
@@ -90,7 +82,7 @@ export abstract class FormField<
    * Gets the initial state for the component.
    * @returns The initial state.
    */
-  get defaultState(): State & { current: Value } {
+  get defaultState(): State & Editor<Value, Element, Props, State>['state'] {
     return {
       ...super.defaultState,
       current: this.props.value ?? this.props.initialValue ?? ('' as Value),

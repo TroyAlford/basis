@@ -82,11 +82,11 @@ export class Router extends Component<Props, null, State> {
     const { currentURL } = this.state
     const route = React.Children.toArray(this.props.children).find(child => {
       if (!React.isValidElement(child) || child.type !== Router.Route) return false
-      return !!parseTemplateURI(currentURL, child.props.template)
+      return !!parseTemplateURI(currentURL, (child.props as Route<unknown>['props']).template)
     }) as React.ReactElement<Route<unknown>['props']> | undefined
 
     if (route) {
-      const { children, redirectTo, template } = route.props
+      const { children, redirectTo, template } = route.props as Route<unknown>['props']
       const params = parseTemplateURI(currentURL, template)
 
       if (redirectTo) return <Router.Redirect to={redirectTo} />

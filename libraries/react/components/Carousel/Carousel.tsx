@@ -31,8 +31,6 @@ interface State {
   currentIndex: number,
   /** Whether the lightbox is open. */
   lightbox: boolean,
-  /** X-coordinate of the touch start. */
-  touchStart: number | null,
 }
 
 /**
@@ -72,6 +70,8 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     onImageChange: noop,
     size: Size.Contain,
   }
+
+  touchStart: number | null = null
 
   get aria(): Record<string, string> {
     return {
@@ -116,7 +116,6 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     return {
       currentIndex: 0,
       lightbox: false,
-      touchStart: null,
     }
   }
 
@@ -127,7 +126,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
   get images(): ImageConfig[] {
     const { children, images = [] } = this.props
     const childImages = React.Children.toArray(children)
-      .filter((child): child is React.ReactElement => (
+      .filter((child): child is React.ReactElement<Image['props'] & { altText?: string }> => (
         React.isValidElement(child)
         && (child.type === 'img' || child.type === Image)
       ))
@@ -260,7 +259,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
 
   /** Resets touch tracking state */
   handleTouchEnd = (): void => {
-    this.setState({ touchStart: null })
+    this.touchStart = null
   }
 
   /**
@@ -268,13 +267,13 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
    * @param event - The touch event.
    */
   handleTouchMove = (event: React.TouchEvent): void => {
-    if (this.state.touchStart === null) return
+    if (this.touchStart === null) return
 
-    const diff = this.state.touchStart - event.touches[0].clientX
+    const diff = this.touchStart - event.touches[0].clientX
     if (Math.abs(diff) > 50) {
       if (diff > 0) this.next()
       else this.prev()
-      this.setState({ touchStart: null })
+      this.touchStart = null
     }
   }
 
@@ -283,7 +282,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
    * @param event - The touch event.
    */
   handleTouchStart = (event: React.TouchEvent): void => {
-    this.setState({ touchStart: event.touches[0].clientX })
+    this.touchStart = event.touches[0].clientX
   }
 
   /**

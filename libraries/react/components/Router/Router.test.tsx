@@ -39,7 +39,7 @@ describe('Router', () => {
     replaceState.mockRestore()
   })
 
-  test('matches routes and passes templated params as props', () => {
+  test('matches routes and passes templated params as props', async () => {
     const router = (
       <Router>
         <Router.Route template="/pages/:slug">
@@ -53,7 +53,7 @@ describe('Router', () => {
     )
 
     window.location.pathname = '/pages/foo'
-    const { node } = render<Router>(router)
+    const { node } = await render<Router>(router)
     expect(node.matches('.page')).toBe(true)
     expect(node.textContent).toBe('foo')
   })
@@ -68,17 +68,17 @@ describe('Router', () => {
     )
 
     window.history.pushState({}, '', '/bar/234')
-    const rendered = render<Router>(router)
+    const rendered = await render<Router>(router)
     expect(rendered.node.outerHTML).toEqual('<div data-id="234" data-type="bar"></div>')
 
     window.history.pushState({}, '', '/qux/456')
     await new Promise(resolve => setTimeout(resolve, 0))
-    rendered.update()
+    await rendered.update()
 
     expect(rendered.node.outerHTML).toEqual('<div data-id="456" data-type="qux"></div>')
   })
 
-  test('renders null when no route matches', () => {
+  test('renders null when no route matches', async () => {
     const router = (
       <Router>
         <Router.Route template="/foo">
@@ -88,7 +88,7 @@ describe('Router', () => {
     )
 
     window.location.pathname = '/non/matching/route'
-    const { node } = render<Router>(router)
+    const { node } = await render<Router>(router)
     expect(node).toBeNull()
   })
 
@@ -106,7 +106,7 @@ describe('Router', () => {
     )
 
     window.location.pathname = '/123'
-    const rendered = render<Router>(router)
+    const rendered = await render<Router>(router)
     expect(rendered.node.textContent).toBe('123')
 
     window.location.pathname = '/456'

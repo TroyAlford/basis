@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
       - name: Run ESLint
-        run: bun eslint
+        run: NODE_NO_WARNINGS=1 bun eslint
 
   run-tests:
     runs-on: ubuntu-latest

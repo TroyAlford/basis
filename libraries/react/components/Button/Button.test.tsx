@@ -5,8 +5,8 @@ import { Button } from './Button'
 
 describe('Button', () => {
   describe('rendering', () => {
-    test('renders with default props', () => {
-      const { node } = render(<Button>Click me</Button>)
+    test('renders with default props', async () => {
+      const { node } = await render(<Button>Click me</Button>)
       expect(node.tagName).toBe('BUTTON')
       expect(node).toHaveClass('button', 'component')
       expect(node).not.toHaveAttribute('disabled')
@@ -14,69 +14,69 @@ describe('Button', () => {
       expect(node.textContent).toBe('Click me')
     })
 
-    test('renders with custom type', () => {
-      const { node } = render(<Button type={Button.Type.Submit}>Submit</Button>)
+    test('renders with custom type', async () => {
+      const { node } = await render(<Button type={Button.Type.Submit}>Submit</Button>)
       expect(node).toHaveAttribute('type', 'submit')
     })
 
-    test('renders in disabled state', () => {
-      const { node } = render(<Button disabled>Disabled</Button>)
+    test('renders in disabled state', async () => {
+      const { node } = await render(<Button disabled>Disabled</Button>)
       expect(node).toHaveAttribute('disabled', '')
     })
   })
 
   describe('event handling', () => {
-    test('calls onActivate when clicked', () => {
+    test('calls onActivate when clicked', async () => {
       const onActivate = mock()
-      const { node } = render(<Button onActivate={onActivate}>Click me</Button>)
+      const { node } = await render(<Button onActivate={onActivate}>Click me</Button>)
 
       node.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       expect(onActivate).toHaveBeenCalledTimes(1)
     })
 
-    test('calls onActivate on Enter key', () => {
+    test('calls onActivate on Enter key', async () => {
       const onActivate = mock()
-      const { node } = render(<Button onActivate={onActivate}>Press Enter</Button>)
+      const { node } = await render(<Button onActivate={onActivate}>Press Enter</Button>)
 
       node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
       expect(onActivate).toHaveBeenCalledTimes(1)
     })
 
-    test('calls onActivate on Space key', () => {
+    test('calls onActivate on Space key', async () => {
       const onActivate = mock()
-      const { node } = render(<Button onActivate={onActivate}>Press Space</Button>)
+      const { node } = await render(<Button onActivate={onActivate}>Press Space</Button>)
 
       node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ' }))
       expect(onActivate).toHaveBeenCalledTimes(1)
     })
 
-    test('does not call onActivate on other keys', () => {
+    test('does not call onActivate on other keys', async () => {
       const onActivate = mock()
-      const { node } = render(<Button onActivate={onActivate}>Press Tab</Button>)
+      const { node } = await render(<Button onActivate={onActivate}>Press Tab</Button>)
 
       node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Tab' }))
       expect(onActivate).not.toHaveBeenCalled()
     })
 
-    test('calls onActivate on primary pointer button', () => {
+    test('calls onActivate on primary pointer button', async () => {
       const onActivate = mock()
-      const { node } = render(<Button onActivate={onActivate}>Click me</Button>)
+      const { node } = await render(<Button onActivate={onActivate}>Click me</Button>)
 
       node.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }))
       expect(onActivate).toHaveBeenCalledTimes(1)
     })
 
-    test('does not call onActivate on non-primary pointer button', () => {
+    test('does not call onActivate on non-primary pointer button', async () => {
       const onActivate = mock()
-      const { node } = render(<Button onActivate={onActivate}>Right click</Button>)
+      const { node } = await render(<Button onActivate={onActivate}>Right click</Button>)
 
       node.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 2 }))
       expect(onActivate).not.toHaveBeenCalled()
     })
 
-    test('does not call onActivate when disabled', () => {
+    test('does not call onActivate when disabled', async () => {
       const onActivate = mock()
-      const { node } = render(<Button disabled onActivate={onActivate}>Disabled</Button>)
+      const { node } = await render(<Button disabled onActivate={onActivate}>Disabled</Button>)
 
       node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
       node.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -86,8 +86,8 @@ describe('Button', () => {
   })
 
   describe('accessibility', () => {
-    test('passes through direct aria-* props', () => {
-      const { node } = render(
+    test('passes through direct aria-* props', async () => {
+      const { node } = await render(
         <Button
           aria-controls="menu-1"
           aria-expanded="true"
@@ -101,8 +101,8 @@ describe('Button', () => {
       expect(node).toHaveAttribute('aria-controls', 'menu-1')
     })
 
-    test('passes through aria object props', () => {
-      const { node } = render(
+    test('passes through aria object props', async () => {
+      const { node } = await render(
         <Button
           aria={{
             controls: 'menu-1',
@@ -118,8 +118,8 @@ describe('Button', () => {
       expect(node).toHaveAttribute('aria-controls', 'menu-1')
     })
 
-    test('merges direct aria-* props with aria object props', () => {
-      const { node } = render(
+    test('merges direct aria-* props with aria object props', async () => {
+      const { node } = await render(
         <Button
           aria-expanded="false"
           aria-haspopup="true"
@@ -137,16 +137,16 @@ describe('Button', () => {
       expect(node).toHaveAttribute('aria-controls', 'menu-1')
     })
 
-    test('sets aria-disabled based on disabled prop', () => {
-      const enabled = render(<Button>Enabled</Button>)
+    test('sets aria-disabled based on disabled prop', async () => {
+      const enabled = await render(<Button>Enabled</Button>)
       expect(enabled.node).toHaveAttribute('aria-disabled', 'false')
 
-      const disabled = render(<Button disabled>Disabled</Button>)
+      const disabled = await render(<Button disabled>Disabled</Button>)
       expect(disabled.node).toHaveAttribute('aria-disabled', 'true')
     })
 
-    test('disabled prop overrides aria-disabled from props', () => {
-      const { node } = render(
+    test('disabled prop overrides aria-disabled from props', async () => {
+      const { node } = await render(
         <Button
           disabled
           aria={{ disabled: false }}
