@@ -130,14 +130,28 @@ runs:
           exit 0
         fi
 
+    - name: Generate cache key
+      id: cache-key
+      shell: bash
+      run: |
+        LOCK_FILE="${{ steps.pkg-manager.outputs.lock_file }}"
+        if [ -f "$LOCK_FILE" ]; then
+          HASH=$(sha256sum "$LOCK_FILE" | cut -d' ' -f1)
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "Generated hash: $HASH for file: $LOCK_FILE"
+        else
+          echo "Lock file not found: $LOCK_FILE"
+          echo "hash=" >> $GITHUB_OUTPUT
+        fi
+
     - name: Debug cache key
       shell: bash
       run: |
         echo "Manager: ${{ steps.pkg-manager.outputs.manager }}"
         echo "Lock file: ${{ steps.pkg-manager.outputs.lock_file }}"
         echo "OS: ${{ runner.os }}"
-        echo "Hash of lock file: ${{ hashFiles('${{ steps.pkg-manager.outputs.lock_file }}') }}"
-        echo "Full cache key: ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-${{ hashFiles('${{ steps.pkg-manager.outputs.lock_file }}') }}"
+        echo "Generated hash: ${{ steps.cache-key.outputs.hash }}"
+        echo "Full cache key: ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-${{ steps.cache-key.outputs.hash }}"
 
     - name: Cache dependencies
       uses: actions/cache@v4
@@ -150,7 +164,7 @@ runs:
           ~/.cache/yarn
           ~/.pnpm-store
           ~/.bun/install/cache
-        key: ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-${{ hashFiles('${{ steps.pkg-manager.outputs.lock_file }}') }}
+        key: ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-${{ steps.cache-key.outputs.hash }}
         restore-keys: |
           ${{ runner.os }}-${{ steps.pkg-manager.outputs.manager }}-
 
