@@ -130,7 +130,9 @@ export default pluginTypescript.config(
       '@stylistic/js/no-trailing-spaces': 'error',
       '@stylistic/js/no-whitespace-before-property': 'error',
       '@stylistic/js/one-var-declaration-per-line': ['error', 'always'],
-      '@stylistic/js/operator-linebreak': ['error', 'before', { overrides: { ':': 'before', '?': 'before' } }],
+      '@stylistic/js/operator-linebreak': ['error', 'after', {
+        overrides: { '&': 'before', '&&': 'before', ':': 'before', '?': 'before', '|': 'before', '||': 'before' },
+      }],
       '@stylistic/js/prop-types': 'off',
       '@stylistic/js/quote-props': ['error', 'consistent-as-needed'],
       '@stylistic/js/quotes': ['error', 'single', { avoidEscape: true }],
@@ -150,6 +152,7 @@ export default pluginTypescript.config(
       '@stylistic/js/wrap-iife': ['error', 'inside', { functionPrototypeMethods: false }],
       '@stylistic/js/wrap-regexp': 'off',
       '@stylistic/js/yield-star-spacing': ['error', 'before'],
+      '@stylistic/jsx/indent': ['error', 2],
       '@stylistic/jsx/jsx-child-element-spacing': 'error',
       '@stylistic/jsx/jsx-closing-bracket-location': ['error', 'line-aligned'],
       '@stylistic/jsx/jsx-closing-tag-location': 'error',
@@ -163,8 +166,6 @@ export default pluginTypescript.config(
       '@stylistic/jsx/jsx-equals-spacing': ['error', 'never'],
       '@stylistic/jsx/jsx-first-prop-new-line': ['error', 'multiline-multiprop'],
       '@stylistic/jsx/jsx-function-call-newline': ['error', 'multiline'],
-      '@stylistic/jsx/jsx-indent': ['error', 2, { checkAttributes: false, indentLogicalExpressions: true }],
-      '@stylistic/jsx/jsx-indent-props': ['error', 'first'],
       '@stylistic/jsx/jsx-max-props-per-line': ['error', { maximum: { multi: 1, single: 3 } }],
       '@stylistic/jsx/jsx-newline': ['error', { allowMultilines: false, prevent: true }],
       '@stylistic/jsx/jsx-one-expression-per-line': ['error', { allow: 'literal' }],
@@ -230,7 +231,6 @@ export default pluginTypescript.config(
       '@stylistic/ts/no-extra-parens': 'off',
       // this rule breaks arrows that return nested expressions
       '@stylistic/ts/no-extra-semi': 'error',
-
       '@stylistic/ts/no-tabs': ['error', { allowIndentationTabs: false }],
       '@stylistic/ts/object-curly-newline': ['error', {
         ExportDeclaration: { multiline: true },

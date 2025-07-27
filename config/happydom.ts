@@ -1,7 +1,7 @@
+import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { beforeEach } from 'bun:test'
 
-import('@happy-dom/global-registrator')
-  .then(({ GlobalRegistrator }) => GlobalRegistrator.register())
+GlobalRegistrator.register()
 
 beforeEach(() => {
   // reset NODE_ENV

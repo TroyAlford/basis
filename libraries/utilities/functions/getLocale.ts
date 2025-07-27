@@ -8,8 +8,8 @@ export function getLocale(): string {
   if (typeof navigator === 'undefined') return DEFAULT_LOCALE
 
   return (
-    navigator.languages?.[0]
-    ?? navigator.language
-    ?? DEFAULT_LOCALE
+    navigator.languages?.[0] ??
+    navigator.language ??
+    DEFAULT_LOCALE
   )
 }
