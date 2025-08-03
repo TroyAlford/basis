@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { css, style } from '@basis/react/utilities/style'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
 import type { IPlaceholder } from '../../mixins/Placeholder'
@@ -22,12 +23,22 @@ export enum Wrap {
 interface Props extends IAccessible, IPrefixSuffix, IPlaceholder {
   /** Whether to enable browser autocomplete. */
   autoComplete?: boolean,
-  /** Whether the text editor should render as a textarea for multi-line input. @default false */
-  multiline?: boolean,
+  /** Whether to automatically focus the input on mount. @default false */
+  autoFocus?: boolean,
+  /**
+   * Multiline behavior for the text editor.
+   *
+   * - `false`: Default. Outputs an `input[type="text"]`
+   * - `true`: Outputs a `textarea` with normal resizing and `data-multiline="true"`
+   * - `'auto'`: Outputs `data-multiline="auto"` with auto-growing textarea
+   * - `number`: Sets fixed number of lines, non-resizable textarea
+   * @default false
+   */
+  multiline?: false | true | 'auto' | number,
   /** Callback function called when a key is pressed while the input has focus. */
   onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void,
-  /** Whether the textarea can be resized by the user (only applies when multiline is true). @default true */
-  resizable?: boolean,
+  /** Whether to select all text when the input receives focus. @default true */
+  selectOnFocus?: boolean,
   /** Whether to wrap text in the textarea (only applies when multiline is true). @default Wrap.Soft */
   wrap?: Wrap,
 }
@@ -44,12 +55,43 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     ...Accessible.defaultProps,
     ...PrefixSuffix.defaultProps,
     ...Placeholder.defaultProps,
-    resizable: true,
+    autoFocus: false,
+    multiline: false,
+    selectOnFocus: true,
     wrap: Wrap.Soft,
   }
 
+  #input = React.createRef<HTMLInputElement | HTMLTextAreaElement>()
+
   #handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     this.handleChange(event.target.value)
+  }
+
+  #handleFocus = () => {
+    if (this.props.selectOnFocus) {
+      const currentElement = this.#input.current
+      if (currentElement) {
+        currentElement.select()
+      }
+    }
+  }
+
+  override get attributes() {
+    return {
+      ...super.attributes,
+      'data-multiline': String(this.props.multiline),
+      'data-value': String(this.current),
+    }
+  }
+
+  componentDidMount(): void {
+    super.componentDidMount?.()
+    if (this.props.autoFocus) {
+      const currentElement = this.#input.current
+      if (currentElement) {
+        currentElement.focus()
+      }
+    }
   }
 
   /**
@@ -58,11 +100,12 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
    */
   readOnly(): React.ReactNode {
     const value = String(this.current ?? '')
+    let rendered: React.ReactNode = value
 
     // For multiline text, replace newlines with <br /> tags
-    if (this.props.multiline) {
+    if (this.props.multiline !== false) {
       const lines = value.split('\n')
-      return lines.map((line, index) => (
+      rendered = lines.map((line, index) => (
         <React.Fragment key={index}>
           {line}
           {index < lines.length - 1 && <br />}
@@ -70,7 +113,11 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
       ))
     }
 
-    return value
+    return (
+      <span className="value">
+        {rendered}
+      </span>
+    )
   }
 
   /**
@@ -78,21 +125,27 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
    * @returns The component's content.
    */
   content(): React.ReactNode {
-    const input: React.ReactElement<React.HTMLAttributes<HTMLElement>> = this.props.multiline ? (
+    const input: React.ReactElement<React.HTMLAttributes<HTMLElement>> = this.props.multiline !== false ? (
       <textarea
+        ref={this.#input as React.RefObject<HTMLTextAreaElement>}
         autoComplete={this.props.autoComplete ? 'on' : 'off'}
-        style={this.props.resizable ? undefined : { resize: 'none' }}
+        className="value"
+        rows={typeof this.props.multiline === 'number' ? this.props.multiline : undefined}
         value={this.current || ''}
         wrap={this.props.wrap}
         onChange={this.#handleChange}
+        onFocus={this.#handleFocus}
         onKeyDown={this.props.onKeyDown}
       />
     ) : (
       <input
+        ref={this.#input as React.RefObject<HTMLInputElement>}
         autoComplete={this.props.autoComplete ? 'on' : 'off'}
+        className="value"
         type="text"
         value={this.current || ''}
         onChange={this.#handleChange}
+        onFocus={this.#handleFocus}
         onKeyDown={this.props.onKeyDown}
       />
     )
@@ -101,3 +154,41 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     return super.content(rendered)
   }
 }
+
+style('basis:text-editor', css`
+  .text-editor.component {
+    position: relative;
+
+    > .value {
+      padding: inherit;
+      resize: none;
+    }
+    &::before { padding: 0; }
+
+    > .value, &::before {
+      font-size: inherit;
+      line-height: inherit;
+      margin: 0;
+    }
+
+    &[data-multiline="true"] {
+      > .value {
+        display: flex;
+        overflow: auto;
+      }
+    }
+
+    &[data-multiline="auto"] {
+      &::before {
+        content: attr(data-value) ' ';
+        visibility: hidden;
+        white-space: pre-wrap;
+      }
+
+      > .value {
+        inset: 0;
+        position: absolute;
+      }
+    }
+  }
+`)
