@@ -16,6 +16,7 @@ export const Placeholder: Mixin<IPlaceholder> = {
    * Applies placeholder props to a React element.
    * @param element The React element to apply props to.
    * @param component The component instance with placeholder props.
+   * @param component.props The props of the component.
    * @returns The enhanced React element.
    */
   apply<T extends React.ReactElement>(
@@ -34,4 +35,4 @@ export const Placeholder: Mixin<IPlaceholder> = {
 
   /** Default props for elements with placeholder text. */
   defaultProps: {},
-} 
+}

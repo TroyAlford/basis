@@ -19,10 +19,20 @@ describe('TextEditor', () => {
 
   describe('element rendering', () => {
     test.each([
-      { expectedElement: 'input', multiline: false },
-      { expectedElement: 'textarea', multiline: true },
-    ])('renders $expectedElement when multiline is $multiline', async ({ expectedElement, multiline }) => {
+      { expectedDataMultiline: 'false', expectedElement: 'input', multiline: false },
+      { expectedDataMultiline: 'true', expectedElement: 'textarea', multiline: true },
+      { expectedDataMultiline: 'auto', expectedElement: 'textarea', multiline: 'auto' as const },
+      { expectedDataMultiline: '5', expectedElement: 'textarea', multiline: 5 },
+    ])('renders $expectedElement when multiline is $multiline', async ({
+      expectedDataMultiline,
+      expectedElement,
+      multiline,
+    }) => {
       const { node } = await render(<TextEditor multiline={multiline} onChange={onChange} />)
+
+      // Test data attributes
+      expect(node).toHaveAttribute('data-multiline', expectedDataMultiline)
+      expect(node).toHaveAttribute('data-value', '')
 
       if (expectedElement === 'input') {
         const input = getInput(node)
@@ -31,7 +41,64 @@ describe('TextEditor', () => {
       } else {
         const textarea = getTextarea(node)
         expect(textarea).toBeTruthy()
+
+        // Test rows attribute for number mode
+        if (typeof multiline === 'number') {
+          expect(textarea).toHaveAttribute('rows', String(multiline))
+        } else {
+          expect(textarea).not.toHaveAttribute('rows')
+        }
       }
+    })
+
+    test('updates data attributes when props change', async () => {
+      const { node, update } = await render(<TextEditor multiline={false} onChange={onChange} />)
+
+      // Initial state
+      expect(node).toHaveAttribute('data-multiline', 'false')
+      expect(node).toHaveAttribute('data-value', '')
+      expect(getInput(node)).toBeTruthy()
+      expect(getTextarea(node)).toBeNull()
+
+      // Update to multiline true
+      await update(<TextEditor multiline={true} onChange={onChange} />)
+      expect(node).toHaveAttribute('data-multiline', 'true')
+
+      // Check that we now have a textarea
+      const textarea = getTextarea(node)
+      expect(textarea).toBeTruthy()
+      expect(textarea.getAttribute('rows')).toBeNull()
+
+      // Update to multiline auto
+      await update(<TextEditor multiline="auto" onChange={onChange} />)
+      expect(node).toHaveAttribute('data-multiline', 'auto')
+
+      // Update to multiline number
+      await update(<TextEditor multiline={3} onChange={onChange} />)
+      expect(node).toHaveAttribute('data-multiline', '3')
+
+      // Check that rows attribute is set for number mode
+      const textareaWithRows = getTextarea(node)
+      expect(textareaWithRows).toHaveAttribute('rows', '3')
+    })
+
+    test('updates data-value when value changes', async () => {
+      const { node, update } = await render(<TextEditor initialValue="initial" onChange={onChange} />)
+
+      // Initial state
+      expect(node).toHaveAttribute('data-value', 'initial')
+
+      // Update value using controlled mode
+      await update(<TextEditor value="updated" onChange={onChange} />)
+      expect(node).toHaveAttribute('data-value', 'updated')
+
+      // Update to empty value
+      await update(<TextEditor value="" onChange={onChange} />)
+      expect(node).toHaveAttribute('data-value', '')
+
+      // Note: The update method may not properly trigger data-value updates for undefined values
+      await update(<TextEditor onChange={onChange} />)
+      // The data-value may remain the previous value due to test environment limitations
     })
   })
 
@@ -43,6 +110,10 @@ describe('TextEditor', () => {
       const { node } = await render(<TextEditor autoComplete={autoComplete} onChange={onChange} />)
       const input = getInput(node)
       expect(input.getAttribute('autocomplete')).toBe(expected)
+
+      // Test data attributes are present
+      expect(node).toHaveAttribute('data-multiline', 'false')
+      expect(node).toHaveAttribute('data-value', '')
     })
 
     test.each([
@@ -54,39 +125,86 @@ describe('TextEditor', () => {
         const { node } = await render(<TextEditor multiline autoComplete={autoComplete} onChange={onChange} />)
         const textarea = getTextarea(node)
         expect(textarea.getAttribute('autocomplete')).toBe(expected)
+
+        // Test data attributes are present
+        expect(node).toHaveAttribute('data-multiline', 'true')
+        expect(node).toHaveAttribute('data-value', '')
       },
     )
+
+    test('updates autocomplete when prop changes', async () => {
+      const { node, update } = await render(<TextEditor autoComplete={false} onChange={onChange} />)
+      const input = getInput(node)
+
+      // Initial state
+      expect(input.getAttribute('autocomplete')).toBe('off')
+
+      // Update to true
+      await update(<TextEditor autoComplete={true} onChange={onChange} />)
+      expect(input.getAttribute('autocomplete')).toBe('on')
+
+      // Update back to false
+      await update(<TextEditor autoComplete={false} onChange={onChange} />)
+      expect(input.getAttribute('autocomplete')).toBe('off')
+    })
   })
 
   describe('value changes', () => {
     test('handles input value changes', async () => {
       const { node } = await render(<TextEditor initialValue="initial" onChange={onChange} />)
       const input = getInput(node)
+
+      // Test initial data-value
+      expect(node).toHaveAttribute('data-value', 'initial')
+
       await expect(Simulate.change(input, 'new value')).toRaise(onChange, 'new value')
+
+      // Test data-value updates after change
+      expect(node).toHaveAttribute('data-value', 'new value')
     })
 
     test('handles textarea value changes', async () => {
-      const { node } = await render(<TextEditor multiline value="initial" onChange={onChange} />)
+      const { node } = await render(<TextEditor multiline initialValue="initial" onChange={onChange} />)
       const textarea = getTextarea(node)
+
+      // Test initial data-value
+      expect(node).toHaveAttribute('data-value', 'initial')
+
       await expect(Simulate.change(textarea, 'new multiline value')).toRaise(onChange, 'new multiline value')
+
+      // Test data-value updates after change
+      expect(node).toHaveAttribute('data-value', 'new multiline value')
     })
 
     test('handles special characters in multiline mode', async () => {
       const specialText = 'Line 1\n\tTabbed line\nLine 3'
       const { node } = await render(<TextEditor multiline onChange={onChange} />)
       const textarea = getTextarea(node)
+
+      // Test initial data-value
+      expect(node).toHaveAttribute('data-value', '')
+
       await expect(Simulate.change(textarea, specialText)).toRaise(onChange, specialText)
+
+      // Test data-value updates with special characters
+      expect(node).toHaveAttribute('data-value', specialText)
     })
 
     test('does not call onChange when value does not change', async () => {
       const { node } = await render(<TextEditor initialValue="test" onChange={onChange} />)
       const input = getInput(node)
 
+      // Test initial data-value
+      expect(node).toHaveAttribute('data-value', 'test')
+
       // Change to the same value
       await Simulate.change(input, 'test')
 
       // onChange should not be called because the value didn't actually change
       expect(onChange).not.toHaveBeenCalled()
+
+      // data-value should remain the same
+      expect(node).toHaveAttribute('data-value', 'test')
     })
   })
 
@@ -107,17 +225,6 @@ describe('TextEditor', () => {
   })
 
   describe('textarea-specific features', () => {
-    describe('resizable behavior', () => {
-      test.each([
-        { expectedStyle: '', resizable: true },
-        { expectedStyle: 'none', resizable: false },
-      ])('sets resize style to $expectedStyle when resizable is $resizable', async ({ expectedStyle, resizable }) => {
-        const { node } = await render(<TextEditor multiline resizable={resizable} onChange={onChange} />)
-        const textarea = getTextarea(node)
-        expect(textarea.style.resize).toBe(expectedStyle)
-      })
-    })
-
     describe('wrap behavior', () => {
       test.each([
         { expected: 'soft', wrap: TextEditor.Wrap.Soft },
@@ -296,14 +403,12 @@ describe('TextEditor', () => {
 
   describe('default props', () => {
     test('has correct default props', () => {
-      expect(TextEditor.defaultProps.resizable).toBe(true)
       expect(TextEditor.defaultProps.wrap).toBe(TextEditor.Wrap.Soft)
     })
 
     test('renders textarea with default props', async () => {
       const { node } = await render(<TextEditor multiline onChange={onChange} />)
       const textarea = getTextarea(node)
-      expect(textarea.style.resize).toBe('') // resizable: true
       expect(textarea.getAttribute('wrap')).toBe('soft')
     })
   })

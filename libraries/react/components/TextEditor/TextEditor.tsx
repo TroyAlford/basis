@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { css, style } from '@basis/react/utilities/style'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
 import type { IPlaceholder } from '../../mixins/Placeholder'
@@ -7,6 +6,7 @@ import { Placeholder } from '../../mixins/Placeholder'
 import type { IPrefixSuffix } from '../../mixins/PrefixSuffix'
 import { PrefixSuffix } from '../../mixins/PrefixSuffix'
 import { applyMixins } from '../../utilities/applyMixins'
+import { css, style } from '../../utilities/style'
 import { Editor } from '../Editor/Editor'
 
 /** Text wrapping options for textarea elements. */
@@ -80,7 +80,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     return {
       ...super.attributes,
       'data-multiline': String(this.props.multiline),
-      'data-value': String(this.current),
+      'data-value': String(this.current || ''),
     }
   }
 

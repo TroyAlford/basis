@@ -41,6 +41,7 @@ type S<V, T> = TState<V> & T
  * Abstract base class for editor components.
  * Extends Component to provide common editor functionality.
  */
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - TS2589: Type instantiation is excessively deep and possibly infinite.
 export abstract class Editor<
   Value,

@@ -8,10 +8,17 @@ interface ReturnType { message: () => string, pass: boolean }
  * @returns the result of the check
  */
 export function toHaveAttribute(
-  node: HTMLElement,
+  node: HTMLElement | null,
   name: string,
   value?: string | RegExp,
 ): ReturnType {
+  if (!node) {
+    return {
+      message: () => 'expected element to exist but received null',
+      pass: false,
+    }
+  }
+
   const actual = node.getAttribute(name)
   let message = ''
   let pass = false

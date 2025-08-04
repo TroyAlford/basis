@@ -1,4 +1,4 @@
-import * as React from 'react'
+import type * as React from 'react'
 
 /** Type for mixin objects. */
 export interface Mixin<Props> {
@@ -13,4 +13,4 @@ export interface Mixin<Props> {
   defaultProps: Partial<Props>,
   /** Whether this mixin should be applied after other mixins (mutative mixins). */
   post?: boolean,
-} 
+}

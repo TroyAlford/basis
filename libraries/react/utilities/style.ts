@@ -96,7 +96,4 @@ export function style(id: string, cssString: string): void {
  * `)
  * ```
  */
-export const css = String.raw as (
-  strings: TemplateStringsArray,
-  ...replacements: unknown[]
-) => string
+export const css = String.raw

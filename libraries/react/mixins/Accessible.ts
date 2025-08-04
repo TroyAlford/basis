@@ -19,10 +19,14 @@ export interface IAccessible {
 
 /** Mixin for accessible elements. */
 export const Accessible: Mixin<IAccessible> = {
+  /** Props for accessible elements. */
+  Props: {} as IAccessible,
+
   /**
    * Applies accessible props to a React element.
    * @param element The React element to apply props to.
    * @param component The component instance with accessible props.
+   * @param component.props The props of the component.
    * @returns The enhanced React element.
    */
   apply<T extends React.ReactElement>(
@@ -47,7 +51,4 @@ export const Accessible: Mixin<IAccessible> = {
   defaultProps: {
     invalid: false,
   },
-
-  /** Props for accessible elements. */
-  Props: {} as IAccessible,
-} 
+}
