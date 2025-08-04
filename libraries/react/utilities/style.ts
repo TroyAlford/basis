@@ -49,6 +49,7 @@
  * ```
  */
 export function style(id: string, cssString: string): void {
+  if (typeof globalThis.document === 'undefined') return // support for SSR
   let styleElement = document.getElementById(id) as HTMLStyleElement | null
 
   if (!styleElement) {
