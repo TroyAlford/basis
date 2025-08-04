@@ -1,4 +1,4 @@
-import { clone, deepEquals, noop, set } from '@basis/utilities'
+import { clone, deepEquals, isNil, noop, set } from '@basis/utilities'
 import { Component } from '../Component/Component'
 
 interface TProps<Value> {
@@ -82,7 +82,8 @@ export abstract class Editor<
   get attributes(): (typeof this)['attributes'] {
     return {
       ...super.attributes,
-      readOnly: this.props.readOnly ? 'readOnly' : undefined,
+      'data-field': isNil(this.props.field) ? undefined : this.props.field,
+      'readOnly': this.props.readOnly ? 'readOnly' : undefined,
     }
   }
 

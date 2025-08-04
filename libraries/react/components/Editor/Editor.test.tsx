@@ -43,15 +43,28 @@ describe('Editor', () => {
     test('renders with field identifier', async () => {
       const { node: numberNode } = await render(<TestEditor field="1" />)
       expect(numberNode).toHaveClass('editor', '1')
+      expect(numberNode).toHaveAttribute('data-field', '1')
 
       const { node: stringNode } = await render(<TestEditor field="test-field" />)
       expect(stringNode).toHaveClass('editor', 'test-field')
+      expect(stringNode).toHaveAttribute('data-field', 'test-field')
+    })
+
+    test('renders without data-field when field is not provided', async () => {
+      const { node } = await render(<TestEditor />)
+      expect(node).not.toHaveAttribute('data-field')
     })
 
     test('renders with read-only state', async () => {
       const { node } = await render(<TestEditor readOnly />)
       expect(node).toHaveAttribute('readOnly')
       expect(node).toHaveAttribute('aria-readonly', 'true')
+    })
+
+    test('renders without readOnly attribute when not read-only', async () => {
+      const { node } = await render(<TestEditor />)
+      expect(node).not.toHaveAttribute('readOnly')
+      expect(node).toHaveAttribute('aria-readonly', 'false')
     })
   })
 
