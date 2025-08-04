@@ -130,6 +130,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
         ref={this.#input as React.RefObject<HTMLTextAreaElement>}
         autoComplete={this.props.autoComplete ? 'on' : 'off'}
         className="value"
+        name={this.props.field}
         rows={typeof this.props.multiline === 'number' ? this.props.multiline : undefined}
         value={this.current || ''}
         wrap={this.props.wrap}
@@ -142,6 +143,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
         ref={this.#input as React.RefObject<HTMLInputElement>}
         autoComplete={this.props.autoComplete ? 'on' : 'off'}
         className="value"
+        name={this.props.field}
         type="text"
         value={this.current || ''}
         onChange={this.#handleChange}
@@ -159,16 +161,14 @@ style('basis:text-editor', css`
   .text-editor.component {
     position: relative;
 
-    > .value {
-      padding: inherit;
-      resize: none;
-    }
+    > .value { resize: none; }
     &::before { padding: 0; }
 
     > .value, &::before {
       font-size: inherit;
       line-height: inherit;
       margin: 0;
+      white-space: pre-wrap;
     }
 
     &[data-multiline="true"] {
@@ -182,11 +182,12 @@ style('basis:text-editor', css`
       &::before {
         content: attr(data-value) ' ';
         visibility: hidden;
-        white-space: pre-wrap;
       }
 
       > .value {
         inset: 0;
+        overflow: hidden;
+        padding: inherit;
         position: absolute;
       }
     }

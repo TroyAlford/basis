@@ -103,6 +103,8 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
   content(): React.ReactNode {
     const input = (
       <input
+        className="value"
+        name={this.props.field}
         type="text"
         value={this.inputValue}
         onChange={this.#handleChange}
