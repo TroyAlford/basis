@@ -17,6 +17,3 @@ export { Placeholder } from './mixins/Placeholder'
 export { PrefixSuffix } from './mixins/PrefixSuffix'
 
 export { css, style } from './utilities/style'
-
-export { render } from './testing/render'
-export { waitFor } from './testing/waitFor'
