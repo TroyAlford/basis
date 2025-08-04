@@ -17,15 +17,15 @@ export class Link extends Component<Props, HTMLAnchorElement> {
 
   componentDidMount(): void {
     const options = { capture: true, passive: false }
-    this.rootNode.addEventListener('click', this.handleClick, options)
-    this.rootNode.addEventListener('keydown', this.handleKeyDown, options)
+    this.rootNode.addEventListener('click', this.handleNativeClick, options)
+    this.rootNode.addEventListener('keydown', this.handleNativeKeyDown, options)
   }
 
   /**
    * Handles the click event.
    * @param event - The pointer event.
    */
-  private handleClick = (event: PointerEvent) => {
+  private handleNativeClick = (event: PointerEvent) => {
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return
     this.handleNavigate(event)
   }
@@ -34,7 +34,7 @@ export class Link extends Component<Props, HTMLAnchorElement> {
    * Handles the key down event.
    * @param event - The keyboard event.
    */
-  private handleKeyDown = (event: KeyboardEvent) => {
+  private handleNativeKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter') return
     this.handleNavigate(event)
   }

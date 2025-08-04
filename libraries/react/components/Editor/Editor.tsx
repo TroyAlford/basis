@@ -1,9 +1,9 @@
-import { clone, noop, set } from '@basis/utilities'
+import { clone, deepEquals, noop, set } from '@basis/utilities'
 import { Component } from '../Component/Component'
 
 interface TProps<Value> {
   /** Field identifier (number or string) */
-  field?: number | string,
+  field?: string,
   /** Initial value for uncontrolled mode */
   initialValue?: Value,
   /** Change handler */
@@ -41,6 +41,7 @@ type S<V, T> = TState<V> & T
  * Abstract base class for editor components.
  * Extends Component to provide common editor functionality.
  */
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - TS2589: Type instantiation is excessively deep and possibly infinite.
 export abstract class Editor<
   Value,
@@ -118,6 +119,13 @@ export abstract class Editor<
    */
   protected handleChange = async (value: Value): Promise<void> => {
     const { field = '', onChange = noop } = this.props
+    const currentValue = this.current
+
+    // Short-circuit if the value is the same instance
+    if (value === currentValue) return
+
+    // Deep equality check to avoid unnecessary onChange calls
+    if (deepEquals(value, currentValue)) return
 
     if (this.controlled) {
       onChange(value, field, this)
@@ -142,5 +150,17 @@ export abstract class Editor<
 
     set(path, update, value)
     await this.handleChange(update)
+  }
+
+  content(children?: React.ReactNode): React.ReactNode {
+    return super.content(this.props.readOnly ? this.readOnly() : children)
+  }
+
+  /**
+   * Renders the component's content in read-only mode.
+   * @returns The component's content as a string representation.
+   */
+  readOnly(): React.ReactNode {
+    return String(this.current)
   }
 }

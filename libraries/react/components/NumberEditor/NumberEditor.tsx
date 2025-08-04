@@ -1,18 +1,41 @@
-import type * as React from 'react'
-import { FormField } from '../FormField/FormField'
+import * as React from 'react'
+import { formatNumber } from '@basis/utilities'
+import type { IAccessible } from '../../mixins/Accessible'
+import { Accessible } from '../../mixins/Accessible'
+import type { IPlaceholder } from '../../mixins/Placeholder'
+import { Placeholder } from '../../mixins/Placeholder'
+import type { IPrefixSuffix } from '../../mixins/PrefixSuffix'
+import { PrefixSuffix } from '../../mixins/PrefixSuffix'
+import { applyMixins } from '../../utilities/applyMixins'
+import { Editor } from '../Editor/Editor'
+
+/** Props specific to number editor. */
+interface Props extends IAccessible, IPrefixSuffix, IPlaceholder {
+  /** Step value for up/down arrow keys. If provided, arrow keys will adjust the value by this amount. */
+  step?: number,
+}
 
 /**
- * Number input editor component that extends the FormField base class.
+ * Number input editor component that extends the Editor base class.
  * Handles number formatting with comma separators.
  */
-export class NumberEditor
-  extends FormField<number, HTMLInputElement> {
+export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
+  static displayName = 'NumberEditor'
+  /** Default props for number editor. */
+  static defaultProps = {
+    ...super.defaultProps,
+    ...Accessible.defaultProps,
+    ...PrefixSuffix.defaultProps,
+    ...Placeholder.defaultProps,
+  }
+
   /**
    * Formats a number with comma separators.
    * @param value The number to format.
    * @returns The formatted string.
    */
-  private formatNumber(value: number): string {
+  private formatNumber(value: number | null): string {
+    if (value === null || value === undefined) return ''
     return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   }
 
@@ -31,20 +54,63 @@ export class NumberEditor
    * @returns The formatted input value.
    */
   protected get inputValue(): string {
+    if (this.current === null || this.current === undefined) return ''
     return this.current === 0 ? '' : this.formatNumber(this.current)
   }
 
-  /**
-   * Gets additional input attributes for number parsing.
-   * @returns Additional input attributes.
-   */
-  protected get inputAttributes(): Record<string, unknown> {
-    return {
-      onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
-        const value = event.target.value
-        const numberValue = this.parseNumber(value)
-        this.handleChange(numberValue)
-      },
+  #handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value
+    const numberValue = this.parseNumber(value)
+    this.handleChange(numberValue)
+  }
+
+  #handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    const { step } = this.props
+
+    // Call the base class handleKeyDown first
+    super.handleKeyDown(event)
+
+    // Check if step should be applied (only if step is provided and arrow keys are pressed)
+    if (step && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      // Don't apply step if default was prevented
+      if (!event.defaultPrevented) {
+        event.preventDefault()
+
+        const currentValue = this.current ?? 0
+        const newValue = event.key === 'ArrowUp'
+          ? currentValue + step
+          : currentValue - step
+
+        this.handleChange(newValue)
+      }
     }
+  }
+
+  /**
+   * Renders the component's content in read-only mode.
+   * @returns The component's content as nicely formatted number.
+   */
+  readOnly(): React.ReactNode {
+    const value = this.current
+    if (value === null || value === undefined) return ''
+    return formatNumber(value, { grouping: true, locale: 'en-US' })
+  }
+
+  /**
+   * Renders the component's content.
+   * @returns The component's content.
+   */
+  content(): React.ReactNode {
+    const input = (
+      <input
+        type="text"
+        value={this.inputValue}
+        onChange={this.#handleChange}
+        onKeyDown={this.#handleKeyDown}
+      />
+    )
+    const rendered = applyMixins(input, this, [Accessible, PrefixSuffix, Placeholder])
+
+    return super.content(rendered)
   }
 }

@@ -244,7 +244,7 @@ export default pluginTypescript.config(
       '@stylistic/ts/semi': ['error', 'never', { beforeStatementContinuationChars: 'always' }],
       '@stylistic/ts/space-before-blocks': ['error', 'always'],
       '@stylistic/ts/space-before-function-paren': ['error', {
-        anonymous: 'never',
+        anonymous: 'always',
         asyncArrow: 'always',
         named: 'never',
       }],

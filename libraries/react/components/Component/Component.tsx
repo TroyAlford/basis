@@ -22,6 +22,8 @@ interface TProps<
   data?: Record<string, unknown>,
   /** An optional ref to the component's root element. */
   nodeRef?: React.RefObject<E>,
+  /** Callback function called when a key is pressed while the component has focus. */
+  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => boolean | undefined,
 }
 
 type P<E extends Element, T> = TProps<E> & T
@@ -42,6 +44,7 @@ export abstract class Component<
 > extends React.Component<P<Element, Props>, State> {
   static defaultProps: P<HTMLElement, TProps> = {
     nodeRef: React.createRef<HTMLDivElement>(),
+    onKeyDown: () => undefined,
   }
 
   /**
@@ -142,6 +145,22 @@ export abstract class Component<
         {this.content(children)}
       </Tag>
     )
+  }
+
+  /**
+   * Handles keyboard events with basic onKeyDown functionality.
+   * @param event The keyboard event.
+   */
+  protected handleKeyDown(event: React.KeyboardEvent<HTMLElement>): void {
+    const { onKeyDown } = this.props
+
+    // Call onKeyDown first
+    const shouldPreventDefault = onKeyDown(event)
+
+    // If onKeyDown returned false, prevent default if not already prevented
+    if (shouldPreventDefault === false && !event.defaultPrevented) {
+      event.preventDefault()
+    }
   }
 
   /**
