@@ -1,6 +1,7 @@
 [test]
 coverage = true
 coverageReporter = ["lcov"]
+coverageSkipTestFiles = true
 preload = [
 	"./config/happydom.ts",
 	"./libraries/react/testing/bun"
