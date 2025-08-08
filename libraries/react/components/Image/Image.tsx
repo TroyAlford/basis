@@ -66,7 +66,7 @@ export class Image extends Component<Props, HTMLImageElement, State> {
     }
   }
 
-  get attributes(): React.ImgHTMLAttributes<HTMLImageElement> {
+  get attributes() {
     return {
       ...super.attributes,
       alt: this.props.alt || '',

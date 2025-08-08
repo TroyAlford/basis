@@ -34,7 +34,7 @@ describe('Tag', () => {
         <Tag>
           <span>Icon</span>
           <strong>Bold Text</strong>
-        </Tag>
+        </Tag>,
       )
       expect(node.textContent).toContain('Icon')
       expect(node.textContent).toContain('Bold Text')
@@ -64,7 +64,7 @@ describe('Tag', () => {
       const { node } = await render(
         <div onClick={onParentClick}>
           <Tag removable onRemove={onRemove}>Event Tag</Tag>
-        </div>
+        </div>,
       )
 
       const removeButton = node.querySelector('a.remove[aria-label="Remove tag"]') as HTMLAnchorElement
@@ -74,4 +74,4 @@ describe('Tag', () => {
       expect(onParentClick).not.toHaveBeenCalled()
     })
   })
-}) 
+})
