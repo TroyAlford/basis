@@ -81,7 +81,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     }
   }
 
-  get attributes(): React.HTMLAttributes<HTMLDivElement> {
+  get attributes() {
     return {
       ...super.attributes,
       onKeyDown: this.handleKeyDown,

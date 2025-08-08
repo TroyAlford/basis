@@ -24,6 +24,8 @@ interface TProps<
   nodeRef?: React.RefObject<E>,
   /** Callback function called when a key is pressed while the component has focus. */
   onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => boolean | undefined,
+  /** The name of the theme to use for the component. */
+  theme?: string,
 }
 
 type P<E extends Element, T> = TProps<E> & T
@@ -45,6 +47,7 @@ export abstract class Component<
   static defaultProps: P<HTMLElement, TProps> = {
     nodeRef: React.createRef<HTMLDivElement>(),
     onKeyDown: () => undefined,
+    theme: undefined,
   }
 
   /**
@@ -63,7 +66,11 @@ export abstract class Component<
    * @returns a React.HTMLAttributes<Element> object
    * @example get attributes() { return { tabIndex: 0 } }
    */
-  get attributes(): React.HTMLAttributes<Element> { return {} }
+  get attributes() {
+    return {
+      'data-theme': this.props.theme,
+    }
+  }
 
   /**
    * Getter for class names.

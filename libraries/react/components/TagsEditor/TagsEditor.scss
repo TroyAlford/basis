@@ -1,0 +1,58 @@
+.basis:tags-editor.component {
+  align-items: center;
+  display: flex;
+  flex-flow: row wrap;
+  gap: .5em;
+  padding: .5em;
+
+  > .tag.component {
+    display: flex;
+    flex-direction: row;
+    gap: .25em;
+    margin: 0;
+
+    > .icon, > .remove {
+      margin: 0;
+      height: 1em;
+      width: 1em;
+    }
+  }
+
+  > .input-wrapper {
+    align-items: center;
+    display: flex;
+    flex: 1;
+    gap: .25em;
+    min-width: 20ch;
+
+    > .icon {
+      color: currentColor;
+      display: flex;
+      font-size: 1em;
+      height: 1em;
+      width: 1em;
+    }
+
+    > .input {
+      background: transparent;
+      border: none;
+      color: currentColor;
+      flex: 1;
+      font-family: inherit;
+      font-size: inherit;
+      outline: none;
+      padding: 0;
+
+      &::placeholder {
+        color: currentColor;
+        opacity: 0.5;
+      }
+    }
+  }
+
+  &[data-readonly="true"] {
+    > .input-wrapper {
+      display: none;
+    }
+  }
+} 

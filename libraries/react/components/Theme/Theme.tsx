@@ -2,6 +2,7 @@ import type * as React from 'react'
 import { Color } from '@basis/utilities/functions/Color'
 import { kebabCase } from '@basis/utilities/functions/kebabCase'
 import { merge } from '@basis/utilities/functions/merge'
+import { style } from '../../utilities/style'
 import { Component } from '../Component/Component'
 
 interface Props {
@@ -159,10 +160,8 @@ export class Theme extends Component<Props> {
     ...DEFAULT_THEME,
   }
 
-  get tag(): Component<Props>['tag'] { return 'style' }
-
   componentDidMount(): void {
-    if (this.rootNode) this.rootNode.textContent = this.getCSSVariables()
+    this.injectStyles()
   }
 
   shouldComponentUpdate(
@@ -170,7 +169,7 @@ export class Theme extends Component<Props> {
     nextState: Readonly<Component['state']>,
   ): boolean {
     if (!super.shouldComponentUpdate(nextProps, nextState)) return false
-    if (this.rootNode) this.rootNode.textContent = this.getCSSVariables()
+    this.injectStyles()
     return false
   }
 
@@ -209,8 +208,14 @@ export class Theme extends Component<Props> {
       .flatMap(([category, values]) => this.processObject(category, values as Record<string, unknown>))
 
     return name?.trim()
-      ? `:root [theme="${name}"] { ${variables.join('\n')} }`
+      ? `:root [data-theme="${name}"] { ${variables.join('\n')} }`
       : `:root { ${variables.join('\n')} }`
+  }
+
+  private injectStyles(): void {
+    const cssContent = this.getCSSVariables()
+    const themeName = this.props.name?.trim() || 'default'
+    style(`basis:theme:${themeName}`, cssContent)
   }
 
   content(): React.ReactNode { return null }

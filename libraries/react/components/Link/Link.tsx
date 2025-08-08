@@ -1,4 +1,3 @@
-import type React from 'react'
 import { Component } from '../Component/Component'
 
 interface Props {
@@ -10,8 +9,11 @@ interface Props {
 
 /** A component for navigating to a URL. */
 export class Link extends Component<Props, HTMLAnchorElement> {
-  get attributes(): React.HTMLAttributes<HTMLAnchorElement> {
-    return { href: this.props.to } as React.HTMLAttributes<HTMLAnchorElement>
+  get attributes() {
+    return {
+      ...super.attributes,
+      href: this.props.to,
+    }
   }
   get tag(): Component<Props, HTMLAnchorElement>['tag'] { return 'a' }
 

@@ -41,9 +41,10 @@ export class Button extends Component<Props, HTMLButtonElement> {
     }
   }
 
-  get attributes(): React.ButtonHTMLAttributes<HTMLButtonElement> {
+  get attributes() {
     const { disabled, type } = this.props
     return {
+      ...super.attributes,
       disabled: !!disabled,
       onClick: this.handleActivate,
       onKeyDown: this.handleActivate,

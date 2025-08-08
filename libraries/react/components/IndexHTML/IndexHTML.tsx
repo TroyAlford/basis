@@ -1,4 +1,4 @@
-import React from 'react'
+import * as React from 'react'
 
 const version = React.version
 const bundle = Bun.env.NODE_ENV !== 'production'

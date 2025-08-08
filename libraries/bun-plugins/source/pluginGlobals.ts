@@ -14,7 +14,7 @@ type GlobalResolveFunc = (moduleName: string) => string | undefined
  * that returns the global variable reference.
  * @example Simple global mapping
  * {
- *   // Maps `import React from 'react'` to `window.React`
+ *   // Maps `import * as React from 'react'` to `window.React`
  *   'react': 'window.React',
  *   // Maps all react-dom imports (including subpaths) to window.ReactDOM
  *   'react-dom': 'window.ReactDOM',
@@ -103,6 +103,16 @@ function generateExport(globals: PluginGlobalsOptions, name: string): string | u
  * })
  */
 export function pluginGlobals(globals: PluginGlobalsOptions = {}): BunPlugin {
+  // If no globals are configured, return a no-op plugin
+  if (!Object.keys(globals).length) {
+    return {
+      name: 'globals',
+      setup() {
+        // No-op plugin when no globals are configured
+      },
+    } as BunPlugin
+  }
+
   const filter = generateResolveFilter(globals)
   return {
     name: 'globals',
