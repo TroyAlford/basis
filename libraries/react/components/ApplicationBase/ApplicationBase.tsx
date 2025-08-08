@@ -1,4 +1,4 @@
-import React from 'react'
+import * as React from 'react'
 import { deepEquals } from '@basis/utilities'
 import { Component } from '../Component/Component'
 import { Router } from '../Router/Router'

@@ -6,13 +6,16 @@ import { Theme } from './Theme'
 describe('Theme', () => {
   describe('rendering', () => {
     test('renders with minimal props', async () => {
-      const { node } = await render(<Theme name="test" />)
-      expect(node.tagName).toBe('STYLE')
-      expect(node.textContent).toContain('[theme="test"]')
+      await render(<Theme name="test" />)
+
+      // Check that styles were injected into document.head
+      const styleElement = document.getElementById('basis:theme:test')
+      expect(styleElement).toBeTruthy()
+      expect(styleElement?.textContent).toContain('[data-theme="test"]')
     })
 
     test('renders with all props', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           name="test"
           color={{
@@ -61,7 +64,9 @@ describe('Theme', () => {
         />,
       )
 
-      const css = node.textContent || ''
+      const styleElement = document.getElementById('basis:theme:test')
+      expect(styleElement).toBeTruthy()
+      const css = styleElement?.textContent || ''
 
       // Test color processing
       expect(css).toContain('--basis-color-primary: #ff0000ff')
@@ -110,111 +115,121 @@ describe('Theme', () => {
 
   describe('color processing', () => {
     test('processes hex colors', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           color={{ primary: '#ff0000' }}
           name="test"
         />,
       )
-      expect(node.textContent).toContain('--basis-color-primary: #ff0000ff')
+      const styleElement = document.getElementById('basis:theme:test')
+      expect(styleElement?.textContent).toContain('--basis-color-primary: #ff0000ff')
     })
 
     test('processes rgb colors', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           color={{ primary: 'rgb(255, 0, 0)' }}
           name="test"
         />,
       )
-      expect(node.textContent).toContain('--basis-color-primary: #ff0000ff')
+      const styleElement = document.getElementById('basis:theme:test')
+      expect(styleElement?.textContent).toContain('--basis-color-primary: #ff0000ff')
     })
 
     test('processes rgba colors', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           color={{ primary: 'rgba(255, 0, 0, 0.5)' }}
           name="test"
         />,
       )
-      expect(node.textContent).toContain('--basis-color-primary: #ff000080')
+      const styleElement = document.getElementById('basis:theme:test')
+      expect(styleElement?.textContent).toContain('--basis-color-primary: #ff000080')
     })
 
     test('processes hsl colors', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           color={{ primary: 'hsl(0, 100%, 50%)' }}
           name="test"
         />,
       )
-      expect(node.textContent).toContain('--basis-color-primary: #ff0000ff')
+      const styleElement = document.getElementById('basis:theme:test')
+      expect(styleElement?.textContent).toContain('--basis-color-primary: #ff0000ff')
     })
 
     test('processes hsla colors', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           color={{ primary: 'hsla(0, 100%, 50%, 0.5)' }}
           name="test"
         />,
       )
-      expect(node.textContent).toContain('--basis-color-primary: #ff000080')
+      const styleElement = document.getElementById('basis:theme:test')
+      expect(styleElement?.textContent).toContain('--basis-color-primary: #ff000080')
     })
   })
 
   describe('value processing', () => {
     test('adds px to numeric values', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           name="test"
           radius={{ md: 8 }}
           unit={{ md: 16 }}
         />,
       )
-      expect(node.textContent).toContain('--basis-unit-md: 16px')
-      expect(node.textContent).toContain('--basis-radius-md: 8px')
+      const styleElement = document.getElementById('basis:theme:test')
+      expect(styleElement?.textContent).toContain('--basis-unit-md: 16px')
+      expect(styleElement?.textContent).toContain('--basis-radius-md: 8px')
     })
 
     test('adds % to font sizes', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           fontSize={{ md: 100 }}
           name="test"
         />,
       )
-      expect(node.textContent).toContain('--basis-font-size-md: 100%')
+      const styleElement = document.getElementById('basis:theme:test')
+      expect(styleElement?.textContent).toContain('--basis-font-size-md: 100%')
     })
 
     test('preserves string values for shadows and transitions', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           name="test"
           shadow={{ md: '0 2px 4px rgba(0, 0, 0, 0.1)' }}
           transition={{ fast: '100ms ease' }}
         />,
       )
-      expect(node.textContent).toContain('--basis-shadow-md: 0 2px 4px rgba(0, 0, 0, 0.1)')
-      expect(node.textContent).toContain('--basis-transition-fast: 100ms ease')
+      const styleElement = document.getElementById('basis:theme:test')
+      expect(styleElement?.textContent).toContain('--basis-shadow-md: 0 2px 4px rgba(0, 0, 0, 0.1)')
+      expect(styleElement?.textContent).toContain('--basis-transition-fast: 100ms ease')
     })
   })
 
   describe('theme namespacing', () => {
     test('namespaces variables under theme attribute', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           color={{ primary: '#ff0000' }}
           name="light"
         />,
       )
-      expect(node.textContent).toMatch(/^:root \[theme="light"\] {/)
+      const styleElement = document.getElementById('basis:theme:light')
+      expect(styleElement?.textContent).toMatch(/^:root \[data-theme="light"\] {/)
     })
 
     test('handles special characters in theme name', async () => {
-      const { node } = await render(
+      await render(
         <Theme
           color={{ primary: '#ff0000' }}
           name="theme:light@2x"
         />,
       )
-      expect(node.textContent).toMatch(/^:root \[theme="theme:light@2x"\] {/)
+      const styleElement = document.getElementById('basis:theme:theme:light@2x')
+      expect(styleElement?.textContent).toMatch(/^:root \[data-theme="theme:light@2x"\] {/)
     })
   })
 })
