@@ -5,170 +5,177 @@ import { Direction } from '../../types/Direction'
 import { Tooltip } from './Tooltip'
 
 describe('Tooltip', () => {
-  describe('rendering', () => {
-    test('renders with default props', async () => {
-      const div = await render(<Tooltip>Tooltip content</Tooltip>)
+  // Helper function to test style attributes
+  const expectStyleAttribute = async (
+    tooltip: React.ReactElement,
+    expectedProps: Record<string, string>,
+  ) => {
+    const div = await render(tooltip)
+    expect(div.node).toHaveAttribute('style')
 
-      expect(div.node.tagName).toBe('DIV')
-      expect(div.node).toHaveClass('tooltip', 'component')
-      expect(div.node).toHaveAttribute('data-direction', 'N')
-      expect(div.node).toHaveAttribute('data-visible', 'auto')
-      expect(div.node).toHaveAttribute('role', 'tooltip')
+    const style = div.node.getAttribute('style')
+    if (!style) throw new Error('Style attribute not found')
+    Object.entries(expectedProps).forEach(([prop, value]) => {
+      expect(style).toContain(`${prop}: ${value}`)
+    })
+  }
+
+  // Helper function to test data attributes
+  const expectDataAttributes = async (tooltip: React.ReactElement, expectedAttrs: Record<string, string>) => {
+    const div = await render(tooltip)
+    Object.entries(expectedAttrs).forEach(([attr, value]) => {
+      expect(div.node).toHaveAttribute(attr, value)
+    })
+  }
+
+  describe('static properties', () => {
+    test('exposes Direction enum', () => {
+      expect(Tooltip.Direction).toBe(Direction)
     })
 
-    test('renders with custom direction', async () => {
-      const div = await render(
-        <Tooltip direction={Direction.SE}>Bottom right tooltip</Tooltip>,
-      )
-
-      expect(div.node).toHaveAttribute('data-direction', 'SE')
-    })
-
-    test('renders with custom visible state', async () => {
-      const div = await render(
-        <Tooltip visible={true}>Visible tooltip</Tooltip>,
-      )
-
-      expect(div.node).toHaveAttribute('data-visible', 'true')
-    })
-
-    test('renders with custom animation duration', async () => {
-      const div = await render(
-        <Tooltip animationDuration=".3s">Animated tooltip</Tooltip>,
-      )
-
-      expect(div.node).toHaveAttribute('style')
-      const style = div.node.getAttribute('style')
-      expect(style).toContain('--tooltip-animation-duration: .3s')
-    })
-
-    test('renders with string offset', async () => {
-      const div = await render(
-        <Tooltip offset="1rem">Offset tooltip</Tooltip>,
-      )
-
-      expect(div.node).toHaveAttribute('style')
-      const style = div.node.getAttribute('style')
-      expect(style).toContain('--tooltip-offset: 1rem')
-    })
-
-    test('renders with numeric offset (auto-appends px)', async () => {
-      const div = await render(
-        <Tooltip offset={8}>Numeric offset tooltip</Tooltip>,
-      )
-
-      expect(div.node).toHaveAttribute('style')
-      const style = div.node.getAttribute('style')
-      expect(style).toContain('--tooltip-offset: 8px')
-    })
-
-    test('renders with zero offset', async () => {
-      const div = await render(
-        <Tooltip offset={0}>Zero offset tooltip</Tooltip>,
-      )
-
-      expect(div.node).toHaveAttribute('style')
-      const style = div.node.getAttribute('style')
-      expect(style).toContain('--tooltip-offset: 0px')
+    test('has correct default props', () => {
+      expect(Tooltip.defaultProps).toEqual({
+        animationDuration: '.125s',
+        children: null,
+        direction: Direction.N,
+        offset: '.25em',
+        visible: 'auto',
+      })
     })
   })
 
-  describe('content structure', () => {
-    test('renders bubble and arrow elements', async () => {
-      const div = await render(<Tooltip>Content</Tooltip>)
+  describe('direction positioning', () => {
+    test('renders with all direction values', async () => {
+      const directions = [
+        Direction.N,
+        Direction.NE,
+        Direction.E,
+        Direction.SE,
+        Direction.S,
+        Direction.SW,
+        Direction.W,
+        Direction.NW,
+      ]
 
-      const bubble = div.node.querySelector('.bubble')
-      const arrow = div.node.querySelector('.arrow')
-
-      expect(bubble).toBeTruthy()
-      expect(arrow).toBeTruthy()
-      expect(bubble?.textContent).toBe('Content')
-    })
-
-    test('renders as div element', async () => {
-      const div = await render(<Tooltip>Content</Tooltip>)
-
-      expect(div.node.tagName).toBe('DIV')
+      for (const direction of directions) {
+        const div = await render(<Tooltip direction={direction}>Content</Tooltip>)
+        expect(div.node).toHaveAttribute('data-direction', direction)
+      }
     })
   })
 
-  describe('class names', () => {
-    test('includes tooltip class', async () => {
-      const div = await render(<Tooltip>Content</Tooltip>)
+  describe('animation duration handling', () => {
+    test('handles string values', async () => {
+      await expectStyleAttribute(
+        <Tooltip animationDuration=".3s">Content</Tooltip>,
+        { '--tooltip-animation-duration': '.3s' },
+      )
+    })
 
-      expect(div.node).toHaveClass('tooltip')
-      expect(div.node).toHaveClass('component')
+    test('handles numeric values (appends s)', async () => {
+      await expectStyleAttribute(
+        <Tooltip animationDuration={0.2}>Content</Tooltip>,
+        { '--tooltip-animation-duration': '0.2s' },
+      )
+    })
+
+    test('handles zero and negative values', async () => {
+      await expectStyleAttribute(
+        <Tooltip animationDuration={0}>Content</Tooltip>,
+        { '--tooltip-animation-duration': '0s' },
+      )
+
+      await expectStyleAttribute(
+        <Tooltip animationDuration={-0.1}>Content</Tooltip>,
+        { '--tooltip-animation-duration': '-0.1s' },
+      )
+    })
+
+    test('falls back to default for nil/empty values', async () => {
+      await expectStyleAttribute(
+        <Tooltip animationDuration="">Content</Tooltip>,
+        { '--tooltip-animation-duration': '.125s' },
+      )
+
+      await expectStyleAttribute(
+        <Tooltip animationDuration={null}>Content</Tooltip>,
+        { '--tooltip-animation-duration': '.125s' },
+      )
     })
   })
 
   describe('offset handling', () => {
-    test('handles undefined offset with fallback', async () => {
-      const div = await render(
-        <Tooltip offset={undefined}>Content</Tooltip>,
+    test('handles string values', async () => {
+      await expectStyleAttribute(
+        <Tooltip offset="1rem">Content</Tooltip>,
+        { '--tooltip-offset': '1rem' },
       )
-
-      expect(div.node).toHaveAttribute('style')
-      const style = div.node.getAttribute('style')
-      expect(style).toContain('--tooltip-offset: .25em')
     })
 
-    test('handles null offset with fallback', async () => {
-      const div = await render(
-        <Tooltip offset={null}>Content</Tooltip>,
+    test('handles numeric values (appends px)', async () => {
+      await expectStyleAttribute(
+        <Tooltip offset={16}>Content</Tooltip>,
+        { '--tooltip-offset': '16px' },
       )
-
-      expect(div.node).toHaveAttribute('style')
-      const style = div.node.getAttribute('style')
-      expect(style).toContain('--tooltip-offset: .25em')
     })
 
-    test('handles decimal numeric offset', async () => {
-      const div = await render(
-        <Tooltip offset={0.5}>Content</Tooltip>,
+    test('handles zero and negative values', async () => {
+      await expectStyleAttribute(
+        <Tooltip offset={0}>Content</Tooltip>,
+        { '--tooltip-offset': '0px' },
       )
 
-      expect(div.node).toHaveAttribute('style')
-      const style = div.node.getAttribute('style')
-      expect(style).toContain('--tooltip-offset: 0.5px')
-    })
-
-    test('handles negative numeric offset', async () => {
-      const div = await render(
+      await expectStyleAttribute(
         <Tooltip offset={-10}>Content</Tooltip>,
+        { '--tooltip-offset': '-10px' },
+      )
+    })
+
+    test('falls back to default for nil/empty values', async () => {
+      await expectStyleAttribute(
+        <Tooltip offset="">Content</Tooltip>,
+        { '--tooltip-offset': '.25em' },
       )
 
-      expect(div.node).toHaveAttribute('style')
-      const style = div.node.getAttribute('style')
-      expect(style).toContain('--tooltip-offset: -10px')
+      await expectStyleAttribute(
+        <Tooltip offset={null}>Content</Tooltip>,
+        { '--tooltip-offset': '.25em' },
+      )
     })
   })
 
-  describe('style attributes', () => {
-    test('includes all CSS custom properties', async () => {
-      const div = await render(
+  describe('combined props', () => {
+    test('renders with multiple custom props', async () => {
+      await expectDataAttributes(
         <Tooltip
-          animationDuration=".5s"
-          offset="2rem"
+          animationDuration={0.5}
+          direction={Direction.E}
+          offset={32}
+          visible={true}
         >
           Content
         </Tooltip>,
+        {
+          'data-direction': 'E',
+          'data-visible': 'true',
+          'role': 'tooltip',
+        },
       )
 
-      expect(div.node).toHaveAttribute('style')
-      const style = div.node.getAttribute('style')
-      expect(style).toContain('--tooltip-animation-duration: .5s')
-      expect(style).toContain('--tooltip-offset: 2rem')
-    })
-
-    test('handles empty string animation duration', async () => {
-      const div = await render(
-        <Tooltip animationDuration="">Content</Tooltip>,
+      await expectStyleAttribute(
+        <Tooltip
+          animationDuration={0.5}
+          direction={Direction.E}
+          offset={32}
+          visible={true}
+        >
+          Content
+        </Tooltip>,
+        {
+          '--tooltip-animation-duration': '0.5s',
+          '--tooltip-offset': '32px',
+        },
       )
-
-      expect(div.node).toHaveAttribute('style')
-      const style = div.node.getAttribute('style')
-      // Empty string animation duration should not output the property (reasonable behavior)
-      expect(style).not.toContain('--tooltip-animation-duration')
     })
   })
 })

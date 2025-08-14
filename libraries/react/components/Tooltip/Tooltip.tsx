@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { isNil } from '@basis/utilities'
 import { Direction } from '../../types/Direction'
 import { css, style } from '../../utilities/style'
 import { Component } from '../Component/Component'
@@ -6,13 +7,13 @@ import { Component } from '../Component/Component'
 /** Props for the Tooltip component. */
 interface Props {
   /** The animation duration for the tooltip. */
-  animationDuration?: string,
+  animationDuration?: number | string,
   /** The children of the tooltip. */
   children: React.ReactNode,
   /** The direction where the tooltip should appear. */
   direction?: Direction,
   /** The offset distance from the parent element. If a number is provided, 'px' will be appended. */
-  offset?: string | number,
+  offset?: number | string,
   /** Whether the tooltip is visible. */
   visible?: boolean | 'auto',
 }
@@ -50,7 +51,7 @@ export class Tooltip extends Component<Props, HTMLDivElement> {
       'data-visible': this.props.visible,
       'role': 'tooltip',
       'style': {
-        '--tooltip-animation-duration': this.props.animationDuration,
+        '--tooltip-animation-duration': this.animationDuration,
         '--tooltip-offset': this.offset,
       },
     }
@@ -61,16 +62,29 @@ export class Tooltip extends Component<Props, HTMLDivElement> {
   }
 
   /**
+   * Gets the animation duration with fallback to default.
+   * @returns The animation duration string
+   */
+  get animationDuration(): string {
+    const { animationDuration } = this.props
+    if (isNil(animationDuration) || animationDuration === '') {
+      return Tooltip.defaultProps.animationDuration as string
+    }
+    if (typeof animationDuration === 'number') return `${animationDuration}s`
+    return animationDuration
+  }
+
+  /**
    * Converts the offset prop to a CSS string.
    * If it's a number, appends 'px'. If it's a string, returns as-is.
+   * Empty strings fall back to default.
    * @returns The CSS string representation of the offset
    */
   get offset(): string {
     const { offset } = this.props
-    if (typeof offset === 'number') {
-      return `${offset}px`
-    }
-    return offset || '.25em'
+    if (isNil(offset) || offset === '') return Tooltip.defaultProps.offset as string
+    if (typeof offset === 'number') return `${offset}px`
+    return offset
   }
 
   content(children?: React.ReactNode): React.ReactNode {
