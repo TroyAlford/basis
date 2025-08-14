@@ -11,6 +11,7 @@ export { Tag } from './components/Tag/Tag'
 export { TagsEditor } from './components/TagsEditor/TagsEditor'
 export { TextEditor } from './components/TextEditor/TextEditor'
 export { Theme } from './components/Theme/Theme'
+export { Tooltip } from './components/Tooltip/Tooltip'
 
 export { Accessible } from './mixins/Accessible'
 export { Focusable } from './mixins/Focusable'
