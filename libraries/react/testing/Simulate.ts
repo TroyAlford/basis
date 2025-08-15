@@ -1,4 +1,5 @@
 import type { Mock } from 'bun:test'
+import type { Keyboard } from '../types/Keyboard'
 
 /**
  * Simulates user interactions with React elements in a way that works with React 19's async rendering.
@@ -118,7 +119,7 @@ export const Simulate = {
    */
   async keyDown<T extends HTMLElement>(
     element: T,
-    key: string,
+    key: Keyboard,
     handler: Mock<(...args: unknown[]) => void>,
     timeout?: number,
   ): Promise<void> {

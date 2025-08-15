@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Keyboard } from '@basis/react/types/Keyboard'
 import { formatNumber } from '@basis/utilities'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
@@ -64,20 +65,20 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
     this.handleChange(numberValue)
   }
 
-  #handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  protected handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     const { step } = this.props
 
     // Call the base class handleKeyDown first
     super.handleKeyDown(event)
 
     // Check if step should be applied (only if step is provided and arrow keys are pressed)
-    if (step && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+    if (step && ([Keyboard.ArrowUp, Keyboard.ArrowDown].includes(event.key as Keyboard))) {
       // Don't apply step if default was prevented
       if (!event.defaultPrevented) {
         event.preventDefault()
 
         const currentValue = this.current ?? 0
-        const newValue = event.key === 'ArrowUp'
+        const newValue = event.key === Keyboard.ArrowUp
           ? currentValue + step
           : currentValue - step
 
@@ -108,7 +109,7 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
         type="text"
         value={this.inputValue}
         onChange={this.#handleChange}
-        onKeyDown={this.#handleKeyDown}
+        onKeyDown={this.handleKeyDown}
       />
     )
     const rendered = applyMixins(input, this, [Accessible, PrefixSuffix, Placeholder])

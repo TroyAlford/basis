@@ -1,5 +1,6 @@
 import type * as React from 'react'
 import { match, noop } from '@basis/utilities'
+import { Keyboard } from '../../types/Keyboard'
 import { Component } from '../Component/Component'
 
 import './Button.styles.ts'
@@ -68,12 +69,10 @@ export class Button extends Component<Props, HTMLButtonElement> {
     event.stopPropagation()
 
     match(event.type)
-      .when('click').then(() => {
-        onActivate(event)
-      })
+      .when('click').then(() => { onActivate(event) })
       .when('keydown').then(() => {
         const { key } = event as React.KeyboardEvent
-        if (!['Enter', ' '].includes(key)) return
+        if (![Keyboard.Enter, Keyboard.Space].includes(key as Keyboard)) return
         onActivate(event)
       })
       .else(noop)

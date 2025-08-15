@@ -197,4 +197,53 @@ describe('match', () => {
       .when([_, 2, _]).then(($, placeholders) => placeholders)
       .else(false)).toEqual([1, 3])
   })
+
+  describe('match with no value', () => {
+    test('can call match() with no arguments', () => {
+      expect(match()
+        .when(true).then('bleh')
+        .when(() => true).then('blah')
+        .else('fallback')).toBe('bleh')
+    })
+
+    test('boolean matchers work with no value', () => {
+      expect(match()
+        .when(false).then('false')
+        .when(true).then('true')
+        .else('fallback')).toBe('true')
+    })
+
+    test('function matchers work with no value', () => {
+      expect(match()
+        .when(() => false).then('false')
+        .when(() => true).then('true')
+        .else('fallback')).toBe('true')
+    })
+  })
+
+  describe('boolean matchers', () => {
+    test('true matcher always matches', () => {
+      expect(match(42)
+        .when(true).then('always true')
+        .else('fallback')).toBe('always true')
+    })
+
+    test('false matcher never matches', () => {
+      expect(match(42)
+        .when(false).then('never true')
+        .else('fallback')).toBe('fallback')
+    })
+
+    test('boolean matchers work with .and()', () => {
+      expect(match(42)
+        .when(v => v > 0).and(true).then('positive and true')
+        .else('fallback')).toBe('positive and true')
+    })
+
+    test('boolean matchers work with .or()', () => {
+      expect(match(42)
+        .when(false).or(true).then('true or false')
+        .else('fallback')).toBe('true or false')
+    })
+  })
 })

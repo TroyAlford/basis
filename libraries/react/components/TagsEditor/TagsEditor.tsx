@@ -1,5 +1,6 @@
 import * as React from 'react'
-import { deburr } from '@basis/utilities'
+import { deburr, match } from '@basis/utilities'
+import { Keyboard } from '../../types/Keyboard'
 import { css, style } from '../../utilities/style'
 import { Editor } from '../Editor/Editor'
 import { Tag } from '../Tag/Tag'
@@ -107,30 +108,21 @@ export class TagsEditor extends Editor<string[], HTMLDivElement, Props, State> {
   /**
    * Handles key down events.
    * @param event The event object.
-   * @returns True if the event was handled, false otherwise.
    */
-  override handleKeyDown: TextEditor['props']['onKeyDown'] = event => {
-    switch (event.key) {
-      case 'Backspace':
-        if (event.target.value === '') {
+  protected handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
+    match(event.key)
+      .when(Keyboard.Backspace).then(() => {
+        if (event.currentTarget.value === '') {
           event.preventDefault()
           this.handleRemove(this.current[this.current.length - 1])
         }
-        return true
-
-      case 'Enter':
+      })
+      .when(Keyboard.Enter).then(() => {
         event.preventDefault()
-        this.handleAdd(event.target.value)
-        return true
-
-      case 'Escape':
-        this.setState({ inputValue: '' })
-        return true
-
-      default:
-        super.handleKeyDown(event)
-        return !event.defaultPrevented
-    }
+        this.handleAdd(event.currentTarget.value)
+      })
+      .when(Keyboard.Escape).then(() => this.setState({ inputValue: '' }))
+      .else(() => super.handleKeyDown(event))
   }
 
   /**
@@ -178,7 +170,7 @@ export class TagsEditor extends Editor<string[], HTMLDivElement, Props, State> {
             prefix={icon}
             value={inputValue}
             onChange={this.handleInputChange}
-            onKeyDown={this.handleKeyDown}
+            onKeyDown={this.handleKeyDown as TextEditor['props']['onKeyDown']}
           />
         )}
       </>,

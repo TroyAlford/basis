@@ -18,4 +18,7 @@ export { Focusable } from './mixins/Focusable'
 export { Placeholder } from './mixins/Placeholder'
 export { PrefixSuffix } from './mixins/PrefixSuffix'
 
+export { Keyboard } from './types/Keyboard'
+
+export { applyMixins } from './utilities/applyMixins'
 export { css, style } from './utilities/style'

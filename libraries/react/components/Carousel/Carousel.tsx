@@ -4,6 +4,7 @@ import { match, noop } from '@basis/utilities'
 import { Align } from '../../types/Align'
 import type { ImageConfig } from '../../types/ImageConfig'
 import type { ImageInput } from '../../types/ImageInput'
+import { Keyboard } from '../../types/Keyboard'
 import { Size } from '../../types/Size'
 import { loadImage } from '../../utilities/loadImage'
 import { Button } from '../Button/Button'
@@ -239,10 +240,10 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
    */
   handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     switch (event.key) {
-      case 'ArrowRight':
+      case Keyboard.ArrowRight:
         this.next()
         break
-      case 'ArrowLeft':
+      case Keyboard.ArrowLeft:
         this.prev()
         break
     }

@@ -36,7 +36,7 @@ interface Props extends IAccessible, IPrefixSuffix, IPlaceholder {
    */
   multiline?: false | true | 'auto' | number,
   /** Callback function called when a key is pressed while the input has focus. */
-  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void,
+  onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => void,
   /** Whether to select all text when the input receives focus. @default true */
   selectOnFocus?: boolean,
   /** Whether to wrap text in the textarea (only applies when multiline is true). @default Wrap.Soft */
