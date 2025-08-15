@@ -4,9 +4,8 @@
   "description": "Documentation site",
   "source": "index.html",
   "scripts": {
-    "start": "parcel index.html --port 1234 --hmr-port 1235",
+    "start": "bun ./libraries/docs/index.html",
     "build": "echo 'SKIP'",
-    "build:disabled": "parcel build index.html",
     "publish": "SKIP"
   },
   "dependencies": {
@@ -15,11 +14,7 @@
     "react-dom": "^19"
   },
   "devDependencies": {
-    "@parcel/transformer-sass": "2.15.4",
     "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
-    "buffer": "^6.0.3",
-    "parcel": "^2.15.4",
-    "process": "^0.11.10"
+    "@types/react-dom": "^19.1.6"
   }
 }

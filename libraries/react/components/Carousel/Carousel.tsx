@@ -9,7 +9,8 @@ import { loadImage } from '../../utilities/loadImage'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Image } from '../Image/Image'
-import './Carousel.scss'
+
+import './Carousel.styles.ts'
 
 interface Props {
   /** Default alignment for all images. */

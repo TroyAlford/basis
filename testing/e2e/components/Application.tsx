@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { ApplicationBase, Link } from '@basis/react'
-import './Application.scss'
+
+import './Application.styles.ts'
 
 export class Application extends ApplicationBase {
   layout(content: React.ReactNode) {

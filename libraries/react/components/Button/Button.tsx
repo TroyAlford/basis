@@ -1,7 +1,8 @@
 import type * as React from 'react'
 import { match, noop } from '@basis/utilities'
 import { Component } from '../Component/Component'
-import './Button.scss'
+
+import './Button.styles.ts'
 
 enum ButtonType {
   Button = 'button',
