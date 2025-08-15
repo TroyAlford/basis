@@ -3,7 +3,8 @@ import { Align } from '../../types/Align'
 import { Size } from '../../types/Size'
 import { loadImage } from '../../utilities/loadImage'
 import { Component } from '../Component/Component'
-import './Image.scss'
+
+import './Image.styles.ts'
 
 interface Props {
   /** Alignment value. */

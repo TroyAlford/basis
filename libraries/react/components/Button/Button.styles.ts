@@ -1,0 +1,45 @@
+import { css, style } from '../../utilities/style'
+
+style('basis:button', css`
+  .button.component {
+    appearance: none;
+    background-color: var(--basis-color-primary);
+    border: none;
+    border-radius: var(--basis-radius-md);
+    color: var(--basis-color-background);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 1em;
+    font-weight: 500;
+    line-height: 1;
+    margin: 0;
+    padding: var(--basis-unit-md) var(--basis-unit-lg);
+    position: relative;
+    text-align: center;
+    text-decoration: none;
+    transition: all var(--basis-transition-fast);
+    user-select: none;
+    white-space: nowrap;
+
+    &:hover:not(.disabled) {
+      background-color: var(--basis-color-primary-dark);
+      transform: translateY(-1px);
+    }
+
+    &:active:not(.disabled) {
+      transform: translateY(0);
+    }
+
+    &:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px var(--basis-color-primary-light);
+    }
+
+    &.disabled {
+      background-color: var(--basis-color-disabled);
+      color: var(--basis-color-disabled-text);
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+  } 
+`)
