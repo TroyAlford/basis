@@ -134,6 +134,13 @@ export class TagsEditor extends Editor<string[], HTMLDivElement, Props, State> {
     this.handleChange(newTags)
   }
 
+  private handleRemoveButton = (event: React.MouseEvent<HTMLAnchorElement>): void => {
+    const tag = event.currentTarget
+      .closest<HTMLDivElement>('.tag.component')
+      ?.dataset.value
+    this.handleRemove(tag)
+  }
+
   get attributes() {
     return {
       ...super.attributes,
@@ -145,8 +152,9 @@ export class TagsEditor extends Editor<string[], HTMLDivElement, Props, State> {
     typeof this.props.tag === 'function' ? this.props.tag(value) : (
       <Tag
         key={value}
+        data-value={value}
         removable={!this.props.readOnly}
-        onRemove={() => this.handleRemove(value)}
+        onRemove={this.handleRemoveButton}
       >
         {value}
       </Tag>
