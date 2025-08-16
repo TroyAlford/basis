@@ -63,8 +63,6 @@ export class Button extends Component<Props, HTMLButtonElement> {
   private handleActivate = (event: React.SyntheticEvent): void => {
     const { disabled, onActivate } = this.props
     if (disabled) return
-
-    // Prevent default behavior and stop propagation to avoid interference
     event.preventDefault()
     event.stopPropagation()
 

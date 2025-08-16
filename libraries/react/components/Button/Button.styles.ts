@@ -3,10 +3,10 @@ import { css, style } from '../../utilities/style'
 style('basis:button', css`
   .button.component {
     appearance: none;
-    background-color: var(--basis-color-primary);
+    background-color: var(--basis-color-background);
     border: none;
     border-radius: var(--basis-radius-md);
-    color: var(--basis-color-background);
+    color: var(--basis-color-foreground-text);
     cursor: pointer;
     font-family: inherit;
     font-size: 1em;
