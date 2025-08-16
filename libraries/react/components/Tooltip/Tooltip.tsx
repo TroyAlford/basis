@@ -1,20 +1,19 @@
 import * as React from 'react'
 import { isNil } from '@basis/utilities'
+import type { IDirectional } from '../../mixins/Directional'
+import { Directional } from '../../mixins/Directional'
 import { Direction } from '../../types/Direction'
+import { applyMixins } from '../../utilities/applyMixins'
 import { Component } from '../Component/Component'
 
 import './Tooltip.styles.ts'
 
 /** Props for the Tooltip component. */
-interface Props {
+interface Props extends IDirectional {
   /** The animation duration for the tooltip. */
   animationDuration?: number | string,
   /** The children of the tooltip. */
   children: React.ReactNode,
-  /** The direction where the tooltip should appear. */
-  direction?: Direction,
-  /** The offset distance from the parent element. If a number is provided, 'px' will be appended. */
-  offset?: number | string,
   /** Whether the tooltip is visible. */
   visible?: boolean | 'auto',
 }
@@ -38,22 +37,20 @@ export class Tooltip extends Component<Props, HTMLDivElement> {
 
   /** Default props for tooltip. */
   static defaultProps: Props = {
+    ...Component.defaultProps,
+    ...Directional.defaultProps,
     animationDuration: '.125s',
     children: null,
-    direction: Direction.N,
-    offset: '.25em',
     visible: 'auto',
   }
 
   get attributes() {
     return {
       ...super.attributes,
-      'data-direction': this.props.direction,
       'data-visible': this.props.visible,
       'role': 'tooltip',
       'style': {
         '--tooltip-animation-duration': this.animationDuration,
-        '--tooltip-offset': this.offset,
       },
     }
   }
@@ -76,16 +73,11 @@ export class Tooltip extends Component<Props, HTMLDivElement> {
   }
 
   /**
-   * Converts the offset prop to a CSS string.
-   * If it's a number, appends 'px'. If it's a string, returns as-is.
-   * Empty strings fall back to default.
-   * @returns The CSS string representation of the offset
+   * Override render to apply the Directional mixin to the root element.
+   * @returns The rendered React node with mixins applied.
    */
-  get offset(): string {
-    const { offset } = this.props
-    if (isNil(offset) || offset === '') return Tooltip.defaultProps.offset as string
-    if (typeof offset === 'number') return `${offset}px`
-    return offset
+  override render(): React.ReactNode {
+    return applyMixins(super.render() as React.ReactElement, this, [Directional])
   }
 
   content(children?: React.ReactNode): React.ReactNode {

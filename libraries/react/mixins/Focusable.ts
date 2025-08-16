@@ -19,9 +19,6 @@ export interface IFocusable {
 
 /** Mixin for focusable elements. */
 export const Focusable: Mixin<IFocusable> = {
-  /** Props for focusable elements. */
-  Props: {} as IFocusable,
-
   /**
    * Applies focusable props to a React element.
    * @param element The React element to apply props to.

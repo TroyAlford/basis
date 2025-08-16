@@ -1,25 +1,24 @@
 import * as React from 'react'
 import { isNil, match, noop } from '@basis/utilities'
+import type { IDirectional } from '../../mixins/Directional'
+import { Directional } from '../../mixins/Directional'
 import { Direction } from '../../types/Direction'
 import { Keyboard } from '../../types/Keyboard'
+import { applyMixins } from '../../utilities/applyMixins'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Menu } from '../Menu/Menu'
 
 import './DropdownMenu.styles.ts'
 
-interface Props {
+interface Props extends IDirectional {
   /**
    * The children to display within the dropdown when it is opened.
    * Generally, these will be a set of DropdownMenu.Item components.
    */
   children?: React.ReactNode,
-  /** The direction where the dropdown should appear. */
-  direction?: Direction,
   /** Whether the dropdown is disabled. */
   disabled?: boolean,
-  /** The offset distance from the parent element. If a number is provided, 'px' will be appended. */
-  offset?: number | string,
   /** A callback function that is called when the dropdown is closed. */
   onClose?: () => void,
   /** A callback function that is called when the dropdown is opened. */
@@ -46,9 +45,8 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
 
   static defaultProps = {
     ...Component.defaultProps,
-    direction: Direction.S,
+    ...Directional.defaultProps,
     disabled: false,
-    offset: '0px',
     onClose: noop,
     onOpen: noop,
     open: undefined,
@@ -61,13 +59,9 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
       'aria-disabled': this.props.disabled ? 'true' : undefined,
       'aria-expanded': this.isOpen,
       'aria-haspopup': 'true',
-      'data-direction': this.props.direction,
       'disabled': this.props.disabled ? 'disabled' : undefined,
       'onBlur': this.handleBlur,
       'onKeyDown': this.handleKeyDown,
-      'style': {
-        '--dropdown-menu-offset': this.offset,
-      },
     }
   }
   get classNames(): Set<string> { return super.classNames.add('dropdown-menu') }
@@ -84,18 +78,6 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
     return isNil(this.props.open)
       ? !!this.state.open
       : !!this.props.open
-  }
-  /**
-   * Converts the offset prop to a CSS string.
-   * If it's a number, appends 'px'. If it's a string, returns as-is.
-   * Empty strings fall back to default.
-   * @returns The CSS string representation of the offset
-   */
-  get offset(): string {
-    const { offset } = this.props
-    if (isNil(offset) || offset === '') return DropdownMenu.defaultProps.offset as string
-    if (typeof offset === 'number') return `${offset}px`
-    return offset
   }
   get tag(): keyof React.JSX.IntrinsicElements { return 'div' }
 
@@ -126,6 +108,14 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
         this.props.onClose()
       }
     })
+  }
+
+  /**
+   * Override render to apply the Directional mixin to the root element.
+   * @returns The rendered React node with mixins applied.
+   */
+  override render(): React.ReactNode {
+    return applyMixins(super.render() as React.ReactElement, this, [Directional])
   }
 
   content(children?: React.ReactNode): React.ReactNode {

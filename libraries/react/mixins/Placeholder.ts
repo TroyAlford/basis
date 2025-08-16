@@ -9,9 +9,6 @@ export interface IPlaceholder {
 
 /** Mixin for elements with placeholder text. */
 export const Placeholder: Mixin<IPlaceholder> = {
-  /** Props for elements with placeholder text. */
-  Props: {} as IPlaceholder,
-
   /**
    * Applies placeholder props to a React element.
    * @param element The React element to apply props to.
@@ -24,7 +21,6 @@ export const Placeholder: Mixin<IPlaceholder> = {
     component: { props: IPlaceholder },
   ): T {
     const { placeholder } = component.props
-
     const elementProps = element.props as React.HTMLAttributes<HTMLElement>
 
     return React.cloneElement(element, {
