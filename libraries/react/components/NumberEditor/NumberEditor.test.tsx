@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
 import { Simulate } from '../../testing/Simulate'
+import { Keyboard } from '../../types/Keyboard'
 import { NumberEditor } from './NumberEditor'
 
 describe('NumberEditor', () => {
@@ -107,7 +108,7 @@ describe('NumberEditor', () => {
       )
       const numberInput = getInput(node)
 
-      await Simulate.keyDown(numberInput, 'ArrowUp', onKeyDown)
+      await Simulate.keyDown(numberInput, Keyboard.ArrowUp, onKeyDown)
       expect(onChange).toHaveBeenCalledWith(15, '', expect.any(Object))
     })
 
@@ -122,7 +123,7 @@ describe('NumberEditor', () => {
       )
       const numberInput = getInput(node)
 
-      await Simulate.keyDown(numberInput, 'ArrowDown', onKeyDown)
+      await Simulate.keyDown(numberInput, Keyboard.ArrowDown, onKeyDown)
       expect(onChange).toHaveBeenCalledWith(5, '', expect.any(Object))
     })
 
@@ -137,7 +138,7 @@ describe('NumberEditor', () => {
       )
       const numberInput = getInput(node)
 
-      await Simulate.keyDown(numberInput, 'ArrowUp', onKeyDown)
+      await Simulate.keyDown(numberInput, Keyboard.ArrowUp, onKeyDown)
       expect(onChange).toHaveBeenCalledWith(2, '', expect.any(Object))
     })
 
@@ -152,7 +153,7 @@ describe('NumberEditor', () => {
       )
       const numberInput = getInput(node)
 
-      await Simulate.keyDown(numberInput, 'ArrowUp', onKeyDown)
+      await Simulate.keyDown(numberInput, Keyboard.ArrowUp, onKeyDown)
       expect(onChange).toHaveBeenCalledWith(-1, '', expect.any(Object))
     })
 
@@ -160,7 +161,7 @@ describe('NumberEditor', () => {
       const { node } = await render(<NumberEditor initialValue={10} onChange={onChange} onKeyDown={onKeyDown} />)
       const numberInput = getInput(node)
 
-      await Simulate.keyDown(numberInput, 'ArrowUp', onKeyDown)
+      await Simulate.keyDown(numberInput, Keyboard.ArrowUp, onKeyDown)
       expect(onChange).not.toHaveBeenCalled()
     })
 
@@ -168,7 +169,7 @@ describe('NumberEditor', () => {
       const { node } = await render(<NumberEditor step={5} onChange={onChange} onKeyDown={onKeyDown} />)
       const numberInput = getInput(node)
 
-      await Simulate.keyDown(numberInput, 'ArrowUp', onKeyDown)
+      await Simulate.keyDown(numberInput, Keyboard.ArrowUp, onKeyDown)
       expect(onChange).toHaveBeenCalledWith(5, '', expect.any(Object))
     })
 
@@ -176,7 +177,7 @@ describe('NumberEditor', () => {
       const { node } = await render(<NumberEditor step={5} onChange={onChange} onKeyDown={onKeyDown} />)
       const numberInput = getInput(node)
 
-      await Simulate.keyDown(numberInput, 'ArrowUp', onKeyDown)
+      await Simulate.keyDown(numberInput, Keyboard.ArrowUp, onKeyDown)
       expect(onKeyDown).toHaveBeenCalled()
     })
 
@@ -193,7 +194,7 @@ describe('NumberEditor', () => {
       )
       const numberInput = getInput(node)
 
-      await Simulate.keyDown(numberInput, 'ArrowUp', preventDefaultOnKeyDown)
+      await Simulate.keyDown(numberInput, Keyboard.ArrowUp, preventDefaultOnKeyDown)
 
       // onChange should not be called because step was not applied
       expect(onChange).not.toHaveBeenCalled()
@@ -213,7 +214,7 @@ describe('NumberEditor', () => {
       )
       const numberInput = getInput(node)
 
-      await Simulate.keyDown(numberInput, 'ArrowUp', allowDefaultOnKeyDown)
+      await Simulate.keyDown(numberInput, Keyboard.ArrowUp, allowDefaultOnKeyDown)
 
       // onChange should be called because step was applied
       expect(onChange).toHaveBeenCalledWith(15, '', expect.any(Object))

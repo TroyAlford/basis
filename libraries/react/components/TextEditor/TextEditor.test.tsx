@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
 import { Simulate } from '../../testing/Simulate'
+import { Keyboard } from '../../types/Keyboard'
 import { TextEditor } from './TextEditor'
 
 describe('TextEditor', () => {
@@ -212,14 +213,14 @@ describe('TextEditor', () => {
     test('calls onKeyDown for input', async () => {
       const { node } = await render(<TextEditor onChange={onChange} onKeyDown={onKeyDown} />)
       const input = getInput(node)
-      await Simulate.keyDown(input, 'Enter', onKeyDown)
+      await Simulate.keyDown(input, Keyboard.Enter, onKeyDown)
       expect(onKeyDown).toHaveBeenCalled()
     })
 
     test('calls onKeyDown for textarea', async () => {
       const { node } = await render(<TextEditor multiline onChange={onChange} onKeyDown={onKeyDown} />)
       const textarea = getTextarea(node)
-      await Simulate.keyDown(textarea, 'Enter', onKeyDown)
+      await Simulate.keyDown(textarea, Keyboard.Enter, onKeyDown)
       expect(onKeyDown).toHaveBeenCalled()
     })
   })

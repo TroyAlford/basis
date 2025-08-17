@@ -6,8 +6,9 @@ import { Placeholder } from '../../mixins/Placeholder'
 import type { IPrefixSuffix } from '../../mixins/PrefixSuffix'
 import { PrefixSuffix } from '../../mixins/PrefixSuffix'
 import { applyMixins } from '../../utilities/applyMixins'
-import { css, style } from '../../utilities/style'
 import { Editor } from '../Editor/Editor'
+
+import './TextEditor.styles.ts'
 
 /** Text wrapping options for textarea elements. */
 export enum Wrap {
@@ -36,7 +37,7 @@ interface Props extends IAccessible, IPrefixSuffix, IPlaceholder {
    */
   multiline?: false | true | 'auto' | number,
   /** Callback function called when a key is pressed while the input has focus. */
-  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void,
+  onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => void,
   /** Whether to select all text when the input receives focus. @default true */
   selectOnFocus?: boolean,
   /** Whether to wrap text in the textarea (only applies when multiline is true). @default Wrap.Soft */
@@ -156,40 +157,3 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     return super.content(rendered)
   }
 }
-
-style('basis:text-editor', css`
-  .text-editor.component {
-    position: relative;
-
-    > .value { resize: none; }
-    &::before { padding: 0; }
-
-    > .value, &::before {
-      font-size: inherit;
-      line-height: inherit;
-      margin: 0;
-      white-space: pre-wrap;
-    }
-
-    &[data-multiline="true"] {
-      > .value {
-        display: flex;
-        overflow: auto;
-      }
-    }
-
-    &[data-multiline="auto"] {
-      &::before {
-        content: attr(data-value) ' ';
-        visibility: hidden;
-      }
-
-      > .value {
-        inset: 0;
-        overflow: hidden;
-        padding: inherit;
-        position: absolute;
-      }
-    }
-  }
-`)

@@ -32,6 +32,7 @@ type Matcher<T> =
   | NumberMatcher
   | ObjectMatcher<T>
   | StringMatcher
+  | boolean
   | ((value: T) => boolean)
 
 /** Utility type to extract known types, filtering out unknown */
@@ -52,6 +53,10 @@ type ElseFn<T, R> = (value: T) => R
  *   .when(5).then('five')
  *   .when(10).then('ten')
  *   .else('unknown')
+ *
+ * match()
+ *   .when(true).then('bleh')
+ *   .when(() => true).then('blah')
  */
 class Match<Value, Return = unknown, Narrowed = unknown> {
   private matched = false
@@ -166,6 +171,11 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
         continue
       }
 
+      if (typeof matchOn === 'boolean') {
+        if (matchOn !== true) return false
+        continue
+      }
+
       if (Array.isArray(matchOn) && Array.isArray(value)) {
         if (matchOn.length > value.length) return false
         for (let i = 0; i < matchOn.length; i++) {
@@ -255,15 +265,19 @@ class Match<Value, Return = unknown, Narrowed = unknown> {
 /**
  * Creates a new pattern matching chain for a value.
  * Supports matching against exact values, ranges, regular expressions,
- * array patterns, object patterns, and custom predicates.
- * @param value The value to match against patterns
+ * array patterns, object patterns, boolean values, and custom predicates.
+ * @param value The value to match against patterns (optional, defaults to undefined)
  * @returns A new Match instance
  * @example
  * match(5)
  *   .when(5).then('five')
  *   .when({ min: 0, max: 10 }).then('small number')
  *   .else('something else')
+ *
+ * match()
+ *   .when(true).then('bleh')
+ *   .when(() => true).then('blah')
  */
-export const match = <Value, Return>(value: Value): Match<Value, Return, unknown> => (
-  new Match<Value, Return, unknown>(value)
+export const match = <Value, Return>(value?: Value): Match<Value | undefined, Return, unknown> => (
+  new Match<Value | undefined, Return, unknown>(value)
 )

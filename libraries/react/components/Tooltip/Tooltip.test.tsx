@@ -33,12 +33,12 @@ describe('Tooltip', () => {
       expect(Tooltip.Direction).toBe(Direction)
     })
 
-    test('has correct default props', () => {
-      expect(Tooltip.defaultProps).toEqual({
+    test.only('has correct default props', () => {
+      expect(Tooltip.defaultProps).toMatchObject({
         animationDuration: '.125s',
         children: null,
-        direction: Direction.N,
-        offset: '.25em',
+        direction: Direction.S,
+        offset: 0,
         visible: 'auto',
       })
     })

@@ -9,7 +9,7 @@ interface Props {
   /** The children of the tag. */
   children: React.ReactNode,
   /** Callback function called when the remove button is clicked. */
-  onRemove?: () => void,
+  onRemove?: (event: React.MouseEvent<HTMLAnchorElement>) => void,
   /** Whether the tag can be removed. @default false */
   removable?: boolean,
 }
@@ -39,7 +39,7 @@ export class Tag extends Component<Props, HTMLSpanElement> {
   #handleRemove = (event: React.MouseEvent<HTMLAnchorElement>): void => {
     event.preventDefault()
     event.stopPropagation()
-    this.props.onRemove()
+    this.props.onRemove(event)
   }
 
   content(): React.ReactNode {

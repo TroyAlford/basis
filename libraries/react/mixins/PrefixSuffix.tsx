@@ -11,9 +11,6 @@ export interface IPrefixSuffix {
 
 /** Mixin for elements with prefix/suffix content. */
 export const PrefixSuffix: Mixin<IPrefixSuffix> = {
-  /** Props for elements with prefix/suffix content. */
-  Props: {} as IPrefixSuffix,
-
   /**
    * Applies prefix/suffix content around a React element.
    * @param element The main element to render.

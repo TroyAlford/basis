@@ -3,14 +3,13 @@ import { css, style } from '../../utilities/style'
 style('basis:tooltip', css`
   :root {
     --tooltip-animation-duration: .125s;
-    --tooltip-offset: .25em;
     --tooltip-color-background: var(--basis-color-background);
     --tooltip-color-border: var(--basis-color-foreground);
     --tooltip-color-foreground: var(--basis-color-foreground);
   }
 
   .tooltip.component {
-    inset: calc(var(--tooltip-offset) * -1);
+    inset: calc(var(--directional-offset) * -1);
     opacity: 0;
     position: absolute;
     pointer-events: none;
