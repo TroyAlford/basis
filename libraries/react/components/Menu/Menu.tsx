@@ -1,6 +1,6 @@
 import type * as React from 'react'
-import { match } from '@basis/utilities/functions/match.ts'
-import { Keyboard } from '../../types/Keyboard.ts'
+import { match } from '@basis/utilities'
+import { Keyboard } from '../../types/Keyboard'
 import { Orientation } from '../../types/Orientation'
 import { Component } from '../Component/Component'
 

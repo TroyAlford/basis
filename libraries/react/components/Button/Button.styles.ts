@@ -6,7 +6,7 @@ style('basis:button', css`
     background-color: var(--basis-color-background);
     border: none;
     border-radius: var(--basis-radius-md);
-    color: var(--basis-color-foreground-text);
+    color: var(--basis-color-foreground);
     cursor: pointer;
     font-family: inherit;
     font-size: 1em;
@@ -17,7 +17,7 @@ style('basis:button', css`
     position: relative;
     text-align: center;
     text-decoration: none;
-    transition: all var(--basis-transition-fast);
+    transition: all 50ms ease-in-out;
     user-select: none;
     white-space: nowrap;
 
@@ -32,7 +32,7 @@ style('basis:button', css`
 
     &:focus {
       outline: none;
-      box-shadow: 0 0 0 3px var(--basis-color-primary-light);
+      box-shadow: 0 0 0 3px var(--basis-color-primary);
     }
 
     &.disabled {

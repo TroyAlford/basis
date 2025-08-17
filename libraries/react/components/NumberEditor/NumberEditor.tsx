@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { Keyboard } from '@basis/react/types/Keyboard'
 import { formatNumber } from '@basis/utilities'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
@@ -7,6 +6,7 @@ import type { IPlaceholder } from '../../mixins/Placeholder'
 import { Placeholder } from '../../mixins/Placeholder'
 import type { IPrefixSuffix } from '../../mixins/PrefixSuffix'
 import { PrefixSuffix } from '../../mixins/PrefixSuffix'
+import { Keyboard } from '../../types/Keyboard'
 import { applyMixins } from '../../utilities/applyMixins'
 import { Editor } from '../Editor/Editor'
 
