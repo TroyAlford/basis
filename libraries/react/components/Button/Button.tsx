@@ -27,6 +27,17 @@ interface Props {
  * <Button onActivate={event => console.log('Button activated!')}>
  *   Click me
  * </Button>
+ * @example
+ * // Using data attributes with a single handler (recommended pattern)
+ * <Button data-value="option1" onActivate={handleButton}>Option 1</Button>
+ * <Button data-value="option2" onActivate={handleButton}>Option 2</Button>
+ *
+ * // With handler that reads data-value:
+ * handleButton = (event: React.SyntheticEvent): void => {
+ *   const target = event.currentTarget as HTMLButtonElement
+ *   const value = target.dataset.value
+ *   // Handle based on value
+ * }
  */
 export class Button extends Component<Props, HTMLButtonElement> {
   static readonly Type = ButtonType
@@ -63,16 +74,23 @@ export class Button extends Component<Props, HTMLButtonElement> {
   private handleActivate = (event: React.SyntheticEvent): void => {
     const { disabled, onActivate } = this.props
     if (disabled) return
-    event.preventDefault()
-    event.stopPropagation()
 
-    match(event.type)
-      .when('click').then(() => { onActivate(event) })
+    const handled = match(event.type)
+      .when('click').then(() => {
+        onActivate(event)
+        return true
+      })
       .when('keydown').then(() => {
         const { key } = event as React.KeyboardEvent
-        if (![Keyboard.Enter, Keyboard.Space].includes(key as Keyboard)) return
+        if (![Keyboard.Enter, Keyboard.Space].includes(key as Keyboard)) return false
+
         onActivate(event)
+        return true
       })
       .else(noop)
+
+    if (!handled) return
+    event.preventDefault()
+    event.stopPropagation()
   }
 }

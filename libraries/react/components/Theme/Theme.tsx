@@ -155,7 +155,8 @@ const DEFAULT_THEME = {
  * />
  */
 export class Theme extends Component<Props> {
-  static readonly defaultProps: Component<Props>['props'] = {
+  static displayName = 'Theme'
+  static defaultProps: Component<Props>['props'] = {
     ...Component.defaultProps,
     ...DEFAULT_THEME,
   }
@@ -218,5 +219,5 @@ export class Theme extends Component<Props> {
     style(`basis:theme:${themeName}`, cssContent)
   }
 
-  content(): React.ReactNode { return null }
+  override render = (): React.ReactNode => null
 }

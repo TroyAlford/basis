@@ -168,7 +168,7 @@ export default pluginTypescript.config(
       '@stylistic/jsx/jsx-function-call-newline': ['error', 'multiline'],
       '@stylistic/jsx/jsx-max-props-per-line': ['error', { maximum: { multi: 1, single: 3 } }],
       '@stylistic/jsx/jsx-newline': ['error', { allowMultilines: false, prevent: true }],
-      '@stylistic/jsx/jsx-one-expression-per-line': ['error', { allow: 'literal' }],
+      '@stylistic/jsx/jsx-one-expression-per-line': 'off',
       '@stylistic/jsx/jsx-pascal-case': ['error', {
         allowAllCaps: false,
         allowLeadingUnderscore: false,

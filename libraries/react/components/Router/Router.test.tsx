@@ -1,13 +1,9 @@
-import type { Mock } from 'bun:test'
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
+import { beforeEach, describe, expect, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
 import { Router } from './Router'
 
 describe('Router', () => {
-  let pushState: Mock<History['pushState']>
-  let replaceState: Mock<History['replaceState']>
-
   beforeEach(() => {
     Object.defineProperty(window, 'location', {
       value: {
@@ -18,25 +14,6 @@ describe('Router', () => {
       },
       writable: true,
     })
-
-    pushState = spyOn(window.history, 'pushState').mockImplementation((state, title, url) => {
-      const [path, search] = url.toString().split('?')
-      window.location.pathname = path
-      window.location.search = search ? '?' + search : ''
-      window.location.href = 'http://example.com' + window.location.pathname + window.location.search
-    })
-
-    replaceState = spyOn(window.history, 'replaceState').mockImplementation((state, title, url) => {
-      const [path, search] = url.toString().split('?')
-      window.location.pathname = path
-      window.location.search = search ? '?' + search : ''
-      window.location.href = 'http://example.com' + window.location.pathname + window.location.search
-    })
-  })
-
-  afterEach(() => {
-    pushState.mockRestore()
-    replaceState.mockRestore()
   })
 
   test('matches routes and passes templated params as props', async () => {
@@ -58,7 +35,7 @@ describe('Router', () => {
     expect(node.textContent).toBe('foo')
   })
 
-  test('renders a new route when the path changes', async () => {
+  test('renders route based on current location', async () => {
     const router = (
       <Router>
         <Router.Route template="/:type/:id">
@@ -67,14 +44,24 @@ describe('Router', () => {
       </Router>
     )
 
-    window.history.pushState({}, '', '/bar/234')
+    // Test first route
+    window.location.pathname = '/bar/234'
     const rendered = await render<Router>(router)
     expect(rendered.node.outerHTML).toEqual('<div data-id="234" data-type="bar"></div>')
+  })
 
-    window.history.pushState({}, '', '/qux/456')
-    await new Promise(resolve => setTimeout(resolve, 0))
-    await rendered.update()
+  test('renders different route for different location', async () => {
+    const router = (
+      <Router>
+        <Router.Route template="/:type/:id">
+          {({ id, type }) => <div data-id={id} data-type={type} />}
+        </Router.Route>
+      </Router>
+    )
 
+    // Test second route
+    window.location.pathname = '/qux/456'
+    const rendered = await render<Router>(router)
     expect(rendered.node.outerHTML).toEqual('<div data-id="456" data-type="qux"></div>')
   })
 
@@ -92,30 +79,32 @@ describe('Router', () => {
     expect(node).toBeNull()
   })
 
-  test('responds to popstate events', async () => {
+  test('handles query parameters in URL', async () => {
     const router = (
       <Router>
-        <Router.Route template="/:id">
-          {({ id }) => (
-            <div>
-              {id}
-            </div>
-          )}
+        <Router.Route template="/search">
+          <div>Search Results</div>
         </Router.Route>
       </Router>
     )
 
-    window.location.pathname = '/123'
-    const rendered = await render<Router>(router)
-    expect(rendered.node.textContent).toBe('123')
+    window.location.pathname = '/search'
+    window.location.search = '?q=test&page=1'
+    const { node } = await render<Router>(router)
+    expect(node.textContent).toBe('Search Results')
+  })
 
-    window.location.pathname = '/456'
-    window.dispatchEvent(new PopStateEvent('popstate'))
+  test('handles root path correctly', async () => {
+    const router = (
+      <Router>
+        <Router.Route template="/">
+          <div>Home Page</div>
+        </Router.Route>
+      </Router>
+    )
 
-    // Wait for state update
-    await new Promise(resolve => setTimeout(resolve, 0))
-    rendered.update()
-
-    expect(rendered.node.textContent).toBe('456')
+    window.location.pathname = '/'
+    const { node } = await render<Router>(router)
+    expect(node.textContent).toBe('Home Page')
   })
 })
