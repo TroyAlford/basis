@@ -9,8 +9,6 @@ type Tag = keyof React.JSX.IntrinsicElements
 interface TProps<
   E extends Element = HTMLDivElement,
 > {
-  /** ARIA attributes to be prefixed with 'aria-' during render. */
-  aria?: Record<string, unknown>,
   /** The children of the component. */
   children?: React.ReactNode,
   /** Optional class name(s) to output on the component's root element. */
@@ -18,8 +16,6 @@ interface TProps<
   | string
   | Set<string>
   | Record<string, boolean | (() => boolean)>,
-  /** Data attributes to be prefixed with 'data-' during render. */
-  data?: Record<string, unknown>,
   /** An optional ref to the component's root element. */
   nodeRef?: React.RefObject<E>,
   /** Callback function called when a key is pressed while the component has focus. */
@@ -51,17 +47,6 @@ export abstract class Component<
   }
 
   /**
-   * Getter for ARIA attributes. Values will be prefixed with 'aria-' during render.
-   * @returns A Record<string, boolean | number | string> of ARIA attributes.
-   */
-  get aria(): Record<string, unknown> {
-    return {
-      ...this.props.aria,
-      ...filterByPrefix('aria-', this.props),
-    }
-  }
-
-  /**
    * Getter for attributes.
    * @returns a React.HTMLAttributes<Element> object
    * @example get attributes() { return { tabIndex: 0 } }
@@ -69,6 +54,8 @@ export abstract class Component<
   get attributes() {
     return {
       'data-theme': this.props.theme,
+      ...prefixObject('aria-', filterByPrefix('aria-', this.props)),
+      ...prefixObject('data-', filterByPrefix('data-', this.props)),
     }
   }
 
@@ -82,17 +69,6 @@ export abstract class Component<
       // @ts-expect-error - displayName is valid in React components, but not typed
       .add(kebabCase(this.constructor.displayName ?? this.constructor.name))
       .add('component')
-  }
-
-  /**
-   * Getter for data attributes. Values will be prefixed with 'data-' during render.
-   * @returns A Record<string, boolean | number | string> of data attributes.
-   */
-  get data(): Record<string, unknown> {
-    return {
-      ...this.props.data,
-      ...filterByPrefix('data-', this.props),
-    }
   }
 
   /**
@@ -144,8 +120,6 @@ export abstract class Component<
     return ( // @ts-expect-error - we are assuming a props match
       <Tag // @ts-expect-error - we are assuming a props match
         ref={nodeRef}
-        {...prefixObject('aria-', this.aria)}
-        {...prefixObject('data-', this.data)}
         {...this.attributes}
         className={classNames(className, this.classNames)}
       >

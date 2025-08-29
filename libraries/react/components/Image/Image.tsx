@@ -60,38 +60,25 @@ export class Image extends Component<Props, HTMLImageElement, State> {
     }
   }
 
-  get aria(): Record<string, string> {
-    return {
-      ...super.aria,
-      'aria-description': this.props.alt || '',
-    }
-  }
-
   get attributes() {
     return {
       ...super.attributes,
-      alt: this.props.alt || '',
-      onClick: this.props.onClick,
-      onMouseDown: this.props.onMouseDown,
-      onTouchEnd: this.props.onTouchEnd,
-      onTouchMove: this.props.onTouchMove,
-      onTouchStart: this.props.onTouchStart,
-      role: this.props.alt ? undefined : 'img',
-      src: Image.Cache.Resolved.has(this.props.src)
+      'alt': this.props.alt || '',
+      'aria-description': this.props.alt || '',
+      'data-align': this.props.align,
+      'data-error': this.state.error,
+      'data-loaded': Image.Cache.Resolved.has(this.props.src),
+      'data-loading': Image.Cache.Loading.has(this.props.src),
+      'data-size': this.props.size,
+      'onClick': this.props.onClick,
+      'onMouseDown': this.props.onMouseDown,
+      'onTouchEnd': this.props.onTouchEnd,
+      'onTouchMove': this.props.onTouchMove,
+      'onTouchStart': this.props.onTouchStart,
+      'role': this.props.alt ? undefined : 'img',
+      'src': Image.Cache.Resolved.has(this.props.src)
         ? this.props.src
         : undefined,
-    }
-  }
-
-  get data(): Record<string, boolean | number | string> {
-    const { src } = this.props
-    return {
-      ...super.data,
-      align: this.props.align,
-      error: this.state.error,
-      loaded: Image.Cache.Resolved.has(src),
-      loading: Image.Cache.Loading.has(src),
-      size: this.props.size,
     }
   }
 

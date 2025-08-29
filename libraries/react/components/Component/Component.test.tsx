@@ -49,78 +49,24 @@ describe('Component', () => {
     })
   })
 
-  describe('data attributes', () => {
-    test('from direct data-* props', async () => {
-      const { node } = await render(<TestComponent data-foo data-bar={42} data-baz="qux" />)
-      expect(node).toHaveAttribute('data-foo', 'true')
-      expect(node).toHaveAttribute('data-bar', '42')
-      expect(node).toHaveAttribute('data-baz', 'qux')
-    })
-
-    test('from data object prop', async () => {
-      const { node } = await render(<TestComponent data={{ bar: 42, baz: 'qux', foo: true }} />)
-      expect(node).toHaveAttribute('data-foo', 'true')
-      expect(node).toHaveAttribute('data-bar', '42')
-      expect(node).toHaveAttribute('data-baz', 'qux')
-    })
-
-    test('direct data-* props take precedence over data object', async () => {
-      const { node } = await render(
-        <TestComponent
-          data-foo
-          data={{ bar: 0, foo: false }}
-          data-bar={42}
-        />,
-      )
-      expect(node).toHaveAttribute('data-foo', 'true')
-      expect(node).toHaveAttribute('data-bar', '42')
-    })
+  test('data-* props', async () => {
+    const { node } = await render(<TestComponent data-foo data-bar={42} data-baz="qux" />)
+    expect(node).toHaveAttribute('data-foo', 'true')
+    expect(node).toHaveAttribute('data-bar', '42')
+    expect(node).toHaveAttribute('data-baz', 'qux')
   })
 
-  describe('ARIA attributes', () => {
-    test('from direct aria-* props', async () => {
-      const { node } = await render(
-        <TestComponent
-          aria-controls="menu-1"
-          aria-expanded="true"
-          aria-haspopup="true"
-        />,
-      )
-      expect(node).toHaveAttribute('aria-expanded', 'true')
-      expect(node).toHaveAttribute('aria-haspopup', 'true')
-      expect(node).toHaveAttribute('aria-controls', 'menu-1')
-    })
-
-    test('from aria object prop', async () => {
-      const { node } = await render(
-        <TestComponent
-          aria={{
-            controls: 'menu-1',
-            expanded: true,
-            haspopup: true,
-          }}
-        />,
-      )
-      expect(node).toHaveAttribute('aria-expanded', 'true')
-      expect(node).toHaveAttribute('aria-haspopup', 'true')
-      expect(node).toHaveAttribute('aria-controls', 'menu-1')
-    })
-
-    test('direct aria-* props take precedence over aria object', async () => {
-      const { node } = await render(
-        <TestComponent
-          aria-expanded="false"
-          aria-haspopup="true"
-          aria={{
-            controls: 'menu-1',
-            expanded: true,
-          }}
-        />,
-      )
-      expect(node).toHaveAttribute('aria-expanded', 'false')
-      expect(node).toHaveAttribute('aria-haspopup', 'true')
-      expect(node).toHaveAttribute('aria-controls', 'menu-1')
-    })
+  test('aria-* props', async () => {
+    const { node } = await render(
+      <TestComponent
+        aria-controls="menu-1"
+        aria-expanded="true"
+        aria-haspopup="true"
+      />,
+    )
+    expect(node).toHaveAttribute('aria-expanded', 'true')
+    expect(node).toHaveAttribute('aria-haspopup', 'true')
+    expect(node).toHaveAttribute('aria-controls', 'menu-1')
   })
 
   describe('rendering optimization', () => {
@@ -131,20 +77,10 @@ describe('Component', () => {
         render = renderMock
       }
 
-      const { update } = await render(
-        <RenderTestComponent
-          aria={{ expanded: true }}
-          data={{ foo: true }}
-        />,
-      )
+      const { update } = await render(<RenderTestComponent data-foo={{ bar: 'baz' }} />)
 
       // Update with deeply equal props
-      update(
-        <RenderTestComponent
-          aria={{ expanded: true }}
-          data={{ foo: true }}
-        />,
-      )
+      update(<RenderTestComponent data-foo={{ bar: 'baz' }} />)
 
       expect(renderMock).toHaveBeenCalledTimes(1)
     })
@@ -157,19 +93,11 @@ describe('Component', () => {
       }
 
       const { update } = await render(
-        <RenderTestComponent
-          aria={{ expanded: true }}
-          data={{ foo: true }}
-        />,
+        <RenderTestComponent aria-expanded="true" data-foo="true" />,
       )
 
       // Update with different props
-      await update(
-        <RenderTestComponent
-          aria={{ expanded: false }}
-          data={{ foo: true }}
-        />,
-      )
+      await update(<RenderTestComponent aria-expanded="false" data-foo="true" />)
 
       expect(renderMock).toHaveBeenCalledTimes(2)
     })

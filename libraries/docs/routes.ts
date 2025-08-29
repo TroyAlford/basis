@@ -1,5 +1,6 @@
 import { AwaitDocs } from './pages/Await.docs.tsx'
 import { ButtonDocs } from './pages/Button.docs.tsx'
+import { ComponentDocs } from './pages/Component.docs.tsx'
 import { OverviewDocs } from './pages/Overview.docs.tsx'
 import { RouterDocs } from './pages/Router.docs.tsx'
 
@@ -19,6 +20,10 @@ export const routes: DocRoute[] = [{
   default: true,
   path: '/',
   title: 'Overview',
+}, {
+  component: ComponentDocs,
+  path: '/components/component',
+  title: 'Component',
 }, {
   component: AwaitDocs,
   path: '/components/await',

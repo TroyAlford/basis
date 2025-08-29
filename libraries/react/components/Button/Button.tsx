@@ -47,21 +47,15 @@ export class Button extends Component<Props, HTMLButtonElement> {
     type: ButtonType.Button,
   }
 
-  get aria(): Record<string, boolean | number | string> {
-    return {
-      ...super.aria,
-      'aria-disabled': !!this.props.disabled,
-    }
-  }
-
   get attributes() {
     const { disabled, type } = this.props
     return {
       ...super.attributes,
-      disabled: !!disabled,
-      onClick: this.handleActivate,
-      onKeyDown: this.handleActivate,
-      type,
+      'aria-disabled': !!disabled,
+      'disabled': !!disabled,
+      'onClick': this.handleActivate,
+      'onKeyDown': this.handleActivate,
+      'type': type,
     }
   }
 

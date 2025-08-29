@@ -75,21 +75,19 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
 
   touchStart: number | null = null
 
-  get aria(): Record<string, string> {
-    return {
-      'aria-roledescription': 'carousel',
-      'label': 'Image Carousel',
-      'live': 'polite',
-    }
-  }
-
   get attributes() {
     return {
       ...super.attributes,
-      onKeyDown: this.handleKeyDown,
-      onWheel: this.handleWheel,
-      role: 'region',
-      tabIndex: -1, // Make focusable but not tabbable
+      'aria-label': 'Image Carousel',
+      'aria-live': 'polite' as const,
+      'aria-roledescription': 'carousel',
+      'data-align': this.currentImage?.align ?? this.props.align,
+      'data-lightbox': this.state.lightbox,
+      'data-size': this.currentImage?.size ?? this.props.size,
+      'onKeyDown': this.handleKeyDown,
+      'onWheel': this.handleWheel,
+      'role': 'region',
+      'tabIndex': -1, // Make focusable but not tabbable
     }
   }
 
@@ -103,15 +101,6 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
     return typeof input === 'string'
       ? { altText: this.props.altText, url: input }
       : { ...input, altText: input.altText || this.props.altText }
-  }
-
-  get data(): Record<string, boolean | number | string> {
-    return {
-      ...super.data,
-      align: this.currentImage?.align ?? this.props.align,
-      lightbox: this.state.lightbox,
-      size: this.currentImage?.size ?? this.props.size,
-    }
   }
 
   get defaultState(): State {

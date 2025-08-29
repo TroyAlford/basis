@@ -73,15 +73,10 @@ export abstract class Editor<
     }
   }
 
-  get aria(): Record<string, string> {
-    return {
-      ...super.aria,
-      readonly: this.props.readOnly ? 'true' : 'false',
-    }
-  }
   get attributes(): (typeof this)['attributes'] {
     return {
       ...super.attributes,
+      'aria-readonly': this.props.readOnly ? 'true' : 'false',
       'data-field': isNil(this.props.field) ? undefined : this.props.field,
       'readOnly': this.props.readOnly ? 'readOnly' : undefined,
     }

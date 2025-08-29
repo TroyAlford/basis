@@ -101,42 +101,6 @@ describe('Button', () => {
       expect(node).toHaveAttribute('aria-controls', 'menu-1')
     })
 
-    test('passes through aria object props', async () => {
-      const { node } = await render(
-        <Button
-          aria={{
-            controls: 'menu-1',
-            expanded: true,
-            haspopup: true,
-          }}
-        >
-          Menu
-        </Button>,
-      )
-      expect(node).toHaveAttribute('aria-expanded', 'true')
-      expect(node).toHaveAttribute('aria-haspopup', 'true')
-      expect(node).toHaveAttribute('aria-controls', 'menu-1')
-    })
-
-    test('merges direct aria-* props with aria object props', async () => {
-      const { node } = await render(
-        <Button
-          aria-expanded="false"
-          aria-haspopup="true"
-          aria={{
-            controls: 'menu-1',
-            expanded: true,
-          }}
-        >
-          Menu
-        </Button>,
-      )
-      // Direct props should take precedence
-      expect(node).toHaveAttribute('aria-expanded', 'false')
-      expect(node).toHaveAttribute('aria-haspopup', 'true')
-      expect(node).toHaveAttribute('aria-controls', 'menu-1')
-    })
-
     test('sets aria-disabled based on disabled prop', async () => {
       const enabled = await render(<Button>Enabled</Button>)
       expect(enabled.node).toHaveAttribute('aria-disabled', 'false')
@@ -146,15 +110,7 @@ describe('Button', () => {
     })
 
     test('disabled prop overrides aria-disabled from props', async () => {
-      const { node } = await render(
-        <Button
-          disabled
-          aria={{ disabled: false }}
-          aria-disabled="false"
-        >
-          Disabled
-        </Button>,
-      )
+      const { node } = await render(<Button disabled>Disabled</Button>)
       expect(node).toHaveAttribute('aria-disabled', 'true')
     })
   })
