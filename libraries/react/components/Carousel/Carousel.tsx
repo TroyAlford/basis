@@ -85,7 +85,6 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
       'data-lightbox': this.state.lightbox,
       'data-size': this.currentImage?.size ?? this.props.size,
       'onKeyDown': this.handleKeyDown,
-      'onWheel': this.handleWheel,
       'role': 'region',
       'tabIndex': -1, // Make focusable but not tabbable
     }
@@ -159,6 +158,8 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
 
   componentDidMount(): void {
     this.preloadImages()
+    // Add native wheel event listener to prevent scrolling
+    this.rootNode?.addEventListener('wheel', this.handleNativeWheel, { passive: false })
   }
 
   componentDidUpdate(_: Props, prevState: State): void {
@@ -174,9 +175,27 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
   }
 
   componentWillUnmount(): void {
+    // Remove native wheel event listener
+    this.rootNode?.removeEventListener('wheel', this.handleNativeWheel)
     if (this.state.lightbox) {
       document.removeEventListener('keydown', this.handleGlobalKeyDown)
       document.removeEventListener('wheel', this.handleWheel)
+    }
+  }
+
+  /**
+   * Handles native wheel events to prevent scrolling before it happens
+   * @param event - The native wheel event.
+   */
+  handleNativeWheel = (event: WheelEvent): void => {
+    // Prevent the page from scrolling when navigating images
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (event.deltaX > 0 || event.deltaY > 0) {
+      this.next()
+    } else if (event.deltaX < 0 || event.deltaY < 0) {
+      this.prev()
     }
   }
 

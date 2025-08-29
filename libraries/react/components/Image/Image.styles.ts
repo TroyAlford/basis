@@ -3,62 +3,73 @@ import { css, style } from '../../utilities/style'
 style('basis:image', css`
   .image.component {
     position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    display: block;
     width: 100%;
     height: 100%;
+    min-height: 100px;
+    min-width: 100px;
+    background-repeat: no-repeat;
 
+    /* Size behaviors */
     &[data-size="natural"] {
       width: auto;
       height: auto;
+      min-width: auto;
+      min-height: auto;
     }
 
     &[data-size="contain"] {
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
+      background-size: contain !important;
     }
 
     &[data-size="fill"] {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
+      background-size: cover !important;
     }
 
-    // Alignment styles
-    &[data-align="center"] { object-position: center; }
-    &[data-align="n"] { object-position: top; }
-    &[data-align="s"] { object-position: bottom; }
-    &[data-align="e"] { object-position: right; }
-    &[data-align="w"] { object-position: left; }
-    &[data-align="ne"] { object-position: right top; }
-    &[data-align="nw"] { object-position: left top; }
-    &[data-align="se"] { object-position: right bottom; }
-    &[data-align="sw"] { object-position: left bottom; }
-
-    &[data-error="true"] { background: #f44336; }
-    &[data-loaded="false"] {
-      background: rgba(0, 0, 0, 0.1);
+    /* Loading state */
+    &[data-loading="true"] {
+      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+      background-size: 200% 100%;
+      animation: loading 1.5s infinite;
     }
 
-    > .loading {
-      animation: spin 1s linear infinite;
-      border-top-color: #000;
-      border: 3px solid rgba(0, 0, 0, 0.1);
-      height: 32px;
-      width: 32px;
+    /* Error state */
+    &[data-error="true"] {
+      background: #f44336 !important;
+      background-size: contain !important;
+      background-repeat: no-repeat !important;
+      background-position: center !important;
     }
 
-    > .error {
-      background: #f44336;
-      border-radius: 50%;
-      height: 32px;
-      width: 32px;
+    /* Loaded state - set background image */
+    &[data-loaded="true"][data-src] {
+      background-image: url(attr(data-src url));
+    }
+
+    /* Alignment styles */
+    &[data-align="center"] { background-position: center; }
+    &[data-align="n"] { background-position: center top; }
+    &[data-align="s"] { background-position: center bottom; }
+    &[data-align="e"] { background-position: right center; }
+    &[data-align="w"] { background-position: left center; }
+    &[data-align="ne"] { background-position: right top; }
+    &[data-align="nw"] { background-position: left top; }
+    &[data-align="se"] { background-position: right bottom; }
+    &[data-align="sw"] { background-position: left bottom; }
+
+    /* Accessibility focus styles */
+    &:focus-visible {
+      outline: 2px solid #007acc;
+      outline-offset: 2px;
+    }
+
+    /* Interactive states */
+    &:hover {
+      cursor: pointer;
     }
   }
 
-  @keyframes spin {
-    to { transform: rotate(360deg); }
+  @keyframes loading {
+    to { transform: translateX(-50%); }
   }
 `)

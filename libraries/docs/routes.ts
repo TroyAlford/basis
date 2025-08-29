@@ -1,6 +1,8 @@
 import { AwaitDocs } from './pages/Await.docs.tsx'
 import { ButtonDocs } from './pages/Button.docs.tsx'
+import { CarouselDocs } from './pages/Carousel.docs.tsx'
 import { ComponentDocs } from './pages/Component.docs.tsx'
+import { ImageDocs } from './pages/Image.docs.tsx'
 import { OverviewDocs } from './pages/Overview.docs.tsx'
 import { RouterDocs } from './pages/Router.docs.tsx'
 
@@ -21,10 +23,6 @@ export const routes: DocRoute[] = [{
   path: '/',
   title: 'Overview',
 }, {
-  component: ComponentDocs,
-  path: '/components/component',
-  title: 'Component',
-}, {
   component: AwaitDocs,
   path: '/components/await',
   title: 'Await',
@@ -32,6 +30,18 @@ export const routes: DocRoute[] = [{
   component: ButtonDocs,
   path: '/components/button',
   title: 'Button',
+}, {
+  component: CarouselDocs,
+  path: '/components/carousel',
+  title: 'Carousel',
+}, {
+  component: ComponentDocs,
+  path: '/components/component',
+  title: 'Component',
+}, {
+  component: ImageDocs,
+  path: '/components/image',
+  title: 'Image',
 }, {
   component: RouterDocs,
   path: '/components/router',
