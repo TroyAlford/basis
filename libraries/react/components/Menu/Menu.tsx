@@ -34,6 +34,7 @@ interface ItemProps {
  * </Menu>
  */
 export class Menu extends Component<Props> {
+  static displayName = 'Menu'
   static defaultProps = {
     ...Component.defaultProps,
     disabled: false,
@@ -51,7 +52,6 @@ export class Menu extends Component<Props> {
       'role': 'menu',
     }
   }
-  get classNames(): Set<string> { return super.classNames.add('menu') }
   get tag(): keyof React.JSX.IntrinsicElements { return 'ul' }
 
   protected handleKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
@@ -81,6 +81,7 @@ export class Menu extends Component<Props> {
 
   /** Menu item component that extends Component for proper semantic HTML. */
   static Item = class MenuItem extends Component<ItemProps> {
+    static displayName = 'MenuItem'
     get attributes() {
       const { disabled } = this.props
       return {
@@ -94,7 +95,6 @@ export class Menu extends Component<Props> {
         'tabIndex': disabled ? -1 : 0,
       }
     }
-    get classNames(): Set<string> { return super.classNames.add('menu-item') }
     get tag(): keyof React.JSX.IntrinsicElements { return 'li' }
 
     /**
@@ -117,13 +117,13 @@ export class Menu extends Component<Props> {
 
   /** Divider component for visual separation between menu items. */
   static Divider = class MenuDivider extends Component {
+    static displayName = 'MenuDivider'
     get attributes() {
       return {
         ...super.attributes,
         role: 'separator',
       }
     }
-    get classNames(): Set<string> { return super.classNames.add('menu-divider') }
     get tag(): keyof React.JSX.IntrinsicElements { return 'hr' }
   }
 }

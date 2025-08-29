@@ -1,34 +1,10 @@
-import type { Mock } from 'bun:test'
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import * as React from 'react'
+import { NavigateEvent } from '../../events/NavigateEvent'
 import { render } from '../../testing/render'
 import { Link } from './Link'
 
 describe('Link', () => {
-  let pushState: Mock<History['pushState']>
-
-  beforeEach(() => {
-    Object.defineProperty(window, 'location', {
-      value: {
-        href: 'http://example.com/',
-        pathname: '/',
-        search: '',
-        toString() { return this.href },
-      },
-      writable: true,
-    })
-
-    pushState = spyOn(window.history, 'pushState').mockImplementation((state, title, url) => {
-      const [path, search] = url.toString().split('?')
-      window.location.pathname = path
-      window.location.search = search ? '?' + search : ''
-      window.location.href = 'http://example.com' + window.location.pathname + window.location.search
-    })
-  })
-
-  afterEach(() => {
-    pushState.mockRestore()
-  })
 
   test('renders an anchor tag with the correct href', async () => {
     const { node } = await render<Link>(
@@ -39,7 +15,41 @@ describe('Link', () => {
     expect(node.textContent).toBe('Click me')
   })
 
-  test('uses pushState for client-side navigation', async () => {
+  test('updates active state when location changes', async () => {
+    const { node } = await render<Link>(
+      <Link to="/current">Current</Link>,
+    )
+
+    // Initially not active since we're at '/'
+    expect(node.getAttribute('data-active')).toBe('false')
+
+    // Change location to match link target
+    window.location.pathname = '/current'
+    const navigateEvent = new NavigateEvent('/current')
+    window.dispatchEvent(navigateEvent)
+
+    // Wait for the event to be processed
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    // Should now be active
+    expect(node.getAttribute('data-active')).toBe('true')
+  })
+
+  test('prevents navigation when already active', async () => {
+    window.location.pathname = '/current'
+
+    const { instance } = await render<Link>(
+      <Link to="/current">Current</Link>,
+    )
+
+    const event = new MouseEvent('click')
+    instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
+
+    // Should still be at the same location since navigation was prevented
+    expect(window.location.pathname).toBe('/current')
+  })
+
+  test('allows navigation when not active', async () => {
     const { instance } = await render<Link>(
       <Link to="/new/path">Navigate</Link>,
     )
@@ -47,6 +57,7 @@ describe('Link', () => {
     const event = new MouseEvent('click')
     instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
 
-    expect(pushState).toHaveBeenCalledTimes(1)
+    // Should now be at the new location
+    expect(window.location.pathname).toBe('/new/path')
   })
 })

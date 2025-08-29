@@ -8,10 +8,10 @@ class TestEditor extends Editor<string> {
     await this.handleChange(value)
   }
 
-  get data(): Record<string, unknown> {
+  override get attributes() {
     return {
-      ...super.data,
-      value: this.current,
+      ...super.attributes,
+      'data-value': this.current,
     }
   }
 

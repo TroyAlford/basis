@@ -1,43 +1,51 @@
 import { css, style } from '../../utilities/style'
 
 style('basis:button', css`
+  :root {
+    --basis-button-background-disabled: var(--basis-color-disabled);
+    --basis-button-background-hover: rgb(from var(--basis-color-primary) r g b / 0.25);
+    --basis-button-background-focus: rgb(from var(--basis-color-primary) r g b / 0.5);
+    --basis-button-background: var(--basis-color-background);
+    --basis-button-border-color: var(--basis-color-foreground);
+    --basis-button-border: 1px solid var(--basis-button-border-color);
+    --basis-button-foreground-disabled: var(--basis-color-disabled-text);
+    --basis-button-foreground: var(--basis-color-foreground);
+    --basis-button-shadow-color: var(--basis-color-primary);
+    --basis-button-shadow: 0 0 0 3px var(--basis-button-shadow-color);
+  }
+
   .button.component {
+    align-items: center;
     appearance: none;
-    background-color: var(--basis-color-background);
-    border: none;
-    border-radius: var(--basis-radius-md);
-    color: var(--basis-color-foreground);
+    background-color: var(--basis-button-background);
+    border-radius: var(--basis-radius-sm);
+    border: var(--basis-button-border);
+    color: var(--basis-button-foreground);
     cursor: pointer;
+    display: inline-flex;
     font-family: inherit;
-    font-size: 1em;
-    font-weight: 500;
-    line-height: 1;
+    justify-content: center;
     margin: 0;
-    padding: var(--basis-unit-md) var(--basis-unit-lg);
+    padding: .25em;
     position: relative;
-    text-align: center;
     text-decoration: none;
     transition: all 50ms ease-in-out;
     user-select: none;
     white-space: nowrap;
 
     &:hover:not(.disabled) {
-      background-color: var(--basis-color-primary-dark);
-      transform: translateY(-1px);
-    }
-
-    &:active:not(.disabled) {
-      transform: translateY(0);
+      background-color: var(--basis-button-background-hover);
     }
 
     &:focus {
+      background-color: var(--basis-button-background-focus);
+      border-color: var(--basis-color-primary);
       outline: none;
-      box-shadow: 0 0 0 3px var(--basis-color-primary);
     }
 
-    &.disabled {
-      background-color: var(--basis-color-disabled);
-      color: var(--basis-color-disabled-text);
+    &:disabled, &[disabled] {
+      background-color: var(--basis-button-background-disabled);
+      color: var(--basis-button-foreground-disabled);
       cursor: not-allowed;
       pointer-events: none;
     }

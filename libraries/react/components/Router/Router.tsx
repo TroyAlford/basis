@@ -1,7 +1,9 @@
 import * as React from 'react'
 import { parseTemplateURI } from '@basis/utilities'
+import { NavigateEvent } from '../../events/NavigateEvent'
 import { Component } from '../Component/Component'
 import { Link } from './Link'
+import { navigate } from './navigate'
 import { Redirect } from './Redirect'
 import { Route } from './Route'
 import { Switch } from './Switch'
@@ -10,12 +12,6 @@ import { Switch } from './Switch'
 interface Props {
   /** The routes to render */
   children: React.ReactNode,
-}
-
-/** State for the Router component */
-interface State {
-  /** The current URL */
-  currentURL: string,
 }
 
 /**
@@ -32,62 +28,48 @@ interface State {
  *   </Router.Switch>
  * </Router>
  */
-export class Router extends Component<Props, null, State> {
+export class Router extends Component<Props> {
   static Link = Link
   static Route = Route
   static Switch = Switch
   static Redirect = Redirect
+  static navigate = navigate
 
-  state = {
-    currentURL: window.location.pathname + window.location.search,
-  }
+  static get windowURL() { return window.location.pathname + window.location.search }
 
   componentDidMount(): void {
-    window.addEventListener('popstate', this.handleNavigate)
-    this.patchHistoryMethods()
+    window.addEventListener(NavigateEvent.name, this.#handleUpdate)
+    window.addEventListener('popstate', this.#handleUpdate)
   }
 
   componentWillUnmount(): void {
-    window.removeEventListener('popstate', this.handleNavigate)
+    window.removeEventListener(NavigateEvent.name, this.#handleUpdate)
+    window.removeEventListener('popstate', this.#handleUpdate)
   }
 
-  /** Handles URL navigation */
-  handleNavigate = (): void => {
-    const newURL = window.location.pathname + window.location.search
-    if (newURL !== this.state.currentURL) {
-      this.setState({ currentURL: newURL })
-    }
-  }
-
-  /** Patches history methods to trigger navigation handling */
-  patchHistoryMethods = (): void => {
-    const { pushState, replaceState } = window.history
-
-    window.history.pushState = (...args) => {
-      pushState.apply(window.history, args)
-      this.handleNavigate()
-    }
-
-    window.history.replaceState = (...args) => {
-      replaceState.apply(window.history, args)
-      this.handleNavigate()
-    }
-  }
+  #handleUpdate = (): void => this.forceUpdate()
 
   /**
    * Renders the matching route
    * @returns The rendered route or null if no match
    */
   renderRoute = (): React.ReactNode | null => {
-    const { currentURL } = this.state
+    const currentURL = Router.windowURL
     const route = React.Children.toArray(this.props.children).find(child => {
       if (!React.isValidElement(child) || child.type !== Router.Route) return false
-      return !!parseTemplateURI(currentURL, (child.props as Route<unknown>['props']).template)
+
+      const template = (child.props as Route<unknown>['props']).template
+
+      // Handle static routes (exact path matches)
+      if (template === currentURL) return true
+
+      // Handle dynamic routes (using parseTemplateURI)
+      return !!parseTemplateURI(currentURL, template)
     }) as React.ReactElement<Route<unknown>['props']> | undefined
 
     if (route) {
       const { children, redirectTo, template } = route.props as Route<unknown>['props']
-      const params = parseTemplateURI(currentURL, template)
+      const params = parseTemplateURI(currentURL, template) || {}
 
       if (redirectTo) return <Router.Redirect to={redirectTo} />
       if (typeof children === 'function') return children(params)

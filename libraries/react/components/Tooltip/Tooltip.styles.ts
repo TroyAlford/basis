@@ -24,14 +24,14 @@ style('basis:tooltip', css`
       &:is(:hover, :focus-within) > .tooltip.component {
         opacity: 1;
         visibility: visible;
-        z-index: 1;
+        z-index: var(--basis-z-tooltip, 2);
       }
     }
 
     &[data-visible="true"] {
       opacity: 1;
       visibility: visible;
-      z-index: 1;
+      z-index: var(--basis-z-tooltip, 2);
     }
 
     > .bubble {

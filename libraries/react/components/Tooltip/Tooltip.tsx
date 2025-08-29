@@ -55,10 +55,6 @@ export class Tooltip extends Component<Props, HTMLDivElement> {
     }
   }
 
-  get classNames(): Set<string> {
-    return super.classNames.add('tooltip')
-  }
-
   /**
    * Gets the animation duration with fallback to default.
    * @returns The animation duration string

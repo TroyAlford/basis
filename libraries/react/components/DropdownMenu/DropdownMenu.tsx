@@ -39,6 +39,7 @@ interface State {
 
 /** A dropdown menu component, composed of a {@link Button} and a {@link Menu}. */
 export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
+  static displayName = 'DropdownMenu'
   static Item = Menu.Item
   static Divider = Menu.Divider
   static Direction = Direction
@@ -64,7 +65,6 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
       'onKeyDown': this.handleKeyDown,
     }
   }
-  get classNames(): Set<string> { return super.classNames.add('dropdown-menu') }
   get defaultState() {
     return {
       ...super.defaultState,

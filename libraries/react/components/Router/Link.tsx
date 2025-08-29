@@ -1,4 +1,9 @@
-import * as React from 'react'
+import type * as React from 'react'
+import { NavigateEvent } from '../../events/NavigateEvent'
+import { Component } from '../Component/Component'
+import { navigate } from './navigate'
+
+import './Link.styles.ts'
 
 /** Props for the Link component */
 interface Props {
@@ -9,18 +14,45 @@ interface Props {
 }
 
 /** A component for client-side navigation between routes */
-export class Link extends React.Component<Props> {
-  handleClick: React.MouseEventHandler<HTMLAnchorElement> = event => {
-    event.preventDefault()
-    window.history.pushState({}, '', this.props.to)
+export class Link extends Component<Props> {
+  static displayName = 'Link'
+
+  get attributes() {
+    return {
+      ...super.attributes,
+      'data-active': this.isActive,
+      'href': this.props.to,
+      'onClick': this.handleClick,
+    }
   }
 
-  render(): React.ReactNode {
-    const { children, to } = this.props
-    return (
-      <a href={to} onClick={this.handleClick}>
-        {children}
-      </a>
-    )
+  get tag(): keyof React.JSX.IntrinsicElements { return 'a' }
+
+  componentDidMount(): void {
+    window.addEventListener(NavigateEvent.name, this.#handleUpdate)
+    window.addEventListener('popstate', this.#handleUpdate)
+  }
+
+  componentWillUnmount(): void {
+    window.removeEventListener(NavigateEvent.name, this.#handleUpdate)
+    window.removeEventListener('popstate', this.#handleUpdate)
+  }
+
+  #handleUpdate = (): void => this.forceUpdate()
+
+  get isActive(): boolean {
+    return window.location.pathname === this.props.to
+  }
+
+  handleClick: React.MouseEventHandler<HTMLAnchorElement> = event => {
+    event.preventDefault()
+
+    if (this.isActive) return // do not navigate if this is already the route
+
+    navigate(this.props.to)
+  }
+
+  content(): React.ReactNode {
+    return this.props.children
   }
 }
