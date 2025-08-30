@@ -1,11 +1,13 @@
 import * as React from 'react'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
+import type { IFocusable } from '../../mixins/Focusable'
+import { Focusable } from '../../mixins/Focusable'
 import type { IPlaceholder } from '../../mixins/Placeholder'
 import { Placeholder } from '../../mixins/Placeholder'
 import type { IPrefixSuffix } from '../../mixins/PrefixSuffix'
 import { PrefixSuffix } from '../../mixins/PrefixSuffix'
-import { applyMixins } from '../../utilities/applyMixins'
+import type { Mixin } from '../../types/Mixin.ts'
 import { Editor } from '../Editor/Editor'
 
 import './TextEditor.styles.ts'
@@ -21,7 +23,7 @@ export enum Wrap {
 }
 
 /** Props specific to text editor. */
-interface Props extends IAccessible, IPrefixSuffix, IPlaceholder {
+interface Props extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable {
   /** Whether to enable browser autocomplete. */
   autoComplete?: boolean,
   /** Whether to automatically focus the input on mount. @default false */
@@ -49,13 +51,17 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
   static displayName = 'TextEditor'
   /** Text wrapping options for textarea elements. */
   static readonly Wrap = Wrap
+  static get mixins(): Set<Mixin> {
+    return super.mixins
+      .add(Accessible)
+      .add(PrefixSuffix)
+      .add(Placeholder)
+      .add(Focusable)
+  }
 
   /** Default props for text editor. */
   static defaultProps = {
     ...super.defaultProps,
-    ...Accessible.defaultProps,
-    ...PrefixSuffix.defaultProps,
-    ...Placeholder.defaultProps,
     autoFocus: false,
     multiline: false,
     selectOnFocus: true,
@@ -85,27 +91,20 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     }
   }
 
-  componentDidMount(): void {
-    super.componentDidMount?.()
-    if (this.props.autoFocus) {
-      const currentElement = this.#input.current
-      if (currentElement) {
-        currentElement.focus()
-      }
-    }
-  }
-
   /**
    * Renders the component's content in read-only mode.
    * @returns The component's content as text with newlines converted to <br /> tags.
    */
   readOnly(): React.ReactNode {
-    const value = String(this.current ?? '')
-    let rendered: React.ReactNode = value
+    const value = this.current
+    if (value === null || value === undefined) return ''
+
+    const stringValue = String(value)
+    let rendered: React.ReactNode = stringValue
 
     // For multiline text, replace newlines with <br /> tags
     if (this.props.multiline !== false) {
-      const lines = value.split('\n')
+      const lines = stringValue.split('\n')
       rendered = lines.map((line, index) => (
         <React.Fragment key={index}>
           {line}
@@ -115,7 +114,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     }
 
     return (
-      <span className="value">
+      <span className="readonly-value">
         {rendered}
       </span>
     )
@@ -152,8 +151,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
         onKeyDown={this.props.onKeyDown}
       />
     )
-    const rendered = applyMixins(input, this, [Accessible, PrefixSuffix, Placeholder])
 
-    return super.content(rendered)
+    return super.content(input)
   }
 }

@@ -4,7 +4,7 @@ import type { IDirectional } from '../../mixins/Directional'
 import { Directional } from '../../mixins/Directional'
 import { Direction } from '../../types/Direction'
 import { Keyboard } from '../../types/Keyboard'
-import { applyMixins } from '../../utilities/applyMixins'
+import type { Mixin } from '../../types/Mixin'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Menu } from '../Menu/Menu'
@@ -39,14 +39,18 @@ interface State {
 
 /** A dropdown menu component, composed of a {@link Button} and a {@link Menu}. */
 export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
-  static displayName = 'DropdownMenu'
   static Item = Menu.Item
   static Divider = Menu.Divider
   static Direction = Direction
 
+  static displayName = 'DropdownMenu'
+  static get mixins(): Set<Mixin> {
+    return super.mixins
+      .add(Directional)
+  }
+
   static defaultProps = {
-    ...Component.defaultProps,
-    ...Directional.defaultProps,
+    ...super.defaultProps,
     disabled: false,
     onClose: noop,
     onOpen: noop,
@@ -108,14 +112,6 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
         this.props.onClose()
       }
     })
-  }
-
-  /**
-   * Override render to apply the Directional mixin to the root element.
-   * @returns The rendered React node with mixins applied.
-   */
-  override render(): React.ReactNode {
-    return applyMixins(super.render() as React.ReactElement, this, [Directional])
   }
 
   content(children?: React.ReactNode): React.ReactNode {

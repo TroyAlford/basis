@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { classNames, deepEquals, kebabCase, noop } from '@basis/utilities'
+import type { Mixin } from '../../types/Mixin'
 import { filterByPrefix } from '../../utilities/filterByPrefix'
 import { prefixObject } from '../../utilities/prefixObject'
 
@@ -40,10 +41,17 @@ export abstract class Component<
   /** The state of the component. */
   State = object,
 > extends React.Component<P<Element, Props>, State> {
-  static defaultProps: P<HTMLElement, TProps> = {
-    nodeRef: React.createRef<HTMLDivElement>(),
-    onKeyDown: () => undefined,
-    theme: undefined,
+  static get mixins(): Set<Mixin> { return new Set() }
+
+  static get defaultProps(): P<HTMLElement, TProps> {
+    return {
+      nodeRef: React.createRef<HTMLDivElement>(),
+      onKeyDown: () => undefined,
+      theme: undefined,
+      ...Array.from(this.mixins).reduce((props, mixin) => ({
+        ...props, ...mixin.defaultProps,
+      }), {}),
+    }
   }
 
   /**
@@ -100,13 +108,41 @@ export abstract class Component<
     return !deepEquals(this.props, nextProps) || !deepEquals(this.state, nextState)
   }
 
+  /** Called after component mounts. */
+  componentDidMount(): void {
+    this.applyMixins('componentDidMount')
+  }
+
+  /**
+   * Called after component updates.
+   * @param prevProps The previous props.
+   * @param prevState The previous state.
+   */
+  componentDidUpdate(prevProps: Readonly<Props & TProps<Element>>, prevState: Readonly<State>): void {
+    this.applyMixins('componentDidUpdate', prevProps, prevState)
+  }
+
+  /** Called before component unmounts. */
+  componentWillUnmount(): void {
+    this.applyMixins('componentWillUnmount')
+  }
+
+  get mixins(): Mixin<Props>[] {
+    return Array.from((this.constructor as typeof Component).mixins)
+      // ensure post mixins are applied last
+      .sort((a, b) => (a.post && !b.post ? 1 : -1))
+  }
+
   /**
    * Renders the component's content. Called once per render.
    * @param children The children of the component.
    * @returns The rendered content.
    */
   content(children?: React.ReactNode): React.ReactNode {
-    return children
+    if (!React.isValidElement(children)) return children
+    return this.mixins.reduce((content, mixin) => (
+      mixin.content?.(content, this) ?? content
+    ), children)
   }
 
   /**
@@ -117,7 +153,7 @@ export abstract class Component<
     const Tag = this.tag
     const { children, className, nodeRef } = this.props
 
-    return ( // @ts-expect-error - we are assuming a props match
+    const rendered = ( // @ts-expect-error - we are assuming a props match
       <Tag // @ts-expect-error - we are assuming a props match
         ref={nodeRef}
         {...this.attributes}
@@ -126,6 +162,12 @@ export abstract class Component<
         {this.content(children)}
       </Tag>
     )
+
+    return this.mixins.reduce((element, mixin) => (
+      typeof mixin.render === 'function'
+        ? mixin.render(element, this)
+        : element
+    ), rendered)
   }
 
   /**
@@ -163,5 +205,16 @@ export abstract class Component<
       })
     ))
     return this.state
+  }
+
+  private applyMixins(event: keyof Mixin<Props>, ...args: unknown[]): void {
+    const mixins = (this.constructor as typeof Component).mixins
+    if (!mixins.size) return
+
+    // For other lifecycle methods, just call them
+    Array.from(mixins).forEach(mixin => {
+      const method = mixin[event] as (component: typeof this, ...args: unknown[]) => void
+      method?.(this, ...args)
+    })
   }
 }

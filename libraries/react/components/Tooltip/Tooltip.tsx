@@ -3,7 +3,7 @@ import { isNil } from '@basis/utilities'
 import type { IDirectional } from '../../mixins/Directional'
 import { Directional } from '../../mixins/Directional'
 import { Direction } from '../../types/Direction'
-import { applyMixins } from '../../utilities/applyMixins'
+import type { Mixin } from '../../types/Mixin'
 import { Component } from '../Component/Component'
 
 import './Tooltip.styles.ts'
@@ -30,15 +30,16 @@ interface Props extends IDirectional {
  * </div>
  */
 export class Tooltip extends Component<Props, HTMLDivElement> {
-  static displayName = 'Tooltip'
-
-  /** Direction enum for tooltip positioning. */
   static Direction = Direction
+
+  static displayName = 'Tooltip'
+  static get mixins(): Set<Mixin> {
+    return super.mixins.add(Directional)
+  }
 
   /** Default props for tooltip. */
   static defaultProps: Props = {
-    ...Component.defaultProps,
-    ...Directional.defaultProps,
+    ...super.defaultProps,
     animationDuration: '.125s',
     children: null,
     visible: 'auto',
@@ -66,14 +67,6 @@ export class Tooltip extends Component<Props, HTMLDivElement> {
     }
     if (typeof animationDuration === 'number') return `${animationDuration}s`
     return animationDuration
-  }
-
-  /**
-   * Override render to apply the Directional mixin to the root element.
-   * @returns The rendered React node with mixins applied.
-   */
-  override render(): React.ReactNode {
-    return applyMixins(super.render() as React.ReactElement, this, [Directional])
   }
 
   content(children?: React.ReactNode): React.ReactNode {

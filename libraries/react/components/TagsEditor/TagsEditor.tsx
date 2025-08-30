@@ -9,7 +9,7 @@ import { TextEditor } from '../TextEditor/TextEditor'
 /** Props for the TagsEditor component. */
 interface Props {
   /** List of tags to deny from being added. */
-  denyList?: string[],
+  deny?: string[],
   /** Icon to display before the input. */
   icon?: React.ReactNode,
   /** Placeholder text for the input. */
@@ -31,7 +31,7 @@ export class TagsEditor extends Editor<string[], HTMLDivElement, Props, State> {
   /** Default props for tags editor. */
   static defaultProps = {
     ...Editor.defaultProps,
-    denyList: [],
+    deny: [],
     icon: null,
     placeholder: 'Add...',
     tag: null,
@@ -85,7 +85,7 @@ export class TagsEditor extends Editor<string[], HTMLDivElement, Props, State> {
    */
   private handleAdd(value: string): void {
     const trimmed = value && value.trim()
-    if (!trimmed || (this.props.denyList && this.props.denyList.includes(trimmed))) {
+    if (!trimmed || (this.props.deny && this.props.deny.includes(trimmed))) {
       return
     }
 

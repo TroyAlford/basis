@@ -18,7 +18,7 @@ export const PrefixSuffix: Mixin<IPrefixSuffix> = {
    * @param component.props The props for the element.
    * @returns The element wrapped with prefix/suffix content.
    */
-  apply<T extends React.ReactElement>(
+  content<T extends React.ReactElement>(
     element: T,
     component: { props: IPrefixSuffix },
   ): T {

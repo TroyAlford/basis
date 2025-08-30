@@ -16,7 +16,7 @@ export const Placeholder: Mixin<IPlaceholder> = {
    * @param component.props The props of the component.
    * @returns The enhanced React element.
    */
-  apply<T extends React.ReactElement>(
+  content<T extends React.ReactElement>(
     element: T,
     component: { props: IPlaceholder },
   ): T {
