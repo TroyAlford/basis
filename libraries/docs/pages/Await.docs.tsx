@@ -29,7 +29,7 @@ export class AwaitDocs extends React.Component {
             <Await fallback="Loading...">
               {Promise.resolve("Content loaded!")}
             </Await>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Component Architecture</h3>
@@ -56,7 +56,7 @@ export class AwaitDocs extends React.Component {
             <Await fallback="Loading component...">
               {import('./HeavyComponent').then(module => <module.HeavyComponent />)}
             </Await>
-          `, 'tsx')}
+          `)}
           <h4>API Data Loading</h4>
           <p>
             Render content based on API responses with automatic loading states:
@@ -67,7 +67,7 @@ export class AwaitDocs extends React.Component {
                 .then(response => response.json())
                 .then(users => <UserList users={users} />)}
             </Await>
-          `, 'tsx')}
+          `)}
           <h4>Complex Async Operations</h4>
           <p>
             Handle multiple async operations or complex promise chains:
@@ -86,7 +86,7 @@ export class AwaitDocs extends React.Component {
                   <Dashboard users={users} posts={posts} />
                 ))}
             </Await>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h2>Best Practices</h2>
@@ -109,7 +109,7 @@ export class AwaitDocs extends React.Component {
             <Await fallback={<ProgressBar progress={0.5} />}>
               {processLargeFile(file)}
             </Await>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Error Handling</h3>
@@ -127,7 +127,7 @@ export class AwaitDocs extends React.Component {
                 })
                 .catch(error => <ErrorMessage error={error} />)}
             </Await>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Performance Considerations</h3>
@@ -155,7 +155,7 @@ export class AwaitDocs extends React.Component {
                 {fetchUser(userId)} // This creates a new promise each time
               </Await>
             )
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Component Integration</h3>
@@ -177,7 +177,7 @@ export class AwaitDocs extends React.Component {
                 {fetchFooter()}
               </Await>
             </div>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Benefits</h3>

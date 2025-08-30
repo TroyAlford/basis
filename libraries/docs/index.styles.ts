@@ -10,9 +10,10 @@ export const docsStyles = style('basis:docs:index', css`
     i, em { font-style: italic; }
 
     code:not(.code.component code) {
+      color: green;
       font-family: 'Fira Code', monospace;
       font-variant-ligatures: contextual;
-      font-weight: bold;
+      font-weight: 500;
     }
 
     p {

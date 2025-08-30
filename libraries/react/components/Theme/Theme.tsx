@@ -161,18 +161,8 @@ export class Theme extends Component<Props> {
     ...DEFAULT_THEME,
   }
 
-  componentDidMount(): void {
-    this.injectStyles()
-  }
-
-  shouldComponentUpdate(
-    nextProps: Readonly<Component<Props>['props']>,
-    nextState: Readonly<Component['state']>,
-  ): boolean {
-    if (!super.shouldComponentUpdate(nextProps, nextState)) return false
-    this.injectStyles()
-    return false
-  }
+  componentDidMount(): void { this.injectStyles() }
+  componentDidUpdate(): void { this.injectStyles() }
 
   private processColor(color: string): string {
     return Color.from(color).toString()

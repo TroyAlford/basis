@@ -46,7 +46,7 @@ export class CarouselDocs extends React.Component {
               ]}
               altText="Gallery images"
             />
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Component Architecture</h3>
@@ -80,7 +80,7 @@ export class CarouselDocs extends React.Component {
               ]}
               altText="Product gallery"
             />
-          `, 'tsx')}
+          `)}
           <h4>Image Configuration Objects</h4>
           <p>
             Detailed configuration for each image with custom alignment and sizing:
@@ -99,7 +99,7 @@ export class CarouselDocs extends React.Component {
                 altText: 'Hero image 2'
               }]}
             />
-          `, 'tsx')}
+          `)}
           <h4>Child Components</h4>
           <p>
             Use Image components as children for maximum control:
@@ -110,7 +110,7 @@ export class CarouselDocs extends React.Component {
               <Image src="/slide2.jpg" alt="Second slide" />
               <Image src="/slide3.jpg" alt="Third slide" />
             </Carousel>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Navigation Controls</h3>
@@ -122,7 +122,7 @@ export class CarouselDocs extends React.Component {
               images={['/img1.jpg', '/img2.jpg', '/img3.jpg']}
               onImageChange={(index) => console.log(\`Switched to image \${index}\`)}
             />
-          `, 'tsx')}
+          `)}
           <p>
             Navigation methods:
           </p>
@@ -144,7 +144,7 @@ export class CarouselDocs extends React.Component {
               images={['/img1.jpg', '/img2.jpg', '/img3.jpg']}
               altText="Gallery images"
             />
-          `, 'tsx')}
+          `)}
           <p>
             Lightbox features:
           </p>
@@ -172,7 +172,7 @@ export class CarouselDocs extends React.Component {
             >
               {/* Optional child Image components */}
             </Carousel>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h2>Best Practices</h2>
@@ -206,7 +206,7 @@ export class CarouselDocs extends React.Component {
                 }
               ]}
             />
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Accessibility</h3>
@@ -230,7 +230,7 @@ export class CarouselDocs extends React.Component {
                 // Use your preferred accessibility announcement method
               }}
             />
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Performance Optimization</h3>
@@ -253,7 +253,7 @@ export class CarouselDocs extends React.Component {
                 }
               }}
             />
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Mobile Experience</h3>
@@ -268,7 +268,7 @@ export class CarouselDocs extends React.Component {
               // Touch events are automatically handled
               // Swipe gestures work out of the box
             />
-          `, 'tsx')}
+          `)}
           <p>
             Mobile features:
           </p>
@@ -307,7 +307,7 @@ export class CarouselDocs extends React.Component {
                 altText="Hero images"
               />
             </section>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Benefits</h3>

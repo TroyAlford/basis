@@ -54,7 +54,7 @@ export class RouterDocs extends React.Component {
 
               </Router.Switch>
             </Router>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Router Components</h3>
@@ -104,7 +104,7 @@ export class RouterDocs extends React.Component {
           {Code.format(`
             <Router.Link to="/dashboard">Dashboard</Router.Link>
             <Router.Link to="/users/123">User Profile</Router.Link>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Route Templates</h3>
@@ -153,7 +153,7 @@ export class RouterDocs extends React.Component {
 
             // With query parameters
             Router.navigate('/search?q=react&page=2')
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h2>Best Practices</h2>
@@ -187,7 +187,7 @@ export class RouterDocs extends React.Component {
                 return <UserProfile id={userId} />
               }}
             </Router.Route>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Active Link States</h3>
@@ -207,7 +207,7 @@ export class RouterDocs extends React.Component {
               color: white;
               font-weight: bold;
             }
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Component Architecture</h3>

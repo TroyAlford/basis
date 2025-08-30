@@ -108,7 +108,7 @@ export const ImageDocs = () => {
         </p>
         {Code.format(`
           <Image src="/path/to/image.jpg" alt="Description of the image" />
-        `, 'tsx')}
+        `)}
       </section>
       <section>
         <h3>Component Architecture</h3>
@@ -183,7 +183,7 @@ export const ImageDocs = () => {
           <Image src="/image.jpg" align={Align.South} alt="Bottom edge image" />
           <Image src="/image.jpg" align={Align.East} alt="Right edge image" />
           <Image src="/image.jpg" align={Align.West} alt="Left edge image" />
-        `, 'tsx')}
+        `)}
         <p>
           Available alignment options:
         </p>
@@ -208,7 +208,7 @@ export const ImageDocs = () => {
 
           // Fill - covers entire container, may crop image
           <Image src="/image.jpg" size={Size.Fill} alt="Filled image" />
-        `, 'tsx')}
+        `)}
         <p>Size behavior:</p>
         <ul>
           <li><strong>Natural:</strong> Preserves original dimensions, may overflow container</li>
@@ -229,7 +229,7 @@ export const ImageDocs = () => {
             onTouchMove={(event) => console.log('Touch moved')}
             onTouchEnd={(event) => console.log('Touch ended')}
           />
-        `, 'tsx')}
+        `)}
         <p>All event handlers receive the standard React event objects with proper typing.</p>
       </section>
       <section>
@@ -250,7 +250,7 @@ export const ImageDocs = () => {
           // data-loaded="true" (when cached)
           // data-loading="true" (while loading)
           // data-error="true" (if load failed)
-        `, 'tsx')}
+        `)}
         <p>These attributes can be used for CSS styling based on image state:</p>
         {Code.format(`
           /* CSS examples using data attributes */
@@ -279,7 +279,7 @@ export const ImageDocs = () => {
           // Cache is shared across all Image instances
           const image1 = <Image src="/logo.jpg" alt="Logo" />
           const image2 = <Image src="/logo.jpg" alt="Logo" /> // Uses cached version
-        `, 'tsx')}
+        `)}
         <p>Benefits of the caching system:</p>
         <ul>
           <li><strong>Prevents Duplicate Requests:</strong> Same URL won't trigger multiple loads</li>
@@ -328,7 +328,7 @@ export const ImageDocs = () => {
           
           // Decorative images (empty alt is acceptable)
           <Image src="/decoration.jpg" alt="" />
-        `, 'tsx')}
+        `)}
         <p>The component automatically sets appropriate ARIA attributes based on the alt prop.</p>
       </section>
       <section>
@@ -347,7 +347,7 @@ export const ImageDocs = () => {
             <Image src="/logo.jpg" alt="Company logo" /> {/* Uses cache */}
             <Image src="/logo.jpg" alt="Company logo" /> {/* Uses cache */}
           </div>
-        `, 'tsx')}
+        `)}
       </section>
       <section>
         <h3>Error Handling</h3>
@@ -369,7 +369,7 @@ export const ImageDocs = () => {
               }
             }}
           />
-        `, 'tsx')}
+        `)}
         <p>
           Error handling is automatic - failed loads set the error state and data-error attribute.
         </p>
@@ -401,7 +401,7 @@ export const ImageDocs = () => {
             size={Size.Natural}
             align={Align.NorthWest}
           />
-        `, 'tsx')}
+        `)}
       </section>
       <section>
         <h3>Integration with Other Components</h3>
@@ -422,7 +422,7 @@ export const ImageDocs = () => {
               className="featured-image"
             />
           </div>
-        `, 'tsx')}
+        `)}
       </section>
       <section>
         <h3>CSS Integration</h3>

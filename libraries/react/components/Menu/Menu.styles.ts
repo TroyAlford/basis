@@ -44,9 +44,21 @@ style('basis:menu', css`
     > .menu-divider.component {
       background-color: var(--basis-color-foreground);
       border: none;
-      height: 1px;
-      margin: 0.25em 0;
       opacity: 0.2;
+    }
+
+    &[data-orientation='${Orientation.Vertical}'] {
+      > .menu-divider.component {
+        height: 1px;
+        margin: 0.25em 0;
+      }
+    }
+
+    &[data-orientation='${Orientation.Horizontal}'] {
+      > .menu-divider.component {
+        width: 1px;
+        margin: 0 0.25em;
+      }
     }
   }
 `)

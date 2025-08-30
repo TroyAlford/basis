@@ -34,6 +34,8 @@ interface ItemProps {
  * </Menu>
  */
 export class Menu extends Component<Props> {
+  static Orientation = Orientation
+
   static displayName = 'Menu'
   static defaultProps = {
     ...Component.defaultProps,
