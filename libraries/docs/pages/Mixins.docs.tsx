@@ -1,6 +1,5 @@
 import * as React from 'react'
 import { Code } from '../components/Code'
-import { Link } from '../../react/components/Link/Link'
 
 export class MixinsDocs extends React.Component {
   render(): React.ReactNode {
@@ -10,15 +9,14 @@ export class MixinsDocs extends React.Component {
         <section>
           <p>
             The Component class includes a powerful mixin system that allows you to compose behavior
-            without inheritance. Mixins can modify both content and root elements, providing flexible
-            composition patterns.
+            without inheritance. Mixins can modify both content and root elements, providing
+            flexible composition patterns.
           </p>
           <p>
             Mixins are automatically integrated once declared, providing default props, content processing,
             root modification, and lifecycle method integration.
           </p>
         </section>
-
         <section>
           <h2>How to Use Mixins</h2>
           <h3>Declaring Mixins</h3>
@@ -41,7 +39,10 @@ export class MixinsDocs extends React.Component {
           </p>
           <ul>
             <li><strong>Default Props</strong>: Mixin default props are automatically merged</li>
-            <li><strong>Content Processing</strong>: Content mixins are applied in order (respecting <code>post</code> flag)</li>
+            <li>
+              <strong>Content Processing</strong>:
+              Content mixins are applied in order (respecting the <code>post</code> flag)
+            </li>
             <li><strong>Root Modification</strong>: Render mixins modify the final root element</li>
             <li><strong>Lifecycle Methods</strong>: Mixin lifecycle methods are automatically called</li>
           </ul>
@@ -64,14 +65,12 @@ export class MixinsDocs extends React.Component {
             }
           `)}
         </section>
-
         <section>
           <h2>Content Mixins</h2>
           <p>
             Content mixins modify the component's children/content. They are applied in the order
             they're declared, with post mixins applied last.
           </p>
-
           <h3>Accessible Mixin</h3>
           <p>
             Provides ARIA attributes and accessibility features for components.
@@ -98,10 +97,10 @@ export class MixinsDocs extends React.Component {
             }
           `)}
           <p>
-            <strong>Usage:</strong> Automatically adds <code>aria-label</code> and <code>aria-describedby</code>
-            attributes to form inputs and interactive elements.
+            <strong>Usage</strong>:
+            Automatically adds <code>aria-label</code> and <code>aria-describedby</code> attributes
+            to form inputs and interactive elements.
           </p>
-
           <h3>PrefixSuffix Mixin</h3>
           <p>
             Adds content before and after the main element, useful for labels, icons, or additional context.
@@ -128,10 +127,9 @@ export class MixinsDocs extends React.Component {
             }
           `)}
           <p>
-            <strong>Usage:</strong> Perfect for adding currency symbols, units, or labels around inputs.
-            Example: <code>&lt;NumberEditor prefix="$" suffix="USD" /&gt;</code>
+            <strong>Usage:</strong> Perfect for adding currency symbols, units, or labels around
+            inputs. Example: <code>&lt;NumberEditor prefix="$" suffix="USD" /&gt;</code>
           </p>
-
           <h3>Placeholder Mixin</h3>
           <p>
             Provides placeholder text support for input elements.
@@ -158,7 +156,6 @@ export class MixinsDocs extends React.Component {
           <p>
             <strong>Usage:</strong> Automatically adds <code>placeholder</code> attribute to input elements.
           </p>
-
           <h3>Focusable Mixin</h3>
           <p>
             Provides auto-focus support and focus management for components.
@@ -181,14 +178,12 @@ export class MixinsDocs extends React.Component {
             Useful for form inputs that should receive focus immediately.
           </p>
         </section>
-
         <section>
           <h2>Render Mixins</h2>
           <p>
             Render mixins modify the component's root element. They are applied after content mixins
             to ensure the final element has all necessary attributes and styles.
           </p>
-
           <h3>Directional Mixin</h3>
           <p>
             Provides directional positioning and offset support for components like tooltips, dropdowns, and popovers.
@@ -218,12 +213,11 @@ export class MixinsDocs extends React.Component {
             }
           `)}
           <p>
-            <strong>Usage:</strong> Automatically adds <code>data-direction</code> attribute and
-            <code>--directional-offset</code> CSS variable for positioning components.
+            <strong>Usage</strong>: Automatically adds <code>data-direction</code> attribute
+            and <code>--directional-offset</code> CSS variable for positioning components.
             Example: <code>&lt;Tooltip direction="NE" offset={8} /&gt;</code>
           </p>
         </section>
-
         <section>
           <h2>Creating Custom Mixins</h2>
           <p>
@@ -319,13 +313,15 @@ export class MixinsDocs extends React.Component {
             }
           `)}
         </section>
-
         <section>
           <h2>Best Practices</h2>
           <h3>Mixin Composition</h3>
           <ul>
             <li><strong>Keep Mixins Focused</strong>: Each mixin should handle one specific concern</li>
-            <li><strong>Use Post Flag Wisely</strong>: Only set <code>post: true</code> when the mixin needs to run after others</li>
+            <li>
+              <strong>Use Post Flag Wisely</strong>:
+              Only set <code>post: true</code> when the mixin needs to run after others
+            </li>
             <li><strong>Provide Default Props</strong>: Always provide sensible defaults for mixin props</li>
             <li><strong>Handle Missing Props</strong>: Gracefully handle cases where optional props aren't provided</li>
           </ul>
@@ -336,7 +332,6 @@ export class MixinsDocs extends React.Component {
             <li><strong>Limit Mixin Count</strong>: Too many mixins can impact performance and readability</li>
           </ul>
         </section>
-
         <section>
           <h2>Real-World Examples</h2>
           <h3>Tooltip Component</h3>
