@@ -50,6 +50,7 @@ export class Image extends Component<Props, HTMLDivElement, State> {
     Resolved: new Map<string, HTMLImageElement>(),
   }
 
+  static displayName = 'Image'
   static defaultProps = {
     ...Component.defaultProps,
     align: Align.Center,
@@ -92,14 +93,12 @@ export class Image extends Component<Props, HTMLDivElement, State> {
     // Add inline styles for background image and sizing
     if (error) {
       baseAttributes.style = {
-        background: '#f44336',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
         backgroundSize: 'contain',
       }
     } else if (loading || !dimensions) {
       baseAttributes.style = {
-        background: 'rgba(0, 0, 0, 0.1)',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
         backgroundSize: 'contain',

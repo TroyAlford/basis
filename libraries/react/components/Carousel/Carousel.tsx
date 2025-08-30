@@ -64,6 +64,8 @@ interface State {
 export class Carousel extends Component<Props, HTMLDivElement, State> {
   static Align = Align
   static Size = Size
+
+  static displayName = 'Carousel'
   static defaultProps = {
     ...Component.defaultProps,
     align: Align.Center,
