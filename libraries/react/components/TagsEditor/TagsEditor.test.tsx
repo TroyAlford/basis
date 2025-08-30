@@ -114,8 +114,8 @@ describe('TagsEditor', () => {
     })
 
     test('does not add denied tags', async () => {
-      const denyList = ['denied-tag']
-      const { node } = await render(<TagsEditor denyList={denyList} onChange={onChange} />)
+      const deny = ['denied-tag']
+      const { node } = await render(<TagsEditor deny={deny} onChange={onChange} />)
       const input = getInput(node)
 
       await Simulate.change(input, 'denied-tag')

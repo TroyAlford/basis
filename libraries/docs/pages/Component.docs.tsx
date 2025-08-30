@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Link } from '../../react/components/Router/Link'
 import { Code } from '../components/Code'
 
 export class ComponentDocs extends React.Component {
@@ -70,7 +71,7 @@ export class ComponentDocs extends React.Component {
                 </>
               }
             }
-          `, 'tsx')}
+          `)}
           <p>
             This component automatically gets:
           </p>
@@ -107,7 +108,37 @@ export class ComponentDocs extends React.Component {
                 return super.content(applyMixins(input, this, [Accessible, PrefixSuffix, Placeholder]))
               }
             }
-          `, 'tsx')}
+          `)}
+        </section>
+        <section>
+          <h2>Mixin System</h2>
+          <p>
+            The Component class includes a powerful mixin system that allows you to compose behavior
+            without inheritance. Mixins can modify both content and root elements, providing flexible
+            composition patterns.
+          </p>
+          <p>
+            For comprehensive documentation on all available mixins and how to create custom ones,
+            see the <Link to="/mixins">Mixins documentation</Link>.
+          </p>
+          <h3>Quick Start</h3>
+          <p>
+            Components declare their mixins using a static getter:
+          </p>
+          {Code.format(`
+            export class MyComponent extends Component<Props> {
+              static get mixins(): Set<Mixin> {
+                return super.mixins
+                  .add(Accessible)
+                  .add(PrefixSuffix)
+                  .add(Placeholder)
+              }
+            }
+          `)}
+          <p>
+            Once declared, mixins are automatically integrated, providing default props, content processing,
+            root modification, and lifecycle method integration.
+          </p>
         </section>
         <section>
           <h2>Core Features</h2>
@@ -125,7 +156,7 @@ export class ComponentDocs extends React.Component {
             // Custom classes can still be added via props
             <UserProfile className="highlighted" />
             // Results in: <div class="user-profile component highlighted">...</div>
-          `, 'tsx')}
+          `)}
           <p>
             <strong>Note:</strong> Some build systems munge class names during compilation. As a best practice,
             set a <code>static displayName</code> which will be used with preference if it exists, instead
@@ -137,7 +168,7 @@ export class ComponentDocs extends React.Component {
               
               // Now the class name is guaranteed to be 'user-profile' regardless of build system
             }
-          `, 'tsx')}
+          `)}
           <h3>Attribute Surface Area</h3>
           <p>
             Any ARIA or data attributes passed as props are automatically applied to the root element:
@@ -153,7 +184,7 @@ export class ComponentDocs extends React.Component {
 
             // The Component class automatically handles the prefixing and application
             // No need to manually manage these in your component
-          `, 'tsx')}
+          `)}
           <h3>Theme Integration</h3>
           <p>
             The theme prop works seamlessly with the Theme component:
@@ -170,7 +201,7 @@ export class ComponentDocs extends React.Component {
             // All components automatically get data-theme="dark" or data-theme="light"
             // CSS can target: [data-theme="dark"] .button.component { ... }
             // CSS can target: [data-theme="light"] .button.component { ... }
-          `, 'tsx')}
+          `)}
           <h3>Flexible Element Types</h3>
           <p>
             Components can specify their root element type for proper semantic HTML:
@@ -185,7 +216,7 @@ export class ComponentDocs extends React.Component {
             export class Image extends Component<Props, HTMLImageElement, State> {
               override get tag(): Tag { return 'img' }
             }
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h2>Implementation Patterns</h2>
@@ -219,7 +250,7 @@ export class ComponentDocs extends React.Component {
                 )
               }
             }
-          `, 'tsx')}
+          `)}
           <h3>State Updates</h3>
           <p>
             The Promise-based setState can be useful for complex state management scenarios:
@@ -242,7 +273,7 @@ export class ComponentDocs extends React.Component {
                 }
               }
             }
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h2>Migration from React.Component</h2>
@@ -276,7 +307,7 @@ export class ComponentDocs extends React.Component {
                 return this.props.children
               }
             }
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h2>When to Use Component</h2>

@@ -314,7 +314,7 @@ describe('TextEditor', () => {
       })
 
       test('handles null/undefined values in readOnly mode', async () => {
-        const { node } = await render(
+        const { root } = await render(
           <TextEditor
             readOnly
             value={null as unknown as string}
@@ -322,9 +322,9 @@ describe('TextEditor', () => {
           />,
         )
 
-        const input = node.querySelector('input')
+        const input = root.querySelector('input')
         expect(input).toBeNull()
-        expect(node.textContent).toBe('')
+        expect(root.textContent).toBe('')
       })
     })
   })

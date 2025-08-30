@@ -66,7 +66,7 @@ export class ButtonDocs extends React.Component<unknown, State> {
             <Button disabled onActivate={() => alert('Button activated!')}>
               Disabled Button
             </Button>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Button Types</h3>
@@ -97,13 +97,11 @@ export class ButtonDocs extends React.Component<unknown, State> {
             <Button type={Button.Type.Submit}>
               Submit Form
             </Button>
-          `, 'tsx')}
+          `)}
         </section>
         <section>
           <h3>Accessibility Features</h3>
-          <p>
-            The Button component automatically handles accessibility concerns:
-          </p>
+          <p>The Button component automatically handles accessibility concerns:</p>
           <ul>
             <li>
               <strong>Keyboard Navigation:</strong> Supports Enter and Space key activation
@@ -176,7 +174,7 @@ export class ButtonDocs extends React.Component<unknown, State> {
                 this.setState({ selectedValue: value })
               }
             }
-          `, 'tsx')}
+          `)}
           <h3>Benefits</h3>
           <ul>
             <li>Reduces the number of handler functions</li>

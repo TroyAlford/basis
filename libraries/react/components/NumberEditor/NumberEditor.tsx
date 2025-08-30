@@ -2,16 +2,18 @@ import * as React from 'react'
 import { formatNumber } from '@basis/utilities'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
+import type { IFocusable } from '../../mixins/Focusable'
+import { Focusable } from '../../mixins/Focusable'
 import type { IPlaceholder } from '../../mixins/Placeholder'
 import { Placeholder } from '../../mixins/Placeholder'
 import type { IPrefixSuffix } from '../../mixins/PrefixSuffix'
 import { PrefixSuffix } from '../../mixins/PrefixSuffix'
 import { Keyboard } from '../../types/Keyboard'
-import { applyMixins } from '../../utilities/applyMixins'
+import type { Mixin } from '../../types/Mixin'
 import { Editor } from '../Editor/Editor'
 
 /** Props specific to number editor. */
-interface Props extends IAccessible, IPrefixSuffix, IPlaceholder {
+interface Props extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable {
   /** Step value for up/down arrow keys. If provided, arrow keys will adjust the value by this amount. */
   step?: number,
 }
@@ -22,12 +24,12 @@ interface Props extends IAccessible, IPrefixSuffix, IPlaceholder {
  */
 export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
   static displayName = 'NumberEditor'
-  /** Default props for number editor. */
-  static defaultProps = {
-    ...super.defaultProps,
-    ...Accessible.defaultProps,
-    ...PrefixSuffix.defaultProps,
-    ...Placeholder.defaultProps,
+  static get mixins(): Set<Mixin> {
+    return super.mixins
+      .add(Accessible)
+      .add(Focusable)
+      .add(Placeholder)
+      .add(PrefixSuffix)
   }
 
   /**
@@ -112,8 +114,7 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
         onKeyDown={this.handleKeyDown}
       />
     )
-    const rendered = applyMixins(input, this, [Accessible, PrefixSuffix, Placeholder])
 
-    return super.content(rendered)
+    return super.content(input)
   }
 }

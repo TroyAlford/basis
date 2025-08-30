@@ -29,6 +29,12 @@ export interface IDirectional {
 
 /** Mixin for directional elements. */
 export const Directional: Mixin<IDirectional> = {
+  /** Default props for directional elements. */
+  defaultProps: {
+    direction: Direction.S,
+    offset: DEFAULT_OFFSET,
+  },
+
   /**
    * Applies directional props to a React element.
    * @param element The React element to apply props to.
@@ -36,7 +42,7 @@ export const Directional: Mixin<IDirectional> = {
    * @param component.props The props of the component.
    * @returns The enhanced React element.
    */
-  apply<T extends React.ReactElement>(
+  render<T extends React.ReactElement>(
     element: T,
     component: { props: IDirectional },
   ): T {
@@ -51,11 +57,5 @@ export const Directional: Mixin<IDirectional> = {
         '--directional-offset': getOffsetString(offset),
       },
     } as React.HTMLAttributes<HTMLElement>) as T
-  },
-
-  /** Default props for directional elements. */
-  defaultProps: {
-    direction: Direction.S,
-    offset: DEFAULT_OFFSET,
   },
 }

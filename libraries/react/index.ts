@@ -26,5 +26,4 @@ export { Direction } from './types/Direction'
 export { Keyboard } from './types/Keyboard'
 export { Orientation } from './types/Orientation'
 
-export { applyMixins } from './utilities/applyMixins'
 export { css, style } from './utilities/style'

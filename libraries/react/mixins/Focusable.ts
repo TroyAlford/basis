@@ -19,6 +19,12 @@ export interface IFocusable {
 
 /** Mixin for focusable elements. */
 export const Focusable: Mixin<IFocusable> = {
+  componentDidMount(component): void {
+    if (component.props.autoFocus && component.rootNode) {
+      component.rootNode.focus()
+    }
+  },
+
   /**
    * Applies focusable props to a React element.
    * @param element The React element to apply props to.
@@ -26,10 +32,12 @@ export const Focusable: Mixin<IFocusable> = {
    * @param component.props The props for the element.
    * @returns The enhanced React element.
    */
-  apply<T extends React.ReactElement>(
+  content<T extends React.ReactNode>(
     element: T,
     component: { props: IFocusable },
   ): T {
+    if (!React.isValidElement(element)) return element
+
     const { autoFocus, disabled, onBlur, onFocus, readOnly, tabIndex } = component.props
     const elementProps = element.props as React.HTMLAttributes<HTMLElement>
 

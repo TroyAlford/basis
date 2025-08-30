@@ -33,7 +33,7 @@ describe('Tooltip', () => {
       expect(Tooltip.Direction).toBe(Direction)
     })
 
-    test.only('has correct default props', () => {
+    test('has correct default props', () => {
       expect(Tooltip.defaultProps).toMatchObject({
         animationDuration: '.125s',
         children: null,
@@ -108,38 +108,38 @@ describe('Tooltip', () => {
     test('handles string values', async () => {
       await expectStyleAttribute(
         <Tooltip offset="1rem">Content</Tooltip>,
-        { '--tooltip-offset': '1rem' },
+        { '--directional-offset': '1rem' },
       )
     })
 
     test('handles numeric values (appends px)', async () => {
       await expectStyleAttribute(
         <Tooltip offset={16}>Content</Tooltip>,
-        { '--tooltip-offset': '16px' },
+        { '--directional-offset': '16px' },
       )
     })
 
     test('handles zero and negative values', async () => {
       await expectStyleAttribute(
         <Tooltip offset={0}>Content</Tooltip>,
-        { '--tooltip-offset': '0px' },
+        { '--directional-offset': '0px' },
       )
 
       await expectStyleAttribute(
         <Tooltip offset={-10}>Content</Tooltip>,
-        { '--tooltip-offset': '-10px' },
+        { '--directional-offset': '-10px' },
       )
     })
 
     test('falls back to default for nil/empty values', async () => {
       await expectStyleAttribute(
         <Tooltip offset="">Content</Tooltip>,
-        { '--tooltip-offset': '.25em' },
+        { '--directional-offset': '0px' },
       )
 
       await expectStyleAttribute(
         <Tooltip offset={null}>Content</Tooltip>,
-        { '--tooltip-offset': '.25em' },
+        { '--directional-offset': '0px' },
       )
     })
   })
@@ -172,8 +172,8 @@ describe('Tooltip', () => {
           Content
         </Tooltip>,
         {
+          '--directional-offset': '32px',
           '--tooltip-animation-duration': '0.5s',
-          '--tooltip-offset': '32px',
         },
       )
     })
