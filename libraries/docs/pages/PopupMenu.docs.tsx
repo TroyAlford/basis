@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { AnchorPoint } from '@basis/react/types/AnchorPoint'
 import { Button } from '../../react/components/Button/Button'
+import { Menu } from '../../react/components/Menu/Menu'
 import { PopupMenu } from '../../react/components/PopupMenu/PopupMenu'
 import { Link } from '../../react/components/Router/Link'
 import { Code } from '../components/Code'
@@ -79,10 +80,10 @@ export class PopupMenuDocs extends React.Component<object, State> {
                     anchorPoint={this.state.anchorPoint}
                     visible={this.state.visible}
                   >
-                    <PopupMenu.Item>Menu Item 1</PopupMenu.Item>
-                    <PopupMenu.Item>Menu Item 2</PopupMenu.Item>
-                    <PopupMenu.Divider />
-                    <PopupMenu.Item>Menu Item 3</PopupMenu.Item>
+                    <Menu.Item>Menu Item 1</Menu.Item>
+                    <Menu.Item>Menu Item 2</Menu.Item>
+                    <Menu.Divider />
+                    <Menu.Item>Menu Item 3</Menu.Item>
                   </PopupMenu>
                 </Button>
               </div>

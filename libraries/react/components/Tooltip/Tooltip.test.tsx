@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import * as React from 'react'
-import { AnchorPoint } from '../../types/AnchorPoint'
 import { render } from '../../testing/render'
+import { AnchorPoint } from '../../types/AnchorPoint'
 import { Tooltip } from './Tooltip'
 
 describe('Tooltip', () => {
@@ -49,7 +49,7 @@ describe('Tooltip', () => {
 
     test('renders with popup data attributes', async () => {
       await expectDataAttributes(
-        <Tooltip arrow={true} anchorPoint={AnchorPoint.Bottom}>
+        <Tooltip anchorPoint={AnchorPoint.Bottom} arrow={true}>
           Content
         </Tooltip>,
         {
