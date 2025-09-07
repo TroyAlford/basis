@@ -26,6 +26,12 @@ interface Props extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable {
  */
 export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
   static displayName = 'NumberEditor'
+  static get defaultProps() {
+    return {
+      ...super.defaultProps,
+      step: 1,
+    }
+  }
   static get mixins(): Set<Mixin> {
     return super.mixins
       .add(Accessible)
@@ -70,13 +76,13 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
   }
 
   protected handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    const { step } = this.props
+    const { step = 1 } = this.props
 
     // Call the base class handleKeyDown first
     super.handleKeyDown(event)
 
-    // Check if step should be applied (only if step is provided and arrow keys are pressed)
-    if (step && ([Keyboard.ArrowUp, Keyboard.ArrowDown].includes(event.key as Keyboard))) {
+    // Check if step should be applied (arrow keys are pressed)
+    if ([Keyboard.ArrowUp, Keyboard.ArrowDown].includes(event.key as Keyboard)) {
       // Don't apply step if default was prevented
       if (!event.defaultPrevented) {
         event.preventDefault()

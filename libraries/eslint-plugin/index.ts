@@ -312,4 +312,10 @@ export default pluginTypescript.config(
       '@stylistic/jsx/jsx-child-element-spacing': 'off',
     },
   }),
+  plugin({
+    files: ['libraries/icons/**/*.tsx'],
+    rules: {
+      '@stylistic/max-len': 'off',
+    },
+  }),
 ) as ESLint.ConfigData

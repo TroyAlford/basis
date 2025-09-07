@@ -43,6 +43,8 @@ export class Code extends Component<Props> {
   }
 
   get code(): string {
+    if (typeof this.props.code !== 'string') return ''
+
     const lines = this.props.code
       .replace(/\t/g, '  ')
       .split('\n')

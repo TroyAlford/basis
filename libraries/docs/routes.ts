@@ -4,6 +4,7 @@ import { CarouselDocs } from './pages/Carousel.docs.tsx'
 import { ComponentDocs } from './pages/Component.docs.tsx'
 import { DropdownMenuDocs } from './pages/DropdownMenu.docs.tsx'
 import { EditorDocs } from './pages/Editor.docs.tsx'
+import IconsDocs from './pages/Icons.docs.tsx'
 import { ImageDocs } from './pages/Image.docs.tsx'
 import { MenuDocs } from './pages/Menu.docs.tsx'
 import { MixinsDocs } from './pages/Mixins.docs.tsx'
@@ -36,6 +37,7 @@ export const routes: DocRoute[] = [
   { component: DropdownMenuDocs, path: '/components/dropdown-menu', title: 'DropdownMenu' },
   { component: EditorDocs, path: '/components/editor', title: 'Editor' },
   { component: ImageDocs, path: '/components/image', title: 'Image' },
+  { component: IconsDocs, path: '/icons', title: 'Icons' },
   { component: MenuDocs, path: '/components/menu', title: 'Menu' },
   { component: MixinsDocs, path: '/mixins', title: 'Mixins' },
   { component: NumberEditorDocs, path: '/components/number-editor', title: 'NumberEditor' },

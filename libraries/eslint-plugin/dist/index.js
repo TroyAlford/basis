@@ -320,4 +320,10 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
         rules: {
             '@stylistic/jsx/jsx-child-element-spacing': 'off',
         },
+    }),
+    plugin({
+        files: ['libraries/icons/**/*.tsx'],
+        rules: {
+            '@stylistic/max-len': 'off',
+        },
     })], false));
