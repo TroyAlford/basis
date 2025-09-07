@@ -1,6 +1,8 @@
 import * as React from 'react'
 import type { Mixin } from '../types/Mixin'
 
+import './PrefixSuffix.styles.ts'
+
 /** Interface for elements that can have prefix/suffix content. */
 export interface IPrefixSuffix {
   /** Content to render before the element. */
@@ -11,6 +13,11 @@ export interface IPrefixSuffix {
 
 /** Mixin for elements with prefix/suffix content. */
 export const PrefixSuffix: Mixin<IPrefixSuffix> = {
+  attributes: props => ({
+    'data-has-prefix': !!props.prefix,
+    'data-has-suffix': !!props.suffix,
+  }),
+
   /**
    * Applies prefix/suffix content around a React element.
    * @param element The main element to render.

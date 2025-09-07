@@ -1,20 +1,19 @@
 import * as React from 'react'
+import { AnchorPoint } from '@basis/react/types/AnchorPoint'
 import { Button } from '../../react/components/Button/Button'
 import { DropdownMenu } from '../../react/components/DropdownMenu/DropdownMenu'
 import { Link } from '../../react/components/Router/Link'
 import { Code } from '../components/Code'
 
 interface State {
-  direction: DropdownMenu['props']['direction'],
-  offset: number,
+  anchorPoint: AnchorPoint,
   open: boolean,
 }
 
 export class DropdownMenuDocs extends React.Component<object, State> {
   state: State = {
-    direction: DropdownMenu.Direction.S,
-    offset: 8,
-    open: false,
+    anchorPoint: AnchorPoint.Top,
+    open: true,
   }
 
   render = (): React.ReactNode => (
@@ -43,34 +42,24 @@ export class DropdownMenuDocs extends React.Component<object, State> {
         <div style={{ display: 'grid', gap: '2rem', gridTemplateColumns: '300px 1fr' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
-              <h4>Direction</h4>
+              <h4>Anchor Point</h4>
               <select
-                defaultValue="S"
-                style={{ padding: '0.5rem', width: '100%' }}
-                onChange={e => this.setState({ direction: e.target.value as DropdownMenu['props']['direction'] })}
+                defaultValue={AnchorPoint.Top}
+                onChange={e => this.setState({ anchorPoint: e.target.value as AnchorPoint })}
               >
-                <option value="N">North</option>
-                <option value="NE">North East</option>
-                <option value="E">East</option>
-                <option value="SE">South East</option>
-                <option value="S">South (default)</option>
-                <option value="SW">South West</option>
-                <option value="W">West</option>
-                <option value="NW">North West</option>
+                <option value={AnchorPoint.Top}>Top</option>
+                <option value={AnchorPoint.TopStart}>Top Start</option>
+                <option value={AnchorPoint.TopEnd}>Top End</option>
+                <option value={AnchorPoint.Bottom}>Bottom</option>
+                <option value={AnchorPoint.BottomStart}>Bottom Start</option>
+                <option value={AnchorPoint.BottomEnd}>Bottom End</option>
+                <option value={AnchorPoint.Left}>Left</option>
+                <option value={AnchorPoint.LeftStart}>Left Start</option>
+                <option value={AnchorPoint.LeftEnd}>Left End</option>
+                <option value={AnchorPoint.Right}>Right</option>
+                <option value={AnchorPoint.RightStart}>Right Start</option>
+                <option value={AnchorPoint.RightEnd}>Right End</option>
               </select>
-            </div>
-            <div>
-              <h4>Offset</h4>
-              <input
-                defaultValue="8"
-                max="32"
-                min="0"
-                step="4"
-                style={{ width: '100%' }}
-                type="range"
-                onChange={e => this.setState({ offset: Number(e.target.value) })}
-              />
-              <span>{this.state.offset}px</span>
             </div>
             <div>
               <h4>State</h4>
@@ -83,8 +72,7 @@ export class DropdownMenuDocs extends React.Component<object, State> {
           <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '2rem', textAlign: 'center' }}>
             <div style={{ display: 'inline-block', position: 'relative' }}>
               <DropdownMenu
-                direction={this.state.direction}
-                offset={this.state.offset}
+                anchorPoint={this.state.anchorPoint}
                 open={this.state.open}
                 trigger="Click to Open"
                 onClose={() => this.setState({ open: false })}
@@ -144,9 +132,10 @@ export class DropdownMenuDocs extends React.Component<object, State> {
           with the <code>open</code> prop and <code>onOpen</code>/<code>onClose</code> callbacks.
         </p>
         <p>
-          The <code>trigger</code> prop accepts any React content to display as the clickable button,
-          while <code>direction</code> and <code>offset</code> control the menu positioning relative
-          to the trigger.
+          The <code>trigger</code> prop accepts any React content to display as the clickable button.
+          DropdownMenu now uses the Popup mixin for positioning,
+          supporting <code>anchorPoint</code>, <code>arrow</code>, and <code>offset</code> props
+          for flexible positioning relative to the trigger.
         </p>
       </section>
       <section>
@@ -158,13 +147,14 @@ export class DropdownMenuDocs extends React.Component<object, State> {
         {Code.format(`
             export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
               static get mixins(): Set<Mixin> {
-                return super.mixins.add(Directional)
+                return super.mixins.add(Popup)
               }
             }
           `)}
         <p>
-          The Directional mixin automatically provides positioning support, ensuring the dropdown menu
-          appears in the correct location relative to the trigger button.
+          The Popup mixin automatically provides positioning support using Floating UI primitives,
+          ensuring the dropdown menu appears in the correct location relative to the trigger button
+          with support for all anchor points and automatic repositioning.
         </p>
       </section>
       <section>
@@ -215,15 +205,15 @@ export class DropdownMenuDocs extends React.Component<object, State> {
         </p>
       </section>
       <section>
-        <h2>Positioning and Directions</h2>
+        <h2>Positioning and Anchor Points</h2>
         <p>
-          Like Tooltip, DropdownMenu supports 8 cardinal directions for flexible positioning.
-          The menu automatically appears in the specified direction relative to the trigger button,
-          with configurable offset for fine-tuning the placement.
+          DropdownMenu uses the Popup mixin for flexible positioning. For detailed information about
+          available anchor points and positioning options, see the <Link to="/mixins">Mixins documentation</Link>.
         </p>
         <p>
-          The default South direction works well for most use cases, but you can customize
-          based on available screen space and design requirements.
+          The <code>anchorPoint</code> prop controls positioning, while <code>offset</code> allows fine-tuning
+          the distance between the trigger and menu. The <code>arrow</code> prop can add a visual pointer
+          connecting the menu to its trigger.
         </p>
       </section>
 

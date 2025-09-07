@@ -306,4 +306,10 @@ export default pluginTypescript.config(
       'import/no-extraneous-dependencies': ['error', { devDependencies: true }],
     },
   }),
+  plugin({
+    files: ['*.docs.tsx'],
+    rules: {
+      '@stylistic/jsx/jsx-child-element-spacing': 'off',
+    },
+  }),
 ) as ESLint.ConfigData

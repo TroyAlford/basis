@@ -1,16 +1,25 @@
 import * as React from 'react'
+import { match } from '@basis/utilities'
 import { Link } from '../../react/components/Router/Link'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Code } from '../components/Code'
 
 interface State {
   multiline: TextEditor['props']['multiline'],
+  placeholder: string,
+  prefix: string,
+  suffix: string,
+  value: string,
   wrap: TextEditor['props']['wrap'],
 }
 
 export class TextEditorDocs extends React.Component<unknown, State> {
   state: State = {
     multiline: false,
+    placeholder: 'Type here to see the TextEditor in action...',
+    prefix: 'mailto:',
+    suffix: '@gmail.com',
+    value: 'username',
     wrap: TextEditor.Wrap.Soft,
   }
 
@@ -47,10 +56,34 @@ export class TextEditorDocs extends React.Component<unknown, State> {
             {/* Configuration Menu */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <h4>Multiline Mode</h4>
+                <strong>Placeholder</strong>
+                <TextEditor
+                  field="placeholder"
+                  placeholder="Placeholder text"
+                  value={this.state.placeholder}
+                  onChange={value => this.setState({ placeholder: value })}
+                />
+              </div>
+              <div>
+                <strong>Prefix/Suffix</strong>
+                <TextEditor
+                  field="prefix"
+                  placeholder="Prefix (e.g., @, #)"
+                  value={this.state.prefix}
+                  onChange={value => this.setState({ prefix: value })}
+                />
+                <TextEditor
+                  field="suffix"
+                  placeholder="Suffix (e.g., .com, px)"
+                  value={this.state.suffix}
+                  onChange={value => this.setState({ suffix: value })}
+                />
+              </div>
+              <div>
+                <strong>Multiline Mode</strong>
                 <select
-                  defaultValue="false"
                   style={{ padding: '0.5rem', width: '100%' }}
+                  value={this.state.multiline.toString()}
                   onChange={e => this.setState({ multiline: e.target.value as State['multiline'] })}
                 >
                   <option value="false">Single Line (input)</option>
@@ -60,10 +93,10 @@ export class TextEditorDocs extends React.Component<unknown, State> {
                 </select>
               </div>
               <div>
-                <h4>Text Wrapping</h4>
+                <strong>Text Wrapping</strong>
                 <select
-                  defaultValue="soft"
                   style={{ padding: '0.5rem', width: '100%' }}
+                  value={this.state.wrap}
                   onChange={e => this.setState({ wrap: e.target.value as State['wrap'] })}
                 >
                   <option value="soft">Soft (word boundaries)</option>
@@ -71,13 +104,31 @@ export class TextEditorDocs extends React.Component<unknown, State> {
                   <option value="off">Off (no wrapping)</option>
                 </select>
               </div>
+              <div>
+                <strong>Value</strong>
+                <TextEditor
+                  field="value"
+                  placeholder="Enter value"
+                  value={this.state.value}
+                  onChange={value => this.setState({ value })}
+                />
+              </div>
             </div>
             {/* Demo Area */}
             <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '1rem' }}>
               <TextEditor
                 field="demo"
-                multiline={this.state?.multiline || false}
-                placeholder="Type here to see the TextEditor in action..."
+                placeholder={this.state.placeholder}
+                prefix={this.state.prefix || undefined}
+                suffix={this.state.suffix || undefined}
+                value={this.state.value}
+                wrap={this.state.wrap}
+                multiline={match(this.state.multiline)
+                  .when('true').then(true)
+                  .when('false').then(false)
+                  .when((value: string) => Number.parseInt(value, 10) >= 0).then(value => Number.parseInt(value, 10))
+                  .else(this.state.multiline)}
+                onChange={value => this.setState({ value })}
               />
             </div>
           </div>
@@ -89,7 +140,7 @@ export class TextEditorDocs extends React.Component<unknown, State> {
             <TextEditor
               field="username"
               placeholder="Enter username"
-              onChange={(value, field) => setFormData(prev => ({ ...prev, [field]: value }))}
+              onChange={(value, field) => setState(prev => ({ ...prev, [field]: value }))}
             />
           `)}
           <h3>Multiline Textarea</h3>
@@ -98,7 +149,7 @@ export class TextEditorDocs extends React.Component<unknown, State> {
               field="description"
               multiline="auto"
               placeholder="Enter description..."
-              onChange={(value, field) => setFormData(prev => ({ ...prev, [field]: value }))}
+              onChange={(value, field) => setState(prev => ({ ...prev, [field]: value }))}
             />
           `)}
         </section>
@@ -121,7 +172,11 @@ export class TextEditorDocs extends React.Component<unknown, State> {
           <ul>
             <li><strong>false (default)</strong>: Renders as a single-line <code>input[type="text"]</code> element</li>
             <li><strong>true</strong>: Renders as a <code>textarea</code> with normal browser resizing</li>
-            <li><strong>'auto'</strong>: Renders as a <code>textarea</code> that automatically grows in height</li>
+            <li>
+              <strong>'auto'</strong>: Renders as a <code>textarea</code> that automatically grows in height.
+              <br />
+              <em>Note: Prefix and suffix are hidden in auto-growing mode.</em>
+            </li>
             <li><strong>number</strong>: Renders as a <code>textarea</code> with a fixed number of lines</li>
           </ul>
           <h3><code>wrap</code></h3>

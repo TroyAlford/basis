@@ -1,5 +1,5 @@
 import type * as React from 'react'
-import { match } from '@basis/utilities'
+import { match, noop } from '@basis/utilities'
 import { Keyboard } from '../../types/Keyboard'
 import { Orientation } from '../../types/Orientation'
 import { Component } from '../Component/Component'
@@ -33,15 +33,17 @@ interface ItemProps {
  *   <Menu.Item onActivate={() => console.log('Item 2 clicked')}>Item 2</Menu.Item>
  * </Menu>
  */
-export class Menu extends Component<Props> {
+export class Menu extends Component<Props, HTMLUListElement> {
   static Orientation = Orientation
 
   static displayName = 'Menu'
-  static defaultProps = {
-    ...Component.defaultProps,
-    disabled: false,
-    orientation: Orientation.Vertical,
-    readOnly: false,
+  static get defaultProps() {
+    return {
+      ...Component.defaultProps,
+      disabled: false,
+      orientation: Orientation.Vertical,
+      readOnly: false,
+    }
   }
 
   get attributes() {
@@ -58,10 +60,22 @@ export class Menu extends Component<Props> {
 
   protected handleKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
     match([this.props.orientation, event.key])
-      .when([Orientation.Vertical, Keyboard.ArrowDown]).then(() => this.navigateToItem('next'))
-      .when([Orientation.Vertical, Keyboard.ArrowUp]).then(() => this.navigateToItem('previous'))
-      .when([Orientation.Horizontal, Keyboard.ArrowRight]).then(() => this.navigateToItem('next'))
-      .when([Orientation.Horizontal, Keyboard.ArrowLeft]).then(() => this.navigateToItem('previous'))
+      .when([Orientation.Vertical, Keyboard.ArrowDown]).then(() => {
+        event.preventDefault()
+        this.navigateToItem('next')
+      })
+      .when([Orientation.Vertical, Keyboard.ArrowUp]).then(() => {
+        event.preventDefault()
+        this.navigateToItem('previous')
+      })
+      .when([Orientation.Horizontal, Keyboard.ArrowRight]).then(() => {
+        event.preventDefault()
+        this.navigateToItem('next')
+      })
+      .when([Orientation.Horizontal, Keyboard.ArrowLeft]).then(() => {
+        event.preventDefault()
+        this.navigateToItem('previous')
+      })
   }
 
   /**
@@ -84,6 +98,12 @@ export class Menu extends Component<Props> {
   /** Menu item component that extends Component for proper semantic HTML. */
   static Item = class MenuItem extends Component<ItemProps> {
     static displayName = 'MenuItem'
+    static defaultProps = {
+      ...Component.defaultProps,
+      disabled: false,
+      onActivate: noop,
+    }
+
     get attributes() {
       const { disabled } = this.props
       return {

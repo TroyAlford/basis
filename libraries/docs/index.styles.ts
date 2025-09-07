@@ -23,6 +23,11 @@ export const docsStyles = style('basis:docs:index', css`
       &:last-child { margin-bottom: 0; }
     }
 
+    select {
+      padding: 0.5rem;
+      width: 100%;
+    }
+
     ul {
       list-style: disc;
       padding-left: 0;

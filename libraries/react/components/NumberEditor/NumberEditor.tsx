@@ -12,6 +12,8 @@ import { Keyboard } from '../../types/Keyboard'
 import type { Mixin } from '../../types/Mixin'
 import { Editor } from '../Editor/Editor'
 
+import './NumberEditor.styles.ts'
+
 /** Props specific to number editor. */
 interface Props extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable {
   /** Step value for up/down arrow keys. If provided, arrow keys will adjust the value by this amount. */

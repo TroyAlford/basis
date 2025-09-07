@@ -1,25 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import * as React from 'react'
+import { AnchorPoint } from '../../types/AnchorPoint'
 import { render } from '../../testing/render'
-import { Direction } from '../../types/Direction'
 import { Tooltip } from './Tooltip'
 
 describe('Tooltip', () => {
-  // Helper function to test style attributes
-  const expectStyleAttribute = async (
-    tooltip: React.ReactElement,
-    expectedProps: Record<string, string>,
-  ) => {
-    const div = await render(tooltip)
-    expect(div.node).toHaveAttribute('style')
-
-    const style = div.node.getAttribute('style')
-    if (!style) throw new Error('Style attribute not found')
-    Object.entries(expectedProps).forEach(([prop, value]) => {
-      expect(style).toContain(`${prop}: ${value}`)
-    })
-  }
-
   // Helper function to test data attributes
   const expectDataAttributes = async (tooltip: React.ReactElement, expectedAttrs: Record<string, string>) => {
     const div = await render(tooltip)
@@ -29,117 +14,68 @@ describe('Tooltip', () => {
   }
 
   describe('static properties', () => {
-    test('exposes Direction enum', () => {
-      expect(Tooltip.Direction).toBe(Direction)
-    })
-
     test('has correct default props', () => {
       expect(Tooltip.defaultProps).toMatchObject({
-        animationDuration: '.125s',
+        arrow: true,
         children: null,
-        direction: Direction.S,
-        offset: 0,
+        offset: 4,
         visible: 'auto',
       })
     })
   })
 
-  describe('direction positioning', () => {
-    test('renders with all direction values', async () => {
-      const directions = [
-        Direction.N,
-        Direction.NE,
-        Direction.E,
-        Direction.SE,
-        Direction.S,
-        Direction.SW,
-        Direction.W,
-        Direction.NW,
+  describe('popup positioning', () => {
+    test('renders with all anchor point values', async () => {
+      const anchorPoints = [
+        AnchorPoint.Top,
+        AnchorPoint.TopStart,
+        AnchorPoint.TopEnd,
+        AnchorPoint.Bottom,
+        AnchorPoint.BottomStart,
+        AnchorPoint.BottomEnd,
+        AnchorPoint.Left,
+        AnchorPoint.LeftStart,
+        AnchorPoint.LeftEnd,
+        AnchorPoint.Right,
+        AnchorPoint.RightStart,
+        AnchorPoint.RightEnd,
       ]
 
-      for (const direction of directions) {
-        const div = await render(<Tooltip direction={direction}>Content</Tooltip>)
-        expect(div.node).toHaveAttribute('data-direction', direction)
+      for (const anchorPoint of anchorPoints) {
+        const div = await render(<Tooltip anchorPoint={anchorPoint}>Content</Tooltip>)
+        expect(div.node).toHaveAttribute('data-popup-anchor-point', anchorPoint)
       }
     })
-  })
 
-  describe('animation duration handling', () => {
-    test('handles string values', async () => {
-      await expectStyleAttribute(
-        <Tooltip animationDuration=".3s">Content</Tooltip>,
-        { '--tooltip-animation-duration': '.3s' },
-      )
-    })
-
-    test('handles numeric values (appends s)', async () => {
-      await expectStyleAttribute(
-        <Tooltip animationDuration={0.2}>Content</Tooltip>,
-        { '--tooltip-animation-duration': '0.2s' },
-      )
-    })
-
-    test('handles zero and negative values', async () => {
-      await expectStyleAttribute(
-        <Tooltip animationDuration={0}>Content</Tooltip>,
-        { '--tooltip-animation-duration': '0s' },
-      )
-
-      await expectStyleAttribute(
-        <Tooltip animationDuration={-0.1}>Content</Tooltip>,
-        { '--tooltip-animation-duration': '-0.1s' },
-      )
-    })
-
-    test('falls back to default for nil/empty values', async () => {
-      await expectStyleAttribute(
-        <Tooltip animationDuration="">Content</Tooltip>,
-        { '--tooltip-animation-duration': '.125s' },
-      )
-
-      await expectStyleAttribute(
-        <Tooltip animationDuration={null}>Content</Tooltip>,
-        { '--tooltip-animation-duration': '.125s' },
+    test('renders with popup data attributes', async () => {
+      await expectDataAttributes(
+        <Tooltip arrow={true} anchorPoint={AnchorPoint.Bottom}>
+          Content
+        </Tooltip>,
+        {
+          'data-popup': 'true',
+          'data-popup-anchor-point': 'bottom',
+          'data-popup-arrow': 'true',
+        },
       )
     })
   })
 
-  describe('offset handling', () => {
-    test('handles string values', async () => {
-      await expectStyleAttribute(
-        <Tooltip offset="1rem">Content</Tooltip>,
-        { '--directional-offset': '1rem' },
-      )
-    })
-
-    test('handles numeric values (appends px)', async () => {
-      await expectStyleAttribute(
-        <Tooltip offset={16}>Content</Tooltip>,
-        { '--directional-offset': '16px' },
-      )
-    })
-
-    test('handles zero and negative values', async () => {
-      await expectStyleAttribute(
-        <Tooltip offset={0}>Content</Tooltip>,
-        { '--directional-offset': '0px' },
+  describe('visibility handling', () => {
+    test('renders with visible prop', async () => {
+      await expectDataAttributes(
+        <Tooltip visible={true}>Content</Tooltip>,
+        { 'data-visible': 'true' },
       )
 
-      await expectStyleAttribute(
-        <Tooltip offset={-10}>Content</Tooltip>,
-        { '--directional-offset': '-10px' },
-      )
-    })
-
-    test('falls back to default for nil/empty values', async () => {
-      await expectStyleAttribute(
-        <Tooltip offset="">Content</Tooltip>,
-        { '--directional-offset': '0px' },
+      await expectDataAttributes(
+        <Tooltip visible={false}>Content</Tooltip>,
+        { 'data-visible': 'false' },
       )
 
-      await expectStyleAttribute(
-        <Tooltip offset={null}>Content</Tooltip>,
-        { '--directional-offset': '0px' },
+      await expectDataAttributes(
+        <Tooltip visible="auto">Content</Tooltip>,
+        { 'data-visible': 'auto' },
       )
     })
   })
@@ -148,34 +84,37 @@ describe('Tooltip', () => {
     test('renders with multiple custom props', async () => {
       await expectDataAttributes(
         <Tooltip
-          animationDuration={0.5}
-          direction={Direction.E}
-          offset={32}
+          anchorPoint={AnchorPoint.Right}
+          arrow={false}
+          offset={8}
           visible={true}
         >
           Content
         </Tooltip>,
         {
-          'data-direction': 'E',
+          'data-popup': 'true',
+          'data-popup-anchor-point': 'right',
+          'data-popup-arrow': 'false',
           'data-visible': 'true',
-          'role': 'tooltip',
         },
+      )
+    })
+  })
+
+  describe('basic rendering', () => {
+    test('renders tooltip content', async () => {
+      const div = await render(
+        <Tooltip>
+          Test tooltip content
+        </Tooltip>,
       )
 
-      await expectStyleAttribute(
-        <Tooltip
-          animationDuration={0.5}
-          direction={Direction.E}
-          offset={32}
-          visible={true}
-        >
-          Content
-        </Tooltip>,
-        {
-          '--directional-offset': '32px',
-          '--tooltip-animation-duration': '0.5s',
-        },
-      )
+      expect(div.node.textContent).toContain('Test tooltip content')
+    })
+
+    test('renders with role attribute', async () => {
+      const div = await render(<Tooltip>Content</Tooltip>)
+      expect(div.node).toHaveAttribute('role', 'tooltip')
     })
   })
 })

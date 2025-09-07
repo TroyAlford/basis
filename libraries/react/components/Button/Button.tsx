@@ -41,6 +41,8 @@ interface Props {
  */
 export class Button extends Component<Props, HTMLButtonElement> {
   static readonly Type = ButtonType
+
+  static displayName = 'Button'
   static defaultProps: Partial<Component<Props>['props']> = {
     disabled: false,
     onActivate: noop,

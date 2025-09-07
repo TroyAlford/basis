@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Tag } from '@basis/react'
 import { NumberEditor } from '../../react/components/NumberEditor/NumberEditor'
 import { Link } from '../../react/components/Router/Link'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
@@ -6,15 +7,21 @@ import { Code } from '../components/Code'
 
 interface State {
   autoFocus: boolean,
-  initialValue: number,
+  placeholder: string,
+  prefix: string,
   step: number,
+  suffix: string,
+  value: number,
 }
 
 export class NumberEditorDocs extends React.Component<object, State> {
   state: State = {
     autoFocus: false,
-    initialValue: 0,
+    placeholder: 'Enter a number...',
+    prefix: '$',
     step: 1,
+    suffix: 'USD',
+    value: 1000,
   }
 
   render(): React.ReactNode {
@@ -45,10 +52,34 @@ export class NumberEditorDocs extends React.Component<object, State> {
           <div style={{ display: 'grid', gap: '2rem', gridTemplateColumns: '300px 1fr' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <h4>Step Value</h4>
+                <strong>Placeholder</strong>
+                <TextEditor
+                  field="placeholder"
+                  placeholder="Placeholder text"
+                  value={this.state.placeholder}
+                  onChange={value => this.setState({ placeholder: value })}
+                />
+              </div>
+              <div>
+                <strong>Prefix/Suffix</strong>
+                <TextEditor
+                  field="prefix"
+                  placeholder="Prefix (e.g., $, €)"
+                  value={this.state.prefix}
+                  onChange={value => this.setState({ prefix: value })}
+                />
+                <TextEditor
+                  field="suffix"
+                  placeholder="Suffix (e.g., USD, items)"
+                  value={this.state.suffix}
+                  onChange={value => this.setState({ suffix: value })}
+                />
+              </div>
+              <div>
+                <strong>Step Navigation</strong>
                 <select
-                  defaultValue="1"
                   style={{ padding: '0.5rem', width: '100%' }}
+                  value={this.state.step}
                   onChange={e => this.setState({ step: Number(e.target.value) })}
                 >
                   <option value="1">1 (default)</option>
@@ -58,36 +89,30 @@ export class NumberEditorDocs extends React.Component<object, State> {
                 </select>
               </div>
               <div>
-                <h4>Initial Value</h4>
-                <TextEditor
-                  field="initialValue"
-                  initialValue={String(this.state?.initialValue || 0)}
-                  placeholder="Enter initial value"
-                  onChange={value => this.setState({ initialValue: Number(value) || 0 })}
+                <strong>Value</strong>
+                <NumberEditor
+                  field="value"
+                  placeholder="Enter value"
+                  value={this.state.value}
+                  onChange={value => this.setState({ value })}
                 />
               </div>
             </div>
             {/* Demo Area */}
             <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '1rem' }}>
               <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem' }}>Number Input:</label>
+                <label style={{ display: 'block', marginBottom: '0.5rem' }}>
+                  NumberEditor with all mixins:
+                </label>
                 <NumberEditor
-                  autoFocus={this.state?.autoFocus || false}
+                  autoFocus={this.state.autoFocus}
                   field="demo"
-                  initialValue={this.state?.initialValue || 0}
-                  placeholder="Enter a number..."
-                  step={this.state?.step || 1}
-                  onChange={value => this.setState({ initialValue: value })}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem' }}>With Step Navigation:</label>
-                <NumberEditor
-                  field="stepped"
-                  initialValue={1000}
-                  placeholder="Use arrow keys to step..."
-                  step={this.state?.step || 1}
-                  onChange={value => this.setState({ initialValue: value })}
+                  placeholder={this.state.placeholder}
+                  prefix={this.state.prefix || undefined}
+                  step={this.state.step}
+                  suffix={this.state.suffix || undefined}
+                  value={this.state.value}
+                  onChange={value => this.setState({ value })}
                 />
               </div>
             </div>
@@ -100,7 +125,7 @@ export class NumberEditorDocs extends React.Component<object, State> {
             <NumberEditor
               field="quantity"
               placeholder="Enter quantity"
-              onChange={(value, field) => setFormData(prev => ({ ...prev, [field]: value }))}
+              onChange={(value, field) => setState(prev => ({ ...prev, [field]: value }))}
             />
           `)}
           <h3>With Step Navigation</h3>
@@ -109,7 +134,7 @@ export class NumberEditorDocs extends React.Component<object, State> {
               field="price"
               step={0.01}
               placeholder="Enter price"
-              onChange={(value, field) => setFormData(prev => ({ ...prev, [field]: value }))}
+              onChange={(value, field) => setState(prev => ({ ...prev, [field]: value }))}
             />
           `)}
         </section>
@@ -161,8 +186,8 @@ export class NumberEditorDocs extends React.Component<object, State> {
             When a <code>step</code> value is provided, users can navigate numbers using arrow keys:
           </p>
           <ul>
-            <li><strong>↑ Arrow Up</strong>: Increases value by step amount</li>
-            <li><strong>↓ Arrow Down</strong>: Decreases value by step amount</li>
+            <li><strong><Tag>↑</Tag> Arrow Up</strong>: Increases value by step amount</li>
+            <li><strong><Tag>↓</Tag> Arrow Down</strong>: Decreases value by step amount</li>
           </ul>
         </section>
         <section>
