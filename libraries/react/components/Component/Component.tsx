@@ -1,15 +1,16 @@
+import type { ComponentType } from 'react'
 import * as React from 'react'
 import { classNames, deepEquals, kebabCase, noop } from '@basis/utilities'
 import type { Mixin } from '../../types/Mixin'
 import { filterByPrefix } from '../../utilities/filterByPrefix'
 import { prefixObject } from '../../utilities/prefixObject'
 
-type Tag = keyof React.JSX.IntrinsicElements
+type Tag<P = object> =
+  | keyof React.JSX.IntrinsicElements
+  | ComponentType<P>
 
 /** Props for the Component class. */
-interface TProps<
-  E extends Element = HTMLDivElement,
-> {
+interface TProps<E extends Element = HTMLDivElement> {
   /** The children of the component. */
   children?: React.ReactNode,
   /** Optional class name(s) to output on the component's root element. */
@@ -64,6 +65,9 @@ export abstract class Component<
       'data-theme': this.props.theme,
       ...prefixObject('aria-', filterByPrefix('aria-', this.props)),
       ...prefixObject('data-', filterByPrefix('data-', this.props)),
+      ...this.mixins.reduce((attributes, mixin) => ({
+        ...attributes, ...mixin.attributes?.(this.props),
+      }), {}),
     }
   }
 
@@ -96,7 +100,7 @@ export abstract class Component<
    * The tag name of the component's root node.
    * @returns The tag name.
    */
-  get tag(): Tag { return 'div' }
+  get tag(): Tag<Props> { return 'div' }
 
   /**
    * Determines if the component should update.

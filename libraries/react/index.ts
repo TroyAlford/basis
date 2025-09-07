@@ -17,12 +17,11 @@ export { Theme } from './components/Theme/Theme'
 export { Tooltip } from './components/Tooltip/Tooltip'
 
 export { Accessible } from './mixins/Accessible'
-export { Directional } from './mixins/Directional'
 export { Focusable } from './mixins/Focusable'
+export { Popup } from './mixins/Popup'
 export { Placeholder } from './mixins/Placeholder'
 export { PrefixSuffix } from './mixins/PrefixSuffix'
 
-export { Direction } from './types/Direction'
 export { Keyboard } from './types/Keyboard'
 export { Orientation } from './types/Orientation'
 

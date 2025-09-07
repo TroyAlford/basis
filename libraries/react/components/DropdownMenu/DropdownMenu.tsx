@@ -1,17 +1,16 @@
 import * as React from 'react'
 import { isNil, match, noop } from '@basis/utilities'
-import type { IDirectional } from '../../mixins/Directional'
-import { Directional } from '../../mixins/Directional'
-import { Direction } from '../../types/Direction'
+import type { IPopup } from '../../mixins/Popup'
+import { AnchorPoint } from '../../types/AnchorPoint'
 import { Keyboard } from '../../types/Keyboard'
-import type { Mixin } from '../../types/Mixin'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Menu } from '../Menu/Menu'
+import { PopupMenu } from '../PopupMenu/PopupMenu'
 
 import './DropdownMenu.styles.ts'
 
-interface Props extends IDirectional {
+interface Props extends IPopup {
   /**
    * The children to display within the dropdown when it is opened.
    * Generally, these will be a set of DropdownMenu.Item components.
@@ -39,16 +38,11 @@ interface State {
 
 /** A dropdown menu component, composed of a {@link Button} and a {@link Menu}. */
 export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
+  static AnchorPoint = AnchorPoint
   static Item = Menu.Item
   static Divider = Menu.Divider
-  static Direction = Direction
 
   static displayName = 'DropdownMenu'
-  static get mixins(): Set<Mixin> {
-    return super.mixins
-      .add(Directional)
-  }
-
   static defaultProps = {
     ...super.defaultProps,
     disabled: false,
@@ -57,6 +51,8 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
     open: undefined,
     trigger: null,
   }
+
+  private button = React.createRef<HTMLButtonElement>()
 
   get attributes() {
     return {
@@ -119,13 +115,24 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
 
     return (
       <>
-        <Button className="trigger" disabled={disabled} onActivate={this.handleToggle}>
+        <Button
+          className="trigger"
+          disabled={disabled}
+          nodeRef={this.button}
+          onActivate={this.handleToggle}
+        >
           {this.props.trigger}
         </Button>
         {this.isOpen && !disabled && (
-          <Menu className="dropdown" disabled={disabled}>
+          <PopupMenu
+            anchorPoint={this.props.anchorPoint}
+            anchorTo={this.button}
+            arrow={this.props.arrow}
+            disabled={disabled}
+            offset={this.props.offset}
+          >
             {children}
-          </Menu>
+          </PopupMenu>
         )}
       </>
     )

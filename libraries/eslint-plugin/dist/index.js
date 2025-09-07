@@ -314,4 +314,10 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
             'dot-notation': 'off',
             'import/no-extraneous-dependencies': ['error', { devDependencies: true }],
         },
+    }),
+    plugin({
+        files: ['*.docs.tsx'],
+        rules: {
+            '@stylistic/jsx/jsx-child-element-spacing': 'off',
+        },
     })], false));

@@ -44,7 +44,7 @@ export class ApplicationBase<
     }
   }
 
-  get tag(): Component['tag'] { return 'div' }
+  get tag() { return 'div' as const }
 
   constructor(props: P & Props) {
     super(props)

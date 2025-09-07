@@ -25,7 +25,7 @@
     "react-dom": "^19"
   },
   "scripts": {
-    "docs:start": "bun run --filter @basis/docs start",
+    "docs": "bun ./libraries/docs/index.html",
     "test:develop": "bun test --watch",
     "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces",
     "workspace": "bun ./libraries/workspaces/source/bin/workspace.ts",

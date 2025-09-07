@@ -1,17 +1,13 @@
-import * as React from 'react'
-import { isNil } from '@basis/utilities'
-import type { IDirectional } from '../../mixins/Directional'
-import { Directional } from '../../mixins/Directional'
-import { Direction } from '../../types/Direction'
+import type * as React from 'react'
+import type { IPopup } from '../../mixins/Popup'
+import { Popup } from '../../mixins/Popup'
 import type { Mixin } from '../../types/Mixin'
 import { Component } from '../Component/Component'
 
 import './Tooltip.styles.ts'
 
 /** Props for the Tooltip component. */
-interface Props extends IDirectional {
-  /** The animation duration for the tooltip. */
-  animationDuration?: number | string,
+interface Props extends IPopup {
   /** The children of the tooltip. */
   children: React.ReactNode,
   /** Whether the tooltip is visible. */
@@ -19,29 +15,35 @@ interface Props extends IDirectional {
 }
 
 /**
- * A tooltip bubble that anchors to its nearest parent element automatically.
- * Place it as a direct child of the element you want to describe.
+ * A tooltip bubble that can be positioned relative to an anchor element or its parent.
+ * Uses Floating UI for accurate positioning in all directions with automatic arrow positioning.
  * @example
  * <div className="some component">
  *   Content
- *   <Tooltip direction={Tooltip.Direction.NE} offset={8} animationDuration=".2s">
+ *   <Tooltip placement="top" animationDuration=".2s">
  *     Tooltip Content!
  *   </Tooltip>
  * </div>
+ * @example
+ * <div ref={anchorRef} className="anchor">
+ *   Anchor Content
+ * </div>
+ * <Tooltip anchor={anchorRef} placement="bottom-end">
+ *   Tooltip attached to anchor!
+ * </Tooltip>
  */
 export class Tooltip extends Component<Props, HTMLDivElement> {
-  static Direction = Direction
-
   static displayName = 'Tooltip'
   static get mixins(): Set<Mixin> {
-    return super.mixins.add(Directional)
+    return super.mixins.add(Popup)
   }
 
   /** Default props for tooltip. */
   static defaultProps: Props = {
     ...super.defaultProps,
-    animationDuration: '.125s',
+    arrow: true,
     children: null,
+    offset: 4,
     visible: 'auto',
   }
 
@@ -50,33 +52,6 @@ export class Tooltip extends Component<Props, HTMLDivElement> {
       ...super.attributes,
       'data-visible': this.props.visible,
       'role': 'tooltip',
-      'style': {
-        '--tooltip-animation-duration': this.animationDuration,
-      },
     }
-  }
-
-  /**
-   * Gets the animation duration with fallback to default.
-   * @returns The animation duration string
-   */
-  get animationDuration(): string {
-    const { animationDuration } = this.props
-    if (isNil(animationDuration) || animationDuration === '') {
-      return Tooltip.defaultProps.animationDuration as string
-    }
-    if (typeof animationDuration === 'number') return `${animationDuration}s`
-    return animationDuration
-  }
-
-  content(children?: React.ReactNode): React.ReactNode {
-    return (
-      <>
-        <div className="bubble">
-          {children}
-        </div>
-        <div className="arrow" />
-      </>
-    )
   }
 }

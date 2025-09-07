@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { NumberEditor } from '@basis/react/components/NumberEditor/NumberEditor'
 import { Code } from '../components/Code'
 
 export class MixinsDocs extends React.Component {
@@ -53,14 +54,14 @@ export class MixinsDocs extends React.Component {
           {Code.format(`
             // Mixins are applied in this order:
             // 1. Regular mixins (prefix, suffix, etc.)
-            // 2. Post mixins (directional, etc.)
+            // 2. Post mixins (popup, etc.)
             
             export class Tooltip extends Component<Props> {
               static get mixins(): Set<Mixin> {
                 return super.mixins
                   .add(Accessible)      // Applied first
                   .add(PrefixSuffix)    // Applied first
-                  .add(Directional)     // Applied last (post: true)
+                  .add(Popup)           // Applied last (post: true)
               }
             }
           `)}
@@ -73,109 +74,45 @@ export class MixinsDocs extends React.Component {
           </p>
           <h3>Accessible Mixin</h3>
           <p>
-            Provides ARIA attributes and accessibility features for components.
+            Provides ARIA attributes and accessibility features for components. Automatically
+            adds <code>aria-label</code> and <code>aria-describedby</code> attributes to form inputs
+            and interactive elements.
           </p>
-          {Code.format(`
-            export const Accessible: Mixin<IAccessible> = {
-              content<T extends React.ReactElement>(
-                element: T,
-                component: { props: IAccessible },
-              ): T {
-                const { label, description } = component.props
-                
-                return React.cloneElement(element, {
-                  ...element.props,
-                  'aria-label': label,
-                  'aria-describedby': description,
-                } as React.HTMLAttributes<HTMLElement>) as T
-              },
-              
-              defaultProps: {
-                label: undefined,
-                description: undefined,
-              },
-            }
-          `)}
           <p>
-            <strong>Usage</strong>:
-            Automatically adds <code>aria-label</code> and <code>aria-describedby</code> attributes
-            to form inputs and interactive elements.
+            <strong>Usage:</strong> Perfect for form inputs, buttons, and interactive elements
+            that need proper accessibility labeling.
           </p>
           <h3>PrefixSuffix Mixin</h3>
           <p>
             Adds content before and after the main element, useful for labels, icons, or additional context.
+            Wraps the component with prefix and suffix elements when provided.
           </p>
-          {Code.format(`
-            export const PrefixSuffix: Mixin<IPrefixSuffix> = {
-              content<T extends React.ReactElement>(
-                element: T,
-                component: { props: IPrefixSuffix },
-              ): T {
-                const { prefix, suffix } = component.props
-                
-                return (
-                  <>
-                    {prefix && <div className="prefix">{prefix}</div>}
-                    {element}
-                    {suffix && <div className="suffix">{suffix}</div>}
-                  </>
-                ) as T
-              },
-              
-              defaultProps: {},
-              post: true, // Applied after other mixins
-            }
-          `)}
           <p>
-            <strong>Usage:</strong> Perfect for adding currency symbols, units, or labels around
-            inputs. Example: <code>&lt;NumberEditor prefix="$" suffix="USD" /&gt;</code>
+            <strong>Usage:</strong> Perfect for adding currency symbols, units, or labels around inputs.
+          </p>
+          <p>
+            <strong>Example:</strong>
+            <NumberEditor prefix="$" suffix="USD" value={1000} />
+            {Code.format(`
+              <NumberEditor prefix="$" suffix="USD" value={1000} />
+            `)}
           </p>
           <h3>Placeholder Mixin</h3>
           <p>
-            Provides placeholder text support for input elements.
+            Provides placeholder text support for input elements. Automatically adds
+            the <code>placeholder</code> attribute to input elements.
           </p>
-          {Code.format(`
-            export const Placeholder: Mixin<IPlaceholder> = {
-              content<T extends React.ReactElement>(
-                element: T,
-                component: { props: IPlaceholder },
-              ): T {
-                const { placeholder } = component.props
-                
-                return React.cloneElement(element, {
-                  ...element.props,
-                  placeholder,
-                } as React.HTMLAttributes<HTMLElement>) as T
-              },
-              
-              defaultProps: {
-                placeholder: undefined,
-              },
-            }
-          `)}
           <p>
-            <strong>Usage:</strong> Automatically adds <code>placeholder</code> attribute to input elements.
+            <strong>Usage:</strong> Essential for form inputs that need placeholder text for better UX.
           </p>
           <h3>Focusable Mixin</h3>
           <p>
-            Provides auto-focus support and focus management for components.
+            Provides auto-focus support and focus management for components. Automatically focuses
+            components when <code>autoFocus={true}</code> is set.
           </p>
-          {Code.format(`
-            export const Focusable: Mixin<IFocusable> = {
-              componentDidMount(component: { props: IFocusable, rootNode?: HTMLElement | null }): void {
-                if (component.props.autoFocus && component.rootNode) {
-                  component.rootNode.focus()
-                }
-              },
-              
-              defaultProps: {
-                autoFocus: false,
-              },
-            }
-          `)}
           <p>
-            <strong>Usage:</strong> Automatically focuses components when <code>autoFocus={true}</code> is set.
-            Useful for form inputs that should receive focus immediately.
+            <strong>Usage:</strong> Useful for form inputs that should receive focus immediately
+            when mounted or when certain conditions are met.
           </p>
         </section>
         <section>
@@ -184,38 +121,46 @@ export class MixinsDocs extends React.Component {
             Render mixins modify the component's root element. They are applied after content mixins
             to ensure the final element has all necessary attributes and styles.
           </p>
-          <h3>Directional Mixin</h3>
+          <h3>Popup Mixin</h3>
           <p>
-            Provides directional positioning and offset support for components like tooltips, dropdowns, and popovers.
+            Provides flexible positioning support using Floating UI primitives for components like tooltips,
+            dropdowns, and popovers. Supports both anchor-based and parent-based positioning with automatic
+            repositioning on updates.
           </p>
-          {Code.format(`
-            export const Directional: Mixin<IDirectional> = {
-              render<T extends React.ReactElement>(
-                element: T,
-                component: { props: IDirectional },
-              ): T {
-                const { direction, offset } = component.props
-                
-                return React.cloneElement(element, {
-                  ...element.props,
-                  'data-direction': direction,
-                  'style': {
-                    ...element.props.style,
-                    '--directional-offset': getOffsetString(offset),
-                  },
-                } as React.HTMLAttributes<HTMLElement>) as T
-              },
-              
-              defaultProps: {
-                direction: Direction.S,
-                offset: 0,
-              },
-            }
-          `)}
           <p>
-            <strong>Usage</strong>: Automatically adds <code>data-direction</code> attribute
-            and <code>--directional-offset</code> CSS variable for positioning components.
-            Example: <code>&lt;Tooltip direction="NE" offset={8} /&gt;</code>
+            <strong>Usage:</strong> Automatically handles positioning using Floating UI with support for
+            all anchor points, automatic repositioning, and arrow positioning.
+          </p>
+          <p>
+            <strong>Example:</strong>
+            {Code.format(`
+              <Tooltip anchorTo={ref} anchorPoint={AnchorPoint.BottomEnd} arrow={true} />
+            `)}
+          </p>
+          <h4>Available Anchor Points</h4>
+          <p>
+            The Popup mixin supports 12 anchor point options that directly map to Floating UI placement values:
+          </p>
+          <ul>
+            <li><strong>Top</strong>: Above the reference element with center alignment</li>
+            <li><strong>Top Start</strong>: Above the reference element with left alignment</li>
+            <li><strong>Top End</strong>: Above the reference element with right alignment</li>
+            <li><strong>Bottom</strong>: Below the reference element with center alignment</li>
+            <li><strong>Bottom Start</strong>: Below the reference element with left alignment</li>
+            <li><strong>Bottom End</strong>: Below the reference element with right alignment</li>
+            <li><strong>Left</strong>: To the left of the reference element with center alignment</li>
+            <li><strong>Left Start</strong>: To the left of the reference element with top alignment</li>
+            <li><strong>Left End</strong>: To the left of the reference element with bottom alignment</li>
+            <li><strong>Right</strong>: To the right of the reference element with center alignment</li>
+            <li><strong>Right Start</strong>: To the right of the reference element with top alignment</li>
+            <li><strong>Right End</strong>: To the right of the reference element with bottom alignment</li>
+          </ul>
+          <h4>Anchor vs Parent Positioning</h4>
+          <p>
+            Components using the Popup mixin can position themselves relative to either a specific anchor element
+            (via the <code>anchorTo</code> prop) or automatically to their parent element. When an anchor ref
+            is provided, the popup positions relative to that element. When omitted, it falls back to parent-based
+            positioning.
           </p>
         </section>
         <section>
@@ -341,14 +286,15 @@ export class MixinsDocs extends React.Component {
           {Code.format(`
             export class Tooltip extends Component<Props> {
               static get mixins(): Set<Mixin> {
-                return super.mixins.add(Directional)
+                return super.mixins.add(Popup)
               }
               
               // No need to manually apply mixins!
-              // Directional mixin automatically:
-              // - Adds direction/offset default props
-              // - Sets data-direction attribute
-              // - Adds --directional-offset CSS variable
+              // Popup mixin automatically:
+              // - Adds anchorPoint/offset/arrow default props
+              // - Sets data-popup attributes
+              // - Handles positioning with Floating UI
+              // - Manages repositioning on updates
               
               content(): React.ReactNode {
                 return (
