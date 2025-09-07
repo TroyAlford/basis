@@ -22,12 +22,6 @@ style('basis:icon', css`
       cursor: pointer;
     }
 
-    /* Make all child elements inherit stroke and fill from SVG */
-    * {
-      fill: inherit;
-      stroke: inherit;
-    }
-
     > .overlay {
       fill: var(--basis-icon-overlay-color);
       stroke: var(--basis-icon-overlay-stroke);

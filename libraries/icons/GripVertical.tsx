@@ -5,13 +5,12 @@ export class GripVertical extends IconBase {
   static displayName = 'GripVerticalIcon'
   renderContent = (): React.ReactNode => (
     <>
-      <circle cx={110} cy={150} r={20} />
-      <circle cx={190} cy={150} r={20} />
-      <circle cx={110} cy={65} r={20} />
-      <circle cx={190} cy={65} r={20} />
-      <circle cx={110} cy={235} r={20} />
-      <circle cx={190} cy={235} r={20} />
+      <circle cx={-26.66666666666667} cy={0} r={13.333333333333332} />
+      <circle cx={26.666666666666657} cy={0} r={13.333333333333332} />
+      <circle cx={-26.66666666666667} cy={-56.66666666666667} r={13.333333333333332} />
+      <circle cx={26.666666666666657} cy={-56.66666666666667} r={13.333333333333332} />
+      <circle cx={-26.66666666666667} cy={56.66666666666666} r={13.333333333333332} />
+      <circle cx={26.666666666666657} cy={56.66666666666666} r={13.333333333333332} />
     </>
   )
-  viewBox = '0 0 300 300'
 }

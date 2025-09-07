@@ -5,13 +5,12 @@ export class GripBottomLeft extends IconBase {
   static displayName = 'GripBottomLeftIcon'
   renderContent = (): React.ReactNode => (
     <>
-      <circle cx={250} cy={250} r={35} />
-      <circle cx={375} cy={375} r={35} />
-      <circle cx={125} cy={250} r={35} />
-      <circle cx={250} cy={375} r={35} />
-      <circle cx={125} cy={125} r={35} />
-      <circle cx={125} cy={375} r={35} />
+      <circle cx={0} cy={0} r={14} />
+      <circle cx={50} cy={50} r={14} />
+      <circle cx={-50} cy={0} r={14} />
+      <circle cx={0} cy={50} r={14} />
+      <circle cx={-50} cy={-50} r={14} />
+      <circle cx={-50} cy={50} r={14} />
     </>
   )
-  viewBox = '0 0 500 500'
 }

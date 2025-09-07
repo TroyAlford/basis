@@ -6,24 +6,23 @@ export class Constrained extends IconBase {
   renderContent = (): React.ReactNode => (
     <>
       <path
-        d="M21 7V17"
+        d="M75 -41.6667V41.6667"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="2"
+        strokeWidth={16.666666666666668}
       />
       <path
-        d="M3 7V17"
+        d="M-75 -41.6667V41.6667"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="2"
+        strokeWidth={16.666666666666668}
       />
       <path
-        d="M7 12H17M7 12L9.5 9.5M7 12L9.5 14.5M17 12L14.5 9.5M17 12L14.5 14.5"
+        d="M-41.6667 0H41.6667M-41.6667 0L-20.8333 -20.8333M-41.6667 0L-20.8333 20.8333M41.6667 0L20.8333 -20.8333M41.6667 0L20.8333 20.8333"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth="2"
+        strokeWidth={16.666666666666668}
       />
     </>
   )
-  viewBox = '0 0 24 24'
 }

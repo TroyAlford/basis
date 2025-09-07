@@ -31,8 +31,8 @@ export abstract class IconBase<
     return typeof ctor === 'function' && ctor.prototype instanceof IconBase
   }
 
-  abstract renderContent: () => React.ReactNode
-  abstract readonly viewBox: string
+  renderContent: () => React.ReactNode = () => null
+  viewBox = '-100 -100 200 200'
 
   get classNames() { return super.classNames.add('icon') }
   get tag() { return 'svg' as const }

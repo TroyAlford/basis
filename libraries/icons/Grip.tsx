@@ -39,25 +39,17 @@ export class Grip extends IconBase<Props> {
   static BottomLeft = GripBottomLeft
   static BottomRight = GripBottomRight
 
-  // Required abstract methods from IconBase
-  renderContent = (): React.ReactNode => {
+  // Override Render instead of renderContent, so we don't get nesting
+  render = (): React.ReactNode => {
     const { orientation, ...props } = this.props
 
     switch (orientation) {
-      case Orientation.Vertical:
-      case 'Vertical': return <GripVertical {...props} />
-      case Orientation.TopRight:
-      case 'TopRight': return <GripTopRight {...props} />
-      case Orientation.TopLeft:
-      case 'TopLeft': return <GripTopLeft {...props} />
-      case Orientation.BottomRight:
-      case 'BottomRight': return <GripBottomRight {...props} />
-      case Orientation.BottomLeft:
-      case 'BottomLeft': return <GripBottomLeft {...props} />
-      case Orientation.Horizontal:
-      case 'Horizontal':
-      default: return <GripHorizontal {...props} />
+      case Orientation.Vertical: return <GripVertical {...props} />
+      case Orientation.TopRight: return <GripTopRight {...props} />
+      case Orientation.TopLeft: return <GripTopLeft {...props} />
+      case Orientation.BottomRight: return <GripBottomRight {...props} />
+      case Orientation.BottomLeft: return <GripBottomLeft {...props} />
+      case Orientation.Horizontal: default: return <GripHorizontal {...props} />
     }
   }
-  readonly viewBox = '0 0 24 24'
 }

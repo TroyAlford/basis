@@ -4,7 +4,9 @@ import { IconBase } from './IconBase/IconBase'
 export class StarFilled extends IconBase {
   static displayName = 'StarFilledIcon'
   renderContent = (): React.ReactNode => (
-    <path d="M16 2l3.09 6.26L26 9.27l-5 4.87 1.18 6.88L16 17.77l-6.18 3.25L11 14.14 6 9.27l6.91-1.01L16 2z" />
+    <path
+      d="M0 -83.3333L25.75 -31.1667L83.3333 -22.75L41.6667 17.8333L51.5 75.1667L0 48.0833L-51.5 75.1667L-41.6667 17.8333L-83.3333 -22.75L-25.75 -31.1667L0 -83.3333Z"
+      strokeWidth={10}
+    />
   )
-  viewBox = '4 1 24 22'
 }

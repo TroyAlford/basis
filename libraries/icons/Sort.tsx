@@ -49,5 +49,4 @@ export class Sort extends IconBase<Props> {
 
     return Component ? <Component {...rest} /> : null
   }
-  viewBox = '0 0 32 32'
 }

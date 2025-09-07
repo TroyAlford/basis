@@ -26,12 +26,11 @@ export class Heart extends IconBase<HeartProps> {
   static Filled = HeartFilled
   static Outline = HeartOutline
 
-  // Required abstract methods from IconBase
-  renderContent = (): React.ReactNode => {
+  // Override Render instead of renderContent, so we don't get nesting
+  render = (): React.ReactNode => {
     const { filled, ...props } = this.props
     return filled
       ? <HeartFilled {...props} />
       : <HeartOutline {...props} />
   }
-  readonly viewBox = '0 0 24 24'
 }

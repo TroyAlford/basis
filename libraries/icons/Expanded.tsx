@@ -4,7 +4,6 @@ import { IconBase } from './IconBase/IconBase'
 export class Expanded extends IconBase {
   static displayName = 'ExpandedIcon'
   renderContent = (): React.ReactNode => (
-    <path d="M17.28 8.416l-8.608 15.136-8.672-15.136h17.28z" />
+    <path d="M54.875 -47.4L1.075 47.2L-53.125 -47.4H54.875Z" />
   )
-  viewBox = '0 0 17 32'
 }

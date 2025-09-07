@@ -81,5 +81,4 @@ export class MoonPhase extends IconBase<Props> {
       <g transform={`rotate(${this.props.tilt * 100})`}>{this.renderPath()}</g>
     </>
   )
-  viewBox = '-105 -105 210 210' // x y w h
 }
