@@ -1,40 +1,37 @@
 #!/usr/bin/env bun
 
-import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'fs'
-import { join, extname, basename } from 'path'
+import { mkdirSync, readdirSync, writeFileSync } from 'fs'
+import { basename, extname, join } from 'path'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
+// eslint-disable-next-line @import/no-extraneous-dependencies
 import SVGPathCommander from 'svg-path-commander'
 
 /**
- * Combined Icon Renderer and SVG Coordinate Transformer
- * 
- * This script renders React icon components to SVG files and immediately
- * transforms them to the standardized viewBox: -100 -100 200 200
- * 
- * CANONICAL WORKFLOW:
- * 1. render-and-transform-icons.ts - Render and transform icons (THIS SCRIPT)
- * 2. check-viewboxes.ts          - Verify which icons need updating
- * 3. Manual application          - Apply transformed content back to .tsx files manually
- * 
- * Enhanced to handle:
- * - Path data transformation using SVGPathCommander
- * - Coordinate attributes (x, y, cx, cy)
- * - Radius attributes (r, rx, ry) 
- * - Dimension attributes (width, height)
- * - Animation values in <animate> elements
+ * Icon Renderer and SVG Coordinate Transformer
+ *
+ * This script renders React icon components to SVG files and transforms them
+ * to the standardized viewBox: -100 -100 200 200
+ *
+ * Usage: bun run scripts/transformSVGs.ts
+ *
+ * Features:
+ * - Renders React icon components to pure SVG strings
+ * - Transforms SVG coordinates using SVGPathCommander from esm.sh
+ * - Handles path data, coordinates, radius, dimensions, and animations
+ * - Outputs transformed SVG files to temp/svgs/ directory
  */
 
 interface ViewBox {
-  x: number
-  y: number
-  width: number
-  height: number
+  height: number,
+  width: number,
+  x: number,
+  y: number,
 }
 
 class IconRendererAndTransformer {
   private tempDir = join(process.cwd(), 'temp', 'svgs')
-  private targetViewBox: ViewBox = { x: -100, y: -100, width: 200, height: 200 }
+  private targetViewBox: ViewBox = { height: 200, width: 200, x: -100, y: -100 }
 
   /**
    * Ensure temp directory exists
@@ -42,13 +39,15 @@ class IconRendererAndTransformer {
   private ensureTempDir(): void {
     try {
       mkdirSync(this.tempDir, { recursive: true })
-    } catch (error) {
+    } catch {
       // Directory might already exist
     }
   }
 
   /**
    * Parse viewBox string into ViewBox type
+   * @param viewBoxString - The viewBox string to parse (e.g., "0 0 100 100")
+   * @returns Parsed ViewBox object
    */
   private parseViewBox(viewBoxString: string): ViewBox {
     const parts = viewBoxString.trim().split(/\s+/)
@@ -57,15 +56,17 @@ class IconRendererAndTransformer {
     }
 
     return {
+      height: parseFloat(parts[3]),
+      width: parseFloat(parts[2]),
       x: parseFloat(parts[0]),
       y: parseFloat(parts[1]),
-      width: parseFloat(parts[2]),
-      height: parseFloat(parts[3])
     }
   }
 
   /**
    * Convert ViewBox type back to string
+   * @param viewBox - The ViewBox object to convert
+   * @returns ViewBox string (e.g., "0 0 100 100")
    */
   private viewBoxToString(viewBox: ViewBox): string {
     return `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`
@@ -73,8 +74,15 @@ class IconRendererAndTransformer {
 
   /**
    * Calculate transformation parameters from source to target viewBox
+   * @param sourceViewBox - The source viewBox to transform from
+   * @returns Transformation parameters for scaling and translation
    */
-  private calculateTransformation(sourceViewBox: ViewBox): { scaleX: number, scaleY: number, translateX: number, translateY: number } {
+  private calculateTransformation(sourceViewBox: ViewBox): {
+    scaleX: number,
+    scaleY: number,
+    translateX: number,
+    translateY: number,
+  } {
     // Use uniform scaling to preserve aspect ratio
     const scaleX = this.targetViewBox.width / sourceViewBox.width
     const scaleY = this.targetViewBox.height / sourceViewBox.height
@@ -85,16 +93,32 @@ class IconRendererAndTransformer {
     const scaledHeight = sourceViewBox.height * uniformScale
 
     // Center the scaled content within the target viewBox
-    const translateX = this.targetViewBox.x + (this.targetViewBox.width - scaledWidth) / 2 - (sourceViewBox.x * uniformScale)
-    const translateY = this.targetViewBox.y + (this.targetViewBox.height - scaledHeight) / 2 - (sourceViewBox.y * uniformScale)
+    const translateX = this.targetViewBox.x + ((this.targetViewBox.width - scaledWidth) / 2) -
+      (sourceViewBox.x * uniformScale)
+    const translateY = this.targetViewBox.y + ((this.targetViewBox.height - scaledHeight) / 2) -
+      (sourceViewBox.y * uniformScale)
 
     return { scaleX: uniformScale, scaleY: uniformScale, translateX, translateY }
   }
 
   /**
    * Transform animation values based on the attribute being animated
+   * @param values - The semicolon-separated animation values
+   * @param attributeName - The name of the attribute being animated
+   * @param scaleX - X-axis scale factor
+   * @param scaleY - Y-axis scale factor
+   * @param translateX - X-axis translation offset
+   * @param translateY - Y-axis translation offset
+   * @returns Transformed animation values string
    */
-  private transformAnimationValues(values: string, attributeName: string, scaleX: number, scaleY: number, translateX: number, translateY: number): string {
+  private transformAnimationValues(
+    values: string,
+    attributeName: string,
+    scaleX: number,
+    scaleY: number,
+    translateX: number,
+    translateY: number,
+  ): string {
     // Split values by semicolon and transform each value
     const valueList = values.split(';').map(v => v.trim())
 
@@ -108,10 +132,10 @@ class IconRendererAndTransformer {
       switch (attributeName) {
         case 'x':
         case 'cx':
-          return (num * scaleX + translateX).toString()
+          return ((num * scaleX) + translateX).toString()
         case 'y':
         case 'cy':
-          return (num * scaleY + translateY).toString()
+          return ((num * scaleY) + translateY).toString()
         case 'width':
           return (num * scaleX).toString()
         case 'height':
@@ -131,11 +155,14 @@ class IconRendererAndTransformer {
   /**
    * Transform SVG string with proper coordinate transformation using SVGPathCommander
    * Enhanced to handle animate elements and their values attributes
+   * @param svgString - The SVG string to transform
+   * @returns Transformed SVG string
    */
   private transformSVGString(svgString: string): string {
     // Extract current viewBox
     const viewBoxMatch = svgString.match(/viewBox\s*=\s*['"`]([^'"`]+)['"`]/)
     if (!viewBoxMatch) {
+      // eslint-disable-next-line no-console
       console.warn('No viewBox found in SVG')
       return svgString
     }
@@ -158,12 +185,13 @@ class IconRendererAndTransformer {
         // Apply transformation matrix: scale then translate
         pathCommander.transform({
           scale: [scaleX, scaleY],
-          translate: [translateX, translateY]
+          translate: [translateX, translateY],
         })
 
         const transformedPath = pathCommander.toString()
         return `d="${transformedPath}"`
       } catch (error) {
+        // eslint-disable-next-line no-console
         console.warn(`Error transforming path data: ${pathData}`, error)
         return match
       }
@@ -173,13 +201,17 @@ class IconRendererAndTransformer {
     const coordinateAttrs = ['x', 'y', 'cx', 'cy']
     coordinateAttrs.forEach(attr => {
       // Use negative lookbehind to avoid matching viewBox attributes
-      transformed = transformed.replace(new RegExp(`(?<!viewBox\\s*=\\s*['"\`][^'"\`]*)\\b${attr}\\s*=\\s*['"\`]([^'"\`]+)['"\`]`, 'g'), (match, value) => {
+      const regex = new RegExp(
+        `(?<!viewBox\\s*=\\s*['"\`][^'"\`]*)\\b${attr}\\s*=\\s*['"\`]([^'"\`]+)['"\`]`,
+        'g',
+      )
+      transformed = transformed.replace(regex, (match, value) => {
         const num = parseFloat(value)
         if (!isNaN(num)) {
-          const transformed = attr === 'x' || attr === 'cx'
-            ? num * scaleX + translateX
-            : num * scaleY + translateY
-          return `${attr}="${transformed}"`
+          const transformedValue = attr === 'x' || attr === 'cx'
+            ? (num * scaleX) + translateX
+            : (num * scaleY) + translateY
+          return `${attr}="${transformedValue}"`
         }
         return match
       })
@@ -188,11 +220,12 @@ class IconRendererAndTransformer {
     // Transform radius attributes
     const radiusAttrs = ['r', 'rx', 'ry']
     radiusAttrs.forEach(attr => {
-      transformed = transformed.replace(new RegExp(`${attr}\\s*=\\s*['"\`]([^'"\`]+)['"\`]`, 'g'), (match, value) => {
+      const regex = new RegExp(`${attr}\\s*=\\s*['"\`]([^'"\`]+)['"\`]`, 'g')
+      transformed = transformed.replace(regex, (match, value) => {
         const num = parseFloat(value)
         if (!isNaN(num)) {
-          const transformed = num * Math.sqrt(scaleX * scaleY) // Geometric mean for radius
-          return `${attr}="${transformed}"`
+          const transformedValue = num * Math.sqrt(scaleX * scaleY) // Geometric mean for radius
+          return `${attr}="${transformedValue}"`
         }
         return match
       })
@@ -201,19 +234,31 @@ class IconRendererAndTransformer {
     // Transform dimension attributes
     const dimensionAttrs = ['width', 'height']
     dimensionAttrs.forEach(attr => {
-      transformed = transformed.replace(new RegExp(`${attr}\\s*=\\s*['"\`]([^'"\`]+)['"\`]`, 'g'), (match, value) => {
+      const regex = new RegExp(`${attr}\\s*=\\s*['"\`]([^'"\`]+)['"\`]`, 'g')
+      transformed = transformed.replace(regex, (match, value) => {
         const num = parseFloat(value)
         if (!isNaN(num)) {
-          const transformed = attr === 'width' ? num * scaleX : num * scaleY
-          return `${attr}="${transformed}"`
+          const transformedValue = attr === 'width' ? num * scaleX : num * scaleY
+          return `${attr}="${transformedValue}"`
         }
         return match
       })
     })
 
     // Transform animation values - enhanced to handle animate elements!
-    transformed = transformed.replace(/<animate[^>]*attributeName\s*=\s*['"`]([^'"`]+)['"`][^>]*values\s*=\s*['"`]([^'"`]+)['"`][^>]*>/g, (match, attributeName, values) => {
-      const transformedValues = this.transformAnimationValues(values, attributeName, scaleX, scaleY, translateX, translateY)
+    const animateRegex = new RegExp(
+      '<animate[^>]*attributeName\\s*=\\s*[\'"`]([^\'"`]+)[\'"`][^>]*values\\s*=\\s*[\'"`]([^\'"`]+)[\'"`][^>]*>',
+      'g',
+    )
+    transformed = transformed.replace(animateRegex, (match, attributeName, values) => {
+      const transformedValues = this.transformAnimationValues(
+        values,
+        attributeName,
+        scaleX,
+        scaleY,
+        translateX,
+        translateY,
+      )
       return match.replace(/values\s*=\s*['"`]([^'"`]+)['"`]/, `values="${transformedValues}"`)
     })
 
@@ -222,6 +267,8 @@ class IconRendererAndTransformer {
 
   /**
    * Render a single icon to SVG string
+   * @param iconPath - Path to the icon component file
+   * @returns Promise that resolves to the rendered SVG string
    */
   private async renderIconToSVG(iconPath: string): Promise<string> {
     try {
@@ -239,12 +286,13 @@ class IconRendererAndTransformer {
       // Get the full SVG with proper attributes
       const fullSvgMatch = svgString.match(/<svg[^>]*>[\s\S]*?<\/svg>/)
       if (!fullSvgMatch) {
-        throw new Error(`No full SVG found in rendered string`)
+        throw new Error('No full SVG found in rendered string')
       }
 
       return fullSvgMatch[0]
 
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error(`Error rendering ${iconPath}:`, error)
       return ''
     }
@@ -252,17 +300,21 @@ class IconRendererAndTransformer {
 
   /**
    * Process a single icon file
+   * @param filePath - Path to the icon file to process
+   * @returns Promise that resolves when processing is complete
    */
   private async processIconFile(filePath: string): Promise<void> {
     try {
       const fileName = basename(filePath, '.tsx')
       const svgPath = join(this.tempDir, `${fileName}.svg`)
 
+      // eslint-disable-next-line no-console
       console.log(`🔄 Rendering and transforming ${fileName}...`)
 
       // Render icon to SVG
       const svgContent = await this.renderIconToSVG(filePath)
       if (!svgContent) {
+        // eslint-disable-next-line no-console
         console.warn(`Failed to render ${fileName}`)
         return
       }
@@ -271,6 +323,7 @@ class IconRendererAndTransformer {
       const viewBoxMatch = svgContent.match(/viewBox\s*=\s*['"`]([^'"`]+)['"`]/)
       if (viewBoxMatch) {
         const sourceViewBox = this.parseViewBox(viewBoxMatch[1])
+        // eslint-disable-next-line no-console
         console.log(`📐 Source viewBox: ${this.viewBoxToString(sourceViewBox)}`)
       }
 
@@ -280,37 +333,48 @@ class IconRendererAndTransformer {
       // Write transformed SVG file
       writeFileSync(svgPath, transformedContent, 'utf-8')
 
+      // eslint-disable-next-line no-console
       console.log(`✅ Rendered and transformed ${fileName} → ${svgPath}`)
+      // eslint-disable-next-line no-console
       console.log(`   ${viewBoxMatch?.[1] || 'unknown'} → ${this.viewBoxToString(this.targetViewBox)}`)
+      // eslint-disable-next-line no-console
       console.log('')
 
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error(`Error processing ${filePath}:`, error)
     }
   }
 
   /**
    * Process all icon files
+   * @param iconsDir - Directory containing icon files
+   * @returns Promise that resolves when all icons are processed
    */
   async processAllIcons(iconsDir: string): Promise<void> {
+    // eslint-disable-next-line no-console
     console.log('🎨 Starting icon rendering and transformation...')
+    // eslint-disable-next-line no-console
     console.log(`Target viewBox: ${this.viewBoxToString(this.targetViewBox)}`)
+    // eslint-disable-next-line no-console
     console.log(`📁 Output directory: ${this.tempDir}`)
+    // eslint-disable-next-line no-console
     console.log('📝 Note: Enhanced to handle animate elements and values attributes')
+    // eslint-disable-next-line no-console
     console.log('')
 
     this.ensureTempDir()
 
     const files = readdirSync(iconsDir)
-    const iconFiles = files.filter(file =>
-      extname(file) === '.tsx' &&
-      !file.includes('IconBase') &&
-      !file.includes('Icon.tsx') &&
-      !file.includes('index.ts') &&
-      !file.includes('test')
-    )
+    const iconFiles = files.filter(file => extname(file) === '.tsx'
+      && !file.includes('IconBase')
+      && !file.includes('Icon.tsx')
+      && !file.includes('index.ts')
+      && !file.includes('test'))
 
+    // eslint-disable-next-line no-console
     console.log(`Found ${iconFiles.length} icon files to process`)
+    // eslint-disable-next-line no-console
     console.log('')
 
     for (const file of iconFiles) {
@@ -318,7 +382,9 @@ class IconRendererAndTransformer {
       await this.processIconFile(filePath)
     }
 
+    // eslint-disable-next-line no-console
     console.log('🎉 Icon rendering and transformation complete!')
+    // eslint-disable-next-line no-console
     console.log(`📊 Processed ${iconFiles.length} icons`)
   }
 }
@@ -327,5 +393,8 @@ class IconRendererAndTransformer {
 if (import.meta.main) {
   const iconsDir = join(process.cwd(), 'libraries', 'icons')
   const renderer = new IconRendererAndTransformer()
-  renderer.processAllIcons(iconsDir).catch(console.error)
+  renderer.processAllIcons(iconsDir).catch(error => {
+    // eslint-disable-next-line no-console
+    console.error(error)
+  })
 }

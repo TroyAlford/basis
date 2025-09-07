@@ -1,8 +1,8 @@
 import * as React from 'react'
+import type { IconProps } from './IconBase/IconBase'
+import { IconBase } from './IconBase/IconBase'
 import { StarFilled } from './StarFilled'
 import { StarOutline } from './StarOutline'
-import { IconBase } from './IconBase/IconBase'
-import type { IconProps } from './IconBase/IconBase'
 
 interface StarProps extends IconProps {
   /** Whether the star is filled or outlined */
@@ -27,11 +27,10 @@ export class Star extends IconBase<StarProps> {
   static Outline = StarOutline
 
   // Required abstract methods from IconBase
-  renderContent = (): React.ReactNode => {
+  render = (): React.ReactNode => {
     const { filled, ...props } = this.props
     return filled
       ? <StarFilled {...props} />
       : <StarOutline {...props} />
   }
-  readonly viewBox = '0 0 32 32'
 }

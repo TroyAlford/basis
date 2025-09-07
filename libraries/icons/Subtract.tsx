@@ -4,7 +4,6 @@ import { IconBase } from './IconBase/IconBase'
 export class Subtract extends IconBase {
   static displayName = 'SubtractIcon'
   renderContent = (): React.ReactNode => (
-    <path d="M416 208H32c-17.67 0-32 14.33-32 32v32c0 17.67 14.33 32 32 32h384c17.67 0 32-14.33 32-32v-32c0-17.67-14.33-32-32-32z" />
+    <path d="M75 -18.75H-75C-81.9023 -18.75 -87.5 -13.1523 -87.5 -6.25V6.25C-87.5 13.1523 -81.9023 18.75 -75 18.75H75C81.9023 18.75 87.5 13.1523 87.5 6.25V-6.25C87.5 -13.1523 81.9023 -18.75 75 -18.75Z" />
   )
-  viewBox = '0 0 448 512'
 }

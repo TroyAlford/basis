@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { pascalCase } from '@basis/utilities'
-import { IconBase } from './IconBase/IconBase'
 import type { IconProps as BaseIconProps } from './IconBase/IconBase'
+import { IconBase } from './IconBase/IconBase'
 import * as Icons from './index'
 
 interface IconProps extends BaseIconProps {
@@ -18,5 +18,4 @@ export class Icon extends IconBase<IconProps> {
     const NamedIcon = typeof Icons[name] === 'function' ? Icons[name] : Icons.Blank
     return <NamedIcon {...iconProps} />
   }
-  viewBox = null
 }
