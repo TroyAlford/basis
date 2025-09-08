@@ -11,6 +11,7 @@ import { SortNone } from './SortNone'
 
 export enum SortBy {
   Name = 'name',
+  None = 'none',
   Size = 'size',
   Value = 'value',
 }
@@ -20,8 +21,8 @@ export enum SortDirection {
 }
 
 interface Props extends IconProps {
-  direction: SortDirection,
-  sortBy: SortBy,
+  direction?: SortDirection,
+  sortBy?: SortBy,
 }
 
 export class Sort extends IconBase<Props> {
@@ -31,13 +32,15 @@ export class Sort extends IconBase<Props> {
     sortBy: SortBy.Name,
   }
 
+  static None = SortNone
+
   renderContent = (): React.ReactNode => null
   render = (): React.ReactNode => {
     const { direction, sortBy, ...rest } = this.props
     const { Asc } = SortDirection
 
     let Component
-    if (!sortBy) {
+    if (!sortBy || sortBy === SortBy.None) {
       Component = SortNone
     } else if (sortBy === SortBy.Name) {
       Component = direction === Asc ? SortByNameAsc : SortByNameDesc

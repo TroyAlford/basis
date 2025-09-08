@@ -3,7 +3,17 @@ import { IconBase } from './IconBase/IconBase'
 
 export class Subtract extends IconBase {
   static displayName = 'SubtractIcon'
-  renderContent = (): React.ReactNode => (
-    <path d="M75 -18.75H-75C-81.9023 -18.75 -87.5 -13.1523 -87.5 -6.25V6.25C-87.5 13.1523 -81.9023 18.75 -75 18.75H75C81.9023 18.75 87.5 13.1523 87.5 6.25V-6.25C87.5 -13.1523 81.9023 -18.75 75 -18.75Z" />
-  )
+
+  renderContent = (): React.ReactNode => {
+    const { filled } = this.props
+
+    return (
+      <path
+        d="M67.5 -16.875H-67.5C-73.7121 -16.875 -78.75 -11.8371 -78.75 -5.625V5.625C-78.75 11.8371 -73.7121 16.875 -67.5 16.875H67.5C73.7121 16.875 78.75 11.8371 78.75 5.625V-5.625C78.75 -11.8371 73.7121 -16.875 67.5 -16.875Z"
+        data-name="minus"
+        fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
+        strokeWidth="10"
+      />
+    )
+  }
 }

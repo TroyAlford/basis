@@ -1,9 +1,41 @@
 import * as React from 'react'
 import { IconBase } from './IconBase/IconBase'
+import { Tag } from './Tag'
 
 export class Tags extends IconBase {
   static displayName = 'TagsIcon'
-  renderContent = (): React.ReactNode => (
-    <path d="M-88.8889 -19.5556V-62.2222Q-88.5333 -67.0222 -85.1556 -70.4T-77.5111 -73.7778H-34.6667Q-27.0222 -73.7778 -19.0222 -68.8L48 4.8Q51.0222 8.8889 51.0222 13.3333T48 21.1556L-1.7778 70.4Q-5.5111 73.6 -10.1333 73.7778T-17.7778 70.4L-80.8889 -0.1778Q-88.8889 -9.7778 -88.8889 -19.5556ZM-70.4 -44.0889Q-70.4 -39.6444 -67.3778 -36.6222Q-63.4667 -33.0667 -59.2 -33.2444T-51.7333 -36.6222Q-48.5333 -40 -48.5333 -44.4444T-51.7333 -52.0889Q-55.2889 -55.2889 -59.7333 -55.1111T-67.3778 -52.0889Q-70.4 -48.3556 -70.4 -44.0889ZM-14.2222 -73.4222H2.1333Q14.9333 -72.7111 21.5111 -65.4222L84.8 5.1556Q87.8222 8.8889 87.8222 13.6889T84.8 21.5111L35.0222 70.7556Q24.3556 76.9778 18.1333 69.3333L66.3111 21.1556Q69.5111 17.2444 69.5111 12.8T66.3111 4.8L9.7778 -58.4889Q5.5111 -64 -2.8444 -68.4444T-14.2222 -73.4222Z" />
-  )
+
+  renderContent = (): React.ReactNode => {
+    const { filled } = this.props
+
+    // In outline mode: rear and front are outlined, mask is filled and masks the rear
+    const outlinedTag = Tag.path(false)
+    const filledTag = Tag.path(true)
+
+    return (
+      <>
+        <defs>
+          <mask id="basis:icon:tags:mask:rear">
+            <rect
+              fill="white"
+              height="200"
+              width="200"
+              x="-100"
+              y="-100"
+            />
+            <path
+              d="M-20 100 L65 15 L-30 -100 L-100 -100 L-100 100 Z"
+              fill="black"
+            />
+          </mask>
+        </defs>
+        <g data-name="back" mask="url(#basis:icon:tags:mask:rear)" transform="translate(15, 0)">
+          {outlinedTag}
+        </g>
+        <g data-name="front" transform="translate(-15, 0)">
+          {filled ? filledTag : outlinedTag}
+        </g>
+      </>
+    )
+  }
 }

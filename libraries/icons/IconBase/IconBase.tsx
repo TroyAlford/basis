@@ -7,6 +7,7 @@ import './IconBase.styles.ts'
 
 export type IconProps<P = object> = Component<{
   disabled?: boolean,
+  filled?: boolean,
   onClick?: MouseEventHandler<SVGSVGElement>,
   overlay?: typeof IconBase,
   title?: string,
@@ -20,6 +21,7 @@ export abstract class IconBase<
       ...super.defaultProps,
       color: 'var(--basis-icon-color, currentColor)',
       disabled: false,
+      filled: false,
       onClick: noop,
       overlay: null,
       overlayColor: 'var(--basis-icon-overlay-color, currentColor)',

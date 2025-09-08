@@ -3,7 +3,53 @@ import { IconBase } from './IconBase/IconBase'
 
 export class Navigation extends IconBase {
   static displayName = 'NavigationIcon'
-  renderContent = (): React.ReactNode => (
-    <path d="M100 39.2V75Q100 79.4 96.8 82.6T89.2 85.8H53.6Q49.2 85.8 46 82.6T42.8 75V39.2Q42.8 34.8 46 31.6T53.6 28.6H64.2V7.2H7.2V28.6H17.8Q22.4 28.6 25.4 31.6T28.6 39.2V75Q28.6 79.4 25.4 82.6T17.8 85.8H-17.8Q-22.4 85.8 -25.4 82.6T-28.6 75V39.2Q-28.6 34.8 -25.4 31.6T-17.8 28.6H-7.2V7.2H-64.2V28.6H-53.6Q-49 28.6 -46 31.6T-42.8 39.2V75Q-42.8 79.4 -46 82.6T-53.6 85.8H-89.2Q-93.8 85.8 -96.8 82.6T-100 75V39.2Q-100 34.8 -96.8 31.6T-89.2 28.6H-78.6V7.2Q-78.6 1.4 -74.4 -3T-64.2 -7.2H-7.2V-28.6H-17.8Q-22.4 -28.6 -25.4 -31.8T-28.6 -39.2V-75Q-28.6 -79.4 -25.4 -82.6T-17.8 -85.8H17.8Q22.4 -85.8 25.4 -82.6T28.6 -75V-39.2Q28.6 -34.8 25.4 -31.8T17.8 -28.6H7.2V-7.2H64.2Q70 -7.2 74.4 -3T78.6 7.2V28.6H89.2Q93.8 28.6 96.8 31.6T100 39.2Z" />
-  )
+
+  renderRect = (centerX: number, centerY: number, width: number, height: number, dataName: string): React.ReactNode => {
+    const { filled } = this.props
+    const x = centerX - (width / 2)
+    const y = centerY - (height / 2)
+
+    return (
+      <rect
+        data-name={dataName}
+        fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
+        height={height}
+        rx="10"
+        ry="10"
+        strokeWidth="10"
+        width={width}
+        x={x}
+        y={y}
+      />
+    )
+  }
+
+  renderContent = (): React.ReactNode => {
+    const testSquares = (
+      <>
+        {this.renderRect(0, -55, 45, 40, 'top-box')}
+        {this.renderRect(0, 55, 45, 40, 'bottom-center-box')}
+        {this.renderRect(-65, 55, 45, 40, 'bottom-left-box')}
+        {this.renderRect(65, 55, 45, 40, 'bottom-right-box')}
+      </>
+    )
+
+    const connectingLine = (
+      <path
+        d="M0 -35L0 35M-65 35L-65 10A10 10 0 0 1 -55 0L55 0A10 10 0 0 1 65 10L65 35"
+        data-name="connecting-line"
+        fill="transparent"
+        strokeLinecap="round"
+        strokeWidth="10"
+      />
+    )
+
+    return (
+      <>
+        {/* {boxes} */}
+        {testSquares}
+        {connectingLine}
+      </>
+    )
+  }
 }

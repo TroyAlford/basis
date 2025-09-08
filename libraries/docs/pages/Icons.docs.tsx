@@ -9,6 +9,7 @@ import './Icons.styles.ts'
 const { Icon } = Icons
 
 interface State {
+  filled: boolean,
   filterText: string,
   iconColor: string,
   iconSize: number,
@@ -20,6 +21,7 @@ interface State {
 
 export default class IconsDocs extends React.Component<Record<string, never>, State> {
   state = {
+    filled: false,
     filterText: '',
     iconColor: '#369',
     iconSize: 60,
@@ -32,7 +34,7 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
   // Get all icon components (excluding Icon, IconBase, and utility components)
   get iconComponents() {
     const excludeComponents = ['Icon', 'IconBase', 'Sort', 'MoonPhase']
-    return Object.entries(Icons)
+    return Object.entries(Icons as unknown as Record<string, React.ComponentType<Icons.IconProps>>)
       .filter(([name]) => !excludeComponents.includes(name))
       .filter(([name]) => typeof Icons[name] === 'function')
       .filter(([name]) => {
@@ -45,7 +47,7 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
   }
 
   renderIconGrid = (): React.ReactNode => {
-    const { showNames } = this.state
+    const { filled, showNames } = this.state
 
     return (
       <div className="icon-grid">
@@ -55,7 +57,7 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
             className="icon-item"
           >
             <div className="icon-demo-container">
-              {React.createElement(IconComponent as unknown as React.ComponentType<Record<string, never>>)}
+              <IconComponent filled={filled} />
             </div>
             {showNames && (
               <span className="icon-name">
@@ -112,7 +114,7 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
   }
 
   render() {
-    const { filterText, iconColor, iconSize, moonDay, moonPeriod, moonTilt, showNames } = this.state
+    const { filled, filterText, iconColor, iconSize, moonDay, moonPeriod, moonTilt, showNames } = this.state
     style('basis:docs:icons:dynamic', css`
       .icon-demo-container {
         --demo-icon-color: ${iconColor};
@@ -163,6 +165,17 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
               value={filterText}
               onChange={value => this.setState({ filterText: value })}
             />
+          </div>
+          <div className="control-group">
+            <label>
+              Filled
+            </label>
+            <Button
+              className={filled ? 'primary' : 'secondary'}
+              onActivate={() => this.setState({ filled: !filled })}
+            >
+              {filled ? 'Filled' : 'Outline'}
+            </Button>
           </div>
           <div className="control-group">
             <label>

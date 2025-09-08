@@ -5,8 +5,5 @@
 	"dependencies": {
 		"react": "^19",
 		"react-dom": "^19"
-	},
-	"devDependencies": {
-		"svg-path-commander": "^2.1.11"
 	}
 }

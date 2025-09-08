@@ -3,7 +3,69 @@ import { IconBase } from './IconBase/IconBase'
 
 export class Trash extends IconBase {
   static displayName = 'TrashIcon'
-  renderContent = (): React.ReactNode => (
-    <path d="M-75 81.25C-75 91.6053 -66.6053 100 -56.25 100H56.25C66.6053 100 75 91.6053 75 81.25V-50H-75ZM31.25 -18.75C31.25 -23.5613 36.4583 -26.5683 40.625 -24.1627C42.5588 -23.0462 43.75 -20.9829 43.75 -18.75V68.75C43.75 73.5613 38.5417 76.5683 34.375 74.1627C32.4412 73.0462 31.25 70.9829 31.25 68.75ZM-6.25 -18.75C-6.25 -23.5613 -1.0417 -26.5683 3.125 -24.1627C5.0588 -23.0462 6.25 -20.9829 6.25 -18.75V68.75C6.25 73.5613 1.0417 76.5683 -3.125 74.1627C-5.0588 73.0462 -6.25 70.9829 -6.25 68.75ZM-43.75 -18.75C-43.75 -23.5613 -38.5417 -26.5683 -34.375 -24.1627C-32.4412 -23.0462 -31.25 -20.9829 -31.25 -18.75V68.75C-31.25 73.5613 -36.4583 76.5683 -40.625 74.1627C-42.5588 73.0462 -43.75 70.9829 -43.75 68.75ZM81.25 -87.5H34.375L30.7031 -94.8047C29.1166 -97.9901 25.8633 -100.0026 22.3047 -100H-22.3437C-25.8957 -100.0137 -29.1428 -97.9956 -30.7031 -94.8047L-34.375 -87.5H-81.25C-84.7018 -87.5 -87.5 -84.7018 -87.5 -81.25V-68.75C-87.5 -65.2982 -84.7018 -62.5 -81.25 -62.5H81.25C84.7018 -62.5 87.5 -65.2982 87.5 -68.75V-81.25C87.5 -84.7018 84.7018 -87.5 81.25 -87.5Z" />
-  )
+
+  renderContent = (): React.ReactNode => {
+    const { filled } = this.props
+
+    const outline = (
+      <path
+        d="M66 -71H28L25 -77C24 -79 21 -81 18 -81H-18C-21 -81 -24 -79 -25 -77L-28 -71H-66C-69 -71 -71 -69 -71 -66V-56C-71 -53 -69 -51 -66 -51H-61V66C-61 74 -54 81 -46 81H46C54 81 61 74 61 66V-51H66C69 -51 71 -53 71 -56V-66C71 -69 69 -71 66 -71Z"
+        data-name="lid-can"
+        fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
+        mask={filled ? 'url(#basis:icon:trash:mask:lines)' : undefined}
+        strokeWidth="10"
+      />
+    )
+
+    const verticalLines = (
+      <path
+        d="M30 -15V56ZM0 -15V56ZM-30 -15V56Z"
+        data-name="vertical-lines"
+        fill={filled ? 'none' : 'transparent'}
+        stroke={filled ? 'black' : undefined}
+        strokeLinecap="round"
+        strokeWidth="10"
+      />
+    )
+
+    const horizontalBar = (
+      <path
+        d="M-70 -50H70"
+        data-name="horizontal-bar"
+        fill={filled ? 'none' : 'transparent'}
+        stroke={filled ? 'black' : undefined}
+        strokeLinecap="round"
+        strokeWidth="10"
+      />
+    )
+
+    if (filled) {
+      return (
+        <>
+          <defs>
+            <mask id="basis:icon:trash:mask:lines">
+              <rect
+                fill="white"
+                height="200"
+                width="200"
+                x="-100"
+                y="-100"
+              />
+              {verticalLines}
+              {horizontalBar}
+            </mask>
+          </defs>
+          {outline}
+        </>
+      )
+    }
+
+    return (
+      <>
+        {outline}
+        {verticalLines}
+        {horizontalBar}
+      </>
+    )
+  }
 }

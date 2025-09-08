@@ -3,14 +3,55 @@ import { IconBase } from './IconBase/IconBase'
 
 export class GripBottomRight extends IconBase {
   static displayName = 'GripBottomRightIcon'
-  renderContent = (): React.ReactNode => (
-    <>
-      <circle cx={0} cy={0} r={14} />
-      <circle cx={50} cy={50} r={14} />
-      <circle cx={50} cy={0} r={14} />
-      <circle cx={0} cy={50} r={14} />
-      <circle cx={50} cy={-50} r={14} />
-      <circle cx={-50} cy={50} r={14} />
-    </>
-  )
+
+  renderContent = (): React.ReactNode => {
+    const { filled } = this.props
+
+    return (
+      <>
+        <circle
+          cx={0}
+          cy={0}
+          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
+          r={14}
+          strokeWidth="10"
+        />
+        <circle
+          cx={50}
+          cy={50}
+          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
+          r={14}
+          strokeWidth="10"
+        />
+        <circle
+          cx={50}
+          cy={0}
+          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
+          r={14}
+          strokeWidth="10"
+        />
+        <circle
+          cx={0}
+          cy={50}
+          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
+          r={14}
+          strokeWidth="10"
+        />
+        <circle
+          cx={50}
+          cy={-50}
+          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
+          r={14}
+          strokeWidth="10"
+        />
+        <circle
+          cx={-50}
+          cy={50}
+          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
+          r={14}
+          strokeWidth="10"
+        />
+      </>
+    )
+  }
 }

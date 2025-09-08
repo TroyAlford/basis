@@ -8,7 +8,7 @@ import { GripVertical } from './GripVertical'
 import type { IconProps } from './IconBase/IconBase'
 import { IconBase } from './IconBase/IconBase'
 
-export enum Orientation {
+enum Orientation {
   BottomLeft = 'BottomLeft',
   BottomRight = 'BottomRight',
   Horizontal = 'Horizontal',
@@ -28,6 +28,7 @@ export class Grip extends IconBase<Props> {
   static get defaultProps() {
     return {
       ...super.defaultProps,
+      filled: false,
       orientation: Orientation.Horizontal,
     }
   }
@@ -41,15 +42,15 @@ export class Grip extends IconBase<Props> {
 
   // Override Render instead of renderContent, so we don't get nesting
   render = (): React.ReactNode => {
-    const { orientation, ...props } = this.props
+    const { filled, orientation, ...props } = this.props
 
     switch (orientation) {
-      case Orientation.Vertical: return <GripVertical {...props} />
-      case Orientation.TopRight: return <GripTopRight {...props} />
-      case Orientation.TopLeft: return <GripTopLeft {...props} />
-      case Orientation.BottomRight: return <GripBottomRight {...props} />
-      case Orientation.BottomLeft: return <GripBottomLeft {...props} />
-      case Orientation.Horizontal: default: return <GripHorizontal {...props} />
+      case Orientation.Vertical: return <GripVertical {...props} filled={filled} />
+      case Orientation.TopRight: return <GripTopRight {...props} filled={filled} />
+      case Orientation.TopLeft: return <GripTopLeft {...props} filled={filled} />
+      case Orientation.BottomRight: return <GripBottomRight {...props} filled={filled} />
+      case Orientation.BottomLeft: return <GripBottomLeft {...props} filled={filled} />
+      case Orientation.Horizontal: default: return <GripHorizontal {...props} filled={filled} />
     }
   }
 }

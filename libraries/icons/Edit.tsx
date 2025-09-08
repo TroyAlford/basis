@@ -3,7 +3,91 @@ import { IconBase } from './IconBase/IconBase'
 
 export class Edit extends IconBase {
   static displayName = 'EditIcon'
-  renderContent = (): React.ReactNode => (
-    <path d="M93.9556 -57.0667Q98.2222 -52.9778 98.2222 -47.2889T93.9556 -37.5111L61.0667 -4.6222V78.7556Q61.0667 82.4889 58.4 85.1556T51.8222 88H-68.3556Q-72.2667 88 -74.9333 85.1556T-77.7778 78.7556V-41.6Q-77.7778 -45.3333 -74.9333 -48.1778T-68.3556 -50.8444H14.8444L47.7333 -83.7333Q52 -88 57.5111 -88T67.2889 -83.7333ZM0.9778 29.3333L59.1111 -28.9778L39.2 -48.8889L-19.1111 9.2444ZM-22.8444 17.0667L-22.1333 32.3556L-6.4889 33.0667ZM42.7556 69.5111V14.0444L13.0667 42.4889Q9.5111 46.0444 1.8667 48.3556T-12.3556 50.8444H-40.6222V22.5778Q-40.6222 15.2889 -38.6667 8T-33.1556 -2.8444L-3.8222 -32.5333H-59.2889V69.5111H42.7556ZM65.8667 -35.3778L77.7778 -47.2889L57.5111 -67.5556L45.6 -55.6444Z" />
-  )
+
+  renderContent = (): React.ReactNode => {
+    const { filled } = this.props
+
+    const pencil = (
+      <path
+        d="M0 30 L75 -50 L55 -70 L-20 10 L-20 30 Z"
+        data-name="pencil"
+      />
+    )
+
+    const lines = (
+      <g data-name="lines" strokeWidth="5">
+        <path d="M-15 5 L5 25" data-name="tip-line" />
+        <path d="M60 -35 L40 -55" data-name="eraser-line" />
+      </g>
+    )
+
+    if (filled) {
+      return (
+        <>
+          <defs>
+            <mask id="basis:icon:edit:mask:pencil">
+              <rect
+                fill="white"
+                height="200"
+                width="200"
+                x="-100"
+                y="-100"
+              />
+              {React.cloneElement(pencil, { fill: 'black', stroke: 'black', strokeWidth: 30 })}
+            </mask>
+            <mask id="basis:icon:edit:mask:lines">
+              <rect
+                fill="white"
+                height="200"
+                width="200"
+                x="-100"
+                y="-100"
+              />
+              {React.cloneElement(lines, { fill: 'black', stroke: 'black' })}
+            </mask>
+          </defs>
+          <rect
+            data-name="square"
+            fill="var(--basis-icon-color)"
+            height="105"
+            mask="url(#basis:icon:edit:mask:pencil)"
+            strokeWidth="10"
+            width="105"
+            x="-60"
+            y="-35"
+          />
+          {React.cloneElement(pencil, { fill: 'var(--basis-icon-color)', mask: 'url(#basis:icon:edit:mask:lines)', strokeWidth: 10 })}
+        </>
+      )
+    }
+
+    return (
+      <>
+        <defs>
+          <mask id="basis:icon:edit:mask:pencil">
+            <rect
+              fill="white"
+              height="200"
+              width="200"
+              x="-100"
+              y="-100"
+            />
+            {React.cloneElement(pencil, { fill: 'black', stroke: 'black', strokeWidth: 30 })}
+          </mask>
+        </defs>
+        <rect
+          data-name="square"
+          fill="transparent"
+          height="105"
+          mask="url(#basis:icon:edit:mask:pencil)"
+          strokeWidth="10"
+          width="105"
+          x="-60"
+          y="-35"
+        />
+        {React.cloneElement(pencil, { fill: 'transparent', strokeWidth: 10 })}
+        {lines}
+      </>
+    )
+  }
 }
