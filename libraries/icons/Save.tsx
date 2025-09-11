@@ -18,7 +18,7 @@ export class Save extends IconBase {
           <defs>
             <mask id="basis:icon:save:mask">
               <rect fill="white" height={200} width={200} x={-100} y={-100} />
-              <circle cx={0} cy={35} fill="black" r={25} />
+              {React.cloneElement(circle, { color: 'black', fill: true, stroke: 0 })}
             </mask>
           </defs>
           {React.cloneElement(outline, { fill: true, mask: 'url(#basis:icon:save:mask)' })}

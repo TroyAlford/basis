@@ -2,6 +2,8 @@ import * as React from 'react'
 import { randomHash } from '@basis/utilities'
 import type { IconProps } from './IconBase/IconBase'
 import { IconBase } from './IconBase/IconBase'
+import { Circle } from './parts/Circle'
+import { Path } from './parts/Path'
 
 interface Props extends IconProps {
   day: number,
@@ -53,31 +55,26 @@ export class MoonPhase extends IconBase<Props> {
   renderPath = (): React.ReactNode => {
     switch (this.phase) {
       case (Phase.WaxingCrescent):
-        return <path d={`M 0 -100 A ${this.ellipseWidth} 100 0 0 1 0 100 A 100 100 0 0 0 0 -100 Z`} />
+        return <Path d={`M 0 -100 A ${this.ellipseWidth} 100 0 0 1 0 100 A 100 100 0 0 0 0 -100 Z`} />
       case (Phase.FirstQuarter):
-        return <path d="M 0 -100 A 100 100 0 0 1 0 100 Z" />
+        return <Path d="M 0 -100 A 100 100 0 0 1 0 100 Z" />
       case (Phase.WaxingGibbous):
-        return <path d={`M 0 -100 A ${this.ellipseWidth} 100 0 0 0 0 100 A 100 100 0 0 0 0 -100 Z`} />
+        return <Path d={`M 0 -100 A ${this.ellipseWidth} 100 0 0 0 0 100 A 100 100 0 0 0 0 -100 Z`} />
       case (Phase.WaningGibbous):
-        return <path d={`M 0 -100 A 100 100 0 0 0 0 100 A ${this.ellipseWidth} 100 0 0 0 0 -100 Z`} />
+        return <Path d={`M 0 -100 A 100 100 0 0 0 0 100 A ${this.ellipseWidth} 100 0 0 0 0 -100 Z`} />
       case (Phase.LastQuarter):
-        return <path d="M 0 -100 A 100 100 0 0 0 0 100 Z" />
+        return <Path d="M 0 -100 A 100 100 0 0 0 0 100 Z" />
       case (Phase.WaningCrescent):
-        return <path d={`M 0 -100 A 100 100 0 0 0 0 100 A ${this.ellipseWidth} 100 0 0 1 0 -100 Z`} />
+        return <Path d={`M 0 -100 A 100 100 0 0 0 0 100 A ${this.ellipseWidth} 100 0 0 1 0 -100 Z`} />
       case (Phase.Full):
-        return <circle r={100} x={0} y={0} />
+        return <Circle position={[0, 0]} radius={100} />
       case (Phase.New): default: return null
     }
   }
 
   renderContent = (): React.ReactNode => (
     <>
-      <circle
-        fill="#1114"
-        r={100}
-        x={0}
-        y={0}
-      />
+      <Circle color="#1114" position={[0, 0]} radius={100} />
       <g transform={`rotate(${this.props.tilt * 100})`}>{this.renderPath()}</g>
     </>
   )
