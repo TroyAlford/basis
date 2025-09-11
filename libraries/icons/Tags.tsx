@@ -18,10 +18,10 @@ export class Tags extends IconBase {
           <mask id="basis:icon:tags:mask:rear">
             <rect
               fill="white"
-              height="200"
-              width="200"
-              x="-100"
-              y="-100"
+              height={200}
+              width={200}
+              x={-100}
+              y={-100}
             />
             <path
               d="M-20 100 L65 15 L-30 -100 L-100 -100 L-100 100 Z"

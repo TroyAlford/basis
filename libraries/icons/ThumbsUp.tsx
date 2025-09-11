@@ -27,11 +27,11 @@ export class ThumbsUp extends IconBase {
 
     const circle = (
       <circle
-        cx="-63.3334"
-        cy="63.3334"
+        cx={-63.3334}
+        cy={63.3334}
         data-name="circle"
         fill={filled ? 'black' : 'var(--basis-icon-color)'}
-        r="8.3334"
+        r={8.3334}
         strokeWidth={filled ? undefined : undefined}
       />
     )
@@ -43,10 +43,10 @@ export class ThumbsUp extends IconBase {
             <mask id="basis:icon:thumbsup:mask:circle">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {React.cloneElement(circle, { fill: 'black', strokeWidth: undefined })}
             </mask>

@@ -13,7 +13,7 @@ export class Read extends IconBase {
         data-name="book"
         fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
         mask={filled ? 'url(#basis:icon:read:mask:spine)' : undefined}
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
@@ -24,7 +24,7 @@ export class Read extends IconBase {
         fill="transparent"
         stroke={filled ? 'black' : undefined}
         strokeLinecap="round"
-        strokeWidth="5"
+        strokeWidth={5}
       />
     )
 
@@ -35,10 +35,10 @@ export class Read extends IconBase {
             <mask id="basis:icon:read:mask:spine">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {spine}
             </mask>

@@ -18,11 +18,11 @@ export class Gear extends IconBase {
 
     const circle = (
       <circle
-        cx="0"
-        cy="0"
+        cx={0}
+        cy={0}
         data-name="circle"
         fill={filled ? 'black' : 'transparent'}
-        r="19.8"
+        r={19.8}
         strokeWidth={filled ? undefined : '10'}
       />
     )
@@ -34,10 +34,10 @@ export class Gear extends IconBase {
             <mask id="basis:icon:gear:mask:circle">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {React.cloneElement(circle, { fill: 'black', strokeWidth: undefined })}
             </mask>

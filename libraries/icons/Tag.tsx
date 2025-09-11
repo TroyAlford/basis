@@ -11,7 +11,7 @@ export class Tag extends IconBase {
         data-name="outline"
         fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
         mask={filled ? 'url(#basis:icon:tag:mask:hole)' : undefined}
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
@@ -31,10 +31,10 @@ export class Tag extends IconBase {
             <mask id="basis:icon:tag:mask:hole">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {hole}
             </mask>

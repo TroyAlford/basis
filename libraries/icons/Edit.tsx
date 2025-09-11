@@ -15,7 +15,7 @@ export class Edit extends IconBase {
     )
 
     const lines = (
-      <g data-name="lines" strokeWidth="5">
+      <g data-name="lines" strokeWidth={5}>
         <path d="M-15 5 L5 25" data-name="tip-line" />
         <path d="M60 -35 L40 -55" data-name="eraser-line" />
       </g>
@@ -28,20 +28,20 @@ export class Edit extends IconBase {
             <mask id="basis:icon:edit:mask:pencil">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {React.cloneElement(pencil, { fill: 'black', stroke: 'black', strokeWidth: 30 })}
             </mask>
             <mask id="basis:icon:edit:mask:lines">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {React.cloneElement(lines, { fill: 'black', stroke: 'black' })}
             </mask>
@@ -49,12 +49,12 @@ export class Edit extends IconBase {
           <rect
             data-name="square"
             fill="var(--basis-icon-color)"
-            height="105"
+            height={105}
             mask="url(#basis:icon:edit:mask:pencil)"
-            strokeWidth="10"
-            width="105"
-            x="-60"
-            y="-35"
+            strokeWidth={10}
+            width={105}
+            x={-60}
+            y={-35}
           />
           {React.cloneElement(pencil, { fill: 'var(--basis-icon-color)', mask: 'url(#basis:icon:edit:mask:lines)', strokeWidth: 10 })}
         </>
@@ -67,10 +67,10 @@ export class Edit extends IconBase {
           <mask id="basis:icon:edit:mask:pencil">
             <rect
               fill="white"
-              height="200"
-              width="200"
-              x="-100"
-              y="-100"
+              height={200}
+              width={200}
+              x={-100}
+              y={-100}
             />
             {React.cloneElement(pencil, { fill: 'black', stroke: 'black', strokeWidth: 30 })}
           </mask>
@@ -78,12 +78,12 @@ export class Edit extends IconBase {
         <rect
           data-name="square"
           fill="transparent"
-          height="105"
+          height={105}
           mask="url(#basis:icon:edit:mask:pencil)"
-          strokeWidth="10"
-          width="105"
-          x="-60"
-          y="-35"
+          strokeWidth={10}
+          width={105}
+          x={-60}
+          y={-35}
         />
         {React.cloneElement(pencil, { fill: 'transparent', strokeWidth: 10 })}
         {lines}

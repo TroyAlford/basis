@@ -12,7 +12,7 @@ export class Warning extends IconBase {
         d="M9.1636 -67.3455L71.4182 46.9818Q74.3273 52.0727 71.2727 57.1636Q69.9636 59.6364 67.4909 60.9455T62.4 62.4H-62.4Q-65.0182 62.4 -67.4909 60.9455T-71.2727 57.1636Q-74.3273 52.0727 -71.4182 46.9818L-9.0182 -67.3455Q-7.7091 -69.8182 -5.2364 -71.2727T0 -72.7273T5.2364 -71.2727T9.1636 -67.3455Z"
         data-name="triangle"
         fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
@@ -32,10 +32,10 @@ export class Warning extends IconBase {
             <mask id="basis:icon:warning:mask:exclamation">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {React.cloneElement(exclamation, { fill: 'black', strokeWidth: undefined })}
             </mask>

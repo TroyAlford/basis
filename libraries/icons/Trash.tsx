@@ -13,7 +13,7 @@ export class Trash extends IconBase {
         data-name="lid-can"
         fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
         mask={filled ? 'url(#basis:icon:trash:mask:lines)' : undefined}
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
@@ -24,7 +24,7 @@ export class Trash extends IconBase {
         fill={filled ? 'none' : 'transparent'}
         stroke={filled ? 'black' : undefined}
         strokeLinecap="round"
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
@@ -35,7 +35,7 @@ export class Trash extends IconBase {
         fill={filled ? 'none' : 'transparent'}
         stroke={filled ? 'black' : undefined}
         strokeLinecap="round"
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
@@ -46,10 +46,10 @@ export class Trash extends IconBase {
             <mask id="basis:icon:trash:mask:lines">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {verticalLines}
               {horizontalBar}

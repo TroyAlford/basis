@@ -7,7 +7,7 @@ export class Loading extends IconBase {
     <>
       <rect
         height={66.66666666666667}
-        opacity="0.2"
+        opacity={0.2}
         width={26.666666666666668}
         x={-66.66666666666667}
         y={-33.33333333333333}
@@ -39,7 +39,7 @@ export class Loading extends IconBase {
       </rect>
       <rect
         height={66.66666666666667}
-        opacity="0.2"
+        opacity={0.2}
         width={26.666666666666668}
         x={-13.333333333333336}
         y={-33.33333333333333}
@@ -71,7 +71,7 @@ export class Loading extends IconBase {
       </rect>
       <rect
         height={66.66666666666667}
-        opacity="0.2"
+        opacity={0.2}
         width={26.666666666666668}
         x={40}
         y={-33.33333333333333}

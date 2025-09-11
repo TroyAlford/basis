@@ -10,16 +10,16 @@ export class Danger extends IconBase {
     const features = (
       <g data-name="features" fill={filled ? 'black' : 'var(--basis-icon-color)'}>
         <circle
-          cx="-15.2"
-          cy="1.6"
+          cx={-15.2}
+          cy={1.6}
           data-name="left-eye"
-          r="10"
+          r={10}
         />
         <circle
-          cx="15.2"
-          cy="1.6"
+          cx={15.2}
+          cy={1.6}
           data-name="right-eye"
-          r="10"
+          r={10}
         />
         <path
           d="M4.96 20.64C4.96 20.64 0.96 18.72 -4.64 20.64C-4.64 20.64 -4.64 13.6 0.32 13.6S4.96 20.64 4.96 20.64Z"
@@ -64,10 +64,10 @@ export class Danger extends IconBase {
             <mask id="basis:icon:danger:mask:features">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {React.cloneElement(features, { fill: 'black' })}
             </mask>

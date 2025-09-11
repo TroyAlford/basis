@@ -40,16 +40,16 @@ export class Search extends IconBase {
             <mask id="basis:icon:search:mask">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               <circle
-                cx="13.0667"
-                cy="-13.1556"
+                cx={13.0667}
+                cy={-13.1556}
                 fill="black"
-                r="40"
+                r={40}
               />
             </mask>
           </defs>

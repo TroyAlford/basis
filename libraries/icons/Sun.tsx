@@ -13,18 +13,18 @@ export class Sun extends IconBase {
         data-name="rays"
         fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
         mask={filled ? 'url(#basis:icon:sun:mask:center)' : undefined}
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
     const corona = (
       <circle
-        cx="0"
-        cy="0"
+        cx={0}
+        cy={0}
         data-name="corona"
         fill="transparent"
-        r="30"
-        strokeWidth="10"
+        r={30}
+        strokeWidth={10}
       />
     )
 
@@ -35,10 +35,10 @@ export class Sun extends IconBase {
             <mask id="basis:icon:sun:mask:center">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {corona}
             </mask>

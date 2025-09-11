@@ -1,9 +1,36 @@
 import * as React from 'react'
 import { IconBase } from './IconBase/IconBase'
+import { Circle } from './parts/Circle'
+import { Path } from './parts/Path'
 
 export class Save extends IconBase {
   static displayName = 'SaveIcon'
-  renderContent = (): React.ReactNode => (
-    <path d="M47.3882 -75.2941L74.1176 -45.9294V56.4706Q74.1176 64 68.6588 69.6471T55.2941 75.2941H-57.6471Q-65.1765 75.2941 -70.8235 69.6471T-76.4706 56.4706V-56.4706Q-76.4706 -64.3765 -70.8235 -69.8353T-57.6471 -75.2941H47.3882ZM36.4706 -18.8235V-65.8824H-38.8235V-18.8235Q-38.8235 -15.0588 -36 -12.2353T-29.4118 -9.4118H27.0588Q30.8235 -9.4118 33.6471 -12.2353T36.4706 -18.8235ZM27.0588 -56.4706V-18.8235H8.2353V-56.4706H27.0588Z" />
-  )
+
+  renderContent = (): React.ReactNode => {
+    const { filled } = this.props
+
+    const outline = <Path d="M-80 -80 H 50 L 80 -50 V80 80 H-80 Z M-50 -80 V -10 H 50 V -80 Z" data-name="outline" />
+    const circle = <Circle data-name="circle" position={[0, 35]} radius={25} />
+
+    if (filled) {
+      return (
+        <>
+          <defs>
+            <mask id="basis:icon:save:mask">
+              <rect fill="white" height={200} width={200} x={-100} y={-100} />
+              <circle cx={0} cy={35} fill="black" r={25} />
+            </mask>
+          </defs>
+          {React.cloneElement(outline, { fill: true, mask: 'url(#basis:icon:save:mask)' })}
+        </>
+      )
+    }
+
+    return (
+      <>
+        {React.cloneElement(outline, { fill: false, stroke: 10 })}
+        {React.cloneElement(circle, { fill: false, stroke: 10 })}
+      </>
+    )
+  }
 }

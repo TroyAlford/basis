@@ -13,17 +13,17 @@ export class Picture extends IconBase {
         data-name="frame"
         fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
         mask={filled ? 'url(#basis:icon:picture:mask:frame)' : undefined}
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
     const moon = (
       <circle
-        cx="-45.67718571428574"
-        cy="-28.64"
+        cx={-45.67718571428574}
+        cy={-28.64}
         data-name="moon"
         fill={filled ? 'black' : 'transparent'}
-        r="17.12"
+        r={17.12}
         strokeWidth={filled ? undefined : '10'}
       />
     )
@@ -44,10 +44,10 @@ export class Picture extends IconBase {
             <mask id="basis:icon:picture:mask:frame">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {moon}
               {mountain}

@@ -13,7 +13,7 @@ export class PadlockLocked extends IconBase {
         data-name="arch"
         fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
         mask={filled ? 'url(#basis:icon:secret:mask:cutout)' : undefined}
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
@@ -33,10 +33,10 @@ export class PadlockLocked extends IconBase {
             <mask id="basis:icon:secret:mask:cutout">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {rectangle}
             </mask>

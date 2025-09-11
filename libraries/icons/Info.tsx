@@ -13,7 +13,7 @@ export class Info extends IconBase {
         data-name="circle"
         fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
         mask={filled ? 'url(#basis:icon:info:mask:letter)' : undefined}
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
@@ -32,10 +32,10 @@ export class Info extends IconBase {
             <mask id="basis:icon:info:mask:letter">
               <rect
                 fill="white"
-                height="200"
-                width="200"
-                x="-100"
-                y="-100"
+                height={200}
+                width={200}
+                x={-100}
+                y={-100}
               />
               {letter}
             </mask>

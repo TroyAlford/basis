@@ -14,9 +14,9 @@ export class Navigation extends IconBase {
         data-name={dataName}
         fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
         height={height}
-        rx="10"
-        ry="10"
-        strokeWidth="10"
+        rx={10}
+        ry={10}
+        strokeWidth={10}
         width={width}
         x={x}
         y={y}
@@ -40,7 +40,7 @@ export class Navigation extends IconBase {
         data-name="connecting-line"
         fill="transparent"
         strokeLinecap="round"
-        strokeWidth="10"
+        strokeWidth={10}
       />
     )
 
