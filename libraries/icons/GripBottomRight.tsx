@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { IconBase } from './IconBase/IconBase'
+import { Circle } from './parts/Circle'
 
 export class GripBottomRight extends IconBase {
   static displayName = 'GripBottomRightIcon'
@@ -9,48 +10,12 @@ export class GripBottomRight extends IconBase {
 
     return (
       <>
-        <circle
-          cx={0}
-          cy={0}
-          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
-          r={14}
-          strokeWidth="10"
-        />
-        <circle
-          cx={50}
-          cy={50}
-          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
-          r={14}
-          strokeWidth="10"
-        />
-        <circle
-          cx={50}
-          cy={0}
-          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
-          r={14}
-          strokeWidth="10"
-        />
-        <circle
-          cx={0}
-          cy={50}
-          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
-          r={14}
-          strokeWidth="10"
-        />
-        <circle
-          cx={50}
-          cy={-50}
-          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
-          r={14}
-          strokeWidth="10"
-        />
-        <circle
-          cx={-50}
-          cy={50}
-          fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
-          r={14}
-          strokeWidth="10"
-        />
+        <Circle fill={filled} position={[0, 0]} radius={12.5} />
+        <Circle fill={filled} position={[50, 50]} radius={12.5} />
+        <Circle fill={filled} position={[50, 0]} radius={12.5} />
+        <Circle fill={filled} position={[0, 50]} radius={12.5} />
+        <Circle fill={filled} position={[50, -50]} radius={12.5} />
+        <Circle fill={filled} position={[-50, 50]} radius={12.5} />
       </>
     )
   }

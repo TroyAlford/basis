@@ -55,6 +55,40 @@ export abstract class IconBase<
     }
   }
 
+  // Smart defaults for SVG elements
+  get defaultFill() {
+    return this.props.filled ? 'var(--basis-icon-color)' : 'transparent'
+  }
+
+  get defaultStroke() {
+    return 'var(--basis-icon-color)'
+  }
+
+  get defaultStrokeWidth() {
+    return this.props.filled ? '10' : '10'
+  }
+
+  // Helper method to get smart defaults for SVG elements
+  getSvgProps(overrides: Partial<{
+    fill: string | boolean,
+    stroke: string | boolean,
+    strokeWidth: string | number | boolean,
+  }> = {}) {
+    const { fill, stroke, strokeWidth } = overrides
+
+    return {
+      fill: fill === false ? 'transparent'
+        : fill === true ? 'var(--basis-icon-color)'
+          : fill || this.defaultFill,
+      stroke: stroke === false ? 'transparent'
+        : stroke === true ? 'var(--basis-icon-color)'
+          : stroke || this.defaultStroke,
+      strokeWidth: strokeWidth === false ? '0'
+        : strokeWidth === true ? '10'
+          : strokeWidth || this.defaultStrokeWidth,
+    }
+  }
+
   content(): React.ReactNode {
     const { overlay, title } = this.props
     const Overlay = overlay as typeof IconBase

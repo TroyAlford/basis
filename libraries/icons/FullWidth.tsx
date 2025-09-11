@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { IconBase } from './IconBase/IconBase'
+import { Path } from './parts/Path'
 
 export class FullWidth extends IconBase {
   static displayName = 'FullWidthIcon'
@@ -8,12 +9,10 @@ export class FullWidth extends IconBase {
     const { filled } = this.props
 
     return (
-      <path
+      <Path
         d="M-75 0H75M-75 0L-41.6667 -33.3333M-75 0L-41.6667 33.3333M75 0L41.6667 33.3333M75 0L41.6667 -33.3333"
-        fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={filled ? 20 : 10}
+        fill={filled}
+        stroke={filled ? 20 : 10}
       />
     )
   }
