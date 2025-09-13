@@ -1,0 +1,9 @@
+{
+	"name": "@basis/icons",
+	"main": "index.ts",
+	"version": "0.0.0",
+	"dependencies": {
+		"react": "^19",
+		"react-dom": "^19"
+	}
+}

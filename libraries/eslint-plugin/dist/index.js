@@ -175,7 +175,7 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
             '@stylistic/jsx/jsx-equals-spacing': ['error', 'never'],
             '@stylistic/jsx/jsx-first-prop-new-line': ['error', 'multiline-multiprop'],
             '@stylistic/jsx/jsx-function-call-newline': ['error', 'multiline'],
-            '@stylistic/jsx/jsx-max-props-per-line': ['error', { maximum: { multi: 1, single: 3 } }],
+            '@stylistic/jsx/jsx-max-props-per-line': ['error', { maximum: { multi: 1, single: 5 } }],
             '@stylistic/jsx/jsx-newline': ['error', { allowMultilines: false, prevent: true }],
             '@stylistic/jsx/jsx-one-expression-per-line': 'off',
             '@stylistic/jsx/jsx-pascal-case': ['error', {
@@ -319,5 +319,11 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
         files: ['*.docs.tsx'],
         rules: {
             '@stylistic/jsx/jsx-child-element-spacing': 'off',
+        },
+    }),
+    plugin({
+        files: ['libraries/icons/**/*.tsx'],
+        rules: {
+            '@stylistic/max-len': 'off',
         },
     })], false));

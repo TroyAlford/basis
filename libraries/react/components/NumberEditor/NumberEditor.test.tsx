@@ -157,12 +157,12 @@ describe('NumberEditor', () => {
       expect(onChange).toHaveBeenCalledWith(-1, '', expect.any(Object))
     })
 
-    test('does not handle arrow keys when step is not provided', async () => {
+    test('handles arrow keys with default step of 1 when step is not provided', async () => {
       const { node } = await render(<NumberEditor initialValue={10} onChange={onChange} onKeyDown={onKeyDown} />)
       const numberInput = getInput(node)
 
       await Simulate.keyDown(numberInput, Keyboard.ArrowUp, onKeyDown)
-      expect(onChange).not.toHaveBeenCalled()
+      expect(onChange).toHaveBeenCalledWith(11, '', expect.any(Object))
     })
 
     test('handles null/undefined current value with step', async () => {

@@ -10,11 +10,8 @@
   },
   "dependencies": {
     "@basis/react": "workspace:*",
+    "@basis/icons": "workspace:*",
     "react": "^19",
     "react-dom": "^19"
-  },
-  "devDependencies": {
-    "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6"
   }
 }
