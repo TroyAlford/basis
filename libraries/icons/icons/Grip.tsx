@@ -1,12 +1,12 @@
 import * as React from 'react'
+import type { IconProps } from '../IconBase/IconBase'
+import { IconBase } from '../IconBase/IconBase'
 import { GripBottomLeft } from './GripBottomLeft'
 import { GripBottomRight } from './GripBottomRight'
 import { GripHorizontal } from './GripHorizontal'
 import { GripTopLeft } from './GripTopLeft'
 import { GripTopRight } from './GripTopRight'
 import { GripVertical } from './GripVertical'
-import type { IconProps } from '../IconBase/IconBase'
-import { IconBase } from '../IconBase/IconBase'
 
 enum Orientation {
   BottomLeft = 'BottomLeft',

@@ -4,7 +4,6 @@ import { mkdirSync, readdirSync, writeFileSync } from 'fs'
 import { basename, extname, join } from 'path'
 import React from 'react'
 import { renderToString } from 'react-dom/server'
-// eslint-disable-next-line @import/no-extraneous-dependencies
 import SVGPathCommander from 'svg-path-commander'
 
 /**
