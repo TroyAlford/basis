@@ -27,6 +27,7 @@ export class MoonPhase extends IconBase<Props> {
     return {
       ...super.defaultProps,
       day: 0,
+      filled: true,
       period: 28,
       tilt: 0,
     }
@@ -35,9 +36,9 @@ export class MoonPhase extends IconBase<Props> {
   maskId = randomHash()
 
   get ellipseWidth(): number {
-    const ellipseWidth = (((this.props.day / this.props.period) * 4) % 1) * 100
+    const ellipseWidth = (((this.props.day / this.props.period) * 4) % 1) * 80
     return [Phase.WaningGibbous, Phase.WaxingCrescent].includes(this.phase)
-      ? 100 - ellipseWidth
+      ? 80 - ellipseWidth
       : ellipseWidth
   }
   get phase(): Phase {
@@ -53,28 +54,37 @@ export class MoonPhase extends IconBase<Props> {
   }
 
   renderPath = (): React.ReactNode => {
+    const { filled } = this.props
+    const stroke = filled ? 0 : 10
+
     switch (this.phase) {
       case (Phase.WaxingCrescent):
-        return <Path d={`M 0 -100 A ${this.ellipseWidth} 100 0 0 1 0 100 A 100 100 0 0 0 0 -100 Z`} />
+        return <Path d={`M 0 -80 A ${this.ellipseWidth} 80 0 0 1 0 80 A 80 80 0 0 0 0 -80 Z`} fill={filled} stroke={stroke} />
       case (Phase.FirstQuarter):
-        return <Path d="M 0 -100 A 100 100 0 0 1 0 100 Z" />
+        return <Path d="M 0 -80 A 80 80 0 0 1 0 80 Z" fill={filled} stroke={stroke} />
       case (Phase.WaxingGibbous):
-        return <Path d={`M 0 -100 A ${this.ellipseWidth} 100 0 0 0 0 100 A 100 100 0 0 0 0 -100 Z`} />
+        return <Path d={`M 0 -80 A ${this.ellipseWidth} 80 0 0 0 0 80 A 80 80 0 0 0 0 -80 Z`} fill={filled} stroke={stroke} />
       case (Phase.WaningGibbous):
-        return <Path d={`M 0 -100 A 100 100 0 0 0 0 100 A ${this.ellipseWidth} 100 0 0 0 0 -100 Z`} />
+        return <Path d={`M 0 -80 A 80 80 0 0 0 0 80 A ${this.ellipseWidth} 80 0 0 0 0 -80 Z`} fill={filled} stroke={stroke} />
       case (Phase.LastQuarter):
-        return <Path d="M 0 -100 A 100 100 0 0 0 0 100 Z" />
+        return <Path d="M 0 -80 A 80 80 0 0 0 0 80 Z" fill={filled} stroke={stroke} />
       case (Phase.WaningCrescent):
-        return <Path d={`M 0 -100 A 100 100 0 0 0 0 100 A ${this.ellipseWidth} 100 0 0 1 0 -100 Z`} />
+        return <Path d={`M 0 -80 A 80 80 0 0 0 0 80 A ${this.ellipseWidth} 80 0 0 1 0 -80 Z`} fill={filled} stroke={stroke} />
       case (Phase.Full):
-        return <Circle position={[0, 0]} radius={100} />
+        return <Circle fill={filled} position={[0, 0]} radius={80} stroke={stroke} />
       case (Phase.New): default: return null
     }
   }
 
   renderContent = (): React.ReactNode => (
     <>
-      <Circle color="#1114" position={[0, 0]} radius={100} />
+      <Circle
+        color="var(--basis-icon-color-secondary, #11111144)"
+        fill={this.props.filled}
+        position={[0, 0]}
+        radius={80}
+        stroke={this.props.filled ? 0 : 10}
+      />
       <g transform={`rotate(${this.props.tilt * 100})`}>{this.renderPath()}</g>
     </>
   )

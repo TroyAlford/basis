@@ -111,5 +111,58 @@ export const iconsDocsStyles = style('basis:docs:icons', css`
       padding: 16px;
     }
 
+    .moon-phase-section {
+      background-color: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      display: grid;
+      gap: 24px;
+      grid-template-columns: 1fr 2fr;
+      margin-bottom: 24px;
+      padding: 24px;
+
+      @media (max-width: 768px) {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .moon-controls {
+      h3 {
+        margin-bottom: 16px;
+        margin-top: 0;
+      }
+    }
+
+    .moon-controls-grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1fr;
+    }
+
+    .moon-display {
+      align-items: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .moon-demo-container {
+      --basis-icon-color: var(--demo-icon-color, currentColor);
+      --basis-icon-stroke: var(--demo-icon-color, currentColor);
+      --basis-icon-size: 120px;
+      background-color: white;
+      border: 1px solid #dee2e6;
+      border-radius: 50%;
+      margin-bottom: 16px;
+      padding: 20px;
+    }
+
+    .moon-phase-name {
+      color: #6c757d;
+      font-size: 14px;
+      font-weight: 500;
+      text-align: center;
+    }
+
   }
 `)

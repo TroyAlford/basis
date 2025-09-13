@@ -36,20 +36,27 @@ style('basis:docs:layout', css`
         margin: 0;
       }
 
-      > .links {
-        display: flex;
-        flex-direction: column;
+        UL, LI {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+        }
+        LI {
+          > A {
+            display: block;
+            padding: var(--basis-unit-sm) var(--basis-unit-md);
+            text-decoration: none;
+            
+            &[data-active='true'] {
+              background-color: var(--basis-color-background);
+              color: var(--basis-color-primary);
+            }
+          }
 
-        > a {
-          padding: var(--basis-unit-sm) var(--basis-unit-md);
-          text-decoration: none;
-
-          &[data-active='true'] {
-            background-color: var(--basis-color-background);
-            color: var(--basis-color-primary);
+          > UL > LI {
+            padding-left: var(--basis-unit-md);
           }
         }
-      }
     }
 
     > main {

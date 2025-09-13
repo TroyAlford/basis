@@ -1,33 +1,26 @@
-/* eslint-disable @import/no-default-export */
 import * as React from 'react'
 import type { IconProps } from '@basis/icons'
 import * as Icons from '@basis/icons'
-import { Button, css, NumberEditor, style, TextEditor } from '@basis/react'
+import { Button, css, NumberEditor, Router, style, TextEditor } from '@basis/react'
 import { Code } from '../components/Code'
 
 import './Icons.styles.ts'
 
 interface State {
+  color: string,
   filled: boolean,
   filterText: string,
-  iconColor: string,
-  iconSize: number,
-  moonDay: number,
-  moonPeriod: number,
-  moonTilt: number,
   showNames: boolean,
+  size: number,
 }
 
-export default class IconsDocs extends React.Component<Record<string, never>, State> {
+export class IconsDocs extends React.Component<Record<string, never>, State> {
   state = {
+    color: '#000000',
     filled: false,
     filterText: '',
-    iconColor: '#369',
-    iconSize: 60,
-    moonDay: 3.5,
-    moonPeriod: 28,
-    moonTilt: 28.5,
     showNames: true,
+    size: 60,
   }
 
   // Get all icon components (excluding Icon, IconBase, and utility components)
@@ -69,46 +62,47 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
     )
   }
 
-  renderSpecialIcons = (): React.ReactNode => {
-    const { moonDay, moonPeriod, moonTilt } = this.state
-
-    return (
-      <div className="special-icons-grid">
-        {/* Sort Component */}
-        <div className="special-icon-item">
-          <div className="icon-demo-container">
-            <Icons.Sort
-              direction={Icons.Sort.Direction.Asc}
-              sortBy={Icons.Sort.By.Name}
-            />
-          </div>
-          <span className="special-icon-name">
-            Sort (by name)
-          </span>
+  renderSpecialIcons = (): React.ReactNode => (
+    <div className="special-icons-grid">
+      {/* Triangle Component */}
+      <div className="special-icon-item">
+        <div className="icon-demo-container">
+          <Icons.Triangle orientation={Icons.Triangle.Orientation.Right} />
         </div>
-        {/* Moon Phase Component */}
-        <div className="special-icon-item">
-          <div className="icon-demo-container">
-            <Icons.MoonPhase
-              day={moonDay}
-              period={moonPeriod}
-              tilt={moonTilt}
-            />
-          </div>
-          <span className="special-icon-name">
-            Moon Phase
-          </span>
-        </div>
+        <span className="special-icon-name">
+          Triangle (Right)
+        </span>
       </div>
-    )
-  }
+      {/* Sort Component */}
+      <div className="special-icon-item">
+        <div className="icon-demo-container">
+          <Icons.Sort
+            direction={Icons.Sort.Direction.Asc}
+            sortBy={Icons.Sort.By.Name}
+          />
+        </div>
+        <span className="special-icon-name">
+          Sort (by name)
+        </span>
+      </div>
+      {/* Grip Component */}
+      <div className="special-icon-item">
+        <div className="icon-demo-container">
+          <Icons.Grip orientation={Icons.Grip.Orientation.Horizontal} />
+        </div>
+        <span className="special-icon-name">
+          Grip (Horizontal)
+        </span>
+      </div>
+    </div>
+  )
 
   render() {
-    const { filled, filterText, iconColor, iconSize, moonDay, moonPeriod, moonTilt, showNames } = this.state
+    const { color, filled, filterText, showNames, size } = this.state
     style('basis:docs:icons:dynamic', css`
       .icon-demo-container {
-        --demo-icon-color: ${iconColor};
-        --demo-icon-size: ${iconSize}px;
+        --demo-icon-color: ${color};
+        --demo-icon-size: ${size}px;
       }
     `)
 
@@ -127,12 +121,12 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
         <div className="controls-grid">
           <div className="control-group">
             <label>
-              Size: {iconSize}px
+              Size: {size}px
             </label>
             <NumberEditor
               step={4}
-              value={iconSize}
-              onChange={value => this.setState({ iconSize: value })}
+              value={size}
+              onChange={value => this.setState({ size: value })}
             />
           </div>
           <div className="control-group">
@@ -142,8 +136,8 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
             <input
               className="color-input"
               type="color"
-              value={iconColor}
-              onChange={e => this.setState({ iconColor: e.target.value })}
+              value={color}
+              onChange={event => this.setState({ color: event.target.value })}
             />
           </div>
           <div className="control-group">
@@ -183,41 +177,6 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
           <h3>All Icons ({this.iconComponents.length})</h3>
           {this.renderIconGrid()}
         </div>
-        <h2>Special Components</h2>
-        <p>
-          Some icons are more than simple graphics - they're interactive components with their own props and behavior:
-        </p>
-        <div className="moon-controls-grid">
-          <div className="control-group">
-            <label>
-              Moon Day: {moonDay}
-            </label>
-            <NumberEditor
-              value={moonDay}
-              onChange={value => this.setState({ moonDay: value })}
-            />
-          </div>
-          <div className="control-group">
-            <label>
-              Moon Period: {moonPeriod}
-            </label>
-            <NumberEditor
-              value={moonPeriod}
-              onChange={value => this.setState({ moonPeriod: value })}
-            />
-          </div>
-          <div className="control-group">
-            <label>
-              Moon Tilt: {moonTilt}
-            </label>
-            <NumberEditor
-              step={0.1}
-              value={moonTilt}
-              onChange={value => this.setState({ moonTilt: value })}
-            />
-          </div>
-        </div>
-        {this.renderSpecialIcons()}
         <h2>Usage Examples</h2>
         <h3>Basic Icon Usage</h3>
         {Code.format(`
@@ -229,50 +188,51 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
           <Gear />
 
           // With custom styling via CSS custom properties
-          <div style={{ '--basis-icon-color': '#007bff', '--basis-icon-size': '32px' }}>
+          <div style={{ '--basis-icon-color': '#000000', '--basis-icon-size': '32px' }}>
             <Plus />
           </div>
           <Search disabled={true} />
         `)}
-        <h3>Dynamic Icon Rendering</h3>
+        <h2>Group/Set Icons</h2>
+        {this.renderSpecialIcons()}
+        <p>
+          Some icons are more than simple graphics - they're interactive components with their own props and behavior.
+          The following three components follow the same pattern of grouping icon variants into a single component:
+        </p>
+        <ul>
+          <li><strong>Triangle</strong>: Directional triangles with an <code>orientation</code> prop</li>
+          <li><strong>Sort</strong>: Sort indicators with <code>sortBy</code> and <code>direction</code> props</li>
+          <li><strong>Grip</strong>: Grip handles with an <code>orientation</code> prop</li>
+        </ul>
+        <p>This reduces the number of individual icon components while providing type-safe access to all variants.</p>
+        <h3>Usage</h3>
         {Code.format(`
-          import { Icon } from '@basis/icons'
+          import { Triangle, Sort, Grip } from '@basis/icons'
 
-          // Render icons by name
-          <Icon named="Plus" />
-          <Icon named="Search" />
-          <Icon named="Gear" />
+          // Triangle - directional arrows
+          <Triangle orientation={Triangle.Orientation.Right} />
+          <Triangle orientation={Triangle.Orientation.Up} />
+          <Triangle orientation={Triangle.Orientation.Down} />
+          <Triangle orientation={Triangle.Orientation.Left} />
 
-          // With custom styling via CSS custom properties
-          <div style={{ '--basis-icon-color': '#28a745', '--basis-icon-size': '24px' }}>
-            <Icon named="Plus" />
-          </div>
+          // Sort - table sorting indicators
+          <Sort sortBy={Sort.By.Name} direction={Sort.Direction.Asc} />
+          <Sort sortBy={Sort.By.Size} direction={Sort.Direction.Desc} />
+          <Sort sortBy={Sort.By.Value} direction={Sort.Direction.Asc} />
+          
+          // Alternative syntax - direct component access
+          <Sort.BySize.Desc />
+
+          // Grip - drag handles for different positions
+          <Grip orientation={Grip.Orientation.Horizontal} />
+          <Grip orientation={Grip.Orientation.Vertical} />
+          <Grip orientation={Grip.Orientation.TopLeft} />
+          <Grip orientation={Grip.Orientation.BottomRight} />
         `)}
-        <h3>Sort Component</h3>
-        {Code.format(`
-          import { Sort, SortBy, SortDirection } from '@basis/icons'
-
-          // Sort by different criteria
-          <Sort by={SortBy.Name} direction={SortDirection.Asc} />
-          <Sort by={SortBy.Size} direction={SortDirection.Desc} />
-          <Sort by={SortBy.Value} direction={SortDirection.Asc} />
-
-          // No sort state
-          <Sort by={SortBy.None} />
-        `)}
-        <h3>Moon Phase Component</h3>
-        {Code.format(`
-          import { MoonPhase } from '@basis/icons'
-
-          // Show different moon phases
-          <MoonPhase day={0} period={28} tilt={0} />      // New moon
-          <MoonPhase day={7} period={28} tilt={0} />      // First quarter
-          <MoonPhase day={14} period={28} tilt={0} />     // Full moon
-          <MoonPhase day={21} period={28} tilt={0} />     // Last quarter
-
-          // With custom tilt
-          <MoonPhase day={14} period={28} tilt={0.3} />
-        `)}
+        <p>
+          For detailed information about the Moon Phase component, see the
+          <Router.Link to="/icons/MoonPhase">MoonPhase documentation</Router.Link>.
+        </p>
         <h2>Icon Styling</h2>
         <p>
           Icons are styled using CSS custom properties. All icons inherit from <code>IconBase</code> and
@@ -280,7 +240,7 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
         </p>
         <ul>
           <li><strong>--basis-icon-size</strong> - Icon size (default: 1em)</li>
-          <li><strong>--basis-icon-color</strong> - Icon color (default: currentColor)</li>
+          <li><strong>--basis-icon-color</strong> - Icon color (default: currentColor, shown as #000000 in picker)</li>
           <li><strong>--basis-icon-stroke</strong> - Icon stroke color (default: transparent)</li>
           <li><strong>--basis-icon-overlay-color</strong> - Overlay color (default: currentColor)</li>
           <li><strong>--basis-icon-overlay-stroke</strong> - Overlay stroke color (default: currentColor)</li>
@@ -312,14 +272,14 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
         {Code.format(`
           // CSS custom properties customization
           .my-icon-container {
-            --basis-icon-color: #007bff;
+            --basis-icon-color: #000000;
             --basis-icon-size: 32px;
             --basis-icon-stroke: #0056b3;
             transition: --basis-icon-color 0.2s ease;
           }
 
           .my-icon-container:hover {
-            --basis-icon-color: #0056b3;
+            --basis-icon-color: #333333;
           }
 
           // Component extension
