@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { IconBase } from './IconBase/IconBase'
+import { Path } from './parts/Path'
 
 export class Lightning extends IconBase {
   static displayName = 'LightningIcon'
@@ -7,10 +8,10 @@ export class Lightning extends IconBase {
   renderContent = (): React.ReactNode => {
     const { filled } = this.props
     return (
-      <path
-        d="M44.1595 -12.5356H8.7907L39.3229 -66.256C40.0786 -67.5792 40.0741 -69.2029 39.3107 -70.5217C38.5428 -71.8394 37.1361 -72.6496 35.6125 -72.6496H-15.6695C-17.5091 -72.6496 -19.1417 -71.4721 -19.7216 -69.7282L-45.3626 7.4797C-45.8011 8.7818 -45.5796 10.2175 -44.7783 11.3315C-43.9726 12.4466 -42.6827 13.1054 -41.3105 13.1054H-5.0559L-28.1428 67.2643C-28.9697 69.1885 -28.2764 71.4298 -26.5069 72.5516C-24.7663 73.6645 -22.4281 73.3718 -21.0236 71.7849L47.3524 -5.4231C48.4709 -6.6796 48.7469 -8.4791 48.058 -10.0105C47.3691 -11.5463 45.8422 -12.5356 44.1595 -12.5356ZM44.1595 -12.5356"
-        fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
-        strokeWidth={10}
+      <Path
+        d="M44 -12 H9 L39 -66 C40 -67 40 -69 39 -70 C38 -72 37 -72 35 -72 H-15 C-17 -72 -19 -71 -20 -70 L-45 7 C-46 9 -45 10 -45 11 C-44 12 -42 13 -41 13 H-5 L-28 67 C-29 69 -28 71 -26 72 C-25 74 -22 73 -21 72 L47 -5 C48 -6 49 -8 48 -10 C47 -11 46 -12 44 -12 ZM44 -12"
+        fill={filled}
+        stroke={10}
       />
     )
   }

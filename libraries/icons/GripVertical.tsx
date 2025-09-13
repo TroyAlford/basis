@@ -10,12 +10,12 @@ export class GripVertical extends IconBase {
 
     return (
       <>
-        <Circle fill={filled} position={[-25, 0]} radius={12.5} />
-        <Circle fill={filled} position={[25, 0]} radius={12.5} />
-        <Circle fill={filled} position={[-25, -50]} radius={12.5} />
-        <Circle fill={filled} position={[25, -50]} radius={12.5} />
-        <Circle fill={filled} position={[-25, 50]} radius={12.5} />
-        <Circle fill={filled} position={[25, 50]} radius={12.5} />
+        <Circle fill={filled} position={[-25, 0]} radius={12.5} stroke={10} />
+        <Circle fill={filled} position={[25, 0]} radius={12.5} stroke={10} />
+        <Circle fill={filled} position={[-25, -50]} radius={12.5} stroke={10} />
+        <Circle fill={filled} position={[25, -50]} radius={12.5} stroke={10} />
+        <Circle fill={filled} position={[-25, 50]} radius={12.5} stroke={10} />
+        <Circle fill={filled} position={[25, 50]} radius={12.5} stroke={10} />
       </>
     )
   }

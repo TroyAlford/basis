@@ -26,7 +26,7 @@ export abstract class Shape<P extends Props = Props> extends Component<P, SVGEle
       ...super.attributes,
       fill: this.props.fill ? this.props.color : 'transparent',
       mask: this.props.mask,
-      strokeColor: this.props.color,
+      stroke: this.props.color,
       strokeWidth: this.props.stroke,
     }
   }
