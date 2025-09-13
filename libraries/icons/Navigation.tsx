@@ -1,5 +1,8 @@
 import * as React from 'react'
 import { IconBase } from './IconBase/IconBase'
+import { Path } from './parts/Path'
+import { Rect } from './parts/Rect'
+import { LineCap } from './types/LineCap'
 
 export class Navigation extends IconBase {
   static displayName = 'NavigationIcon'
@@ -10,13 +13,12 @@ export class Navigation extends IconBase {
     const y = centerY - (height / 2)
 
     return (
-      <rect
+      <Rect
         data-name={dataName}
-        fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
+        fill={filled}
         height={height}
         rx={10}
         ry={10}
-        strokeWidth={10}
         width={width}
         x={x}
         y={y}
@@ -25,29 +27,20 @@ export class Navigation extends IconBase {
   }
 
   renderContent = (): React.ReactNode => {
-    const testSquares = (
-      <>
-        {this.renderRect(0, -55, 45, 40, 'top-box')}
-        {this.renderRect(0, 55, 45, 40, 'bottom-center-box')}
-        {this.renderRect(-65, 55, 45, 40, 'bottom-left-box')}
-        {this.renderRect(65, 55, 45, 40, 'bottom-right-box')}
-      </>
-    )
-
     const connectingLine = (
-      <path
+      <Path
         d="M0 -35L0 35M-65 35L-65 10A10 10 0 0 1 -55 0L55 0A10 10 0 0 1 65 10L65 35"
         data-name="connecting-line"
-        fill="transparent"
-        strokeLinecap="round"
-        strokeWidth={10}
+        lineCap={LineCap.Round}
       />
     )
 
     return (
       <>
-        {/* {boxes} */}
-        {testSquares}
+        {this.renderRect(0, -55, 45, 40, 'top-box')}
+        {this.renderRect(0, 55, 45, 40, 'bottom-center-box')}
+        {this.renderRect(-65, 55, 45, 40, 'bottom-left-box')}
+        {this.renderRect(65, 55, 45, 40, 'bottom-right-box')}
         {connectingLine}
       </>
     )

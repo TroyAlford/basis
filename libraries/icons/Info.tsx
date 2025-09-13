@@ -2,24 +2,12 @@ import * as React from 'react'
 import { IconBase } from './IconBase/IconBase'
 import { Circle } from './parts/Circle'
 import { Path } from './parts/Path'
-import { Rect } from './parts/Rect'
 
 export class Info extends IconBase {
   static displayName = 'InfoIcon'
 
   renderContent = (): React.ReactNode => {
     const { filled } = this.props
-
-    const circle = (
-      <Circle
-        data-name="circle"
-        fill={filled}
-        mask={filled ? 'url(#basis:icon:info:mask:letter)' : undefined}
-        position={[0, 0]}
-        radius={80}
-        stroke={10}
-      />
-    )
 
     const letter = (
       <Path
@@ -29,32 +17,23 @@ export class Info extends IconBase {
         stroke={0}
       />
     )
-
-    if (filled) {
-      return (
-        <>
-          <defs>
-            <mask id="basis:icon:info:mask:letter">
-              <Rect
-                fill
-                color="white"
-                height={200}
-                width={200}
-                x={-100}
-                y={-100}
-              />
-              {React.cloneElement(letter, { color: 'black' })}
-            </mask>
-          </defs>
-          {circle}
-        </>
-      )
-    }
+    const mask = this.mask('letter', letter)
+    const circle = (
+      <Circle
+        data-name="circle"
+        fill={filled}
+        mask={filled ? mask.props.url : undefined}
+        position={[0, 0]}
+        radius={80}
+        stroke={10}
+      />
+    )
 
     return (
       <>
+        <defs>{mask}</defs>
         {circle}
-        {letter}
+        {!filled && letter}
       </>
     )
   }

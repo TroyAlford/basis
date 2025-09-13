@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { IconBase } from './IconBase/IconBase'
+import { Path } from './parts/Path'
 
 export class QuotationMark extends IconBase {
   static displayName = 'QuotationMarkIcon'
@@ -7,25 +8,29 @@ export class QuotationMark extends IconBase {
   renderContent = (): React.ReactNode => {
     const { filled } = this.props
 
-    const leftQuote = (
-      <path
+    const left = (
+      <Path
         d="M-43.0625 -64.3292C-32.3667 -64.3292 -23.7417 -60.5375 -17.1875 -52.9542C-10.6583 -45.3708 -7.3958 -35.1917 -7.3958 -22.4125C-7.3958 -6.05 -12.1458 9.2542 -21.6458 23.5042C-31.175 37.7833 -42.9083 48.3375 -56.8542 55.1708L-61.3125 47.5875C-55.3667 42.8375 -50.1042 37.0458 -45.5208 30.2125C-40.9083 23.3792 -37.2583 15.0583 -34.5625 5.2542L-43.9375 2.5458C-53.4667 -0.425 -60.9792 -4.8833 -66.4792 -10.8292C-71.95 -16.775 -74.6875 -24.05 -74.6875 -32.6625C-74.6875 -42.1625 -71.575 -49.8167 -65.3542 -55.6208C-59.1042 -61.425 -51.675 -64.3292 -43.0625 -64.3292"
         data-name="left-quote"
+        fill={filled}
+        stroke={filled ? 5 : 10}
       />
     )
 
-    const rightQuote = (
-      <path
+    const right = (
+      <Path
         d="M33.8958 -64.3292C44.5917 -64.3292 53.2167 -60.5375 59.7708 -52.9542C66.3 -45.3708 69.5625 -35.1917 69.5625 -22.4125C69.5625 -6.05 64.8125 9.2542 55.3125 23.5042C45.7833 37.7833 34.05 48.3375 20.1042 55.1708L15.6458 47.5875C21.5625 42.8375 26.825 37.0458 31.4375 30.2125C36.05 23.3792 39.6875 15.0583 42.3542 5.2542L33.0208 2.5458C23.4917 -0.425 15.9792 -4.8833 10.4792 -10.8292C4.9792 -16.775 2.2292 -24.05 2.2292 -32.6625C2.2292 -42.1625 5.3542 -49.8167 11.6042 -55.6208C17.8542 -61.425 25.2833 -64.3292 33.8958 -64.3292"
         data-name="right-quote"
+        fill={filled}
+        stroke={filled ? 5 : 10}
       />
     )
 
     return (
-      <g fill={filled ? 'var(--basis-icon-color)' : 'transparent'} strokeWidth={filled ? 5 : 10}>
-        {leftQuote}
-        {rightQuote}
-      </g>
+      <>
+        {left}
+        {right}
+      </>
     )
   }
 }

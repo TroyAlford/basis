@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { IconBase } from './IconBase/IconBase'
+import { Path } from './parts/Path'
 
 export class Remove extends IconBase {
   static displayName = 'RemoveIcon'
@@ -8,11 +9,11 @@ export class Remove extends IconBase {
     const { filled } = this.props
 
     return (
-      <path
+      <Path
         d="M59.8118 38.9176Q59.8118 43.0588 56.9882 46.0706L42.6824 60.3765Q39.6706 63.2 35.5294 63.2T28.3765 60.3765L-2.4941 29.3176L-33.3647 60.3765Q-36.3765 63.2 -40.5176 63.2T-47.6706 60.3765L-61.9765 46.0706Q-64.9882 43.0588 -64.9882 38.9176T-61.9765 31.7647L-31.1059 0.8941L-61.9765 -29.9765Q-64.9882 -32.9882 -64.9882 -37.1294T-61.9765 -44.2824L-47.6706 -58.5882Q-44.6588 -61.6 -40.5176 -61.6T-33.3647 -58.5882L-2.4941 -27.7176L28.3765 -58.5882Q31.3882 -61.6 35.5294 -61.6T42.6824 -58.5882L56.9882 -44.2824Q59.8118 -41.4588 59.8118 -37.1294T56.9882 -29.9765L26.1176 0.8941L56.9882 31.7647Q59.8118 34.5882 59.8118 38.9176Z"
         data-name="cross"
-        fill={filled ? 'var(--basis-icon-color)' : 'transparent'}
-        strokeWidth={10}
+        fill={filled}
+        stroke={10}
       />
     )
   }

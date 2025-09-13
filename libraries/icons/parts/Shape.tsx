@@ -15,7 +15,7 @@ export abstract class Shape<P extends Props = Props> extends Component<P, SVGEle
   static get defaultProps() {
     return {
       ...super.defaultProps,
-      color: 'var(--basis-icon-color)',
+      color: 'var(--basis-icon-color, currentColor)',
       fill: false,
       stroke: 10,
     }

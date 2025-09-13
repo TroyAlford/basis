@@ -1,7 +1,10 @@
 import type { MouseEventHandler } from 'react'
 import React from 'react'
+import type { JsxChild, JsxFragment } from 'typescript'
 import { Component } from '@basis/react'
 import { noop } from '@basis/utilities'
+import { Rect } from '../parts/Rect.tsx'
+import type { Shape } from '../parts/Shape.tsx'
 
 import './IconBase.styles.ts'
 
@@ -109,6 +112,56 @@ export abstract class IconBase<
           />
         )}
       </g>
+    )
+  }
+
+  /**
+   * Process mask children by setting their color to black
+   * @param child - The child to process
+   * @returns The processed child
+   */
+  #maskChildren = (child: React.ReactNode | JsxChild): React.ReactNode => {
+    if (React.isValidElement<Shape>(child)) {
+      // @ts-expect-error - color is valid for Shape children
+      return React.cloneElement(child, { color: 'black' })
+    }
+
+    return child as React.ReactNode
+  }
+
+  /**
+   * Create a mask for the given children
+   * @param id - A unique identifier for the mask
+   * @param children - The children to mask out
+   * @returns A mask element with a white background and children converted to black
+   */
+  mask(id: string, children: React.ReactNode) {
+    const displayName = 'displayName' in this.constructor
+      ? this.constructor.displayName
+      : this.constructor.name
+
+    const maskId = `basis:icon:${displayName}:mask:${id}`
+
+    const processed = React.isValidElement<JsxFragment>(children) && children.type === React.Fragment
+      ? React.Children.map(children.props.children, this.#maskChildren)
+      : this.#maskChildren(children)
+
+    return (
+      <mask
+        id={maskId}
+        // @ts-expect-error - not valid SVG, but useful for our DX
+        url={`url(#${maskId})`}
+      >
+        <Rect
+          fill
+          color="white"
+          height={200}
+          width={200}
+          x={-100}
+          y={-100}
+        />
+        {processed}
+      </mask>
     )
   }
 }
