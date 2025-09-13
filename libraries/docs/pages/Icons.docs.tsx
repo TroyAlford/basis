@@ -1,12 +1,11 @@
 /* eslint-disable @import/no-default-export */
 import * as React from 'react'
+import type { IconProps } from '@basis/icons'
 import * as Icons from '@basis/icons'
 import { Button, css, NumberEditor, style, TextEditor } from '@basis/react'
 import { Code } from '../components/Code'
 
 import './Icons.styles.ts'
-
-const { Icon } = Icons
 
 interface State {
   filled: boolean,
@@ -34,7 +33,7 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
   // Get all icon components (excluding Icon, IconBase, and utility components)
   get iconComponents() {
     const excludeComponents = ['Icon', 'IconBase', 'Sort', 'MoonPhase']
-    return Object.entries(Icons as unknown as Record<string, React.ComponentType<Icons.IconProps>>)
+    return Object.entries(Icons as unknown as Record<string, React.ComponentType<IconProps>>)
       .filter(([name]) => !excludeComponents.includes(name))
       .filter(([name]) => typeof Icons[name] === 'function')
       .filter(([name]) => {
@@ -75,21 +74,12 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
 
     return (
       <div className="special-icons-grid">
-        {/* Dynamic Icon Component */}
-        <div className="special-icon-item">
-          <div className="icon-demo-container">
-            <Icon named="search" />
-          </div>
-          <span className="special-icon-name">
-            Icon (dynamic)
-          </span>
-        </div>
         {/* Sort Component */}
         <div className="special-icon-item">
           <div className="icon-demo-container">
             <Icons.Sort
-              direction={Icons.SortDirection.Asc}
-              sortBy={Icons.SortBy.Name}
+              direction={Icons.Sort.Direction.Asc}
+              sortBy={Icons.Sort.By.Name}
             />
           </div>
           <span className="special-icon-name">
@@ -231,16 +221,16 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
         <h2>Usage Examples</h2>
         <h3>Basic Icon Usage</h3>
         {Code.format(`
-          import { Add, Search, Settings } from '@basis/icons'
+          import { Plus, Search, Gear } from '@basis/icons'
 
           // Use individual icons
-          <Add />
+          <Plus />
           <Search />
-          <Settings />
+          <Gear />
 
           // With custom styling via CSS custom properties
           <div style={{ '--basis-icon-color': '#007bff', '--basis-icon-size': '32px' }}>
-            <Add />
+            <Plus />
           </div>
           <Search disabled={true} />
         `)}
@@ -249,13 +239,13 @@ export default class IconsDocs extends React.Component<Record<string, never>, St
           import { Icon } from '@basis/icons'
 
           // Render icons by name
-          <Icon named="add" />
-          <Icon named="search" />
-          <Icon named="settings" />
+          <Icon named="Plus" />
+          <Icon named="Search" />
+          <Icon named="Gear" />
 
           // With custom styling via CSS custom properties
           <div style={{ '--basis-icon-color': '#28a745', '--basis-icon-size': '24px' }}>
-            <Icon named="add" />
+            <Icon named="Plus" />
           </div>
         `)}
         <h3>Sort Component</h3>

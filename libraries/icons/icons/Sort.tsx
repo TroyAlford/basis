@@ -9,27 +9,30 @@ import { SortByValueAsc } from './SortByValueAsc'
 import { SortByValueDesc } from './SortByValueDesc'
 import { SortNone } from './SortNone'
 
-export enum SortBy {
+enum By {
   Name = 'name',
   None = 'none',
   Size = 'size',
   Value = 'value',
 }
-export enum SortDirection {
+enum Direction {
   Asc = 'asc',
   Desc = 'desc',
 }
 
 interface Props extends IconProps {
-  direction?: SortDirection,
-  sortBy?: SortBy,
+  direction?: Direction,
+  sortBy?: By,
 }
 
 export class Sort extends IconBase<Props> {
+  static By = By
+  static Direction = Direction
+
   static defaultProps = {
     ...IconBase.defaultProps,
-    direction: SortDirection.Asc,
-    sortBy: SortBy.Name,
+    direction: Direction.Asc,
+    sortBy: By.Name,
   }
 
   static None = SortNone
@@ -37,17 +40,16 @@ export class Sort extends IconBase<Props> {
   renderContent = (): React.ReactNode => null
   render = (): React.ReactNode => {
     const { direction, sortBy, ...rest } = this.props
-    const { Asc } = SortDirection
 
     let Component
-    if (!sortBy || sortBy === SortBy.None) {
+    if (!sortBy || sortBy === By.None) {
       Component = SortNone
-    } else if (sortBy === SortBy.Name) {
-      Component = direction === Asc ? SortByNameAsc : SortByNameDesc
-    } else if (sortBy === SortBy.Size) {
-      Component = direction === Asc ? SortBySizeAsc : SortBySizeDesc
-    } else if (sortBy === SortBy.Value) {
-      Component = direction === Asc ? SortByValueAsc : SortByValueDesc
+    } else if (sortBy === By.Name) {
+      Component = direction === Direction.Asc ? SortByNameAsc : SortByNameDesc
+    } else if (sortBy === By.Size) {
+      Component = direction === Direction.Asc ? SortBySizeAsc : SortBySizeDesc
+    } else if (sortBy === By.Value) {
+      Component = direction === Direction.Asc ? SortByValueAsc : SortByValueDesc
     }
 
     return Component ? <Component {...rest} /> : null

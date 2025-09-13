@@ -4,7 +4,7 @@ import { IconBase } from '../IconBase/IconBase'
 import { PadlockLocked } from './PadlockLocked'
 import { PadlockUnlocked } from './PadlockUnlocked'
 
-export enum LockState {
+enum LockState {
   Locked = 'Locked',
   Unlocked = 'Unlocked',
 }
