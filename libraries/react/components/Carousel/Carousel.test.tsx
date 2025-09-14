@@ -28,7 +28,7 @@ describe('Carousel', () => {
         <Carousel
           images={[{
             align: Carousel.Align.NorthWest,
-            size: Carousel.Size.Fill,
+            size: Carousel.Size.Cover,
             url: 'test.jpg',
           }]}
         />,

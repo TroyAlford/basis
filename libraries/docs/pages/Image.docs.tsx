@@ -31,7 +31,7 @@ export const ImageDocs = () => {
               >
                 <option value={Image.Size.Natural}>Natural</option>
                 <option value={Image.Size.Contain}>Contain</option>
-                <option value={Image.Size.Fill}>Fill</option>
+                <option value={Image.Size.Cover}>Fill</option>
               </select>
             </div>
             <div>

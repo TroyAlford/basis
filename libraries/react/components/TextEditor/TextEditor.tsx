@@ -114,7 +114,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     }
 
     return (
-      <span className="readonly-value">
+      <span className="value">
         {rendered}
       </span>
     )

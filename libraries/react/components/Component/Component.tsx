@@ -22,6 +22,8 @@ interface TProps<E extends Element = HTMLDivElement> {
   nodeRef?: React.RefObject<E>,
   /** Callback function called when a key is pressed while the component has focus. */
   onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => boolean | undefined,
+  /** The style of the component. */
+  style?: React.CSSProperties,
   /** The name of the theme to use for the component. */
   theme?: string,
 }
@@ -63,6 +65,7 @@ export abstract class Component<
   get attributes() {
     return {
       'data-theme': this.props.theme,
+      'style': this.props.style,
       ...prefixObject('aria-', filterByPrefix('aria-', this.props)),
       ...prefixObject('data-', filterByPrefix('data-', this.props)),
       ...this.mixins.reduce((attributes, mixin) => ({

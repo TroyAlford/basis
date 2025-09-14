@@ -88,7 +88,8 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
       'data-size': this.currentImage?.size ?? this.props.size,
       'onKeyDown': this.handleKeyDown,
       'role': 'region',
-      'tabIndex': -1, // Make focusable but not tabbable
+      // Make focusable but not tabbable
+      'tabIndex': -1,
     }
   }
 
@@ -320,21 +321,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
 
   /** Preloads all images in the carousel */
   preloadImages = (): void => {
-    const urls = new Set(this.images.map(img => img.url))
-
-    urls.forEach(url => {
-      if (!Image.Cache.Resolved.has(url) && !Image.Cache.Loading.has(url)) {
-        const loadingPromise = loadImage(url).then(img => {
-          Image.Cache.Loading.delete(url)
-          Image.Cache.Resolved.set(url, img)
-          return img
-        }).catch(error => {
-          Image.Cache.Loading.delete(url)
-          throw error
-        })
-        Image.Cache.Loading.set(url, loadingPromise)
-      }
-    })
+    new Set(this.images.map(img => img.url)).forEach(loadImage)
   }
 
   /** Returns to the previous image */

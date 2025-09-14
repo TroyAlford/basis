@@ -135,7 +135,7 @@ describe('Image', () => {
 
     test('applies correct styles for fill size', async () => {
       const { node } = await render(
-        <Image size={Image.Size.Fill} src="/fill-image.jpg" />,
+        <Image size={Image.Size.Cover} src="/fill-image.jpg" />,
       )
 
       expect(node).toHaveAttribute('data-size', 'fill')
