@@ -1,58 +1,56 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { loadImage } from './loadImage'
 
 describe('loadImage', () => {
-  test('resolves with image element on successful load', async () => {
-    // Mock successful image load
-    const WindowImage = window.Image
+  let imageSpy: ReturnType<typeof spyOn>
 
-    window.Image = class extends WindowImage {
-      constructor() {
-        super()
-        setTimeout(() => this.onload?.(null), 0)
-      }
-    }
+  beforeEach(() => {
+    imageSpy = spyOn(window, 'Image')
+  })
+  afterAll(() => {
+    imageSpy.mockRestore()
+  })
+
+  test('resolves with image element on successful load', async () => {
+    imageSpy.mockImplementation(() => {
+      const img = new Image()
+      setTimeout(() => img.onload?.(new Event('load')), 0)
+      return img
+    })
 
     const result = await loadImage('test.jpg')
-    expect(result).toBeInstanceOf(window.Image)
-    expect(result.src).toContain('test.jpg')
-
-    // Restore original Image constructor
-    window.Image = WindowImage
+    expect(result).toBeInstanceOf(Image)
+    expect(result?.src).toContain('test.jpg')
   })
 
-  test('rejects with error on failed load', async () => {
-    // Mock failed image load
-    const WindowImage = window.Image
+  test('resolves with null on failed load', async () => {
+    imageSpy.mockImplementation(() => {
+      const img = new Image()
+      setTimeout(() => img.onerror?.(new Event('error')), 0)
+      return img
+    })
 
-    window.Image = class extends WindowImage {
-      constructor() {
-        super()
-        setTimeout(() => this.onerror?.(null), 0)
-      }
-    }
-
-    await expect(loadImage('invalid.jpg')).rejects.toThrow('Failed to load image: invalid.jpg')
-
-    // Restore original Image constructor
-    window.Image = WindowImage
+    const result = await loadImage('invalid.jpg')
+    expect(result).toBeNull()
   })
 
-  test('sets src property on image element', () => {
-    const WindowImage = window.Image
-    let createdImage: HTMLImageElement | null = null
+  test('caches image loading promises', async () => {
+    let callCount = 0
+    imageSpy.mockImplementation(() => {
+      callCount++
+      const img = new Image()
+      setTimeout(() => img.onload?.(new Event('load')), 0)
+      return img
+    })
 
-    window.Image = class extends WindowImage {
-      constructor() {
-        super()
-        createdImage = this // eslint-disable-line @typescript-eslint/no-this-alias
-      }
-    }
+    // Load the same image multiple times
+    const promise1 = loadImage('cached-test.jpg')
+    const promise2 = loadImage('cached-test.jpg')
+    const promise3 = loadImage('cached-test.jpg')
 
-    loadImage('test.jpg')
-    expect(createdImage?.src).toContain('test.jpg')
+    await Promise.all([promise1, promise2, promise3])
 
-    // Restore original Image constructor
-    window.Image = WindowImage
+    // Should only create one Image instance due to caching
+    expect(callCount).toBe(1)
   })
 })

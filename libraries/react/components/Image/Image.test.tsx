@@ -1,6 +1,7 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, mock, spyOn, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
+import * as loadImageModule from '../../utilities/loadImage'
 import { Image } from './Image'
 
 describe('Image', () => {
@@ -21,8 +22,8 @@ describe('Image', () => {
       const { node } = await render(
         <Image align={Image.Align.NorthWest} size={Image.Size.Contain} src="/test-image.jpg" />,
       )
-      expect(node).toHaveAttribute('data-align', 'nw')
-      expect(node).toHaveAttribute('data-size', 'contain')
+      expect(node).toHaveAttribute('data-align', Image.Align.NorthWest)
+      expect(node).toHaveAttribute('data-size', Image.Size.Contain)
     })
   })
 
@@ -65,64 +66,39 @@ describe('Image', () => {
     })
   })
 
-  describe('image loading and caching', () => {
-    test('sets loaded state when image is cached', async () => {
-      // Mock the Image.Cache to simulate loaded image
-      const testImage = document.createElement('img')
-      Object.defineProperty(testImage, 'naturalWidth', { value: 100, writable: false })
-      Object.defineProperty(testImage, 'naturalHeight', { value: 100, writable: false })
-      Image.Cache.Resolved.set('/cached-image.jpg', testImage)
-
+  describe('image loading', () => {
+    test('sets loading state initially', async () => {
       const { node } = await render(
-        <Image src="/cached-image.jpg" />,
+        <Image src="/test-image.jpg" />,
       )
 
-      expect(node).toHaveAttribute('data-loaded', 'true')
-      // The component should have the src in its props for styling
-      expect(node).toHaveAttribute('data-size', 'natural')
-
-      // Clean up
-      Image.Cache.Resolved.delete('/cached-image.jpg')
+      expect(node).toHaveAttribute('data-loading', 'true')
+      expect(node).toHaveAttribute('data-error', 'false')
     })
 
-    test('prevents duplicate loading requests', async () => {
+    test('handles image loading error', async () => {
+      const loadImageSpy = spyOn(loadImageModule, 'loadImage').mockResolvedValue(null)
+
       const { node } = await render(
-        <Image src="/unique-image.jpg" />,
+        <Image src="/invalid-image.jpg" />,
       )
 
-      // Initially data-loading is true, becomes false after loading completes
-      expect(node).toHaveAttribute('data-loading', 'true')
+      // Wait for loading to complete
+      await new Promise(resolve => setTimeout(resolve, 0))
 
-      // Wait for componentDidMount to complete
-      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(node).toHaveAttribute('data-loading', 'false')
+      expect(node).toHaveAttribute('data-error', 'true')
 
-      // Now it should be loading
-      expect(Image.Cache.Loading.has('/unique-image.jpg')).toBe(true)
-
-      // Clean up
-      Image.Cache.Loading.delete('/unique-image.jpg')
+      loadImageSpy.mockRestore()
     })
   })
 
   describe('sizing modes', () => {
     test('applies correct styles for natural size', async () => {
-      const testImage = document.createElement('img')
-      Object.defineProperty(testImage, 'naturalWidth', { value: 200, writable: false })
-      Object.defineProperty(testImage, 'naturalHeight', { value: 150, writable: false })
-      Image.Cache.Resolved.set('/sized-image.jpg', testImage)
-
       const { node } = await render(
         <Image size={Image.Size.Natural} src="/sized-image.jpg" />,
       )
-
-      // Wait for state update
-      await new Promise(resolve => setTimeout(resolve, 50))
-
-      expect(node).toHaveAttribute('data-size', 'natural')
-      expect(node).toHaveAttribute('data-loaded', 'true')
-
-      // Clean up
-      Image.Cache.Resolved.delete('/sized-image.jpg')
+      expect(node).toHaveAttribute('data-size', Image.Size.Natural)
     })
 
     test('applies correct styles for contain size', async () => {
@@ -130,15 +106,15 @@ describe('Image', () => {
         <Image size={Image.Size.Contain} src="/contain-image.jpg" />,
       )
 
-      expect(node).toHaveAttribute('data-size', 'contain')
+      expect(node).toHaveAttribute('data-size', Image.Size.Contain)
     })
 
-    test('applies correct styles for fill size', async () => {
+    test('applies correct styles for cover size', async () => {
       const { node } = await render(
-        <Image size={Image.Size.Cover} src="/fill-image.jpg" />,
+        <Image size={Image.Size.Cover} src="/cover-image.jpg" />,
       )
 
-      expect(node).toHaveAttribute('data-size', 'fill')
+      expect(node).toHaveAttribute('data-size', Image.Size.Cover)
     })
   })
 
@@ -148,15 +124,12 @@ describe('Image', () => {
         <Image align={Image.Align.NorthEast} src="/aligned-image.jpg" />,
       )
 
-      expect(node).toHaveAttribute('data-align', 'ne')
+      expect(node).toHaveAttribute('data-align', Image.Align.NorthEast)
     })
 
     test('applies center alignment by default', async () => {
-      const { node } = await render(
-        <Image src="/default-image.jpg" />,
-      )
-
-      expect(node).toHaveAttribute('data-align', 'center')
+      const { node } = await render(<Image src="/default-image.jpg" />)
+      expect(node).toHaveAttribute('data-align', Image.Align.Center)
     })
   })
 })

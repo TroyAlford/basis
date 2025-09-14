@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
+import { Keyboard } from '@basis/react/types/Keyboard'
 import { render } from '../../testing/render'
 import { Carousel } from './Carousel'
 
@@ -19,7 +20,7 @@ describe('Carousel', () => {
 
       // Test that the carousel has the correct image data
       expect(node).toBeDefined()
-      const imgDiv = node.querySelector<HTMLDivElement>('div.image.component')
+      const imgDiv = node.querySelector<HTMLDivElement>('.image.component')
       expect(imgDiv).toBeDefined()
     })
 
@@ -33,8 +34,8 @@ describe('Carousel', () => {
           }]}
         />,
       )
-      expect(node.dataset.align).toBe('nw')
-      expect(node.dataset.size).toBe('fill')
+      expect(node.dataset.align).toBe(Carousel.Align.NorthWest)
+      expect(node.dataset.size).toBe(Carousel.Size.Cover)
     })
   })
 
@@ -78,7 +79,7 @@ describe('Carousel', () => {
   describe('lightbox', () => {
     test('opens lightbox on image click', async () => {
       const { node, update } = await render(<Carousel images={images} />)
-      const imgDiv = node.querySelector<HTMLDivElement>('div.image.component')
+      const imgDiv = node.querySelector<HTMLDivElement>('.image.component')
 
       imgDiv?.click()
       await update()
@@ -88,7 +89,7 @@ describe('Carousel', () => {
 
     test('closes lightbox on background click', async () => {
       const { node, update } = await render(<Carousel images={images} />)
-      const imgDiv = node.querySelector<HTMLDivElement>('div.image.component')
+      const imgDiv = node.querySelector<HTMLDivElement>('.image.component')
 
       // Open lightbox first
       imgDiv?.click()
@@ -107,7 +108,7 @@ describe('Carousel', () => {
 
     test('closes lightbox with escape key', async () => {
       const { node, update } = await render(<Carousel images={images} />)
-      const imgDiv = node.querySelector<HTMLDivElement>('div.image.component')
+      const imgDiv = node.querySelector<HTMLDivElement>('.image.component')
 
       // Open lightbox first
       imgDiv?.click()
@@ -115,7 +116,7 @@ describe('Carousel', () => {
       expect(node.dataset.lightbox).toBe('true')
 
       // Close with escape key
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: Keyboard.Escape }))
       await update()
       expect(node.dataset.lightbox).toBe('false')
     })
@@ -132,7 +133,7 @@ describe('Carousel', () => {
 
       node.dispatchEvent(new KeyboardEvent('keydown', {
         bubbles: true,
-        key: 'ArrowRight',
+        key: Keyboard.ArrowRight,
       }))
       await update()
 
@@ -145,7 +146,7 @@ describe('Carousel', () => {
 
       const initialIndex = instance.state.currentIndex
 
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: Keyboard.ArrowRight }))
       const newIndex = instance.state.currentIndex
       expect(newIndex).toBe(initialIndex)
     })
@@ -157,7 +158,7 @@ describe('Carousel', () => {
       window.open = openMock as unknown as typeof window.open
 
       const { node } = await render(<Carousel images={images} />)
-      const imgDiv = node.querySelector<HTMLDivElement>('div.image.component')
+      const imgDiv = node.querySelector<HTMLDivElement>('.image.component')
 
       imgDiv?.dispatchEvent(new MouseEvent('mousedown', {
         bubbles: true,
@@ -203,16 +204,20 @@ describe('Carousel', () => {
     test('preloads all images on mount', async () => {
       const { instance } = await render<Carousel>(<Carousel images={images} />)
 
+      // Verify images are available for preloading
       instance.images.forEach(img => {
         expect(img.url).toBeDefined()
       })
+
+      // The preloadImages method should be callable
+      expect(typeof instance.preloadImages).toBe('function')
     })
   })
 
   describe('accessibility', () => {
     test('maintains focus handling in lightbox mode', async () => {
       const { node, update } = await render(<Carousel images={images} />)
-      const imgDiv = node.querySelector<HTMLDivElement>('div.image.component')
+      const imgDiv = node.querySelector<HTMLDivElement>('.image.component')
 
       imgDiv?.click()
       await update()
