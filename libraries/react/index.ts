@@ -22,6 +22,7 @@ export { Popup } from './mixins/Popup'
 export { Placeholder } from './mixins/Placeholder'
 export { PrefixSuffix } from './mixins/PrefixSuffix'
 
+export { AnchorPoint } from './types/AnchorPoint'
 export { Keyboard } from './types/Keyboard'
 export { Orientation } from './types/Orientation'
 

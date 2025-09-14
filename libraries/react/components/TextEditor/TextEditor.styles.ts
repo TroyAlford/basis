@@ -14,6 +14,7 @@ style('basis:text-editor', css`
     border: var(--basis-text-editor-border);
     display: flex;
     font-size: 1em;
+    gap: .25em;
     line-height: 1em;
     min-height: 1.5em;
     overflow: hidden;
@@ -31,29 +32,26 @@ style('basis:text-editor', css`
       font-size: inherit;
       resize: none;
     }
-
+    
     &::before { padding: 0; }
-
+    
     > .value, &::before {
       font-family: inherit;
       font-size: inherit;
       line-height: inherit;
-      margin: 0;
-      padding: .25em;
+      margin: .25em;
+      padding: 0;
       white-space: pre-wrap;
     }
 
-    &[data-multiline="true"] {
-      > .value {
-        display: flex;
-        overflow: auto;
-      }
+    &[data-multiline="true"] > .value {
+      display: flex;
+      overflow: auto;
     }
 
     &[data-multiline="auto"] {
       &::before {
         content: attr(data-value) ' ';
-        inset: 1px; // account for the border
         visibility: hidden;
       }
 

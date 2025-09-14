@@ -15,11 +15,11 @@ interface State {
 
 export class TextEditorDocs extends React.Component<unknown, State> {
   state: State = {
-    multiline: false,
+    multiline: 3,
     placeholder: 'Type here to see the TextEditor in action...',
     prefix: 'mailto:',
     suffix: '@gmail.com',
-    value: 'username',
+    value: 'example\nof a\nmultiline\nvalue',
     wrap: TextEditor.Wrap.Soft,
   }
 
@@ -116,8 +116,8 @@ export class TextEditorDocs extends React.Component<unknown, State> {
             </div>
             {/* Demo Area */}
             <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '1rem' }}>
+              <h3>Editable</h3>
               <TextEditor
-                field="demo"
                 placeholder={this.state.placeholder}
                 prefix={this.state.prefix || undefined}
                 suffix={this.state.suffix || undefined}
@@ -129,6 +129,20 @@ export class TextEditorDocs extends React.Component<unknown, State> {
                   .when((value: string) => Number.parseInt(value, 10) >= 0).then(value => Number.parseInt(value, 10))
                   .else(this.state.multiline)}
                 onChange={value => this.setState({ value })}
+              />
+              <h3>Read Only</h3>
+              <TextEditor
+                readOnly
+                placeholder={this.state.placeholder}
+                prefix={this.state.prefix || undefined}
+                suffix={this.state.suffix || undefined}
+                value={this.state.value}
+                wrap={this.state.wrap}
+                multiline={match(this.state.multiline)
+                  .when('true').then(true)
+                  .when('false').then(false)
+                  .when((value: string) => Number.parseInt(value, 10) >= 0).then(value => Number.parseInt(value, 10))
+                  .else(this.state.multiline)}
               />
             </div>
           </div>

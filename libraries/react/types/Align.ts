@@ -5,19 +5,19 @@ export enum Align {
   /** Center both horizontally and vertically */
   Center = 'center',
   /** Align to right edge */
-  East = 'e',
+  East = 'right center',
   /** Align to top edge */
-  North = 'n',
+  North = 'center top',
   /** Align to top-right corner */
-  NorthEast = 'ne',
+  NorthEast = 'right top',
   /** Align to top-left corner */
-  NorthWest = 'nw',
+  NorthWest = 'left top',
   /** Align to bottom edge */
-  South = 's',
+  South = 'center bottom',
   /** Align to bottom-right corner */
-  SouthEast = 'se',
+  SouthEast = 'right bottom',
   /** Align to bottom-left corner */
-  SouthWest = 'sw',
+  SouthWest = 'left bottom',
   /** Align to left edge */
-  West = 'w',
+  West = 'left center',
 }
