@@ -75,7 +75,7 @@ class Option<T> extends Component<OptionProps<T>, HTMLLabelElement> {
   }
 
   override content(): React.ReactNode {
-    const { children, disabled, selected, type } = this.props
+    const { children, disabled, selected, type, value } = this.props
 
     return (
       <>
@@ -83,6 +83,7 @@ class Option<T> extends Component<OptionProps<T>, HTMLLabelElement> {
           checked={selected || false}
           disabled={disabled}
           type={type}
+          value={String(value)}
           onChange={this.handleChange}
         />
         {children}

@@ -24,12 +24,10 @@ describe('ToggleEditor', () => {
       expect(node.textContent).toBe('On')
     })
 
-    test('renders with text', async () => {
-      const { node } = await render(<ToggleEditor text="Toggle me" onChange={() => undefined} />)
+    test('renders with custom content', async () => {
+      const { node } = await render(<ToggleEditor off="Custom Off" on="Custom On" onChange={() => undefined} />)
 
-      const textElement = node.querySelector('.text')
-      expect(textElement).toBeTruthy()
-      expect(textElement.textContent).toBe('Toggle me')
+      expect(node.textContent).toBe('Custom Off')
     })
 
     test('renders with custom on icon', async () => {

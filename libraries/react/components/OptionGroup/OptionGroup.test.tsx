@@ -1,25 +1,21 @@
 import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
-import { Simulate } from '../../testing/Simulate'
+import { Orientation } from '../../types/Orientation'
 import { OptionGroup } from './OptionGroup'
 
 describe('OptionGroup', () => {
-  const testOptions = [
-    { value: 'option1', label: 'Option 1' },
-    { value: 'option2', label: 'Option 2' },
-    { value: 'option3', label: 'Option 3' },
-  ]
-
   describe('rendering', () => {
     test('renders radio buttons when multiple is false', async () => {
       const { node } = await render(
         <OptionGroup
-          options={testOptions}
           multiple={false}
           value="option1"
-          onChange={() => {}}
-        />
+        >
+          <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
+          <OptionGroup.Option value="option2">Option 2</OptionGroup.Option>
+          <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+        </OptionGroup>,
       )
 
       const inputs = node.querySelectorAll('input[type="radio"]')
@@ -32,11 +28,13 @@ describe('OptionGroup', () => {
     test('renders checkboxes when multiple is true', async () => {
       const { node } = await render(
         <OptionGroup
-          options={testOptions}
           multiple={true}
           value={['option1', 'option3']}
-          onChange={() => {}}
-        />
+        >
+          <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
+          <OptionGroup.Option value="option2">Option 2</OptionGroup.Option>
+          <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+        </OptionGroup>,
       )
 
       const inputs = node.querySelectorAll('input[type="checkbox"]')
@@ -49,41 +47,45 @@ describe('OptionGroup', () => {
     test('renders horizontal orientation', async () => {
       const { node } = await render(
         <OptionGroup
-          options={testOptions}
           multiple={false}
-          orientation="horizontal"
+          orientation={Orientation.Horizontal}
           value="option1"
-          onChange={() => {}}
-        />
+        >
+          <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
+          <OptionGroup.Option value="option2">Option 2</OptionGroup.Option>
+          <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+        </OptionGroup>,
       )
 
-      const container = node.querySelector('.option-group-container')
-      expect(container).toHaveClass('horizontal')
+      expect(node).toHaveAttribute('data-orientation', 'horizontal')
     })
 
     test('renders vertical orientation by default', async () => {
       const { node } = await render(
         <OptionGroup
-          options={testOptions}
           multiple={false}
           value="option1"
-          onChange={() => {}}
-        />
+        >
+          <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
+          <OptionGroup.Option value="option2">Option 2</OptionGroup.Option>
+          <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+        </OptionGroup>,
       )
 
-      const container = node.querySelector('.option-group-container')
-      expect(container).toHaveClass('vertical')
+      expect(node).toHaveAttribute('data-orientation', 'vertical')
     })
 
     test('uses proper ARIA attributes', async () => {
       const { node } = await render(
         <OptionGroup
-          options={testOptions}
+          aria-label="Test options"
           multiple={false}
           value="option1"
-          aria-label="Test options"
-          onChange={() => {}}
-        />
+        >
+          <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
+          <OptionGroup.Option value="option2">Option 2</OptionGroup.Option>
+          <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+        </OptionGroup>,
       )
 
       expect(node).toHaveAttribute('aria-label', 'Test options')
@@ -91,19 +93,15 @@ describe('OptionGroup', () => {
     })
 
     test('handles disabled options', async () => {
-      const disabledOptions = [
-        { value: 'option1', label: 'Option 1' },
-        { value: 'option2', label: 'Option 2', disabled: true },
-        { value: 'option3', label: 'Option 3' },
-      ]
-
       const { node } = await render(
         <OptionGroup
-          options={disabledOptions}
           multiple={false}
           value="option1"
-          onChange={() => {}}
-        />
+        >
+          <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
+          <OptionGroup.Option disabled value="option2">Option 2</OptionGroup.Option>
+          <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+        </OptionGroup>,
       )
 
       const inputs = node.querySelectorAll('input')
@@ -113,12 +111,14 @@ describe('OptionGroup', () => {
     test('renders in read-only mode', async () => {
       const { node } = await render(
         <OptionGroup
-          options={testOptions}
           multiple={false}
-          value="option1"
           readOnly={true}
-          onChange={() => {}}
-        />
+          value="option1"
+        >
+          <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
+          <OptionGroup.Option value="option2">Option 2</OptionGroup.Option>
+          <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+        </OptionGroup>,
       )
 
       const inputs = node.querySelectorAll('input')
@@ -133,11 +133,14 @@ describe('OptionGroup', () => {
       const onChange = mock()
       const { node } = await render(
         <OptionGroup
-          options={testOptions}
           multiple={false}
           value="option1"
           onChange={onChange}
-        />
+        >
+          <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
+          <OptionGroup.Option value="option2">Option 2</OptionGroup.Option>
+          <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+        </OptionGroup>,
       )
 
       // Verify the component renders with the handler
@@ -150,11 +153,14 @@ describe('OptionGroup', () => {
       const onChange = mock()
       const { node } = await render(
         <OptionGroup
-          options={testOptions}
           multiple={false}
           value="option2"
           onChange={onChange}
-        />
+        >
+          <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
+          <OptionGroup.Option value="option2">Option 2</OptionGroup.Option>
+          <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+        </OptionGroup>,
       )
 
       // Verify the controlled value is respected
@@ -166,11 +172,14 @@ describe('OptionGroup', () => {
       const onChange = mock()
       const { node } = await render(
         <OptionGroup
-          options={testOptions}
-          multiple={false}
           initialValue="option3"
+          multiple={false}
           onChange={onChange}
-        />
+        >
+          <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
+          <OptionGroup.Option value="option2">Option 2</OptionGroup.Option>
+          <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+        </OptionGroup>,
       )
 
       // Verify the initial value is respected
@@ -181,20 +190,17 @@ describe('OptionGroup', () => {
 
   describe('generic types', () => {
     test('handles number values', async () => {
-      const numberOptions = [
-        { value: 1, label: 'One' },
-        { value: 2, label: 'Two' },
-        { value: 3, label: 'Three' },
-      ]
-
       const onChange = mock()
       const { node } = await render(
         <OptionGroup<number>
-          options={numberOptions}
           multiple={false}
           value={2}
           onChange={onChange}
-        />
+        >
+          <OptionGroup.Option value={1}>One</OptionGroup.Option>
+          <OptionGroup.Option value={2}>Two</OptionGroup.Option>
+          <OptionGroup.Option value={3}>Three</OptionGroup.Option>
+        </OptionGroup>,
       )
 
       // Verify the number value is handled correctly

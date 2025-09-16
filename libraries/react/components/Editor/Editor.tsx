@@ -82,7 +82,13 @@ export abstract class Editor<
     }
   }
 
-  get classNames(): Set<string> { return super.classNames.add('editor') }
+  get classNames(): Set<string> { 
+    const classes = super.classNames.add('editor')
+    if (this.props.field !== undefined) {
+      classes.add(String(this.props.field))
+    }
+    return classes
+  }
 
   /**
    * Gets the current value, either from props (controlled) or state (uncontrolled)
