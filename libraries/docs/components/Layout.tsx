@@ -1,6 +1,5 @@
 import * as React from 'react'
 import { Component, Router, Theme } from '@basis/react'
-import { NavigateEvent } from '../../react/events/NavigateEvent'
 import { routes } from '../routes.ts'
 
 import './Layout.styles.ts'
@@ -9,18 +8,6 @@ export class Layout extends Component {
   static displayName = 'Layout'
 
   main = React.createRef<HTMLDivElement>()
-
-  private handleNavigate = (): void => {
-    this.main.current?.scrollTo({ top: 0 })
-  }
-
-  componentDidMount(): void {
-    window.addEventListener(NavigateEvent.name, this.handleNavigate as EventListener)
-  }
-
-  componentWillUnmount(): void {
-    window.removeEventListener(NavigateEvent.name, this.handleNavigate as EventListener)
-  }
 
   override content(): React.ReactNode {
     // Build tree structure

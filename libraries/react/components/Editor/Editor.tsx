@@ -11,7 +11,7 @@ interface TProps<Value> {
     /** The new value */
     value: Value,
     /** The field identifier */
-    field: number | string,
+    field: string,
     /**
      * The editor instance. Typed as `unknown` to avoid circular TS dependencies.
      * @example
@@ -83,12 +83,11 @@ export abstract class Editor<
   }
 
   get classNames(): Set<string> {
-    const { field } = this.props
-    switch (typeof field) {
-      case 'number': return super.classNames.add('editor').add(`index-${field}`)
-      case 'string': return super.classNames.add('editor').add(field)
-      default: return super.classNames.add('editor')
+    const classes = super.classNames.add('editor')
+    if (this.props.field !== undefined) {
+      classes.add(String(this.props.field))
     }
+    return classes
   }
 
   /**

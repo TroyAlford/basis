@@ -22,7 +22,6 @@ export abstract class IconBase<
   static get defaultProps() {
     return {
       ...super.defaultProps,
-      color: 'var(--basis-icon-color, currentColor)',
       disabled: false,
       filled: false,
       onClick: noop,

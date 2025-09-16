@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Color } from '@basis/utilities'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Theme } from '../../react/components/Theme/Theme'
 import { Code } from '../components/Code'
@@ -41,6 +42,9 @@ export class ThemeDocs extends React.Component<object, State> {
             <li>
               <strong>CSS Variable Generation</strong>:
               Automatically creates CSS custom properties for all theme values
+            </li>
+            <li><strong>Smart Color Processing</strong>:
+              Auto-computes contrast colors for primary colors using luminance analysis
             </li>
             <li><strong>Namespaced Themes</strong>: Support for multiple named themes with automatic CSS scoping</li>
             <li><strong>Smart Value Processing</strong>: Automatic unit conversion and color processing</li>
@@ -112,7 +116,7 @@ export class ThemeDocs extends React.Component<object, State> {
                   backgroundColor: 'var(--basis-color-primary)',
                   borderRadius: 'var(--basis-radius-md)',
                   boxShadow: 'var(--basis-shadow-md)',
-                  color: 'white',
+                  color: 'var(--basis-color-contrast)',
                   fontSize: `${this.state.fontSize}%`,
                   padding: '1rem',
                   textAlign: 'center',
@@ -121,13 +125,14 @@ export class ThemeDocs extends React.Component<object, State> {
                 <h3>Theme Preview</h3>
                 <p>This element uses CSS variables from your custom theme!</p>
                 <div style={{
-                  backgroundColor: '#ffffff44',
+                  backgroundColor: '#ffffff88',
                   borderRadius: '4px',
                   margin: '1rem 0',
                   padding: '0.5rem',
                 }}
                 >
                   <code>--basis-color-primary: {this.state.primaryColor}</code><br />
+                  <code>--basis-color-contrast: {`${Color.fromHex(this.state.primaryColor).contrast()}`}</code><br />
                   <code>--basis-font-size-md: {this.state.fontSize}%</code><br />
                   <code>--basis-radius-md: {this.state.borderRadius}px</code>
                 </div>
@@ -196,6 +201,12 @@ export class ThemeDocs extends React.Component<object, State> {
             Color palette for your theme. All colors are automatically processed and converted to
             consistent formats. Supports hex, rgb, hsl, and named colors.
           </p>
+          <p>
+            <strong>Auto-Computed Contrast</strong>: When you set a primary color, Theme automatically
+            computes an appropriate contrast color using luminance analysis. Light primary colors get
+            dark contrast colors, and dark primary colors get light contrast colors. This ensures
+            optimal readability and accessibility.
+          </p>
           <h3><code>fontSize</code></h3>
           <p>
             Typography scale defined as percentages relative to the base font size (16px). Values are
@@ -227,6 +238,7 @@ export class ThemeDocs extends React.Component<object, State> {
           {Code.format(`
             /* Color variables */
             --basis-color-primary: #0070f3;
+            --basis-color-contrast: #dddddded; /* Auto-computed contrast */
             --basis-color-background: #ffffff;
             --basis-color-foreground: #171717;
             
@@ -254,6 +266,7 @@ export class ThemeDocs extends React.Component<object, State> {
             /* With name="dark" */
             [data-theme="dark"] {
               --basis-color-primary: #00d4ff;
+              --basis-color-contrast: #dddddded; /* Auto-computed contrast */
               --basis-color-background: #1a1a1a;
               --basis-color-foreground: #ffffff;
             }
@@ -318,6 +331,7 @@ export class ThemeDocs extends React.Component<object, State> {
           {Code.format(`
             .my-button {
               background-color: var(--basis-color-primary);
+              color: var(--basis-color-contrast);
               border-radius: var(--basis-radius-md);
               padding: var(--basis-unit-sm) var(--basis-unit-md);
               font-size: var(--basis-font-size-md);

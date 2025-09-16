@@ -234,4 +234,48 @@ describe('Color', () => {
       expect(color.toRGB()).toEqual({ a: 1, b, g, r })
     })
   })
+
+  describe('contrast()', () => {
+    test('returns dark color for light colors', () => {
+      const white = Color.fromHex('#ffffff')
+      const contrast = white.contrast()
+      expect(contrast.toRGB()).toEqual({ a: 1, b: 0, g: 0, r: 0 })
+    })
+
+    test('returns light color for dark colors', () => {
+      const black = Color.fromHex('#000000')
+      const contrast = black.contrast()
+      expect(contrast.toRGB()).toEqual({ a: 1, b: 255, g: 255, r: 255 })
+    })
+
+    test('returns appropriate contrast for medium blue color', () => {
+      const blue = Color.fromHex('#336699')
+      const contrast = blue.contrast()
+      // This should be dark enough to return light color
+      expect(contrast.toRGB()).toEqual({ a: 1, b: 255, g: 255, r: 255 })
+    })
+
+    test('returns dark color for light blue', () => {
+      const lightBlue = Color.fromHex('#87CEEB')
+      const contrast = lightBlue.contrast()
+      expect(contrast.toRGB()).toEqual({ a: 1, b: 0, g: 0, r: 0 })
+    })
+
+    test('returns light color for dark red', () => {
+      const darkRed = Color.fromHex('#8B0000')
+      const contrast = darkRed.contrast()
+      expect(contrast.toRGB()).toEqual({ a: 1, b: 255, g: 255, r: 255 })
+    })
+
+    test('contrast method uses provided onDark/onLight colors', () => {
+      const customOnDark = Color.fromHex('#ff0000') // Red
+      const customOnLight = Color.fromHex('#00ff00') // Green
+
+      const lightColor = Color.fromHex('#ffffff')
+      const darkColor = Color.fromHex('#000000')
+
+      expect(lightColor.contrast(customOnDark, customOnLight).toHex()).toBe(customOnLight.toHex())
+      expect(darkColor.contrast(customOnDark, customOnLight).toHex()).toBe(customOnDark.toHex())
+    })
+  })
 })

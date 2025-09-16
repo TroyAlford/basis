@@ -3,7 +3,7 @@ import { parseTemplateURI } from '@basis/utilities'
 import { NavigateEvent } from '../../events/NavigateEvent'
 import { Component } from '../Component/Component'
 import { Link } from './Link'
-import { navigate } from './navigate'
+import { handleNavigationScrolling, navigate } from './navigate'
 import { Redirect } from './Redirect'
 import { Route } from './Route'
 import { Switch } from './Switch'
@@ -47,7 +47,10 @@ export class Router extends Component<Props> {
     window.removeEventListener('popstate', this.#handleUpdate)
   }
 
-  #handleUpdate = (): void => this.forceUpdate()
+  #handleUpdate = (): void => {
+    this.forceUpdate()
+    handleNavigationScrolling(window.location.href)
+  }
 
   /**
    * Renders the matching route

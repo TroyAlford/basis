@@ -197,6 +197,7 @@ export class Theme extends Component<Props> {
     const variables = Object.entries(theme)
       .filter(([, values]) => values && typeof values === 'object')
       .flatMap(([category, values]) => this.processObject(category, values as Record<string, unknown>))
+    variables.push(`--basis-color-contrast: ${Color.from(theme.color.primary).contrast()};`)
 
     return name?.trim()
       ? `:root [data-theme="${name}"] { ${variables.join('\n')} }`
