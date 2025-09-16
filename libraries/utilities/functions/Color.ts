@@ -437,4 +437,39 @@ export class Color {
   toString(): string {
     return this.toHex()
   }
+
+  /**
+   * Computes a contrast color for this color.
+   * Returns a dark gray for light colors and a light gray for dark colors.
+   * @param onDark Optional color to contrast against dark hues
+   * @param onLight Optional color to contrast against light hues
+   * @returns A Color instance with appropriate contrast
+   * @example
+   * Color.fromHex('#ffffff').contrast() // Returns onLight
+   * Color.fromHex('#000000').contrast() // Returns onDark
+   */
+  contrast(
+    onDark = Color.fromHex('#ffffff'),
+    onLight = Color.fromHex('#000000'),
+  ): Color {
+    // Convert to RGB to compute luminance
+    const r = this.red / 255
+    const g = this.green / 255
+    const b = this.blue / 255
+
+    // Compute relative luminance using the standard formula
+    const luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+
+    /*
+     * If luminance is high (light color), return dark gray
+     * If luminance is low (dark color), return light gray
+     */
+    if (luminance > 0.5) {
+      // Light color - return dark gray with alpha
+      return onLight
+    } else {
+      // Dark color - return light gray with alpha
+      return onDark
+    }
+  }
 }

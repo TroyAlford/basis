@@ -90,6 +90,7 @@
         "react-dom": "^19",
       },
       "peerDependencies": {
+        "@basis/icons": "workspace:*",
         "@basis/utilities": "workspace:*",
       },
     },

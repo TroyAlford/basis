@@ -3,7 +3,7 @@ import { Component } from '../Component/Component'
 
 interface TProps<Value> {
   /** Field identifier (number or string) */
-  field?: string,
+  field?: string | number,
   /** Initial value for uncontrolled mode */
   initialValue?: Value,
   /** Change handler */
@@ -82,14 +82,7 @@ export abstract class Editor<
     }
   }
 
-  get classNames(): Set<string> {
-    const { field } = this.props
-    switch (typeof field) {
-      case 'number': return super.classNames.add('editor').add(`index-${field}`)
-      case 'string': return super.classNames.add('editor').add(field)
-      default: return super.classNames.add('editor')
-    }
-  }
+  get classNames(): Set<string> { return super.classNames.add('editor') }
 
   /**
    * Gets the current value, either from props (controlled) or state (uncontrolled)

@@ -234,4 +234,37 @@ describe('Color', () => {
       expect(color.toRGB()).toEqual({ a: 1, b, g, r })
     })
   })
+
+  describe('contrast()', () => {
+    test('returns dark gray for light colors', () => {
+      const white = Color.fromHex('#ffffff')
+      const contrast = white.contrast()
+      expect(contrast.toRGB()).toEqual({ a: 0.93, b: 34, g: 34, r: 34 })
+    })
+
+    test('returns light gray for dark colors', () => {
+      const black = Color.fromHex('#000000')
+      const contrast = black.contrast()
+      expect(contrast.toRGB()).toEqual({ a: 0.93, b: 221, g: 221, r: 221 })
+    })
+
+    test('returns appropriate contrast for medium blue color', () => {
+      const blue = Color.fromHex('#336699')
+      const contrast = blue.contrast()
+      // This should be dark enough to return light gray
+      expect(contrast.toRGB()).toEqual({ a: 0.93, b: 221, g: 221, r: 221 })
+    })
+
+    test('returns dark gray for light blue', () => {
+      const lightBlue = Color.fromHex('#87CEEB')
+      const contrast = lightBlue.contrast()
+      expect(contrast.toRGB()).toEqual({ a: 0.93, b: 34, g: 34, r: 34 })
+    })
+
+    test('returns light gray for dark red', () => {
+      const darkRed = Color.fromHex('#8B0000')
+      const contrast = darkRed.contrast()
+      expect(contrast.toRGB()).toEqual({ a: 0.93, b: 221, g: 221, r: 221 })
+    })
+  })
 })
