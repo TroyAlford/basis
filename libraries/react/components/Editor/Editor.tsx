@@ -3,7 +3,7 @@ import { Component } from '../Component/Component'
 
 interface TProps<Value> {
   /** Field identifier (number or string) */
-  field?: string | number,
+  field?: string,
   /** Initial value for uncontrolled mode */
   initialValue?: Value,
   /** Change handler */
@@ -11,7 +11,7 @@ interface TProps<Value> {
     /** The new value */
     value: Value,
     /** The field identifier */
-    field: number | string,
+    field: string,
     /**
      * The editor instance. Typed as `unknown` to avoid circular TS dependencies.
      * @example
@@ -82,7 +82,7 @@ export abstract class Editor<
     }
   }
 
-  get classNames(): Set<string> { 
+  get classNames(): Set<string> {
     const classes = super.classNames.add('editor')
     if (this.props.field !== undefined) {
       classes.add(String(this.props.field))
