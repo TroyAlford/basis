@@ -7,7 +7,7 @@ import { Documentation } from '../components/Documentation'
 
 interface ConfigState {
   customOptions: string,
-  multiple: boolean,
+  optionType: 'option' | 'toggle',
   orientation: Orientation,
   readOnly: boolean,
   selectedValue: string | string[],
@@ -17,15 +17,11 @@ export class OptionGroupDocs extends Documentation<ConfigState> {
   state = {
     current: {
       customOptions: 'option1,option2,option3',
-      multiple: false,
+      optionType: 'option' as const,
       orientation: Orientation.Vertical,
       readOnly: false,
       selectedValue: 'option2',
     },
-  }
-
-  handleMultipleToggle = (): void => {
-    this.handleField(!this.current.multiple, 'multiple')
   }
 
   handleOrientationChange = (orientation: Orientation): void => {
@@ -41,27 +37,40 @@ export class OptionGroupDocs extends Documentation<ConfigState> {
   }
 
   content(): React.ReactNode {
-    const { customOptions, multiple, orientation, readOnly, selectedValue } = this.current
+    const { customOptions, optionType, orientation, readOnly, selectedValue } = this.current
 
     return (
       <>
         <h1>OptionGroup</h1>
         <Section title="Overview">
           <p>
-            OptionGroup is a flexible option selection component that extends the Editor base class to provide
-            either radio button groups (single selection) or checkbox groups (multiple selection). It automatically
-            handles keyboard navigation, accessibility, and provides a consistent API for both selection modes.
+            <code>OptionGroup</code> is a flexible option selection component that extends the Editor base class to
+            provide either radio button groups (single selection) or checkbox groups (multiple selection). It
+            automatically handles keyboard navigation, accessibility, and provides a consistent API for both selection
+            modes.
           </p>
           <p>
-            Built on the Editor pattern, OptionGroup supports both controlled and uncontrolled modes, making it
-            perfect for forms, settings panels, and any interface requiring option selection with proper
+            Built on the Editor pattern, <code>OptionGroup</code> supports both controlled and uncontrolled modes,
+            making it perfect for forms, settings panels, and any interface requiring option selection with proper
             accessibility and keyboard navigation.
           </p>
         </Section>
         <Section title="Key Features">
           <ul>
             <li><strong>Dual Selection Modes</strong>: Toggle between radio buttons and checkboxes</li>
-            <li><strong>Generic Type Support</strong>: Works with any value type (string, number, enum, etc.)</li>
+            <li>
+              <strong>Generic Type Support</strong>: Works with any value type
+              (<code>string</code>, <code>number</code>, <code>enum</code>, objects, etc.)
+            </li>
+            <li>
+              <strong>Editor&lt;boolean&gt; Integration</strong>:
+              Accepts any mix of <code>Editor&lt;boolean&gt;</code> components as children. The <code>data</code> prop
+              determines the value returned when that editor is selected.
+            </li>
+            <li>
+              <strong>Mixed Component Support</strong>:
+              Combine <code>OptionGroup.Option</code> and <code>ToggleEditor</code> components in the same group
+            </li>
             <li><strong>Keyboard Navigation</strong>: Arrow keys, Space, Home/End for full keyboard accessibility</li>
             <li><strong>Orientation Control</strong>: Horizontal or vertical layout options</li>
             <li><strong>Individual Disabling</strong>: Disable specific options while keeping others active</li>
@@ -75,13 +84,6 @@ export class OptionGroupDocs extends Documentation<ConfigState> {
               <div>
                 <div>
                   <ToggleEditor
-                    field="multiple"
-                    off="Radio Buttons"
-                    on="Checkboxes"
-                    value={multiple}
-                    onChange={this.handleField}
-                  />
-                  <ToggleEditor
                     field="readOnly"
                     off="Editable"
                     on="Read Only"
@@ -91,11 +93,25 @@ export class OptionGroupDocs extends Documentation<ConfigState> {
                 </div>
               </div>
               <div>
-                <strong>Orientation</strong>
-                <div>
-                  <OptionGroup field="orientation" value={orientation} onChange={this.handleField}>
-                    <OptionGroup.Option value={Orientation.Horizontal}>Horizontal</OptionGroup.Option>
-                    <OptionGroup.Option value={Orientation.Vertical}>Vertical</OptionGroup.Option>
+                <strong>Option Type & Orientation</strong>
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <OptionGroup
+                    field="optionType"
+                    orientation={Orientation.Horizontal}
+                    value={this.current.optionType}
+                    onChange={this.handleField}
+                  >
+                    <ToggleEditor data="option" off="Option" on="Option" />
+                    <ToggleEditor data="toggle" off="Toggle" on="Toggle" />
+                  </OptionGroup>
+                  <OptionGroup
+                    field="orientation"
+                    orientation={Orientation.Horizontal}
+                    value={orientation}
+                    onChange={this.handleField}
+                  >
+                    <ToggleEditor data={Orientation.Horizontal} off="Horizontal" on="Horizontal" />
+                    <ToggleEditor data={Orientation.Vertical} off="Vertical" on="Vertical" />
                   </OptionGroup>
                 </div>
               </div>
@@ -129,82 +145,127 @@ export class OptionGroupDocs extends Documentation<ConfigState> {
               <h3>Live OptionGroup</h3>
               <OptionGroup
                 field="selectedValue"
-                multiple={multiple}
+                multiple={false}
                 orientation={orientation}
                 readOnly={readOnly}
                 value={selectedValue}
                 onChange={this.handleField}
               >
                 {this.options.map(value => (
-                  <OptionGroup.Option key={value} value={value}>{value}</OptionGroup.Option>
+                  optionType === 'toggle'
+                    ? <ToggleEditor key={value} data={value} off={value} on={value} />
+                    : <OptionGroup.Option key={value} data={value}>{value}</OptionGroup.Option>
                 ))}
               </OptionGroup>
             </div>
           </div>
         </Section>
         <Section title="Usage Examples">
-          <h3>Basic Radio Group (Single Selection)</h3>
+          <h3>Basic Usage</h3>
           {Code.format(`
             <OptionGroup
-              multiple={false}
               value="editor"
               onChange={(value) => setRole(value)}
             >
-              <OptionGroup.Option value="public">Public</OptionGroup.Option>
-              <OptionGroup.Option value="player">Player</OptionGroup.Option>
-              <OptionGroup.Option value="editor">Editor</OptionGroup.Option>
-              <OptionGroup.Option value="owner">Storyteller</OptionGroup.Option>
+              <OptionGroup.Option data="public">Public</OptionGroup.Option>
+              <OptionGroup.Option data="player">Player</OptionGroup.Option>
+              <OptionGroup.Option data="editor">Editor</OptionGroup.Option>
             </OptionGroup>
           `)}
-          <h3>Checkbox Group (Multiple Selection)</h3>
+          <h3>With ToggleEditor Components</h3>
           {Code.format(`
             <OptionGroup
-              multiple={true}
+              value="toggle1"
+              onChange={(value) => setSelection(value)}
+            >
+              <ToggleEditor data="toggle1" off="Option 1" on="Option 1" />
+              <ToggleEditor data="toggle2" off="Option 2" on="Option 2" />
+              <ToggleEditor data="toggle3" off="Option 3" on="Option 3" />
+            </OptionGroup>
+          `)}
+          <h3>Multiple Selection</h3>
+          {Code.format(`
+            <OptionGroup
+              multiple
               value={['read', 'write']}
               onChange={(values) => setPermissions(values)}
             >
-              <OptionGroup.Option value="read">Read</OptionGroup.Option>
-              <OptionGroup.Option value="write">Write</OptionGroup.Option>
-              <OptionGroup.Option value="admin">Admin</OptionGroup.Option>
+              <OptionGroup.Option data="read">Read</OptionGroup.Option>
+              <OptionGroup.Option data="write">Write</OptionGroup.Option>
+              <OptionGroup.Option data="admin">Admin</OptionGroup.Option>
             </OptionGroup>
           `)}
-          <h3>Horizontal Layout</h3>
+        </Section>
+        <Section title="Editor&lt;boolean&gt; Integration">
+          <p>
+            <code>OptionGroup</code> accepts any <code>Editor&lt;boolean&gt;</code> component as children, not
+            just <code>OptionGroup.Option</code>. This includes <code>ToggleEditor</code> and any other
+            boolean editor you create.
+          </p>
+          <h3>How It Works</h3>
+          <ul>
+            <li>
+              <strong>Data Prop</strong>: Each <code>Editor&lt;boolean&gt;</code> child must have
+              a <code>data</code> prop that specifies the value to be returned when that editor is selected/checked.
+            </li>
+            <li>
+              <strong>Selection State</strong>: <code>OptionGroup</code> manages which editors are "on" (true) or
+              "off" (false) based on the current <code>value</code> prop.
+            </li>
+            <li>
+              <strong>Return Values</strong>: When editors are selected, their <code>data</code> values are
+              collected into a <code>Set</code> internally, then returned as either a single value (single selection)
+              or an array (multiple selection).
+            </li>
+          </ul>
+          <h3>Example</h3>
           {Code.format(`
             <OptionGroup
-              multiple={false}
-              orientation="horizontal"
-              value="option1"
-              onChange={handleChange}
+              value="toggle1"
+              onChange={(value) => console.log(value)} // "toggle1"
             >
-              <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
-              <OptionGroup.Option value="option2">Option 2</OptionGroup.Option>
-              <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+              <ToggleEditor data="toggle1" off="Option 1" on="Option 1" />
+              <ToggleEditor data="toggle2" off="Option 2" on="Option 2" />
             </OptionGroup>
           `)}
-          <h3>With Disabled Options</h3>
+          <p>
+            In this example, when the first ToggleEditor is selected, the <code>data="toggle1"</code> value
+            is returned to the <code>onChange</code> handler.
+          </p>
+        </Section>
+        <Section title="Object Value Support">
+          <p>
+            The <code>data</code> prop can contain any value type, including complex objects. When an option
+            is selected, the exact object reference is returned, allowing you to work with full objects
+            rather than just scalar values.
+          </p>
+          <h3>Example with Objects</h3>
           {Code.format(`
+            const userOptions = [
+              { id: 1, name: 'Alice', role: 'admin' },
+              { id: 2, name: 'Bob', role: 'user' },
+              { id: 3, name: 'Charlie', role: 'moderator' }
+            ]
+
             <OptionGroup
-              multiple={false}
-              value="option1"
-              onChange={handleChange}
+              value={userOptions[0]}
+              onChange={(selectedUser) => {
+                console.log(selectedUser.name) // "Alice"
+                console.log(selectedUser.role)  // "admin"
+                // selectedUser is the exact object reference
+              }}
             >
-              <OptionGroup.Option value="option1">Option 1</OptionGroup.Option>
-              <OptionGroup.Option value="option2" disabled>Option 2</OptionGroup.Option>
-              <OptionGroup.Option value="option3">Option 3</OptionGroup.Option>
+              {userOptions.map(user => (
+                <OptionGroup.Option key={user.id} data={user}>
+                  {user.name} ({user.role})
+                </OptionGroup.Option>
+              ))}
             </OptionGroup>
           `)}
-          <h3>Generic Types</h3>
-          {Code.format(`
-            <OptionGroup<number>
-              multiple={false}
-              value={2}
-              onChange={(value: number) => setNumber(value)}
-            >
-              <OptionGroup.Option value={1}>One</OptionGroup.Option>
-              <OptionGroup.Option value={2}>Two</OptionGroup.Option>
-              <OptionGroup.Option value={3}>Three</OptionGroup.Option>
-            </OptionGroup>
-          `)}
+          <p>
+            This pattern is particularly useful for forms where you need to select from a list of complex
+            objects and want to work with the full object data rather than just an ID or name.
+          </p>
         </Section>
         <Section title="Key Props">
           <p>
@@ -215,24 +276,30 @@ export class OptionGroupDocs extends Documentation<ConfigState> {
           <h3>Core Props</h3>
           <ul>
             <li><strong><code>multiple</code></strong>: Boolean to toggle between radio buttons and checkboxes</li>
+            <li>
+              <strong><code>onChange</code></strong>: Handler function called when selection changes.
+              Returns the <code>data</code> values from selected editors.
+            </li>
             <li><strong><code>orientation</code></strong>: 'horizontal' or 'vertical' layout</li>
-            <li><strong><code>value</code></strong>: Current selection (string for single, array for multiple)</li>
-            <li><strong><code>onChange</code></strong>: Handler function called when selection changes</li>
+            <li>
+              <strong><code>value</code></strong>: Current selection (single value for single selection,
+              array for multiple)
+            </li>
           </ul>
           <h3>OptionGroup.Option Props</h3>
           <ul>
-            <li><strong><code>value</code></strong>: The value for this option (any type)</li>
             <li><strong><code>children</code></strong>: Display content for this option (text, icons, etc.)</li>
+            <li><strong><code>data</code></strong>: The value for this option (any type)</li>
             <li><strong><code>disabled</code></strong>: Whether this option is disabled</li>
-            <li><strong><code>inputProps</code></strong>: Additional props for the input element</li>
+            <li><strong><code>type</code></strong>: Input type ('radio' or 'checkbox') - automatically set</li>
           </ul>
         </Section>
         <Section title="Keyboard Navigation">
           <p>OptionGroup provides comprehensive keyboard navigation:</p>
           <ul>
             <li><strong>Arrow Keys (↑↓←→)</strong>: Navigate between options</li>
-            <li><strong>Space</strong>: Toggle checkbox selection (multiple mode)</li>
             <li><strong>Home/End</strong>: Jump to first/last option</li>
+            <li><strong>Space</strong>: Toggle checkbox selection (multiple mode)</li>
             <li><strong>Tab</strong>: Focus the component</li>
           </ul>
           <p>
@@ -244,10 +311,10 @@ export class OptionGroupDocs extends Documentation<ConfigState> {
           <p>OptionGroup includes comprehensive accessibility support:</p>
           <ul>
             <li><strong>ARIA Roles</strong>: Automatically sets <code>radiogroup</code> or <code>group</code> roles</li>
-            <li><strong>Labels</strong>: Proper <code>aria-label</code> and <code>aria-labelledby</code> support</li>
-            <li><strong>Focus Management</strong>: Keyboard navigation with proper focus indicators</li>
-            <li><strong>Screen Reader Support</strong>: Semantic HTML with proper labeling</li>
             <li><strong>Disabled States</strong>: Proper handling of disabled options</li>
+            <li><strong>Focus Management</strong>: Keyboard navigation with proper focus indicators</li>
+            <li><strong>Labels</strong>: Proper <code>aria-label</code> and <code>aria-labelledby</code> support</li>
+            <li><strong>Screen Reader Support</strong>: Semantic HTML with proper labeling</li>
           </ul>
         </Section>
         <Section title="Styling & Theming">

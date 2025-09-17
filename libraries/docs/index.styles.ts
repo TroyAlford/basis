@@ -17,7 +17,7 @@ export const docsStyles = style('basis:docs:index', css`
     }
 
     p {
-      margin: 1em 0;
+      margin: 0;
 
       &:first-child { margin-top: 0; }
       &:last-child { margin-bottom: 0; }
@@ -31,6 +31,7 @@ export const docsStyles = style('basis:docs:index', css`
     ul {
       list-style: disc;
       padding-left: 0;
+      margin: 0;
 
       > li {
         margin: 0.25em 0 0 2em;
