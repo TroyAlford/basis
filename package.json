@@ -27,6 +27,7 @@
   },
   "scripts": {
     "docs": "bun ./libraries/docs/index.html",
+    "update:linter": "bun --filter=@basis/eslint-plugin run build",
     "test:develop": "bun test --watch",
     "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces",
     "workspace": "bun ./libraries/workspaces/source/bin/workspace.ts",

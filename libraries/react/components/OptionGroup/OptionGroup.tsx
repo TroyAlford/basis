@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { noop } from '@basis/utilities'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
 import type { IFocusable } from '../../mixins/Focusable'
@@ -7,89 +6,21 @@ import { Focusable } from '../../mixins/Focusable'
 import { Keyboard } from '../../types/Keyboard'
 import type { Mixin } from '../../types/Mixin'
 import type { Orientation } from '../../types/Orientation'
-import { Component } from '../Component/Component'
 import { Editor } from '../Editor/Editor'
+import { Option } from './Option'
 
 import './OptionGroup.styles.ts'
 
-export enum OptionType {
-  Checkbox = 'checkbox',
-  Radio = 'radio',
-}
-
-/** Props for individual options within the OptionGroup. */
-interface OptionProps<T> {
-  /** The content to display for this option */
-  children: React.ReactNode,
-  /** Whether this option is disabled */
-  disabled?: boolean,
-  /** The index of this option */
-  index?: number,
-  /** Change handler called with (selected, index, value) */
-  onChange?: (selected: boolean, index: number, value: T) => void,
-  /** Whether this option is currently selected */
-  selected?: boolean,
-  /** The type of input (radio or checkbox) */
-  type?: OptionType.Radio | OptionType.Checkbox,
-  /** The value for this option */
-  value: T,
-}
-
-/** Props specific to option group editor. */
+/** Props for the OptionGroup component. */
 interface Props extends IAccessible, IFocusable {
+  /** The children of the component. */
+  children?: React.ReactNode,
   /** Whether multiple options can be selected */
   multiple?: boolean,
-  /** Orientation of the option group */
+  /** The orientation of the options */
   orientation?: Orientation,
-}
-
-/**
- * Individual option component for use within OptionGroup
- */
-class Option<T> extends Component<OptionProps<T>, HTMLLabelElement> {
-  static displayName = 'OptionGroup.Option'
-  static get defaultProps() {
-    return {
-      ...super.defaultProps,
-      onChange: noop,
-      type: OptionType.Radio,
-    }
-  }
-
-  override get attributes() {
-    return {
-      ...super.attributes,
-      'data-index': this.props.index,
-      'data-selected': this.props.selected,
-      'data-type': this.props.type,
-    }
-  }
-  override get classNames() { return super.classNames.add('option-group-item') }
-  override get tag() { return 'label' as const }
-
-  private handleChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
-    const { index, onChange, value } = this.props
-    if (onChange && index !== undefined) {
-      onChange(e.target.checked, index, value)
-    }
-  }
-
-  override content(): React.ReactNode {
-    const { children, disabled, selected, type, value } = this.props
-
-    return (
-      <>
-        <input
-          checked={selected || false}
-          disabled={disabled}
-          type={type}
-          value={String(value)}
-          onChange={this.handleChange}
-        />
-        {children}
-      </>
-    )
-  }
+  /** The current value(s) */
+  value?: unknown | unknown[],
 }
 
 /**
@@ -116,112 +47,131 @@ export class OptionGroup<T> extends Editor<T | T[], HTMLFieldSetElement, Props> 
     if (Array.isArray(value)) {
       return new Set(value)
     }
-    if (value !== undefined && value !== null) {
-      return new Set([value])
-    }
-    return new Set()
+    return value !== undefined && value !== null ? new Set([value]) : new Set()
   }
-  override get tag() { return 'fieldset' as const }
 
   /**
-   * Handles option change from Option component
-   * @param selected Whether the option is selected
-   * @param index The index of the option
-   * @param value The value of the option
+   * Handles the change event for an individual option.
+   * @param selected Whether the option is selected.
+   * @param index The index of the option.
+   * @param data The data value of the option.
    */
-  private handleOptionChange = (selected: boolean, index: number, value: T): void => {
+  private handleOptionChange = (selected: boolean, index: number, data: T): void => {
+    const { multiple } = this.props
     const update = new Set(this.set)
 
-    if (this.props.multiple) {
-      // Multiple mode: add/remove from set
+    if (multiple) {
       if (selected) {
-        update.add(value)
+        update.add(data)
       } else {
-        update.delete(value)
+        update.delete(data)
       }
-      // Convert Set back to array for onChange
-      this.handleChange(Array.from(update) as T[])
+      this.handleChange(Array.from(update))
     } else {
-      // Single mode: replace entire set with single selection
       update.clear()
       if (selected) {
-        update.add(value)
+        update.add(data)
       }
       // Convert Set back to single value for onChange
       this.handleChange(update.size > 0 ? Array.from(update)[0] : null as T | null)
     }
   }
 
-  /**
-   * Gets the index of the currently focused option
-   * @returns The index of the focused option, or 0 if none focused
-   */
-  private getFocusedIndex(): number {
-    const focusedInput = this.rootNode?.querySelector('.option-group-item:focus-within') as HTMLInputElement
-    return Number.parseInt(focusedInput?.dataset?.index ?? '-1', 10)
+  private focusOptionElement = (optionElements: NodeListOf<Element>, index: number): boolean => {
+    const targetOptionElement = optionElements[index] as HTMLElement
+    if (!targetOptionElement) return false
+
+    // Focus the root element directly (it should be focusable)
+    if (targetOptionElement.focus) {
+      targetOptionElement.focus()
+      return true
+    }
+    return false
   }
 
-  /**
-   * Gets the Option components from children
-   * @returns Array of Option React elements
-   */
-  private get options(): React.ReactElement<OptionProps<T>>[] {
-    return React.Children.toArray(this.props.children)
-      .filter(child => React.isValidElement(child) && child.type === OptionGroup.Option)
-      .map(child => child as React.ReactElement<OptionProps<T>>)
-  }
-
-  /**
-   * Handles keyboard navigation within the option group
-   * @param event The keyboard event
-   */
   #handleKeyDown = (event: React.KeyboardEvent<HTMLFieldSetElement>): void => {
-    const optionElements = this.options
-    const current = this.getFocusedIndex()
-    let index = current
+    // Handle the onKeyDown prop manually (like the base class does)
+    const { onKeyDown } = this.props
+    const shouldPreventDefault = onKeyDown(event)
 
-    switch (event.key) {
-      case Keyboard.ArrowDown:
-      case Keyboard.ArrowRight:
-        event.preventDefault()
-        index = (current + 1) % optionElements.length
-        break
-      case Keyboard.ArrowUp:
-      case Keyboard.ArrowLeft:
-        event.preventDefault()
-        index = (current - 1 + optionElements.length) % optionElements.length
-        break
-      case Keyboard.Home:
-        event.preventDefault()
-        index = 0
-        break
-      case Keyboard.End:
-        event.preventDefault()
-        index = optionElements.length - 1
-        break
-      case Keyboard.Space: {
-        event.preventDefault()
-        const option = optionElements[current]
-        if (option) {
-          this.handleOptionChange(!this.set.has(option.props.value), current, option.props.value)
-        }
-        break
-      }
+    /*
+     * CRITICAL: Use event.currentTarget (the fieldset) instead of this.rootNode
+     * This ensures we're always working with the correct fieldset element
+     */
+    const fieldset = event.currentTarget as HTMLFieldSetElement
+
+    const role = '[data-role="OptionGroup.Option"]'
+    const focused = fieldset.querySelector(`${role}:focus, ${role}:focus-within`)
+    if (!focused) return
+
+    // Get all OptionGroup.Option elements WITHIN THIS FIELDSET ONLY
+    const options = fieldset.querySelectorAll(role)
+    const currentIndex = Array.from(options).indexOf(focused)
+    if (currentIndex === -1) return
+
+    // ONLY handle navigation keys - let individual components handle selection
+    let handled = false
+    if ([Keyboard.ArrowDown, Keyboard.ArrowRight].includes(event.key as Keyboard)) {
+      const targetIndex = (currentIndex + 1) % options.length
+      handled = this.focusOptionElement(options, targetIndex)
+    } else if ([Keyboard.ArrowUp, Keyboard.ArrowLeft].includes(event.key as Keyboard)) {
+      const targetIndex = (currentIndex - 1 + options.length) % options.length
+      handled = this.focusOptionElement(options, targetIndex)
+    } else if (event.key === Keyboard.Home) {
+      handled = this.focusOptionElement(options, 0)
+    } else if (event.key === Keyboard.End) {
+      handled = this.focusOptionElement(options, options.length - 1)
     }
+    // Do NOT handle Space/Enter - let individual components handle their own selection
 
-    if (index !== current) {
-      const option = optionElements[index]
-      if (option && !option.props.disabled) {
-        if (!this.props.multiple) {
-          // In single mode, select the new option (deselect others)
-          this.handleOptionChange(true, index, option.props.value)
-        }
-        // Focus the input element
-        const input = this.rootNode.querySelector(`.option-group-item[data-index="${index}"] input`) as HTMLInputElement
-        input?.focus()
-      }
+    if (handled) {
+      event.preventDefault()
+      event.stopPropagation()
+    } else if (shouldPreventDefault === false && !event.defaultPrevented) {
+      event.preventDefault()
     }
   }
+
+  get array(): T[] { return Array.from(this.set) }
+  get selected(): T | null {
+    const array = this.array
+    return array.length > 0 ? array[0] : null
+  }
+
+  /**
+   * Gets the Editor<boolean> components from children
+   * @returns Array of Editor React elements
+   */
+  get options(): React.ReactElement[] {
+    return React.Children.toArray(this.props.children)
+      .filter(child => React.isValidElement(child))
+  }
+
+  /**
+   * Extracts the data value from an Editor<boolean> component
+   * @param option The option element
+   * @returns The data value or undefined
+   */
+  private getOptionData(option: React.ReactElement): T | undefined {
+    // For Option components, get the data prop
+    if (option.type === OptionGroup.Option) {
+      return (option.props as { data?: T }).data
+    }
+    // For other Editor<boolean> components (like ToggleEditor), get the data prop
+    return (option.props as { data?: T }).data
+  }
+
+  /**
+   * Checks if an option is currently selected.
+   * @param option The option element.
+   * @returns True if the option is selected, false otherwise.
+   */
+  private isOptionSelected(option: React.ReactElement): boolean {
+    const data = this.getOptionData(option)
+    return data !== undefined && this.set.has(data)
+  }
+
+  override get tag(): 'fieldset' { return 'fieldset' }
 
   override get attributes() {
     return {
@@ -232,7 +182,7 @@ export class OptionGroup<T> extends Editor<T | T[], HTMLFieldSetElement, Props> 
       'data-orientation': this.props.orientation,
       'onKeyDown': this.#handleKeyDown,
       'role': this.props.multiple ? 'group' : 'radiogroup',
-      'tabIndex': this.props.readOnly ? -1 : 0,
+      'tabIndex': -1,
     }
   }
 
@@ -242,14 +192,24 @@ export class OptionGroup<T> extends Editor<T | T[], HTMLFieldSetElement, Props> 
    */
   readOnly(): React.ReactNode {
     const optionElements = this.options
-    const selectedOptions = optionElements.filter(opt => this.set.has(opt.props.value))
-    const labels = selectedOptions.map(opt => String(opt.props.children))
+    const selectedOptions = optionElements.filter(opt => this.isOptionSelected(opt))
 
-    return (
-      <span className="value">
-        {labels.join(this.props.multiple ? ', ' : '')}
-      </span>
-    )
+    if (selectedOptions.length === 0) {
+      return null
+    }
+
+    return selectedOptions.map(opt => {
+      // For OptionGroup.Option, render its children
+      if (opt.type === OptionGroup.Option) {
+        return (opt.props as { children?: React.ReactNode }).children
+      }
+      /*
+       * For other Editor<boolean> components, render their readOnly content if available
+       * This assumes other editors have a readOnly method or a prop to display read-only state
+       */
+      const optProps = (opt as React.ReactElement<Record<string, unknown>>).props
+      return optProps.readOnlyContent || String(this.getOptionData(opt))
+    }).join(', ')
   }
 
   /**
@@ -258,18 +218,26 @@ export class OptionGroup<T> extends Editor<T | T[], HTMLFieldSetElement, Props> 
    */
   content(): React.ReactNode {
     const { multiple } = this.props
-    return this.options.map(({ props: option }, index) => (
-      <Option<T>
-        key={index}
-        disabled={option.disabled || this.props.readOnly}
-        index={index}
-        selected={this.set.has(option.value)}
-        type={multiple ? OptionType.Checkbox : OptionType.Radio}
-        value={option.value}
-        onChange={this.handleOptionChange}
-      >
-        {option.children}
-      </Option>
-    ))
+    return this.options.map((option, index) => {
+      const data = this.getOptionData(option)
+      const isSelected = data !== undefined ? this.set.has(data) : false
+
+      // Clone the option element and add necessary props
+      return React.cloneElement(option as React.ReactElement<Record<string, unknown>>, {
+        ...(option.props as Record<string, unknown>),
+        data,
+        'data-role': 'OptionGroup.Option',
+        index,
+        'key': index,
+        'onChange': (selected: boolean) => {
+          if (data !== undefined) {
+            this.handleOptionChange(selected, index, data)
+          }
+        },
+        'readOnly': this.props.readOnly,
+        'type': option.type === OptionGroup.Option ? (multiple ? Option.Type.Checkbox : Option.Type.Radio) : undefined,
+        'value': isSelected,
+      })
+    })
   }
 }

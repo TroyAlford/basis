@@ -10,6 +10,8 @@ import './ToggleEditor.styles.ts'
 
 /** Props specific to toggle editor. */
 interface Props extends IAccessible, IFocusable {
+  /** The data value for this toggle */
+  data?: unknown,
   /** Whether the toggle is disabled */
   disabled?: boolean,
   /** Content to display when toggle is off */
