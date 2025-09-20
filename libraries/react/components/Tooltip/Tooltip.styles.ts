@@ -14,6 +14,7 @@ style('basis:tooltip', css`
     border-radius: 4px;
     box-shadow: var(--basis-shadow-md);
     color: var(--tooltip-color-foreground);
+    margin: 0;
     opacity: 0;
     padding: 8px;
     pointer-events: none;
@@ -24,7 +25,6 @@ style('basis:tooltip', css`
     ;
     visibility: hidden;
     white-space: nowrap;
-    z-index: var(--basis-z-tooltip, 2);
 
     *:has(> &) {
       &:is(:hover, :focus-within) > .tooltip.component {

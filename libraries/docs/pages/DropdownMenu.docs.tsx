@@ -12,7 +12,7 @@ interface State {
 
 export class DropdownMenuDocs extends React.Component<object, State> {
   state: State = {
-    anchorPoint: AnchorPoint.Top,
+    anchorPoint: AnchorPoint.BottomStart,
     open: true,
   }
 

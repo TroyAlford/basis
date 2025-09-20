@@ -4,6 +4,7 @@ import { CarouselDocs } from './pages/Carousel.docs.tsx'
 import { ComponentDocs } from './pages/Component.docs.tsx'
 import { DropdownMenuDocs } from './pages/DropdownMenu.docs.tsx'
 import { EditorDocs } from './pages/Editor.docs.tsx'
+import { EnumEditorDocs } from './pages/EnumEditor.docs.tsx'
 import { IconsDocs } from './pages/Icons.docs.tsx'
 import { ImageDocs } from './pages/Image.docs.tsx'
 import { MenuDocs } from './pages/Menu.docs.tsx'
@@ -40,6 +41,7 @@ export const routes: DocRoute[] = [
   { component: ComponentDocs, path: '/components/component', title: 'Component' },
   { component: DropdownMenuDocs, path: '/components/dropdown-menu', title: 'DropdownMenu' },
   { component: EditorDocs, path: '/components/editor', title: 'Editor' },
+  { component: EnumEditorDocs, path: '/components/enum-editor', title: 'EnumEditor' },
   { component: IconsDocs, path: '/icons', title: 'Icons' },
   { component: ImageDocs, path: '/components/image', title: 'Image' },
   { component: MenuDocs, path: '/components/menu', title: 'Menu' },

@@ -52,6 +52,8 @@ export const Popup: Mixin<IPopup> = {
   componentDidMount<E extends HTMLElement | SVGElement>(
     component: { props: IPopup, rootNode: E | null },
   ): void {
+    component.rootNode.setAttribute('popover', 'manual');
+    (component.rootNode as HTMLElement).showPopover?.()
     reposition(component)
   },
 

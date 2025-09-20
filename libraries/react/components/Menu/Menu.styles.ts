@@ -45,6 +45,9 @@ style('basis:menu', css`
       background-color: var(--basis-color-foreground);
       border: none;
       opacity: 0.2;
+
+      + .menu-divider.component { display: none; }
+      &:first-child, &:last-child { display: none; }
     }
 
     &[data-orientation='${Orientation.Vertical}'] {

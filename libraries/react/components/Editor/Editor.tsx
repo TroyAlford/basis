@@ -148,14 +148,19 @@ export abstract class Editor<
   }
 
   content(children?: React.ReactNode): React.ReactNode {
-    return super.content(this.props.readOnly ? this.readOnly() : children)
+    return super.content(
+      (this.props.readOnly && typeof this.readOnly === 'function')
+        ? this.readOnly()
+        : children,
+    )
   }
 
   /**
    * Renders the component's content in read-only mode.
+   * @param children - The children to render in read-only mode.
    * @returns The component's content as a string representation.
    */
-  readOnly(): React.ReactNode {
-    return String(this.current)
+  readOnly(children?: React.ReactNode): React.ReactNode {
+    return children
   }
 }
