@@ -9,7 +9,6 @@ style('basis:text-editor', css`
   }
 
   .text-editor.component {
-    align-items: center;
     border-radius: var(--basis-text-editor-border-radius);
     border: var(--basis-text-editor-border);
     display: flex;
@@ -22,28 +21,18 @@ style('basis:text-editor', css`
     position: relative;
 
 
-    > .prefix, > .suffix {
-      align-self: flex-start;
-    }
-
-    > .value {
+    > .value, &::before {
       border: none;
       flex-grow: 1;
-      font-size: inherit;
-      resize: none;
-    }
-    
-    &::before { padding: 0; }
-    
-    > .value, &::before {
       font-family: inherit;
       font-size: inherit;
       line-height: inherit;
       margin: .25em;
       padding: 0;
+      resize: none;
       white-space: pre-wrap;
     }
-
+    
     &[data-multiline="true"] > .value {
       display: flex;
       overflow: auto;

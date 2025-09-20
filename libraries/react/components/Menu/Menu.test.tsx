@@ -50,7 +50,7 @@ describe('Menu', () => {
 
   test('Menu.Item supports data-* on activate', async () => {
     const onActivate = mock()
-    const { node } = await render(
+    const { instance, node } = await render(
       <Menu.Item data-action="item-1" onActivate={onActivate}>Item 1</Menu.Item>,
     )
 
@@ -58,7 +58,7 @@ describe('Menu', () => {
 
     expect(node).toHaveAttribute('data-action', 'item-1')
     expect(node).toHaveTextContent('Item 1')
-    expect(onActivate).toHaveBeenLastCalledWith(expect.objectContaining({ target: node }))
+    expect(onActivate).toHaveBeenLastCalledWith(expect.objectContaining({ target: node }), instance)
   })
 
   test('supports Menu.Divider', async () => {

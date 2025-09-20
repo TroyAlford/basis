@@ -10,6 +10,7 @@ export const PrefixSuffixStyles = style('basis:prefix-suffix', css`
 
   [data-has-prefix] > .prefix,
   [data-has-suffix] > .suffix {
+    align-self: flex-start;
     align-items: center;
     display: flex;
     font-size: inherit;

@@ -3,10 +3,12 @@ import { isNil, match, noop } from '@basis/utilities'
 import type { IPopup } from '../../mixins/Popup'
 import { AnchorPoint } from '../../types/AnchorPoint'
 import { Keyboard } from '../../types/Keyboard'
+import { Event, events } from '../../utilities/EventManager.ts'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Menu } from '../Menu/Menu'
 import { PopupMenu } from '../PopupMenu/PopupMenu'
+import { DropdownMenuItem } from './DropdownMenuItem.tsx'
 
 import './DropdownMenu.styles.ts'
 
@@ -16,6 +18,8 @@ interface Props extends IPopup {
    * Generally, these will be a set of DropdownMenu.Item components.
    */
   children?: React.ReactNode,
+  /** Whether the dropdown should close when menu items are activated. */
+  closeOnActivate?: boolean,
   /** Whether the dropdown is disabled. */
   disabled?: boolean,
   /** A callback function that is called when the dropdown is closed. */
@@ -39,12 +43,14 @@ interface State {
 /** A dropdown menu component, composed of a {@link Button} and a {@link Menu}. */
 export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
   static AnchorPoint = AnchorPoint
-  static Item = Menu.Item
+  static Item = DropdownMenuItem
   static Divider = Menu.Divider
 
   static displayName = 'DropdownMenu'
   static defaultProps = {
     ...super.defaultProps,
+    anchorPoint: AnchorPoint.BottomStart,
+    closeOnActivate: true,
     disabled: false,
     onClose: noop,
     onOpen: noop,
@@ -53,6 +59,7 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
   }
 
   private button = React.createRef<HTMLButtonElement>()
+  private unsubscribeBlur?: () => void
 
   get attributes() {
     return {
@@ -61,7 +68,6 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
       'aria-expanded': this.isOpen,
       'aria-haspopup': 'true',
       'disabled': this.props.disabled ? 'disabled' : undefined,
-      'onBlur': this.handleBlur,
       'onKeyDown': this.handleKeyDown,
     }
   }
@@ -81,8 +87,16 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
   }
   get tag(): keyof React.JSX.IntrinsicElements { return 'div' }
 
-  private handleBlur = (event: React.FocusEvent<HTMLElement>): void => {
-    if (!this.rootNode?.contains(event.relatedTarget as Element) && this.isOpen) {
+  componentDidMount(): void {
+    this.unsubscribeBlur = events.on(Event.Blur, this.rootNode, this.handleBlur)
+  }
+
+  componentWillUnmount(): void {
+    this.unsubscribeBlur?.()
+  }
+
+  private handleBlur = (): void => {
+    if (this.isOpen) {
       this.setState({ open: false }, () => this.props.onClose())
     }
   }
@@ -113,6 +127,21 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
   content(children?: React.ReactNode): React.ReactNode {
     const { disabled } = this.props
 
+    const clones = React.Children.map(children, child => {
+      if (React.isValidElement(child) && child.type === DropdownMenuItem) {
+        const { closeOnActivate = true, onActivate = noop } = child.props as DropdownMenuItem['props']
+
+        return React.cloneElement<DropdownMenuItem<typeof child.props>['props']>(child, {
+          onActivate: (event: React.MouseEvent, menuItem) => {
+            onActivate(event, menuItem)
+            if (closeOnActivate) this.handleClose()
+          },
+        })
+      }
+
+      return child
+    })
+
     return (
       <>
         <Button
@@ -131,7 +160,7 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
             disabled={disabled}
             offset={this.props.offset}
           >
-            {children}
+            {clones}
           </PopupMenu>
         )}
       </>

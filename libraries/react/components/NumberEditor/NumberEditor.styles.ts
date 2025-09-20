@@ -9,24 +9,27 @@ export const NumberEditorStyles = style('basis:number-editor', css`
   }
 
   .number-editor.component {
-    align-items: center;
     border-radius: var(--basis-number-editor-border-radius);
     border: var(--basis-number-editor-border);
     display: flex;
     font-size: 1em;
-    height: 1.5em;
+    gap: .25em;
     line-height: 1em;
+    min-height: 1.5em;
     overflow: hidden;
     padding: .25em;
+    position: relative;
 
     > .value {
       border: none;
       flex-grow: 1;
+      font-family: inherit;
       font-size: inherit;
       height: 100%;
       line-height: inherit;
-      margin: 0;
-      padding: 1px .25em 0 .25em;
+      margin: .25em;
+      padding: 0;
+      text-align: right;
     }
   }
 `)

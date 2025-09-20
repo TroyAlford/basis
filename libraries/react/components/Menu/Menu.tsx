@@ -1,8 +1,9 @@
 import type * as React from 'react'
-import { match, noop } from '@basis/utilities'
+import { match } from '@basis/utilities'
 import { Keyboard } from '../../types/Keyboard'
 import { Orientation } from '../../types/Orientation'
 import { Component } from '../Component/Component'
+import { MenuItem } from './MenuItem'
 
 import './Menu.styles.ts'
 
@@ -14,14 +15,6 @@ interface Props {
   orientation?: Orientation,
   /** Whether the menu is in read-only mode. */
   readOnly?: boolean,
-}
-
-/** Props for Menu.Item component. */
-interface ItemProps {
-  /** Whether the item is disabled. */
-  disabled?: boolean,
-  /** The handler for when the item is activated. */
-  onActivate?: (event: React.SyntheticEvent) => void,
 }
 
 /**
@@ -96,50 +89,11 @@ export class Menu extends Component<Props, HTMLUListElement> {
   }
 
   /** Menu item component that extends Component for proper semantic HTML. */
-  static Item = class MenuItem extends Component<ItemProps> {
-    static displayName = 'MenuItem'
-    static defaultProps = {
-      ...Component.defaultProps,
-      disabled: false,
-      onActivate: noop,
-    }
-
-    get attributes() {
-      const { disabled } = this.props
-      return {
-        ...super.attributes,
-        'aria-disabled': disabled,
-        'aria-selected': false,
-        'disabled': disabled ? 'disabled' : undefined,
-        'onClick': this.handleActivate,
-        'onKeyDown': this.handleActivate,
-        'role': 'menuitem',
-        'tabIndex': disabled ? -1 : 0,
-      }
-    }
-    get tag(): keyof React.JSX.IntrinsicElements { return 'li' }
-
-    /**
-     * Handles all activation events (click, key).
-     * @param event - The synthetic event.
-     */
-    private handleActivate = (event: React.SyntheticEvent): void => {
-      const { disabled, onActivate } = this.props
-      if (disabled) return
-
-      match(event.type)
-        .when('click').then(() => onActivate(event))
-        .when('keydown').then(() => {
-          const { key } = event as React.KeyboardEvent
-          if (![Keyboard.Enter, Keyboard.Space].includes(key as Keyboard)) return
-          onActivate(event)
-        })
-    }
-  }
+  static Item = MenuItem
 
   /** Divider component for visual separation between menu items. */
   static Divider = class MenuDivider extends Component {
-    static displayName = 'MenuDivider'
+    static displayName = 'Menu.Divider'
     get attributes() {
       return {
         ...super.attributes,
