@@ -150,7 +150,7 @@ export abstract class Editor<
   content(children?: React.ReactNode): React.ReactNode {
     return super.content(
       (this.props.readOnly && typeof this.readOnly === 'function')
-        ? this.readOnly()
+        ? this.readOnly(children)
         : children,
     )
   }
