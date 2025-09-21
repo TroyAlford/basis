@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
+import type { PathOf, TypeAt } from '@basis/utilities'
 import { render } from '../../testing/render'
 import { Editor } from './Editor'
 
@@ -121,7 +122,10 @@ describe('Editor', () => {
     }
 
     class NestedEditor extends Editor<NestedValue> {
-      public async testHandleField(value: unknown, path: string): Promise<void> {
+      public async testHandleField(
+        value: TypeAt<NestedValue, PathOf<NestedValue>>,
+        path: PathOf<NestedValue>,
+      ): Promise<void> {
         await this.handleField(value, path)
       }
 
@@ -166,6 +170,7 @@ describe('Editor', () => {
         <NestedEditor initialValue={initialValue} />,
       )
 
+      // @ts-expect-error - invalid path
       instance.testHandleField('updated', '')
       expect(instance.current).toEqual(initialValue)
     })

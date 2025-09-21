@@ -8,11 +8,11 @@ import type { TypeAt } from '../types/TypeAt'
  * @param value the value to set
  * @returns the object with the value set
  */
-export function set<V = object, P extends PathOf<V> = PathOf<V>>(
-  object: V,
-  path: P,
-  value: TypeAt<V, P>,
-): V {
+export function set<
+  O = unknown,
+  P extends PathOf<O> | string = O extends unknown ? string : PathOf<O>,
+  V = P extends string ? unknown : TypeAt<O, P>,
+>(object: O, path: P, value: V): O {
   const keys = String(path).split('.')
 
   let current = object
