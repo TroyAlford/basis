@@ -3,8 +3,5 @@
   "description": "A collection of utility functions for common programming tasks.",
   "exports": {
     ".": "./index.ts"
-  },
-  "dependencies": {
-    "@hyperjump/json-schema": "^1.16.2"
   }
 }
