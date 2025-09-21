@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@basis/react": "workspace:*",
-    "@basis/icons": "workspace:*",
     "react": "^19",
     "react-dom": "^19"
   }
