@@ -29,5 +29,10 @@ export { PrefixSuffix } from './mixins/PrefixSuffix'
 export { AnchorPoint } from './types/AnchorPoint'
 export { Keyboard } from './types/Keyboard'
 export { Orientation } from './types/Orientation'
+export { SortBy } from './types/SortBy'
+export { SortDirection } from './types/SortDirection'
 
 export { css, style } from './utilities/style'
+
+export * from './icons/IconBase/IconBase'
+export * from './icons'

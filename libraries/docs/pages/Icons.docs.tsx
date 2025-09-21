@@ -1,7 +1,7 @@
 import * as React from 'react'
-import type { IconProps } from '@basis/icons'
-import * as Icons from '@basis/icons'
+import type { IconProps } from '@basis/react'
 import { Button, css, NumberEditor, Router, style, TextEditor } from '@basis/react'
+import * as Icons from '@basis/react/icons'
 import { Code } from '../components/Code'
 
 import './Icons.styles.ts'
@@ -180,7 +180,7 @@ export class IconsDocs extends React.Component<Record<string, never>, State> {
         <h2>Usage Examples</h2>
         <h3>Basic Icon Usage</h3>
         {Code.format(`
-          import { Plus, Search, Gear } from '@basis/icons'
+          import { Plus, Search, Gear } from '@basis/react'
 
           // Use individual icons
           <Plus />
@@ -207,7 +207,7 @@ export class IconsDocs extends React.Component<Record<string, never>, State> {
         <p>This reduces the number of individual icon components while providing type-safe access to all variants.</p>
         <h3>Usage</h3>
         {Code.format(`
-          import { Triangle, Sort, Grip } from '@basis/icons'
+          import { Triangle, Sort, Grip } from '@basis/react'
 
           // Triangle - directional arrows
           <Triangle orientation={Triangle.Orientation.Right} />

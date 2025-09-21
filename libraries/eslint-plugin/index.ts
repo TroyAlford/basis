@@ -313,7 +313,7 @@ export default pluginTypescript.config(
     },
   }),
   plugin({
-    files: ['libraries/icons/**/*.tsx'],
+    files: ['libraries/react/icons/*.tsx'],
     rules: {
       '@stylistic/max-len': 'off',
     },

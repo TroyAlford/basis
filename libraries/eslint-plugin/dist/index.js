@@ -322,7 +322,7 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
         },
     }),
     plugin({
-        files: ['libraries/icons/**/*.tsx'],
+        files: ['libraries/react/icons/*.tsx'],
         rules: {
             '@stylistic/max-len': 'off',
         },

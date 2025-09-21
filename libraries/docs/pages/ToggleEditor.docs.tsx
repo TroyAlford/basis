@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Padlock } from '@basis/icons'
+import { Padlock } from '@basis/react'
 import { Section, ToggleEditor } from '@basis/react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Code } from '../components/Code'
