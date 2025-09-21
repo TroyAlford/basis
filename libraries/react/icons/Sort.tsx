@@ -43,6 +43,14 @@ export class Sort extends IconBase<Props> {
       Component = direction === SortDirection.Asc ? SortByValueAsc : SortByValueDesc
     }
 
-    return Component ? <Component {...rest} /> : null
+    const props = {
+      ...rest,
+      'data-direction': direction,
+      'data-sort-by': sortBy,
+    }
+
+    return Component
+      ? <Component className="sort" {...props} />
+      : null
   }
 }

@@ -45,10 +45,8 @@ export abstract class Component<
   State = object,
 > extends React.Component<P<Element, Props>, State> {
   static get mixins(): Set<Mixin> { return new Set() }
-
   static get defaultProps(): P<HTMLElement, TProps> {
     return {
-      nodeRef: React.createRef<HTMLDivElement>(),
       onKeyDown: () => undefined,
       theme: undefined,
       ...Array.from(this.mixins).reduce((props, mixin) => ({
@@ -92,12 +90,17 @@ export abstract class Component<
    */
   get defaultState(): State { return {} as State }
   state = this.defaultState
+  #nodeRef = React.createRef<Element>()
 
   /**
    * Getter for the root element of the component.
    * @returns The root element of the component.
    */
-  get rootNode(): Element | null { return this.props.nodeRef?.current }
+  get rootNode(): Element | null {
+    return this.props.nodeRef
+      ? this.props.nodeRef.current
+      : this.#nodeRef.current
+  }
 
   /**
    * The tag name of the component's root node.
@@ -162,7 +165,7 @@ export abstract class Component<
 
     const rendered = ( // @ts-expect-error - we are assuming a props match
       <Tag // @ts-expect-error - we are assuming a props match
-        ref={nodeRef}
+        ref={nodeRef ?? this.#nodeRef}
         {...this.attributes}
         className={classNames(className, this.classNames)}
       >

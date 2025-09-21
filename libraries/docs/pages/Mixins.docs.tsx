@@ -1,13 +1,18 @@
 import * as React from 'react'
-import { NumberEditor } from '@basis/react/components/NumberEditor/NumberEditor'
+import { NumberEditor, Section } from '@basis/react'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
-export class MixinsDocs extends React.Component {
-  render(): React.ReactNode {
+export class MixinsDocs extends Documentation<Record<string, never>> {
+  state = {
+    current: {},
+  }
+
+  content(): React.ReactNode {
     return (
       <>
         <h1>Mixins</h1>
-        <section>
+        <Section title="Overview">
           <p>
             The Component class includes a powerful mixin system that allows you to compose behavior
             without inheritance. Mixins can modify both content and root elements, providing
@@ -17,10 +22,9 @@ export class MixinsDocs extends React.Component {
             Mixins are automatically integrated once declared, providing default props, content processing,
             root modification, and lifecycle method integration.
           </p>
-        </section>
-        <section>
-          <h2>How to Use Mixins</h2>
-          <h3>Declaring Mixins</h3>
+        </Section>
+        <Section title="How to Use Mixins">
+          <h2>Declaring Mixins</h2>
           <p>
             Components declare their mixins using a static getter:
           </p>
@@ -34,7 +38,7 @@ export class MixinsDocs extends React.Component {
               }
             }
           `)}
-          <h3>Automatic Integration</h3>
+          <h2>Automatic Integration</h2>
           <p>
             Once declared, mixins are automatically integrated:
           </p>
@@ -47,7 +51,7 @@ export class MixinsDocs extends React.Component {
             <li><strong>Root Modification</strong>: Render mixins modify the final root element</li>
             <li><strong>Lifecycle Methods</strong>: Mixin lifecycle methods are automatically called</li>
           </ul>
-          <h3>Mixin Ordering</h3>
+          <h2>Mixin Ordering</h2>
           <p>
             Mixins with <code>post: true</code> are applied after regular mixins, ensuring proper layering:
           </p>
@@ -65,14 +69,13 @@ export class MixinsDocs extends React.Component {
               }
             }
           `)}
-        </section>
-        <section>
-          <h2>Content Mixins</h2>
+        </Section>
+        <Section title="Content Mixins">
           <p>
             Content mixins modify the component's children/content. They are applied in the order
             they're declared, with post mixins applied last.
           </p>
-          <h3>Accessible Mixin</h3>
+          <h2>Accessible Mixin</h2>
           <p>
             Provides ARIA attributes and accessibility features for components. Automatically
             adds <code>aria-label</code> and <code>aria-describedby</code> attributes to form inputs
@@ -82,7 +85,7 @@ export class MixinsDocs extends React.Component {
             <strong>Usage:</strong> Perfect for form inputs, buttons, and interactive elements
             that need proper accessibility labeling.
           </p>
-          <h3>PrefixSuffix Mixin</h3>
+          <h2>PrefixSuffix Mixin</h2>
           <p>
             Adds content before and after the main element, useful for labels, icons, or additional context.
             Wraps the component with prefix and suffix elements when provided.
@@ -97,7 +100,7 @@ export class MixinsDocs extends React.Component {
               <NumberEditor prefix="$" suffix="USD" value={1000} />
             `)}
           </p>
-          <h3>Placeholder Mixin</h3>
+          <h2>Placeholder Mixin</h2>
           <p>
             Provides placeholder text support for input elements. Automatically adds
             the <code>placeholder</code> attribute to input elements.
@@ -105,7 +108,7 @@ export class MixinsDocs extends React.Component {
           <p>
             <strong>Usage:</strong> Essential for form inputs that need placeholder text for better UX.
           </p>
-          <h3>Focusable Mixin</h3>
+          <h2>Focusable Mixin</h2>
           <p>
             Provides auto-focus support and focus management for components. Automatically focuses
             components when <code>autoFocus={true}</code> is set.
@@ -114,14 +117,31 @@ export class MixinsDocs extends React.Component {
             <strong>Usage:</strong> Useful for form inputs that should receive focus immediately
             when mounted or when certain conditions are met.
           </p>
-        </section>
-        <section>
-          <h2>Render Mixins</h2>
+          <h2>Pinnable Mixin</h2>
+          <p>
+            Provides column pinning functionality for table cells. Automatically applies CSS positioning
+            to pin columns to the left or right side of a table, with automatic cleanup when unpinned.
+          </p>
+          <p>
+            <strong>Usage:</strong> Used by Table HeaderCell and Cell components to implement sticky
+            column functionality. Automatically handles CSS positioning and cleanup.
+          </p>
+          <p>
+            <strong>Features:</strong>
+          </p>
+          <ul>
+            <li><strong>Left Pinning</strong>: Pins element to the left side using <code>position: sticky</code></li>
+            <li><strong>Right Pinning</strong>: Pins element to the right side using <code>position: sticky</code></li>
+            <li><strong>Automatic Cleanup</strong>: Removes positioning styles when unpinned</li>
+            <li><strong>Data Attributes</strong>: Adds <code>data-pin</code> attribute for CSS targeting</li>
+          </ul>
+        </Section>
+        <Section title="Render Mixins">
           <p>
             Render mixins modify the component's root element. They are applied after content mixins
             to ensure the final element has all necessary attributes and styles.
           </p>
-          <h3>Popup Mixin</h3>
+          <h2>Popup Mixin</h2>
           <p>
             Provides flexible positioning support using Floating UI primitives for components like tooltips,
             dropdowns, and popovers. Supports both anchor-based and parent-based positioning with automatic
@@ -137,7 +157,7 @@ export class MixinsDocs extends React.Component {
               <Tooltip anchorTo={ref} anchorPoint={AnchorPoint.BottomEnd} arrow={true} />
             `)}
           </p>
-          <h4>Available Anchor Points</h4>
+          <h5>Available Anchor Points</h5>
           <p>
             The Popup mixin supports 12 anchor point options that directly map to Floating UI placement values:
           </p>
@@ -155,16 +175,15 @@ export class MixinsDocs extends React.Component {
             <li><strong>Right Start</strong>: To the right of the reference element with top alignment</li>
             <li><strong>Right End</strong>: To the right of the reference element with bottom alignment</li>
           </ul>
-          <h4>Anchor vs Parent Positioning</h4>
+          <h5>Anchor vs Parent Positioning</h5>
           <p>
             Components using the Popup mixin can position themselves relative to either a specific anchor element
             (via the <code>anchorTo</code> prop) or automatically to their parent element. When an anchor ref
             is provided, the popup positions relative to that element. When omitted, it falls back to parent-based
             positioning.
           </p>
-        </section>
-        <section>
-          <h2>Creating Custom Mixins</h2>
+        </Section>
+        <Section title="Creating Custom Mixins">
           <p>
             You can create custom mixins by implementing the <code>Mixin</code> interface:
           </p>
@@ -217,7 +236,7 @@ export class MixinsDocs extends React.Component {
               post: false,
             }
           `)}
-          <h3>Mixin Interface</h3>
+          <h2>Mixin Interface</h2>
           <p>
             The <code>Mixin</code> interface defines what methods a mixin can implement:
           </p>
@@ -257,10 +276,9 @@ export class MixinsDocs extends React.Component {
               post?: boolean,
             }
           `)}
-        </section>
-        <section>
-          <h2>Best Practices</h2>
-          <h3>Mixin Composition</h3>
+        </Section>
+        <Section title="Best Practices">
+          <h2>Mixin Composition</h2>
           <ul>
             <li><strong>Keep Mixins Focused</strong>: Each mixin should handle one specific concern</li>
             <li>
@@ -270,16 +288,15 @@ export class MixinsDocs extends React.Component {
             <li><strong>Provide Default Props</strong>: Always provide sensible defaults for mixin props</li>
             <li><strong>Handle Missing Props</strong>: Gracefully handle cases where optional props aren't provided</li>
           </ul>
-          <h3>Performance Considerations</h3>
+          <h2>Performance Considerations</h2>
           <ul>
             <li><strong>Minimize DOM Manipulation</strong>: Use <code>React.cloneElement</code> efficiently</li>
             <li><strong>Cache Computed Values</strong>: Avoid recalculating values in render methods</li>
             <li><strong>Limit Mixin Count</strong>: Too many mixins can impact performance and readability</li>
           </ul>
-        </section>
-        <section>
-          <h2>Real-World Examples</h2>
-          <h3>Tooltip Component</h3>
+        </Section>
+        <Section title="Real-World Examples">
+          <h2>Tooltip Component</h2>
           <p>
             The Tooltip component demonstrates effective mixin usage:
           </p>
@@ -306,7 +323,7 @@ export class MixinsDocs extends React.Component {
               }
             }
           `)}
-          <h3>NumberEditor Component</h3>
+          <h2>NumberEditor Component</h2>
           <p>
             The NumberEditor shows how multiple mixins work together:
           </p>
@@ -324,7 +341,24 @@ export class MixinsDocs extends React.Component {
               // No manual mixin application needed
             }
           `)}
-        </section>
+          <h2>Table Cell Components</h2>
+          <p>
+            The Table HeaderCell and Cell components demonstrate the Pinnable mixin:
+          </p>
+          {Code.format(`
+            export class HeaderCell<TRow, TField> extends Editor<ColumnProps<TRow, TField>> {
+              static get mixins(): Set<Mixin> {
+                return super.mixins.add(Pinnable)
+              }
+              
+              // Pinnable mixin automatically:
+              // - Adds data-pin attribute
+              // - Handles CSS positioning for sticky columns
+              // - Cleans up styles when unpinned
+              // - Runs on mount and update
+            }
+          `)}
+        </Section>
       </>
     )
   }

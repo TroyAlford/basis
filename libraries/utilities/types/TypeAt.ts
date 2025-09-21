@@ -1,4 +1,4 @@
-import type { PathOf } from './PathOf'
+import type { PathOf, Primitive } from './PathOf'
 
 // The “split string by dot” type. E.g. "a.b.c" → ["a","b","c"]
 type SplitPath<S extends string> =
@@ -11,18 +11,19 @@ export type TypeAt<T, P extends string> =
 
 // Internal recursive walking
 type TypeAtInternal<T, Parts extends string[]> =
-  Parts extends [infer Head, ...infer Rest]
-    ? Head extends string
-      ? Rest extends string[]
-        // If T is an array/tuple and the head is a numeric index, dive into the element type
-        ? T extends (infer U)[]
-          ? Head extends `${number}`
-            ? TypeAtInternal<U, Rest>
-            : never
-          // Otherwise, treat Head as an object key
-          : Head extends keyof T
-            ? TypeAtInternal<T[Head], Rest>
-            : never
+  // **Add a guard: if T is a Primitive, stop here**
+  T extends Primitive
+    ? T : Parts extends [infer Head, ...infer Rest]
+      ? Head extends string
+        ? Rest extends string[]
+          ? T extends (infer U)[]
+            ? Head extends `${number}`
+              // array element, go into U
+              ? TypeAtInternal<U, Rest>
+              : never
+            : Head extends keyof T
+              ? TypeAtInternal<T[Head], Rest>
+              : never
+          : never
         : never
-      : never
-    : T
+      : T

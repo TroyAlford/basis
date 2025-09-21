@@ -128,6 +128,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     const input: React.ReactElement<React.HTMLAttributes<HTMLElement>> = this.props.multiline !== false ? (
       <textarea
         ref={this.#input as React.RefObject<HTMLTextAreaElement>}
+        aria-invalid={this.props.invalid ? 'true' : 'false'}
         autoComplete={this.props.autoComplete ? 'on' : 'off'}
         className="value"
         name={this.props.field}
@@ -141,6 +142,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     ) : (
       <input
         ref={this.#input as React.RefObject<HTMLInputElement>}
+        aria-invalid={this.props.invalid ? 'true' : 'false'}
         autoComplete={this.props.autoComplete ? 'on' : 'off'}
         className="value"
         name={this.props.field}

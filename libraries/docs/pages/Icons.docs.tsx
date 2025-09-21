@@ -25,9 +25,7 @@ export class IconsDocs extends React.Component<Record<string, never>, State> {
 
   // Get all icon components (excluding Icon, IconBase, and utility components)
   get iconComponents() {
-    const excludeComponents = ['Icon', 'IconBase', 'Sort', 'MoonPhase']
     return Object.entries(Icons as unknown as Record<string, React.ComponentType<IconProps>>)
-      .filter(([name]) => !excludeComponents.includes(name))
       .filter(([name]) => typeof Icons[name] === 'function')
       .filter(([name]) => {
         if (this.state.filterText) {

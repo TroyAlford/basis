@@ -1,5 +1,5 @@
 /* eslint-disable @stylistic/ts/indent, @typescript-eslint/no-unsafe-function-type */
-type Primitive =
+export type Primitive =
   | bigint
   | boolean
   | Date
