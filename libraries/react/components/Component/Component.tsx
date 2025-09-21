@@ -89,17 +89,19 @@ export abstract class Component<
    * @returns The initial state of the component.
    */
   get defaultState(): State { return {} as State }
-  state = this.defaultState
+  readonly state = this.defaultState
+
   #nodeRef = React.createRef<Element>()
+  get nodeRef(): React.RefObject<Element> {
+    return this.props.nodeRef ?? this.#nodeRef
+  }
 
   /**
    * Getter for the root element of the component.
    * @returns The root element of the component.
    */
   get rootNode(): Element | null {
-    return this.props.nodeRef
-      ? this.props.nodeRef.current
-      : this.#nodeRef.current
+    return this.nodeRef.current
   }
 
   /**
@@ -165,7 +167,7 @@ export abstract class Component<
 
     const rendered = ( // @ts-expect-error - we are assuming a props match
       <Tag // @ts-expect-error - we are assuming a props match
-        ref={nodeRef ?? this.#nodeRef}
+        ref={nodeRef ?? this.nodeRef}
         {...this.attributes}
         className={classNames(className, this.classNames)}
       >
