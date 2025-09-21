@@ -3,9 +3,10 @@ import { css, style } from '../../utilities/style'
 export const NumberEditorStyles = style('basis:number-editor', css`
   :root {
     --basis-number-editor-background: var(--basis-color-background);
-    --basis-number-editor-foreground: var(--basis-color-foreground);
-    --basis-number-editor-border: 1px solid var(--basis-color-foreground);
     --basis-number-editor-border-radius: var(--basis-radius-sm);
+    --basis-number-editor-border: 1px solid var(--basis-color-foreground);
+    --basis-number-editor-foreground: var(--basis-color-foreground);
+    --basis-number-editor-padding: var(--basis-unit-xs);
   }
 
   .number-editor.component {
@@ -13,11 +14,11 @@ export const NumberEditorStyles = style('basis:number-editor', css`
     border: var(--basis-number-editor-border);
     display: flex;
     font-size: 1em;
-    gap: .25em;
+    gap: var(--basis-number-editor-padding);
     line-height: 1em;
     min-height: 1.5em;
     overflow: hidden;
-    padding: .25em;
+    padding: var(--basis-number-editor-padding);
     position: relative;
 
     > .value {
@@ -27,7 +28,7 @@ export const NumberEditorStyles = style('basis:number-editor', css`
       font-size: inherit;
       height: 100%;
       line-height: inherit;
-      margin: .25em;
+      margin: var(--basis-number-editor-padding);
       padding: 0;
       text-align: right;
     }

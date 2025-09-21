@@ -1,3 +1,5 @@
+import type { PathOf } from '../types/PathOf'
+import type { TypeAt } from '../types/TypeAt'
 import { get } from './get'
 import { set } from './set'
 
@@ -20,20 +22,24 @@ export function clone<V = object>(value: V): V {
     const { path, source } = queue.shift()
 
     Object.keys(source).forEach(key => {
-      const fullPath = path ? `${path}.${key}` : key
-      const item = get(fullPath, value)
+      const fullPath = (path ? `${path}.${key}` : key) as PathOf<V>
+      const item = get<V, PathOf<V>>(value, fullPath)
 
       if (typeof item === 'object' && item !== null) {
         if (item instanceof Date) {
-          set(fullPath, cloned, new Date(item.getTime()))
+          set(cloned, fullPath, new Date(item.getTime()) as TypeAt<V, PathOf<V>>)
         } else if (item instanceof RegExp) {
-          set(fullPath, cloned, new RegExp(item.source, item.flags))
+          set(cloned, fullPath, new RegExp(item.source, item.flags) as TypeAt<V, PathOf<V>>)
         } else {
-          set(fullPath, cloned, Array.isArray(item) ? [] : {})
-          queue.push({ path: fullPath, source: item, target: get(fullPath, cloned) })
+          set(cloned, fullPath, (Array.isArray(item) ? [] : {}) as TypeAt<V, PathOf<V>>)
+          queue.push({
+            path: fullPath,
+            source: item,
+            target: get<V, PathOf<V>>(cloned, fullPath),
+          })
         }
       } else {
-        set(fullPath, cloned, item)
+        set(cloned, fullPath, item)
       }
     })
   }

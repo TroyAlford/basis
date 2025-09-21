@@ -1,3 +1,4 @@
+import type { PathOf, TypeAt } from '@basis/utilities'
 import { clone, deepEquals, isNil, noop, set } from '@basis/utilities'
 import { Component } from '../Component/Component'
 
@@ -136,14 +137,17 @@ export abstract class Editor<
    * @param value - The new value
    * @param path - The path to the nested field
    */
-  protected handleField = async (value: unknown, path: string): Promise<void> => {
+  protected handleField = async <Path extends PathOf<Value>>(
+    value: TypeAt<Value, Path>,
+    path: Path,
+  ): Promise<void> => {
     const update = clone(this.current)
 
     const parts = path.split('.')
     const lastPart = parts.pop()
     if (!lastPart) return
 
-    set(path, update, value)
+    set(update, path, value)
     await this.handleChange(update)
   }
 

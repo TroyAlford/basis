@@ -1,6 +1,7 @@
 import { AwaitDocs } from './pages/Await.docs.tsx'
 import { ButtonDocs } from './pages/Button.docs.tsx'
 import { CarouselDocs } from './pages/Carousel.docs.tsx'
+import { CheckboxEditorDocs } from './pages/CheckboxEditor.docs.tsx'
 import { ComponentDocs } from './pages/Component.docs.tsx'
 import { DropdownMenuDocs } from './pages/DropdownMenu.docs.tsx'
 import { EditorDocs } from './pages/Editor.docs.tsx'
@@ -14,6 +15,7 @@ import { NumberEditorDocs } from './pages/NumberEditor.docs.tsx'
 import { OptionGroupDocs } from './pages/OptionGroup.docs.tsx'
 import { OverviewDocs } from './pages/Overview.docs.tsx'
 import { RouterDocs } from './pages/Router.docs.tsx'
+import { TableDocs } from './pages/Table.docs.tsx'
 import { TagDocs } from './pages/Tag.docs.tsx'
 import { TagsEditorDocs } from './pages/TagsEditor.docs.tsx'
 import { TextEditorDocs } from './pages/TextEditor.docs.tsx'
@@ -38,6 +40,7 @@ export const routes: DocRoute[] = [
   { component: AwaitDocs, path: '/components/await', title: 'Await' },
   { component: ButtonDocs, path: '/components/button', title: 'Button' },
   { component: CarouselDocs, path: '/components/carousel', title: 'Carousel' },
+  { component: CheckboxEditorDocs, path: '/components/checkbox-editor', title: 'CheckboxEditor' },
   { component: ComponentDocs, path: '/components/component', title: 'Component' },
   { component: DropdownMenuDocs, path: '/components/dropdown-menu', title: 'DropdownMenu' },
   { component: EditorDocs, path: '/components/editor', title: 'Editor' },
@@ -51,6 +54,7 @@ export const routes: DocRoute[] = [
   { component: OptionGroupDocs, path: '/components/option-group', title: 'OptionGroup' },
   { component: OverviewDocs, default: true, path: '/', title: 'Overview' },
   { component: RouterDocs, path: '/components/router', title: 'Router' },
+  { component: TableDocs, path: '/components/table', title: 'Table' },
   { component: TagDocs, path: '/components/tag', title: 'Tag' },
   { component: TagsEditorDocs, path: '/components/tags-editor', title: 'TagsEditor' },
   { component: TextEditorDocs, path: '/components/text-editor', title: 'TextEditor' },

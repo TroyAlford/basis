@@ -19,8 +19,7 @@ export class PopupMenu extends Component<Props, HTMLUListElement> {
   }
 
   get rootNode() {
-    const menu = this.props.nodeRef.current as undefined as Menu
-    return menu.rootNode
+    return (super.rootNode as unknown as Menu).rootNode
   }
   get tag() { return Menu as Component['tag'] }
 

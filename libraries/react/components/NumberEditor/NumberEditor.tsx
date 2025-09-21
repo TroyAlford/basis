@@ -114,6 +114,7 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
   content(): React.ReactNode {
     const input = (
       <input
+        aria-invalid={this.props.invalid ? 'true' : 'false'}
         className="value"
         name={this.props.field}
         type="text"

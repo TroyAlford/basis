@@ -1,0 +1,63 @@
+import { Pin } from '@basis/react/types/Pin'
+import { css, style } from '../../utilities/style'
+
+style('basis:table', css`
+  :root {
+    --basis-table-border-color: #8888;
+    --basis-table-header-cell-background: var(--basis-color-primary);
+    --basis-table-header-cell-foreground: var(--basis-color-contrast);
+    --basis-table-header-row-z: 2;
+    --basis-table-row-background-even: #ddd;
+    --basis-table-row-background-odd: var(--basis-color-background);
+    --basis-table-row-height: 2em;
+    --basis-table-row-hover-color: var(--basis-color-primary);
+  }
+
+  .table.editor.component {
+    border-color: var(--basis-table-border-color);
+    max-height: 200px;
+    overflow: auto;
+    position: relative;
+
+    > table {
+      border-collapse: separate;
+      border-spacing: 0;
+
+      thead tr {
+        background-color: var(--basis-table-header-cell-background);
+        isolation: isolate;
+        position: sticky;
+        top: 0;
+        z-index: var(--basis-table-header-row-z);
+      }
+      
+      th, td {
+        height: var(--basis-table-row-height);
+        &[data-pin="${Pin.Left}"], &[data-pin="${Pin.Right}"] {
+          background-color: inherit;
+        }
+      }
+
+      tbody tr {
+        position: relative;
+
+        &:nth-child(odd) {
+          background-color: var(--basis-table-row-background-odd);
+        }
+        &:nth-child(even) {
+          background-color: var(--basis-table-row-background-even);
+        }
+
+        &:hover:after {
+          background-color: var(--basis-table-row-hover-color);
+          content: '';
+          inset: 0;
+          opacity: 0.2;
+          pointer-events: none;
+          position: absolute;
+          z-index: var(--basis-table-header-row-z);
+        }
+      }
+    }
+  }
+`)
