@@ -39,8 +39,10 @@ style('basis:table-header-cell', css`
         }
       }
     }
-
-
+    
+    &[data-sortable="true"] {
+      cursor: pointer;
+    }
     &[data-align="${TextAlign.Center}"] > .content > .title { text-align: center; }
     &[data-align="${TextAlign.Left}"] > .content > .title { text-align: left; }
     &[data-align="${TextAlign.Right}"] > .content > .title { text-align: right; }

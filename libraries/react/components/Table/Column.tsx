@@ -1,4 +1,5 @@
 import * as React from 'react'
+import type { TypeAt } from '@basis/utilities'
 import type { PathOf } from '../../../utilities/types/PathOf'
 import { Pin } from '../../types/Pin'
 import { SortBy } from '../../types/SortBy'
@@ -14,8 +15,16 @@ export enum ColumnType {
   Text = 'text',
 }
 
-export interface ColumnProps<TRow, TField extends PathOf<TRow>> {
+export interface CellProps<T, R = unknown, F extends PathOf<R> = PathOf<R>> {
+  column: ColumnProps<R, F>,
+  field: F,
+  row: R,
+  value: T,
+}
+
+export interface ColumnProps<TRow = unknown, TField extends PathOf<TRow> = PathOf<TRow>> {
   align?: TextAlign,
+  component?: React.ComponentType<CellProps<TypeAt<TRow, TField>, TRow, TField>>,
   enum?: Record<string, string | number>,
   field: TField,
   header?: boolean,
@@ -38,6 +47,7 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
       pin: Pin.Unpinned,
       sortDirection: null,
       sortable: true,
+      width: 'auto',
     }
   }
 

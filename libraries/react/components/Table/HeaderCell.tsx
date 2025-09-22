@@ -23,10 +23,14 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
     return {
       ...super.attributes,
       'data-align': this.current.align,
-      'data-field': this.props.field,
-      'data-sort-direction': this.props.sortDirection || undefined,
-      'data-sortable': this.props.sortable ? 'true' : 'false',
+      'data-field': this.current.field,
+      'data-sort-direction': this.current.sortDirection || undefined,
+      'data-sortable': this.current.sortable ? 'true' : 'false',
       'onClick': sortable ? this.handleSort : undefined,
+      'style': {
+        minWidth: this.current.width ?? undefined,
+        width: this.current.width ?? '100%',
+      },
     }
   }
 
@@ -52,7 +56,7 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
   }
 
   content(): React.ReactNode {
-    const { field, sortable, title } = this.current
+    const { field, sortable, sortDirection, title } = this.current
     const displayTitle = title || String(field)
 
     return super.content(
@@ -61,8 +65,8 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
         {sortable && (
           <Sort
             aria-label={`Sort by ${displayTitle}`}
-            direction={this.current.sortDirection || undefined}
-            sortBy={this.current.sortDirection ? this.sortBy : SortBy.None}
+            direction={sortDirection || undefined}
+            sortBy={sortDirection ? this.sortBy : SortBy.None}
           />
         )}
       </div>,

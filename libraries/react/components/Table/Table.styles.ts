@@ -15,16 +15,17 @@ style('basis:table', css`
 
   .table.editor.component {
     border-color: var(--basis-table-border-color);
-    max-height: 200px;
     overflow: auto;
     position: relative;
 
     > table {
       border-collapse: separate;
       border-spacing: 0;
+      width: 100%;
 
       thead tr {
         background-color: var(--basis-table-header-cell-background);
+        height: var(--basis-table-row-height);
         isolation: isolate;
         position: sticky;
         top: 0;
@@ -39,6 +40,7 @@ style('basis:table', css`
       }
 
       tbody tr {
+        height: var(--basis-table-row-height);
         position: relative;
 
         &:nth-child(odd) {
@@ -48,7 +50,7 @@ style('basis:table', css`
           background-color: var(--basis-table-row-background-even);
         }
 
-        &:hover:after {
+        &:hover > :is(td, th):after {
           background-color: var(--basis-table-row-hover-color);
           content: '';
           inset: 0;

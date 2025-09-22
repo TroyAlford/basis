@@ -1,4 +1,5 @@
 import * as React from 'react'
+import type { TypeAt } from '@basis/utilities/types/TypeAt.ts'
 import type { PathOf } from '../../../utilities/types/PathOf'
 import type { IPinnable } from '../../mixins/Pinnable'
 import { Pinnable } from '../../mixins/Pinnable'
@@ -9,12 +10,14 @@ import { Editor } from '../Editor/Editor'
 import { EnumEditor } from '../EnumEditor/EnumEditor'
 import { NumberEditor } from '../NumberEditor/NumberEditor'
 import { TextEditor } from '../TextEditor/TextEditor'
+import type { ColumnProps } from './Column'
 import { ColumnType } from './Column'
 
 import './Cell.styles.ts'
 
 type Props<TRow, TField extends PathOf<TRow> = PathOf<TRow>> = {
   align?: TextAlign,
+  column: ColumnProps<TRow, TField>,
   enum?: Record<string, string | number>,
   field: TField,
   header?: boolean,
@@ -38,6 +41,10 @@ export class Cell<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
       'data-align': this.props.align,
       'data-field': this.props.field,
       'data-type': this.props.type,
+      'style': {
+        minWidth: this.props.column.width ?? undefined,
+        width: this.props.column.width ?? '100%',
+      },
     }
   }
 
@@ -56,8 +63,20 @@ export class Cell<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
   }
 
   content(): React.ReactNode {
-    const { enum: enumOptions, field, readOnly, type = ColumnType.Text } = this.props
+    const { column, field, readOnly, row, type = ColumnType.Text } = this.props
     const value = this.current
+
+    if (column.component) {
+      const TComponent = column.component
+      return super.content(
+        <TComponent
+          column={column}
+          field={field}
+          row={row}
+          value={value as TypeAt<TRow, TField>}
+        />,
+      )
+    }
 
     switch (type) {
       case ColumnType.Number:
@@ -73,27 +92,23 @@ export class Cell<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
       case ColumnType.Boolean:
         return super.content(
           <CheckboxEditor
+            readOnly
             field={field}
-            readOnly={readOnly}
             value={value as boolean}
             onChange={this.handleChange}
           />,
         )
 
       case ColumnType.Enum:
-        if (enumOptions) {
-          return super.content(
-            <EnumEditor
-              enum={enumOptions}
-              field={field}
-              readOnly={readOnly}
-              value={value as string | number}
-              onChange={this.handleChange}
-            />,
-          )
-        } else {
-          return super.content(String(value || ''))
-        }
+        return super.content(
+          <EnumEditor
+            readOnly
+            enum={this.props.enum}
+            field={field}
+            value={value as string | number}
+            onChange={this.handleChange}
+          />,
+        )
 
       case ColumnType.Date:
         // For now, render as text since we don't have a DateEditor
@@ -105,8 +120,8 @@ export class Cell<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
       default:
         return super.content(
           <TextEditor
+            readOnly
             field={field}
-            readOnly={readOnly}
             value={value as string}
             onChange={this.handleChange}
           />,
