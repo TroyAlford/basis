@@ -129,7 +129,7 @@ export class Table<T extends object = { id: string }>
   }
 
   content(): React.ReactNode {
-    const data = this.current
+    const data = this.current ?? []
     const columns = this.columns
 
     if (!columns.length) return null
@@ -169,6 +169,7 @@ export class Table<T extends object = { id: string }>
                   <Cell
                     key={field}
                     align={props.align}
+                    column={props}
                     enum={props.enum}
                     field={field}
                     header={props.header}

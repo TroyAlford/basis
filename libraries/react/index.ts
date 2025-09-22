@@ -40,5 +40,11 @@ export { TextAlign } from './types/TextAlign'
 
 export { css, style } from './utilities/style'
 
-export * from './icons/IconBase/IconBase'
+export { Circle } from './icons/parts/Circle'
+export { IconBase } from './icons/IconBase/IconBase'
+export { LineCap } from './icons/types/LineCap'
+export { LineJoin } from './icons/types/LineJoin'
+export { Path } from './icons/parts/Path'
+export { Rect } from './icons/parts/Rect'
+export { Shape } from './icons/parts/Shape'
 export * from './icons'
