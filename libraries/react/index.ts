@@ -42,6 +42,7 @@ export { css, style } from './utilities/style'
 
 export { Circle } from './icons/parts/Circle'
 export { IconBase } from './icons/IconBase/IconBase'
+export type { IconProps } from './icons/IconBase/IconBase'
 export { LineCap } from './icons/types/LineCap'
 export { LineJoin } from './icons/types/LineJoin'
 export { Path } from './icons/parts/Path'

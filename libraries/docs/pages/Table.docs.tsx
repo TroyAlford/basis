@@ -218,23 +218,21 @@ export class TableDocs extends Documentation<Record<string, never>> {
         <Section title="API Reference">
           <h4>Table Props</h4>
           <ul>
-            <li><code>value: T[]</code> - Array of data to display</li>
-            <li><code>keyField?: PathOf&lt;T&gt;</code> - Field to use as unique row identifier (default: 'id')</li>
-            <li><code>onRowClick?: (row: T, index: number) =&gt; void</code> - Handler for row clicks</li>
-            <li><code>onRowDoubleClick?: (row: T, index: number) =&gt; void</code> - Handler for row double-clicks</li>
-            <li><code>readOnly?: boolean</code> - Whether the table is read-only</li>
             <li><code>className?: string</code> - Additional CSS classes</li>
+            <li><code>keyField?: PathOf&lt;T&gt;</code> - Field to use as unique row identifier (default: 'id')</li>
+            <li><code>readOnly?: boolean</code> - Whether the table is read-only</li>
+            <li><code>value: T[]</code> - Array of data to display</li>
           </ul>
           <h4>Column Props</h4>
           <ul>
+            <li><code>align?: TextAlign</code> - Text alignment (Left, Right, Center)</li>
+            <li><code>enum?: Record&lt;string, string | number&gt;</code> - Enum options for Enum columns</li>
             <li><code>field: PathOf&lt;T&gt;</code> - Path to the data field (supports dot notation)</li>
+            <li><code>pin?: Pin</code> - Column pinning position (Left, Right, Unpinned)</li>
+            <li><code>sortable?: boolean</code> - Whether the column is sortable (default: true)</li>
             <li><code>title?: string</code> - Column header text (defaults to field name)</li>
             <li><code>type?: ColumnType</code> - Column type (Text, Number, Boolean, Date, Enum)</li>
-            <li><code>sortable?: boolean</code> - Whether the column is sortable (default: true)</li>
             <li><code>width?: string | number</code> - Column width</li>
-            <li><code>enum?: Record&lt;string, string | number&gt;</code> - Enum options for Enum columns</li>
-            <li><code>pin?: Pin</code> - Column pinning position (Left, Right, Unpinned)</li>
-            <li><code>align?: TextAlign</code> - Text alignment (Left, Right, Center)</li>
           </ul>
         </Section>
       </>
