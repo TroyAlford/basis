@@ -12,7 +12,6 @@ style('basis:table-cell', css`
     color: var(--basis-table-cell-foreground);
     isolation: isolate;
     padding: var(--basis-table-cell-padding);
-    position: relative;
     white-space: nowrap;
 
     ${Object.values(TextAlign).map(align => (css`
