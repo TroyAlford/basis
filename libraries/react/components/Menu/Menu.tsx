@@ -11,6 +11,8 @@ import './Menu.styles.ts'
 interface Props {
   /** Whether the menu is disabled. */
   disabled?: boolean,
+  /** Callback function called when a key is pressed while the menu has focus. */
+  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void,
   /** The orientation of the menu. */
   orientation?: Orientation,
   /** Whether the menu is in read-only mode. */
@@ -68,6 +70,9 @@ export class Menu extends Component<Props, HTMLUListElement> {
       .when([Orientation.Horizontal, Keyboard.ArrowLeft]).then(() => {
         event.preventDefault()
         this.navigateToItem('previous')
+      })
+      .else(() => {
+        this.props.onKeyDown?.(event)
       })
   }
 

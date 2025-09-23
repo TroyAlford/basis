@@ -1,3 +1,4 @@
+export { AbortablePromise } from './functions/AbortablePromise'
 export { classNames } from './functions/classNames'
 export { clone } from './functions/clone'
 export { Color } from './functions/Color'

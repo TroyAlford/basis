@@ -3,7 +3,7 @@ import { isNil, match, noop } from '@basis/utilities'
 import type { IPopup } from '../../mixins/Popup'
 import { AnchorPoint } from '../../types/AnchorPoint'
 import { Keyboard } from '../../types/Keyboard'
-import { Event, events } from '../../utilities/EventManager.ts'
+import { Event, events } from '../../utilities/EventManager'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Menu } from '../Menu/Menu'
@@ -88,20 +88,17 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
   get tag(): keyof React.JSX.IntrinsicElements { return 'div' }
 
   componentDidMount(): void {
-    this.unsubscribeBlur = events.on(Event.Blur, this.rootNode, this.handleBlur)
+    super.componentDidMount()
+    this.unsubscribeBlur = events.on(Event.Blur, this.rootNode, this.handleClose)
   }
 
   componentWillUnmount(): void {
+    super.componentWillUnmount()
     this.unsubscribeBlur?.()
   }
 
-  private handleBlur = (): void => {
-    if (this.isOpen) {
-      this.setState({ open: false }, () => this.props.onClose())
-    }
-  }
-
   private handleClose = (): void => {
+    if (!this.isOpen) return
     this.setState({ open: false }, () => this.props.onClose())
   }
 
@@ -142,7 +139,7 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
       return child
     })
 
-    return (
+    return super.content(
       <>
         <Button
           className="trigger"
@@ -163,7 +160,7 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
             {clones}
           </PopupMenu>
         )}
-      </>
+      </>,
     )
   }
 }

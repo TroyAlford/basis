@@ -68,7 +68,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     wrap: Wrap.Soft,
   }
 
-  #input = React.createRef<HTMLInputElement | HTMLTextAreaElement>()
+  input = React.createRef<HTMLInputElement | HTMLTextAreaElement>()
 
   #handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     this.handleChange(event.target.value)
@@ -76,7 +76,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
 
   #handleFocus = () => {
     if (this.props.selectOnFocus) {
-      const currentElement = this.#input.current
+      const currentElement = this.input.current
       if (currentElement) {
         currentElement.select()
       }
@@ -127,7 +127,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
   content(): React.ReactNode {
     const input: React.ReactElement<React.HTMLAttributes<HTMLElement>> = this.props.multiline !== false ? (
       <textarea
-        ref={this.#input as React.RefObject<HTMLTextAreaElement>}
+        ref={this.input as React.RefObject<HTMLTextAreaElement>}
         aria-invalid={this.props.invalid ? 'true' : 'false'}
         autoComplete={this.props.autoComplete ? 'on' : 'off'}
         className="value"
@@ -141,7 +141,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
       />
     ) : (
       <input
-        ref={this.#input as React.RefObject<HTMLInputElement>}
+        ref={this.input as React.RefObject<HTMLInputElement>}
         aria-invalid={this.props.invalid ? 'true' : 'false'}
         autoComplete={this.props.autoComplete ? 'on' : 'off'}
         className="value"

@@ -1,12 +1,13 @@
 import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
+import { AnchorPoint } from '../../types/AnchorPoint'
 import { DropdownMenu } from './DropdownMenu'
 
 describe('DropdownMenu', () => {
   test('renders trigger when provided', async () => {
     const { node } = await render(
-      <DropdownMenu trigger={<button>Open Menu</button>}>
+      <DropdownMenu trigger="Open Menu">
         <DropdownMenu.Item>Item 1</DropdownMenu.Item>
       </DropdownMenu>,
     )
@@ -16,7 +17,7 @@ describe('DropdownMenu', () => {
 
   test('renders dropdown when open', async () => {
     const { node, update } = await render(
-      <DropdownMenu trigger={<button>Open Menu</button>}>
+      <DropdownMenu trigger="Open Menu">
         <DropdownMenu.Item>Item 1</DropdownMenu.Item>
         <DropdownMenu.Item>Item 2</DropdownMenu.Item>
       </DropdownMenu>,
@@ -44,7 +45,7 @@ describe('DropdownMenu', () => {
 
   test('supports DropdownMenu.Divider', async () => {
     const { node, update } = await render(
-      <DropdownMenu trigger={<button>Open Menu</button>}>
+      <DropdownMenu trigger="Open Menu">
         <DropdownMenu.Item>Item 1</DropdownMenu.Item>
         <DropdownMenu.Divider />
         <DropdownMenu.Item>Item 2</DropdownMenu.Item>
@@ -108,7 +109,7 @@ describe('DropdownMenu', () => {
   test('calls onOpen when menu opens', async () => {
     const onOpen = mock()
     const { node, update } = await render(
-      <DropdownMenu trigger={<button>Open Menu</button>} onOpen={onOpen}>
+      <DropdownMenu trigger="Open Menu" onOpen={onOpen}>
         <DropdownMenu.Item>Item 1</DropdownMenu.Item>
       </DropdownMenu>,
     )
@@ -125,7 +126,7 @@ describe('DropdownMenu', () => {
   test('calls onClose when menu closes', async () => {
     const onClose = mock()
     const { node, update } = await render(
-      <DropdownMenu trigger={<button>Open Menu</button>} onClose={onClose}>
+      <DropdownMenu trigger="Open Menu" onClose={onClose}>
         <DropdownMenu.Item>Item 1</DropdownMenu.Item>
       </DropdownMenu>,
     )
@@ -183,5 +184,32 @@ describe('DropdownMenu', () => {
 
     // Verify onClose was called
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  test('honors anchorPoint changes when closed', async () => {
+    const { node, update } = await render(
+      <DropdownMenu anchorPoint={AnchorPoint.BottomStart} trigger="Open Menu">
+        <DropdownMenu.Item>Item 1</DropdownMenu.Item>
+      </DropdownMenu>,
+    )
+
+    // Change anchorPoint while closed
+    await update(
+      <DropdownMenu anchorPoint={AnchorPoint.TopEnd} trigger="Open Menu">
+        <DropdownMenu.Item>Item 2</DropdownMenu.Item>
+      </DropdownMenu>,
+    )
+
+    // Open the menu
+    const trigger = node.querySelector<HTMLButtonElement>('.trigger')
+    trigger?.click()
+    await update()
+
+    // Verify menu is open and positioned correctly
+    expect(node.textContent).toContain('Item 2')
+    expect(node.textContent).not.toContain('Item 1')
+    const popupMenu = node.querySelector('.popup-menu.component')
+    // Check that the PopupMenu has the correct anchorPoint attribute
+    expect(popupMenu?.getAttribute('data-popup-anchor-point')).toBe(AnchorPoint.TopEnd)
   })
 })

@@ -8,6 +8,8 @@ import './PopupMenu.styles.ts'
 
 /** Props for the PopupMenu component. */
 type Props = Menu['props'] & IPopup & {
+  /** Callback function called when a key is pressed while the menu has focus. */
+  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void,
   /** Whether the popup menu is visible. */
   visible?: boolean | 'auto',
 }
@@ -40,6 +42,7 @@ export class PopupMenu extends Component<Props, HTMLUListElement> {
       'aria-disabled': this.props.disabled ? 'true' : undefined,
       'data-visible': this.props.visible,
       'disabled': this.props.disabled ? 'disabled' : undefined,
+      'onKeyDown': this.props.onKeyDown,
       'role': 'menu',
     }
   }

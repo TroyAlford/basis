@@ -1,4 +1,5 @@
 export { ApplicationBase } from './components/ApplicationBase/ApplicationBase'
+export { AutoComplete } from './components/AutoComplete/AutoComplete'
 export { Await } from './components/Await/Await'
 export { Button } from './components/Button/Button'
 export { Carousel } from './components/Carousel/Carousel'
