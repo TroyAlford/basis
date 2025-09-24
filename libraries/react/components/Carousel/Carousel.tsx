@@ -190,15 +190,15 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
    * Handles native wheel events to prevent scrolling before it happens
    * @param event - The native wheel event.
    */
-  handleNativeWheel = (event: WheelEvent): void => {
+  handleNativeWheel = async (event: WheelEvent): Promise<void> => {
     // Prevent the page from scrolling when navigating images
     event.preventDefault()
     event.stopPropagation()
 
     if (event.deltaX > 0 || event.deltaY > 0) {
-      this.next()
+      await this.next()
     } else if (event.deltaX < 0 || event.deltaY < 0) {
-      this.prev()
+      await this.prev()
     }
   }
 
@@ -225,7 +225,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
    * Handles image click events for opening lightbox and navigation
    * @param event - The mouse event.
    */
-  handleImageClick = (event: React.MouseEvent<HTMLImageElement>): void => {
+  handleImageClick = async (event: React.MouseEvent<HTMLImageElement>): Promise<void> => {
     if (event.button !== 0) return
 
     if (!this.state.lightbox) {
@@ -233,7 +233,7 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
       return
     }
 
-    this.next()
+    await this.next()
   }
 
   /**
@@ -249,13 +249,18 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
    * Handles keyboard navigation when carousel has focus
    * @param event - The keyboard event.
    */
-  handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+  handleKeyDown = async (event: React.KeyboardEvent<HTMLDivElement>): Promise<void> => {
     switch (event.key) {
       case Keyboard.ArrowRight:
-        this.next()
+        await this.next()
         break
       case Keyboard.ArrowLeft:
-        this.prev()
+        await this.prev()
+        break
+      case Keyboard.Escape:
+        if (this.state.lightbox) {
+          await this.setState({ lightbox: false })
+        }
         break
     }
   }
@@ -279,13 +284,13 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
    * Handles touch move events for swipe navigation
    * @param event - The touch event.
    */
-  handleTouchMove = (event: React.TouchEvent): void => {
+  handleTouchMove = async (event: React.TouchEvent): Promise<void> => {
     if (this.touchStart === null) return
 
     const diff = this.touchStart - event.touches[0].clientX
     if (Math.abs(diff) > 50) {
-      if (diff > 0) this.next()
-      else this.prev()
+      if (diff > 0) await this.next()
+      else await this.prev()
       this.touchStart = null
     }
   }
@@ -302,21 +307,22 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
    * Handles mouse wheel events for navigation
    * @param event - The wheel event.
    */
-  handleWheel = (event: WheelEvent | React.WheelEvent<HTMLDivElement>): void => {
+  handleWheel = async (event: WheelEvent | React.WheelEvent<HTMLDivElement>): Promise<void> => {
     event.preventDefault()
 
     if (event.deltaX > 0 || event.deltaY > 0) {
-      this.next()
+      await this.next()
     } else if (event.deltaX < 0 || event.deltaY < 0) {
-      this.prev()
+      await this.prev()
     }
   }
 
   /** Advances to the next image */
-  next = (): void => {
-    this.setState(state => ({
+  next = async (): Promise<void> => {
+    await this.setState(state => ({
       currentIndex: (state.currentIndex + 1) % this.images.length,
-    }), () => this.props.onImageChange?.(this.state.currentIndex))
+    }))
+    this.props.onImageChange?.(this.state.currentIndex)
   }
 
   /** Preloads all images in the carousel */
@@ -325,10 +331,11 @@ export class Carousel extends Component<Props, HTMLDivElement, State> {
   }
 
   /** Returns to the previous image */
-  prev = (): void => {
-    this.setState(state => ({
+  prev = async (): Promise<void> => {
+    await this.setState(state => ({
       currentIndex: (state.currentIndex - 1 + this.images.length) % this.images.length,
-    }), () => this.props.onImageChange?.(this.state.currentIndex))
+    }))
+    this.props.onImageChange?.(this.state.currentIndex)
   }
 
   content(): React.ReactNode {

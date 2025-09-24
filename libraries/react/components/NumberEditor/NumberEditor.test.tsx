@@ -182,7 +182,10 @@ describe('NumberEditor', () => {
     })
 
     test('does not apply step when onKeyDown prevents default', async () => {
-      const preventDefaultOnKeyDown = mock(() => false)
+      const preventDefaultOnKeyDown = mock((event: React.KeyboardEvent<HTMLElement>) => {
+        event.preventDefault()
+        event.defaultPrevented = true
+      })
 
       const { node } = await render(
         <NumberEditor

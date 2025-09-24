@@ -66,20 +66,20 @@ export class AbortablePromise<T> extends Promise<T> implements Abortable<Promise
   then<TResult1 = T, TResult2 = never>(
     onResolve?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null,
     onReject?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | undefined | null,
-  ): Abortable<Promise<TResult1 | TResult2>> {
+  ): AbortablePromise<TResult1 | TResult2> {
     const result = super.then(onResolve, onReject)
-    return Object.assign(result, { abort: () => this.abort() })
+    return Object.assign(result, { abort: () => this.abort() }) as AbortablePromise<TResult1 | TResult2>
   }
 
   catch<TResult = never>(
     onCatch?: ((reason: unknown) => TResult | PromiseLike<TResult>) | undefined | null,
-  ): Abortable<Promise<T | TResult>> {
+  ): AbortablePromise<T | TResult> {
     const result = super.catch(onCatch)
-    return Object.assign(result, { abort: () => this.abort() })
+    return Object.assign(result, { abort: () => this.abort() }) as AbortablePromise<T | TResult>
   }
 
-  finally(onFinally?: (() => void) | undefined | null): Abortable<Promise<T>> {
+  finally(onFinally?: (() => void) | undefined | null): AbortablePromise<T> {
     const result = super.finally(onFinally)
-    return Object.assign(result, { abort: () => this.abort() })
+    return Object.assign(result, { abort: () => this.abort() }) as AbortablePromise<T>
   }
 }

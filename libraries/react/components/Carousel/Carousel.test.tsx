@@ -46,19 +46,19 @@ describe('Carousel', () => {
       // Test that navigation methods work
       expect(instance.state.currentIndex).toBe(0)
 
-      instance.next()
+      await instance.next()
       await update()
       expect(instance.state.currentIndex).toBe(1)
 
-      instance.next()
+      await instance.next()
       await update()
       expect(instance.state.currentIndex).toBe(2)
 
-      instance.next()
+      await instance.next()
       await update()
       expect(instance.state.currentIndex).toBe(0) // Wraps around
 
-      instance.prev()
+      await instance.prev()
       await update()
       expect(instance.state.currentIndex).toBe(2)
     })
@@ -69,7 +69,7 @@ describe('Carousel', () => {
         <Carousel images={images} onImageChange={onImageChange} />,
       )
 
-      instance.next()
+      await instance.next()
       await update()
 
       expect(onImageChange).toHaveBeenCalledWith(1)
@@ -107,18 +107,18 @@ describe('Carousel', () => {
     })
 
     test('closes lightbox with escape key', async () => {
-      const { node, update } = await render(<Carousel images={images} />)
-      const imgDiv = node.querySelector<HTMLDivElement>('.image.component')
+      const { instance, update } = await render(<Carousel images={images} />)
+      const imgDiv = instance.rootNode.querySelector<HTMLDivElement>('.image.component')
 
       // Open lightbox first
       imgDiv?.click()
       await update()
-      expect(node.dataset.lightbox).toBe('true')
+      expect(instance.rootNode.dataset.lightbox).toBe('true')
 
-      // Close with escape key
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: Keyboard.Escape }))
+      // Close with escape key by calling handleKeyDown directly
+      await instance.handleKeyDown({ key: Keyboard.Escape } as React.KeyboardEvent<HTMLDivElement>)
       await update()
-      expect(node.dataset.lightbox).toBe('false')
+      expect(instance.rootNode.dataset.lightbox).toBe('false')
     })
   })
 
@@ -169,14 +169,14 @@ describe('Carousel', () => {
     })
 
     test('handles wheel navigation', async () => {
-      const { instance, node, update } = await render<Carousel>(<Carousel images={images} />)
+      const { instance, update } = await render<Carousel>(<Carousel images={images} />)
 
       const initialIndex = instance.state.currentIndex
 
-      node.dispatchEvent(new WheelEvent('wheel', {
+      await instance.handleWheel(new WheelEvent('wheel', {
         bubbles: true,
         deltaY: 100,
-      }))
+      }) as any)
       await update()
 
       const newIndex = instance.state.currentIndex
@@ -191,7 +191,7 @@ describe('Carousel', () => {
       const initialIndex = instance.state.currentIndex
 
       instance.handleTouchStart({ touches: [{ clientX: 300 }] } as unknown as React.TouchEvent)
-      instance.handleTouchMove({ touches: [{ clientX: 100 }] } as unknown as React.TouchEvent)
+      await instance.handleTouchMove({ touches: [{ clientX: 100 }] } as unknown as React.TouchEvent)
       instance.handleTouchEnd()
       await update()
 

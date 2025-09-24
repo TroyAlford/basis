@@ -77,23 +77,20 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
 
   protected handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     const { step = 1 } = this.props
-
-    // Call the base class handleKeyDown first
-    super.handleKeyDown(event)
+    this.props.onKeyDown(event)
+    if (event.defaultPrevented) return
 
     // Check if step should be applied (arrow keys are pressed)
     if ([Keyboard.ArrowUp, Keyboard.ArrowDown].includes(event.key as Keyboard)) {
-      // Don't apply step if default was prevented
-      if (!event.defaultPrevented) {
-        event.preventDefault()
+      // This component handles arrow keys for step functionality
+      event.preventDefault()
 
-        const currentValue = this.current ?? 0
-        const newValue = event.key === Keyboard.ArrowUp
-          ? currentValue + step
-          : currentValue - step
+      const currentValue = this.current ?? 0
+      const newValue = event.key === Keyboard.ArrowUp
+        ? currentValue + step
+        : currentValue - step
 
-        this.handleChange(newValue)
-      }
+      this.handleChange(newValue)
     }
   }
 

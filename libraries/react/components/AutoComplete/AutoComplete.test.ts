@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test'
-import { AbortablePromise } from '@basis/utilities'
+import { AbortablePromise, noop } from '@basis/utilities'
 
 describe('AutoComplete', () => {
   it('should create AbortablePromise with timeout for search operations', async () => {
-    const searchPromise = new AbortablePromise<string[]>((resolve, reject) => {
+    const searchPromise = new AbortablePromise<string[]>(resolve => {
       // Simulate a search that takes time
       setTimeout(() => resolve(['result1', 'result2']), 100)
     }, { timeout: 5000 })
@@ -28,7 +28,7 @@ describe('AutoComplete', () => {
     }, { timeout: 1000 })
 
     // Second search (will complete)
-    const secondSearch = new AbortablePromise<string[]>((resolve, reject) => {
+    const secondSearch = new AbortablePromise<string[]>(resolve => {
       setTimeout(() => {
         secondSearchCompleted = true
         resolve(['second'])
@@ -36,7 +36,7 @@ describe('AutoComplete', () => {
     }, { timeout: 1000 })
 
     // Start both searches
-    const firstPromise = firstSearch.catch(() => { }) // Catch the abort error
+    const firstPromise = firstSearch.catch(noop) // Catch the abort error
     const secondPromise = secondSearch
 
     // Abort first search immediately
@@ -54,7 +54,7 @@ describe('AutoComplete', () => {
   })
 
   it('should timeout slow search operations', async () => {
-    const slowSearch = new AbortablePromise<string[]>((resolve) => {
+    const slowSearch = new AbortablePromise<string[]>(resolve => {
       // This will never resolve, should timeout
       setTimeout(() => resolve(['slow']), 6000)
     }, { timeout: 1000 })
@@ -71,7 +71,7 @@ describe('AutoComplete', () => {
   })
 
   it('should work with chained operations', async () => {
-    const searchPromise = new AbortablePromise<number>((resolve) => {
+    const searchPromise = new AbortablePromise<number>(resolve => {
       setTimeout(() => resolve(42), 100)
     }, { timeout: 5000 })
 
@@ -85,7 +85,7 @@ describe('AutoComplete', () => {
   })
 
   it('should handle onSearch that returns undefined', async () => {
-    const badOnSearch = () => undefined as any
+    const badOnSearch = () => undefined
 
     const promise = new AbortablePromise<string[]>((resolve, reject) => {
       const searchPromise = badOnSearch()
@@ -100,7 +100,7 @@ describe('AutoComplete', () => {
   })
 
   it('should handle onSearch that returns null', async () => {
-    const badOnSearch = () => null as any
+    const badOnSearch = () => null
 
     const promise = new AbortablePromise<string[]>((resolve, reject) => {
       const searchPromise = badOnSearch()

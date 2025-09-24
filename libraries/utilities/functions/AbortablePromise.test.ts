@@ -1,8 +1,10 @@
+import { describe, expect, test } from 'bun:test'
 import { AbortablePromise } from './AbortablePromise'
+import { noop } from './noop'
 
 describe('AbortablePromise', () => {
-  it('should resolve with the correct value', async () => {
-    const promise = new AbortablePromise<string>((resolve) => {
+  test('should resolve with the correct value', async () => {
+    const promise = new AbortablePromise<string>(resolve => {
       setTimeout(() => resolve('success'), 10)
     })
 
@@ -10,7 +12,7 @@ describe('AbortablePromise', () => {
     expect(result).toBe('success')
   })
 
-  it('should reject with the correct error', async () => {
+  test('should reject with the correct error', async () => {
     const promise = new AbortablePromise<string>((resolve, reject) => {
       setTimeout(() => reject(new Error('test error')), 10)
     })
@@ -18,7 +20,7 @@ describe('AbortablePromise', () => {
     await expect(promise).rejects.toThrow('test error')
   })
 
-  it('should abort and reject with AbortError', async () => {
+  test('should abort and reject with AbortError', async () => {
     const promise = new AbortablePromise<string>((resolve, reject, signal) => {
       signal.addEventListener('abort', () => {
         reject(new Error('AbortError'))
@@ -33,7 +35,7 @@ describe('AbortablePromise', () => {
     await expect(promise).rejects.toThrow('AbortError')
   })
 
-  it('should abort a promise that takes time to resolve', async () => {
+  test('should abort a promise that takes time to resolve', async () => {
     let resolved = false
     const promise = new AbortablePromise<string>((resolve, reject, signal) => {
       const timeout = setTimeout(() => {
@@ -59,7 +61,7 @@ describe('AbortablePromise', () => {
     expect(resolved).toBe(false)
   })
 
-  it('should handle multiple abort calls gracefully', async () => {
+  test('should handle multiple abort calls gracefully', async () => {
     const promise = new AbortablePromise<string>((resolve, reject, signal) => {
       signal.addEventListener('abort', () => {
         reject(new Error('AbortError'))
@@ -75,8 +77,8 @@ describe('AbortablePromise', () => {
     await expect(promise).rejects.toThrow('AbortError')
   })
 
-  it('should work with then() method', async () => {
-    const promise = new AbortablePromise<number>((resolve) => {
+  test('should work with then() method', async () => {
+    const promise = new AbortablePromise<number>(resolve => {
       setTimeout(() => resolve(42), 10)
     })
 
@@ -84,18 +86,18 @@ describe('AbortablePromise', () => {
     expect(result).toBe(84)
   })
 
-  it('should work with catch() method', async () => {
+  test('should work with catch() method', async () => {
     const promise = new AbortablePromise<string>((resolve, reject) => {
       setTimeout(() => reject(new Error('test error')), 10)
     })
 
-    const result = await promise.catch(error => `caught: ${error.message}`)
+    const result = await promise.catch((error: Error) => `caught: ${error.message}`)
     expect(result).toBe('caught: test error')
   })
 
-  it('should work with finally() method', async () => {
+  test('should work with finally() method', async () => {
     let finallyCalled = false
-    const promise = new AbortablePromise<string>((resolve) => {
+    const promise = new AbortablePromise<string>(resolve => {
       setTimeout(() => resolve('success'), 10)
     })
 
@@ -107,7 +109,7 @@ describe('AbortablePromise', () => {
     expect(finallyCalled).toBe(true)
   })
 
-  it('should preserve abort functionality through then()', async () => {
+  test('should preserve abort functionality through then()', async () => {
     const promise = new AbortablePromise<number>((resolve, reject, signal) => {
       const timeout = setTimeout(() => resolve(42), 100)
 
@@ -125,7 +127,7 @@ describe('AbortablePromise', () => {
     await expect(chainedPromise).rejects.toThrow('AbortError')
   })
 
-  it('should preserve abort functionality through catch()', async () => {
+  test('should preserve abort functionality through catch()', async () => {
     const promise = new AbortablePromise<string>((resolve, reject, signal) => {
       const timeout = setTimeout(() => reject(new Error('test error')), 100)
 
@@ -135,7 +137,7 @@ describe('AbortablePromise', () => {
       })
     }, { timeout: 200 })
 
-    const chainedPromise = promise.catch(error => {
+    const chainedPromise = promise.catch((error: Error) => {
       if (error.message === 'AbortError') {
         throw error // Re-throw abort errors
       }
@@ -148,7 +150,7 @@ describe('AbortablePromise', () => {
     await expect(chainedPromise).rejects.toThrow('AbortError')
   })
 
-  it('should preserve abort functionality through finally()', async () => {
+  test('should preserve abort functionality through finally()', async () => {
     const promise = new AbortablePromise<string>((resolve, reject, signal) => {
       const timeout = setTimeout(() => resolve('success'), 100)
 
@@ -158,7 +160,7 @@ describe('AbortablePromise', () => {
       })
     }, { timeout: 200 })
 
-    const chainedPromise = promise.finally(() => { })
+    const chainedPromise = promise.finally(noop)
 
     // Abort the original promise
     promise.abort()
@@ -166,8 +168,8 @@ describe('AbortablePromise', () => {
     await expect(chainedPromise).rejects.toThrow('AbortError')
   })
 
-  it('should work with complex chaining', async () => {
-    const promise = new AbortablePromise<number>((resolve) => {
+  test('should work with complex chaining', async () => {
+    const promise = new AbortablePromise<number>(resolve => {
       setTimeout(() => resolve(10), 10)
     })
 
@@ -175,12 +177,12 @@ describe('AbortablePromise', () => {
       .then(value => value * 2)
       .then(value => value + 5)
       .catch(() => 0)
-      .finally(() => { })
+      .finally(noop)
 
     expect(result).toBe(25)
   })
 
-  it('should handle abort signal in executor', async () => {
+  test('should handle abort signal in executor', async () => {
     const promise = new AbortablePromise<string>((resolve, reject, signal) => {
       signal.addEventListener('abort', () => {
         reject(new Error('Custom abort handler'))
@@ -198,9 +200,9 @@ describe('AbortablePromise', () => {
     await expect(promise).rejects.toThrow('Custom abort handler')
   })
 
-  it('should work with async executor', async () => {
-    const promise = new AbortablePromise<string>(async (resolve) => {
-      await new Promise(resolve => setTimeout(resolve, 10))
+  test('should work with async executor', async () => {
+    const promise = new AbortablePromise<string>(async resolve => {
+      await new Promise(ok => setTimeout(ok, 10))
       resolve('async success')
     })
 
@@ -208,17 +210,17 @@ describe('AbortablePromise', () => {
     expect(result).toBe('async success')
   })
 
-  it('should handle promise rejection in async executor', async () => {
+  test('should handle promise rejection in async executor', async () => {
     const promise = new AbortablePromise<string>(async (resolve, reject) => {
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await new Promise(ok => setTimeout(ok, 10))
       reject(new Error('async error'))
     })
 
     await expect(promise).rejects.toThrow('async error')
   })
 
-  it('should auto-timeout after default 1000ms', async () => {
-    const promise = new AbortablePromise<string>((resolve) => {
+  test('should auto-timeout after default 1000ms', async () => {
+    const promise = new AbortablePromise<string>(resolve => {
       // Never resolve - should timeout
       setTimeout(() => resolve('success'), 2000)
     })
@@ -226,8 +228,8 @@ describe('AbortablePromise', () => {
     await expect(promise).rejects.toThrow('TimeoutError')
   })
 
-  it('should auto-timeout after custom timeout', async () => {
-    const promise = new AbortablePromise<string>((resolve) => {
+  test('should auto-timeout after custom timeout', async () => {
+    const promise = new AbortablePromise<string>(resolve => {
       // Never resolve - should timeout after 100ms
       setTimeout(() => resolve('success'), 200)
     }, { timeout: 100 })
@@ -235,8 +237,8 @@ describe('AbortablePromise', () => {
     await expect(promise).rejects.toThrow('TimeoutError')
   })
 
-  it('should not timeout if promise resolves before timeout', async () => {
-    const promise = new AbortablePromise<string>((resolve) => {
+  test('should not timeout if promise resolves before timeout', async () => {
+    const promise = new AbortablePromise<string>(resolve => {
       setTimeout(() => resolve('success'), 100)
     }, { timeout: 500 })
 
@@ -244,7 +246,7 @@ describe('AbortablePromise', () => {
     expect(result).toBe('success')
   })
 
-  it('should not timeout if promise rejects before timeout', async () => {
+  test('should not timeout if promise rejects before timeout', async () => {
     const promise = new AbortablePromise<string>((resolve, reject) => {
       setTimeout(() => reject(new Error('test error')), 100)
     }, { timeout: 500 })
@@ -252,7 +254,7 @@ describe('AbortablePromise', () => {
     await expect(promise).rejects.toThrow('test error')
   })
 
-  it('should not timeout if promise is aborted before timeout', async () => {
+  test('should not timeout if promise is aborted before timeout', async () => {
     const promise = new AbortablePromise<string>((resolve, reject, signal) => {
       signal.addEventListener('abort', () => {
         reject(new Error('AbortError'))

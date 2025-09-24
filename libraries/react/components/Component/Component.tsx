@@ -188,7 +188,6 @@ export abstract class Component<
    */
   protected handleKeyDown(event: React.KeyboardEvent<HTMLElement>): void {
     this.props.onKeyDown(event)
-    event.preventDefault()
   }
 
   /**
