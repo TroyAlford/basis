@@ -1,3 +1,4 @@
+import { AutoCompleteDocs } from '@basis/react/components/AutoComplete/AutoComplete.docs.tsx'
 import { AwaitDocs } from './pages/Await.docs.tsx'
 import { ButtonDocs } from './pages/Button.docs.tsx'
 import { CarouselDocs } from './pages/Carousel.docs.tsx'
@@ -37,6 +38,7 @@ export interface DocRoute {
 }
 
 export const routes: DocRoute[] = [
+  { component: AutoCompleteDocs, path: '/components/auto-complete', title: 'AutoComplete' },
   { component: AwaitDocs, path: '/components/await', title: 'Await' },
   { component: ButtonDocs, path: '/components/button', title: 'Button' },
   { component: CarouselDocs, path: '/components/carousel', title: 'Carousel' },

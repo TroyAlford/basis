@@ -14,6 +14,6 @@
     "react-dom": "^19"
   },
   "devDependencies": {
-    "@faker-js/faker": "^9.0.0"
+    "@faker-js/faker": "^10.0.0"
   }
 }

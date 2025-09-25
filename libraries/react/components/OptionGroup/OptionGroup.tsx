@@ -92,7 +92,7 @@ export class OptionGroup<T> extends Editor<T | T[], HTMLFieldSetElement, Props> 
   #handleKeyDown = (event: React.KeyboardEvent<HTMLFieldSetElement>): void => {
     // Handle the onKeyDown prop manually (like the base class does)
     const { onKeyDown } = this.props
-    const shouldPreventDefault = onKeyDown(event)
+    onKeyDown(event)
 
     /*
      * CRITICAL: Use event.currentTarget (the fieldset) instead of this.rootNode
@@ -127,7 +127,7 @@ export class OptionGroup<T> extends Editor<T | T[], HTMLFieldSetElement, Props> 
     if (handled) {
       event.preventDefault()
       event.stopPropagation()
-    } else if (shouldPreventDefault === false && !event.defaultPrevented) {
+    } else if (!event.defaultPrevented) {
       event.preventDefault()
     }
   }

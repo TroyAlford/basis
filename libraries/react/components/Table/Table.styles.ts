@@ -16,6 +16,7 @@ style('basis:table', css`
   .table.editor.component {
     border-color: var(--basis-table-border-color);
     overflow: auto;
+    padding: 0;
     position: relative;
 
     > table {
@@ -39,25 +40,29 @@ style('basis:table', css`
         }
       }
 
-      tbody tr {
-        height: var(--basis-table-row-height);
-        position: relative;
+      tbody {
+        background-color: var(--basis-table-row-background-odd);
 
-        &:nth-child(odd) {
-          background-color: var(--basis-table-row-background-odd);
-        }
-        &:nth-child(even) {
-          background-color: var(--basis-table-row-background-even);
-        }
+        tr {
+          height: var(--basis-table-row-height);
+          position: relative;
 
-        &:hover > :is(td, th):after {
-          background-color: var(--basis-table-row-hover-color);
-          content: '';
-          inset: 0;
-          opacity: 0.2;
-          pointer-events: none;
-          position: absolute;
-          z-index: var(--basis-table-header-row-z);
+          &:nth-child(odd) {
+            background-color: var(--basis-table-row-background-odd);
+          }
+          &:nth-child(even) {
+            background-color: #8883;
+          }
+
+          &:hover > :is(td, th):after {
+            background-color: var(--basis-table-row-hover-color);
+            content: '';
+            inset: 0;
+            opacity: 0.2;
+            pointer-events: none;
+            position: absolute;
+            z-index: var(--basis-table-header-row-z);
+          }
         }
       }
     }

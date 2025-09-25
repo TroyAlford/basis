@@ -181,6 +181,9 @@ export async function render<
   const onUpdatedPromise = new Promise<void>(resolve => { onUpdated = resolve })
     .then(() => { hasUpdated = true })
 
+  // Track the most recent children for bare update() calls
+  let currentChildren = children
+
   rootDOM.render(
     <Mounter<C>
       ref={mounterRef}
@@ -200,7 +203,7 @@ export async function render<
   /**
    * Search for a component instance in the rendered tree
    * @param ctor The constructor or element tag to search for
-   * @yields the next matching component instance
+   * @yields {I} the next matching component instance
    * @returns the last matching component instance
    * @example
    * const { find } = render(<App />)
@@ -247,9 +250,17 @@ export async function render<
     root: rootElement,
     unmount: () => onUnmounted(childRef),
     update: async (
-      update = React.cloneElement(children, children.props),
+      update = currentChildren,
       timeout = 50,
     ) => {
+      // If no update provided, just wait for the current state to flush
+      if (update === currentChildren) {
+        return await Promise.resolve(result)
+      }
+
+      // Update the current children reference
+      currentChildren = update
+
       let updatePromise: Promise<void> = onUpdatedPromise
       if (hasUpdated) {
         hasUpdated = false

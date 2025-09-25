@@ -21,7 +21,7 @@ interface TProps<E extends Element = HTMLDivElement> {
   /** An optional ref to the component's root element. */
   nodeRef?: React.RefObject<E>,
   /** Callback function called when a key is pressed while the component has focus. */
-  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => boolean | undefined,
+  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void,
   /** The style of the component. */
   style?: React.CSSProperties,
   /** The name of the theme to use for the component. */
@@ -187,15 +187,7 @@ export abstract class Component<
    * @param event The keyboard event.
    */
   protected handleKeyDown(event: React.KeyboardEvent<HTMLElement>): void {
-    const { onKeyDown } = this.props
-
-    // Call onKeyDown first
-    const shouldPreventDefault = onKeyDown(event)
-
-    // If onKeyDown returned false, prevent default if not already prevented
-    if (shouldPreventDefault === false && !event.defaultPrevented) {
-      event.preventDefault()
-    }
+    this.props.onKeyDown(event)
   }
 
   /**

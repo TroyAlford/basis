@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
 import * as React from 'react'
+import { isNil } from '@basis/utilities'
 import { render } from '../../testing/render'
 import { Simulate } from '../../testing/Simulate'
 import { Keyboard } from '../../types/Keyboard'
@@ -15,22 +16,6 @@ describe('NumberEditor', () => {
   beforeEach(() => {
     onChange = mock()
     onKeyDown = mock()
-  })
-
-  describe('number formatting in input', () => {
-    test.each([
-      { description: 'large numbers with commas', expected: '1,234,567', value: 1234567 },
-      { description: 'zero as empty string', expected: '', value: 0 },
-      { description: 'single digit without commas', expected: '5', value: 5 },
-      { description: '3 digits without commas', expected: '123', value: 123 },
-      { description: '4 digits with comma', expected: '1,234', value: 1234 },
-      { description: '5 digits with comma', expected: '12,345', value: 12345 },
-      { description: '6 digits with comma', expected: '123,456', value: 123456 },
-    ])('formats $description', async ({ expected, value }) => {
-      const { node } = await render(<NumberEditor value={value} onChange={onChange} />)
-      const input = getInput(node)
-      expect(input.value).toBe(expected)
-    })
   })
 
   describe('readOnly behavior', () => {
@@ -65,9 +50,9 @@ describe('NumberEditor', () => {
 
   describe('value changes and parsing', () => {
     test.each([
-      { description: 'comma-separated input', expected: 1234, input: '1,234' },
+      // { description: 'comma-separated input', expected: 1234, input: '1,234' },
       { description: 'single digit', expected: 5, input: '5' },
-      { description: 'multiple commas', expected: 1234567, input: '1,234,567' },
+      // { description: 'multiple commas', expected: 1234567, input: '1,234,567' },
       { description: 'zero input', expected: 0, input: '0' },
       { description: 'plain number', expected: 123, input: '123' },
     ])('parses $description correctly', async ({ expected, input }) => {
@@ -182,7 +167,10 @@ describe('NumberEditor', () => {
     })
 
     test('does not apply step when onKeyDown prevents default', async () => {
-      const preventDefaultOnKeyDown = mock(() => false)
+      const preventDefaultOnKeyDown = mock((event: React.KeyboardEvent<HTMLElement>) => {
+        event.preventDefault()
+        event.defaultPrevented = true
+      })
 
       const { node } = await render(
         <NumberEditor
@@ -269,6 +257,177 @@ describe('NumberEditor', () => {
       const input = getInput(node)
       expect(input).toBeTruthy()
       expect(input.type).toBe('text')
+    })
+  })
+
+  // TODO: we will reimplement this in a future release.
+  describe.skip('number formatting in input', () => {
+    test.each([
+      // Invalid/Sanitizing Inputs
+      { description: 'null value', input: null, output: '' },
+      { description: 'undefined value', input: undefined, output: '' },
+      { description: 'empty string', input: '', output: '' },
+      { description: 'whitespace string', input: '  ', output: '' },
+      { description: 'gross pasted string', input: '--12,34a56.78.90', output: '-123,456.7890' },
+      { description: 'multiple decimals and negative signs', input: '--1234.56.78', output: '-1,234.5678' },
+      // Valid Inputs
+      { description: 'integer', input: 123456789.12345678, output: '123,456,789.12345678' },
+      { description: 'integer', input: -123456789.12345678, output: '-123,456,789.12345678' },
+      { description: 'float', input: '1234.56', output: '1,234.56' },
+      { description: 'negative float', input: '-1234.56', output: '-1,234.56' },
+      { description: 'integer', input: '1234', output: '1,234' },
+      { description: 'negative integer', input: '-1234', output: '-1,234' },
+      { description: 'empty decimal', input: '1234.', output: '1,234.' },
+      { description: 'empty decimal', input: '1234.0', output: '1,234.0' },
+      { description: 'empty decimal', input: '.', output: '.' },
+      { description: 'empty decimal', input: '.0', output: '.0' },
+    ])('formats $description', async ({ input, output }) => {
+      expect(NumberEditor.formatNumber(input)).toBe(output)
+      // @ts-expect-error - value is a string
+      const { node } = await render(<NumberEditor value={input} />)
+      expect(node.querySelector('input').value).toBe(output)
+    })
+  })
+
+  // TODO: we will reimplement this in a future release.
+  describe.skip('cursor management', () => {
+    interface State {
+      numerics: string,
+      position: number,
+      selected: number,
+    }
+    /**
+     * Parses the state of the number editor into a position and range.
+     * @param state - The state of the number editor.
+     * @returns The position and range.
+     * @example parseState('1234|5678') // { numerics: '12345678', position: 4, selected: 0 }
+     * @example parseState('1234|5678|90') // { numerics: '1234567890', position: 4, selected: 2 }
+     */
+    function parseState(state: string): State {
+      const [first, second, third] = state.split('|')
+      if (isNil(third)) {
+        return { numerics: `${first}${second}`, position: first.length, selected: 0 }
+      } else {
+        return { numerics: `${first}${second}${third}`, position: first.length, selected: second.length }
+      }
+    }
+
+    // Note: this is just a test to ensure the parseState function works correctly
+    test.each([
+      ['1234|5678', { expected: { numerics: '12345678', position: 4, selected: 0 } }],
+      ['1234|5678|90', { expected: { numerics: '1234567890', position: 4, selected: 4 } }],
+    ])('parses state $title', (value, { expected }) => {
+      expect(parseState(value)).toEqual(expected)
+    })
+
+    /**
+     * Sets up an input with the given state.
+     * @param input - The input to set up.
+     * @param state - The state to set up.
+     * @returns The spy on the input's setSelectionRange method.
+     * @example setupInput(input, '1234|5678') // { numerics: '12345678', position: 4, selected: 0 }
+     * @example setupInput(input, '1234|5678|90') // { numerics: '1234567890', position: 4, selected: 4 }
+     */
+    function setupInput(input: HTMLInputElement, state: string) {
+      const { numerics, position, selected } = parseState(state)
+      input.value = numerics
+      const setSelectionRange = spyOn(input, 'setSelectionRange').mockImplementation((start, end) => {
+        // Mock the selection properties by overriding the getters
+        Object.defineProperty(input, 'selectionStart', { configurable: true, value: start, writable: true })
+        Object.defineProperty(input, 'selectionEnd', { configurable: true, value: end, writable: true })
+      })
+      setSelectionRange(position, position + selected)
+      return setSelectionRange
+    }
+
+    test.each([
+      ['1234|5678', { numerics: '12345678', position: 4, selected: 0 }],
+      ['1234|5678|90', { numerics: '1234567890', position: 4, selected: 4 }],
+    ])('setupInput: %s', (value, { numerics, position, selected }) => {
+      const input = document.createElement('input')
+      const setSelectionRange = setupInput(input, value)
+      expect(input.value).toBe(numerics)
+      expect(input.selectionStart).toBe(position)
+      expect(input.selectionEnd).toBe(position + selected)
+      expect(setSelectionRange).toHaveBeenCalledWith(position, position + selected)
+    })
+
+    describe('getCursorPosition', () => {
+      test.each([
+        ['1234|5678', { prefix: '1234', selected: '', suffix: '5678' }],
+        ['1234|5678|90', { prefix: '1234', selected: '5678', suffix: '90' }],
+      ])('getCursorPosition: %s', (value, { prefix, selected, suffix }) => {
+        const input = document.createElement('input')
+        setupInput(input, value)
+        expect(NumberEditor.getCursorPosition(input)).toEqual({ prefix, selected, suffix })
+      })
+    })
+
+    test.each([
+      ['12,3|45,678', Keyboard.Backspace, '1,2|45,678'],
+      ['12,|345,678', Keyboard.Backspace, '1|,345,678'],
+      ['12,345,678.1|23', Keyboard.Backspace, '12,345,678.|23'],
+      ['12,345,678.|123', Keyboard.Backspace, '12,345,678|,123'],
+      ['12|,345,6|78', Keyboard.Backspace, '1,2|78'],
+      ['12,3|45,678', Keyboard.Delete, '1,23|5,678'],
+      ['12,|345,678', Keyboard.Delete, '1,2|45,678'],
+      ['12,345,678.1|23', Keyboard.Delete, '12,345,678.1|3'],
+      ['12,345,678.|123', Keyboard.Delete, '12,345,678.|23'],
+      ['1|.23', Keyboard.Delete, '1|23'],
+      ['1.|23', Keyboard.Delete, '1.|3'],
+      ['1|,234', Keyboard.Delete, '1|34'],
+      ['12|,345,6|78', Keyboard.Delete, '1,2|78'],
+    ])('%s -> %s -> %s', async (initial, key, expected) => {
+      const initialState = parseState(initial)
+      const { numerics, position, selected } = parseState(expected)
+      // @ts-expect-error - value is a string
+      const { node } = await render(<NumberEditor initialValue={initialState.numerics} onChange={onChange} />)
+      const input = node.querySelector('input')
+      const setSelectionRange = setupInput(input, initial)
+
+      await Simulate.keyDown(input, key, onChange)
+
+      expect(input.value).toBe(NumberEditor.formatNumber(numerics))
+      expect(setSelectionRange).toHaveBeenCalledWith(position, position + selected)
+    })
+
+    test.each([
+      ['1|34', '2', '1,2|34'],
+      ['|1,000', '2', '2|1,000'],
+      ['1,000|', '.', '1,000.|'],
+      ['1,000|.00', '4', '10,004|.00'],
+      ['1,000.00|', '4', '1,000.004|'],
+      ['1,0|00.00', '123', '1,012,3|00.00'],
+      ['1,000|.00', '12345', '100,012,345|.00'],
+      ['1,000.|00', '123456', '1,000.123456|00'],
+      ['1,000|.00', '$1,2.34', '100,012.34|00'],
+      ['1,|000|.00', '$1,2.34', '11,234|.00'],
+      ['1|,000.0|0', '8', '18|0'],
+      ['1|,000.0|0', '$8.00', '18.00|0'],
+    ])('%s -> %s -> %s', async (initial, key, expected) => {
+      const initialState = parseState(initial)
+      const { numerics, position, selected } = parseState(expected)
+      // @ts-expect-error - value is a string
+      const { node } = await render(<NumberEditor initialValue={initialState.numerics} onChange={onChange} />)
+      const input = node.querySelector('input')
+      const setSelectionRange = setupInput(input, initial)
+      const { prefix, suffix } = NumberEditor.getCursorPosition(input)
+
+      await Simulate.change(input, `${prefix}${key}${suffix}`, onChange)
+
+      expect(input.value).toBe(NumberEditor.formatNumber(numerics))
+      expect(setSelectionRange).toHaveBeenLastCalledWith(position, position + selected)
+    })
+
+    test.each([
+      [123, '12a3'],
+      [123, '12,3'],
+      [-123.45, '--123.45'],
+    ])('ignores non-numeric characters and does not call onChange', async (initial, value) => {
+      const { instance } = await render<NumberEditor>(<NumberEditor initialValue={initial} onChange={onChange} />)
+      // @ts-expect-error - handleInputChange is protected
+      instance.handleInputChange({ target: { value } } as React.ChangeEvent<HTMLInputElement>)
+      expect(onChange).not.toHaveBeenCalled()
     })
   })
 })

@@ -44,7 +44,7 @@ export class DropdownMenuDocs extends React.Component<object, State> {
             <div>
               <h4>Anchor Point</h4>
               <select
-                defaultValue={AnchorPoint.Top}
+                value={this.state.anchorPoint}
                 onChange={e => this.setState({ anchorPoint: e.target.value as AnchorPoint })}
               >
                 <option value={AnchorPoint.Top}>Top</option>
@@ -91,39 +91,39 @@ export class DropdownMenuDocs extends React.Component<object, State> {
         <h2>Usage Examples</h2>
         <h3>Basic Dropdown</h3>
         {Code.format(`
-            <DropdownMenu trigger="Options">
-              <DropdownMenu.Item onActivate={handleEdit}>
-                Edit
-              </DropdownMenu.Item>
-              <DropdownMenu.Item onActivate={handleDelete}>
-                Delete
-              </DropdownMenu.Item>
-            </DropdownMenu>
-          `)}
+          <DropdownMenu trigger="Options">
+            <DropdownMenu.Item onActivate={handleEdit}>
+              Edit
+            </DropdownMenu.Item>
+            <DropdownMenu.Item onActivate={handleDelete}>
+              Delete
+            </DropdownMenu.Item>
+          </DropdownMenu>
+        `)}
         <h3>With Custom Trigger</h3>
         {Code.format(`
-            <DropdownMenu trigger={<Button>Custom Button</Button>}>
-              <DropdownMenu.Item onActivate={handleAction1}>
-                Action 1
-              </DropdownMenu.Item>
-              <DropdownMenu.Item onActivate={handleAction2}>
-                Action 2
-              </DropdownMenu.Item>
-            </DropdownMenu>
-          `)}
+          <DropdownMenu trigger={<Button>Custom Button</Button>}>
+            <DropdownMenu.Item onActivate={handleAction1}>
+              Action 1
+            </DropdownMenu.Item>
+            <DropdownMenu.Item onActivate={handleAction2}>
+              Action 2
+            </DropdownMenu.Item>
+          </DropdownMenu>
+        `)}
         <h3>Controlled State</h3>
         {Code.format(`
-            <DropdownMenu
-              open={isOpen}
-              onOpen={() => setIsOpen(true)}
-              onClose={() => setIsOpen(false)}
-              trigger="Controlled Menu"
-            >
-              <DropdownMenu.Item onActivate={handleAction}>
-                Controlled Action
-              </DropdownMenu.Item>
-            </DropdownMenu>
-          `)}
+          <DropdownMenu
+            open={isOpen}
+            onOpen={() => setIsOpen(true)}
+            onClose={() => setIsOpen(false)}
+            trigger="Controlled Menu"
+          >
+            <DropdownMenu.Item onActivate={handleAction}>
+              Controlled Action
+            </DropdownMenu.Item>
+          </DropdownMenu>
+        `)}
       </section>
       <section>
         <h2>Key Props</h2>
@@ -145,12 +145,12 @@ export class DropdownMenuDocs extends React.Component<object, State> {
           information about each mixin, see the <Link to="/mixins">Mixins documentation</Link>.
         </p>
         {Code.format(`
-            export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
-              static get mixins(): Set<Mixin> {
-                return super.mixins.add(Popup)
-              }
+          export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
+            static get mixins(): Set<Mixin> {
+              return super.mixins.add(Popup)
             }
-          `)}
+          }
+        `)}
         <p>
           The Popup mixin automatically provides positioning support using Floating UI primitives,
           ensuring the dropdown menu appears in the correct location relative to the trigger button
@@ -165,28 +165,28 @@ export class DropdownMenuDocs extends React.Component<object, State> {
           and keyboard navigation support:
         </p>
         {Code.format(`
-            <DropdownMenu.Item onActivate={handleAction}>
-              Menu Item Text
-            </DropdownMenu.Item>
-          `)}
+          <DropdownMenu.Item onActivate={handleAction}>
+            Menu Item Text
+          </DropdownMenu.Item>
+        `)}
         <h3>Divider Component</h3>
         <p>
           <code>DropdownMenu.Divider</code> creates visual separation between groups of menu items:
         </p>
         {Code.format(`
-            <DropdownMenu.Item>First Group</DropdownMenu.Item>
-            <DropdownMenu.Divider />
-            <DropdownMenu.Item>Second Group</DropdownMenu.Item>
-          `)}
+          <DropdownMenu.Item>First Group</DropdownMenu.Item>
+          <DropdownMenu.Divider />
+          <DropdownMenu.Item>Second Group</DropdownMenu.Item>
+        `)}
         <h3>Disabled State</h3>
         <p>
           Menu items can be disabled by setting the <code>disabled</code> prop:
         </p>
         {Code.format(`
-            <DropdownMenu.Item disabled onActivate={handleAction}>
-              Disabled Action
-            </DropdownMenu.Item>
-          `)}
+          <DropdownMenu.Item disabled onActivate={handleAction}>
+            Disabled Action
+          </DropdownMenu.Item>
+        `)}
       </section>
       <section>
         <h2>Keyboard Navigation</h2>
@@ -216,7 +216,6 @@ export class DropdownMenuDocs extends React.Component<object, State> {
           connecting the menu to its trigger.
         </p>
       </section>
-
     </>
   )
 }

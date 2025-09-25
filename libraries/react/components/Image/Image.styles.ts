@@ -7,6 +7,8 @@ style('basis:image', css`
     background-size: contain;
     display: block;
     height: 100%;
+    max-height: 100%;
+    max-width: 100%;
     position: relative;
     width: 100%;
 
