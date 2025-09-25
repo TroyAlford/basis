@@ -107,7 +107,7 @@ describe('Carousel', () => {
     })
 
     test('closes lightbox with escape key', async () => {
-      const { instance, update } = await render(<Carousel images={images} />)
+      const { instance, update } = await render<Carousel>(<Carousel images={images} />)
       const imgDiv = instance.rootNode.querySelector<HTMLDivElement>('.image.component')
 
       // Open lightbox first
@@ -176,7 +176,7 @@ describe('Carousel', () => {
       await instance.handleWheel(new WheelEvent('wheel', {
         bubbles: true,
         deltaY: 100,
-      }) as any)
+      }))
       await update()
 
       const newIndex = instance.state.currentIndex

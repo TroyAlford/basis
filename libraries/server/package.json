@@ -14,14 +14,14 @@
     "react": "^18"
   },
   "devDependencies": {
-    "@babel/generator": "^7.28.0",
-    "@babel/parser": "^7.28.0",
-    "@babel/traverse": "^7.28.0",
-    "@babel/types": "^7.28.2",
+    "@babel/generator": "^7.28.3",
+    "@babel/parser": "^7.28.4",
+    "@babel/traverse": "^7.28.4",
+    "@babel/types": "^7.28.4",
     "@basis/bun-plugins": "workspace:*",
     "@basis/react": "workspace:*",
     "@basis/utilities": "workspace:*",
-    "@types/bun": "^1.2.19",
+    "@types/bun": "^1.2.22",
     "react": "^19",
     "react-dom": "^19"
   },

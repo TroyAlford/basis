@@ -10,7 +10,7 @@ export function encode<V = unknown>(value: V): `H-${string}` {
   const base64 = Buffer.from(jsonString)
     .toString('base64')
     .replace(/=+$/, '') // Remove trailing '='
-  return `H-${base64}`  // Ensure it starts with a letter
+  return `H-${base64}` // Ensure it starts with a letter
 }
 
 /**

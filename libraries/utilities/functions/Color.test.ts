@@ -65,13 +65,13 @@ describe('Color', () => {
 
     // Test all HSV hue angles
     test.each([
-      [0, [255, 0, 0]],    // Red
+      [0, [255, 0, 0]], // Red
       [60, [255, 255, 0]], // Yellow
-      [120, [0, 255, 0]],  // Green
+      [120, [0, 255, 0]], // Green
       [180, [0, 255, 255]], // Cyan
-      [240, [0, 0, 255]],  // Blue
+      [240, [0, 0, 255]], // Blue
       [300, [255, 0, 255]], // Magenta
-      [360, [255, 0, 0]],  // Red again
+      [360, [255, 0, 0]], // Red again
     ])('converts hue %i° correctly', (hue, [r, g, b]) => {
       const color = Color.fromHSV(hue, 100, 100)
       expect(color.toRGB()).toEqual({ a: 1, b, g, r })
@@ -110,13 +110,13 @@ describe('Color', () => {
 
     // Test all HSL hue angles
     test.each([
-      [0, [255, 0, 0]],    // Red
+      [0, [255, 0, 0]], // Red
       [60, [255, 255, 0]], // Yellow
-      [120, [0, 255, 0]],  // Green
+      [120, [0, 255, 0]], // Green
       [180, [0, 255, 255]], // Cyan
-      [240, [0, 0, 255]],  // Blue
+      [240, [0, 0, 255]], // Blue
       [300, [255, 0, 255]], // Magenta
-      [360, [255, 0, 0]],  // Red again
+      [360, [255, 0, 0]], // Red again
     ])('converts hue %i° correctly', (hue, [r, g, b]) => {
       const color = Color.fromHSL(hue, 100, 50)
       expect(color.toRGB()).toEqual({ a: 1, b, g, r })
@@ -214,12 +214,12 @@ describe('Color', () => {
 
   describe('Color Conversions', () => {
     const testColors = [
-      { hsl: [0, 100, 50], hsv: [0, 100, 100], rgb: [255, 0, 0] },    // Red
+      { hsl: [0, 100, 50], hsv: [0, 100, 100], rgb: [255, 0, 0] }, // Red
       { hsl: [120, 100, 50], hsv: [120, 100, 100], rgb: [0, 255, 0] }, // Green
       { hsl: [240, 100, 50], hsv: [240, 100, 100], rgb: [0, 0, 255] }, // Blue
-      { hsl: [0, 0, 0], hsv: [0, 0, 0], rgb: [0, 0, 0] },             // Black
-      { hsl: [0, 0, 100], hsv: [0, 0, 100], rgb: [255, 255, 255] },   // White
-      { hsl: [0, 0, 50], hsv: [0, 0, 50], rgb: [128, 128, 128] },     // Gray
+      { hsl: [0, 0, 0], hsv: [0, 0, 0], rgb: [0, 0, 0] }, // Black
+      { hsl: [0, 0, 100], hsv: [0, 0, 100], rgb: [255, 255, 255] }, // White
+      { hsl: [0, 0, 50], hsv: [0, 0, 50], rgb: [128, 128, 128] }, // Gray
     ]
 
     test.each(testColors)('converts between formats correctly', ({ hsl, hsv, rgb }) => {

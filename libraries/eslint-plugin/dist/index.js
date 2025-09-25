@@ -183,7 +183,6 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
                     allowLeadingUnderscore: false,
                     allowNamespace: true,
                 }],
-            '@stylistic/jsx/jsx-props-no-multi-spaces': 'error',
             '@stylistic/jsx/jsx-props-no-spreading': 'off',
             '@stylistic/jsx/jsx-self-closing-comp': ['error', { component: true, html: true }],
             '@stylistic/jsx/jsx-sort-props': ['error', {
@@ -209,6 +208,7 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
                     propertyValue: 'parens-new-line',
                     return: 'parens-new-line',
                 }],
+            '@stylistic/jsx/no-multi-spaces': 'error',
             '@stylistic/linebreak-style': 'off',
             '@stylistic/max-len': ['error', { code: 120, ignorePattern: '^import ', ignoreUrls: true, tabWidth: 2 }],
             '@stylistic/newline-per-chained-call': 'off',

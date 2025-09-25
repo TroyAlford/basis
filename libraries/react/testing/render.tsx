@@ -203,7 +203,7 @@ export async function render<
   /**
    * Search for a component instance in the rendered tree
    * @param ctor The constructor or element tag to search for
-   * @yields the next matching component instance
+   * @yields {I} the next matching component instance
    * @returns the last matching component instance
    * @example
    * const { find } = render(<App />)

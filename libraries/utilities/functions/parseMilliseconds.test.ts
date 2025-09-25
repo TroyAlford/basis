@@ -29,10 +29,10 @@ describe('parseMilliseconds', () => {
   })
 
   test.each([
-    [NaN, ZERO],  // Not a number
-    [Infinity, ZERO],  // Infinite values
-    [-Infinity, ZERO],  // Negative infinite values
-    [null, ZERO],  // Null
+    [NaN, ZERO], // Not a number
+    [Infinity, ZERO], // Infinite values
+    [-Infinity, ZERO], // Negative infinite values
+    [null, ZERO], // Null
   ])('should handle invalid input %p correctly', (actual, expected) => {
     const result = parseMilliseconds(actual)
     expect(result).toEqual(expected)
