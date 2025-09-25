@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { formatNumber } from '@basis/utilities'
+import { formatNumber, isNil } from '@basis/utilities'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
 import type { IFocusable } from '../../mixins/Focusable'
@@ -21,11 +21,11 @@ interface Props extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable {
 }
 
 /**
- * Number input editor component that extends the Editor base class.
- * Handles number formatting with comma separators.
+ * Simple number input editor component that extends the Editor base class.
  */
 export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
   static displayName = 'NumberEditor'
+
   static get defaultProps() {
     return {
       ...super.defaultProps,
@@ -40,39 +40,70 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
       .add(PrefixSuffix)
   }
 
+  static sanitize(value: string | number): string {
+    if (isNil(value) || String(value).trim() === '') return ''
+    let str = String(value).trim()
+    const isNegative = str.startsWith('-')
+    // Remove all characters except digits and dots
+    str = str.replace(/[^0-9.]/g, '')
+    // Only keep the first decimal point, drop others
+    const [intPart, ...decParts] = str.split('.')
+    const decPart = decParts.length > 0 ? decParts.join('') : undefined
+    const cleaned = decPart !== undefined ? `${intPart}.${decPart}` : intPart
+    return isNegative ? `-${cleaned}` : cleaned
+  }
+
   /**
    * Formats a number with comma separators.
    * @param value The number to format.
    * @returns The formatted string.
    */
-  private formatNumber(value: number | null): string {
-    if (value === null || value === undefined) return ''
-    return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  static formatNumber(value: string | number): string {
+    const sanitized = NumberEditor.sanitize(value)
+
+    // Handle empty string
+    if (sanitized === '') return ''
+
+    // Handle single decimal point
+    if (sanitized === '.') return '.'
+
+    // Split by decimal point
+    const isNegative = sanitized.startsWith('-')
+    const cleanValue = sanitized.replace('-', '')
+    const hasDecimalPoint = cleanValue.includes('.')
+    const [before = '0', after = ''] = cleanValue.split('.')
+
+    // Format integer part with commas
+    const formattedInteger = before.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+
+    // Handle decimal part
+    let decimalPart = ''
+    if (hasDecimalPoint) {
+      decimalPart = after.length === 0 ? '.' : `.${after}`
+    }
+
+    return [
+      isNegative ? '-' : '',
+      formattedInteger,
+      decimalPart,
+    ].join('')
   }
 
-  /**
-   * Parses a formatted number string back to a number.
-   * @param value The formatted string to parse.
-   * @returns The parsed number.
-   */
-  private parseNumber(value: string): number {
-    const cleanValue = value.replace(/,/g, '')
-    return cleanValue === '' ? 0 : parseInt(cleanValue, 10)
-  }
+  static getCursorPosition(input: HTMLInputElement): { prefix: string, selected: string, suffix: string } {
+    const value = input.value
+    const prefix = value.slice(0, input.selectionStart)
+    const selected = value.slice(input.selectionStart, input.selectionEnd)
+    const suffix = value.slice(input.selectionEnd)
 
-  /**
-   * Gets the input value to display with number formatting.
-   * @returns The formatted input value.
-   */
-  protected get inputValue(): string {
-    if (this.current === null || this.current === undefined) return ''
-    return this.current === 0 ? '' : this.formatNumber(this.current)
+    return {
+      prefix: NumberEditor.sanitize(prefix),
+      selected: NumberEditor.sanitize(selected),
+      suffix: NumberEditor.sanitize(suffix),
+    }
   }
-
-  #handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value
-    const numberValue = this.parseNumber(value)
-    this.handleChange(numberValue)
+  protected handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(e.target.value) || 0
+    this.handleChange(value)
   }
 
   protected handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -80,16 +111,10 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
     this.props.onKeyDown(event)
     if (event.defaultPrevented) return
 
-    // Check if step should be applied (arrow keys are pressed)
     if ([Keyboard.ArrowUp, Keyboard.ArrowDown].includes(event.key as Keyboard)) {
-      // This component handles arrow keys for step functionality
       event.preventDefault()
-
       const currentValue = this.current ?? 0
-      const newValue = event.key === Keyboard.ArrowUp
-        ? currentValue + step
-        : currentValue - step
-
+      const newValue = event.key === Keyboard.ArrowUp ? currentValue + step : currentValue - step
       this.handleChange(newValue)
     }
   }
@@ -115,8 +140,8 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
         className="value"
         name={this.props.field}
         type="text"
-        value={this.inputValue}
-        onChange={this.#handleChange}
+        value={this.current ?? ''}
+        onChange={this.handleInputChange}
         onKeyDown={this.handleKeyDown}
       />
     )
