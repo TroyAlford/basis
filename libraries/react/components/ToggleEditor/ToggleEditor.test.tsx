@@ -9,7 +9,7 @@ describe('ToggleEditor', () => {
       const { node } = await render(<ToggleEditor onChange={() => undefined} />)
 
       expect(node.tagName).toBe('BUTTON')
-      expect(node).toHaveClass('toggle', 'editor', 'component', 'off', 'clickable')
+      expect(node).toHaveClass('toggle-editor', 'component', 'editor', 'toggle')
       expect(node).toHaveAttribute('data-state', 'off')
       expect(node).toHaveAttribute('aria-pressed', 'false')
       expect(node.textContent).toBe('Off')
@@ -18,7 +18,7 @@ describe('ToggleEditor', () => {
     test('renders in on state', async () => {
       const { node } = await render(<ToggleEditor value={true} onChange={() => undefined} />)
 
-      expect(node).toHaveClass('on')
+      expect(node).toHaveClass('toggle-editor', 'component', 'editor', 'toggle')
       expect(node).toHaveAttribute('data-state', 'on')
       expect(node).toHaveAttribute('aria-pressed', 'true')
       expect(node.textContent).toBe('On')
@@ -56,9 +56,10 @@ describe('ToggleEditor', () => {
     test('renders in read-only mode', async () => {
       const { node } = await render(<ToggleEditor readOnly={true} onChange={() => undefined} />)
 
-      expect(node).toHaveClass('read-only')
+      expect(node).toHaveClass('toggle-editor', 'component', 'editor', 'toggle')
       expect(node).toHaveAttribute('tabIndex', '-1')
       expect(node).toHaveAttribute('disabled', '')
+      expect(node).toHaveAttribute('readOnly', '')
     })
   })
 
@@ -122,7 +123,7 @@ describe('ToggleEditor', () => {
       const { node } = await render(<ToggleEditor value={true} onChange={onChange} />)
 
       expect(node).toHaveAttribute('aria-pressed', 'true')
-      expect(node).toHaveClass('on')
+      expect(node).toHaveAttribute('data-state', 'on')
     })
 
     test('handles uncontrolled mode', async () => {
@@ -130,7 +131,7 @@ describe('ToggleEditor', () => {
       const { node } = await render(<ToggleEditor initialValue={true} onChange={onChange} />)
 
       expect(node).toHaveAttribute('aria-pressed', 'true')
-      expect(node).toHaveClass('on')
+      expect(node).toHaveAttribute('data-state', 'on')
     })
   })
 
@@ -169,12 +170,69 @@ describe('ToggleEditor', () => {
       expect(node.textContent?.trim()).toBe('Off')
     })
 
+    test('renders children when on/off are undefined', async () => {
+      const { node: offNode } = await render(
+        <ToggleEditor value={false} onChange={() => undefined}>
+          Custom Content
+        </ToggleEditor>,
+      )
+      expect(offNode.textContent?.trim()).toBe('Custom Content')
+
+      const { node: onNode } = await render(
+        <ToggleEditor value={true} onChange={() => undefined}>
+          Custom Content
+        </ToggleEditor>,
+      )
+      expect(onNode.textContent?.trim()).toBe('Custom Content')
+    })
+
+    test('prioritizes on/off props over children', async () => {
+      const { node: offNode } = await render(
+        <ToggleEditor off="Off Text" value={false} onChange={() => undefined}>
+          Children Content
+        </ToggleEditor>,
+      )
+      expect(offNode.textContent?.trim()).toBe('Off Text')
+
+      const { node: onNode } = await render(
+        <ToggleEditor on="On Text" value={true} onChange={() => undefined}>
+          Children Content
+        </ToggleEditor>,
+      )
+      expect(onNode.textContent?.trim()).toBe('On Text')
+    })
+
+    test('falls back to default when on/off and children are undefined', async () => {
+      const { node: offNode } = await render(
+        <ToggleEditor value={false} onChange={() => undefined} />,
+      )
+      expect(offNode.textContent?.trim()).toBe('Off')
+
+      const { node: onNode } = await render(
+        <ToggleEditor value={true} onChange={() => undefined} />,
+      )
+      expect(onNode.textContent?.trim()).toBe('On')
+    })
+
     test('handles React element icons', async () => {
       const CustomIcon = <svg data-testid="react-element-icon" />
       const { node } = await render(<ToggleEditor on={CustomIcon} value={true} onChange={() => undefined} />)
 
       const icon = node.querySelector('[data-testid="react-element-icon"]')
       expect(icon).toBeTruthy()
+    })
+
+    test('handles React element children', async () => {
+      const CustomContent = <span data-testid="custom-children">Custom</span>
+      const { node } = await render(
+        <ToggleEditor value={false} onChange={() => undefined}>
+          {CustomContent}
+        </ToggleEditor>,
+      )
+
+      const content = node.querySelector('[data-testid="custom-children"]')
+      expect(content).toBeTruthy()
+      expect(content?.textContent).toBe('Custom')
     })
 
   })
