@@ -35,7 +35,16 @@ export class Router extends Component<Props> {
   static Redirect = Redirect
   static navigate = navigate
 
-  static get windowURL() { return window.location.pathname + window.location.search }
+  static get serverSide() { return typeof window === 'undefined' }
+  static get location() { return Router.serverSide ? new Location() : window.location }
+  static get search() { return Router.serverSide ? '' : Router.location.search ?? '' }
+  static get origin() { return Router.serverSide ? '' : Router.location.origin ?? '' }
+  static get href() { return Router.serverSide ? '' : Router.location.href ?? '' }
+  static get windowURL() {
+    return Router.serverSide
+      ? ''
+      : Router.location.pathname + Router.location.search
+  }
 
   componentDidMount(): void {
     window.addEventListener(NavigateEvent.name, this.#handleUpdate)
@@ -49,7 +58,9 @@ export class Router extends Component<Props> {
 
   #handleUpdate = (): void => {
     this.forceUpdate()
-    handleNavigationScrolling(window.location.href)
+    if (typeof window !== 'undefined') {
+      handleNavigationScrolling(window.location.href)
+    }
   }
 
   /**
