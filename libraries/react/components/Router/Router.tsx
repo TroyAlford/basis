@@ -13,7 +13,11 @@ import { Switch } from './Switch'
 interface Props {
   /** The routes to render */
   children: React.ReactNode,
+  /** The URL to use for server-side rendering (pathname + search) */
+  url?: string,
 }
+
+const WILDCARD_ROUTES = ['*', '.*']
 
 /**
  * A component for client-side routing between pages
@@ -69,11 +73,18 @@ export class Router extends Component<Props> {
    * @returns The rendered route or null if no match
    */
   renderRoute = (): React.ReactNode | null => {
-    const currentURL = Router.windowURL
+    /*
+     * During hydration, use SSR URL if available, otherwise use window URL
+     * This ensures server and client render the same route
+     */
+    const currentURL = this.props.url ?? Router.windowURL
     const route = React.Children.toArray(this.props.children).find(child => {
       if (!React.isValidElement(child) || child.type !== Router.Route) return false
 
       const template = (child.props as Route<unknown>['props']).template
+
+      // Handle wildcard route - always matches, don't parse
+      if (WILDCARD_ROUTES.includes(template)) return true
 
       // Handle static routes (exact path matches)
       if (template === currentURL) return true
@@ -84,7 +95,10 @@ export class Router extends Component<Props> {
 
     if (route) {
       const { children, redirectTo, template } = route.props as Route<unknown>['props']
-      const params = parseTemplateURI(currentURL, template) || {}
+
+      const params = WILDCARD_ROUTES.includes(template)
+        ? {} // Wildcard routes don't have params to parse
+        : parseTemplateURI(currentURL, template) || {}
 
       if (redirectTo) return <Router.Redirect to={redirectTo} />
       if (typeof children === 'function') return children(params)
