@@ -211,6 +211,167 @@ describe('NumberEditor', () => {
 
   })
 
+  describe('min/max constraints', () => {
+    test('clamps value to max on input', async () => {
+      const { node } = await render(<NumberEditor max={10} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '15')).toRaise(onChange, 10)
+    })
+
+    test('clamps value to min on input', async () => {
+      const { node } = await render(<NumberEditor min={0} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '-5')).toRaise(onChange, 0)
+    })
+
+    test('allows value within min/max range', async () => {
+      const { node } = await render(<NumberEditor max={10} min={0} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '5')).toRaise(onChange, 5)
+    })
+
+    test('clamps to max when incrementing with arrow up', async () => {
+      const { node } = await render(
+        <NumberEditor
+          initialValue={8}
+          max={10}
+          step={5}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+        />,
+      )
+      const numberInput = getInput(node)
+
+      await Simulate.keyDown(numberInput, Keyboard.ArrowUp, onKeyDown)
+      expect(onChange).toHaveBeenCalledWith(10, '', expect.any(Object))
+    })
+
+    test('clamps to min when decrementing with arrow down', async () => {
+      const { node } = await render(
+        <NumberEditor
+          initialValue={2}
+          min={0}
+          step={5}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+        />,
+      )
+      const numberInput = getInput(node)
+
+      await Simulate.keyDown(numberInput, Keyboard.ArrowDown, onKeyDown)
+      expect(onChange).toHaveBeenCalledWith(0, '', expect.any(Object))
+    })
+
+    test('works with decimal min/max values', async () => {
+      const { node } = await render(<NumberEditor max={1} min={0} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '1.5')).toRaise(onChange, 1)
+      await expect(Simulate.change(numberInput, '-0.5')).toRaise(onChange, 0)
+      await expect(Simulate.change(numberInput, '0.5')).toRaise(onChange, 0.5)
+    })
+
+    test('works with negative min/max range', async () => {
+      const { node } = await render(<NumberEditor max={-1} min={-10} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '-5')).toRaise(onChange, -5)
+      await expect(Simulate.change(numberInput, '-15')).toRaise(onChange, -10)
+      await expect(Simulate.change(numberInput, '0')).toRaise(onChange, -1)
+    })
+
+    test('allows value at exact min boundary', async () => {
+      const { node } = await render(<NumberEditor min={0} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '0')).toRaise(onChange, 0)
+    })
+
+    test('allows value at exact max boundary', async () => {
+      const { node } = await render(<NumberEditor max={10} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '10')).toRaise(onChange, 10)
+    })
+
+    test('works with only min specified', async () => {
+      const { node } = await render(<NumberEditor min={0} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '1000')).toRaise(onChange, 1000)
+      await expect(Simulate.change(numberInput, '-5')).toRaise(onChange, 0)
+    })
+
+    test('works with only max specified', async () => {
+      const { node } = await render(<NumberEditor max={10} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '-1000')).toRaise(onChange, -1000)
+      await expect(Simulate.change(numberInput, '15')).toRaise(onChange, 10)
+    })
+
+    test('handles edge case where min equals max', async () => {
+      const { node } = await render(<NumberEditor max={5} min={5} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '3')).toRaise(onChange, 5)
+      await expect(Simulate.change(numberInput, '5')).toRaise(onChange, 5)
+      await expect(Simulate.change(numberInput, '7')).toRaise(onChange, 5)
+    })
+
+    test('defaults to Infinity/-Infinity when min/max not provided', async () => {
+      const { node } = await render(<NumberEditor onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      await expect(Simulate.change(numberInput, '999999')).toRaise(onChange, 999999)
+      await expect(Simulate.change(numberInput, '-999999')).toRaise(onChange, -999999)
+    })
+
+    test('does not call onChange when clamped value equals current value', async () => {
+      const { node } = await render(<NumberEditor initialValue={0} min={0} onChange={onChange} />)
+      const numberInput = getInput(node)
+
+      // Try to set to -5, which should clamp to 0 (same as current)
+      await Simulate.change(numberInput, '-5')
+      expect(onChange).not.toHaveBeenCalled()
+    })
+
+    test('does not call onChange when arrow down would clamp to current value', async () => {
+      const { node } = await render(
+        <NumberEditor
+          initialValue={0}
+          min={0}
+          step={1}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+        />,
+      )
+      const numberInput = getInput(node)
+
+      await Simulate.keyDown(numberInput, Keyboard.ArrowDown, onKeyDown)
+      expect(onChange).not.toHaveBeenCalled()
+    })
+
+    test('does not call onChange when arrow up would clamp to current value', async () => {
+      const { node } = await render(
+        <NumberEditor
+          initialValue={10}
+          max={10}
+          step={1}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+        />,
+      )
+      const numberInput = getInput(node)
+
+      await Simulate.keyDown(numberInput, Keyboard.ArrowUp, onKeyDown)
+      expect(onChange).not.toHaveBeenCalled()
+    })
+  })
+
   describe('mixin integration', () => {
     test('applies Accessible mixin', async () => {
       const { node } = await render(

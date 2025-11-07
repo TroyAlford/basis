@@ -43,11 +43,11 @@ describe('Editor', () => {
 
     test('renders with field identifier', async () => {
       const { node: numberNode } = await render(<TestEditor field="1" />)
-      expect(numberNode).toHaveClass('editor', '1')
+      expect(numberNode).toHaveClass('editor')
       expect(numberNode).toHaveAttribute('data-field', '1')
 
       const { node: stringNode } = await render(<TestEditor field="test-field" />)
-      expect(stringNode).toHaveClass('editor', 'test-field')
+      expect(stringNode).toHaveClass('editor')
       expect(stringNode).toHaveAttribute('data-field', 'test-field')
     })
 

@@ -1,4 +1,5 @@
 export { AbortablePromise } from './functions/AbortablePromise'
+export { clamp } from './functions/clamp'
 export { classNames } from './functions/classNames'
 export { clone } from './functions/clone'
 export { Color } from './functions/Color'

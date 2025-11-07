@@ -1,7 +1,9 @@
 import { Pin } from '../types/Pin'
 import { css, style } from '../utilities/style'
 
-export const PinnableStyles = style('basis:pinnable', css`
+import.meta.hot.accept()
+
+style('basis:pinnable', css`
   [data-pin] {
     position: sticky;
 

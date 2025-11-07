@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { AbortablePromise, isNil, match, noop } from '@basis/utilities'
+import { isNil, match, noop } from '@basis/utilities'
 import type { IAccessible } from '../../mixins/Accessible'
 import type { IFocusable } from '../../mixins/Focusable'
 import type { IPlaceholder } from '../../mixins/Placeholder'
@@ -79,7 +79,7 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
 
   private input = React.createRef<TextEditor>()
   private debounceTimeout?: ReturnType<typeof setTimeout>
-  private searching?: AbortablePromise<T[]>
+  private searchCounter = 0
   private unsubscribeBlur?: () => void
 
   get attributes() {
@@ -119,7 +119,6 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
   override componentWillUnmount(): void {
     super.componentWillUnmount()
     this.unsubscribeBlur?.()
-    this.searching?.abort()
     clearTimeout(this.debounceTimeout)
   }
 
@@ -133,28 +132,25 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
     if (search.length >= (this.props.minimumQueryLength ?? 0)) {
       clearTimeout(this.debounceTimeout)
       this.debounceTimeout = setTimeout(async () => {
-        // Abort any previous search
-        this.searching?.abort()
-
+        const searchId = ++this.searchCounter
         await this.setState({ loading: true })
 
-        // Create abortable promise with 5 second timeout for search operations
-        this.searching = new AbortablePromise<T[]>((resolve, reject) => {
-          const searchPromise = this.props.onSearch(search)
-          if (searchPromise && typeof searchPromise.then === 'function') {
-            searchPromise.then(resolve).catch(reject)
-          } else {
-            reject(new Error('onSearch must return a Promise'))
-          }
-        }, { timeout: 5000 })
-
         try {
-          const options = await this.searching
-          await this.setState({ loading: false, open: true, options })
-          this.props.onOpen()
+          const options = await this.props.onSearch(search)
+
+          // Only update if this is still the most recent search
+          if (this.searchCounter === searchId) {
+            await this.setState({ loading: false, open: true, options })
+            this.props.onOpen()
+          }
         } catch (error) {
-          if (error instanceof Error && error.name !== 'AbortError') {
-            await this.setState({ error, loading: false })
+          // Only update if this is still the most recent search
+          if (this.searchCounter === searchId) {
+            if (error instanceof Error) {
+              await this.setState({ error, loading: false })
+            } else {
+              await this.setState({ loading: false })
+            }
           }
         }
       }, 250)

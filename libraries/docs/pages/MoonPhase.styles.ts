@@ -1,6 +1,8 @@
 import { css, style } from '@basis/react'
 
-export const moonPhaseDocsStyles = style('basis:docs:moonphase', css`
+import.meta.hot.accept()
+
+style('basis:docs:moonphase', css`
   .moon-phase-docs {
     .moon-phase-section {
       background-color: #f8f9fa;

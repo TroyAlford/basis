@@ -1,6 +1,8 @@
 import { css, style } from '@basis/react'
 
-export const iconsDocsStyles = style('basis:docs:icons', css`
+import.meta.hot.accept()
+
+style('basis:docs:icons', css`
   .icon-demo-container {
     --basis-icon-color: var(--demo-icon-color, currentColor);
     --basis-icon-stroke: var(--demo-icon-color, currentColor);

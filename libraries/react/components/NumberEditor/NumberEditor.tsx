@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { formatNumber, isNil } from '@basis/utilities'
+import { clamp, formatNumber, isNil } from '@basis/utilities'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
 import type { IFocusable } from '../../mixins/Focusable'
@@ -16,6 +16,10 @@ import './NumberEditor.styles.ts'
 
 /** Props specific to number editor. */
 interface Props extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable {
+  /** Maximum allowed value. Defaults to Infinity. */
+  max?: number,
+  /** Minimum allowed value. Defaults to -Infinity. */
+  min?: number,
   /** Step value for up/down arrow keys. If provided, arrow keys will adjust the value by this amount. */
   step?: number,
 }
@@ -29,6 +33,8 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
   static get defaultProps() {
     return {
       ...super.defaultProps,
+      max: Infinity,
+      min: -Infinity,
       step: 1,
     }
   }
@@ -102,19 +108,21 @@ export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
     }
   }
   protected handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseFloat(e.target.value) || 0
+    const { max, min } = this.props
+    const value = clamp(parseFloat(e.target.value) || 0, { max, min })
     this.handleChange(value)
   }
 
   protected handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    const { step = 1 } = this.props
+    const { max, min, step = 1 } = this.props
     this.props.onKeyDown(event)
     if (event.defaultPrevented) return
 
     if ([Keyboard.ArrowUp, Keyboard.ArrowDown].includes(event.key as Keyboard)) {
       event.preventDefault()
       const currentValue = this.current ?? 0
-      const newValue = event.key === Keyboard.ArrowUp ? currentValue + step : currentValue - step
+      const delta = event.key === Keyboard.ArrowUp ? step : -step
+      const newValue = clamp(currentValue + delta, { max, min })
       this.handleChange(newValue)
     }
   }

@@ -29,6 +29,7 @@ export const IndexHTML: React.FC<Props> = ({ scripts = [] }) => (
       ))}
     </head>
     <body>
+      {/** biome-ignore lint/correctness/useUniqueElementIds: 'root' is always unique */}
       <div id="root" />
     </body>
   </html>

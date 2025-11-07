@@ -1,6 +1,8 @@
 import { css, style } from '@basis/react'
 
-export const docsStyles = style('basis:docs:index', css`
+import.meta.hot.accept()
+
+style('basis:docs:index', css`
   main {
     h1 { border-bottom: 2px solid var(--basis-color-primary); }
 
