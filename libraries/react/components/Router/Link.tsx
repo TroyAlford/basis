@@ -41,7 +41,7 @@ export class Link extends Component<Props> {
   #handleUpdate = (): void => this.forceUpdate()
 
   get isActive(): boolean {
-    return window.location.pathname === this.props.to
+    return window !== undefined ? window.location.pathname === this.props.to : false
   }
 
   handleClick: React.MouseEventHandler<HTMLAnchorElement> = event => {
