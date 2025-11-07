@@ -1,6 +1,8 @@
 import { css, style } from '../../utilities/style'
 
-export const CheckboxEditorStyles = style('basis:checkbox-editor', css`
+import.meta.hot.accept()
+
+style('basis:checkbox-editor', css`
   .checkbox-editor.editor {
     --basis-icon-size: 1.25em;
 

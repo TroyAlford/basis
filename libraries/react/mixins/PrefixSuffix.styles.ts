@@ -1,6 +1,8 @@
 import { css, style } from '../utilities/style'
 
-export const PrefixSuffixStyles = style('basis:prefix-suffix', css`
+import.meta.hot.accept()
+
+style('basis:prefix-suffix', css`
   :root {
     --basis-prefix-suffix-background: #8884;
     --basis-prefix-suffix-foreground: #888F;

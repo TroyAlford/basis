@@ -1,6 +1,8 @@
 import { css, style } from '../../utilities/style'
 
-export const NumberEditorStyles = style('basis:number-editor', css`
+import.meta.hot.accept()
+
+style('basis:number-editor', css`
   :root {
     --basis-number-editor-background: var(--basis-color-background);
     --basis-number-editor-border-radius: var(--basis-radius-sm);

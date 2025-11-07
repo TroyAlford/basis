@@ -10,6 +10,8 @@ import './ToggleEditor.styles.ts'
 
 /** Props specific to toggle editor. */
 interface Props extends IAccessible, IFocusable {
+  /** The children of the component. If on/off are provided, they take precedence over children in the related state. */
+  children?: React.ReactNode,
   /** The data value for this toggle */
   data?: unknown,
   /** Whether the toggle is disabled */
@@ -28,8 +30,8 @@ export class ToggleEditor extends Editor<boolean, HTMLButtonElement, Props> {
   static displayName = 'ToggleEditor'
   static defaultProps = {
     ...super.defaultProps,
-    off: 'Off',
-    on: 'On',
+    off: undefined,
+    on: undefined,
   }
   static get mixins(): Set<Mixin> {
     return super.mixins
@@ -69,25 +71,21 @@ export class ToggleEditor extends Editor<boolean, HTMLButtonElement, Props> {
       'tabIndex': this.props.readOnly ? -1 : 0,
     }
   }
-
+  override get classNames(): Set<string> { return super.classNames.add('toggle') }
   override get tag(): 'button' { return 'button' }
-
-  override get classNames(): Set<string> {
-    const currentValue = this.current ?? false
-    return super.classNames
-      .add('toggle')
-      .add(currentValue ? 'on' : 'off')
-      .add(this.props.readOnly ? 'read-only' : 'clickable')
-  }
 
   /**
    * Renders the component's content.
    * @returns The component's content.
    */
   content(): React.ReactNode {
-    const { off, on } = this.props
+    const { children, off, on } = this.props
     const currentValue = this.current ?? false
 
-    return currentValue ? (on ?? 'On') : (off ?? 'Off')
+    return super.content(
+      currentValue
+        ? on ?? children ?? 'On'
+        : off ?? children ?? 'Off',
+    )
   }
 }
