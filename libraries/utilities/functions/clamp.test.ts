@@ -77,4 +77,3 @@ describe('clamp', () => {
     expect(clamp(-5, { max: 10, min: 0 })).toBe(0)
   })
 })
-

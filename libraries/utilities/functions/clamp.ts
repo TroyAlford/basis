@@ -19,4 +19,3 @@ export function clamp(value: number, options: ClampOptions = {}): number {
   const { max = Infinity, min = -Infinity } = options
   return Math.min(Math.max(value, min), max)
 }
-

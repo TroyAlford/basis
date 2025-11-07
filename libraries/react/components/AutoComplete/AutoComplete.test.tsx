@@ -24,9 +24,7 @@ describe('AutoComplete', () => {
       await Simulate.change(input, 'test')
 
       // Wait for debounce and search
-      await waitFor(() => {
-        return onSearch.mock.calls.length > 0
-      }, { timeout: 500 })
+      await waitFor(() => onSearch.mock.calls.length > 0, { timeout: 500 })
 
       expect(onSearch).toHaveBeenCalledWith('test')
     })
@@ -48,9 +46,7 @@ describe('AutoComplete', () => {
       await Simulate.change(input, 'test')
 
       // Wait for search to be called
-      await waitFor(() => {
-        return onSearch.mock.calls.length > 0
-      }, { timeout: 500 })
+      await waitFor(() => onSearch.mock.calls.length > 0, { timeout: 500 })
 
       // Component should handle the error without crashing
       expect(onSearch).toHaveBeenCalledWith('test')
@@ -103,7 +99,7 @@ describe('AutoComplete', () => {
 
       // Type less than minimum
       await Simulate.change(input, 'te')
-      
+
       // Wait a bit to ensure no search is triggered
       await new Promise(resolve => setTimeout(resolve, 300))
 
@@ -114,9 +110,7 @@ describe('AutoComplete', () => {
       await Simulate.change(input, 'test')
 
       // Wait for debounce
-      await waitFor(() => {
-        return onSearch.mock.calls.length > 0
-      }, { timeout: 500 })
+      await waitFor(() => onSearch.mock.calls.length > 0, { timeout: 500 })
 
       // Now should call onSearch
       expect(onSearch).toHaveBeenCalledTimes(1)
