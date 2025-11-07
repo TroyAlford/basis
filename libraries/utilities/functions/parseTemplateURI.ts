@@ -9,6 +9,8 @@ export const parseTemplateURI = <Token extends string = string>(
   template: string,
 ): Record<Token, string> => {
   const [templatePath, templateQuery] = template.split('?')
+  if (!templatePath) return null
+
   const [uriPath, uriQuery] = uri.split('?')
   const regex = new RegExp(`^${templatePath.replace(/:([a-z]*)/gi, '(?<$1>[^/]+)')}$`)
 
