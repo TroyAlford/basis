@@ -169,42 +169,6 @@ export class ToggleEditorDocs extends Documentation<ConfigState> {
             />
           `)}
         </Section>
-        <Section title="Replacing Nerdrage ToggleEditor">
-          <p>
-            ToggleEditor is designed as a drop-in replacement for the nerdrage ToggleEditor component.
-            Here's how to migrate:
-          </p>
-          <h3>Before (Nerdrage)</h3>
-          {Code.format(`
-            import { ToggleEditor } from '@nerdrage/components'
-
-            <ToggleEditor
-              value={isEnabled}
-              onChange={(value) => setIsEnabled(value)}
-              iconOn={CheckIcon}
-              iconOff={BlankIcon}
-            />
-          `)}
-          <h3>After (Basis)</h3>
-          {Code.format(`
-            import { ToggleEditor } from '@basis/react'
-
-            <ToggleEditor
-              value={isEnabled}
-              onChange={(value) => setIsEnabled(value)}
-              on={<CheckIcon />}
-              off={<BlankIcon />}
-            />
-          `)}
-          <h3>Migration Benefits</h3>
-          <ul>
-            <li><strong>Consistent API</strong>: Same pattern as other Editor components</li>
-            <li><strong>Better Accessibility</strong>: Built-in ARIA attributes and keyboard navigation</li>
-            <li><strong>Type Safety</strong>: Full TypeScript support</li>
-            <li><strong>Simplified Props</strong>: Cleaner prop names (on/off instead of iconOn/iconOff)</li>
-            <li><strong>Customizable Styling</strong>: CSS variables for easy theming</li>
-          </ul>
-        </Section>
         <Section title="Key Props">
           <p>
             ToggleEditor supports both controlled and uncontrolled modes. Use <code>value</code> for controlled
