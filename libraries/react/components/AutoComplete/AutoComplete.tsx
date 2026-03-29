@@ -257,7 +257,7 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
       )
     })
 
-    let content: React.ReactNode = null
+    let content: React.ReactNode
 
     if (loading) {
       content = loadingContent ?? <div className="loading">Loading...</div>

@@ -1,0 +1,26 @@
+diff --git a/lib/index.cjs.js b/lib/index.cjs.js
+index 7923f1c7e341d5ace344fceaa89acd2efbfa9d41..4e3521170c0cdf8b9c963a79686d342b43a34ddb 100644
+--- a/lib/index.cjs.js
++++ b/lib/index.cjs.js
+@@ -166,7 +166,7 @@ const compareFn = (isAscending, isInsensitive, isNatural) => (...args) => {
+ };
+ 
+ function createNodeSwapper(context) {
+-    const sourceCode = context.getSourceCode();
++    const sourceCode = context.sourceCode;
+     /**
+      * Returns the indent range of a node if it's the first on its line.
+      * Otherwise, returns a range starting immediately after the previous sibling.
+diff --git a/lib/index.mjs b/lib/index.mjs
+index 1de5e02866eddecca904f9de40b004109d3b937b..f330cf15e9bdb6bff5e836e163bac49106dd9b4e 100644
+--- a/lib/index.mjs
++++ b/lib/index.mjs
+@@ -162,7 +162,7 @@ const compareFn = (isAscending, isInsensitive, isNatural) => (...args) => {
+ };
+ 
+ function createNodeSwapper(context) {
+-    const sourceCode = context.getSourceCode();
++    const sourceCode = context.sourceCode;
+     /**
+      * Returns the indent range of a node if it's the first on its line.
+      * Otherwise, returns a range starting immediately after the previous sibling.
