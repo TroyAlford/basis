@@ -1,40 +1,39 @@
 import type { TSESTree } from '@typescript-eslint/types'
-import { ESLintUtils } from '@typescript-eslint/utils'
+import type { Rule } from 'eslint'
 
-const createRule = ESLintUtils.RuleCreator(
-  name => `https://example.com/rule/${name}`,
-)
+export const noMixedTypeImports: Rule.RuleModule = {
+  create(context: Rule.RuleContext): Rule.RuleListener {
+    return {
+      ImportDeclaration(node) {
+        // With `@typescript-eslint/parser`, this is a `TSESTree` tree; ESLint's visitor type is ESTree-only.
+        const decl = node as TSESTree.ImportDeclaration
+        const imports = {
+          type: new Set<string>(),
+          value: new Set<string>(),
+        }
+        const semi = context.sourceCode.getText(decl).endsWith(';') ? ';' : ''
 
-export const noMixedTypeImports = createRule({
-  create: context => ({
-    ImportDeclaration(node: TSESTree.ImportDeclaration) {
-      const imports = {
-        type: new Set<string>(),
-        value: new Set<string>(),
-      }
-      const semi = context.sourceCode.getText(node).endsWith(';') ? ';' : ''
+        decl.specifiers.forEach(specifier => {
+          if (specifier.type !== 'ImportSpecifier') return
+          const importedName = specifier.imported.type === 'Identifier'
+            ? specifier.imported.name
+            : specifier.imported.value
+          imports[specifier.importKind].add(importedName)
+        })
 
-      node.specifiers.forEach(specifier => {
-        if (specifier.type !== 'ImportSpecifier') return
-        const importedName = specifier.imported.type === 'Identifier'
-          ? specifier.imported.name
-          : specifier.imported.value
-        imports[specifier.importKind].add(importedName)
-      })
+        if (!imports.type.size || !imports.value.size) return
 
-      if (!imports.type.size || !imports.value.size) return
-
-      context.report({
-        fix: fixer => fixer.replaceTextRange(node.range, [
-          `import type { ${[...imports.type].join(', ')} } from '${node.source.value}'${semi}`,
-          `import { ${[...imports.value].join(', ')} } from '${node.source.value}'${semi}`,
-        ].join('\n')),
-        messageId: 'noMixedTypeImports',
-        node,
-      })
-    },
-  }),
-  defaultOptions: [],
+        context.report({
+          fix: fixer => fixer.replaceTextRange(decl.range, [
+            `import type { ${[...imports.type].join(', ')} } from '${decl.source.value}'${semi}`,
+            `import { ${[...imports.value].join(', ')} } from '${decl.source.value}'${semi}`,
+          ].join('\n')),
+          messageId: 'noMixedTypeImports',
+          node,
+        })
+      },
+    }
+  },
   meta: {
     docs: {
       description: 'Disallow mixing `type` and non-`type` imports on the same line.',
@@ -43,9 +42,7 @@ export const noMixedTypeImports = createRule({
     messages: {
       noMixedTypeImports: '`type` and non-`type` imports must be split onto separate statements.',
     },
-
     schema: [],
     type: 'suggestion',
   },
-  name: 'no-mixed-type-imports',
-})
+}

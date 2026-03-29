@@ -1,23 +1,37 @@
 import * as parser from '@typescript-eslint/parser'
-import { Linter } from '@typescript-eslint/utils/ts-eslint'
+import { Linter } from 'eslint'
 import { describe, expect, test } from 'bun:test'
 import { noMixedTypeImports } from './no-mixed-type-imports'
 
 describe('no-mixed-type-imports', () => {
   const lint = (code: string) => {
-    const linter = new Linter({ configType: 'eslintrc' })
-    linter.defineRule('no-mixed-type-imports', noMixedTypeImports)
-    linter.defineParser('@typescript-eslint/parser', parser)
-
-    return linter.verifyAndFix(code, {
-      parser: '@typescript-eslint/parser',
-      parserOptions: {
-        ecmaVersion: 'latest',
-        project: './tsconfig.json',
-        sourceType: 'module',
-      },
-      rules: { 'no-mixed-type-imports': 'error' },
-    }, { filename: __filename, fix: true })
+    const linter = new Linter()
+    return linter.verifyAndFix(
+      code,
+      [
+        {
+          languageOptions: {
+            parser,
+            parserOptions: {
+              ecmaVersion: 'latest',
+              project: './tsconfig.json',
+              sourceType: 'module',
+            },
+          },
+          plugins: {
+            test: {
+              rules: {
+                'no-mixed-type-imports': noMixedTypeImports,
+              },
+            },
+          },
+          rules: {
+            'test/no-mixed-type-imports': 'error',
+          },
+        },
+      ],
+      { filename: __filename, fix: true },
+    )
   }
 
   test.skipIf(!!Bun.env.CI)('outputs with/out semicolons, based on input line', () => {
@@ -36,15 +50,13 @@ describe('no-mixed-type-imports', () => {
     ])
   })
 
-  test('leaves correct code alone', () => {
-    test('leaves type and non-type imports on separate lines', () => {
-      const code = [
-        "import { a } from 'module'",
-        "import type { b } from 'module'",
-      ].join('\n')
-      const output = lint(code)
-      expect(output.fixed).toBe(false)
-      expect(output.output).toBe(code)
-    })
+  test('leaves type and non-type imports on separate lines', () => {
+    const code = [
+      "import { a } from 'module'",
+      "import type { b } from 'module'",
+    ].join('\n')
+    const output = lint(code)
+    expect(output.fixed).toBe(false)
+    expect(output.output).toBe(code)
   })
 })

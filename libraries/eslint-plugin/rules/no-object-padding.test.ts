@@ -4,14 +4,29 @@ import { noObjectPadding } from './no-object-padding'
 
 describe('no-object-padding', () => {
   const lint = (code: string) => {
-    const linter = new Linter({ configType: 'eslintrc' })
-    // @ts-expect-error - this seems impossible to type correctly
-    linter.defineRule('no-object-padding', noObjectPadding)
-
-    return linter.verifyAndFix(code, {
-      parserOptions: { ecmaVersion: 'latest' },
-      rules: { 'no-object-padding': 'error' },
-    }, { filename: __filename })
+    const linter = new Linter()
+    return linter.verifyAndFix(
+      code,
+      [
+        {
+          languageOptions: {
+            parserOptions: { ecmaVersion: 'latest' },
+          },
+          plugins: {
+            test: {
+              rules: {
+                'no-object-padding': noObjectPadding,
+              },
+            },
+          },
+          rules: {
+            'test/no-object-padding': 'error',
+          },
+        },
+      ],
+      // Use a .js path so the default JS parser runs; .ts would require the TS parser.
+      { filename: 'fixture.js' },
+    )
   }
 
   test('removes leading padding', () => {

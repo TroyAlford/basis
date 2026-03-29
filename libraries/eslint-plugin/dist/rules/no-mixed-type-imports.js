@@ -23,37 +23,38 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     }
     return to.concat(ar || Array.prototype.slice.call(from));
 };
-import { ESLintUtils } from '@typescript-eslint/utils';
-var createRule = ESLintUtils.RuleCreator(function (name) { return "https://example.com/rule/".concat(name); });
-export var noMixedTypeImports = createRule({
-    create: function (context) { return ({
-        ImportDeclaration: function (node) {
-            var imports = {
-                type: new Set(),
-                value: new Set(),
-            };
-            var semi = context.sourceCode.getText(node).endsWith(';') ? ';' : '';
-            node.specifiers.forEach(function (specifier) {
-                if (specifier.type !== 'ImportSpecifier')
+export var noMixedTypeImports = {
+    create: function (context) {
+        return {
+            ImportDeclaration: function (node) {
+                // With `@typescript-eslint/parser`, this is a `TSESTree` tree; ESLint's visitor type is ESTree-only.
+                var decl = node;
+                var imports = {
+                    type: new Set(),
+                    value: new Set(),
+                };
+                var semi = context.sourceCode.getText(decl).endsWith(';') ? ';' : '';
+                decl.specifiers.forEach(function (specifier) {
+                    if (specifier.type !== 'ImportSpecifier')
+                        return;
+                    var importedName = specifier.imported.type === 'Identifier'
+                        ? specifier.imported.name
+                        : specifier.imported.value;
+                    imports[specifier.importKind].add(importedName);
+                });
+                if (!imports.type.size || !imports.value.size)
                     return;
-                var importedName = specifier.imported.type === 'Identifier'
-                    ? specifier.imported.name
-                    : specifier.imported.value;
-                imports[specifier.importKind].add(importedName);
-            });
-            if (!imports.type.size || !imports.value.size)
-                return;
-            context.report({
-                fix: function (fixer) { return fixer.replaceTextRange(node.range, [
-                    "import type { ".concat(__spreadArray([], __read(imports.type), false).join(', '), " } from '").concat(node.source.value, "'").concat(semi),
-                    "import { ".concat(__spreadArray([], __read(imports.value), false).join(', '), " } from '").concat(node.source.value, "'").concat(semi),
-                ].join('\n')); },
-                messageId: 'noMixedTypeImports',
-                node: node,
-            });
-        },
-    }); },
-    defaultOptions: [],
+                context.report({
+                    fix: function (fixer) { return fixer.replaceTextRange(decl.range, [
+                        "import type { ".concat(__spreadArray([], __read(imports.type), false).join(', '), " } from '").concat(decl.source.value, "'").concat(semi),
+                        "import { ".concat(__spreadArray([], __read(imports.value), false).join(', '), " } from '").concat(decl.source.value, "'").concat(semi),
+                    ].join('\n')); },
+                    messageId: 'noMixedTypeImports',
+                    node: node,
+                });
+            },
+        };
+    },
     meta: {
         docs: {
             description: 'Disallow mixing `type` and non-`type` imports on the same line.',
@@ -65,5 +66,4 @@ export var noMixedTypeImports = createRule({
         schema: [],
         type: 'suggestion',
     },
-    name: 'no-mixed-type-imports',
-});
+};

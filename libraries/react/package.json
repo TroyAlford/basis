@@ -1,7 +1,7 @@
 {
   "name": "@basis/react",
   "dependencies": {
-    "@floating-ui/dom": "^1.7.4",
+    "@floating-ui/dom": "^1.7.6",
     "react": "^19",
     "react-dom": "^19"
   },
