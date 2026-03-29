@@ -21,10 +21,15 @@
     "typescript": "^5.9.3"
   },
   "scripts": {
+    "build": "bun run --filter='*' build",
     "docs": "bun ./libraries/docs/index.html",
-    "update:linter": "bun --filter=@basis/eslint-plugin run build",
+    "lint": "bun run lint:es && bun run lint:ts",
+    "lint:es": "bun run update:linter && bun eslint .",
+    "lint:ts": "bun tsc --noEmit",
+    "prepare": "husky",
     "test:develop": "bun test --watch",
     "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces",
+    "update:linter": "bun --filter=@basis/eslint-plugin run build",
     "workspace": "bun ./libraries/workspaces/source/bin/workspace.ts",
     "ws": "bun workspace"
   },
@@ -36,5 +41,11 @@
   ],
   "trustedDependencies": [
     "@basis/workspaces"
-  ]
+  ],
+  "patchedDependencies": {
+    "eslint-plugin-import@2.32.0": "patches/eslint-plugin-import@2.32.0.patch",
+    "eslint-plugin-named-import-spacing@1.0.3": "patches/eslint-plugin-named-import-spacing@1.0.3.patch",
+    "eslint-plugin-sort-keys-fix@1.1.2": "patches/eslint-plugin-sort-keys-fix@1.1.2.patch",
+    "eslint-plugin-typescript-sort-keys@3.3.0": "patches/eslint-plugin-typescript-sort-keys@3.3.0.patch"
+  }
 }

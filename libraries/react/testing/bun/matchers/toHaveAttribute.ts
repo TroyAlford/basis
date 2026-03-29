@@ -21,7 +21,7 @@ export function toHaveAttribute(
 
   const actual = node.getAttribute(name)
   let message = ''
-  let pass = false
+  let pass: boolean
 
   if (value === undefined) {
     message = `expected element to have attribute ${name}`

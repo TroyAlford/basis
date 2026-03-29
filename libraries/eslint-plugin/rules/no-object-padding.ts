@@ -1,5 +1,5 @@
-import type * as ESTree from 'estree'
 import type { Rule } from 'eslint'
+import type * as ESTree from 'estree'
 
 const WHITESPACE_LINE = /^\s*[\r\n]/gm
 

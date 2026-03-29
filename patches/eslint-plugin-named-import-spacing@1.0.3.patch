@@ -1,0 +1,13 @@
+diff --git a/dist/rules/named-import-spacing.js b/dist/rules/named-import-spacing.js
+index 1423f4ab3c90b738af36a48f6c41ec2b8b719dc5..ad6e5f80ec73eb507c5799ab48d369e6ee56b490 100644
+--- a/dist/rules/named-import-spacing.js
++++ b/dist/rules/named-import-spacing.js
+@@ -24,7 +24,7 @@ exports.default = utils_1.ESLintUtils.RuleCreator.withoutDocs({
+         "always"
+     ],
+     create(context) {
+-        const sourceCode = context.getSourceCode();
++        const sourceCode = context.sourceCode;
+         const requireSpace = !context.options[0] || context.options[0] === "always";
+         return {
+             ImportSpecifier: function (node) {

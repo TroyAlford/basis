@@ -207,9 +207,9 @@ export class Color {
     const sat = (s || 0) / 100
     const light = (l || 0) / 100
 
-    let r = 0
-    let g = 0
-    let b = 0
+    let r: number
+    let g: number
+    let b: number
 
     if (sat === 0) {
       r = g = b = light

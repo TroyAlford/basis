@@ -1,6 +1,6 @@
 import * as parser from '@typescript-eslint/parser'
-import { Linter } from 'eslint'
 import { describe, expect, test } from 'bun:test'
+import { Linter } from 'eslint'
 import { noMixedTypeImports } from './no-mixed-type-imports'
 
 describe('no-mixed-type-imports', () => {
