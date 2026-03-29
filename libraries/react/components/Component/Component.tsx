@@ -31,7 +31,7 @@ interface TProps<E extends Element = HTMLDivElement> {
 type P<E extends Element, T> = TProps<E> & T
 
 /**
- * The abstract base class for all components in the @basis/react package.
+ * The abstract base class for all components in the `@basis/react` package.
  * @template Props The props of the component.
  * @template Element The root element type of the component.
  * @template State The state of the component.

@@ -10,7 +10,7 @@ interface Props {
   children: React.ReactNode,
   /** Callback function called when the remove button is clicked. */
   onRemove?: (event: React.MouseEvent<HTMLAnchorElement>) => void,
-  /** Whether the tag can be removed. @default false */
+  /** Whether the tag can be removed. Defaults to `false`. */
   removable?: boolean,
 }
 

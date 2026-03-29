@@ -17,9 +17,9 @@ import './AutoComplete.styles.ts'
 /** Props for the AutoComplete component. */
 interface Props<T = unknown>
   extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable, Omit<IPopup, 'arrow'> {
-  /** Whether to automatically focus the input on mount. @default false */
+  /** Whether to automatically focus the input on mount. Defaults to `false`. */
   autoFocus?: boolean,
-  /** Whether to close the dropdown when an option is selected. @default true */
+  /** Whether to close the dropdown when an option is selected. Defaults to `true`. */
   closeOnSelect?: boolean,
   /** Function to get the disabled state of an option. */
   getOptionDisabled?: (option: T) => boolean,
@@ -29,7 +29,7 @@ interface Props<T = unknown>
   getOptionLabel: (option: T) => React.ReactNode,
   /** Function to get the value for an option. */
   getOptionValue: (option: T) => string,
-  /** Minimum length of search query before triggering search. @default 0 */
+  /** Minimum length of search query before triggering search. Defaults to `0`. */
   minimumQueryLength?: number,
   /** A callback function that is called when the dropdown is closed. */
   onClose?: () => void,

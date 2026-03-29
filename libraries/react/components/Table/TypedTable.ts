@@ -7,6 +7,7 @@ interface TypedTableInterface<TRow extends object> {
   Column: {
     Boolean: (props: ColumnProps<TRow, PathOf<TRow>>) => React.ReactNode,
     Date: (props: ColumnProps<TRow, PathOf<TRow>>) => React.ReactNode,
+    DateTime: (props: ColumnProps<TRow, PathOf<TRow>>) => React.ReactNode,
     Enum: (props: ColumnProps<TRow, PathOf<TRow>>) => React.ReactNode,
     Number: (props: ColumnProps<TRow, PathOf<TRow>>) => React.ReactNode,
     Text: (props: ColumnProps<TRow, PathOf<TRow>>) => React.ReactNode,

@@ -10,11 +10,11 @@ describe('no-mixed-type-imports', () => {
       code,
       [
         {
+          files: ['**/*.ts', '**/*.tsx'],
           languageOptions: {
             parser,
             parserOptions: {
               ecmaVersion: 'latest',
-              project: './tsconfig.json',
               sourceType: 'module',
             },
           },
@@ -30,11 +30,11 @@ describe('no-mixed-type-imports', () => {
           },
         },
       ],
-      { filename: __filename, fix: true },
+      { filename: 'no-mixed-type-imports.fixture.ts', fix: true },
     )
   }
 
-  test.skipIf(!!Bun.env.CI)('outputs with/out semicolons, based on input line', () => {
+  test('outputs with/out semicolons, based on input line', () => {
     const semi = lint("import { a, type b, c } from 'module';")
     expect(semi.fixed).toBe(true)
     expect(semi.output.split(/\n/)).toEqual([

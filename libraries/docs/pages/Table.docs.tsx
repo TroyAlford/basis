@@ -14,6 +14,7 @@ interface User {
   givenName: string,
   id: number,
   lastLogin: string,
+  lastUpdated: string,
   name: string,
   profile: {
     avatar: string,
@@ -38,6 +39,7 @@ export class TableDocs extends Documentation<Record<string, never>> {
         givenName,
         id: i + 1,
         lastLogin: faker.date.recent({ days: 30 }).toISOString(),
+        lastUpdated: faker.date.recent({ days: 7 }).toISOString(),
         name: `${givenName} ${familyName}`,
         profile: {
           avatar: faker.image.avatar(),
@@ -95,13 +97,17 @@ export class TableDocs extends Documentation<Record<string, never>> {
         </Section>
         <Section title="Column Types">
           <p>
-            The Table component supports five built-in column types, each optimized for different data types:
+            The Table component supports six built-in column types, each optimized for different data types:
           </p>
           <ul>
             <li><strong>Text</strong> - For string data, renders as TextEditor</li>
             <li><strong>Number</strong> - For numeric data, renders as NumberEditor</li>
-            <li><strong>Boolean</strong> - For boolean data, renders as ToggleEditor</li>
-            <li><strong>Date</strong> - For date data, displays formatted dates</li>
+            <li><strong>Boolean</strong> - For boolean data, renders as CheckboxEditor</li>
+            <li><strong>Date</strong> - For date-only values, displays a formatted date</li>
+            <li>
+              <strong>DateTime</strong> - For date-and-time values, displays a medium date and short time via{' '}
+              <code>toLocaleString</code>
+            </li>
             <li><strong>Enum</strong> - For enumerated values, renders as EnumEditor with dropdown</li>
           </ul>
           <p>
@@ -109,8 +115,8 @@ export class TableDocs extends Documentation<Record<string, never>> {
           </p>
           <ul>
             <li>Text and Enum columns sort by name/label and are left-aligned</li>
-            <li>Number, Boolean, and Date columns sort by value</li>
-            <li>Numbers are right-aligned, Booleans and Dates are center-aligned</li>
+            <li>Number, Boolean, Date, and DateTime columns sort by value</li>
+            <li>Numbers are right-aligned; Booleans, Dates, and DateTimes are center-aligned</li>
           </ul>
         </Section>
         <Section title="Nested Data Access">
@@ -176,7 +182,7 @@ export class TableDocs extends Documentation<Record<string, never>> {
           <ul>
             <li><strong>Text/Enum</strong>: Left-aligned</li>
             <li><strong>Number</strong>: Right-aligned</li>
-            <li><strong>Boolean/Date</strong>: Center-aligned</li>
+            <li><strong>Boolean/Date/DateTime</strong>: Center-aligned</li>
           </ul>
           <h4>Row Interactions</h4>
           <p>
@@ -231,7 +237,7 @@ export class TableDocs extends Documentation<Record<string, never>> {
             <li><code>pin?: Pin</code> - Column pinning position (Left, Right, Unpinned)</li>
             <li><code>sortable?: boolean</code> - Whether the column is sortable (default: true)</li>
             <li><code>title?: string</code> - Column header text (defaults to field name)</li>
-            <li><code>type?: ColumnType</code> - Column type (Text, Number, Boolean, Date, Enum)</li>
+            <li><code>type?: ColumnType</code> - Column type (Text, Number, Boolean, Date, DateTime, Enum)</li>
             <li><code>width?: string | number</code> - Column width</li>
           </ul>
         </Section>
@@ -264,6 +270,7 @@ function UserTable({ data }: { data: User[] }) {
       {Column.Text({ field: 'email', title: 'Email' })}
       {Column.Enum({ enum: UserRole, field: 'role', title: 'Role' })}
       {Column.Date({ field: 'lastLogin', title: 'Last Login' })}
+      {Column.DateTime({ field: 'lastUpdated', title: 'Last Updated' })}
       {Column.Boolean({ field: 'active', title: 'Status' })}
       {Column.Text({ field: 'profile.bio', title: 'Bio' })}
     </Table>

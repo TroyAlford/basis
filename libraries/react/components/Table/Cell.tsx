@@ -110,6 +110,13 @@ export class Cell<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
           />,
         )
 
+      case ColumnType.DateTime:
+        return super.content(
+          value
+            ? new Date(value as string).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+            : '',
+        )
+
       case ColumnType.Date:
         // For now, render as text since we don't have a DateEditor
         return super.content(
