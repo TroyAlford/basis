@@ -10,6 +10,7 @@ import { Component } from '../Component/Component'
 export enum ColumnType {
   Boolean = 'boolean',
   Date = 'date',
+  DateTime = 'datetime',
   Enum = 'enum',
   Number = 'number',
   Text = 'text',
@@ -69,6 +70,16 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
       sortBy: SortBy.Value,
       ...declaration,
       type: ColumnType.Date,
+    }
+    return <Column<TRow, TField> {...props} />
+  }
+  static DateTime<TRow, TField extends PathOf<TRow> = PathOf<TRow>>(declaration: ColumnProps<TRow, TField>) {
+    const props = {
+      ...Column.defaultProps,
+      align: TextAlign.Center,
+      sortBy: SortBy.Value,
+      ...declaration,
+      type: ColumnType.DateTime,
     }
     return <Column<TRow, TField> {...props} />
   }

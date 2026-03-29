@@ -12,7 +12,7 @@ import './CheckboxEditor.styles.ts'
 
 /** Props specific to checkbox editor. */
 interface Props extends IAccessible, IFocusable {
-  /** Whether to allow indeterminate state. @default false */
+  /** Whether to allow indeterminate state. Defaults to `false`. */
   allowIndeterminate?: boolean,
   /** The children of the component. */
   children?: React.ReactNode,

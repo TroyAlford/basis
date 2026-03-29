@@ -80,6 +80,7 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
     switch (type) {
       case ColumnType.Boolean:
       case ColumnType.Date:
+      case ColumnType.DateTime:
       case ColumnType.Number:
         return SortBy.Value
 

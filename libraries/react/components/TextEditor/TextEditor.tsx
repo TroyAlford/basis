@@ -26,7 +26,7 @@ export enum Wrap {
 interface Props extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable {
   /** Whether to enable browser autocomplete. */
   autoComplete?: boolean,
-  /** Whether to automatically focus the input on mount. @default false */
+  /** Whether to automatically focus the input on mount. Defaults to `false`. */
   autoFocus?: boolean,
   /**
    * Multiline behavior for the text editor.
@@ -35,14 +35,14 @@ interface Props extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable {
    * - `true`: Outputs a `textarea` with normal resizing and `data-multiline="true"`
    * - `'auto'`: Outputs `data-multiline="auto"` with auto-growing textarea
    * - `number`: Sets fixed number of lines, non-resizable textarea
-   * @default false
+   * Defaults to `false`.
    */
   multiline?: false | true | 'auto' | number,
   /** Callback function called when a key is pressed while the input has focus. */
   onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => void,
-  /** Whether to select all text when the input receives focus. @default true */
+  /** Whether to select all text when the input receives focus. Defaults to `true`. */
   selectOnFocus?: boolean,
-  /** Whether to wrap text in the textarea (only applies when multiline is true). @default Wrap.Soft */
+  /** Whether to wrap text in the textarea (only applies when multiline is true). Defaults to `Wrap.Soft`. */
   wrap?: Wrap,
 }
 

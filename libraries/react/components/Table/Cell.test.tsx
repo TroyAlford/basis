@@ -96,6 +96,24 @@ describe('Cell', () => {
     expect(node).toHaveTextContent('12/1/2023')
   })
 
+  test('renders datetime as formatted string for datetime type', async () => {
+    const iso = '2023-12-01T10:00:00Z'
+    const dateRow = { ...defaultProps.row, lastLogin: iso }
+    const { node } = await render(
+      <Cell
+        {...defaultProps}
+        column={{ field: 'lastLogin' }}
+        field="lastLogin"
+        row={dateRow}
+        type={ColumnType.DateTime}
+      />,
+    )
+    expect(node).toHaveAttribute('data-field', 'lastLogin')
+    expect(node).toHaveAttribute('data-type', 'datetime')
+    const expected = new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    expect(node).toHaveTextContent(expected)
+  })
+
   test('renders custom component when provided', async () => {
     const CustomComponent = ({ value }: { value: TestRow['user'] }) => (
       <div data-testid="custom-component">

@@ -294,6 +294,7 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
             'dot-notation': 'error',
             'eol-last': ['error', 'always'],
             'function-paren-newline': ['error', 'multiline-arguments'],
+            'jsdoc/escape-inline-tags': 'error',
             'no-console': 'error',
             'no-return-assign': 'error',
             'no-shadow': 'error',
