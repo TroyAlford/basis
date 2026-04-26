@@ -38,6 +38,16 @@ const original = { a: 1, b: { c: 2 } };
 const copy = clone(original); // Deep clone of the object
 ```
 
+### De-duplicating Arrays
+
+```ts
+import { unique } from '@basis/utilities'
+
+unique([1, 2, 1]) // [1, 2]
+unique([{ id: 'a' }, { id: 'a' }], unique.by('id')) // [{ id: 'a' }]
+unique([{ a: 1 }, { a: 1 }], unique.deepEquals) // [{ a: 1 }]
+```
+
 ### Pattern Matching with `match`
 
 The `match` function allows for flexible pattern matching against values. Here’s an example:
