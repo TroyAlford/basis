@@ -87,7 +87,7 @@ var plugin = function (options) {
 var IGNORE_PATHS = ['node_modules', '.cache', 'build', 'dist'];
 export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__spreadArray(__spreadArray([{ ignores: IGNORE_PATHS.flatMap(function (path) { return ["".concat(path, "/**"), "**/".concat(path, "/**")]; }) },
     eslint.configs.recommended,
-    pluginJSDoc.configs['flat/recommended-typescript']], __read(pluginTypescript.configs.strict), false), __read(pluginTypescript.configs.stylistic), false), [plugin({
+    pluginJSDoc.configs['flat/recommended-typescript-error']], __read(pluginTypescript.configs.strict), false), __read(pluginTypescript.configs.stylistic), false), [plugin({
         rules: {
             '@basis/no-mixed-type-imports': 'error',
             '@basis/no-object-padding': 'error',

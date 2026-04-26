@@ -2,6 +2,10 @@
 
 Guidance for humans and coding agents working in this repository.
 
+## Git and branches
+
+- **Do not push directly to `main`.** Create a feature branch from the latest `main` (`git checkout main && git pull && git checkout -b feat/your-topic`), commit there, and push that branch to open a pull request. Agents must not push to `main` or assume it is writable.
+
 ## Documentation
 
 - **Keep docs in the same change as the code.** Whenever you add or change public API surface, default behavior, or user-visible component behavior, update the matching documentation page under `libraries/docs/pages/` (files named `*.docs.tsx`).
