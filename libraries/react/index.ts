@@ -14,12 +14,16 @@ export { Menu } from './components/Menu/Menu'
 export { NumberEditor } from './components/NumberEditor/NumberEditor'
 export { OptionGroup } from './components/OptionGroup/OptionGroup'
 export { Dialog } from './components/OverlayProvider/Dialog'
+export type { DialogButton, DialogQueued, DialogRequest } from './components/OverlayProvider/Dialog'
+export { DialogIntent } from './components/OverlayProvider/DialogIntent'
+export { Notification } from './components/OverlayProvider/Notification'
+export type {
+  NotificationHandle,
+  NotificationQueued,
+  NotificationRequest,
+} from './components/OverlayProvider/Notification'
+export { NotificationStatus } from './components/OverlayProvider/NotificationStatus'
 export { OverlayProvider } from './components/OverlayProvider/OverlayProvider'
-export { Toast } from './components/OverlayProvider/Toast'
-export type { DialogButton } from './components/OverlayProvider/DialogButton'
-export type { DialogRequest } from './components/OverlayProvider/DialogRequest'
-export type { ToastHandle } from './components/OverlayProvider/ToastHandle'
-export type { ToastRequest } from './components/OverlayProvider/ToastRequest'
 export { Router } from './components/Router/Router'
 export { Section } from './components/Section/Section'
 export { Table } from './components/Table/Table'

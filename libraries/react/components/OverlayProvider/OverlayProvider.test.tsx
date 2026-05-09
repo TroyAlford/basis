@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { render } from '../../testing/render'
 import { waitFor } from '../../testing/waitFor'
 import { Dialog } from './Dialog'
+import { Notification } from './Notification'
 import { OverlayProvider } from './OverlayProvider'
-import { Toast } from './Toast'
 
 describe('OverlayProvider', () => {
   describe('Dialog', () => {
@@ -24,7 +24,7 @@ describe('OverlayProvider', () => {
         title: 'Dialog title',
       })
 
-      const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog.dialog-view.component'))
+      const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog.dialog.component'))
       expect(dialog).toBeInstanceOf(HTMLDialogElement)
       expect(dialog.textContent).toContain('Dialog title')
       expect(dialog.textContent).toContain('Dialog content')
@@ -95,25 +95,25 @@ describe('OverlayProvider', () => {
     })
   })
 
-  describe('Toast', () => {
-    test('Toast.create throws clearly when no OverlayProvider is mounted', () => {
-      expect(() => Toast.create({ title: 'Missing provider' })).toThrow('OverlayProvider is not mounted')
+  describe('Notification', () => {
+    test('Notification.create throws clearly when no OverlayProvider is mounted', () => {
+      expect(() => Notification.create({ title: 'Missing provider' })).toThrow('OverlayProvider is not mounted')
     })
 
-    test('Toast.create renders a toast in the toast region and returns a handle', async () => {
+    test('Notification.create renders in the notifications region and returns a handle', async () => {
       const { node, unmount } = await render(<OverlayProvider />)
-      const toast = Toast.create({
+      const note = Notification.create({
         content: 'Saved',
-        status: Toast.Status.Success,
+        status: Notification.Status.Success,
         title: 'Done',
       })
 
-      expect(toast.id).toStartWith('toast-')
-      expect(toast.update).toBeFunction()
-      expect(toast.dismiss).toBeFunction()
+      expect(note.id).toStartWith('notification-')
+      expect(note.update).toBeFunction()
+      expect(note.dismiss).toBeFunction()
 
-      const region = await waitFor(() => node.querySelector('.overlay-toast-region.component'))
-      const aside = await waitFor(() => region.querySelector<HTMLElement>('aside.toast-view.component'))
+      const region = await waitFor(() => node.querySelector('.notifications.component'))
+      const aside = await waitFor(() => region.querySelector<HTMLElement>('aside.notification.component'))
       expect(aside.dataset.status).toBe('success')
       expect(aside.textContent).toContain('Done')
       expect(aside.textContent).toContain('Saved')
@@ -121,50 +121,50 @@ describe('OverlayProvider', () => {
       unmount()
     })
 
-    test('handle.update updates the same toast', async () => {
+    test('handle.update updates the same notification', async () => {
       const { node, unmount } = await render(<OverlayProvider />)
-      const toast = Toast.create({ content: 'Starting', status: Toast.Status.Loading })
+      const note = Notification.create({ content: 'Starting', status: Notification.Status.Loading })
 
-      const aside = await waitFor(() => node.querySelector<HTMLElement>('aside.toast-view.component'))
-      toast.update({ content: 'Finished', status: Toast.Status.Success })
+      const aside = await waitFor(() => node.querySelector<HTMLElement>('aside.notification.component'))
+      note.update({ content: 'Finished', status: Notification.Status.Success })
 
       await waitFor(() => aside.textContent?.includes('Finished'))
-      expect(node.querySelectorAll('aside.toast-view.component')).toHaveLength(1)
+      expect(node.querySelectorAll('aside.notification.component')).toHaveLength(1)
       expect(aside.dataset.status).toBe('success')
 
       unmount()
     })
 
-    test('handle.dismiss removes the toast', async () => {
+    test('handle.dismiss removes the notification', async () => {
       const { node, unmount } = await render(<OverlayProvider />)
-      const toast = Toast.create({ content: 'Dismiss me' })
+      const note = Notification.create({ content: 'Dismiss me' })
 
-      await waitFor(() => node.querySelector('aside.toast-view.component'))
-      toast.dismiss()
+      await waitFor(() => node.querySelector('aside.notification.component'))
+      note.dismiss()
 
-      await waitFor(() => !node.querySelector('aside.toast-view.component'))
+      await waitFor(() => !node.querySelector('aside.notification.component'))
 
       unmount()
     })
 
-    test('numeric timeout dismisses the toast', async () => {
+    test('numeric timeout dismisses the notification', async () => {
       const { node, unmount } = await render(<OverlayProvider />)
-      Toast.create({ content: 'Temporary', timeout: 100 })
+      Notification.create({ content: 'Temporary', timeout: 100 })
 
-      await waitFor(() => node.querySelector('aside.toast-view.component'))
-      await waitFor(() => !node.querySelector('aside.toast-view.component'), { timeout: 1_000 })
+      await waitFor(() => node.querySelector('aside.notification.component'))
+      await waitFor(() => !node.querySelector('aside.notification.component'), { timeout: 1_000 })
 
       unmount()
     })
 
     test('timeout null does not auto-dismiss', async () => {
       const { node, unmount } = await render(<OverlayProvider />)
-      Toast.create({ content: 'Persistent', timeout: null })
+      Notification.create({ content: 'Persistent', timeout: null })
 
-      await waitFor(() => node.querySelector('aside.toast-view.component'))
+      await waitFor(() => node.querySelector('aside.notification.component'))
       await new Promise(resolve => setTimeout(resolve, 50))
 
-      expect(node.querySelector('aside.toast-view.component')).toBeTruthy()
+      expect(node.querySelector('aside.notification.component')).toBeTruthy()
 
       unmount()
     })

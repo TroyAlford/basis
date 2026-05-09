@@ -6,16 +6,15 @@ interface Props {
 }
 
 /**
- * Live region for toast notifications.
+ * Live region for modal dialogs opened through the overlay host.
  */
-export class OverlayToastRegion extends Component<Props, HTMLElement> {
-  static displayName = 'OverlayToastRegion'
+export class Dialogs extends Component<Props, HTMLElement> {
+  static displayName = 'Dialogs'
 
   get attributes() {
     return {
       ...super.attributes,
-      'aria-label': 'Notifications',
-      'aria-live': 'polite' as const,
+      'aria-live': 'assertive' as const,
     }
   }
 

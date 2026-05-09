@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Button, Dialog, OverlayProvider, Toast } from '@basis/react'
+import { Button, Dialog, Notification, OverlayProvider } from '@basis/react'
 import { Code } from '../components/Code'
 
 export class OverlayProviderDocs extends React.Component {
@@ -11,10 +11,10 @@ export class OverlayProviderDocs extends React.Component {
     })
   }
 
-  createToast = () => {
-    Toast.create({
-      content: 'The toast can be updated or dismissed through its handle.',
-      status: Toast.Status.Success,
+  createNotification = () => {
+    Notification.create({
+      content: 'The notification can be updated or dismissed through its handle.',
+      status: Notification.Status.Success,
       timeout: 4_000,
       title: 'Saved',
     })
@@ -26,8 +26,9 @@ export class OverlayProviderDocs extends React.Component {
         <h1>OverlayProvider</h1>
         <section>
           <p>
-            OverlayProvider is the host for context-safe dialogs and toasts. ApplicationBase renders
-            it automatically inside the application context provider and after the normal layout.
+            OverlayProvider is the host for context-safe dialogs and notifications. ApplicationBase
+            renders it automatically inside the application context provider and after the normal
+            layout.
           </p>
           <p>
             Mount <code>&lt;OverlayProvider /&gt;</code> manually only when using the overlay APIs
@@ -58,27 +59,39 @@ export class OverlayProviderDocs extends React.Component {
           `)}
         </section>
         <section>
-          <h3>Toast</h3>
-          <Button onActivate={this.createToast}>Create toast</Button>
+          <h3>Notification</h3>
+          <Button onActivate={this.createNotification}>Create notification</Button>
           {Code.format(`
-            import { Toast } from '@basis/react'
+            import { Notification } from '@basis/react'
 
-            const toast = Toast.create({
+            const note = Notification.create({
               title: 'Uploading',
               content: 'Preparing files...',
-              status: Toast.Status.Loading,
+              status: Notification.Status.Loading,
               timeout: null,
             })
 
-            toast.update({
+            note.update({
               title: 'Uploaded',
               content: 'Files are ready.',
-              status: Toast.Status.Success,
+              status: Notification.Status.Success,
               timeout: 4000,
             })
 
-            toast.dismiss()
+            note.dismiss()
           `)}
+        </section>
+        <section>
+          <h3>Types</h3>
+          <p>
+            Request and queued-row types live next to their components: import{' '}
+            <code>DialogRequest</code>, <code>DialogButton</code>, and <code>DialogQueued</code> from
+            the same module as <code>Dialog</code>; import <code>NotificationRequest</code>,{' '}
+            <code>NotificationHandle</code>, and <code>NotificationQueued</code> from the same module
+            as <code>Notification</code>. Button intents are <code>DialogIntent</code> values (also
+            exposed as <code>Dialog.Intent</code>). Notification severity uses{' '}
+            <code>NotificationStatus</code> (also <code>Notification.Status</code>).
+          </p>
         </section>
         <OverlayProvider />
       </>

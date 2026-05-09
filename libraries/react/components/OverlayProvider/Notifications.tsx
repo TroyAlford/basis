@@ -6,15 +6,16 @@ interface Props {
 }
 
 /**
- * Live region for modal dialogs opened through the overlay host.
+ * Live region for notifications opened through the overlay host.
  */
-export class OverlayDialogRegion extends Component<Props, HTMLElement> {
-  static displayName = 'OverlayDialogRegion'
+export class Notifications extends Component<Props, HTMLElement> {
+  static displayName = 'Notifications'
 
   get attributes() {
     return {
       ...super.attributes,
-      'aria-live': 'assertive' as const,
+      'aria-label': 'Notifications',
+      'aria-live': 'polite' as const,
     }
   }
 

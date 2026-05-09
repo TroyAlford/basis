@@ -81,7 +81,7 @@ describe('Application', () => {
         title: 'Built-in provider',
       })
 
-      const dialog = await waitFor(() => node.querySelector('dialog.dialog-view.component'))
+      const dialog = await waitFor(() => node.querySelector('dialog.dialog.component'))
       expect(dialog.textContent).toContain('Built-in provider')
       expect(dialog.textContent).toContain('Built-in provider content')
 

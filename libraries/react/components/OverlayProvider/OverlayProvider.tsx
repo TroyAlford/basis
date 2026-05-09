@@ -1,29 +1,41 @@
 import type { ReactNode } from 'react'
 import { createRef } from 'react'
 import { Component } from '../Component/Component'
-import type { DialogEntry } from './DialogEntry'
-import type { DialogRequest } from './DialogRequest'
-import { DialogView } from './DialogView'
-import { OverlayDialogRegion } from './OverlayDialogRegion'
-import { createOverlayId } from './OverlayProviderRegistry'
-import type { OverlayProviderState } from './OverlayProviderState'
-import { OverlayToastRegion } from './OverlayToastRegion'
-import { Toast } from './Toast'
-import type { ToastEntry } from './ToastEntry'
-import type { ToastHandle } from './ToastHandle'
-import type { ToastRequest } from './ToastRequest'
-import { ToastView } from './ToastView'
+import type { DialogQueued, DialogRequest } from './Dialog'
+import { Dialog } from './Dialog'
+import { Dialogs } from './Dialogs'
+import type { NotificationHandle, NotificationQueued, NotificationRequest } from './Notification'
+import { Notification } from './Notification'
+import { Notifications } from './Notifications'
+import { NotificationStatus } from './NotificationStatus'
 
-export class OverlayProvider extends Component<object, HTMLDivElement, OverlayProviderState> {
+interface OverlayHostState {
+  activeDialog: DialogQueued | null,
+  dialogQueue: DialogQueued[],
+  notifications: NotificationQueued[],
+}
+
+export class OverlayProvider extends Component<object, HTMLDivElement, OverlayHostState> {
   static displayName = 'OverlayProvider'
 
-  #toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+  static #nextId = 0
 
-  get defaultState(): OverlayProviderState {
+  /**
+   * Process-unique id for queued overlay rows (dialogs and notifications).
+   * @param prefix - Short label prefix (for example `dialog` or `notification`).
+   * @returns A unique string id prefixed with {@link prefix}.
+   */
+  static createId(prefix: string): string {
+    return `${prefix}-${++OverlayProvider.#nextId}`
+  }
+
+  #notificationTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+
+  get defaultState(): OverlayHostState {
     return {
       activeDialog: null,
       dialogQueue: [],
-      toasts: [],
+      notifications: [],
     }
   }
 
@@ -36,16 +48,35 @@ export class OverlayProvider extends Component<object, HTMLDivElement, OverlayPr
     if (typeof window !== 'undefined' && window.overlayProvider === this) {
       window.overlayProvider = undefined
     }
-    this.#toastTimeouts.forEach(timeout => clearTimeout(timeout))
-    this.#toastTimeouts.clear()
+    this.#notificationTimeouts.forEach(timeout => clearTimeout(timeout))
+    this.#notificationTimeouts.clear()
     super.componentWillUnmount()
+  }
+
+  createNotification(request: Partial<NotificationRequest>): NotificationHandle {
+    const entry: NotificationQueued = {
+      status: NotificationStatus.Info,
+      timeout: null,
+      ...request,
+      id: OverlayProvider.createId('notification'),
+    }
+
+    this.setState(state => ({
+      notifications: [...state.notifications, entry],
+    }), () => this.#scheduleNotification(entry))
+
+    return {
+      dismiss: () => this.#dismissNotification(entry.id),
+      id: entry.id,
+      update: update => this.#updateNotification(entry.id, update),
+    }
   }
 
   openDialog<T>(request: DialogRequest<T>): Promise<T> {
     return new Promise<T>(resolve => {
-      const entry: DialogEntry<T> = {
+      const entry: DialogQueued<T> = {
         ...request,
-        id: createOverlayId('dialog'),
+        id: OverlayProvider.createId('dialog'),
         nodeRef: createRef<HTMLDialogElement>(),
         resolve,
       }
@@ -58,23 +89,14 @@ export class OverlayProvider extends Component<object, HTMLDivElement, OverlayPr
     })
   }
 
-  createToast(request: ToastRequest): ToastHandle {
-    const entry: ToastEntry = {
-      status: Toast.Status.Info,
-      timeout: null,
-      ...request,
-      id: createOverlayId('toast'),
-    }
+  #dismissNotification(id: string): void {
+    const timeout = this.#notificationTimeouts.get(id)
+    if (timeout) clearTimeout(timeout)
+    this.#notificationTimeouts.delete(id)
 
     this.setState(state => ({
-      toasts: [...state.toasts, entry],
-    }), () => this.#scheduleToast(entry))
-
-    return {
-      dismiss: () => this.#dismissToast(entry.id),
-      id: entry.id,
-      update: update => this.#updateToast(entry.id, update),
-    }
+      notifications: state.notifications.filter(row => row.id !== id),
+    }))
   }
 
   #resolveDialog = (value: unknown): void => {
@@ -93,67 +115,59 @@ export class OverlayProvider extends Component<object, HTMLDivElement, OverlayPr
     })
   }
 
-  #dismissToast(id: string): void {
-    const timeout = this.#toastTimeouts.get(id)
-    if (timeout) clearTimeout(timeout)
-    this.#toastTimeouts.delete(id)
-
-    this.setState(state => ({
-      toasts: state.toasts.filter(toast => toast.id !== id),
-    }))
-  }
-
-  #scheduleToast(toast: ToastEntry): void {
-    const current = this.#toastTimeouts.get(toast.id)
+  #scheduleNotification(row: NotificationQueued): void {
+    const current = this.#notificationTimeouts.get(row.id)
     if (current) clearTimeout(current)
-    this.#toastTimeouts.delete(toast.id)
+    this.#notificationTimeouts.delete(row.id)
 
-    if (typeof toast.timeout !== 'number') return
-    this.#toastTimeouts.set(toast.id, setTimeout(() => {
-      this.#dismissToast(toast.id)
-    }, toast.timeout))
+    if (typeof row.timeout !== 'number') return
+    this.#notificationTimeouts.set(row.id, setTimeout(() => {
+      this.#dismissNotification(row.id)
+    }, row.timeout))
   }
 
-  #updateToast(id: string, update: Partial<ToastRequest>): void {
-    let updatedToast: ToastEntry | undefined
+  #updateNotification(id: string, update: Partial<NotificationRequest>): void {
+    let updated: NotificationQueued | undefined
     this.setState(state => {
-      const toasts = state.toasts.map(toast => (
-        toast.id === id
-          ? { ...toast, ...update }
-          : toast
+      const notifications = state.notifications.map(row => (
+        row.id === id
+          ? { ...row, ...update }
+          : row
       ))
-      updatedToast = toasts.find(candidate => candidate.id === id)
-      return { toasts }
+      updated = notifications.find(candidate => candidate.id === id)
+      return { notifications }
     }, () => {
-      if (updatedToast && Object.hasOwn(update, 'timeout')) this.#scheduleToast(updatedToast)
+      if (updated && Object.hasOwn(update, 'timeout')) this.#scheduleNotification(updated)
     })
   }
 
   content(): ReactNode {
-    const { activeDialog, toasts } = this.state
+    const { activeDialog, notifications } = this.state
 
     return (
       <>
-        <OverlayToastRegion>
-          {toasts.map(toast => (
-            <ToastView
-              key={toast.id}
-              toast={toast}
-              onDismiss={() => this.#dismissToast(toast.id)}
+        <Notifications>
+          {notifications.map(row => (
+            <Notification
+              key={row.id}
+              row={row}
+              onDismiss={() => this.#dismissNotification(row.id)}
             />
           ))}
-        </OverlayToastRegion>
-        <OverlayDialogRegion>
+        </Notifications>
+        <Dialogs>
           {activeDialog && (
-            <DialogView
+            <Dialog
               key={activeDialog.id}
               dialog={activeDialog}
               nodeRef={activeDialog.nodeRef}
               onResolve={this.#resolveDialog}
             />
           )}
-        </OverlayDialogRegion>
+        </Dialogs>
       </>
     )
   }
 }
+
+export type OverlayProviderState = InstanceType<typeof OverlayProvider>['state']
