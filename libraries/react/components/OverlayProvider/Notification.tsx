@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { Remove } from '@basis/react/icons'
 import { Component } from '../Component/Component'
-import { NotificationStatus } from './NotificationStatus'
 
 import './Notification.styles.ts'
 
@@ -10,33 +9,41 @@ const overlayHostRequiredMessage = [
   'Render <OverlayProvider /> inside your React application tree before using Dialog.open() or Notification.create().',
 ].join(' ')
 
-export interface NotificationRequest {
+enum Status {
+  Error = 'error',
+  Info = 'info',
+  Loading = 'loading',
+  Success = 'success',
+  Warning = 'warning',
+}
+
+/** Payload for {@link Notification.create} and rows owned by {@link OverlayProvider} (before `id`). */
+export interface INotification {
   content?: ReactNode,
-  status?: NotificationStatus,
+  status?: Status,
   timeout?: number | null,
   title?: ReactNode,
 }
 
-export interface NotificationHandle {
-  dismiss(): void,
+interface Props extends INotification {
   id: string,
-  update(update: Partial<NotificationRequest>): void,
-}
-
-interface HostProps {
   onDismiss: () => void,
-  row: NotificationQueued,
 }
 
 /**
  * In-app notification: static {@link Notification.create} and mounted rows inside {@link OverlayProvider}.
  */
-export class Notification extends Component<HostProps, HTMLElement> {
+export class Notification extends Component<Props, HTMLElement> {
   static displayName = 'Notification'
 
-  static readonly Status = NotificationStatus
+  static readonly Status = Status
 
-  static create(request: Partial<NotificationRequest>): NotificationHandle {
+  /**
+   * @param request - Typically `Partial<INotification>`. Import `type { INotification }` from this
+   *   module; it is not re-exported from `@basis/react`.
+   * @returns Handle for update and dismiss (shape follows {@link OverlayProvider.createNotification}).
+   */
+  static create(request: Partial<INotification>) {
     if (typeof window === 'undefined' || !window.overlayProvider) {
       throw new Error(overlayHostRequiredMessage)
     }
@@ -44,10 +51,10 @@ export class Notification extends Component<HostProps, HTMLElement> {
   }
 
   get attributes() {
-    const { row } = this.props
+    const { status } = this.props
     return {
       ...super.attributes,
-      'data-status': row.status ?? NotificationStatus.Info,
+      'data-status': status ?? Notification.Status.Info,
     }
   }
 
@@ -56,16 +63,13 @@ export class Notification extends Component<HostProps, HTMLElement> {
   }
 
   content(): ReactNode {
-    const { onDismiss, row } = this.props
+    const { content, onDismiss, title } = this.props
     return (
       <>
-        {row.title && <header>{row.title}</header>}
-        {row.content && <section>{row.content}</section>}
+        {title && <header>{title}</header>}
+        {content && <section>{content}</section>}
         <Remove onClick={onDismiss} />
       </>
     )
   }
 }
-
-/** Notification row as queued by {@link OverlayProvider} (request fields plus `id`). */
-export type NotificationQueued = NotificationRequest & { id: string }

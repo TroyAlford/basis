@@ -1,21 +1,28 @@
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { createRef } from 'react'
 import { Component } from '../Component/Component'
-import type { DialogQueued, DialogRequest } from './Dialog'
+import type { IDialog } from './Dialog'
 import { Dialog } from './Dialog'
 import { Dialogs } from './Dialogs'
-import type { NotificationHandle, NotificationQueued, NotificationRequest } from './Notification'
+import type { INotification } from './Notification'
 import { Notification } from './Notification'
 import { Notifications } from './Notifications'
-import { NotificationStatus } from './NotificationStatus'
 
-interface OverlayHostState {
-  activeDialog: DialogQueued | null,
-  dialogQueue: DialogQueued[],
-  notifications: NotificationQueued[],
+type DialogRow<T = unknown> = IDialog<T> & {
+  id: string,
+  nodeRef: RefObject<HTMLDialogElement | null>,
+  resolve: (value: T) => void,
 }
 
-export class OverlayProvider extends Component<object, HTMLDivElement, OverlayHostState> {
+type NotificationRow = INotification & { id: string }
+
+interface State {
+  activeDialog: DialogRow | null,
+  dialogQueue: DialogRow[],
+  notifications: NotificationRow[],
+}
+
+export class OverlayProvider extends Component<object, HTMLDivElement, State> {
   static displayName = 'OverlayProvider'
 
   static #nextId = 0
@@ -31,7 +38,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, OverlayHo
 
   #notificationTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
-  get defaultState(): OverlayHostState {
+  get defaultState(): State {
     return {
       activeDialog: null,
       dialogQueue: [],
@@ -53,12 +60,13 @@ export class OverlayProvider extends Component<object, HTMLDivElement, OverlayHo
     super.componentWillUnmount()
   }
 
-  createNotification(request: Partial<NotificationRequest>): NotificationHandle {
-    const entry: NotificationQueued = {
-      status: NotificationStatus.Info,
-      timeout: null,
-      ...request,
+  createNotification(request: Partial<INotification>) {
+    const entry: NotificationRow = {
+      content: request.content,
       id: OverlayProvider.createId('notification'),
+      status: request.status ?? Notification.Status.Info,
+      timeout: request.timeout ?? null,
+      title: request.title,
     }
 
     this.setState(state => ({
@@ -68,17 +76,20 @@ export class OverlayProvider extends Component<object, HTMLDivElement, OverlayHo
     return {
       dismiss: () => this.#dismissNotification(entry.id),
       id: entry.id,
-      update: update => this.#updateNotification(entry.id, update),
+      update: (update: Partial<INotification>) => this.#updateNotification(entry.id, update),
     }
   }
 
-  openDialog<T>(request: DialogRequest<T>): Promise<T> {
+  openDialog<T = unknown>(request: Partial<IDialog<T>>): Promise<T> {
     return new Promise<T>(resolve => {
-      const entry: DialogQueued<T> = {
-        ...request,
+      const entry: DialogRow<T> = {
+        buttons: (request.buttons ?? []) as DialogRow<T>['buttons'],
+        cancelValue: request.cancelValue as T,
+        content: request.content,
         id: OverlayProvider.createId('dialog'),
         nodeRef: createRef<HTMLDialogElement>(),
         resolve,
+        title: request.title,
       }
 
       this.setState(state => (
@@ -115,7 +126,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, OverlayHo
     })
   }
 
-  #scheduleNotification(row: NotificationQueued): void {
+  #scheduleNotification(row: NotificationRow): void {
     const current = this.#notificationTimeouts.get(row.id)
     if (current) clearTimeout(current)
     this.#notificationTimeouts.delete(row.id)
@@ -126,8 +137,8 @@ export class OverlayProvider extends Component<object, HTMLDivElement, OverlayHo
     }, row.timeout))
   }
 
-  #updateNotification(id: string, update: Partial<NotificationRequest>): void {
-    let updated: NotificationQueued | undefined
+  #updateNotification(id: string, update: Partial<INotification>): void {
+    let updated: NotificationRow | undefined
     this.setState(state => {
       const notifications = state.notifications.map(row => (
         row.id === id
@@ -150,7 +161,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, OverlayHo
           {notifications.map(row => (
             <Notification
               key={row.id}
-              row={row}
+              {...row}
               onDismiss={() => this.#dismissNotification(row.id)}
             />
           ))}
@@ -159,8 +170,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, OverlayHo
           {activeDialog && (
             <Dialog
               key={activeDialog.id}
-              dialog={activeDialog}
-              nodeRef={activeDialog.nodeRef}
+              {...activeDialog}
               onResolve={this.#resolveDialog}
             />
           )}

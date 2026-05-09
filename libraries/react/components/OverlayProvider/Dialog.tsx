@@ -1,51 +1,49 @@
 import type { ReactNode, RefObject, SyntheticEvent } from 'react'
+import { Intent } from '../../types/Intent'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
-import { DialogIntent } from './DialogIntent'
 
-const overlayHostRequiredMessage = [
-  'OverlayProvider is not mounted.',
-  'Render <OverlayProvider /> inside your React application tree before using Dialog.open() or Notification.create().',
-].join(' ')
-
-export interface DialogButton<T> {
-  intent?: DialogIntent,
+interface DialogButton<T> {
+  intent?: Intent,
   label: ReactNode,
   value: T,
 }
 
-export interface DialogRequest<T = unknown> {
+/** Payload for {@link Dialog.open} and rows owned by {@link OverlayProvider} (before `id` / refs / `resolve`). */
+export interface IDialog<T = unknown> {
   buttons: DialogButton<T>[],
   cancelValue: T,
   content?: ReactNode,
   title?: ReactNode,
 }
 
-interface HostProps {
-  dialog: DialogQueued,
+interface Props<T = unknown> extends IDialog<T> {
+  id: string,
+  nodeRef: RefObject<HTMLDialogElement | null>,
   onResolve: (value: unknown) => void,
+  resolve: (value: T) => void,
 }
 
 /**
  * Native `<dialog>` host row (mounted by {@link OverlayProvider}) plus static `Dialog.open` /
  * `Dialog.confirm` entry points.
  */
-export class Dialog extends Component<HostProps, HTMLDialogElement> {
+export class Dialog extends Component<Props, HTMLDialogElement> {
   static displayName = 'Dialog'
 
-  static readonly Intent = DialogIntent
+  static readonly Intent = Intent
 
   static confirm({
-    cancelLabel = 'Cancel',
-    confirmLabel = 'Confirm',
     content,
     danger = false,
+    labelCancel: cancelLabel = 'Cancel',
+    labelConfirm: confirmLabel = 'Confirm',
     title,
   }: {
-    cancelLabel?: ReactNode,
-    confirmLabel?: ReactNode,
     content?: ReactNode,
     danger?: boolean,
+    labelCancel?: ReactNode,
+    labelConfirm?: ReactNode,
     title?: ReactNode,
   }): Promise<boolean> {
     return Dialog.open<boolean>({
@@ -63,11 +61,19 @@ export class Dialog extends Component<HostProps, HTMLDialogElement> {
     })
   }
 
-  static open<T>(request: DialogRequest<T>): Promise<T> {
+  /**
+   * @param request - Typically `Partial<IDialog<T>>`. Import `type { IDialog }` from this module;
+   *   it is not re-exported from `@basis/react`.
+   * @returns Promise that resolves with the chosen button value or cancel value.
+   */
+  static open<T = unknown>(request: Partial<IDialog<T>>): Promise<T> {
     if (typeof window === 'undefined' || !window.overlayProvider) {
-      throw new Error(overlayHostRequiredMessage)
+      throw new Error(`
+        OverlayProvider is not mounted. Render <OverlayProvider /> inside your React application
+        tree before using Dialog.open() or Notification.create().
+      `.trim().replace(/\s+/g, ' '))
     }
-    return window.overlayProvider.openDialog(request)
+    return window.overlayProvider.openDialog<T>(request)
   }
 
   componentDidMount(): void {
@@ -75,13 +81,13 @@ export class Dialog extends Component<HostProps, HTMLDialogElement> {
     this.#syncModalOpenState()
   }
 
-  componentDidUpdate(prevProps: Readonly<HostProps>, prevState: Readonly<object>): void {
+  componentDidUpdate(prevProps: Readonly<Props>, prevState: Readonly<object>): void {
     super.componentDidUpdate(prevProps, prevState)
-    if (prevProps.dialog.id !== this.props.dialog.id) this.#syncModalOpenState()
+    if (prevProps.id !== this.props.id) this.#syncModalOpenState()
   }
 
   #syncModalOpenState(): void {
-    const node = this.props.dialog.nodeRef.current
+    const node = this.props.nodeRef.current
     if (!node) return
 
     if (!node.open && typeof node.showModal === 'function') {
@@ -92,12 +98,12 @@ export class Dialog extends Component<HostProps, HTMLDialogElement> {
   }
 
   get attributes() {
-    const { dialog, onResolve } = this.props
+    const { cancelValue, onResolve } = this.props
     return {
       ...super.attributes,
       onCancel: (event: SyntheticEvent<HTMLDialogElement>) => {
         event.preventDefault()
-        onResolve(dialog.cancelValue)
+        onResolve(cancelValue)
       },
     }
   }
@@ -107,17 +113,17 @@ export class Dialog extends Component<HostProps, HTMLDialogElement> {
   }
 
   content(): ReactNode {
-    const { dialog, onResolve } = this.props
+    const { buttons, content, onResolve, title } = this.props
     return (
       <form method="dialog">
         <header>
-          {dialog.title && <h2>{dialog.title}</h2>}
+          {title && <h2>{title}</h2>}
         </header>
         <section>
-          {dialog.content}
+          {content}
         </section>
         <footer>
-          {dialog.buttons.map((button, index) => (
+          {buttons.map((button, index) => (
             <Button
               key={index}
               data-intent={button.intent ?? Dialog.Intent.Default}
@@ -133,11 +139,4 @@ export class Dialog extends Component<HostProps, HTMLDialogElement> {
       </form>
     )
   }
-}
-
-/** Dialog row as queued by {@link OverlayProvider} (request fields plus `id`, `nodeRef`, `resolve`). */
-export type DialogQueued<T = unknown> = DialogRequest<T> & {
-  id: string,
-  nodeRef: RefObject<HTMLDialogElement | null>,
-  resolve: (value: T) => void,
 }

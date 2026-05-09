@@ -5,8 +5,8 @@ import { Code } from '../components/Code'
 export class OverlayProviderDocs extends React.Component {
   openDialog = async () => {
     await Dialog.confirm({
-      confirmLabel: 'Continue',
       content: 'Dialogs render through the application overlay host.',
+      labelConfirm: 'Continue',
       title: 'Confirm action',
     })
   }
@@ -23,6 +23,7 @@ export class OverlayProviderDocs extends React.Component {
   render(): React.ReactNode {
     return (
       <>
+        <OverlayProvider />
         <h1>OverlayProvider</h1>
         <section>
           <p>
@@ -32,8 +33,9 @@ export class OverlayProviderDocs extends React.Component {
           </p>
           <p>
             Mount <code>&lt;OverlayProvider /&gt;</code> manually only when using the overlay APIs
-            outside ApplicationBase (this docs page mounts one at the end of the tree so the
-            examples work).
+            outside ApplicationBase. This page mounts one <strong>first</strong> in the tree so{' '}
+            <code>window.overlayProvider</code> is registered before any sibling (such as demo
+            buttons) can call <code>Dialog.open</code> or <code>Notification.create</code>.
           </p>
         </section>
         <section>
@@ -84,16 +86,18 @@ export class OverlayProviderDocs extends React.Component {
         <section>
           <h3>Types</h3>
           <p>
-            Request and queued-row types live next to their components: import{' '}
-            <code>DialogRequest</code>, <code>DialogButton</code>, and <code>DialogQueued</code> from
-            the same module as <code>Dialog</code>; import <code>NotificationRequest</code>,{' '}
-            <code>NotificationHandle</code>, and <code>NotificationQueued</code> from the same module
-            as <code>Notification</code>. Button intents are <code>DialogIntent</code> values (also
-            exposed as <code>Dialog.Intent</code>). Notification severity uses{' '}
-            <code>NotificationStatus</code> (also <code>Notification.Status</code>).
+            Dialog and notification <strong>payload</strong> shapes are <code>IDialog</code> and{' '}
+            <code>INotification</code> (import <code>type</code> from the same modules as{' '}
+            <code>Dialog</code> / <code>Notification</code>; they are not re-exported from{' '}
+            <code>@basis/react</code>). Examples: <code>Partial&lt;IDialog&lt;T&gt;&gt;</code> for{' '}
+            <code>Dialog.open</code>, or <code>{'INotification & { id: string }'}</code> for queued rows.
+            Return types for <code>Notification.create</code> follow{' '}
+            <code>OverlayProvider.createNotification</code> (hover or use{' '}
+            <code>ReturnType&lt;OverlayProvider['createNotification']&gt;</code> on an instance type).
+            Button intents are <code>Intent</code> (re-exported as <code>DialogIntent</code>; also{' '}
+            <code>Dialog.Intent</code>). Notification severity is <code>Notification.Status</code>.
           </p>
         </section>
-        <OverlayProvider />
       </>
     )
   }

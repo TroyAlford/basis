@@ -70,7 +70,7 @@ describe('OverlayProvider', () => {
 
     test('Dialog.confirm resolves true for confirm', async () => {
       const { node, unmount } = await render(<OverlayProvider />)
-      const result = Dialog.confirm({ confirmLabel: 'Delete' })
+      const result = Dialog.confirm({ labelConfirm: 'Delete' })
 
       const confirm = await waitFor(() => Array.from(node.querySelectorAll('button'))
         .find(button => button.textContent === 'Delete') as HTMLButtonElement | undefined)
@@ -83,7 +83,7 @@ describe('OverlayProvider', () => {
 
     test('Dialog.confirm resolves false for cancel', async () => {
       const { node, unmount } = await render(<OverlayProvider />)
-      const result = Dialog.confirm({ cancelLabel: 'No' })
+      const result = Dialog.confirm({ labelCancel: 'No' })
 
       const cancel = await waitFor(() => Array.from(node.querySelectorAll('button'))
         .find(button => button.textContent === 'No') as HTMLButtonElement | undefined)

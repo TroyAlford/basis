@@ -14,15 +14,8 @@ export { Menu } from './components/Menu/Menu'
 export { NumberEditor } from './components/NumberEditor/NumberEditor'
 export { OptionGroup } from './components/OptionGroup/OptionGroup'
 export { Dialog } from './components/OverlayProvider/Dialog'
-export type { DialogButton, DialogQueued, DialogRequest } from './components/OverlayProvider/Dialog'
-export { DialogIntent } from './components/OverlayProvider/DialogIntent'
+export { Intent as DialogIntent } from './types/Intent'
 export { Notification } from './components/OverlayProvider/Notification'
-export type {
-  NotificationHandle,
-  NotificationQueued,
-  NotificationRequest,
-} from './components/OverlayProvider/Notification'
-export { NotificationStatus } from './components/OverlayProvider/NotificationStatus'
 export { OverlayProvider } from './components/OverlayProvider/OverlayProvider'
 export { Router } from './components/Router/Router'
 export { Section } from './components/Section/Section'

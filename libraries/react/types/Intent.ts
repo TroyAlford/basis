@@ -1,4 +1,4 @@
-export enum DialogIntent {
+export enum Intent {
   Danger = 'danger',
   Default = 'default',
   Primary = 'primary',
