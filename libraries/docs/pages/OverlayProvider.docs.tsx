@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Button, Dialog, Notification, OverlayProvider } from '@basis/react'
+import { Button, Dialog, Notification } from '@basis/react'
 import { Code } from '../components/Code'
 
 export class OverlayProviderDocs extends React.Component {
@@ -23,19 +23,17 @@ export class OverlayProviderDocs extends React.Component {
   render(): React.ReactNode {
     return (
       <>
-        <OverlayProvider />
         <h1>OverlayProvider</h1>
         <section>
           <p>
-            OverlayProvider is the host for context-safe dialogs and notifications. ApplicationBase
-            renders it automatically inside the application context provider and after the normal
-            layout.
+            OverlayProvider is the host for context-safe dialogs and notifications. This documentation{' '}
+            <code>Layout</code> extends <code>ApplicationBase</code>, which mounts{' '}
+            <code>OverlayProvider</code> automatically after your layout so <code>Dialog.open</code> and{' '}
+            <code>Notification.create</code> work on every page.
           </p>
           <p>
-            Mount <code>&lt;OverlayProvider /&gt;</code> manually only when using the overlay APIs
-            outside ApplicationBase. This page mounts one <strong>first</strong> in the tree so{' '}
-            <code>window.overlayProvider</code> is registered before any sibling (such as demo
-            buttons) can call <code>Dialog.open</code> or <code>Notification.create</code>.
+            Mount <code>&lt;OverlayProvider /&gt;</code> yourself only when using those APIs outside{' '}
+            <code>ApplicationBase</code> (for example a small example or test harness).
           </p>
         </section>
         <section>

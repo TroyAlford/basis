@@ -3,6 +3,8 @@ import { Intent } from '../../types/Intent'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 
+import './Dialog.styles.ts'
+
 interface DialogButton<T> {
   intent?: Intent,
   label: ReactNode,
@@ -115,9 +117,9 @@ export class Dialog extends Component<Props, HTMLDialogElement> {
   content(): ReactNode {
     const { buttons, content, onResolve, title } = this.props
     return (
-      <form method="dialog">
+      <>
         <header>
-          {title && <h2>{title}</h2>}
+          {title ?? null}
         </header>
         <section>
           {content}
@@ -136,7 +138,7 @@ export class Dialog extends Component<Props, HTMLDialogElement> {
             </Button>
           ))}
         </footer>
-      </form>
+      </>
     )
   }
 }

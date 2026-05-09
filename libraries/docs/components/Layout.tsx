@@ -1,19 +1,21 @@
 import * as React from 'react'
-import { Component, Router, Theme } from '@basis/react'
+import { ApplicationBase, Router, Theme } from '@basis/react'
 import { routes } from '../routes.ts'
 
 import './Layout.styles.ts'
 
-export class Layout extends Component {
+export class Layout extends ApplicationBase {
   static displayName = 'Layout'
 
   main = React.createRef<HTMLDivElement>()
 
-  override content(): React.ReactNode {
-    // Build tree structure
+  protected get routes(): Record<string, { component: React.ComponentType }> {
+    return Object.fromEntries(routes.map(route => [route.path, { component: route.component }]))
+  }
+
+  protected layout(content: React.ReactNode): React.ReactNode {
     const routeTree = routes.reduce((tree, route) => {
       if (route.parent) {
-        // Find parent in tree
         const parentRoute = routes.find(r => r.path === route.parent)
         if (parentRoute) {
           if (!tree[parentRoute.path]) {
@@ -21,18 +23,17 @@ export class Layout extends Component {
           }
           tree[parentRoute.path].children.push(route)
         } else {
-          // Parent not found, add as root
           tree[route.path] = { children: [], route }
         }
       } else {
-        // No parent, add as root
         tree[route.path] = { children: [], route }
       }
       return tree
     }, {} as Record<string, { children: typeof routes, route: typeof routes[0] }>)
 
-    // Convert to sorted array
-    const sortedRoutes = Object.values(routeTree).sort((a, b) => a.route.title.localeCompare(b.route.title))
+    const sortedRoutes = Object.values(routeTree).sort((a, b) => (
+      a.route.title.localeCompare(b.route.title)
+    ))
 
     const renderRouteTree = (routeNodes: typeof sortedRoutes): React.ReactNode => (
       <ul>
@@ -64,14 +65,12 @@ export class Layout extends Component {
           <h1>Basis Docs</h1>
           {renderRouteTree(sortedRoutes)}
         </nav>
-        <Router>
-          {routes.map(({ component: RouteComponent, path }) => (
-            <Router.Route key={path} template={path}>
-              {() => (<main ref={this.main}><RouteComponent /></main>)}
-            </Router.Route>
-          ))}
-        </Router>
+        {content}
       </>
     )
+  }
+
+  protected route(outlet: React.ReactNode): React.ReactNode {
+    return <main ref={this.main}>{outlet}</main>
   }
 }

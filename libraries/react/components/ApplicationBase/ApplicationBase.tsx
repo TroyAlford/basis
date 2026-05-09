@@ -76,6 +76,16 @@ export class ApplicationBase<
   }
 
   /**
+   * Override to wrap each matched route's root output (for example a single {@link HTMLElement} main
+   * landmark with a stable ref).
+   * @param outlet - The route component render result
+   * @returns Wrapped outlet (default: unchanged)
+   */
+  protected route(outlet: React.ReactNode): React.ReactNode {
+    return outlet
+  }
+
+  /**
    * Renders the routes.
    * @returns The rendered routes
    */
@@ -89,7 +99,7 @@ export class ApplicationBase<
       >
         {(params: Record<string, string>) => {
           const RouteComponent = config.component
-          return <RouteComponent {...params} />
+          return this.route(<RouteComponent {...params} />)
         }}
       </Router.Route>
     ))

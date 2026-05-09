@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Component } from '../Component/Component'
 
+import './Notifications.styles.ts'
 interface Props {
   children?: ReactNode,
 }
