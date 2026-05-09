@@ -1,4 +1,5 @@
 import type { ReactNode, RefObject, SyntheticEvent } from 'react'
+import { Warning } from '../../icons'
 import { Intent } from '../../types/Intent'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
@@ -16,6 +17,7 @@ export interface IDialog<T = unknown> {
   buttons: DialogButton<T>[],
   cancelValue: T,
   content?: ReactNode,
+  intent?: Intent,
   title?: ReactNode,
 }
 
@@ -59,6 +61,7 @@ export class Dialog extends Component<Props, HTMLDialogElement> {
       ],
       cancelValue: false,
       content,
+      intent: danger ? Dialog.Intent.Danger : Dialog.Intent.Primary,
       title,
     })
   }
@@ -103,6 +106,7 @@ export class Dialog extends Component<Props, HTMLDialogElement> {
     const { cancelValue, onResolve } = this.props
     return {
       ...super.attributes,
+      ['data-intent']: this.props.intent ?? Dialog.Intent.Default,
       onCancel: (event: SyntheticEvent<HTMLDialogElement>) => {
         event.preventDefault()
         onResolve(cancelValue)
@@ -115,12 +119,22 @@ export class Dialog extends Component<Props, HTMLDialogElement> {
   }
 
   content(): ReactNode {
-    const { buttons, content, onResolve, title } = this.props
+    const { buttons, content, intent, onResolve, title } = this.props
+    const resolvedIntent = intent ?? Dialog.Intent.Default
+    const showHeader = Boolean(title)
+      || resolvedIntent === Dialog.Intent.Danger
+      || resolvedIntent === Dialog.Intent.Primary
+
     return (
       <>
-        <header>
-          {title ?? null}
-        </header>
+        {showHeader && (
+          <header data-intent={resolvedIntent}>
+            {resolvedIntent === Dialog.Intent.Danger && (
+              <Warning filled title="Warning" />
+            )}
+            {title}
+          </header>
+        )}
         <section>
           {content}
         </section>
@@ -128,7 +142,6 @@ export class Dialog extends Component<Props, HTMLDialogElement> {
           {buttons.map((button, index) => (
             <Button
               key={index}
-              data-intent={button.intent ?? Dialog.Intent.Default}
               type={Button.Type.Submit}
               onActivate={() => {
                 onResolve(button.value)

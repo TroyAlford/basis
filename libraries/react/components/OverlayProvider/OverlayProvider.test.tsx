@@ -81,6 +81,17 @@ describe('OverlayProvider', () => {
       unmount()
     })
 
+    test('Dialog.confirm with danger uses danger dialog intent on header', async () => {
+      const { node, unmount } = await render(<OverlayProvider />)
+      Dialog.confirm({ danger: true, title: 'Remove?' })
+
+      const header = await waitFor(() => node.querySelector<HTMLElement>('dialog header'))
+      expect(header?.dataset.intent).toBe('danger')
+      expect(header?.querySelector('svg.icon')).toBeTruthy()
+
+      unmount()
+    })
+
     test('Dialog.confirm resolves false for cancel', async () => {
       const { node, unmount } = await render(<OverlayProvider />)
       const result = Dialog.confirm({ labelCancel: 'No' })
@@ -104,7 +115,7 @@ describe('OverlayProvider', () => {
       const { node, unmount } = await render(<OverlayProvider />)
       const note = Notification.create({
         content: 'Saved',
-        status: Notification.Status.Success,
+        intent: Notification.Intent.Primary,
         title: 'Done',
       })
 
@@ -114,7 +125,7 @@ describe('OverlayProvider', () => {
 
       const region = await waitFor(() => node.querySelector('.notifications.component'))
       const aside = await waitFor(() => region.querySelector<HTMLElement>('aside.notification.component'))
-      expect(aside.dataset.status).toBe('success')
+      expect(aside.dataset.intent).toBe('primary')
       expect(aside.textContent).toContain('Done')
       expect(aside.textContent).toContain('Saved')
 
@@ -123,14 +134,14 @@ describe('OverlayProvider', () => {
 
     test('handle.update updates the same notification', async () => {
       const { node, unmount } = await render(<OverlayProvider />)
-      const note = Notification.create({ content: 'Starting', status: Notification.Status.Loading })
+      const note = Notification.create({ content: 'Starting', intent: Notification.Intent.Default })
 
       const aside = await waitFor(() => node.querySelector<HTMLElement>('aside.notification.component'))
-      note.update({ content: 'Finished', status: Notification.Status.Success })
+      note.update({ content: 'Finished', intent: Notification.Intent.Primary })
 
       await waitFor(() => aside.textContent?.includes('Finished'))
       expect(node.querySelectorAll('aside.notification.component')).toHaveLength(1)
-      expect(aside.dataset.status).toBe('success')
+      expect(aside.dataset.intent).toBe('primary')
 
       unmount()
     })

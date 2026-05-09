@@ -1,5 +1,6 @@
 import type { ReactNode, RefObject } from 'react'
 import { createRef } from 'react'
+import { Intent } from '../../types/Intent'
 import { Component } from '../Component/Component'
 import type { IDialog } from './Dialog'
 import { Dialog } from './Dialog'
@@ -64,7 +65,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     const entry: NotificationRow = {
       content: request.content,
       id: OverlayProvider.createId('notification'),
-      status: request.status ?? Notification.Status.Info,
+      intent: request.intent ?? Intent.Default,
       timeout: request.timeout ?? null,
       title: request.title,
     }
@@ -87,6 +88,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
         cancelValue: request.cancelValue as T,
         content: request.content,
         id: OverlayProvider.createId('dialog'),
+        intent: request.intent,
         nodeRef: createRef<HTMLDialogElement>(),
         resolve,
         title: request.title,

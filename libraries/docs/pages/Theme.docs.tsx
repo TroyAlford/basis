@@ -205,7 +205,9 @@ export class ThemeDocs extends React.Component<object, State> {
             <strong>Auto-Computed Contrast</strong>: When you set a primary color, Theme automatically
             computes an appropriate contrast color using luminance analysis. Light primary colors get
             dark contrast colors, and dark primary colors get light contrast colors. This ensures
-            optimal readability and accessibility.
+            optimal readability and accessibility. The semantic <code>color.danger</code> value
+            similarly receives <code>--basis-color-danger-contrast</code> for overlays (for example
+            dialog and notification headers).
           </p>
           <h3><code>fontSize</code></h3>
           <p>
@@ -238,7 +240,9 @@ export class ThemeDocs extends React.Component<object, State> {
           {Code.format(`
             /* Color variables */
             --basis-color-primary: #0070f3;
-            --basis-color-contrast: #dddddded; /* Auto-computed contrast */
+            --basis-color-contrast: #dddddded; /* Auto-computed contrast on primary */
+            --basis-color-danger: #dc2626;
+            --basis-color-danger-contrast: #dddddded; /* Auto-computed contrast on danger */
             --basis-color-background: #ffffff;
             --basis-color-foreground: #171717;
             
@@ -288,12 +292,13 @@ export class ThemeDocs extends React.Component<object, State> {
             const DEFAULT_THEME = {
               color: {
                 background: '#ffffff',
-                foreground: '#171717',
-                primary: '#0070f3',
+                danger: '#dc2626',
                 disabled: '#e5e5e5',
                 disabledText: '#a3a3a3',
+                foreground: '#171717',
                 overlayDark: '#00000080',
                 overlayLight: '#ffffff80',
+                primary: '#0070f3',
               },
               fontSize: {
                 xxs: 62.5,   // 10px

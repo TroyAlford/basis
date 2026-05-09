@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
-import { Remove } from '@basis/react/icons'
+import { match } from '@basis/utilities/index.ts'
+import { Remove, Warning } from '../../icons'
+import { Intent } from '../../types/Intent'
 import { Component } from '../Component/Component'
 
 import './Notification.styles.ts'
@@ -9,18 +11,10 @@ const overlayHostRequiredMessage = [
   'Render <OverlayProvider /> inside your React application tree before using Dialog.open() or Notification.create().',
 ].join(' ')
 
-enum Status {
-  Error = 'error',
-  Info = 'info',
-  Loading = 'loading',
-  Success = 'success',
-  Warning = 'warning',
-}
-
 /** Payload for {@link Notification.create} and rows owned by {@link OverlayProvider} (before `id`). */
 export interface INotification {
   content?: ReactNode,
-  status?: Status,
+  intent?: Intent,
   timeout?: number | null,
   title?: ReactNode,
 }
@@ -36,7 +30,7 @@ interface Props extends INotification {
 export class Notification extends Component<Props, HTMLElement> {
   static displayName = 'Notification'
 
-  static readonly Status = Status
+  static readonly Intent = Intent
 
   /**
    * @param request - Typically `Partial<INotification>`. Import `type { INotification }` from this
@@ -51,10 +45,10 @@ export class Notification extends Component<Props, HTMLElement> {
   }
 
   get attributes() {
-    const { status } = this.props
+    const { intent } = this.props
     return {
       ...super.attributes,
-      'data-status': status ?? Notification.Status.Info,
+      'data-intent': intent ?? Notification.Intent.Default,
     }
   }
 
@@ -62,11 +56,21 @@ export class Notification extends Component<Props, HTMLElement> {
     return 'aside' as const
   }
 
+  get icon() {
+    const intent = this.props.intent ?? Notification.Intent.Default
+    return match(intent)
+      .when(Notification.Intent.Danger).then(<Warning filled title="Warning" />)
+      .else(null)
+  }
+
   content(): ReactNode {
     const { content, onDismiss, title } = this.props
     return (
       <>
-        {title && <header>{title}</header>}
+        <header>
+          {this.icon}
+          {title ?? null}
+        </header>
         {content && <section>{content}</section>}
         <Remove onClick={onDismiss} />
       </>

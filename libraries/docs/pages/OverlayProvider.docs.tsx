@@ -11,12 +11,30 @@ export class OverlayProviderDocs extends React.Component {
     })
   }
 
-  createNotification = () => {
+  openDangerDialog = async () => {
+    await Dialog.confirm({
+      content: 'This uses Intent.Danger on the dialog chrome and confirm button.',
+      danger: true,
+      labelConfirm: 'Delete',
+      title: 'Delete item?',
+    })
+  }
+
+  createPrimaryNotification = () => {
     Notification.create({
-      content: 'The notification can be updated or dismissed through its handle.',
-      status: Notification.Status.Success,
+      content: 'Primary intent tints the header with the brand color; there is no icon.',
+      intent: Notification.Intent.Primary,
       timeout: 4_000,
       title: 'Saved',
+    })
+  }
+
+  createDangerNotification = () => {
+    Notification.create({
+      content: 'Danger intent adds the warning icon and danger-tinted header.',
+      intent: Notification.Intent.Danger,
+      timeout: 4_000,
+      title: 'Could not save',
     })
   }
 
@@ -37,15 +55,33 @@ export class OverlayProviderDocs extends React.Component {
           </p>
         </section>
         <section>
+          <h3>Intent (dialog chrome and notifications)</h3>
+          <p>
+            Both <code>Dialog</code> and <code>Notification</code> use the same{' '}
+            <code>Intent</code> enum (<code>Default</code>, <code>Primary</code>, <code>Danger</code>).
+            When the header is shown, <code>Intent.Danger</code> uses the theme{' '}
+            <code>--basis-color-danger</code> background with <code>--basis-color-danger-contrast</code>{' '}
+            text and a warning icon. <code>Intent.Primary</code> uses <code>--basis-color-primary</code> with{' '}
+            <code>--basis-color-contrast</code> text and no icon. <code>Intent.Default</code> keeps a neutral
+            header. Set <code>intent</code> on <code>Dialog.open</code> / <code>INotification</code>;{' '}
+            <code>Dialog.confirm</code> sets <code>intent</code> from its <code>danger</code> flag (primary vs
+            danger).
+          </p>
+        </section>
+        <section>
           <h3>Dialog</h3>
-          <Button onActivate={this.openDialog}>Open dialog</Button>
+          <p>
+            <Button onActivate={this.openDialog}>Confirm (primary chrome)</Button>{' '}
+            <Button onActivate={this.openDangerDialog}>Confirm danger</Button>
+          </p>
           {Code.format(`
-            import { Dialog } from '@basis/react'
+            import { Dialog, Intent } from '@basis/react'
 
             const result = await Dialog.open({
               title: 'Delete item',
               content: 'This cannot be undone.',
               cancelValue: false,
+              intent: Intent.Danger,
               buttons: [
                 { label: 'Cancel', value: false },
                 { intent: Dialog.Intent.Danger, label: 'Delete', value: true },
@@ -60,21 +96,24 @@ export class OverlayProviderDocs extends React.Component {
         </section>
         <section>
           <h3>Notification</h3>
-          <Button onActivate={this.createNotification}>Create notification</Button>
+          <p>
+            <Button onActivate={this.createPrimaryNotification}>Primary notification</Button>{' '}
+            <Button onActivate={this.createDangerNotification}>Danger notification</Button>
+          </p>
           {Code.format(`
             import { Notification } from '@basis/react'
 
             const note = Notification.create({
               title: 'Uploading',
               content: 'Preparing files...',
-              status: Notification.Status.Loading,
+              intent: Notification.Intent.Primary,
               timeout: null,
             })
 
             note.update({
               title: 'Uploaded',
               content: 'Files are ready.',
-              status: Notification.Status.Success,
+              intent: Notification.Intent.Primary,
               timeout: 4000,
             })
 
@@ -92,8 +131,9 @@ export class OverlayProviderDocs extends React.Component {
             Return types for <code>Notification.create</code> follow{' '}
             <code>OverlayProvider.createNotification</code> (hover or use{' '}
             <code>ReturnType&lt;OverlayProvider['createNotification']&gt;</code> on an instance type).
-            Button intents are <code>Intent</code> (re-exported as <code>DialogIntent</code>; also{' '}
-            <code>Dialog.Intent</code>). Notification severity is <code>Notification.Status</code>.
+            Shared overlay chrome and button styling use <code>Intent</code> (also exported as{' '}
+            <code>DialogIntent</code>; <code>Dialog.Intent</code> and <code>Notification.Intent</code> are the
+            same enum).
           </p>
         </section>
       </>
