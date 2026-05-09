@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { deepEquals } from '@basis/utilities'
 import { Component } from '../Component/Component'
+import { OverlayProvider } from '../OverlayProvider/OverlayProvider'
 import { Router } from '../Router/Router'
 
 interface Props {
@@ -107,6 +108,7 @@ export class ApplicationBase<
             {this.renderRoutes()}
           </Router>,
         )}
+        <OverlayProvider />
       </Provider>
     )
   }

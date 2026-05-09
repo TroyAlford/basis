@@ -12,6 +12,11 @@ Guidance for humans and coding agents working in this repository.
 - **What counts:** new or renamed props, enum values, column types, static helpers on components, sorting or alignment rules, and similar contract changes.
 - **Goal:** A reader browsing the docs app should see the current behavior without relying on the PR description alone.
 
+## `@basis/react` components
+
+- **Subclass `Component`.** UI in this package must be implemented as a `class` that extends `libraries/react/components/Component/Component.tsx` (or another basis component), using `displayName`, `get tag()`, `get attributes()`, `get classNames()`, and `content()` as appropriate. Do **not** add new functional components or use React hooks for package UI; match existing components (for example `Button`, `ApplicationBase`).
+- **Styling.** Rely on `Component`’s automatic root class (`kebabCase(displayName)` plus `component`) and theme or layout CSS that targets those names. Do not introduce ad-hoc BEM-style blocks (`block__element--modifier`) on package components.
+
 ## Commits
 
 - **Do not skip repository checks** when committing (for example `--no-verify` or other flags that bypass Husky). Let lint, typecheck, and tests run; fix failures instead of silencing hooks.

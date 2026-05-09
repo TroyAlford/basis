@@ -14,6 +14,7 @@ import { MixinsDocs } from './pages/Mixins.docs.tsx'
 import { MoonPhaseDocs } from './pages/MoonPhase.docs.tsx'
 import { NumberEditorDocs } from './pages/NumberEditor.docs.tsx'
 import { OptionGroupDocs } from './pages/OptionGroup.docs.tsx'
+import { OverlayProviderDocs } from './pages/OverlayProvider.docs.tsx'
 import { OverviewDocs } from './pages/Overview.docs.tsx'
 import { RouterDocs } from './pages/Router.docs.tsx'
 import { TableDocs } from './pages/Table.docs.tsx'
@@ -54,6 +55,7 @@ export const routes: DocRoute[] = [
   { component: MoonPhaseDocs, parent: '/icons', path: '/icons/MoonPhase', title: 'Icons/MoonPhase' },
   { component: NumberEditorDocs, path: '/components/number-editor', title: 'NumberEditor' },
   { component: OptionGroupDocs, path: '/components/option-group', title: 'OptionGroup' },
+  { component: OverlayProviderDocs, path: '/components/overlay-provider', title: 'OverlayProvider' },
   { component: OverviewDocs, default: true, path: '/', title: 'Overview' },
   { component: RouterDocs, path: '/components/router', title: 'Router' },
   { component: TableDocs, path: '/components/table', title: 'Table' },
