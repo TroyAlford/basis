@@ -2,7 +2,6 @@ import * as React from 'react'
 import { parseTemplateURI } from '@basis/utilities'
 import { NavigateEvent } from '../../events/NavigateEvent'
 import { Component } from '../Component/Component'
-import { Editor } from '../Editor/Editor'
 import { Dialog } from '../OverlayProvider/Dialog'
 import { Link } from './Link'
 import { Location } from './Location'
@@ -88,14 +87,10 @@ export class Router extends Component<Props> {
     }
   }
 
-  #setEditable = (editable: unknown): void => {
-    this.#editable = isEditable(editable) ? editable : null
-  }
-
   #confirmCleanNavigation = async (): Promise<boolean> => {
     if (!this.#editable?.dirty) return true
 
-    try {
+    if (typeof window !== 'undefined' && window.overlayProvider) {
       return await Dialog.confirm({
         content: 'You have unsaved changes. Are you sure you want to leave this page?',
         intent: Dialog.Intent.Danger,
@@ -103,8 +98,25 @@ export class Router extends Component<Props> {
         labelConfirm: 'Discard changes',
         title: 'Discard unsaved changes?',
       })
-    } catch {
-      return window.confirm('You have unsaved changes. Leave this page?')
+    }
+
+    return window.confirm('You have unsaved changes. Leave this page?')
+  }
+
+  #setEditable(node: React.ReactElement<Record<string, unknown>>): React.RefCallback<unknown> {
+    const previousRef = 'ref' in node.props && node.props.ref !== undefined
+      ? node.props.ref as React.Ref<unknown>
+      : undefined
+
+    return value => {
+      this.#editable = isEditable(value) ? value : null
+
+      if (typeof previousRef === 'function') {
+        previousRef(value)
+      } else if (previousRef && typeof previousRef === 'object') {
+        const objectRef = previousRef as React.MutableRefObject<unknown>
+        objectRef.current = value
+      }
     }
   }
 
@@ -117,10 +129,10 @@ export class Router extends Component<Props> {
 
   #renderGuardedRoute(node: React.ReactNode): React.ReactNode {
     if (!React.isValidElement(node)) return node
-    if (!Editor.isEditor(node.type)) return node
+    if (typeof node.type === 'string') return node
 
     return React.cloneElement(node, {
-      ref: this.#setEditable,
+      ref: this.#setEditable(node as React.ReactElement<Record<string, unknown>>),
     } as Partial<typeof node.props>)
   }
 

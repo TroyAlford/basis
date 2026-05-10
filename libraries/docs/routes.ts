@@ -19,6 +19,7 @@ import { OptionGroupDocs } from './pages/OptionGroup.docs.tsx'
 import { OverlayProviderDocs } from './pages/OverlayProvider.docs.tsx'
 import { OverviewDocs } from './pages/Overview.docs.tsx'
 import { RouterDocs } from './pages/Router.docs.tsx'
+import { RouterGuardDocs } from './pages/RouterGuardDocs.docs.tsx'
 import { TableDocs } from './pages/Table.docs.tsx'
 import { TagDocs } from './pages/Tag.docs.tsx'
 import { TagsEditorDocs } from './pages/TagsEditor.docs.tsx'
@@ -62,6 +63,12 @@ export const routes: DocRoute[] = [
   { component: OverlayProviderDocs, path: '/components/overlay-provider', title: 'OverlayProvider' },
   { component: OverviewDocs, default: true, path: '/', title: 'Overview' },
   { component: RouterDocs, path: '/components/router', title: 'Router' },
+  {
+    component: RouterGuardDocs,
+    parent: '/components/router',
+    path: '/components/router/guard-demo',
+    title: 'Router/Guard Demo',
+  },
   { component: TableDocs, path: '/components/table', title: 'Table' },
   { component: TagDocs, path: '/components/tag', title: 'Tag' },
   { component: TagsEditorDocs, path: '/components/tags-editor', title: 'TagsEditor' },

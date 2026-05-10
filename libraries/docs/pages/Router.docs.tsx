@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Router } from '@basis/react'
 import { Code } from '../components/Code'
 
 export class RouterDocs extends React.Component {
@@ -155,10 +156,20 @@ export class RouterDocs extends React.Component {
             await Router.navigate('/search?q=react&page=2')
           `)}
           <p>
-            If the currently matched route renders an uncontrolled <code>Editor</code> directly and
-            that editor is dirty, <code>Router.Link</code> and <code>Router.navigate()</code> prompt
-            before leaving. <code>Router.navigate()</code> resolves <code>false</code> when navigation
-            is canceled and <code>true</code> when it updates browser history.
+            If the currently matched route renders a class component instance that exposes a{' '}
+            <code>dirty</code> boolean (for example an uncontrolled <code>Editor</code>),{' '}
+            <code>Router.Link</code> and <code>Router.navigate()</code> prompt before leaving.{' '}
+            <code>Router.navigate()</code> resolves <code>false</code> when navigation is canceled and{' '}
+            <code>true</code> when it updates browser history.
+          </p>
+          <p>
+            To test guarded navigation interactively, open the Router Guard Demo, change the editor
+            value, then click another docs navigation link.
+          </p>
+          <p>
+            <Router.Link to="/components/router/guard-demo">
+              Open Router Guard Demo
+            </Router.Link>
           </p>
           <p>
             Tab and window close use the browser's native unsaved-changes prompt. Browser back and

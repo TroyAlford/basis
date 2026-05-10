@@ -7,7 +7,7 @@ import './Layout.styles.ts'
 export class Layout extends ApplicationBase {
   static displayName = 'Layout'
 
-  main = React.createRef<HTMLDivElement>()
+  main = React.createRef<HTMLElement>()
 
   protected get routes(): Record<string, { component: React.ComponentType }> {
     return Object.fromEntries(routes.map(route => [route.path, { component: route.component }]))
@@ -65,12 +65,12 @@ export class Layout extends ApplicationBase {
           <h1>Basis Docs</h1>
           {renderRouteTree(sortedRoutes)}
         </nav>
-        {content}
+        <main ref={this.main}>{content}</main>
       </>
     )
   }
 
   protected route(outlet: React.ReactNode): React.ReactNode {
-    return <main ref={this.main}>{outlet}</main>
+    return outlet
   }
 }
