@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { createRef } from 'react'
+import { hash } from '@basis/utilities/functions/hash'
 import { Intent } from '../../types/Intent'
 import { Component } from '../Component/Component'
 import type { DialogButton, IDialog } from './Dialog'
@@ -20,15 +21,15 @@ interface State {
 export class OverlayProvider extends Component<object, HTMLDivElement, State> {
   static displayName = 'OverlayProvider'
 
-  static #nextId = 0
-
   /**
    * Process-unique id for queued overlay rows (dialogs and notifications).
-   * @param prefix - Short label prefix (for example `dialog` or `notification`).
-   * @returns A unique string id prefixed with {@link prefix}.
+   * @returns A short hash string (stable length) for React keys and DOM ids.
    */
-  static createId(prefix: string): string {
-    return `${prefix}-${++OverlayProvider.#nextId}`
+  static createId(): string {
+    const raw = typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}-${Math.random()}`
+    return hash(raw, { length: 12 })
   }
 
   #notificationTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
@@ -60,7 +61,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     const entry: NotificationRow = {
       content: request.content,
       icon: request.icon,
-      id: OverlayProvider.createId('notification'),
+      id: OverlayProvider.createId(),
       intent: request.intent ?? Intent.Default,
       timeout: request.timeout ?? null,
       title: request.title,
@@ -92,7 +93,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
         buttons,
         content: request.content ?? null,
         icon: request.icon ?? null,
-        id: OverlayProvider.createId('dialog'),
+        id: OverlayProvider.createId(),
         intent: request.intent ?? Intent.Primary,
         nodeRef: createRef<HTMLDialogElement>(),
         onResolve: resolve as (value: unknown) => void,
@@ -196,5 +197,3 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     )
   }
 }
-
-export type OverlayProviderState = InstanceType<typeof OverlayProvider>['state']

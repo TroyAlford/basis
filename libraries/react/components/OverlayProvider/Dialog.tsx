@@ -5,6 +5,7 @@ import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
+import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE.ts'
 
 import './Dialog.styles.ts'
 
@@ -92,12 +93,7 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
    * @returns Promise that resolves with the chosen button value or `false` (cancel / dismiss).
    */
   static open<T = boolean>(request: Partial<IDialog<T>> = {}): Promise<T | false> {
-    if (typeof window === 'undefined' || !window.overlayProvider) {
-      throw new Error(`
-        OverlayProvider is not mounted. Render <OverlayProvider /> inside your React application
-        tree before using Dialog.open() or Notification.create().
-      `.trim().replace(/\s+/g, ' '))
-    }
+    if (typeof window === 'undefined' || !window.overlayProvider) throw new Error(REQUIRED_MESSAGE)
     return window.overlayProvider.openDialog(request)
   }
 

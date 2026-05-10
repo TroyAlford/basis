@@ -5,6 +5,7 @@ import { Button } from '../Button/Button'
 import { Dialog } from './Dialog'
 import { Notification } from './Notification'
 import { OverlayProvider } from './OverlayProvider'
+import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE'
 
 /**
  * Clears the process-local overlay provider singleton between tests.
@@ -32,7 +33,7 @@ describe('OverlayProvider', () => {
     test('Dialog.open throws clearly when no OverlayProvider is mounted', () => {
       expect(() => Dialog.open({
         buttons: [{ label: 'Ok', value: 'ok' }],
-      })).toThrow('OverlayProvider is not mounted')
+      })).toThrow(REQUIRED_MESSAGE)
     })
 
     test('Dialog.open renders default buttons', async () => {
@@ -298,7 +299,7 @@ describe('OverlayProvider', () => {
 
   describe('Notification', () => {
     test('Notification.create throws clearly when no OverlayProvider is mounted', () => {
-      expect(() => Notification.create({ title: 'Missing provider' })).toThrow('OverlayProvider is not mounted')
+      expect(() => Notification.create({ title: 'Missing provider' })).toThrow(REQUIRED_MESSAGE)
     })
 
     test('Notification.create renders in the notifications region and returns a handle', async () => {
@@ -309,7 +310,7 @@ describe('OverlayProvider', () => {
         title: 'Done',
       })
 
-      expect(note.id).toStartWith('notification-')
+      expect(note.id).toMatch(/^[0-9A-Za-z-]{12}$/)
       expect(note.update).toBeFunction()
       expect(note.dismiss).toBeFunction()
 

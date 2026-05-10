@@ -5,13 +5,9 @@ import { Remove } from '../../icons'
 import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
 import { Component } from '../Component/Component'
+import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE.ts'
 
 import './Notification.styles.ts'
-
-const overlayHostRequiredMessage = [
-  'OverlayProvider is not mounted.',
-  'Render <OverlayProvider /> inside your React application tree before using Dialog.open() or Notification.create().',
-].join(' ')
 
 /** Payload for {@link Notification.create} and rows owned by {@link OverlayProvider} (before `id`). */
 export interface INotification {
@@ -44,9 +40,7 @@ export class Notification extends Component<Props, HTMLElement> {
    * @returns Handle for update and dismiss (shape follows {@link OverlayProvider.createNotification}).
    */
   static create(request: Partial<INotification>) {
-    if (typeof window === 'undefined' || !window.overlayProvider) {
-      throw new Error(overlayHostRequiredMessage)
-    }
+    if (typeof window === 'undefined' || !window.overlayProvider) throw new Error(REQUIRED_MESSAGE)
     return window.overlayProvider.createNotification(request)
   }
 
