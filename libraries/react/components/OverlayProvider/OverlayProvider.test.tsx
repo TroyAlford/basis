@@ -81,13 +81,36 @@ describe('OverlayProvider', () => {
       unmount()
     })
 
-    test('Dialog.confirm with danger uses danger dialog intent on header', async () => {
+    test('Dialog.confirm with Intent.Danger uses danger dialog intent on header', async () => {
       const { node, unmount } = await render(<OverlayProvider />)
-      Dialog.confirm({ danger: true, title: 'Remove?' })
+      Dialog.confirm({ intent: Dialog.Intent.Danger, title: 'Remove?' })
 
       const header = await waitFor(() => node.querySelector<HTMLElement>('dialog header'))
       expect(header?.dataset.intent).toBe('danger')
       expect(header?.querySelector('svg.icon')).toBeTruthy()
+
+      unmount()
+    })
+
+    test('Dialog.open with success intent shows SquareCheck in header', async () => {
+      const { node, unmount } = await render(<OverlayProvider />)
+      const result = Dialog.open({
+        buttons: [{ label: 'Done', value: true }],
+        cancelValue: false,
+        content: 'Saved.',
+        intent: Dialog.Intent.Success,
+        title: 'Saved',
+      })
+
+      const header = await waitFor(() => node.querySelector<HTMLElement>('dialog header'))
+      expect(header?.dataset.intent).toBe('success')
+      expect(header?.querySelector('svg.icon')).toBeTruthy()
+
+      const done = await waitFor(() => Array.from(node.querySelectorAll('button'))
+        .find(button => button.textContent === 'Done') as HTMLButtonElement | undefined)
+      done.click()
+
+      expect(await result).toBe(true)
 
       unmount()
     })
@@ -128,6 +151,21 @@ describe('OverlayProvider', () => {
       expect(aside.dataset.intent).toBe('primary')
       expect(aside.textContent).toContain('Done')
       expect(aside.textContent).toContain('Saved')
+
+      unmount()
+    })
+
+    test('Notification.create with success intent renders SquareCheck in header', async () => {
+      const { node, unmount } = await render(<OverlayProvider />)
+      Notification.create({
+        content: 'OK',
+        intent: Notification.Intent.Success,
+        title: 'Done',
+      })
+
+      const aside = await waitFor(() => node.querySelector<HTMLElement>('aside.notification.component'))
+      expect(aside.dataset.intent).toBe('success')
+      expect(aside.querySelector('header svg.icon')).toBeTruthy()
 
       unmount()
     })

@@ -64,6 +64,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
   createNotification(request: Partial<INotification>) {
     const entry: NotificationRow = {
       content: request.content,
+      icon: request.icon,
       id: OverlayProvider.createId('notification'),
       intent: request.intent ?? Intent.Default,
       timeout: request.timeout ?? null,
@@ -87,6 +88,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
         buttons: (request.buttons ?? []) as DialogRow<T>['buttons'],
         cancelValue: request.cancelValue as T,
         content: request.content,
+        icon: request.icon,
         id: OverlayProvider.createId('dialog'),
         intent: request.intent,
         nodeRef: createRef<HTMLDialogElement>(),

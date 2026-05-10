@@ -1,5 +1,7 @@
 import type { ReactNode, RefObject, SyntheticEvent } from 'react'
-import { Warning } from '../../icons'
+import { createElement } from 'react'
+import { IconBase } from '../../icons/IconBase/IconBase'
+import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
@@ -17,6 +19,7 @@ export interface IDialog<T = unknown> {
   buttons: DialogButton<T>[],
   cancelValue: T,
   content?: ReactNode,
+  icon?: (typeof IconBase) | ReactNode,
   intent?: Intent,
   title?: ReactNode,
 }
@@ -39,29 +42,36 @@ export class Dialog extends Component<Props, HTMLDialogElement> {
 
   static confirm({
     content,
-    danger = false,
+    icon,
+    intent = Dialog.Intent.Primary,
     labelCancel: cancelLabel = 'Cancel',
     labelConfirm: confirmLabel = 'Confirm',
     title,
   }: {
     content?: ReactNode,
-    danger?: boolean,
+    icon?: (typeof IconBase) | ReactNode,
+    intent?: Intent,
     labelCancel?: ReactNode,
     labelConfirm?: ReactNode,
     title?: ReactNode,
   }): Promise<boolean> {
+    const confirmIntent = intent === Dialog.Intent.Danger || intent === Dialog.Intent.Success
+      ? intent
+      : Dialog.Intent.Primary
+
     return Dialog.open<boolean>({
       buttons: [
         { intent: Dialog.Intent.Default, label: cancelLabel, value: false },
         {
-          intent: danger ? Dialog.Intent.Danger : Dialog.Intent.Primary,
+          intent: confirmIntent,
           label: confirmLabel,
           value: true,
         },
       ],
       cancelValue: false,
       content,
-      intent: danger ? Dialog.Intent.Danger : Dialog.Intent.Primary,
+      icon,
+      intent,
       title,
     })
   }
@@ -118,23 +128,26 @@ export class Dialog extends Component<Props, HTMLDialogElement> {
     return 'dialog' as const
   }
 
+  get icon(): ReactNode {
+    const intent = this.props.intent ?? Dialog.Intent.Default
+    if (this.props.icon) {
+      return (this.props.icon?.constructor?.name === IconBase.name)
+        // @ts-expect-error - TS doesn't like the SVGProps definitions
+        ? createElement(this.props.icon, {})
+        : this.props.icon as ReactNode
+    }
+    return <IntentIcon is={intent} />
+  }
+
   content(): ReactNode {
-    const { buttons, content, intent, onResolve, title } = this.props
-    const resolvedIntent = intent ?? Dialog.Intent.Default
-    const showHeader = Boolean(title)
-      || resolvedIntent === Dialog.Intent.Danger
-      || resolvedIntent === Dialog.Intent.Primary
+    const { buttons, content, onResolve, title } = this.props
 
     return (
       <>
-        {showHeader && (
-          <header data-intent={resolvedIntent}>
-            {resolvedIntent === Dialog.Intent.Danger && (
-              <Warning filled title="Warning" />
-            )}
-            {title}
-          </header>
-        )}
+        <header>
+          {this.icon}
+          {title}
+        </header>
         <section>
           {content}
         </section>

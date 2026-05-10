@@ -14,6 +14,8 @@ describe('Theme', () => {
       expect(styleElement?.textContent).toContain('[data-theme="test"]')
       expect(styleElement?.textContent).toContain('--basis-color-danger:')
       expect(styleElement?.textContent).toContain('--basis-color-danger-contrast:')
+      expect(styleElement?.textContent).toContain('--basis-color-success:')
+      expect(styleElement?.textContent).toContain('--basis-color-success-contrast:')
     })
 
     test('renders with all props', async () => {
@@ -29,6 +31,7 @@ describe('Theme', () => {
             overlayDark: 'rgba(0, 0, 0, 0.5)',
             overlayLight: 'rgba(255, 255, 255, 0.5)',
             primary: '#ff0000',
+            success: '#15803d',
           }}
           fontSize={{
             lg: 112.5,
@@ -75,6 +78,8 @@ describe('Theme', () => {
       expect(css).toContain('--basis-color-primary: #ff0000ff')
       expect(css).toContain('--basis-color-danger: #b91c1cff')
       expect(css).toContain('--basis-color-danger-contrast:')
+      expect(css).toContain('--basis-color-success: #15803dff')
+      expect(css).toContain('--basis-color-success-contrast:')
       expect(css).toContain('--basis-color-background: #ffffffff')
       expect(css).toContain('--basis-color-foreground: #000000ff')
       expect(css).toContain('--basis-color-disabled: #ccccccff')

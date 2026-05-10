@@ -4,6 +4,7 @@ import { ButtonDocs } from './pages/Button.docs.tsx'
 import { CarouselDocs } from './pages/Carousel.docs.tsx'
 import { CheckboxEditorDocs } from './pages/CheckboxEditor.docs.tsx'
 import { ComponentDocs } from './pages/Component.docs.tsx'
+import { DialogDocs } from './pages/Dialog.docs.tsx'
 import { DropdownMenuDocs } from './pages/DropdownMenu.docs.tsx'
 import { EditorDocs } from './pages/Editor.docs.tsx'
 import { EnumEditorDocs } from './pages/EnumEditor.docs.tsx'
@@ -12,6 +13,7 @@ import { ImageDocs } from './pages/Image.docs.tsx'
 import { MenuDocs } from './pages/Menu.docs.tsx'
 import { MixinsDocs } from './pages/Mixins.docs.tsx'
 import { MoonPhaseDocs } from './pages/MoonPhase.docs.tsx'
+import { NotificationDocs } from './pages/Notification.docs.tsx'
 import { NumberEditorDocs } from './pages/NumberEditor.docs.tsx'
 import { OptionGroupDocs } from './pages/OptionGroup.docs.tsx'
 import { OverlayProviderDocs } from './pages/OverlayProvider.docs.tsx'
@@ -45,6 +47,7 @@ export const routes: DocRoute[] = [
   { component: CarouselDocs, path: '/components/carousel', title: 'Carousel' },
   { component: CheckboxEditorDocs, path: '/components/checkbox-editor', title: 'CheckboxEditor' },
   { component: ComponentDocs, path: '/components/component', title: 'Component' },
+  { component: DialogDocs, path: '/components/dialog', title: 'Dialog' },
   { component: DropdownMenuDocs, path: '/components/dropdown-menu', title: 'DropdownMenu' },
   { component: EditorDocs, path: '/components/editor', title: 'Editor' },
   { component: EnumEditorDocs, path: '/components/enum-editor', title: 'EnumEditor' },
@@ -54,6 +57,7 @@ export const routes: DocRoute[] = [
   { component: MixinsDocs, path: '/mixins', title: 'Mixins' },
   { component: MoonPhaseDocs, parent: '/icons', path: '/icons/MoonPhase', title: 'Icons/MoonPhase' },
   { component: NumberEditorDocs, path: '/components/number-editor', title: 'NumberEditor' },
+  { component: NotificationDocs, path: '/components/notification', title: 'Notification' },
   { component: OptionGroupDocs, path: '/components/option-group', title: 'OptionGroup' },
   { component: OverlayProviderDocs, path: '/components/overlay-provider', title: 'OverlayProvider' },
   { component: OverviewDocs, default: true, path: '/', title: 'Overview' },

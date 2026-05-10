@@ -24,6 +24,8 @@ interface Props {
     overlayLight?: string,
     /** Primary brand color */
     primary?: string,
+    /** Semantic success accent (dialogs, notifications) */
+    success?: string,
   },
 
   /** Font sizes relative to base size (16px) */
@@ -101,13 +103,14 @@ interface Props {
 const DEFAULT_THEME = {
   color: {
     background: '#ffffff',
-    danger: '#dc2626',
+    danger: '#C00000',
     disabled: '#e5e5e5',
     disabledText: '#a3a3a3',
     foreground: '#171717',
     overlayDark: '#00000080',
     overlayLight: '#ffffff80',
     primary: '#0070f3',
+    success: '#008000',
   },
   fontSize: {
     lg: 112.5, // 16px
@@ -202,6 +205,7 @@ export class Theme extends Component<Props> {
       .flatMap(([category, values]) => this.processObject(category, values as Record<string, unknown>))
     variables.push(`--basis-color-contrast: ${Color.from(theme.color.primary).contrast()};`)
     variables.push(`--basis-color-danger-contrast: ${Color.from(theme.color.danger).contrast()};`)
+    variables.push(`--basis-color-success-contrast: ${Color.from(theme.color.success).contrast()};`)
 
     return name?.trim()
       ? `:root [data-theme="${name}"] { ${variables.join('\n')} }`

@@ -13,25 +13,10 @@ style('basis:dialog', css`
     overflow: hidden;
     padding: 0;
 
-    &[data-intent="${Intent.Danger}"] {
-      border-color: var(--basis-color-danger);
-
-      > header {
-        background-color: var(--basis-color-danger);
-        color: var(--basis-color-danger-contrast);
-      }
-    }
-    &[data-intent="${Intent.Primary}"] {
-      border-color: var(--basis-color-primary);
-
-      > header {
-        background-color: var(--basis-color-primary);
-        color: var(--basis-color-contrast);
-      }
-    }
-
     > header {
       align-items: center;
+      background-color: var(--basis-color-foreground);
+      color: var(--basis-color-background);
       display: flex;
       flex-wrap: wrap;
       font-size: var(--basis-font-size-lg);
@@ -51,6 +36,31 @@ style('basis:dialog', css`
       gap: .25em;
       justify-content: flex-end;
       padding: .5em;
+    }
+
+    &[data-intent="${Intent.Danger}"] {
+      border-color: var(--basis-color-danger);
+
+      > header {
+        background-color: var(--basis-color-danger);
+        color: var(--basis-color-danger-contrast);
+      }
+    }
+    &[data-intent="${Intent.Primary}"] {
+      border-color: var(--basis-color-primary);
+
+      > header {
+        background-color: var(--basis-color-primary);
+        color: var(--basis-color-contrast);
+      }
+    }
+    &[data-intent="${Intent.Success}"] {
+      border-color: var(--basis-color-success);
+
+      > header {
+        background-color: var(--basis-color-success);
+        color: var(--basis-color-success-contrast);
+      }
     }
   }
 `)

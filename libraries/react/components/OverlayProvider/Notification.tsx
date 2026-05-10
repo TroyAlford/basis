@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
-import { match } from '@basis/utilities/index.ts'
-import { Remove, Warning } from '../../icons'
+import { createElement } from 'react'
+import { IconBase } from '@basis/react/icons/IconBase/IconBase'
+import { Remove } from '../../icons'
+import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
 import { Component } from '../Component/Component'
 
@@ -14,6 +16,7 @@ const overlayHostRequiredMessage = [
 /** Payload for {@link Notification.create} and rows owned by {@link OverlayProvider} (before `id`). */
 export interface INotification {
   content?: ReactNode,
+  icon?: (typeof IconBase) | ReactNode,
   intent?: Intent,
   timeout?: number | null,
   title?: ReactNode,
@@ -56,11 +59,15 @@ export class Notification extends Component<Props, HTMLElement> {
     return 'aside' as const
   }
 
-  get icon() {
+  get icon(): ReactNode {
     const intent = this.props.intent ?? Notification.Intent.Default
-    return match(intent)
-      .when(Notification.Intent.Danger).then(<Warning filled title="Warning" />)
-      .else(null)
+    if (this.props.icon) {
+      return (this.props.icon?.constructor?.name === IconBase.name)
+        // @ts-expect-error - TS doesn't like the SVGProps definitions
+        ? createElement(this.props.icon, {})
+        : this.props.icon as ReactNode
+    }
+    return <IntentIcon is={intent} />
   }
 
   content(): ReactNode {
