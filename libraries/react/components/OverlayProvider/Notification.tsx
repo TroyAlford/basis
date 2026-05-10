@@ -15,10 +15,15 @@ const overlayHostRequiredMessage = [
 
 /** Payload for {@link Notification.create} and rows owned by {@link OverlayProvider} (before `id`). */
 export interface INotification {
+  /** Optional notification body. */
   content?: ReactNode,
+  /** Header icon. Defaults from `intent` when omitted. */
   icon?: (typeof IconBase) | ReactNode,
+  /** Notification intent. Defaults to {@link Intent.Default}. */
   intent?: Intent,
+  /** Auto-dismiss delay in milliseconds. Defaults to `null`, which disables auto-dismiss. */
   timeout?: number | null,
+  /** Optional notification heading. */
   title?: ReactNode,
 }
 
@@ -27,9 +32,7 @@ interface Props extends INotification {
   onDismiss: () => void,
 }
 
-/**
- * In-app notification: static {@link Notification.create} and mounted rows inside {@link OverlayProvider}.
- */
+/** In-app notification: static {@link Notification.create} and mounted rows inside {@link OverlayProvider}. */
 export class Notification extends Component<Props, HTMLElement> {
   static displayName = 'Notification'
 
@@ -79,7 +82,7 @@ export class Notification extends Component<Props, HTMLElement> {
           {title ?? null}
         </header>
         {content && <section>{content}</section>}
-        <Remove onClick={onDismiss} />
+        <Remove title="Dismiss" onClick={onDismiss} />
       </>
     )
   }

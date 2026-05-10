@@ -75,8 +75,10 @@ describe('Application', () => {
       const { node, unmount } = await render<TestApplication>(<TestApplication />)
 
       Dialog.open({
-        buttons: [{ label: 'Ok', value: 'ok' }],
-        cancelValue: 'cancel',
+        buttons: [
+          { label: 'Ok', value: 'ok' },
+          { label: 'Cancel', value: 'cancel' },
+        ],
         content: 'Built-in provider content',
         title: 'Built-in provider',
       })

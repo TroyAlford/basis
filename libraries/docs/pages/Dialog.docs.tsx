@@ -34,25 +34,25 @@ export class DialogDocs extends React.Component<object, State> {
   }
 
   openCustomSuccess = async () => {
-    const choice = await Dialog.open<string>({
+    const choice = await Dialog.open<'close' | 'cancel'>({
       buttons: [
         { label: 'Close', value: 'close' },
+        { label: 'Cancel', value: 'cancel' },
       ],
-      cancelValue: 'escape',
       content: 'Success intent shows the SquareCheck icon and success-tinted header.',
       intent: Intent.Success,
       title: 'Saved',
     })
-    this.setState({ lastChoice: choice })
+    this.setState({ lastChoice: String(choice) })
   }
 
   openTypedDialog = async () => {
-    const value = await Dialog.open<'read' | 'write'>({
+    const value = await Dialog.open<'read' | 'write' | 'cancel'>({
       buttons: [
         { label: 'Read', value: 'read' },
         { label: 'Write', value: 'write' },
+        <Button key="cancel" data-value="cancel">Cancel</Button>,
       ],
-      cancelValue: 'read',
       content: 'Each button carries an arbitrary value; the promise resolves with the chosen value.',
       intent: Intent.Default,
       title: 'Choose mode',
@@ -83,7 +83,7 @@ export class DialogDocs extends React.Component<object, State> {
           <p>
             Optional <code>intent</code> on <code>IDialog</code> drives border and header styling on the dialog
             shell. <code>Dialog.Intent</code> is the same enum as <code>Notification.Intent</code> and the
-            package export <code>Intent</code> / <code>DialogIntent</code>.
+            package export <code>Intent</code>.
           </p>
           <ul>
             <li>
@@ -128,21 +128,34 @@ export class DialogDocs extends React.Component<object, State> {
           <h2><code>Dialog.open</code></h2>
           <p>
             Returns a <code>Promise&lt;T&gt;</code> that resolves with the clicked button&apos;s{' '}
-            <code>value</code> or with <code>cancelValue</code> when the user dismisses the dialog (Escape /
-            native cancel). Supply <code>buttons</code> with stable <code>value</code> payloads and keep{' '}
-            <code>cancelValue</code> distinct from any button value you care about.
+            <code>value</code> or JSX button <code>data-value</code>. For Escape / native cancel, Dialog uses
+            the first button whose value is <code>&apos;cancel&apos;</code> or <code>false</code>; otherwise it
+            uses the last button value.
+          </p>
+          <p>
+            With no request, or with only <code>title</code> / <code>content</code>, <code>Dialog.open()</code>{' '}
+            renders <strong>Cancel</strong> and <strong>OK</strong>. Cancel and Escape resolve{' '}
+            <code>&apos;cancel&apos;</code>; OK resolves <code>&apos;confirm&apos;</code>. Custom button
+            dialogs can use <code>{'{'} label, value {'}'}</code>, <code>&lt;Button data-value="..."&gt;</code>,
+            or a mix of both. Button intent defaults to <code>Intent.Default</code>, while the dialog shell
+            intent defaults to <code>Intent.Primary</code>.
           </p>
           {Code.format(`
             import { Dialog, Intent } from '@basis/react'
 
-            const next = await Dialog.open<'edit' | 'view'>({
+            const defaultResult = await Dialog.open({
+              title: 'Continue?',
+              content: 'Cancel resolves "cancel"; OK resolves "confirm".',
+            })
+
+            const next = await Dialog.open<'edit' | 'view' | 'cancel'>({
               title: 'Open as…',
               content: 'Pick how to open this item.',
-              cancelValue: 'view',
               intent: Intent.Success,
               buttons: [
                 { label: 'View', value: 'view' },
                 { label: 'Edit', value: 'edit' },
+                <Button key="cancel" data-value="cancel">Cancel</Button>,
               ],
             })
           `)}
@@ -151,8 +164,9 @@ export class DialogDocs extends React.Component<object, State> {
           <h2><code>Dialog.confirm</code></h2>
           <p>
             Convenience wrapper around <code>Dialog.open&lt;boolean&gt;</code> with cancel and confirm
-            buttons. Pass <code>intent: Dialog.Intent.Danger</code> for destructive confirmations (danger
-            chrome and confirm button intent).
+            buttons. OK resolves <code>true</code>; Cancel and Escape resolve <code>false</code>. Pass{' '}
+            <code>intent: Dialog.Intent.Danger</code> for destructive confirmations (danger chrome and
+            confirm button intent).
           </p>
           {Code.format(`
             import { Dialog } from '@basis/react'

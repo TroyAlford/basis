@@ -85,7 +85,9 @@ export class NotificationDocs extends React.Component<object, State> {
           <h2>Intent</h2>
           <p>
             Optional <code>intent</code> on <code>INotification</code> tints the shell and selects a header
-            icon where applicable. Values mirror <code>Dialog</code>:
+            icon where applicable. Omitting <code>intent</code> defaults to <code>Default</code>; omitting
+            {' '}<code>icon</code> lets the notification choose the icon from the intent. Values mirror{' '}
+            <code>Dialog</code>:
           </p>
           <ul>
             <li><strong>Default</strong>: neutral shell and header.</li>
@@ -105,7 +107,7 @@ export class NotificationDocs extends React.Component<object, State> {
           <p>
             <code>timeout</code> is milliseconds until auto-dismiss, or <code>null</code> to keep the row
             until <code>dismiss</code>. Omitting <code>timeout</code> defaults to <code>null</code> via the
-            overlay host.
+            overlay host. Both <code>title</code> and <code>content</code> are optional.
           </p>
         </section>
         <section>

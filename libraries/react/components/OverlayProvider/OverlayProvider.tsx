@@ -1,25 +1,19 @@
-import type { ReactNode, RefObject } from 'react'
+import type { ReactNode } from 'react'
 import { createRef } from 'react'
 import { Intent } from '../../types/Intent'
 import { Component } from '../Component/Component'
-import type { IDialog } from './Dialog'
+import type { DialogButton, DialogDefaultValue, IDialog } from './Dialog'
 import { Dialog } from './Dialog'
 import { Dialogs } from './Dialogs'
 import type { INotification } from './Notification'
 import { Notification } from './Notification'
 import { Notifications } from './Notifications'
 
-type DialogRow<T = unknown> = IDialog<T> & {
-  id: string,
-  nodeRef: RefObject<HTMLDialogElement | null>,
-  resolve: (value: T) => void,
-}
-
 type NotificationRow = INotification & { id: string }
 
 interface State {
-  activeDialog: DialogRow | null,
-  dialogQueue: DialogRow[],
+  activeDialog: Dialog['props'] | null,
+  dialogQueue: Dialog['props'][],
   notifications: NotificationRow[],
 }
 
@@ -53,6 +47,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
   }
 
   componentWillUnmount(): void {
+    this.#resolvePendingDialogs()
     if (typeof window !== 'undefined' && window.overlayProvider === this) {
       window.overlayProvider = undefined
     }
@@ -82,18 +77,28 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     }
   }
 
-  openDialog<T = unknown>(request: Partial<IDialog<T>>): Promise<T> {
-    return new Promise<T>(resolve => {
-      const entry: DialogRow<T> = {
-        buttons: (request.buttons ?? []) as DialogRow<T>['buttons'],
-        cancelValue: request.cancelValue as T,
-        content: request.content,
-        icon: request.icon,
+  openDialog<T = DialogDefaultValue>(
+    request: Partial<Omit<IDialog<T>, 'id' | 'nodeRef' | 'onResolve'>> = {},
+  ): Promise<T | DialogDefaultValue> {
+    const defaultButtons: DialogButton<DialogDefaultValue | false>[] = [
+      { intent: Intent.Default, label: 'Cancel', value: false },
+      { intent: Intent.Primary, label: 'OK', value: 'confirm' },
+    ]
+    const hasCustomButtons = Array.isArray(request.buttons) && request.buttons.length > 0
+    const buttons = hasCustomButtons
+      ? request.buttons as DialogButton<T | DialogDefaultValue>[]
+      : defaultButtons
+
+    return new Promise<T | DialogDefaultValue>(resolve => {
+      const entry: Dialog['props'] = {
+        buttons,
+        content: request.content ?? null,
+        icon: request.icon ?? null,
         id: OverlayProvider.createId('dialog'),
-        intent: request.intent,
+        intent: request.intent ?? Intent.Primary,
         nodeRef: createRef<HTMLDialogElement>(),
-        resolve,
-        title: request.title,
+        onResolve: resolve as (value: unknown) => void,
+        title: request.title ?? null,
       }
 
       this.setState(state => (
@@ -119,7 +124,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     if (!activeDialog) return
 
     activeDialog.nodeRef.current?.close()
-    activeDialog.resolve(value)
+    activeDialog.onResolve(value)
 
     this.setState(state => {
       const [nextDialog, ...dialogQueue] = state.dialogQueue
@@ -128,6 +133,16 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
         dialogQueue,
       }
     })
+  }
+
+  #resolvePendingDialogs(): void {
+    const { activeDialog, dialogQueue } = this.state
+
+    activeDialog?.nodeRef.current?.close()
+    activeDialog?.onResolve(false)
+    dialogQueue.forEach(row => row.onResolve(false))
+    this.state.activeDialog = null
+    this.state.dialogQueue = []
   }
 
   #scheduleNotification(row: NotificationRow): void {
