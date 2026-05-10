@@ -1,4 +1,5 @@
 import { NavigateEvent } from '../../events/NavigateEvent'
+import { canNavigate } from './navigationGuards'
 
 /**
  * Handle navigation scrolling without dispatching events
@@ -25,9 +26,13 @@ export const handleNavigationScrolling = (url: string): void => {
 /**
  * Navigate to a new URL using client-side routing
  * @param url The URL to navigate to
+ * @returns Whether navigation completed
  */
-export const navigate = (url: string): void => {
+export const navigate = async (url: string): Promise<boolean> => {
+  if (!await canNavigate(url)) return false
+
   window.history.pushState({}, '', url)
   handleNavigationScrolling(url)
   window.dispatchEvent(new NavigateEvent(url))
+  return true
 }

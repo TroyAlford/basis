@@ -1,6 +1,10 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
+import { Simulate } from '../../testing/Simulate'
+import { Dialog } from '../OverlayProvider/Dialog'
+import { TextEditor } from '../TextEditor/TextEditor'
+import { navigate } from './navigate'
 import { Router } from './Router'
 
 describe('Router', () => {
@@ -8,6 +12,7 @@ describe('Router', () => {
     Object.defineProperty(window, 'location', {
       value: {
         href: 'http://example.com/',
+        origin: 'http://example.com',
         pathname: '/',
         search: '',
         toString() { return this.href },
@@ -106,5 +111,71 @@ describe('Router', () => {
     window.location.pathname = '/'
     const { node } = await render<Router>(router)
     expect(node.textContent).toBe('Home Page')
+  })
+
+  test('prompts and blocks navigation away from a dirty direct Editor route', async () => {
+    window.location.pathname = '/edit'
+    const confirm = spyOn(Dialog, 'confirm').mockResolvedValue(false)
+    const pushState = spyOn(window.history, 'pushState')
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/edit">
+          <TextEditor initialValue="clean" />
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      const beforeUnload = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent
+      window.dispatchEvent(beforeUnload)
+      expect(beforeUnload.defaultPrevented).toBe(true)
+
+      const navigated = await navigate('/other')
+
+      expect(navigated).toBe(false)
+      expect(confirm).toHaveBeenCalledWith({
+        content: 'You have unsaved changes. Are you sure you want to leave this page?',
+        intent: Dialog.Intent.Danger,
+        labelCancel: 'Stay',
+        labelConfirm: 'Discard changes',
+        title: 'Discard unsaved changes?',
+      })
+      expect(pushState).not.toHaveBeenCalled()
+    } finally {
+      rendered.unmount()
+      confirm.mockRestore()
+      pushState.mockRestore()
+    }
+  })
+
+  test('allows navigation after confirming dirty direct Editor route navigation', async () => {
+    window.location.pathname = '/edit'
+    const confirm = spyOn(Dialog, 'confirm').mockResolvedValue(true)
+    const pushState = spyOn(window.history, 'pushState')
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/edit">
+          {() => <TextEditor initialValue="clean" />}
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      const navigated = await navigate('/other')
+
+      expect(navigated).toBe(true)
+      expect(confirm).toHaveBeenCalled()
+      expect(pushState).toHaveBeenCalledWith({}, '', '/other')
+    } finally {
+      rendered.unmount()
+      confirm.mockRestore()
+      pushState.mockRestore()
+    }
   })
 })

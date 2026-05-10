@@ -148,12 +148,22 @@ export class RouterDocs extends React.Component {
             // Declarative navigation with Link
             <Router.Link to="/users/123">View Profile</Router.Link>
 
-            // Programmatic navigation
-            Router.navigate('/users/123')
+            // Programmatic navigation returns whether routing completed
+            const routed = await Router.navigate('/users/123')
 
             // With query parameters
-            Router.navigate('/search?q=react&page=2')
+            await Router.navigate('/search?q=react&page=2')
           `)}
+          <p>
+            If the currently matched route renders an uncontrolled <code>Editor</code> directly and
+            that editor is dirty, <code>Router.Link</code> and <code>Router.navigate()</code> prompt
+            before leaving. <code>Router.navigate()</code> resolves <code>false</code> when navigation
+            is canceled and <code>true</code> when it updates browser history.
+          </p>
+          <p>
+            Tab and window close use the browser's native unsaved-changes prompt. Browser back and
+            forward navigation still update the history entry before Router re-renders.
+          </p>
         </section>
         <section>
           <h2>Best Practices</h2>

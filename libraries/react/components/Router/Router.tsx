@@ -2,9 +2,12 @@ import * as React from 'react'
 import { parseTemplateURI } from '@basis/utilities'
 import { NavigateEvent } from '../../events/NavigateEvent'
 import { Component } from '../Component/Component'
+import { Editor } from '../Editor/Editor'
+import { Dialog } from '../OverlayProvider/Dialog'
 import { Link } from './Link'
 import { Location } from './Location'
 import { handleNavigationScrolling, navigate } from './navigate'
+import { registerNavigationGuard } from './navigationGuards'
 import { Redirect } from './Redirect'
 import { Route } from './Route'
 import { Switch } from './Switch'
@@ -18,6 +21,16 @@ interface Props {
 }
 
 const WILDCARD_ROUTES = ['*', '.*']
+
+interface Editable {
+  readonly dirty: boolean,
+}
+
+const isEditable = (value: unknown): value is Editable => (
+  !!value
+  && typeof value === 'object'
+  && typeof (value as Editable).dirty === 'boolean'
+)
 
 /**
  * A component for client-side routing between pages
@@ -51,14 +64,21 @@ export class Router extends Component<Props> {
       : Router.location.pathname + Router.location.search
   }
 
+  #editable: Editable | null = null
+  #unregisterNavigationGuard?: () => void
+
   componentDidMount(): void {
     window.addEventListener(NavigateEvent.name, this.#handleUpdate)
     window.addEventListener('popstate', this.#handleUpdate)
+    window.addEventListener('beforeunload', this.#handleBeforeUnload)
+    this.#unregisterNavigationGuard = registerNavigationGuard(this.#confirmCleanNavigation)
   }
 
   componentWillUnmount(): void {
     window.removeEventListener(NavigateEvent.name, this.#handleUpdate)
     window.removeEventListener('popstate', this.#handleUpdate)
+    window.removeEventListener('beforeunload', this.#handleBeforeUnload)
+    this.#unregisterNavigationGuard?.()
   }
 
   #handleUpdate = (): void => {
@@ -66,6 +86,42 @@ export class Router extends Component<Props> {
     if (typeof window !== 'undefined') {
       handleNavigationScrolling(window.location.href)
     }
+  }
+
+  #setEditable = (editable: unknown): void => {
+    this.#editable = isEditable(editable) ? editable : null
+  }
+
+  #confirmCleanNavigation = async (): Promise<boolean> => {
+    if (!this.#editable?.dirty) return true
+
+    try {
+      return await Dialog.confirm({
+        content: 'You have unsaved changes. Are you sure you want to leave this page?',
+        intent: Dialog.Intent.Danger,
+        labelCancel: 'Stay',
+        labelConfirm: 'Discard changes',
+        title: 'Discard unsaved changes?',
+      })
+    } catch {
+      return window.confirm('You have unsaved changes. Leave this page?')
+    }
+  }
+
+  #handleBeforeUnload = (event: BeforeUnloadEvent): void => {
+    if (!this.#editable?.dirty) return
+
+    event.preventDefault()
+    event.returnValue = ''
+  }
+
+  #renderGuardedRoute(node: React.ReactNode): React.ReactNode {
+    if (!React.isValidElement(node)) return node
+    if (!Editor.isEditor(node.type)) return node
+
+    return React.cloneElement(node, {
+      ref: this.#setEditable,
+    } as Partial<typeof node.props>)
   }
 
   /**
@@ -101,8 +157,8 @@ export class Router extends Component<Props> {
         : parseTemplateURI(currentURL, template) || {}
 
       if (redirectTo) return <Router.Redirect to={redirectTo} />
-      if (typeof children === 'function') return children(params)
-      if (React.isValidElement(children)) return children
+      if (typeof children === 'function') return this.#renderGuardedRoute(children(params))
+      if (React.isValidElement(children)) return this.#renderGuardedRoute(children)
     }
 
     return null

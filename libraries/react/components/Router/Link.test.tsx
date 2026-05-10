@@ -43,7 +43,7 @@ describe('Link', () => {
     )
 
     const event = new MouseEvent('click')
-    instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
+    await instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
 
     // Should still be at the same location since navigation was prevented
     expect(window.location.pathname).toBe('/current')
@@ -55,7 +55,7 @@ describe('Link', () => {
     )
 
     const event = new MouseEvent('click')
-    instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
+    await instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
 
     // Should now be at the new location
     expect(window.location.pathname).toBe('/new/path')

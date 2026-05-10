@@ -46,12 +46,12 @@ export class Link extends Component<Props> {
       : false
   }
 
-  handleClick: React.MouseEventHandler<HTMLAnchorElement> = event => {
+  handleClick: React.MouseEventHandler<HTMLAnchorElement> = async event => {
     event.preventDefault()
 
     if (this.isActive) return // do not navigate if this is already the route
 
-    navigate(this.props.to)
+    await navigate(this.props.to)
   }
 
   content(): React.ReactNode {
