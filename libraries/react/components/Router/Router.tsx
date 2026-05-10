@@ -104,8 +104,10 @@ export class Router extends Component<Props> {
   }
 
   #componentRef(node: React.ReactElement<Record<string, unknown>>): React.RefCallback<unknown> {
-    const previousRef = (node.props.ref ??
-      (node as React.ReactElement & { ref?: React.Ref<unknown> }).ref) as React.Ref<unknown> | undefined
+    const previousRef = (
+      node.props.ref ??
+      (node as React.ReactElement & { ref?: React.Ref<unknown> }).ref
+    ) as React.Ref<unknown> | undefined
 
     return value => {
       this.#editable = isEditable(value) ? value : null
