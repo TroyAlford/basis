@@ -12,6 +12,10 @@ describe('Theme', () => {
       const styleElement = document.getElementById('basis:theme:test')
       expect(styleElement).toBeTruthy()
       expect(styleElement?.textContent).toContain('[data-theme="test"]')
+      expect(styleElement?.textContent).toContain('--basis-color-danger:')
+      expect(styleElement?.textContent).toContain('--basis-color-danger-contrast:')
+      expect(styleElement?.textContent).toContain('--basis-color-success:')
+      expect(styleElement?.textContent).toContain('--basis-color-success-contrast:')
     })
 
     test('renders with all props', async () => {
@@ -20,12 +24,14 @@ describe('Theme', () => {
           name="test"
           color={{
             background: 'rgb(255, 255, 255)',
+            danger: '#b91c1c',
             disabled: '#cccccc',
             disabledText: '#666666',
             foreground: 'hsl(0, 0%, 0%)',
             overlayDark: 'rgba(0, 0, 0, 0.5)',
             overlayLight: 'rgba(255, 255, 255, 0.5)',
             primary: '#ff0000',
+            success: '#15803d',
           }}
           fontSize={{
             lg: 112.5,
@@ -70,6 +76,10 @@ describe('Theme', () => {
 
       // Test color processing
       expect(css).toContain('--basis-color-primary: #ff0000ff')
+      expect(css).toContain('--basis-color-danger: #b91c1cff')
+      expect(css).toContain('--basis-color-danger-contrast:')
+      expect(css).toContain('--basis-color-success: #15803dff')
+      expect(css).toContain('--basis-color-success-contrast:')
       expect(css).toContain('--basis-color-background: #ffffffff')
       expect(css).toContain('--basis-color-foreground: #000000ff')
       expect(css).toContain('--basis-color-disabled: #ccccccff')

@@ -3,7 +3,7 @@
     "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": true,
     "downlevelIteration": true,
-    "jsx": "react",
+    "jsx": "react-jsx",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,

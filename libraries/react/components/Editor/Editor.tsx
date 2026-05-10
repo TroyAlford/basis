@@ -106,6 +106,14 @@ export abstract class Editor<
   }
 
   /**
+   * Whether the editor is dirty
+   * @returns Whether the editor is dirty
+   */
+  get dirty(): boolean {
+    return !this.controlled && !deepEquals(this.current, this.props.initialValue)
+  }
+
+  /**
    * Handles value changes in both controlled and uncontrolled modes
    * @param value - The new value
    */

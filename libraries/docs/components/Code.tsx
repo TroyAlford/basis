@@ -50,6 +50,10 @@ export class Code extends Component<Props> {
       .split('\n')
 
     const firstLine = lines.find(line => line.trim() !== '')
+    if (firstLine === undefined) {
+      return this.props.code.trim()
+    }
+
     const [, indentation = ''] = firstLine.match(/^(\s*)/) || []
 
     return lines.map(line => line.slice(indentation.length))
