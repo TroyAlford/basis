@@ -142,7 +142,7 @@ export class RouterDocs extends React.Component {
         <section>
           <h3>Navigation</h3>
           <p>
-            Use the Link component for declarative navigation or the navigate function for
+            Use the Link component for declarative navigation or <code>Router.navigate</code> for
             programmatic routing:
           </p>
           {Code.format(`
@@ -156,9 +156,12 @@ export class RouterDocs extends React.Component {
             await Router.navigate('/search?q=react&page=2')
           `)}
           <p>
-            If the currently matched route renders a class component instance that exposes a{' '}
-            <code>dirty</code> boolean (for example an uncontrolled <code>Editor</code>),{' '}
-            <code>Router.Link</code> and <code>Router.navigate()</code> prompt before leaving.{' '}
+            A route component may expose <code>dirty: boolean</code> for automatic unsaved-changes
+            confirmation, or implement <code>onBeforeNavigate(url)</code> for custom navigation
+            control. The Router applies these checks when you use <code>Router.Link</code> or{' '}
+            <code>Router.navigate()</code>.
+          </p>
+          <p>
             <code>Router.navigate()</code> resolves <code>false</code> when navigation is canceled and{' '}
             <code>true</code> when it updates browser history.
           </p>

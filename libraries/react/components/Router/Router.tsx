@@ -5,8 +5,6 @@ import { Component } from '../Component/Component'
 import { Dialog } from '../OverlayProvider/Dialog'
 import { Link } from './Link'
 import { Location } from './Location'
-import { handleNavigationScrolling, navigate } from './navigate'
-import { registerNavigationGuard } from './navigationGuards'
 import { Redirect } from './Redirect'
 import { Route } from './Route'
 import { Switch } from './Switch'
@@ -25,10 +23,14 @@ interface Editable {
   readonly dirty: boolean,
 }
 
-const isEditable = (value: unknown): value is Editable => (
-  !!value
-  && typeof value === 'object'
-  && typeof (value as Editable).dirty === 'boolean'
+interface NavigablePage {
+  onBeforeNavigate?: (url: string) => boolean | Promise<boolean>,
+}
+
+type RouteComponent = Editable | NavigablePage
+
+const isRouteComponent = (value: unknown): value is RouteComponent => (
+  !!value && typeof value === 'object'
 )
 
 /**
@@ -46,11 +48,51 @@ const isEditable = (value: unknown): value is Editable => (
  * </Router>
  */
 export class Router extends Component<Props> {
+  static current: Router | null = null
+
   static Link = Link
   static Route = Route
   static Switch = Switch
   static Redirect = Redirect
-  static navigate = navigate
+
+  static async navigate(url: string): Promise<boolean> {
+    const router = Router.current
+    if (router !== null && !await router.canNavigate(url)) return false
+
+    Router.#commitNavigation(url)
+    return true
+  }
+
+  /**
+   * Updates history, scroll position, and dispatches {@link NavigateEvent}.
+   * Route guards run in {@link Router.navigate}; this performs the actual transition.
+   * @param url The URL to navigate to
+   */
+  static #commitNavigation(url: string): void {
+    window.history.pushState({}, '', url)
+    Router.#handleNavigationScrolling(url)
+    window.dispatchEvent(new NavigateEvent(url))
+  }
+
+  /**
+   * Scroll after URL change (hash target or document top).
+   * Used after navigation and when reacting to history updates (without dispatching).
+   * @param url The URL to handle scrolling for
+   */
+  static #handleNavigationScrolling(url: string): void {
+    const urlObj = new URL(url, window.location.origin)
+    const hash = urlObj.hash
+
+    if (hash) {
+      const targetId = hash.slice(1)
+      const targetElement = document.getElementById(targetId)
+      if (targetElement) {
+        targetElement.scrollIntoView({ behavior: 'smooth' })
+      }
+    } else {
+      window.scrollTo({ top: 0 })
+    }
+  }
 
   static get serverSide() { return typeof window === 'undefined' }
   static get location() { return Router.serverSide ? new Location() : window.location }
@@ -63,33 +105,46 @@ export class Router extends Component<Props> {
       : Router.location.pathname + Router.location.search
   }
 
-  #editable: Editable | null = null
-  #unregisterNavigationGuard?: () => void
+  #routeComponent: RouteComponent | null = null
+
+  async canNavigate(url: string): Promise<boolean> {
+    const route = this.#routeComponent
+    if (!route) return true
+
+    if ('onBeforeNavigate' in route && typeof route.onBeforeNavigate === 'function') {
+      return await route.onBeforeNavigate(url)
+    }
+
+    if ('dirty' in route && route.dirty) {
+      return await this.#confirmDirtyNavigation()
+    }
+
+    return true
+  }
 
   componentDidMount(): void {
+    Router.current = this
     window.addEventListener(NavigateEvent.name, this.#handleUpdate)
     window.addEventListener('popstate', this.#handleUpdate)
     window.addEventListener('beforeunload', this.#handleBeforeUnload)
-    this.#unregisterNavigationGuard = registerNavigationGuard(this.#confirmCleanNavigation)
   }
 
   componentWillUnmount(): void {
+    if (Router.current === this) Router.current = null
+
     window.removeEventListener(NavigateEvent.name, this.#handleUpdate)
     window.removeEventListener('popstate', this.#handleUpdate)
     window.removeEventListener('beforeunload', this.#handleBeforeUnload)
-    this.#unregisterNavigationGuard?.()
   }
 
   #handleUpdate = (): void => {
     this.forceUpdate()
     if (typeof window !== 'undefined') {
-      handleNavigationScrolling(window.location.href)
+      Router.#handleNavigationScrolling(window.location.href)
     }
   }
 
-  #confirmCleanNavigation = async (): Promise<boolean> => {
-    if (!this.#editable?.dirty) return true
-
+  #confirmDirtyNavigation = async (): Promise<boolean> => {
     if (typeof window !== 'undefined' && window.overlayProvider) {
       return await Dialog.confirm({
         content: 'You have unsaved changes. Are you sure you want to leave this page?',
@@ -104,13 +159,11 @@ export class Router extends Component<Props> {
   }
 
   #componentRef(node: React.ReactElement<Record<string, unknown>>): React.RefCallback<unknown> {
-    const previousRef = (
-      node.props.ref ??
-      (node as React.ReactElement & { ref?: React.Ref<unknown> }).ref
-    ) as React.Ref<unknown> | undefined
+    const previousRef = (node.props.ref ??
+      (node as React.ReactElement & { ref?: React.Ref<unknown> }).ref) as React.Ref<unknown> | undefined
 
     return value => {
-      this.#editable = isEditable(value) ? value : null
+      this.#routeComponent = isRouteComponent(value) ? value : null
 
       if (typeof previousRef === 'function') previousRef(value)
       else if (previousRef && typeof previousRef === 'object') {
@@ -120,7 +173,8 @@ export class Router extends Component<Props> {
   }
 
   #handleBeforeUnload = (event: BeforeUnloadEvent): void => {
-    if (!this.#editable?.dirty) return
+    const route = this.#routeComponent
+    if (!route || !('dirty' in route) || !(route as Editable).dirty) return
 
     event.preventDefault()
     event.returnValue = ''

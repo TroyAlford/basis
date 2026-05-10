@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import * as React from 'react'
+import { NavigateEvent } from '../../events/NavigateEvent'
 import { render } from '../../testing/render'
 import { Simulate } from '../../testing/Simulate'
 import { Component } from '../Component/Component'
 import { Dialog } from '../OverlayProvider/Dialog'
 import { OverlayProvider } from '../OverlayProvider/OverlayProvider'
 import { TextEditor } from '../TextEditor/TextEditor'
-import { navigate } from './navigate'
 import { Router } from './Router'
 
 const CONFIRM_UNSAVED = {
@@ -35,6 +35,21 @@ class RefProbe extends Component<object, HTMLDivElement> {
   content(): React.ReactNode { return null }
 
   get tag(): keyof React.JSX.IntrinsicElements { return 'div' }
+}
+
+class BlockingRoute extends Component<object, HTMLSpanElement> {
+  static displayName = 'BlockingRoute'
+  content(): React.ReactNode { return 'blocked' }
+  onBeforeNavigate = (): boolean => false
+  get tag(): keyof React.JSX.IntrinsicElements { return 'span' }
+}
+
+class HookOverridesDirtyRoute extends Component<object, HTMLSpanElement> {
+  static displayName = 'HookOverridesDirtyRoute'
+  content(): React.ReactNode { return 'dirty-hook' }
+  get dirty(): boolean { return true }
+  onBeforeNavigate = (): boolean => true
+  get tag(): keyof React.JSX.IntrinsicElements { return 'span' }
 }
 
 describe('Router', () => {
@@ -147,8 +162,34 @@ describe('Router', () => {
     )
 
     window.location.pathname = '/'
-    const { node } = await render<Router>(router)
-    expect(node.textContent).toBe('Home Page')
+    const rendered = await render<Router>(router)
+    try {
+      expect(rendered.node.textContent).toBe('Home Page')
+    } finally {
+      rendered.unmount()
+    }
+  })
+
+  test('Router.navigate updates history and dispatches NavigateEvent when not blocked', async () => {
+    const prior = Router.current
+    Router.current = null
+
+    const dispatchEvent = spyOn(window, 'dispatchEvent')
+    const pushState = spyOn(window.history, 'pushState')
+
+    try {
+      const navigated = await Router.navigate('/test/path')
+
+      expect(navigated).toBe(true)
+      expect(pushState).toHaveBeenCalledWith({}, '', '/test/path')
+      expect(dispatchEvent).toHaveBeenCalledWith(expect.any(NavigateEvent))
+      const event = dispatchEvent.mock.calls.find(([e]) => e instanceof NavigateEvent)?.[0] as NavigateEvent
+      expect(event.detail.url).toBe('/test/path')
+    } finally {
+      dispatchEvent.mockRestore()
+      pushState.mockRestore()
+      Router.current = prior
+    }
   })
 
   test('prompts and blocks navigation away from a dirty direct route TextEditor', async () => {
@@ -172,7 +213,7 @@ describe('Router', () => {
       window.dispatchEvent(beforeUnload)
       expect(beforeUnload.defaultPrevented).toBe(true)
 
-      const navigated = await navigate('/other')
+      const navigated = await Router.navigate('/other')
 
       expect(navigated).toBe(false)
       expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
@@ -200,11 +241,61 @@ describe('Router', () => {
     )
 
     try {
-      const navigated = await navigate('/other')
+      const navigated = await Router.navigate('/other')
 
       expect(navigated).toBe(false)
       expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
       expect(pushState).not.toHaveBeenCalled()
+    } finally {
+      rendered.unmount()
+      confirm.mockRestore()
+      pushState.mockRestore()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('blocks navigation when onBeforeNavigate returns false', async () => {
+    window.location.pathname = '/block'
+    const pushState = spyOn(window.history, 'pushState')
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/block">
+          <BlockingRoute />
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      const navigated = await Router.navigate('/away')
+
+      expect(navigated).toBe(false)
+      expect(pushState).not.toHaveBeenCalled()
+    } finally {
+      rendered.unmount()
+      pushState.mockRestore()
+    }
+  })
+
+  test('onBeforeNavigate runs before dirty and can allow navigation without dirty dialog', async () => {
+    window.location.pathname = '/hook'
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm')
+    const pushState = spyOn(window.history, 'pushState')
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/hook">
+          <HookOverridesDirtyRoute />
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      const navigated = await Router.navigate('/away')
+
+      expect(navigated).toBe(true)
+      expect(confirm).not.toHaveBeenCalled()
+      expect(pushState).toHaveBeenCalledWith({}, '', '/away')
     } finally {
       rendered.unmount()
       confirm.mockRestore()
@@ -271,7 +362,7 @@ describe('Router', () => {
     )
 
     try {
-      const navigated = await navigate('/away')
+      const navigated = await Router.navigate('/away')
 
       expect(navigated).toBe(false)
       expect(confirm).toHaveBeenCalledWith('You have unsaved changes. Leave this page?')
@@ -297,7 +388,7 @@ describe('Router', () => {
     )
 
     try {
-      await expect(navigate('/away')).rejects.toThrow('dialog failed')
+      await expect(Router.navigate('/away')).rejects.toThrow('dialog failed')
     } finally {
       confirm.mockRestore()
       rendered.unmount()
@@ -323,7 +414,7 @@ describe('Router', () => {
       await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
       await tick()
 
-      const navigated = await navigate('/other')
+      const navigated = await Router.navigate('/other')
 
       expect(navigated).toBe(true)
       expect(confirm).toHaveBeenCalled()
