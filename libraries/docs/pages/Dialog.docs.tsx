@@ -127,28 +127,28 @@ export class DialogDocs extends React.Component<object, State> {
         <section>
           <h2><code>Dialog.open</code></h2>
           <p>
-            Returns a <code>Promise&lt;T&gt;</code> that resolves with the clicked button&apos;s{' '}
-            <code>value</code> or JSX button <code>data-value</code>. For Escape / native cancel, Dialog uses
-            the first button whose value is <code>&apos;cancel&apos;</code> or <code>false</code>; otherwise it
-            uses the last button value.
+            With custom buttons, returns <code>Promise&lt;T | false&gt;</code> that resolves with the clicked
+            button&apos;s <code>value</code> or JSX button <code>data-value</code>. Escape, native cancel, and
+            other dismiss paths resolve <code>false</code>. With no custom buttons,{' '}
+            <code>Dialog.open()</code> returns <code>Promise&lt;boolean&gt;</code>.
           </p>
           <p>
             With no request, or with only <code>title</code> / <code>content</code>, <code>Dialog.open()</code>{' '}
             renders <strong>Cancel</strong> and <strong>OK</strong>. Cancel and Escape resolve{' '}
-            <code>&apos;cancel&apos;</code>; OK resolves <code>&apos;confirm&apos;</code>. Custom button
-            dialogs can use <code>{'{'} label, value {'}'}</code>, <code>&lt;Button data-value="..."&gt;</code>,
-            or a mix of both. Button intent defaults to <code>Intent.Default</code>, while the dialog shell
-            intent defaults to <code>Intent.Primary</code>.
+            <code>false</code>; OK resolves <code>true</code>. Custom button dialogs can use{' '}
+            <code>{'{'} label, value {'}'}</code>, <code>&lt;Button data-value="..."&gt;</code>, or a mix of
+            both. Button intent defaults to <code>Intent.Default</code>, while the dialog shell intent defaults
+            to <code>Intent.Primary</code>.
           </p>
           {Code.format(`
             import { Dialog, Intent } from '@basis/react'
 
             const defaultResult = await Dialog.open({
               title: 'Continue?',
-              content: 'Cancel resolves "cancel"; OK resolves "confirm".',
+              content: 'Cancel resolves false; OK resolves true.',
             })
 
-            const next = await Dialog.open<'edit' | 'view' | 'cancel'>({
+            const next = await Dialog.open<'edit' | 'view'>({
               title: 'Open as…',
               content: 'Pick how to open this item.',
               intent: Intent.Success,

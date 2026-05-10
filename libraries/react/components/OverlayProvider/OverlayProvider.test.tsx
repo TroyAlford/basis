@@ -47,7 +47,7 @@ describe('OverlayProvider', () => {
       unmount()
     })
 
-    test('Dialog.open default OK resolves confirm', async () => {
+    test('Dialog.open default OK resolves true', async () => {
       const { node, unmount } = await renderOverlayProvider()
       const result = Dialog.open()
 
@@ -55,12 +55,12 @@ describe('OverlayProvider', () => {
         .find(button => button.textContent === 'OK') as HTMLButtonElement | undefined)
       ok.click()
 
-      expect(await result).toBe('confirm')
+      expect(await result).toBe(true)
 
       unmount()
     })
 
-    test('Dialog.open default Cancel resolves cancel', async () => {
+    test('Dialog.open default Cancel resolves false', async () => {
       const { node, unmount } = await renderOverlayProvider()
       const result = Dialog.open()
 
@@ -73,7 +73,7 @@ describe('OverlayProvider', () => {
       unmount()
     })
 
-    test('Dialog.open default native cancel resolves cancel', async () => {
+    test('Dialog.open default native cancel resolves false', async () => {
       const { node, unmount } = await renderOverlayProvider()
       const result = Dialog.open()
 
@@ -102,7 +102,7 @@ describe('OverlayProvider', () => {
         .find(button => button.textContent === 'OK') as HTMLButtonElement | undefined)
       ok.click()
 
-      expect(await result).toBe('confirm')
+      expect(await result).toBe(true)
 
       unmount()
     })

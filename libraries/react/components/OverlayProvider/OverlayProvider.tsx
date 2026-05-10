@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { createRef } from 'react'
 import { Intent } from '../../types/Intent'
 import { Component } from '../Component/Component'
-import type { DialogButton, DialogDefaultValue, IDialog } from './Dialog'
+import type { DialogButton, IDialog } from './Dialog'
 import { Dialog } from './Dialog'
 import { Dialogs } from './Dialogs'
 import type { INotification } from './Notification'
@@ -77,19 +77,19 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     }
   }
 
-  openDialog<T = DialogDefaultValue>(
+  openDialog<T = boolean>(
     request: Partial<Omit<IDialog<T>, 'id' | 'nodeRef' | 'onResolve'>> = {},
-  ): Promise<T | DialogDefaultValue> {
-    const defaultButtons: DialogButton<DialogDefaultValue | false>[] = [
+  ): Promise<T | false> {
+    const defaultButtons: DialogButton<boolean>[] = [
       { intent: Intent.Default, label: 'Cancel', value: false },
-      { intent: Intent.Primary, label: 'OK', value: 'confirm' },
+      { intent: Intent.Primary, label: 'OK', value: true },
     ]
     const hasCustomButtons = Array.isArray(request.buttons) && request.buttons.length > 0
     const buttons = hasCustomButtons
-      ? request.buttons as DialogButton<T | DialogDefaultValue>[]
+      ? request.buttons as DialogButton<T | false>[]
       : defaultButtons
 
-    return new Promise<T | DialogDefaultValue>(resolve => {
+    return new Promise<T | false>(resolve => {
       const entry: Dialog['props'] = {
         buttons,
         content: request.content ?? null,

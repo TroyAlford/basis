@@ -8,8 +8,6 @@ import { Component } from '../Component/Component'
 
 import './Dialog.styles.ts'
 
-export type DialogDefaultValue = 'confirm' | false
-
 interface DialogButtonDefinition<T> {
   intent?: Intent,
   label: ReactNode,
@@ -26,31 +24,34 @@ type DialogButtonElement<T> = ReactElement<{
 
 export type DialogButton<T> = DialogButtonDefinition<T> | DialogButtonElement<T>
 
-/** Payload for {@link Dialog.open} and rows owned by {@link OverlayProvider} (before `id` / refs / `resolve`). */
-export interface IDialog<T = DialogDefaultValue> {
+/** Payload for {@link Dialog.open}. Mounted-only fields are added by {@link OverlayProvider}. */
+export interface IDialog<T = boolean> {
   /** Buttons to render. Objects use `value`; JSX button elements use `data-value`. */
   buttons: DialogButton<T>[],
   /** Dialog content. */
   content: ReactNode,
   /** Dialog header icon. Defaults from `intent` when omitted. */
   icon: (typeof IconBase) | ReactNode,
-  /** Process-unique id for the dialog. */
-  id: string,
   /** Dialog shell intent. Defaults to {@link Intent.Primary}. */
   intent: Intent,
-  /** Reference to the native `<dialog>` element. */
-  nodeRef: RefObject<HTMLDialogElement | null>,
-  /** Callback that resolves with the chosen button value or cancel value. */
-  onResolve: (value: T) => void,
   /** Dialog title. */
   title: ReactNode,
+}
+
+interface Props<T = unknown> extends IDialog<T> {
+  /** Process-unique id for the dialog. */
+  id: string,
+  /** Reference to the native `<dialog>` element. */
+  nodeRef: RefObject<HTMLDialogElement | null>,
+  /** Callback that resolves with the chosen button value or cancel sentinel. */
+  onResolve: (value: T | false) => void,
 }
 
 /**
  * Native `<dialog>` host row (mounted by {@link OverlayProvider}) plus static `Dialog.open` /
  * `Dialog.confirm` entry points.
  */
-export class Dialog extends Component<IDialog<unknown>, HTMLDialogElement> {
+export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   static displayName = 'Dialog'
   static readonly Intent = Intent
 
@@ -94,19 +95,15 @@ export class Dialog extends Component<IDialog<unknown>, HTMLDialogElement> {
    *   it is not re-exported from `@basis/react`.
    * @returns Promise that resolves with the chosen button value or cancel value.
    */
-  static open(
-    request?: Partial<Omit<IDialog<DialogDefaultValue>, 'buttons' | 'id' | 'nodeRef' | 'onResolve'>>,
-  ): Promise<DialogDefaultValue>
+  static open(request?: Partial<Omit<IDialog<boolean>, 'buttons'>>): Promise<boolean>
   static open<T>(
-    request: Partial<Omit<IDialog<T>, 'id' | 'nodeRef' | 'onResolve'>> & { buttons: DialogButton<T>[] },
+    request: Partial<Omit<IDialog<T>, 'buttons'>> & { buttons: DialogButton<T>[] },
   ): Promise<T | false>
   /**
    * @param request - Optional dialog payload. Omit buttons for default Cancel / OK behavior.
    * @returns Promise that resolves with the chosen button value or cancel value.
    */
-  static open<T = DialogDefaultValue>(
-    request: Partial<Omit<IDialog<T | DialogDefaultValue>, 'id' | 'nodeRef' | 'onResolve'>> = {},
-  ): Promise<T | DialogDefaultValue> {
+  static open<T = boolean>(request: Partial<IDialog<T>> = {}): Promise<T | false> {
     if (typeof window === 'undefined' || !window.overlayProvider) {
       throw new Error(`
         OverlayProvider is not mounted. Render <OverlayProvider /> inside your React application
@@ -121,7 +118,7 @@ export class Dialog extends Component<IDialog<unknown>, HTMLDialogElement> {
     this.#syncModalOpenState()
   }
 
-  componentDidUpdate(prevProps: Readonly<IDialog<unknown>>, prevState: Readonly<object>): void {
+  componentDidUpdate(prevProps: Readonly<Props<unknown>>, prevState: Readonly<object>): void {
     super.componentDidUpdate(prevProps, prevState)
     if (prevProps.id !== this.props.id) this.#syncModalOpenState()
   }
