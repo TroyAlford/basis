@@ -85,9 +85,9 @@ describe('OverlayProvider', () => {
       const { node, unmount } = await render(<OverlayProvider />)
       Dialog.confirm({ intent: Dialog.Intent.Danger, title: 'Remove?' })
 
-      const header = await waitFor(() => node.querySelector<HTMLElement>('dialog header'))
-      expect(header?.dataset.intent).toBe('danger')
-      expect(header?.querySelector('svg.icon')).toBeTruthy()
+      const dialog = await waitFor(() => node.querySelector<HTMLElement>('dialog.dialog.component'))
+      expect(dialog?.dataset.intent).toBe('danger')
+      expect(dialog?.querySelector('header svg.icon')).toBeTruthy()
 
       unmount()
     })
@@ -102,9 +102,9 @@ describe('OverlayProvider', () => {
         title: 'Saved',
       })
 
-      const header = await waitFor(() => node.querySelector<HTMLElement>('dialog header'))
-      expect(header?.dataset.intent).toBe('success')
-      expect(header?.querySelector('svg.icon')).toBeTruthy()
+      const dialog = await waitFor(() => node.querySelector<HTMLElement>('dialog.dialog.component'))
+      expect(dialog?.dataset.intent).toBe('success')
+      expect(dialog?.querySelector('header svg.icon')).toBeTruthy()
 
       const done = await waitFor(() => Array.from(node.querySelectorAll('button'))
         .find(button => button.textContent === 'Done') as HTMLButtonElement | undefined)
