@@ -77,9 +77,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     }
   }
 
-  openDialog<T = boolean>(
-    request: Partial<Omit<IDialog<T>, 'id' | 'nodeRef' | 'onResolve'>> = {},
-  ): Promise<T | false> {
+  openDialog<T = boolean>(request: Partial<Omit<IDialog<T>, 'id' | 'nodeRef' | 'onResolve'>> = {}): Promise<T | false> {
     const defaultButtons: DialogButton<boolean>[] = [
       { intent: Intent.Default, label: 'Cancel', value: false },
       { intent: Intent.Primary, label: 'OK', value: true },

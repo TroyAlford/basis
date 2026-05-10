@@ -121,6 +121,59 @@ describe('Await', () => {
     })
   })
 
+  describe('promise identity updates', () => {
+    test('re-resolves when children promise reference changes', async () => {
+      const first = Promise.resolve(<div>First</div>)
+      const second = Promise.resolve(<div>Second</div>)
+      const { node, update } = await render(
+        <Await fallback={<div>Loading</div>}>
+          {first}
+        </Await>,
+      )
+
+      await first
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(node.textContent).toBe('First')
+
+      await update(
+        <Await fallback={<div>Loading</div>}>
+          {second}
+        </Await>,
+      )
+      await second
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(node.textContent).toBe('Second')
+    })
+
+    test('does not apply stale resolution after children switches to a new promise', async () => {
+      let finishFirst!: (value: React.ReactNode) => void
+      const first = new Promise<React.ReactNode>(resolve => {
+        finishFirst = resolve
+      })
+      const second = Promise.resolve(<div>Second</div>)
+
+      const { node, update } = await render(
+        <Await fallback={<div>Loading</div>}>
+          {first}
+        </Await>,
+      )
+      expect(node.textContent).toBe('Loading')
+
+      await update(
+        <Await fallback={<div>Loading</div>}>
+          {second}
+        </Await>,
+      )
+      await second
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(node.textContent).toBe('Second')
+
+      finishFirst(<div>Stale</div>)
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(node.textContent).toBe('Second')
+    })
+  })
+
   describe('debugging', () => {
     test('debug: check if component updates after promise resolves', async () => {
       const promise = Promise.resolve(<div>Debug content</div>)

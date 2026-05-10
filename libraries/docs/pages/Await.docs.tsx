@@ -41,7 +41,10 @@ export class AwaitDocs extends React.Component {
             <li><strong>Promise Children:</strong> Accepts a Promise that resolves to React nodes</li>
             <li><strong>Fallback Rendering:</strong> Shows fallback content while promise is pending</li>
             <li><strong>Automatic State Management:</strong> Handles loading state internally</li>
-            <li><strong>Lifecycle Integration:</strong> Uses componentDidMount for async operations</li>
+            <li>
+              <strong>Lifecycle Integration:</strong>{' '}
+              Resolves on mount and again whenever the child promise reference changes (stale results are ignored)
+            </li>
           </ul>
         </section>
         <section>

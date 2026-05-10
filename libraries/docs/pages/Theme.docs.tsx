@@ -1,24 +1,146 @@
 import * as React from 'react'
-import { Color } from '@basis/utilities'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Theme } from '../../react/components/Theme/Theme'
 import { Code } from '../components/Code'
 
+/** Variable groups read from `:root` (Layout’s unnamed `<Theme />`). */
+const ROOT_THEME_CSS_SNAPSHOT_SECTIONS: readonly { readonly title: string, readonly vars: readonly string[] }[] = [
+  {
+    title: 'Color variables',
+    vars: [
+      '--basis-color-primary',
+      '--basis-color-contrast',
+      '--basis-color-danger',
+      '--basis-color-danger-contrast',
+      '--basis-color-success',
+      '--basis-color-success-contrast',
+      '--basis-color-background',
+      '--basis-color-foreground',
+      '--basis-color-disabled',
+      '--basis-color-disabled-text',
+      '--basis-color-overlay-dark',
+      '--basis-color-overlay-light',
+    ],
+  },
+  {
+    title: 'Typography variables',
+    vars: [
+      '--basis-font-size-xxs',
+      '--basis-font-size-xs',
+      '--basis-font-size-sm',
+      '--basis-font-size-md',
+      '--basis-font-size-lg',
+      '--basis-font-size-xl',
+      '--basis-font-size-xxl',
+    ],
+  },
+  {
+    title: 'Spacing variables',
+    vars: [
+      '--basis-unit-xxs',
+      '--basis-unit-xs',
+      '--basis-unit-sm',
+      '--basis-unit-md',
+      '--basis-unit-lg',
+      '--basis-unit-xl',
+      '--basis-unit-xxl',
+    ],
+  },
+  {
+    title: 'Border radius variables',
+    vars: ['--basis-radius-sm', '--basis-radius-md', '--basis-radius-lg', '--basis-radius-round'],
+  },
+  {
+    title: 'Shadow variables',
+    vars: ['--basis-shadow-sm', '--basis-shadow-md', '--basis-shadow-lg'],
+  },
+  {
+    title: 'Transition variables',
+    vars: ['--basis-transition-fast', '--basis-transition-medium', '--basis-transition-slow'],
+  },
+]
+
 interface State {
   borderRadius: number,
   fontSize: number,
+  previewCode: string,
   primaryColor: string,
+  rootThemeCss: string,
   shadow: string,
   themeName: string,
 }
 
 export class ThemeDocs extends React.Component<object, State> {
+  previewThemeTargetRef = React.createRef<HTMLDivElement>()
+
   state: State = {
     borderRadius: 8,
     fontSize: 100,
+    previewCode: '',
     primaryColor: '#0070f3',
+    rootThemeCss: '',
     shadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
     themeName: 'custom',
+  }
+
+  static formatCssVariableSnapshot(
+    target: Element | null,
+    sections: readonly { readonly title: string, readonly vars: readonly string[] }[],
+  ): string {
+    if (target == null || typeof getComputedStyle === 'undefined') {
+      return '/* Open this page in the browser to load live values from Theme. */'
+    }
+    const computed = getComputedStyle(target)
+    const lines: string[] = []
+    for (const { title, vars } of sections) {
+      if (lines.length > 0) lines.push('')
+      lines.push(`/* ${title} */`)
+      for (const variable of vars) {
+        lines.push(`  ${variable}: ${computed.getPropertyValue(variable).trim()};`)
+      }
+    }
+    return lines.join('\n')
+  }
+
+  static formatPreviewVariableLines(target: Element | null): string {
+    if (target == null || typeof getComputedStyle === 'undefined') {
+      return '/* Open in browser for computed theme values on this preview. */'
+    }
+    const computed = getComputedStyle(target)
+    const line = (name: string) => `  ${name}: ${computed.getPropertyValue(name).trim()};`
+    return [
+      '/* Preview element (scoped theme) */',
+      line('--basis-color-primary'),
+      line('--basis-color-contrast'),
+      line('--basis-font-size-md'),
+      line('--basis-radius-md'),
+    ].join('\n')
+  }
+
+  #refreshSnapshots = (): void => {
+    if (typeof document === 'undefined') return
+    requestAnimationFrame(() => {
+      this.setState({
+        previewCode: ThemeDocs.formatPreviewVariableLines(this.previewThemeTargetRef.current),
+        rootThemeCss: ThemeDocs.formatCssVariableSnapshot(document.documentElement, ROOT_THEME_CSS_SNAPSHOT_SECTIONS),
+      })
+    })
+  }
+
+  override componentDidMount(): void {
+    this.#refreshSnapshots()
+  }
+
+  override componentDidUpdate(prevProps: Readonly<object>, prevState: Readonly<State>): void {
+    if (
+      prevState.borderRadius !== this.state.borderRadius
+      || prevState.fontSize !== this.state.fontSize
+      || prevState.primaryColor !== this.state.primaryColor
+      || prevState.shadow !== this.state.shadow
+      || prevState.themeName !== this.state.themeName
+    ) {
+      this.#refreshSnapshots()
+    }
   }
 
   render(): React.ReactNode {
@@ -101,7 +223,6 @@ export class ThemeDocs extends React.Component<object, State> {
                 <span>{this.state.borderRadius}px</span>
               </div>
             </div>
-            {/* Demo Area */}
             <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '2rem' }}>
               <Theme
                 color={{ primary: this.state.primaryColor }}
@@ -111,6 +232,7 @@ export class ThemeDocs extends React.Component<object, State> {
                 shadow={{ md: this.state.shadow }}
               />
               <div
+                ref={this.previewThemeTargetRef}
                 data-theme={this.state.themeName}
                 style={{
                   backgroundColor: 'var(--basis-color-primary)',
@@ -129,12 +251,11 @@ export class ThemeDocs extends React.Component<object, State> {
                   borderRadius: '4px',
                   margin: '1rem 0',
                   padding: '0.5rem',
+                  textAlign: 'left',
+                  whiteSpace: 'pre-wrap',
                 }}
                 >
-                  <code>--basis-color-primary: {this.state.primaryColor}</code><br />
-                  <code>--basis-color-contrast: {`${Color.fromHex(this.state.primaryColor).contrast()}`}</code><br />
-                  <code>--basis-font-size-md: {this.state.fontSize}%</code><br />
-                  <code>--basis-radius-md: {this.state.borderRadius}px</code>
+                  <code>{this.state.previewCode}</code>
                 </div>
               </div>
             </div>
@@ -236,101 +357,32 @@ export class ThemeDocs extends React.Component<object, State> {
           <h2>CSS Variable Generation</h2>
           <p>
             Theme automatically generates CSS custom properties for all design tokens. Variables are
-            namespaced under <code>--basis-</code> and follow a consistent naming pattern:
+            namespaced under <code>--basis-</code> and follow a consistent naming pattern.
           </p>
-          {Code.format(`
-            /* Color variables */
-            --basis-color-primary: #0070f3;
-            --basis-color-contrast: #dddddded; /* Auto-computed contrast on primary */
-            --basis-color-danger: #dc2626;
-            --basis-color-danger-contrast: #dddddded; /* Auto-computed contrast on danger */
-            --basis-color-success: #16a34a;
-            --basis-color-success-contrast: #dddddded; /* Auto-computed contrast on success */
-            --basis-color-background: #ffffff;
-            --basis-color-foreground: #171717;
-            
-            /* Typography variables */
-            --basis-font-size-sm: 87.5%;
-            --basis-font-size-md: 100%;
-            --basis-font-size-lg: 112.5%;
-            
-            /* Spacing variables */
-            --basis-unit-xs: 4px;
-            --basis-unit-sm: 8px;
-            --basis-unit-md: 16px;
-            --basis-unit-lg: 24px;
-            
-            /* Border radius variables */
-            --basis-radius-sm: 4px;
-            --basis-radius-md: 8px;
-            --basis-radius-lg: 16px;
-          `)}
+          <p>
+            The block below is filled from <code>getComputedStyle(document.documentElement)</code> on each
+            paint, so it always matches the unnamed <code>&lt;Theme /&gt;</code> in <code>Layout</code>{' '}
+            (defaults merged into <code>:root</code>).
+          </p>
+          {Code.format(this.state.rootThemeCss, 'scss')}
           <h3>Namespaced Themes</h3>
           <p>
-            When you provide a theme name, variables are scoped to that theme:
+            When <code>name</code> is set, Theme emits <code>:root [data-theme="…"]</code> with the same
+            variable names. Put <code>data-theme</code> on a subtree to apply that token set.
           </p>
           {Code.format(`
-            /* With name="dark" */
-            [data-theme="dark"] {
-              --basis-color-primary: #00d4ff;
-              --basis-color-contrast: #dddddded; /* Auto-computed contrast */
-              --basis-color-background: #1a1a1a;
-              --basis-color-foreground: #ffffff;
-            }
-            
-            /* Usage in CSS */
             .my-component {
               background-color: var(--basis-color-background);
               color: var(--basis-color-foreground);
             }
-          `)}
+          `, 'css')}
         </section>
         <section>
           <h2>Default Values</h2>
           <p>
-            Theme provides sensible defaults for all design tokens. You only need to override the
-            values you want to customize:
+            JavaScript defaults are defined once in <code>libraries/react/components/Theme/Theme.tsx</code> as{' '}
+            <code>DEFAULT_THEME</code>. Use the live CSS block above for resolved values in this app.
           </p>
-          {Code.format(`
-            const DEFAULT_THEME = {
-              color: {
-                background: '#ffffff',
-                danger: '#dc2626',
-                disabled: '#e5e5e5',
-                disabledText: '#a3a3a3',
-                foreground: '#171717',
-                overlayDark: '#00000080',
-                overlayLight: '#ffffff80',
-                primary: '#0070f3',
-                success: '#16a34a',
-              },
-              fontSize: {
-                xxs: 62.5,   // 10px
-                xs: 75,      // 12px
-                sm: 87.5,    // 14px
-                md: 100,     // 16px
-                lg: 112.5,   // 18px
-                xl: 125,     // 20px
-                xxl: 150,    // 24px
-              },
-              radius: {
-                sm: 4,       // 4px
-                md: 8,       // 8px
-                lg: 16,      // 16px
-                round: 50,   // 50px
-              },
-              unit: {
-                xxs: 2,      // 2px
-                xs: 4,       // 4px
-                sm: 8,       // 8px
-                md: 16,      // 16px
-                lg: 24,      // 24px
-                xl: 32,      // 32px
-                xxl: 48,     // 48px
-              },
-              // ... and more defaults
-            }
-          `)}
         </section>
         <section>
           <h2>Using Theme Variables in CSS</h2>

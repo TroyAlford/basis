@@ -70,15 +70,11 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     labelConfirm?: ReactNode,
     title?: ReactNode,
   }): Promise<boolean> {
-    const confirmIntent = intent === Dialog.Intent.Danger || intent === Dialog.Intent.Success
-      ? intent
-      : Dialog.Intent.Primary
-
     return Dialog.open<boolean>({
       buttons: [
         { intent: Dialog.Intent.Default, label: cancelLabel, value: false },
         {
-          intent: confirmIntent,
+          intent: intent ?? Dialog.Intent.Primary,
           label: confirmLabel,
           value: true,
         },
@@ -91,17 +87,9 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   }
 
   /**
-   * @param request - Typically `Partial<IDialog<T>>`. Import `type { IDialog }` from this module;
-   *   it is not re-exported from `@basis/react`.
-   * @returns Promise that resolves with the chosen button value or cancel value.
-   */
-  static open(request?: Partial<Omit<IDialog<boolean>, 'buttons'>>): Promise<boolean>
-  static open<T>(
-    request: Partial<Omit<IDialog<T>, 'buttons'>> & { buttons: DialogButton<T>[] },
-  ): Promise<T | false>
-  /**
-   * @param request - Optional dialog payload. Omit buttons for default Cancel / OK behavior.
-   * @returns Promise that resolves with the chosen button value or cancel value.
+   * @param request - Typically `Partial<IDialog<T>>` (import `type { IDialog }` from this module;
+   *   it is not re-exported from `@basis/react`). Omit `buttons` for default Cancel / OK (`boolean`).
+   * @returns Promise that resolves with the chosen button value or `false` (cancel / dismiss).
    */
   static open<T = boolean>(request: Partial<IDialog<T>> = {}): Promise<T | false> {
     if (typeof window === 'undefined' || !window.overlayProvider) {
