@@ -103,19 +103,16 @@ export class Router extends Component<Props> {
     return window.confirm('You have unsaved changes. Leave this page?')
   }
 
-  #setEditable(node: React.ReactElement<Record<string, unknown>>): React.RefCallback<unknown> {
-    const previousRef = 'ref' in node.props && node.props.ref !== undefined
-      ? node.props.ref as React.Ref<unknown>
-      : undefined
+  #componentRef(node: React.ReactElement<Record<string, unknown>>): React.RefCallback<unknown> {
+    const previousRef = (node.props.ref ??
+      (node as React.ReactElement & { ref?: React.Ref<unknown> }).ref) as React.Ref<unknown> | undefined
 
     return value => {
       this.#editable = isEditable(value) ? value : null
 
-      if (typeof previousRef === 'function') {
-        previousRef(value)
-      } else if (previousRef && typeof previousRef === 'object') {
-        const objectRef = previousRef as React.MutableRefObject<unknown>
-        objectRef.current = value
+      if (typeof previousRef === 'function') previousRef(value)
+      else if (previousRef && typeof previousRef === 'object') {
+        (previousRef as React.MutableRefObject<unknown>).current = value
       }
     }
   }
@@ -132,7 +129,7 @@ export class Router extends Component<Props> {
     if (typeof node.type === 'string') return node
 
     return React.cloneElement(node, {
-      ref: this.#setEditable(node as React.ReactElement<Record<string, unknown>>),
+      ref: this.#componentRef(node as React.ReactElement<Record<string, unknown>>),
     } as Partial<typeof node.props>)
   }
 

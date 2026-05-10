@@ -9,9 +9,19 @@ import { TextEditor } from '../TextEditor/TextEditor'
 import { navigate } from './navigate'
 import { Router } from './Router'
 
+const CONFIRM_UNSAVED = {
+  content: 'You have unsaved changes. Are you sure you want to leave this page?',
+  intent: Dialog.Intent.Danger,
+  labelCancel: 'Stay',
+  labelConfirm: 'Discard changes',
+  title: 'Discard unsaved changes?',
+}
+
+const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0))
+
 /** Route body that is not an Editor but exposes a boolean `dirty` getter for Router guarding. */
-class Editable extends Component<object, HTMLSpanElement> {
-  static displayName = 'DirtyTrackableNonEditor'
+class DirtyRoute extends Component<object, HTMLSpanElement> {
+  static displayName = 'DirtyRoute'
 
   content(): React.ReactNode { return 'tracked' }
 
@@ -46,7 +56,7 @@ describe('Router', () => {
     if (window.overlayProvider) {
       window.overlayProvider = undefined
     }
-    await new Promise<void>(resolve => setTimeout(resolve, 0))
+    await tick()
   })
 
   test('matches routes and passes templated params as props', async () => {
@@ -156,7 +166,7 @@ describe('Router', () => {
 
     try {
       await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
-      await new Promise(resolve => setTimeout(resolve, 0))
+      await tick()
 
       const beforeUnload = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent
       window.dispatchEvent(beforeUnload)
@@ -165,20 +175,14 @@ describe('Router', () => {
       const navigated = await navigate('/other')
 
       expect(navigated).toBe(false)
-      expect(confirm).toHaveBeenCalledWith({
-        content: 'You have unsaved changes. Are you sure you want to leave this page?',
-        intent: Dialog.Intent.Danger,
-        labelCancel: 'Stay',
-        labelConfirm: 'Discard changes',
-        title: 'Discard unsaved changes?',
-      })
+      expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
       expect(pushState).not.toHaveBeenCalled()
     } finally {
       rendered.unmount()
       confirm.mockRestore()
       pushState.mockRestore()
       overlayRendered.unmount()
-      await new Promise<void>(resolve => setTimeout(resolve, 0))
+      await tick()
     }
   })
 
@@ -190,7 +194,7 @@ describe('Router', () => {
     const rendered = await render<Router>(
       <Router>
         <Router.Route template="/dirty">
-          <Editable />
+          <DirtyRoute />
         </Router.Route>
       </Router>,
     )
@@ -199,20 +203,14 @@ describe('Router', () => {
       const navigated = await navigate('/other')
 
       expect(navigated).toBe(false)
-      expect(confirm).toHaveBeenCalledWith({
-        content: 'You have unsaved changes. Are you sure you want to leave this page?',
-        intent: Dialog.Intent.Danger,
-        labelCancel: 'Stay',
-        labelConfirm: 'Discard changes',
-        title: 'Discard unsaved changes?',
-      })
+      expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
       expect(pushState).not.toHaveBeenCalled()
     } finally {
       rendered.unmount()
       confirm.mockRestore()
       pushState.mockRestore()
       overlayRendered.unmount()
-      await new Promise<void>(resolve => setTimeout(resolve, 0))
+      await tick()
     }
   })
 
@@ -267,7 +265,7 @@ describe('Router', () => {
     const rendered = await render<Router>(
       <Router>
         <Router.Route template="/dirty">
-          <Editable />
+          <DirtyRoute />
         </Router.Route>
       </Router>,
     )
@@ -293,7 +291,7 @@ describe('Router', () => {
     const rendered = await render<Router>(
       <Router>
         <Router.Route template="/edit">
-          <Editable />
+          <DirtyRoute />
         </Router.Route>
       </Router>,
     )
@@ -304,7 +302,7 @@ describe('Router', () => {
       confirm.mockRestore()
       rendered.unmount()
       overlayRendered.unmount()
-      await new Promise<void>(resolve => setTimeout(resolve, 0))
+      await tick()
     }
   })
 
@@ -323,7 +321,7 @@ describe('Router', () => {
 
     try {
       await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
-      await new Promise(resolve => setTimeout(resolve, 0))
+      await tick()
 
       const navigated = await navigate('/other')
 
@@ -335,7 +333,7 @@ describe('Router', () => {
       confirm.mockRestore()
       pushState.mockRestore()
       overlayRendered.unmount()
-      await new Promise<void>(resolve => setTimeout(resolve, 0))
+      await tick()
     }
   })
 })

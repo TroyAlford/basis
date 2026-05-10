@@ -20,15 +20,10 @@ export class RouterGuardDocs extends React.Component<unknown, State> {
       <section>
         <h1>Router Guard Demo</h1>
         <p>
-          This page intentionally becomes dirty when edited. Use the left navigation to test
-          Router&apos;s unsaved-changes guard.
-        </p>
-        <p>
-          Change the value below, then use the docs navigation to leave this page.
-          You should see the unsaved-changes confirmation dialog.
+          Change the value, then use the docs navigation to leave this page.
+          Router should show an unsaved-changes confirmation dialog.
         </p>
         <TextEditor
-          initialValue="clean"
           value={this.state.value}
           onChange={value => this.setState({ value })}
         />
