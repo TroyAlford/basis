@@ -80,7 +80,6 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
 
   test('Dialog.editor resolves with TestEditor.current on confirm', async () => {
     const { node, unmount } = await render(<OverlayProvider />)
-    // @ts-expect-error TS2589 — Editor defaultProps depth when inferring Dialog.editor return; runtime is correct.
     const result = Dialog.editor(TestEditor, {
       labelConfirm: 'Save',
       props: { initialValue: { id: 1 } },
@@ -94,7 +93,11 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
       .find(button => button.textContent === 'Save') as HTMLButtonElement | undefined)
     save.click()
 
-    expect(await result).toEqual({ id: 2 })
+    const resolved = await result
+    expect(resolved).toEqual({ id: 2 })
+    if (resolved !== false) {
+      expect(resolved.id).toBe(2)
+    }
     unmount()
   })
 

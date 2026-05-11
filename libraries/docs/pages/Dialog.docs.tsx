@@ -174,14 +174,10 @@ export class DialogDocs extends Documentation<State> {
           <h2><code>Dialog.editor</code></h2>
           <p>
             For route or form flows built with an <code>Editor</code> subclass, <code>Dialog.editor</code>{' '}
-            mounts that editor as the dialog body and resolves <code>Promise&lt;Value | false&gt;</code>:{' '}
-            the confirm button resolves with the editor&apos;s <code>current</code> value at click time;
-            cancel, Escape, and dismiss resolve <code>false</code>. Pass optional <code>props</code> for the
-            editor instance. The value type <code>Value</code> is inferred from the editor class (for example{' '}
-            <code>Editor&lt;NameAndSlug, ...&gt;</code>
-            {' '}
-            yields{' '}
-            <code>NameAndSlug | false</code>).
+            mounts that editor as the dialog body and resolves <code>Promise&lt;Value | false&gt;</code>. It
+            records a variable initialized from <code>props.initialValue</code>, assigns on each editor{' '}
+            <code>onChange</code>, and returns that variable when the user confirms; cancel, Escape, and dismiss
+            resolve <code>false</code>. <code>Value</code> is inferred from <code>props.initialValue</code>.
           </p>
           {Code.format(`
             import { Dialog, Editor } from '@basis/react'
