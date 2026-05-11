@@ -1,8 +1,9 @@
-import * as React from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import type { IconProps } from '@basis/react'
-import { Button, css, NumberEditor, Router, style, TextEditor } from '@basis/react'
+import { Button, css, Editor, NumberEditor, Router, style, TextEditor } from '@basis/react'
 import * as Icons from '@basis/react/icons'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 import './Icons.styles.ts'
 
@@ -14,30 +15,33 @@ interface State {
   size: number,
 }
 
-export class IconsDocs extends React.Component<Record<string, never>, State> {
-  state = {
-    color: '#000000',
-    filled: false,
-    filterText: '',
-    showNames: true,
-    size: 60,
+export class IconsDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Editor.defaultProps,
+    initialValue: {
+      color: '#000000',
+      filled: false,
+      filterText: '',
+      showNames: true,
+      size: 60,
+    },
   }
 
   // Get all icon components (excluding Icon, IconBase, and utility components)
   get iconComponents() {
-    return Object.entries(Icons as unknown as Record<string, React.ComponentType<IconProps>>)
+    return Object.entries(Icons as unknown as Record<string, ComponentType<IconProps>>)
       .filter(([name]) => typeof Icons[name] === 'function')
       .filter(([name]) => {
-        if (this.state.filterText) {
-          return name.toLowerCase().includes(this.state.filterText.toLowerCase())
+        if (this.current.filterText) {
+          return name.toLowerCase().includes(this.current.filterText.toLowerCase())
         }
         return true
       })
       .sort(([a], [b]) => a.localeCompare(b))
   }
 
-  renderIconGrid = (): React.ReactNode => {
-    const { filled, showNames } = this.state
+  renderIconGrid = (): ReactNode => {
+    const { filled, showNames } = this.current
 
     return (
       <div className="icon-grid">
@@ -60,7 +64,7 @@ export class IconsDocs extends React.Component<Record<string, never>, State> {
     )
   }
 
-  renderSpecialIcons = (): React.ReactNode => (
+  renderSpecialIcons = (): ReactNode => (
     <div className="special-icons-grid">
       {/* Triangle Component */}
       <div className="special-icon-item">
@@ -95,8 +99,8 @@ export class IconsDocs extends React.Component<Record<string, never>, State> {
     </div>
   )
 
-  render() {
-    const { color, filled, filterText, showNames, size } = this.state
+  content(): ReactNode {
+    const { color, filled, filterText, showNames, size } = this.current
     style('basis:docs:icons:dynamic', css`
       .icon-demo-container {
         --demo-icon-color: ${color};
@@ -124,7 +128,7 @@ export class IconsDocs extends React.Component<Record<string, never>, State> {
             <NumberEditor
               step={4}
               value={size}
-              onChange={value => this.setState({ size: value })}
+              onChange={value => void this.handleField(value, 'size')}
             />
           </div>
           <div className="control-group">
@@ -135,7 +139,7 @@ export class IconsDocs extends React.Component<Record<string, never>, State> {
               className="color-input"
               type="color"
               value={color}
-              onChange={event => this.setState({ color: event.target.value })}
+              onChange={event => void this.handleField(event.target.value, 'color')}
             />
           </div>
           <div className="control-group">
@@ -145,7 +149,7 @@ export class IconsDocs extends React.Component<Record<string, never>, State> {
             <TextEditor
               placeholder="Search icons..."
               value={filterText}
-              onChange={value => this.setState({ filterText: value })}
+              onChange={value => void this.handleField(value, 'filterText')}
             />
           </div>
           <div className="control-group">
@@ -154,7 +158,7 @@ export class IconsDocs extends React.Component<Record<string, never>, State> {
             </label>
             <Button
               className={filled ? 'primary' : 'secondary'}
-              onActivate={() => this.setState({ filled: !filled })}
+              onActivate={() => void this.handleField(!filled, 'filled')}
             >
               {filled ? 'Filled' : 'Outline'}
             </Button>
@@ -165,7 +169,7 @@ export class IconsDocs extends React.Component<Record<string, never>, State> {
             </label>
             <Button
               className={showNames ? 'primary' : 'secondary'}
-              onActivate={() => this.setState({ showNames: !showNames })}
+              onActivate={() => void this.handleField(!showNames, 'showNames')}
             >
               {showNames ? 'Hide Names' : 'Show Names'}
             </Button>

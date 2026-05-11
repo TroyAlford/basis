@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import * as React from 'react'
+import type { ReactNode } from 'react'
 import { Pin, Section, SortDirection, TextAlign, TypedTable } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
@@ -24,10 +24,6 @@ interface User {
 }
 
 export class TableDocs extends Documentation<Record<string, never>> {
-  state = {
-    current: {},
-  }
-
   // Generate sample data with faker
   private generateUsers(count = 8): User[] {
     return Array.from({ length: count }, (_, i) => {
@@ -52,7 +48,7 @@ export class TableDocs extends Documentation<Record<string, never>> {
 
   private users: User[] = this.generateUsers()
 
-  content(): React.ReactNode {
+  content(): ReactNode {
     return (
       <>
         <h1>Table</h1>

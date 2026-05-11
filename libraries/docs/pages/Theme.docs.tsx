@@ -1,7 +1,10 @@
-import * as React from 'react'
+import type { ReactNode } from 'react'
+import { createRef } from 'react'
+import { Editor } from '@basis/react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Theme } from '../../react/components/Theme/Theme'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 /** Variable groups read from `:root` (Layout’s unnamed `<Theme />`). */
 const ROOT_THEME_CSS_SNAPSHOT_SECTIONS: readonly { readonly title: string, readonly vars: readonly string[] }[] = [
@@ -70,17 +73,20 @@ interface State {
   themeName: string,
 }
 
-export class ThemeDocs extends React.Component<object, State> {
-  previewThemeTargetRef = React.createRef<HTMLDivElement>()
+export class ThemeDocs extends Documentation<State> {
+  previewThemeTargetRef = createRef<HTMLDivElement>()
 
-  state: State = {
-    borderRadius: 8,
-    fontSize: 100,
-    previewCode: '',
-    primaryColor: '#0070f3',
-    rootThemeCss: '',
-    shadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-    themeName: 'custom',
+  static override defaultProps = {
+    ...Editor.defaultProps,
+    initialValue: {
+      borderRadius: 8,
+      fontSize: 100,
+      previewCode: '',
+      primaryColor: '#0070f3',
+      rootThemeCss: '',
+      shadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+      themeName: 'custom',
+    },
   }
 
   static formatCssVariableSnapshot(
@@ -120,9 +126,15 @@ export class ThemeDocs extends React.Component<object, State> {
   #refreshSnapshots = (): void => {
     if (typeof document === 'undefined') return
     requestAnimationFrame(() => {
-      this.setState({
-        previewCode: ThemeDocs.formatPreviewVariableLines(this.previewThemeTargetRef.current),
-        rootThemeCss: ThemeDocs.formatCssVariableSnapshot(document.documentElement, ROOT_THEME_CSS_SNAPSHOT_SECTIONS),
+      void this.setState({
+        current: {
+          ...this.current,
+          previewCode: ThemeDocs.formatPreviewVariableLines(this.previewThemeTargetRef.current),
+          rootThemeCss: ThemeDocs.formatCssVariableSnapshot(
+            document.documentElement,
+            ROOT_THEME_CSS_SNAPSHOT_SECTIONS,
+          ),
+        },
       })
     })
   }
@@ -131,19 +143,24 @@ export class ThemeDocs extends React.Component<object, State> {
     this.#refreshSnapshots()
   }
 
-  override componentDidUpdate(prevProps: Readonly<object>, prevState: Readonly<State>): void {
+  override componentDidUpdate(
+    prevProps: Readonly<object>,
+    prevState: Readonly<{ current: State }>,
+  ): void {
+    const prev = prevState.current
+    const cur = this.current
     if (
-      prevState.borderRadius !== this.state.borderRadius
-      || prevState.fontSize !== this.state.fontSize
-      || prevState.primaryColor !== this.state.primaryColor
-      || prevState.shadow !== this.state.shadow
-      || prevState.themeName !== this.state.themeName
+      prev.borderRadius !== cur.borderRadius
+      || prev.fontSize !== cur.fontSize
+      || prev.primaryColor !== cur.primaryColor
+      || prev.shadow !== cur.shadow
+      || prev.themeName !== cur.themeName
     ) {
       this.#refreshSnapshots()
     }
   }
 
-  render(): React.ReactNode {
+  content(): ReactNode {
     return (
       <>
         <h1>Theme</h1>
@@ -182,9 +199,9 @@ export class ThemeDocs extends React.Component<object, State> {
                 <h4>Theme Name</h4>
                 <TextEditor
                   field="themeName"
-                  initialValue={this.state.themeName}
                   placeholder="Enter theme name"
-                  onChange={value => this.setState({ themeName: value })}
+                  value={this.current.themeName}
+                  onChange={this.handleField}
                 />
               </div>
               <div>
@@ -192,8 +209,8 @@ export class ThemeDocs extends React.Component<object, State> {
                 <input
                   style={{ padding: '0.5rem', width: '100%' }}
                   type="color"
-                  value={this.state.primaryColor}
-                  onChange={e => this.setState({ primaryColor: e.target.value })}
+                  value={this.current.primaryColor}
+                  onChange={e => void this.handleField(e.target.value, 'primaryColor')}
                 />
               </div>
               <div>
@@ -204,10 +221,10 @@ export class ThemeDocs extends React.Component<object, State> {
                   step="12.5"
                   style={{ padding: '0.5rem', width: '100%' }}
                   type="range"
-                  value={this.state.fontSize}
-                  onChange={e => this.setState({ fontSize: Number(e.target.value) })}
+                  value={this.current.fontSize}
+                  onChange={e => void this.handleField(Number(e.target.value), 'fontSize')}
                 />
-                <span>{this.state.fontSize}% ({Math.round(16 * this.state.fontSize / 100)}px)</span>
+                <span>{this.current.fontSize}% ({Math.round(16 * this.current.fontSize / 100)}px)</span>
               </div>
               <div>
                 <h4>Border Radius</h4>
@@ -217,29 +234,29 @@ export class ThemeDocs extends React.Component<object, State> {
                   step="2"
                   style={{ padding: '0.5rem', width: '100%' }}
                   type="range"
-                  value={this.state.borderRadius}
-                  onChange={e => this.setState({ borderRadius: Number(e.target.value) })}
+                  value={this.current.borderRadius}
+                  onChange={e => void this.handleField(Number(e.target.value), 'borderRadius')}
                 />
-                <span>{this.state.borderRadius}px</span>
+                <span>{this.current.borderRadius}px</span>
               </div>
             </div>
             <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '2rem' }}>
               <Theme
-                color={{ primary: this.state.primaryColor }}
-                fontSize={{ md: this.state.fontSize }}
-                name={this.state.themeName}
-                radius={{ md: this.state.borderRadius }}
-                shadow={{ md: this.state.shadow }}
+                color={{ primary: this.current.primaryColor }}
+                fontSize={{ md: this.current.fontSize }}
+                name={this.current.themeName}
+                radius={{ md: this.current.borderRadius }}
+                shadow={{ md: this.current.shadow }}
               />
               <div
                 ref={this.previewThemeTargetRef}
-                data-theme={this.state.themeName}
+                data-theme={this.current.themeName}
                 style={{
                   backgroundColor: 'var(--basis-color-primary)',
                   borderRadius: 'var(--basis-radius-md)',
                   boxShadow: 'var(--basis-shadow-md)',
                   color: 'var(--basis-color-contrast)',
-                  fontSize: `${this.state.fontSize}%`,
+                  fontSize: `${this.current.fontSize}%`,
                   padding: '1rem',
                   textAlign: 'center',
                 }}
@@ -255,7 +272,7 @@ export class ThemeDocs extends React.Component<object, State> {
                   whiteSpace: 'pre-wrap',
                 }}
                 >
-                  <code>{this.state.previewCode}</code>
+                  <code>{this.current.previewCode}</code>
                 </div>
               </div>
             </div>
@@ -364,7 +381,7 @@ export class ThemeDocs extends React.Component<object, State> {
             paint, so it always matches the unnamed <code>&lt;Theme /&gt;</code> in <code>Layout</code>{' '}
             (defaults merged into <code>:root</code>).
           </p>
-          {Code.format(this.state.rootThemeCss, 'scss')}
+          {Code.format(this.current.rootThemeCss, 'scss')}
           <h3>Namespaced Themes</h3>
           <p>
             When <code>name</code> is set, Theme emits <code>:root [data-theme="…"]</code> with the same

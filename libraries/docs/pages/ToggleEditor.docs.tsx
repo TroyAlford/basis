@@ -1,11 +1,10 @@
-import * as React from 'react'
-import { Padlock } from '@basis/react'
-import { Section, ToggleEditor } from '@basis/react'
+import type { ReactNode } from 'react'
+import { Editor, Padlock, Section, ToggleEditor } from '@basis/react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
-interface ConfigState {
+interface State {
   customText: string,
   height: string,
   readOnly: boolean,
@@ -13,9 +12,10 @@ interface ConfigState {
   width: string,
 }
 
-export class ToggleEditorDocs extends Documentation<ConfigState> {
-  state = {
-    current: {
+export class ToggleEditorDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Editor.defaultProps,
+    initialValue: {
       customText: 'Enable notifications',
       height: '1em',
       readOnly: false,
@@ -24,7 +24,7 @@ export class ToggleEditorDocs extends Documentation<ConfigState> {
     },
   }
 
-  content(): React.ReactNode {
+  content(): ReactNode {
     const { customText, readOnly, toggleValue } = this.current
 
     return (

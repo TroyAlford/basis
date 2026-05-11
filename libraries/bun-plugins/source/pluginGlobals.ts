@@ -123,7 +123,10 @@ export function pluginGlobals(globals: PluginGlobalsOptions = {}): BunPlugin {
       }))
       build.onLoad(
         { filter: /.*/, namespace: 'globals' },
-        args => generateExport(globals, args.path) || null,
+        args => {
+          const contents = generateExport(globals, args.path)
+          return contents === undefined ? null : { contents }
+        },
       )
     },
   } as BunPlugin

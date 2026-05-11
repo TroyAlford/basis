@@ -1,19 +1,46 @@
-import type { ReactElement, ReactNode, RefObject, SyntheticEvent } from 'react'
+import type { MutableRefObject, ReactElement, ReactNode, Ref, RefObject, SyntheticEvent } from 'react'
 import { cloneElement, createElement, isValidElement } from 'react'
 import { IconBase } from '../../icons/IconBase/IconBase'
 import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
+import type { Editor } from '../Editor/Editor'
 import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE.ts'
 
 import './Dialog.styles.ts'
 
-interface DialogButtonDefinition<T> {
+/**
+ * Any concrete {@link Editor} subclass constructor (shallow `any` on Editor type parameters so
+ * option types stay lightweight).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- shallow constructor bound only
+type EditorSubclassCtor = new (...args: never[]) => Editor<any, any, any, any>
+
+/**
+ * Value type for an {@link Editor} subclass constructor: infer only the editor value type parameter,
+ * not full {@link InstanceType} (avoids TS2589 from {@link Editor} default props/state depth).
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any -- infer `V` only; Element/Props/State positions use `any` */
+export type EditorValue<C extends EditorSubclassCtor> =
+  C extends new (...args: never[]) => Editor<infer V, any, any, any> ? V : never
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+/** Options for {@link Dialog.editor}. */
+export interface DialogEditorOptions {
+  content?: ReactNode,
+  icon?: (typeof IconBase) | ReactNode,
   intent?: Intent,
-  label: ReactNode,
-  value: T,
+  labelCancel?: ReactNode,
+  labelConfirm?: ReactNode,
+  /** Props forwarded to the editor (typed as plain object to avoid deep {@link Editor} instantiation). */
+  props?: Record<string, unknown>,
+  title?: ReactNode,
 }
+
+type DialogButtonDefinition<T> =
+  | { intent?: Intent, label: ReactNode, resolve: () => T, value?: never }
+  | { intent?: Intent, label: ReactNode, value: T }
 
 type DialogButtonElement<T> = ReactElement<{
   'children'?: ReactNode,
@@ -27,7 +54,7 @@ export type DialogButton<T> = DialogButtonDefinition<T> | DialogButtonElement<T>
 
 /** Payload for {@link Dialog.open}. Mounted-only fields are added by {@link OverlayProvider}. */
 export interface IDialog<T = boolean> {
-  /** Buttons to render. Objects use `value`; JSX button elements use `data-value`. */
+  /** Buttons to render. Objects use `value` or `resolve`; JSX button elements use `data-value`. */
   buttons: DialogButton<T>[],
   /** Dialog content. */
   content: ReactNode,
@@ -95,6 +122,73 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   static open<T = boolean>(request: Partial<IDialog<T>> = {}): Promise<T | false> {
     if (typeof window === 'undefined' || !window.overlayProvider) throw new Error(REQUIRED_MESSAGE)
     return window.overlayProvider.openDialog(request)
+  }
+
+  /**
+   * Opens a dialog whose body is an {@link Editor} subclass. Resolves with the editor
+   * {@link Editor.current} value when the confirm button is used, or {@link false} when cancelled or dismissed.
+   * @param EditorComponent - Editor subclass to mount as dialog body.
+   * @param options - Title, labels, intent, optional extra content, and editor props (`props` is a plain object
+   *   so TypeScript does not recurse deeply through {@link Editor} default props/state).
+   * @returns Promise of the editor value on confirm, or false when cancelled or dismissed.
+   */
+  static editor<C extends EditorSubclassCtor>(
+    EditorComponent: C,
+    options: DialogEditorOptions = {},
+  ): Promise<EditorValue<C> | false> {
+    if (typeof window === 'undefined' || !window.overlayProvider) throw new Error(REQUIRED_MESSAGE)
+
+    const {
+      content: extraContent,
+      icon,
+      intent = Dialog.Intent.Primary,
+      labelCancel = 'Cancel',
+      labelConfirm = 'OK',
+      props: editorProps = {},
+      title,
+    } = options
+
+    let editor: InstanceType<C> | null = null
+    const { ref: userRef, ...restEditorProps } = editorProps as Record<string, unknown> & {
+      ref?: Ref<InstanceType<C>>,
+    }
+
+    const content = (
+      <>
+        {extraContent}
+        {createElement(
+          EditorComponent as never,
+          {
+            ...restEditorProps,
+            ref: (instance: InstanceType<C> | null) => {
+              editor = instance
+              if (typeof userRef === 'function') userRef(instance)
+              else if (userRef && typeof userRef === 'object') {
+                (userRef as MutableRefObject<InstanceType<C> | null>).current = instance
+              }
+            },
+          } as never,
+        )}
+      </>
+    )
+
+    return Dialog.open({
+      buttons: [
+        { intent: Dialog.Intent.Default, label: labelCancel, value: false },
+        {
+          intent: intent ?? Dialog.Intent.Primary,
+          label: labelConfirm,
+          resolve: () => {
+            if (editor === null) throw new Error('Dialog.editor: editor instance is not mounted')
+            return editor.current as EditorValue<C>
+          },
+        },
+      ],
+      content,
+      icon,
+      intent,
+      title,
+    } as never) as Promise<EditorValue<C> | false>
   }
 
   componentDidMount(): void {
@@ -188,7 +282,11 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
         data-intent={button.intent ?? Dialog.Intent.Default}
         type={Button.Type.Submit}
         onActivate={() => {
-          onResolve(button.value)
+          if ('resolve' in button && typeof button.resolve === 'function') {
+            onResolve(button.resolve())
+          } else {
+            onResolve((button as { value: unknown }).value)
+          }
         }}
       >
         {button.label}

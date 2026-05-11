@@ -1,8 +1,10 @@
-import * as React from 'react'
+import type { ReactNode } from 'react'
+import { Editor } from '@basis/react'
 import { match } from '@basis/utilities'
 import { Link } from '../../react/components/Router/Link'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 interface State {
   multiline: TextEditor['props']['multiline'],
@@ -13,17 +15,20 @@ interface State {
   wrap: TextEditor['props']['wrap'],
 }
 
-export class TextEditorDocs extends React.Component<unknown, State> {
-  state: State = {
-    multiline: 3,
-    placeholder: 'Type here to see the TextEditor in action...',
-    prefix: 'mailto:',
-    suffix: '@gmail.com',
-    value: 'example\nof a\nmultiline\nvalue',
-    wrap: TextEditor.Wrap.Soft,
+export class TextEditorDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Editor.defaultProps,
+    initialValue: {
+      multiline: 3,
+      placeholder: 'Type here to see the TextEditor in action...',
+      prefix: 'mailto:',
+      suffix: '@gmail.com',
+      value: 'example\nof a\nmultiline\nvalue',
+      wrap: TextEditor.Wrap.Soft,
+    },
   }
 
-  render(): React.ReactNode {
+  content(): ReactNode {
     return (
       <>
         <h1>TextEditor</h1>
@@ -60,8 +65,8 @@ export class TextEditorDocs extends React.Component<unknown, State> {
                 <TextEditor
                   field="placeholder"
                   placeholder="Placeholder text"
-                  value={this.state.placeholder}
-                  onChange={value => this.setState({ placeholder: value })}
+                  value={this.current.placeholder}
+                  onChange={this.handleField}
                 />
               </div>
               <div>
@@ -69,22 +74,32 @@ export class TextEditorDocs extends React.Component<unknown, State> {
                 <TextEditor
                   field="prefix"
                   placeholder="Prefix (e.g., @, #)"
-                  value={this.state.prefix}
-                  onChange={value => this.setState({ prefix: value })}
+                  value={this.current.prefix}
+                  onChange={this.handleField}
                 />
                 <TextEditor
                   field="suffix"
                   placeholder="Suffix (e.g., .com, px)"
-                  value={this.state.suffix}
-                  onChange={value => this.setState({ suffix: value })}
+                  value={this.current.suffix}
+                  onChange={this.handleField}
                 />
               </div>
               <div>
                 <strong>Multiline Mode</strong>
                 <select
                   style={{ padding: '0.5rem', width: '100%' }}
-                  value={this.state.multiline.toString()}
-                  onChange={e => this.setState({ multiline: e.target.value as State['multiline'] })}
+                  value={this.current.multiline.toString()}
+                  onChange={e => {
+                    const raw = e.target.value
+                    const multiline = raw === 'false'
+                      ? false
+                      : raw === 'true'
+                        ? true
+                        : raw === 'auto'
+                          ? 'auto'
+                          : Number.parseInt(raw, 10)
+                    void this.handleField(multiline as State['multiline'], 'multiline')
+                  }}
                 >
                   <option value="false">Single Line (input)</option>
                   <option value="true">Multiline (textarea)</option>
@@ -96,8 +111,11 @@ export class TextEditorDocs extends React.Component<unknown, State> {
                 <strong>Text Wrapping</strong>
                 <select
                   style={{ padding: '0.5rem', width: '100%' }}
-                  value={this.state.wrap}
-                  onChange={e => this.setState({ wrap: e.target.value as State['wrap'] })}
+                  value={this.current.wrap}
+                  onChange={e => void this.handleField(
+                    e.target.value as State['wrap'],
+                    'wrap',
+                  )}
                 >
                   <option value="soft">Soft (word boundaries)</option>
                   <option value="hard">Hard (character boundaries)</option>
@@ -109,8 +127,8 @@ export class TextEditorDocs extends React.Component<unknown, State> {
                 <TextEditor
                   field="value"
                   placeholder="Enter value"
-                  value={this.state.value}
-                  onChange={value => this.setState({ value })}
+                  value={this.current.value}
+                  onChange={value => void this.handleField(value, 'value')}
                 />
               </div>
             </div>
@@ -118,31 +136,31 @@ export class TextEditorDocs extends React.Component<unknown, State> {
             <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '1rem' }}>
               <h3>Editable</h3>
               <TextEditor
-                placeholder={this.state.placeholder}
-                prefix={this.state.prefix || undefined}
-                suffix={this.state.suffix || undefined}
-                value={this.state.value}
-                wrap={this.state.wrap}
-                multiline={match(this.state.multiline)
+                placeholder={this.current.placeholder}
+                prefix={this.current.prefix || undefined}
+                suffix={this.current.suffix || undefined}
+                value={this.current.value}
+                wrap={this.current.wrap}
+                multiline={match(this.current.multiline)
                   .when('true').then(true)
                   .when('false').then(false)
                   .when((value: string) => Number.parseInt(value, 10) >= 0).then(value => Number.parseInt(value, 10))
-                  .else(this.state.multiline)}
-                onChange={value => this.setState({ value })}
+                  .else(this.current.multiline)}
+                onChange={value => void this.handleField(value, 'value')}
               />
               <h3>Read Only</h3>
               <TextEditor
                 readOnly
-                placeholder={this.state.placeholder}
-                prefix={this.state.prefix || undefined}
-                suffix={this.state.suffix || undefined}
-                value={this.state.value}
-                wrap={this.state.wrap}
-                multiline={match(this.state.multiline)
+                placeholder={this.current.placeholder}
+                prefix={this.current.prefix || undefined}
+                suffix={this.current.suffix || undefined}
+                value={this.current.value}
+                wrap={this.current.wrap}
+                multiline={match(this.current.multiline)
                   .when('true').then(true)
                   .when('false').then(false)
                   .when((value: string) => Number.parseInt(value, 10) >= 0).then(value => Number.parseInt(value, 10))
-                  .else(this.state.multiline)}
+                  .else(this.current.multiline)}
               />
             </div>
           </div>

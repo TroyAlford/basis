@@ -1,10 +1,11 @@
-import * as React from 'react'
+import type { ReactNode } from 'react'
 import { Carousel } from '../../react/components/Carousel/Carousel'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 import { imageURL } from '../utilities/imageURL'
 
-export class CarouselDocs extends React.Component {
-  render(): React.ReactNode {
+export class CarouselDocs extends Documentation {
+  content(): ReactNode {
     return (
       <>
         <h1>Carousel</h1>

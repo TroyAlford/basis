@@ -1,12 +1,13 @@
-import * as React from 'react'
+import type { ReactNode } from 'react'
 import { Router } from '@basis/react'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 /**
  * Documentation for {@link OverlayProvider}: global host for {@link Dialog} and {@link Notification}.
  */
-export class OverlayProviderDocs extends React.Component {
-  render(): React.ReactNode {
+export class OverlayProviderDocs extends Documentation<Record<string, never>> {
+  content(): ReactNode {
     return (
       <>
         <h1>OverlayProvider</h1>
