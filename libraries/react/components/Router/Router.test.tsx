@@ -574,6 +574,50 @@ describe('Router', () => {
     }
   })
 
+  test('popstate dirty cancel at unmanaged history boundary does not reload', async () => {
+    window.location.pathname = '/edit'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm').mockResolvedValue(false)
+    const go = spyHistoryGoSyncPathname(delta => (delta === 1 ? '/edit' : '/external'))
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/edit">
+          <TextEditor initialValue="clean" />
+        </Router.Route>
+        <Router.Route template="/external">
+          <span className="external">external</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
+      await tick()
+
+      window.history.replaceState({}, '', '/external')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
+      expect(go).toHaveBeenCalledWith(1)
+      expect(go).not.toHaveBeenCalledWith(0)
+      expect(pushState).not.toHaveBeenCalled()
+      expect(window.location.pathname).toBe('/edit')
+      expect(rendered.node.querySelector('input')?.value).toBe('dirty')
+    } finally {
+      go.mockRestore()
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
   test('popstate with dirty route confirms and commits navigation', async () => {
     window.location.pathname = '/dirty'
     const { pushState, replaceState } = mockHistoryWritesLocation()

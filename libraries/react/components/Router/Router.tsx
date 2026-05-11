@@ -78,7 +78,7 @@ export class Router extends Component<Props> {
    * @param url The URL to navigate to
    */
   static #commitNavigation(url: string): void {
-    const basisIndex = Router.current ? Router.current.#historyIndex + 1 : Router.#historyIndexFromState() + 1
+    const basisIndex = Router.current ? Router.current.#historyIndex + 1 : (Router.#historyIndexFromState() ?? 0) + 1
     window.history.pushState({ [HISTORY_BASIS_INDEX]: basisIndex }, '', url)
     if (Router.current) Router.current.#historyIndex = basisIndex
     Router.#handleNavigationScrolling(url)
@@ -116,10 +116,10 @@ export class Router extends Component<Props> {
       : Router.location.pathname + Router.location.search
   }
 
-  static #historyIndexFromState(): number {
+  static #historyIndexFromState(): number | null {
     if (Router.serverSide) return 0
     const raw = window.history.state as Record<string, unknown> | null
-    return typeof raw?.[HISTORY_BASIS_INDEX] === 'number' ? raw[HISTORY_BASIS_INDEX] : 0
+    return typeof raw?.[HISTORY_BASIS_INDEX] === 'number' ? raw[HISTORY_BASIS_INDEX] : null
   }
 
   #historyIndex = 0
@@ -172,7 +172,7 @@ export class Router extends Component<Props> {
   componentDidMount(): void {
     Router.current = this
     this.#lastAcceptedPathSearch = this.props.url ?? Router.windowURL
-    this.#historyIndex = Router.#historyIndexFromState()
+    this.#historyIndex = Router.#historyIndexFromState() ?? 0
     if (!Router.serverSide) {
       const state = window.history.state as Record<string, unknown> | null
       if (typeof state?.[HISTORY_BASIS_INDEX] !== 'number') {
@@ -195,7 +195,7 @@ export class Router extends Component<Props> {
 
   #handleNavigateEvent = (): void => {
     this.#lastAcceptedPathSearch = Router.windowURL
-    this.#historyIndex = Router.#historyIndexFromState()
+    this.#historyIndex = Router.#historyIndexFromState() ?? this.#historyIndex
     this.forceUpdate()
     if (typeof window !== 'undefined') {
       Router.#handleNavigationScrolling(window.location.href)
@@ -215,7 +215,7 @@ export class Router extends Component<Props> {
     if (this.#popstateIgnoreOne) {
       this.#clearPopstateIgnoreFallbackTimeout()
       this.#popstateIgnoreOne = false
-      this.#historyIndex = Router.#historyIndexFromState()
+      this.#historyIndex = Router.#historyIndexFromState() ?? this.#historyIndex
       this.#lastAcceptedPathSearch = Router.windowURL
       this.#pendingPopstateRenderPathSearch = null
       this.forceUpdate()
@@ -225,9 +225,9 @@ export class Router extends Component<Props> {
 
     const attempted = Router.windowURL
     const attemptedIndex = Router.#historyIndexFromState()
-    const delta = attemptedIndex - this.#historyIndex
+    const delta = attemptedIndex === null ? -1 : attemptedIndex - this.#historyIndex
     if (attempted === this.#lastAcceptedPathSearch) {
-      this.#historyIndex = attemptedIndex
+      this.#historyIndex = attemptedIndex ?? this.#historyIndex
       this.forceUpdate()
       Router.#handleNavigationScrolling(window.location.href)
       return
@@ -257,7 +257,7 @@ export class Router extends Component<Props> {
 
     this.#pendingPopstateRenderPathSearch = null
     this.#lastAcceptedPathSearch = attempted
-    this.#historyIndex = attemptedIndex
+    this.#historyIndex = attemptedIndex ?? this.#historyIndex
     if (Router.windowURL !== attempted) {
       Router.#commitNavigation(attempted)
     } else {
@@ -283,7 +283,7 @@ export class Router extends Component<Props> {
       this.#popstateIgnoreFallbackTimeoutId = null
       if (!this.#popstateIgnoreOne) return
       this.#popstateIgnoreOne = false
-      this.#historyIndex = Router.#historyIndexFromState()
+      this.#historyIndex = Router.#historyIndexFromState() ?? this.#historyIndex
       this.#lastAcceptedPathSearch = Router.windowURL
       this.#pendingPopstateRenderPathSearch = null
       this.forceUpdate()
