@@ -19,16 +19,16 @@ type DialogEditorProps<Value, Props extends object> =
 
 /** Options for {@link Dialog.editor}. */
 export interface DialogEditorOptions<Value, Props extends object = object> {
-  content?: ReactNode,
+  /** Dialog header icon. Defaults from `intent` when omitted. */
   icon?: (typeof IconBase) | ReactNode,
+  /** Dialog shell intent. Defaults to {@link Intent.Primary}. */
   intent?: Intent,
-  labelCancel?: ReactNode,
-  labelConfirm?: ReactNode,
   /**
    * Props for the editor instance. `onChange` is wrapped so the dialog can record the latest
    * value for confirm. Pass the initial value as the second {@link Dialog.editor} argument.
    */
   props?: DialogEditorProps<Value, Props>,
+  /** Dialog title. */
   title?: ReactNode,
 }
 
@@ -143,11 +143,8 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     }
 
     const {
-      content: extraContent,
       icon,
       intent = Dialog.Intent.Primary,
-      labelCancel = 'Cancel',
-      labelConfirm = 'OK',
       props: editorProps = {} as DialogEditorProps<Value, Props>,
       title,
     } = options
@@ -155,10 +152,10 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     const { onChange } = editorProps
 
     let value = initialValue
+    const confirmToken: { readonly __dialogConfirm: true } = { __dialogConfirm: true }
 
     const content = (
       <>
-        {extraContent}
         {createElement(EditorComponent as unknown as ComponentClass<Record<string, unknown>>, {
           ...editorProps,
           initialValue,
@@ -170,20 +167,16 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
       </>
     )
 
-    return Dialog.open<Value | false>({
+    return Dialog.open<Value | false | typeof confirmToken>({
       buttons: [
-        { intent: Dialog.Intent.Default, label: labelCancel, value: false },
-        {
-          intent: intent ?? Dialog.Intent.Primary,
-          label: labelConfirm,
-          resolve: () => value,
-        },
+        <Button key="ok" data-intent={intent ?? Dialog.Intent.Primary} data-value={confirmToken}>OK</Button>,
+        <Button key="cancel" data-intent={Dialog.Intent.Default} data-value={false}>Cancel</Button>,
       ],
       content,
       icon,
       intent,
       title,
-    })
+    }).then(result => (result === confirmToken ? value : result as Value | false))
   }
 
   componentDidMount(): void {
@@ -211,8 +204,8 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     const { onResolve } = this.props
     return {
       ...super.attributes,
-      ['data-intent']: this.props.intent ?? Dialog.Intent.Default,
-      onCancel: (event: SyntheticEvent<HTMLDialogElement>) => {
+      'data-intent': this.props.intent ?? Dialog.Intent.Default,
+      'onCancel': (event: SyntheticEvent<HTMLDialogElement>) => {
         event.preventDefault()
         onResolve(false)
       },

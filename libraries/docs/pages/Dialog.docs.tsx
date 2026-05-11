@@ -29,8 +29,6 @@ export class DialogDocs extends Documentation<State> {
         slug: '',
       },
       {
-        labelCancel: 'Cancel',
-        labelConfirm: 'Create',
         props: {
           onChange: value => {
             void this.setState({
@@ -211,6 +209,11 @@ export class DialogDocs extends Documentation<State> {
             <code>onChange</code>, and returns that variable when the user confirms; cancel, Escape, and dismiss
             resolve <code>false</code>. <code>Value</code> is inferred from <code>initialValue</code>.
           </p>
+          <p>
+            The editor dialog currently uses the standard <strong>OK</strong> and <strong>Cancel</strong> buttons
+            (JSX <code>&lt;Button data-value=...&gt;</code> under the hood). For fully custom button labels and
+            values, use <code>Dialog.open</code> directly.
+          </p>
           {Code.format(`
             import { Dialog, Editor } from '@basis/react'
 
@@ -228,8 +231,6 @@ export class DialogDocs extends Documentation<State> {
               { name: '', slug: '' },
               {
                 content: 'Name and slug are required.',
-                labelCancel: 'Cancel',
-                labelConfirm: 'Create',
                 props: {
                   onChange: value => console.log('draft', value),
                 },

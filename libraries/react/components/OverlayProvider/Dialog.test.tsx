@@ -90,7 +90,6 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
   test('Dialog.editor resolves with TestEditor.current on confirm', async () => {
     const { node, unmount } = await render(<OverlayProvider />)
     const result = Dialog.editor(TestEditor, { id: 1 }, {
-      labelConfirm: 'Save',
       props: { label: 'Thing editor' },
       title: 'Edit',
     })
@@ -100,8 +99,8 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
 
     expect(bump.dataset.label).toBe('Thing editor')
 
-    const save = await findButton(node, 'Save')
-    save.click()
+    const ok = await findButton(node, 'OK')
+    ok.click()
 
     const resolved = await result
     expect(resolved).toEqual({ id: 2 })
@@ -114,13 +113,12 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
   test('Dialog.editor resolves false when cancelled', async () => {
     const { node, unmount } = await render(<OverlayProvider />)
     const result = Dialog.editor(TestEditor, { id: 0 }, {
-      labelCancel: 'Close',
       props: { label: 'Thing editor' },
       title: 'Edit',
     })
 
-    const close = await findButton(node, 'Close')
-    close.click()
+    const cancel = await findButton(node, 'Cancel')
+    cancel.click()
 
     expect(await result).toBe(false)
     unmount()
@@ -130,7 +128,6 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
     const { node, unmount } = await render(<OverlayProvider />)
     const changes: TestValue[] = []
     const result: Promise<TestValue | false> = Dialog.editor(TestEditor, { id: 99 }, {
-      labelConfirm: 'OK',
       props: {
         label: 'Tracked',
         onChange: value => changes.push(value),
