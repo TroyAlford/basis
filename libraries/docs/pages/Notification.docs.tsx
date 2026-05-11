@@ -1,5 +1,4 @@
-import type { ReactNode } from 'react'
-import { Button, Editor, Notification, Router } from '@basis/react'
+import { Button, Notification, Router } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
@@ -13,7 +12,7 @@ interface State {
  */
 export class NotificationDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       lastHandle: null as string | null,
     },
@@ -67,7 +66,7 @@ export class NotificationDocs extends Documentation<State> {
     }, 1_200)
   }
 
-  content(): ReactNode {
+  content() {
     const { lastHandle } = this.current
 
     return (

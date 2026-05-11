@@ -1,10 +1,9 @@
-import type { ReactNode } from 'react'
 import { NumberEditor, Section } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
 export class MixinsDocs extends Documentation<Record<string, never>> {
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>Mixins</h1>

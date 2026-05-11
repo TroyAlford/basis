@@ -1,5 +1,5 @@
-import type { ReactNode, SyntheticEvent } from 'react'
-import { Button, Editor } from '@basis/react'
+import type { SyntheticEvent } from 'react'
+import { Button } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
@@ -10,7 +10,7 @@ interface State {
 
 export class ButtonDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       buttonType: 'button',
       selectedValue: null as string | null,
@@ -33,7 +33,7 @@ export class ButtonDocs extends Documentation<State> {
     }
   }
 
-  content(): ReactNode {
+  content() {
     const { buttonType, selectedValue } = this.current
 
     return (

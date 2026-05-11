@@ -1,5 +1,4 @@
 import { faker } from '@faker-js/faker'
-import type { ReactNode } from 'react'
 import { Pin, Section, SortDirection, TextAlign, TypedTable } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
@@ -48,7 +47,7 @@ export class TableDocs extends Documentation<Record<string, never>> {
 
   private users: User[] = this.generateUsers()
 
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>Table</h1>

@@ -1,5 +1,4 @@
-import type { ReactNode } from 'react'
-import { AnchorPoint, AutoComplete, Editor, Link } from '@basis/react'
+import { AnchorPoint, AutoComplete, Link } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
@@ -24,7 +23,7 @@ interface State {
 
 export class AutoCompleteDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       anchorPoint: AnchorPoint.BottomStart,
       minimumQueryLength: 0,
@@ -73,7 +72,7 @@ export class AutoCompleteDocs extends Documentation<State> {
       || fruit.includes(query.toLowerCase()))
   }
 
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>AutoComplete</h1>

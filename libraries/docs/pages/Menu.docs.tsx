@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react'
-import { Editor } from '@basis/react'
 import { Menu } from '../../react/components/Menu/Menu'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
@@ -11,14 +9,14 @@ interface State {
 
 export class MenuDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       disabled: false,
       orientation: Menu.Orientation.Vertical,
     },
   }
 
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>Menu</h1>

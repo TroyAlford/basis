@@ -1,5 +1,5 @@
-import type { CSSProperties, ReactNode } from 'react'
-import { Button, css, Editor, NumberEditor, style } from '@basis/react'
+import type { CSSProperties } from 'react'
+import { Button, css, NumberEditor, style } from '@basis/react'
 import * as Icons from '@basis/react/icons'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
@@ -17,7 +17,7 @@ interface State {
 
 export class MoonPhaseDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       color: '#336699',
       day: 3.5,
@@ -28,7 +28,7 @@ export class MoonPhaseDocs extends Documentation<State> {
     },
   }
 
-  renderMoonPhaseSection = (): ReactNode => {
+  renderMoonPhaseSection = () => {
     const { color, day, filled, period, secondary, tilt } = this.current
 
     return (
@@ -116,7 +116,7 @@ export class MoonPhaseDocs extends Documentation<State> {
     )
   }
 
-  content(): ReactNode {
+  content() {
     style('basis:docs:moonphase:dynamic', css`
       .moon-demo-container {
         --basis-icon-size: 120px;

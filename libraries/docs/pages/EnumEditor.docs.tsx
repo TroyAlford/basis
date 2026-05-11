@@ -1,5 +1,4 @@
-import type { ReactNode } from 'react'
-import { Editor, EnumEditor, Section, ToggleEditor } from '@basis/react'
+import { EnumEditor, Section, ToggleEditor } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
@@ -27,7 +26,7 @@ interface State {
 
 export class EnumEditorDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       closeOnActivate: true,
       enumType: 'status' as const,
@@ -37,7 +36,7 @@ export class EnumEditorDocs extends Documentation<State> {
     },
   }
 
-  content(): ReactNode {
+  content() {
     const { closeOnActivate, enumType, priorityValue, readOnly, statusValue } = this.current
 
     return (

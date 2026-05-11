@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import { Component } from 'react'
 import { Button, Router, TextEditor } from '@basis/react'
 
@@ -16,7 +15,7 @@ export class RouterGuardDocs extends Component<unknown, State> {
     return this.state.value !== 'clean'
   }
 
-  render(): ReactNode {
+  render() {
     return (
       <section>
         <h1>Router Guard Demo</h1>

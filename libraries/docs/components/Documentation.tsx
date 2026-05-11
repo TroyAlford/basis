@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import { Editor } from '@basis/react'
 
 /**
@@ -22,7 +21,7 @@ export class Documentation<
     return super.classNames.add('documentation')
   }
 
-  override content(): ReactNode {
+  override content() {
     return null
   }
 

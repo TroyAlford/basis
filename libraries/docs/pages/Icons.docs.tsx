@@ -1,6 +1,6 @@
-import type { ComponentType, ReactNode } from 'react'
+import type { ComponentType } from 'react'
 import type { IconProps } from '@basis/react'
-import { Button, css, Editor, NumberEditor, Router, style, TextEditor } from '@basis/react'
+import { Button, css, NumberEditor, Router, style, TextEditor } from '@basis/react'
 import * as Icons from '@basis/react/icons'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
@@ -17,7 +17,7 @@ interface State {
 
 export class IconsDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       color: '#000000',
       filled: false,
@@ -40,7 +40,7 @@ export class IconsDocs extends Documentation<State> {
       .sort(([a], [b]) => a.localeCompare(b))
   }
 
-  renderIconGrid = (): ReactNode => {
+  renderIconGrid = () => {
     const { filled, showNames } = this.current
 
     return (
@@ -64,7 +64,7 @@ export class IconsDocs extends Documentation<State> {
     )
   }
 
-  renderSpecialIcons = (): ReactNode => (
+  renderSpecialIcons = () => (
     <div className="special-icons-grid">
       {/* Triangle Component */}
       <div className="special-icon-item">
@@ -99,7 +99,7 @@ export class IconsDocs extends Documentation<State> {
     </div>
   )
 
-  content(): ReactNode {
+  content() {
     const { color, filled, filterText, showNames, size } = this.current
     style('basis:docs:icons:dynamic', css`
       .icon-demo-container {

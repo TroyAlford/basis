@@ -1,6 +1,4 @@
-import type { ReactNode } from 'react'
 import { createRef } from 'react'
-import { Editor } from '@basis/react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Theme } from '../../react/components/Theme/Theme'
 import { Code } from '../components/Code'
@@ -77,7 +75,7 @@ export class ThemeDocs extends Documentation<State> {
   previewThemeTargetRef = createRef<HTMLDivElement>()
 
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       borderRadius: 8,
       fontSize: 100,
@@ -160,7 +158,7 @@ export class ThemeDocs extends Documentation<State> {
     }
   }
 
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>Theme</h1>

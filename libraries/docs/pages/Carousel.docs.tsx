@@ -1,11 +1,10 @@
-import type { ReactNode } from 'react'
 import { Carousel } from '../../react/components/Carousel/Carousel'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 import { imageURL } from '../utilities/imageURL'
 
 export class CarouselDocs extends Documentation {
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>Carousel</h1>

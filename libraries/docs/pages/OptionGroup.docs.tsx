@@ -1,5 +1,4 @@
-import type { ReactNode } from 'react'
-import { Editor, OptionGroup, Section, ToggleEditor } from '@basis/react'
+import { OptionGroup, Section, ToggleEditor } from '@basis/react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Orientation } from '../../react/types/Orientation'
 import { Code } from '../components/Code'
@@ -15,7 +14,7 @@ interface State {
 
 export class OptionGroupDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       customOptions: 'option1,option2,option3',
       optionType: 'option' as const,
@@ -37,7 +36,7 @@ export class OptionGroupDocs extends Documentation<State> {
     return this.current.customOptions.split(',').map(option => option.trim())
   }
 
-  content(): ReactNode {
+  content() {
     const { customOptions, optionType, orientation, readOnly, selectedValue } = this.current
 
     return (

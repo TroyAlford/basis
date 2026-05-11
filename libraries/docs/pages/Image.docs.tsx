@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react'
-import { Editor } from '@basis/react'
 import { Image } from '../../react/components/Image/Image'
 import type { Align } from '../../react/types/Align'
 import type { Size } from '../../react/types/Size'
@@ -14,14 +12,14 @@ interface State {
 
 export class ImageDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       align: Image.Align.Center,
       size: Image.Size.Natural,
     },
   }
 
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>Image</h1>

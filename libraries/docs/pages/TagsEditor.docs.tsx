@@ -1,11 +1,10 @@
-import type { ReactNode } from 'react'
 import { Tag } from '@basis/react'
 import { TagsEditor } from '../../react/components/TagsEditor/TagsEditor'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
 export class TagsEditorDocs extends Documentation<Record<string, never>> {
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>TagsEditor</h1>

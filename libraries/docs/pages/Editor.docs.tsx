@@ -1,10 +1,9 @@
-import type { ReactNode } from 'react'
 import { Router } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
 export class EditorDocs extends Documentation<Record<string, never>> {
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>Editor</h1>

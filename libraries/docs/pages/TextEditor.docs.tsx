@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react'
-import { Editor } from '@basis/react'
 import { match } from '@basis/utilities'
 import { Link } from '../../react/components/Router/Link'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
@@ -17,7 +15,7 @@ interface State {
 
 export class TextEditorDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       multiline: 3,
       placeholder: 'Type here to see the TextEditor in action...',
@@ -28,7 +26,7 @@ export class TextEditorDocs extends Documentation<State> {
     },
   }
 
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>TextEditor</h1>

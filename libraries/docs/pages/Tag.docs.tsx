@@ -1,10 +1,9 @@
-import type { ReactNode } from 'react'
 import { Tag } from '../../react/components/Tag/Tag'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
 export class TagDocs extends Documentation<Record<string, never>> {
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>Tag</h1>

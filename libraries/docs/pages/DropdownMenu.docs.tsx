@@ -1,5 +1,4 @@
-import type { ReactNode } from 'react'
-import { AnchorPoint, Editor } from '@basis/react'
+import { AnchorPoint } from '@basis/react'
 import { Button } from '../../react/components/Button/Button'
 import { DropdownMenu } from '../../react/components/DropdownMenu/DropdownMenu'
 import { Link } from '../../react/components/Router/Link'
@@ -13,14 +12,14 @@ interface State {
 
 export class DropdownMenuDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       anchorPoint: AnchorPoint.BottomStart,
       open: true,
     },
   }
 
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>DropdownMenu</h1>

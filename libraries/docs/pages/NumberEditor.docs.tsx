@@ -1,5 +1,4 @@
-import type { ReactNode } from 'react'
-import { Editor, Tag } from '@basis/react'
+import { Tag } from '@basis/react'
 import { NumberEditor } from '../../react/components/NumberEditor/NumberEditor'
 import { Link } from '../../react/components/Router/Link'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
@@ -17,7 +16,7 @@ interface State {
 
 export class NumberEditorDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       autoFocus: false,
       placeholder: 'Enter a number...',
@@ -28,7 +27,7 @@ export class NumberEditorDocs extends Documentation<State> {
     },
   }
 
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>NumberEditor</h1>

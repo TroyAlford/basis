@@ -1,10 +1,9 @@
-import type { ReactNode } from 'react'
 import { Link } from '../../react/components/Router/Link'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
 export class ComponentDocs extends Documentation<Record<string, never>> {
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>Component</h1>

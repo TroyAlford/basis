@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import { Router } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
@@ -7,7 +6,7 @@ import { Documentation } from '../components/Documentation'
  * Documentation for {@link OverlayProvider}: global host for {@link Dialog} and {@link Notification}.
  */
 export class OverlayProviderDocs extends Documentation<Record<string, never>> {
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>OverlayProvider</h1>

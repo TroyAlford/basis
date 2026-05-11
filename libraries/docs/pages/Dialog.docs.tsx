@@ -1,5 +1,4 @@
-import type { ReactNode } from 'react'
-import { Button, Dialog, Editor, Intent, Router } from '@basis/react'
+import { Button, Dialog, Intent, Router } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
@@ -13,7 +12,7 @@ interface State {
  */
 export class DialogDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       lastChoice: null as string | null,
     },
@@ -68,7 +67,7 @@ export class DialogDocs extends Documentation<State> {
     void this.setState({ current: { ...this.current, lastChoice: String(value) } })
   }
 
-  content(): ReactNode {
+  content() {
     const { lastChoice } = this.current
 
     return (

@@ -1,5 +1,4 @@
-import type { ReactNode } from 'react'
-import { AnchorPoint, Editor } from '@basis/react'
+import { AnchorPoint } from '@basis/react'
 import { Button } from '../../react/components/Button/Button'
 import { Menu } from '../../react/components/Menu/Menu'
 import { PopupMenu } from '../../react/components/PopupMenu/PopupMenu'
@@ -14,14 +13,14 @@ interface State {
 
 export class PopupMenuDocs extends Documentation<State> {
   static override defaultProps = {
-    ...Editor.defaultProps,
+    ...Documentation.defaultProps,
     initialValue: {
       anchorPoint: AnchorPoint.Top,
       visible: true,
     },
   }
 
-  content(): ReactNode {
+  content() {
     return (
       <>
         <h1>PopupMenu</h1>
