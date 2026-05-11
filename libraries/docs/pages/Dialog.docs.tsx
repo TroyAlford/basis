@@ -1,5 +1,6 @@
 import { Button, Dialog, Intent, Router } from '@basis/react'
 import { Code } from '../components/Code'
+import { DialogEditorExample } from '../components/DialogEditorExample'
 import { Documentation } from '../components/Documentation'
 
 interface State {
@@ -16,6 +17,37 @@ export class DialogDocs extends Documentation<State> {
     initialValue: {
       lastChoice: null as string | null,
     },
+  }
+
+  openEditorDialog = async () => {
+    void this.setState({ current: { ...this.current, lastChoice: 'opening…' } })
+
+    const result = await Dialog.editor(
+      DialogEditorExample,
+      {
+        name: '',
+        slug: '',
+      },
+      {
+        labelCancel: 'Cancel',
+        labelConfirm: 'Create',
+        props: {
+          onChange: value => {
+            void this.setState({
+              current: { ...this.current, lastChoice: `draft: ${JSON.stringify(value)}` },
+            })
+          },
+        },
+        title: 'New article…',
+      },
+    )
+
+    void this.setState({
+      current: {
+        ...this.current,
+        lastChoice: result === false ? 'cancelled' : `submitted: ${JSON.stringify(result)}`,
+      },
+    })
   }
 
   openConfirmPrimary = async () => {
@@ -124,7 +156,8 @@ export class DialogDocs extends Documentation<State> {
             <Button onActivate={this.openConfirmPrimary}>Dialog.confirm (primary)</Button>{' '}
             <Button onActivate={this.openConfirmDanger}>Dialog.confirm (danger)</Button>{' '}
             <Button onActivate={this.openCustomSuccess}>Dialog.open (success)</Button>{' '}
-            <Button onActivate={this.openTypedDialog}>Dialog.open (typed values)</Button>
+            <Button onActivate={this.openTypedDialog}>Dialog.open (typed values)</Button>{' '}
+            <Button onActivate={this.openEditorDialog}>Dialog.editor (editor dialog)</Button>
           </p>
           {lastChoice && (
             <p>
@@ -150,22 +183,22 @@ export class DialogDocs extends Documentation<State> {
             to <code>Intent.Primary</code>.
           </p>
           {Code.format(`
-            import { Dialog, Intent } from '@basis/react'
+            import { Button, Dialog, Intent } from '@basis/react'
 
             const defaultResult = await Dialog.open({
-              title: 'Continue?',
               content: 'Cancel resolves false; OK resolves true.',
+              title: 'Continue?',
             })
 
             const next = await Dialog.open<'edit' | 'view'>({
-              title: 'Open as…',
-              content: 'Pick how to open this item.',
-              intent: Intent.Success,
               buttons: [
                 { label: 'View', value: 'view' },
                 { label: 'Edit', value: 'edit' },
                 <Button key="cancel" data-value="cancel">Cancel</Button>,
               ],
+              content: 'Pick how to open this item.',
+              intent: Intent.Success,
+              title: 'Open as…',
             })
           `)}
         </section>
@@ -174,25 +207,49 @@ export class DialogDocs extends Documentation<State> {
           <p>
             For route or form flows built with an <code>Editor</code> subclass, <code>Dialog.editor</code>{' '}
             mounts that editor as the dialog body and resolves <code>Promise&lt;Value | false&gt;</code>. It
-            records a variable initialized from the second argument, assigns on each editor{' '}
+            records a variable initialized from the <code>initialValue</code> argument, assigns on each editor{' '}
             <code>onChange</code>, and returns that variable when the user confirms; cancel, Escape, and dismiss
-            resolve <code>false</code>. <code>Value</code> is inferred from the editor&apos;s current value.
+            resolve <code>false</code>. <code>Value</code> is inferred from <code>initialValue</code>.
           </p>
           {Code.format(`
             import { Dialog, Editor } from '@basis/react'
 
-            class CreateEditor extends Editor<NameAndSlug, HTMLDivElement, CreateEditorProps> {
+            interface NameAndSlug {
+              name: string
+              slug: string
+            }
+
+            class CreateEditor extends Editor<NameAndSlug, HTMLDivElement> {
               // ...
             }
 
-            const result = await Dialog.editor(CreateEditor, { name: '', slug: '' }, {
-              title: 'New Article…',
-              labelConfirm: 'Create',
-              labelCancel: 'Cancel',
-              props: { /* other CreateEditor props */ },
-            })
+            const result = await Dialog.editor(
+              CreateEditor,
+              { name: '', slug: '' },
+              {
+                content: 'Name and slug are required.',
+                labelCancel: 'Cancel',
+                labelConfirm: 'Create',
+                props: {
+                  onChange: value => console.log('draft', value),
+                },
+                title: 'New Article…',
+              },
+            )
             if (result === false) return
             // result is NameAndSlug
+            result.slug
+          `)}
+          {Code.format(`
+            // Using the resolved value (same type as initialValue)
+            const created = await Dialog.editor(
+              CreateEditor,
+              { name: '', slug: '' },
+              { title: 'New Article…' },
+            )
+            if (created === false) return
+            console.log('submitted', created)
+            created.slug
           `)}
         </section>
         <section>
@@ -207,11 +264,11 @@ export class DialogDocs extends Documentation<State> {
             import { Dialog } from '@basis/react'
 
             const ok = await Dialog.confirm({
-              title: 'Remove tag?',
               content: 'This cannot be undone.',
               intent: Dialog.Intent.Danger,
               labelCancel: 'Keep',
               labelConfirm: 'Remove',
+              title: 'Remove tag?',
             })
           `)}
         </section>

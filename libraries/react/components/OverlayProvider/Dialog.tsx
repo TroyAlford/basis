@@ -94,12 +94,12 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   }): Promise<boolean> {
     return Dialog.open<boolean>({
       buttons: [
-        { intent: Dialog.Intent.Default, label: cancelLabel, value: false },
         {
           intent: intent ?? Dialog.Intent.Primary,
           label: confirmLabel,
           value: true,
         },
+        { intent: Dialog.Intent.Default, label: cancelLabel, value: false },
       ],
       content,
       icon,

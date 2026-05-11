@@ -14,11 +14,11 @@ style('basis:text-editor', css`
     border: var(--basis-text-editor-border);
     display: flex;
     font-size: 1em;
-    gap: var(--basis-text-editor-padding);
+    gap: 0;
     line-height: 1em;
     min-height: 1.5em;
     overflow: hidden;
-    padding: var(--basis-text-editor-padding);
+    padding: 0;
     position: relative;
 
 
@@ -28,8 +28,9 @@ style('basis:text-editor', css`
       font-family: inherit;
       font-size: inherit;
       line-height: inherit;
-      margin: var(--basis-text-editor-padding);
-      padding: 0;
+      margin: 0;
+      outline: none;
+      padding: var(--basis-text-editor-padding);
       resize: none;
       white-space: pre-wrap;
     }
