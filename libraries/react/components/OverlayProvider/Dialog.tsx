@@ -1,4 +1,4 @@
-import type { ComponentType, ReactElement, ReactNode, RefObject, SyntheticEvent } from 'react'
+import type { ComponentClass, ReactElement, ReactNode, RefObject, SyntheticEvent } from 'react'
 import { cloneElement, createElement, isValidElement } from 'react'
 import { IconBase } from '../../icons/IconBase/IconBase'
 import { Intent as IntentIcon } from '../../icons/Intent'
@@ -10,18 +10,25 @@ import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE.ts'
 
 import './Dialog.styles.ts'
 
+type DialogEditorProps<Value, Props extends object> =
+  Props
+  & {
+    onChange?: Editor<Value>['props']['onChange'],
+    value?: never,
+  }
+
 /** Options for {@link Dialog.editor}. */
-export interface DialogEditorOptions<Value> {
+export interface DialogEditorOptions<Value, Props extends object = object> {
   content?: ReactNode,
   icon?: (typeof IconBase) | ReactNode,
   intent?: Intent,
   labelCancel?: ReactNode,
   labelConfirm?: ReactNode,
   /**
-   * Props for the editor instance. Must include {@link ../Editor/Editor.props.initialValue}. Other keys
-   * are forwarded; `onChange` is wrapped so the dialog can record the latest value for confirm.
+   * Props for the editor instance. `onChange` is wrapped so the dialog can record the latest
+   * value for confirm. Pass the initial value as the second {@link Dialog.editor} argument.
    */
-  props: { initialValue: Value } & Record<string, unknown>,
+  props?: DialogEditorProps<Value, Props>,
   title?: ReactNode,
 }
 
@@ -113,14 +120,22 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
 
   /**
    * Opens a dialog whose body is an {@link Editor} subclass. Subscribes to `onChange` and resolves
-   * confirm with the latest value (starting from `props.initialValue`).
+   * confirm with the latest value (starting from `initialValue`).
    * @param EditorComponent - Editor subclass (validated with {@link Editor.isEditor}).
-   * @param options - Title, labels, intent, optional extra content, and `props` (must include `initialValue`).
+   * @param initialValue - Starting editor value; typed from the editor's current value.
+   * @param options - Title, labels, intent, optional extra content, and editor props.
    * @returns Promise of the recorded value on confirm, or false when cancelled or dismissed.
    */
-  static editor<Value>(
-    EditorComponent: new (...args: never[]) => object,
-    options: DialogEditorOptions<Value>,
+  static editor<
+    Value,
+    EditorComponent extends new (
+      ...args: never[]
+    ) => { current: Value },
+    Props extends object = object,
+  >(
+    EditorComponent: EditorComponent,
+    initialValue: Value,
+    options: DialogEditorOptions<Value, Props> = {},
   ): Promise<Value | false> {
     if (typeof window === 'undefined' || !window.overlayProvider) throw new Error(REQUIRED_MESSAGE)
     if (!Editor.isEditor(EditorComponent)) {
@@ -133,34 +148,25 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
       intent = Dialog.Intent.Primary,
       labelCancel = 'Cancel',
       labelConfirm = 'OK',
-      props: editorProps,
+      props: editorProps = {} as DialogEditorProps<Value, Props>,
       title,
     } = options
 
-    const props = editorProps as { initialValue: Value } & Record<string, unknown>
-    const { initialValue, onChange: userOnChange, ref: userRef } = props
-    const forwardRest = { ...props }
-    delete forwardRest.initialValue
-    delete forwardRest.onChange
-    delete forwardRest.ref
-    delete forwardRest.value
+    const { onChange } = editorProps
 
-    let value: Value = initialValue
+    let value = initialValue
 
     const content = (
       <>
         {extraContent}
-        {createElement(EditorComponent as unknown as ComponentType<Record<string, unknown>>, {
-          ...forwardRest,
+        {createElement(EditorComponent as unknown as ComponentClass<Record<string, unknown>>, {
+          ...editorProps,
           initialValue,
-          onChange: (next: unknown, field: string, editor: unknown) => {
-            value = next as Value
-            if (typeof userOnChange === 'function') {
-              userOnChange(next, field, editor)
-            }
+          onChange: (next, field, editor) => {
+            value = next
+            onChange?.(next, field, editor)
           },
-          ref: userRef,
-        } as Record<string, unknown>)}
+        })}
       </>
     )
 
@@ -170,7 +176,7 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
         {
           intent: intent ?? Dialog.Intent.Primary,
           label: labelConfirm,
-          resolve: (): Value => value,
+          resolve: () => value,
         },
       ],
       content,

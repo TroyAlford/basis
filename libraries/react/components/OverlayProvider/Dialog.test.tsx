@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import * as React from 'react'
 import { render } from '../../testing/render'
 import { waitFor } from '../../testing/waitFor'
 import { Button } from '../Button/Button'
@@ -7,17 +6,18 @@ import { Editor } from '../Editor/Editor'
 import { Dialog } from './Dialog'
 import { OverlayProvider } from './OverlayProvider'
 
-interface Thing {
+interface TestValue {
   id: number,
 }
 
 /** Editor used to assert {@link Dialog.editor} typing and resolution. */
-class TestEditor extends Editor<Thing, HTMLDivElement> {
+class TestEditor extends Editor<TestValue, HTMLDivElement, { label: string }> {
   static displayName = 'TestEditor'
 
-  content(): React.ReactNode {
+  content() {
     return (
       <button
+        data-label={this.props.label}
         data-testid="bump"
         type="button"
         onClick={() => void this.handleChange({ id: this.current.id + 1 })}
@@ -39,6 +39,17 @@ async function resetOverlayProvider() {
   await new Promise<void>(resolve => setTimeout(resolve, 0))
 }
 
+/**
+ * Find a dialog button by its visible label.
+ * @param node - Root node to search.
+ * @param label - Button text to match.
+ * @returns Matching button once rendered.
+ */
+async function findButton(node: ParentNode, label: string) {
+  return waitFor(() => Array.from(node.querySelectorAll('button'))
+    .find(button => button.textContent === label) as HTMLButtonElement | undefined)
+}
+
 describe('Dialog.open with resolve and Dialog.editor', () => {
   beforeEach(async () => {
     await resetOverlayProvider()
@@ -54,8 +65,7 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
       title: 'Pick',
     })
 
-    const y = await waitFor(() => Array.from(node.querySelectorAll('button'))
-      .find(button => button.textContent === 'Y') as HTMLButtonElement | undefined)
+    const y = await findButton(node, 'Y')
     y.click()
 
     expect(await result).toBe('y')
@@ -70,8 +80,7 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
       title: 'Resolve',
     })
 
-    const snap = await waitFor(() => Array.from(node.querySelectorAll('button'))
-      .find(button => button.textContent === 'Snap') as HTMLButtonElement | undefined)
+    const snap = await findButton(node, 'Snap')
     snap.click()
 
     expect(await result).toBe(1)
@@ -80,17 +89,18 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
 
   test('Dialog.editor resolves with TestEditor.current on confirm', async () => {
     const { node, unmount } = await render(<OverlayProvider />)
-    const result = Dialog.editor(TestEditor, {
+    const result = Dialog.editor(TestEditor, { id: 1 }, {
       labelConfirm: 'Save',
-      props: { initialValue: { id: 1 } },
+      props: { label: 'Thing editor' },
       title: 'Edit',
     })
 
     const bump = await waitFor(() => node.querySelector<HTMLButtonElement>('[data-testid="bump"]'))
     bump.click()
 
-    const save = await waitFor(() => Array.from(node.querySelectorAll('button'))
-      .find(button => button.textContent === 'Save') as HTMLButtonElement | undefined)
+    expect(bump.dataset.label).toBe('Thing editor')
+
+    const save = await findButton(node, 'Save')
     save.click()
 
     const resolved = await result
@@ -103,14 +113,13 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
 
   test('Dialog.editor resolves false when cancelled', async () => {
     const { node, unmount } = await render(<OverlayProvider />)
-    const result = Dialog.editor(TestEditor, {
+    const result = Dialog.editor(TestEditor, { id: 0 }, {
       labelCancel: 'Close',
-      props: { initialValue: { id: 0 } },
+      props: { label: 'Thing editor' },
       title: 'Edit',
     })
 
-    const close = await waitFor(() => Array.from(node.querySelectorAll('button'))
-      .find(button => button.textContent === 'Close') as HTMLButtonElement | undefined)
+    const close = await findButton(node, 'Close')
     close.click()
 
     expect(await result).toBe(false)
@@ -119,17 +128,40 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
 
   test('Dialog.editor passes props through to the editor', async () => {
     const { node, unmount } = await render(<OverlayProvider />)
-    const result = Dialog.editor(TestEditor, {
+    const changes: TestValue[] = []
+    const result: Promise<TestValue | false> = Dialog.editor(TestEditor, { id: 99 }, {
       labelConfirm: 'OK',
-      props: { initialValue: { id: 99 } },
+      props: {
+        label: 'Tracked',
+        onChange: value => changes.push(value),
+      },
       title: 'Props',
     })
 
-    const ok = await waitFor(() => Array.from(node.querySelectorAll('button'))
-      .find(button => button.textContent === 'OK') as HTMLButtonElement | undefined)
+    const bump = await waitFor(() => node.querySelector<HTMLButtonElement>('[data-testid="bump"]'))
+    bump.click()
+
+    const ok = await findButton(node, 'OK')
     ok.click()
 
-    expect(await result).toEqual({ id: 99 })
+    expect(changes).toEqual([{ id: 100 }])
+    expect(await result).toEqual({ id: 100 })
+    unmount()
+  })
+
+  test('Dialog.editor rejects non-editor components', async () => {
+    const { unmount } = await render(<OverlayProvider />)
+
+    class NotAnEditor {
+      current = { id: 0 }
+    }
+
+    expect(() => Dialog.editor(
+      NotAnEditor,
+      { id: 0 },
+      { props: { label: 'Invalid' } },
+    )).toThrow('Dialog.editor: expected an Editor subclass constructor')
+
     unmount()
   })
 
@@ -137,8 +169,7 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
     const { node, unmount } = await render(<OverlayProvider />)
     const result = Dialog.confirm({ title: 'Sure?' })
 
-    const ok = await waitFor(() => Array.from(node.querySelectorAll('button'))
-      .find(button => button.textContent === 'OK') as HTMLButtonElement | undefined)
+    const ok = await findButton(node, 'OK')
     ok.click()
 
     expect(await result).toBe(true)
@@ -155,8 +186,7 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
       title: 'JSX',
     })
 
-    const go = await waitFor(() => Array.from(node.querySelectorAll('button'))
-      .find(button => button.textContent === 'Go') as HTMLButtonElement | undefined)
+    const go = await findButton(node, 'Go')
     go.click()
 
     expect(await result).toBe('go')

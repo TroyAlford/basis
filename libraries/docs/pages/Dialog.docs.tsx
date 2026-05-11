@@ -175,9 +175,9 @@ export class DialogDocs extends Documentation<State> {
           <p>
             For route or form flows built with an <code>Editor</code> subclass, <code>Dialog.editor</code>{' '}
             mounts that editor as the dialog body and resolves <code>Promise&lt;Value | false&gt;</code>. It
-            records a variable initialized from <code>props.initialValue</code>, assigns on each editor{' '}
+            records a variable initialized from the second argument, assigns on each editor{' '}
             <code>onChange</code>, and returns that variable when the user confirms; cancel, Escape, and dismiss
-            resolve <code>false</code>. <code>Value</code> is inferred from <code>props.initialValue</code>.
+            resolve <code>false</code>. <code>Value</code> is inferred from the editor&apos;s current value.
           </p>
           {Code.format(`
             import { Dialog, Editor } from '@basis/react'
@@ -186,11 +186,11 @@ export class DialogDocs extends Documentation<State> {
               // ...
             }
 
-            const result = await Dialog.editor(CreateEditor, {
+            const result = await Dialog.editor(CreateEditor, { name: '', slug: '' }, {
               title: 'New Article…',
               labelConfirm: 'Create',
               labelCancel: 'Cancel',
-              props: { /* CreateEditor props */ },
+              props: { /* other CreateEditor props */ },
             })
             if (result === false) return
             // result is NameAndSlug
