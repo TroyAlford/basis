@@ -233,7 +233,7 @@ describe('Router', () => {
       const navigated = await Router.navigate('/test/path')
 
       expect(navigated).toBe(true)
-      expect(pushState).toHaveBeenCalledWith(expect.objectContaining({ basisFrom: '/' }), '', '/test/path')
+      expect(pushState).toHaveBeenCalledWith(expect.objectContaining({ basisIndex: 1 }), '', '/test/path')
       expect(dispatchEvent).toHaveBeenCalledWith(expect.any(NavigateEvent))
       const event = dispatchEvent.mock.calls.find(([e]) => e instanceof NavigateEvent)?.[0] as NavigateEvent
       expect(event.detail.url).toBe('/test/path')
@@ -347,7 +347,7 @@ describe('Router', () => {
 
       expect(navigated).toBe(true)
       expect(confirm).not.toHaveBeenCalled()
-      expect(pushState).toHaveBeenCalledWith(expect.objectContaining({ basisFrom: '/hook' }), '', '/away')
+      expect(pushState).toHaveBeenCalledWith(expect.objectContaining({ basisIndex: 1 }), '', '/away')
     } finally {
       rendered.unmount()
       confirm.mockRestore()
@@ -470,7 +470,7 @@ describe('Router', () => {
 
       expect(navigated).toBe(true)
       expect(confirm).toHaveBeenCalled()
-      expect(pushState).toHaveBeenCalledWith(expect.objectContaining({ basisFrom: '/edit' }), '', '/other')
+      expect(pushState).toHaveBeenCalledWith(expect.objectContaining({ basisIndex: 1 }), '', '/other')
     } finally {
       rendered.unmount()
       confirm.mockRestore()
@@ -480,7 +480,7 @@ describe('Router', () => {
     }
   })
 
-  test('popstate dirty cancel uses history.go(-1) when session basisFrom matches last accepted', async () => {
+  test('popstate dirty cancel restores the current URL with the inverse history index delta', async () => {
     window.location.pathname = '/dirty'
     const { pushState, replaceState } = mockHistoryWritesLocation()
     const overlayRendered = await render(<OverlayProvider />)
@@ -497,19 +497,72 @@ describe('Router', () => {
       </Router>,
     )
 
-    const go = spyHistoryGoSyncPathname(delta => (delta === -1 ? '/dirty' : '/away'))
+    const go = spyHistoryGoSyncPathname(delta => (delta === 1 ? '/dirty' : '/away'))
     try {
-      window.history.replaceState({ basisFrom: '/dirty' }, '', '/away')
+      window.history.replaceState({ basisIndex: -1 }, '', '/away')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
+      expect(go).toHaveBeenCalledWith(1)
+      expect(pushState).not.toHaveBeenCalled()
+      expect(replaceState).toHaveBeenCalled()
+      expect(window.location.pathname).toBe('/dirty')
+      expect(rendered.node.textContent).toBe('tracked')
+    } finally {
+      go.mockRestore()
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate dirty cancel keeps editor state while history.go corrective popstate is pending', async () => {
+    window.location.pathname = '/edit'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm').mockResolvedValue(false)
+    let pendingDelta: number | undefined
+    const go = spyOn(window.history, 'go').mockImplementation((delta: number) => {
+      pendingDelta = delta
+    })
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/edit">
+          <TextEditor initialValue="clean" />
+        </Router.Route>
+        <Router.Route template="/away">
+          <span className="away">away</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
+      await tick()
+
+      window.history.replaceState({ basisIndex: 1 }, '', '/away')
       window.dispatchEvent(new PopStateEvent('popstate'))
       await tick()
       await tick()
 
       expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
       expect(go).toHaveBeenCalledWith(-1)
+      expect(pendingDelta).toBe(-1)
       expect(pushState).not.toHaveBeenCalled()
-      expect(replaceState).toHaveBeenCalled()
-      expect(window.location.pathname).toBe('/dirty')
-      expect(rendered.node.textContent).toBe('tracked')
+      expect(window.location.pathname).toBe('/away')
+      expect(rendered.node.querySelector('input')?.value).toBe('dirty')
+
+      window.location.pathname = '/edit'
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+
+      expect(rendered.node.querySelector('input')?.value).toBe('dirty')
     } finally {
       go.mockRestore()
       confirm.mockRestore()
@@ -694,6 +747,9 @@ describe('Router', () => {
     )
 
     try {
+      replaceState.mockClear()
+      pushState.mockClear()
+
       window.location.pathname = '/b'
       window.dispatchEvent(new PopStateEvent('popstate'))
       await tick()
@@ -781,7 +837,7 @@ describe('Router', () => {
     }
   })
 
-  test('popstate with onBeforeNavigate false reverts with history.go(-1) without Dialog.confirm', async () => {
+  test('popstate with onBeforeNavigate false reverts without Dialog.confirm', async () => {
     window.location.pathname = '/block'
     const { pushState, replaceState } = mockHistoryWritesLocation()
     const overlayRendered = await render(<OverlayProvider />)
@@ -798,15 +854,15 @@ describe('Router', () => {
       </Router>,
     )
 
-    const go = spyHistoryGoSyncPathname(delta => (delta === -1 ? '/block' : '/away'))
+    const go = spyHistoryGoSyncPathname(delta => (delta === 1 ? '/block' : '/away'))
     try {
-      window.history.replaceState({ basisFrom: '/block' }, '', '/away')
+      window.history.replaceState({ basisIndex: -1 }, '', '/away')
       window.dispatchEvent(new PopStateEvent('popstate'))
       await tick()
       await tick()
 
       expect(confirm).not.toHaveBeenCalled()
-      expect(go).toHaveBeenCalledWith(-1)
+      expect(go).toHaveBeenCalledWith(1)
       expect(pushState).not.toHaveBeenCalled()
       expect(replaceState).toHaveBeenCalled()
       expect(window.location.pathname).toBe('/block')

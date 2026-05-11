@@ -19,8 +19,8 @@ interface Props {
 
 const WILDCARD_ROUTES = ['*', '.*']
 
-/** Session history state key recording SPA pathname+search before each Router-driven push. */
-const HISTORY_BASIS_FROM = 'basisFrom'
+/** Session history state key recording this Router's position in the browser history stack. */
+const HISTORY_BASIS_INDEX = 'basisIndex'
 
 /**
  * If `history.go` does not emit `popstate`, clear {@link Router.#popstateIgnoreOne} so later events
@@ -78,8 +78,9 @@ export class Router extends Component<Props> {
    * @param url The URL to navigate to
    */
   static #commitNavigation(url: string): void {
-    const basisFrom = Router.windowURL
-    window.history.pushState({ [HISTORY_BASIS_FROM]: basisFrom }, '', url)
+    const basisIndex = Router.current ? Router.current.#historyIndex + 1 : Router.#historyIndexFromState() + 1
+    window.history.pushState({ [HISTORY_BASIS_INDEX]: basisIndex }, '', url)
+    if (Router.current) Router.current.#historyIndex = basisIndex
     Router.#handleNavigationScrolling(url)
     window.dispatchEvent(new NavigateEvent(url))
   }
@@ -115,6 +116,13 @@ export class Router extends Component<Props> {
       : Router.location.pathname + Router.location.search
   }
 
+  static #historyIndexFromState(): number {
+    if (Router.serverSide) return 0
+    const raw = window.history.state as Record<string, unknown> | null
+    return typeof raw?.[HISTORY_BASIS_INDEX] === 'number' ? raw[HISTORY_BASIS_INDEX] : 0
+  }
+
+  #historyIndex = 0
   #lastAcceptedPathSearch = ''
   /**
    * While set, route matching uses this path+search instead of the real location so the previous
@@ -164,6 +172,13 @@ export class Router extends Component<Props> {
   componentDidMount(): void {
     Router.current = this
     this.#lastAcceptedPathSearch = this.props.url ?? Router.windowURL
+    this.#historyIndex = Router.#historyIndexFromState()
+    if (!Router.serverSide) {
+      const state = window.history.state as Record<string, unknown> | null
+      if (typeof state?.[HISTORY_BASIS_INDEX] !== 'number') {
+        window.history.replaceState({ ...state, [HISTORY_BASIS_INDEX]: this.#historyIndex }, '', Router.windowURL)
+      }
+    }
     window.addEventListener(NavigateEvent.name, this.#handleNavigateEvent)
     window.addEventListener('popstate', this.#handlePopstate)
     window.addEventListener('beforeunload', this.#handleBeforeUnload)
@@ -180,6 +195,7 @@ export class Router extends Component<Props> {
 
   #handleNavigateEvent = (): void => {
     this.#lastAcceptedPathSearch = Router.windowURL
+    this.#historyIndex = Router.#historyIndexFromState()
     this.forceUpdate()
     if (typeof window !== 'undefined') {
       Router.#handleNavigationScrolling(window.location.href)
@@ -199,6 +215,7 @@ export class Router extends Component<Props> {
     if (this.#popstateIgnoreOne) {
       this.#clearPopstateIgnoreFallbackTimeout()
       this.#popstateIgnoreOne = false
+      this.#historyIndex = Router.#historyIndexFromState()
       this.#lastAcceptedPathSearch = Router.windowURL
       this.#pendingPopstateRenderPathSearch = null
       this.forceUpdate()
@@ -207,7 +224,10 @@ export class Router extends Component<Props> {
     }
 
     const attempted = Router.windowURL
+    const attemptedIndex = Router.#historyIndexFromState()
+    const delta = attemptedIndex - this.#historyIndex
     if (attempted === this.#lastAcceptedPathSearch) {
+      this.#historyIndex = attemptedIndex
       this.forceUpdate()
       Router.#handleNavigationScrolling(window.location.href)
       return
@@ -226,21 +246,18 @@ export class Router extends Component<Props> {
     try {
       allowed = await this.#canNavigateWithRoute(attempted, leaving)
     } catch (error) {
-      this.#pendingPopstateRenderPathSearch = null
-      this.#revertDeniedPopNavigation()
-      this.forceUpdate()
+      this.#revertDeniedPopNavigation(delta)
       throw error
     }
 
     if (!allowed) {
-      this.#revertDeniedPopNavigation()
-      this.#pendingPopstateRenderPathSearch = null
-      this.forceUpdate()
+      this.#revertDeniedPopNavigation(delta)
       return
     }
 
     this.#pendingPopstateRenderPathSearch = null
     this.#lastAcceptedPathSearch = attempted
+    this.#historyIndex = attemptedIndex
     if (Router.windowURL !== attempted) {
       Router.#commitNavigation(attempted)
     } else {
@@ -251,25 +268,22 @@ export class Router extends Component<Props> {
 
   /**
    * Undo a disallowed browser history step without `pushState`, which would drop forward entries.
-   * Uses `history.state[HISTORY_BASIS_FROM]` from {@link Router.#commitNavigation} to pick `go(-1)` vs `go(1)`.
+   * Browser POP cannot be cancelled before the URL changes, so this mirrors React Router's index/delta approach:
+   * restore the URL with the inverse delta and ignore the corrective `popstate`.
+   * @param delta - Difference between attempted and last accepted history indexes.
    */
-  #revertDeniedPopNavigation(): void {
+  #revertDeniedPopNavigation(delta: number): void {
     if (Router.windowURL === this.#lastAcceptedPathSearch) return
-
-    const raw = window.history.state as Record<string, unknown> | null
-    const basisFrom = typeof raw?.[HISTORY_BASIS_FROM] === 'string'
-      ? raw[HISTORY_BASIS_FROM] as string
-      : null
-    const delta = basisFrom !== null && basisFrom === this.#lastAcceptedPathSearch ? -1 : 1
 
     this.#clearPopstateIgnoreFallbackTimeout()
     this.#popstateIgnoreOne = true
-    window.history.go(delta)
+    window.history.go(delta === 0 ? 0 : -delta)
 
     this.#popstateIgnoreFallbackTimeoutId = setTimeout(() => {
       this.#popstateIgnoreFallbackTimeoutId = null
       if (!this.#popstateIgnoreOne) return
       this.#popstateIgnoreOne = false
+      this.#historyIndex = Router.#historyIndexFromState()
       this.#lastAcceptedPathSearch = Router.windowURL
       this.#pendingPopstateRenderPathSearch = null
       this.forceUpdate()
