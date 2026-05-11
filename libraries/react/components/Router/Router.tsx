@@ -276,8 +276,22 @@ export class Router extends Component<Props> {
     if (Router.windowURL === this.#lastAcceptedPathSearch) return
 
     this.#clearPopstateIgnoreFallbackTimeout()
+
+    if (delta === 0) {
+      const state = window.history.state as Record<string, unknown> | null
+      window.history.replaceState(
+        { ...state, [HISTORY_BASIS_INDEX]: this.#historyIndex },
+        '',
+        this.#lastAcceptedPathSearch,
+      )
+      this.#pendingPopstateRenderPathSearch = null
+      this.forceUpdate()
+      Router.#handleNavigationScrolling(window.location.href)
+      return
+    }
+
     this.#popstateIgnoreOne = true
-    window.history.go(delta === 0 ? 0 : -delta)
+    window.history.go(-delta)
 
     this.#popstateIgnoreFallbackTimeoutId = setTimeout(() => {
       this.#popstateIgnoreFallbackTimeoutId = null

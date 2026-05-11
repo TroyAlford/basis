@@ -618,6 +618,54 @@ describe('Router', () => {
     }
   })
 
+  test('popstate dirty cancel with duplicate history index repairs URL without reloading', async () => {
+    window.location.pathname = '/edit'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm').mockResolvedValue(false)
+    const go = spyOn(window.history, 'go')
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/edit">
+          <TextEditor initialValue="clean" />
+        </Router.Route>
+        <Router.Route template="/same-index">
+          <span className="same-index">same index</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
+      await tick()
+
+      replaceState.mockClear()
+      pushState.mockClear()
+
+      window.history.replaceState({ basisIndex: 0 }, '', '/same-index')
+      replaceState.mockClear()
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
+      expect(go).not.toHaveBeenCalled()
+      expect(pushState).not.toHaveBeenCalled()
+      expect(replaceState).toHaveBeenCalledWith(expect.objectContaining({ basisIndex: 0 }), '', '/edit')
+      expect(window.location.pathname).toBe('/edit')
+      expect(rendered.node.querySelector('input')?.value).toBe('dirty')
+    } finally {
+      go.mockRestore()
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
   test('popstate with dirty route confirms and commits navigation', async () => {
     window.location.pathname = '/dirty'
     const { pushState, replaceState } = mockHistoryWritesLocation()
