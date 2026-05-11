@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Router } from '@basis/react'
 import { Code } from '../components/Code'
 
 export class RouterDocs extends React.Component {
@@ -141,19 +142,42 @@ export class RouterDocs extends React.Component {
         <section>
           <h3>Navigation</h3>
           <p>
-            Use the Link component for declarative navigation or the navigate function for
+            Use the Link component for declarative navigation or <code>Router.navigate</code> for
             programmatic routing:
           </p>
           {Code.format(`
             // Declarative navigation with Link
             <Router.Link to="/users/123">View Profile</Router.Link>
 
-            // Programmatic navigation
-            Router.navigate('/users/123')
+            // Programmatic navigation returns whether routing completed
+            const routed = await Router.navigate('/users/123')
 
             // With query parameters
-            Router.navigate('/search?q=react&page=2')
+            await Router.navigate('/search?q=react&page=2')
           `)}
+          <p>
+            A route component may expose <code>dirty: boolean</code> for automatic unsaved-changes
+            confirmation, or implement <code>onBeforeNavigate(url)</code> for custom navigation
+            control. The Router applies these checks when you use <code>Router.Link</code> or{' '}
+            <code>Router.navigate()</code>.
+          </p>
+          <p>
+            <code>Router.navigate()</code> resolves <code>false</code> when navigation is canceled and{' '}
+            <code>true</code> when it updates browser history.
+          </p>
+          <p>
+            To test guarded navigation interactively, open the Router Guard Demo, change the editor
+            value, then click another docs navigation link.
+          </p>
+          <p>
+            <Router.Link to="/components/router/guard-demo">
+              Open Router Guard Demo
+            </Router.Link>
+          </p>
+          <p>
+            Tab and window close use the browser's native unsaved-changes prompt. Browser back and
+            forward navigation still update the history entry before Router re-renders.
+          </p>
         </section>
         <section>
           <h2>Best Practices</h2>

@@ -100,14 +100,16 @@ export class MenuDocs extends React.Component<object, State> {
           `)}
           <h3>Horizontal Navigation Menu</h3>
           {Code.format(`
+            import { Router } from '@basis/react'
+
             <Menu orientation={Menu.Orientation.Horizontal}>
-              <Menu.Item onActivate={() => navigate('/')}>
+              <Menu.Item onActivate={() => Router.navigate('/')}>
                 Home
               </Menu.Item>
-              <Menu.Item onActivate={() => navigate('/about')}>
+              <Menu.Item onActivate={() => Router.navigate('/about')}>
                 About
               </Menu.Item>
-              <Menu.Item onActivate={() => navigate('/contact')}>
+              <Menu.Item onActivate={() => Router.navigate('/contact')}>
                 Contact
               </Menu.Item>
             </Menu>

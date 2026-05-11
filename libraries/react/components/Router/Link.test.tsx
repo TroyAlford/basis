@@ -1,8 +1,9 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import * as React from 'react'
 import { NavigateEvent } from '../../events/NavigateEvent'
 import { render } from '../../testing/render'
 import { Link } from './Link'
+import { Router } from './Router'
 
 describe('Link', () => {
 
@@ -43,7 +44,7 @@ describe('Link', () => {
     )
 
     const event = new MouseEvent('click')
-    instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
+    await instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
 
     // Should still be at the same location since navigation was prevented
     expect(window.location.pathname).toBe('/current')
@@ -55,9 +56,36 @@ describe('Link', () => {
     )
 
     const event = new MouseEvent('click')
-    instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
+    await instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
 
     // Should now be at the new location
     expect(window.location.pathname).toBe('/new/path')
+  })
+
+  test('awaits Router.navigate when activating', async () => {
+    const { instance } = await render<Link>(
+      <Link to="/delayed">Go</Link>,
+    )
+
+    let navigateFinished = false
+    const navigateSpy = spyOn(Router, 'navigate').mockImplementation(async url => {
+      await new Promise<void>(resolve => setTimeout(resolve, 10))
+      navigateFinished = true
+      window.history.pushState({}, '', url)
+      window.dispatchEvent(new NavigateEvent(url))
+      return true
+    })
+
+    try {
+      const event = new MouseEvent('click')
+      const pending = instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
+
+      expect(navigateFinished).toBe(false)
+      await pending
+      expect(navigateFinished).toBe(true)
+      expect(navigateSpy).toHaveBeenCalledWith('/delayed')
+    } finally {
+      navigateSpy.mockRestore()
+    }
   })
 })
