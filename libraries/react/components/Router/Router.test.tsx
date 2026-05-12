@@ -52,6 +52,58 @@ class HookOverridesDirtyRoute extends Component<object, HTMLSpanElement> {
   get tag(): keyof React.JSX.IntrinsicElements { return 'span' }
 }
 
+/** Clean route with async `onBeforeNavigate` (must not pin render like a dirty leave). */
+class AsyncAllowRoute extends Component<object, HTMLSpanElement> {
+  static displayName = 'AsyncAllowRoute'
+  content(): React.ReactNode { return 'async-home' }
+  onBeforeNavigate = async (): Promise<boolean> => true
+  get tag(): keyof React.JSX.IntrinsicElements { return 'span' }
+}
+
+/**
+ * Syncs pathname when tests stub history, so Router sees the same URL the user would after
+ * pushState/replaceState.
+ * @returns Spies for `pushState` and `replaceState` (caller restores).
+ */
+function mockHistoryWritesLocation(): { pushState: ReturnType<typeof spyOn>, replaceState: ReturnType<typeof spyOn> } {
+  const replaceState = spyOn(window.history, 'replaceState').mockImplementation((state, _title, url) => {
+    if (typeof url === 'string' && url.startsWith('/')) {
+      window.location.pathname = url
+    }
+    try {
+      Object.defineProperty(window.history, 'state', { configurable: true, value: state, writable: true })
+    } catch {
+      // ignore environments that cannot redefine history.state
+    }
+    return undefined
+  })
+  const pushState = spyOn(window.history, 'pushState').mockImplementation((state, _title, url) => {
+    if (typeof url === 'string' && url.startsWith('/')) {
+      window.location.pathname = url
+    }
+    try {
+      Object.defineProperty(window.history, 'state', { configurable: true, value: state, writable: true })
+    } catch {
+      // ignore environments that cannot redefine history.state
+    }
+    return undefined
+  })
+  return { pushState, replaceState }
+}
+
+/**
+ * jsdom does not move the URL on `history.go`; tests that revert denied `popstate` must simulate
+ * the follow-up `popstate` the browser would emit.
+ * @param resolvePath Maps `history.go` delta to the pathname to apply before dispatching `popstate`.
+ * @returns Spy on `window.history.go` (caller should `mockRestore`).
+ */
+function spyHistoryGoSyncPathname(resolvePath: (delta: number) => string): ReturnType<typeof spyOn> {
+  return spyOn(window.history, 'go').mockImplementation((delta: number) => {
+    window.location.pathname = resolvePath(Number(delta))
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+}
+
 describe('Router', () => {
   beforeEach(() => {
     Object.defineProperty(window, 'location', {
@@ -181,7 +233,7 @@ describe('Router', () => {
       const navigated = await Router.navigate('/test/path')
 
       expect(navigated).toBe(true)
-      expect(pushState).toHaveBeenCalledWith({}, '', '/test/path')
+      expect(pushState).toHaveBeenCalledWith(expect.objectContaining({ basisIndex: 1 }), '', '/test/path')
       expect(dispatchEvent).toHaveBeenCalledWith(expect.any(NavigateEvent))
       const event = dispatchEvent.mock.calls.find(([e]) => e instanceof NavigateEvent)?.[0] as NavigateEvent
       expect(event.detail.url).toBe('/test/path')
@@ -295,7 +347,7 @@ describe('Router', () => {
 
       expect(navigated).toBe(true)
       expect(confirm).not.toHaveBeenCalled()
-      expect(pushState).toHaveBeenCalledWith({}, '', '/away')
+      expect(pushState).toHaveBeenCalledWith(expect.objectContaining({ basisIndex: 1 }), '', '/away')
     } finally {
       rendered.unmount()
       confirm.mockRestore()
@@ -418,11 +470,500 @@ describe('Router', () => {
 
       expect(navigated).toBe(true)
       expect(confirm).toHaveBeenCalled()
-      expect(pushState).toHaveBeenCalledWith({}, '', '/other')
+      expect(pushState).toHaveBeenCalledWith(expect.objectContaining({ basisIndex: 1 }), '', '/other')
     } finally {
       rendered.unmount()
       confirm.mockRestore()
       pushState.mockRestore()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate dirty cancel restores the current URL with the inverse history index delta', async () => {
+    window.location.pathname = '/dirty'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm').mockResolvedValue(false)
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/dirty">
+          <DirtyRoute />
+        </Router.Route>
+        <Router.Route template="/away">
+          <span className="away">away</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    const go = spyHistoryGoSyncPathname(delta => (delta === 1 ? '/dirty' : '/away'))
+    try {
+      window.history.replaceState({ basisIndex: -1 }, '', '/away')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
+      expect(go).toHaveBeenCalledWith(1)
+      expect(pushState).not.toHaveBeenCalled()
+      expect(replaceState).toHaveBeenCalled()
+      expect(window.location.pathname).toBe('/dirty')
+      expect(rendered.node.textContent).toBe('tracked')
+    } finally {
+      go.mockRestore()
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate dirty cancel keeps editor state while history.go corrective popstate is pending', async () => {
+    window.location.pathname = '/edit'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm').mockResolvedValue(false)
+    let pendingDelta: number | undefined
+    const go = spyOn(window.history, 'go').mockImplementation((delta: number) => {
+      pendingDelta = delta
+    })
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/edit">
+          <TextEditor initialValue="clean" />
+        </Router.Route>
+        <Router.Route template="/away">
+          <span className="away">away</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
+      await tick()
+
+      window.history.replaceState({ basisIndex: 1 }, '', '/away')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
+      expect(go).toHaveBeenCalledWith(-1)
+      expect(pendingDelta).toBe(-1)
+      expect(pushState).not.toHaveBeenCalled()
+      expect(window.location.pathname).toBe('/away')
+      expect(rendered.node.querySelector('input')?.value).toBe('dirty')
+
+      window.location.pathname = '/edit'
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+
+      expect(rendered.node.querySelector('input')?.value).toBe('dirty')
+    } finally {
+      go.mockRestore()
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate dirty cancel at unmanaged history boundary does not reload', async () => {
+    window.location.pathname = '/edit'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm').mockResolvedValue(false)
+    const go = spyHistoryGoSyncPathname(delta => (delta === 1 ? '/edit' : '/external'))
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/edit">
+          <TextEditor initialValue="clean" />
+        </Router.Route>
+        <Router.Route template="/external">
+          <span className="external">external</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
+      await tick()
+
+      window.history.replaceState({}, '', '/external')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
+      expect(go).toHaveBeenCalledWith(1)
+      expect(go).not.toHaveBeenCalledWith(0)
+      expect(pushState).not.toHaveBeenCalled()
+      expect(window.location.pathname).toBe('/edit')
+      expect(rendered.node.querySelector('input')?.value).toBe('dirty')
+    } finally {
+      go.mockRestore()
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate dirty cancel with duplicate history index repairs URL without reloading', async () => {
+    window.location.pathname = '/edit'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm').mockResolvedValue(false)
+    const go = spyOn(window.history, 'go')
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/edit">
+          <TextEditor initialValue="clean" />
+        </Router.Route>
+        <Router.Route template="/same-index">
+          <span className="same-index">same index</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
+      await tick()
+
+      replaceState.mockClear()
+      pushState.mockClear()
+
+      window.history.replaceState({ basisIndex: 0 }, '', '/same-index')
+      replaceState.mockClear()
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      expect(confirm).toHaveBeenCalledWith(CONFIRM_UNSAVED)
+      expect(go).not.toHaveBeenCalled()
+      expect(pushState).not.toHaveBeenCalled()
+      expect(replaceState).toHaveBeenCalledWith(expect.objectContaining({ basisIndex: 0 }), '', '/edit')
+      expect(window.location.pathname).toBe('/edit')
+      expect(rendered.node.querySelector('input')?.value).toBe('dirty')
+    } finally {
+      go.mockRestore()
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate with dirty route confirms and commits navigation', async () => {
+    window.location.pathname = '/dirty'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm').mockResolvedValue(true)
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/dirty">
+          <DirtyRoute />
+        </Router.Route>
+        <Router.Route template="/away">
+          <span className="away">away</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      window.location.pathname = '/away'
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      expect(confirm).toHaveBeenCalled()
+      expect(pushState).not.toHaveBeenCalled()
+      expect(window.location.pathname).toBe('/away')
+      expect(rendered.node.className).toContain('away')
+    } finally {
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate onto clean TextEditor does not call Dialog.confirm before the editor mounts', async () => {
+    window.location.pathname = '/home'
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm')
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/home">
+          <span className="home-page">home</span>
+        </Router.Route>
+        <Router.Route template="/edit">
+          <TextEditor initialValue="clean" />
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      window.location.pathname = '/edit'
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      expect(confirm).not.toHaveBeenCalled()
+      expect(rendered.node.querySelector('input')).not.toBeNull()
+    } finally {
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate: pending onBeforeNavigate promise must not block destination route from mounting', async () => {
+    let release!: (value: boolean) => void
+    const pending = new Promise<boolean>(resolve => {
+      release = resolve
+    })
+
+    class DeferredNavLocal extends Component<object, HTMLSpanElement> {
+      static displayName = 'DeferredNavLocal'
+      content(): React.ReactNode { return 'wait' }
+      onBeforeNavigate = (): Promise<boolean> => pending
+      get tag(): keyof React.JSX.IntrinsicElements { return 'span' }
+    }
+
+    window.location.pathname = '/def'
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm')
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/def">
+          <DeferredNavLocal />
+        </Router.Route>
+        <Router.Route template="/edit3">
+          <TextEditor initialValue="y" />
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      window.location.pathname = '/edit3'
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+
+      expect(confirm).not.toHaveBeenCalled()
+      expect(rendered.node.querySelector('input')).not.toBeNull()
+
+      release(true)
+      await tick()
+    } finally {
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate from clean async onBeforeNavigate route still reaches TextEditor without Dialog.confirm', async () => {
+    window.location.pathname = '/async-home'
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm')
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/async-home">
+          <AsyncAllowRoute />
+        </Router.Route>
+        <Router.Route template="/edit2">
+          <TextEditor initialValue="x" />
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      window.location.pathname = '/edit2'
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+      await tick()
+
+      expect(confirm).not.toHaveBeenCalled()
+      expect(rendered.node.querySelector('input')).not.toBeNull()
+    } finally {
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate on a clean route updates the rendered page without extra history writes', async () => {
+    window.location.pathname = '/a'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/a">
+          <span className="a-page">a</span>
+        </Router.Route>
+        <Router.Route template="/b">
+          <span className="b-page">b</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      replaceState.mockClear()
+      pushState.mockClear()
+
+      window.location.pathname = '/b'
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+
+      expect(replaceState).not.toHaveBeenCalled()
+      expect(pushState).not.toHaveBeenCalled()
+      expect(rendered.node.className).toContain('b-page')
+    } finally {
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+    }
+  })
+
+  test('popstate with path unchanged (hash-only) does not run dirty confirm', async () => {
+    window.location.pathname = '/same'
+    window.location.hash = '#one'
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm')
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/same">
+          <DirtyRoute />
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      window.location.hash = '#two'
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+
+      expect(confirm).not.toHaveBeenCalled()
+    } finally {
+      confirm.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('beforeunload sets returnValue when route is dirty', async () => {
+    window.location.pathname = '/edit'
+    const overlayRendered = await render(<OverlayProvider />)
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/edit">
+          <TextEditor initialValue="clean" />
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      await Simulate.change(rendered.node.querySelector('input') as HTMLInputElement, 'dirty')
+      await tick()
+
+      const beforeUnload = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent
+      window.dispatchEvent(beforeUnload)
+      expect(beforeUnload.defaultPrevented).toBe(true)
+      expect(beforeUnload.returnValue).toBe('')
+    } finally {
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('beforeunload does not block when route is not guarded as dirty', async () => {
+    window.location.pathname = '/clean'
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/clean">
+          <span>ok</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      const beforeUnload = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent
+      window.dispatchEvent(beforeUnload)
+      expect(beforeUnload.defaultPrevented).toBe(false)
+    } finally {
+      rendered.unmount()
+    }
+  })
+
+  test('popstate with onBeforeNavigate false reverts without Dialog.confirm', async () => {
+    window.location.pathname = '/block'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+    const confirm = spyOn(Dialog, 'confirm')
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/block">
+          <BlockingRoute />
+        </Router.Route>
+        <Router.Route template="/away">
+          <span className="away">away</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    const go = spyHistoryGoSyncPathname(delta => (delta === 1 ? '/block' : '/away'))
+    try {
+      window.history.replaceState({ basisIndex: -1 }, '', '/away')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      expect(confirm).not.toHaveBeenCalled()
+      expect(go).toHaveBeenCalledWith(1)
+      expect(pushState).not.toHaveBeenCalled()
+      expect(replaceState).toHaveBeenCalled()
+      expect(window.location.pathname).toBe('/block')
+    } finally {
+      go.mockRestore()
+      confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
       overlayRendered.unmount()
       await tick()
     }

@@ -1,4 +1,5 @@
-import * as React from 'react'
+import type { ComponentType, ReactNode } from 'react'
+import { createRef } from 'react'
 import { ApplicationBase, Router, Theme } from '@basis/react'
 import { routes } from '../routes.ts'
 
@@ -7,13 +8,13 @@ import './Layout.styles.ts'
 export class Layout extends ApplicationBase {
   static displayName = 'Layout'
 
-  main = React.createRef<HTMLElement>()
+  main = createRef<HTMLElement>()
 
-  protected get routes(): Record<string, { component: React.ComponentType }> {
+  protected get routes(): Record<string, { component: ComponentType<unknown> }> {
     return Object.fromEntries(routes.map(route => [route.path, { component: route.component }]))
   }
 
-  protected layout(content: React.ReactNode): React.ReactNode {
+  protected layout(content: ReactNode): ReactNode {
     const routeTree = routes.reduce((tree, route) => {
       if (route.parent) {
         const parentRoute = routes.find(r => r.path === route.parent)
@@ -35,7 +36,7 @@ export class Layout extends ApplicationBase {
       a.route.title.localeCompare(b.route.title)
     ))
 
-    const renderRouteTree = (routeNodes: typeof sortedRoutes): React.ReactNode => (
+    const renderRouteTree = (routeNodes: typeof sortedRoutes): ReactNode => (
       <ul>
         {routeNodes.map(({ children, route }) => (
           <li key={route.path}>
@@ -70,7 +71,7 @@ export class Layout extends ApplicationBase {
     )
   }
 
-  protected route(outlet: React.ReactNode): React.ReactNode {
+  protected route(outlet: ReactNode): ReactNode {
     return outlet
   }
 }

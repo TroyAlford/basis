@@ -1,11 +1,10 @@
-import * as React from 'react'
 import { OptionGroup, Section, ToggleEditor } from '@basis/react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Orientation } from '../../react/types/Orientation'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
-interface ConfigState {
+interface State {
   customOptions: string,
   optionType: 'option' | 'toggle',
   orientation: Orientation,
@@ -13,9 +12,10 @@ interface ConfigState {
   selectedValue: string | string[],
 }
 
-export class OptionGroupDocs extends Documentation<ConfigState> {
-  state = {
-    current: {
+export class OptionGroupDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
       customOptions: 'option1,option2,option3',
       optionType: 'option' as const,
       orientation: Orientation.Vertical,
@@ -36,7 +36,7 @@ export class OptionGroupDocs extends Documentation<ConfigState> {
     return this.current.customOptions.split(',').map(option => option.trim())
   }
 
-  content(): React.ReactNode {
+  content() {
     const { customOptions, optionType, orientation, readOnly, selectedValue } = this.current
 
     return (

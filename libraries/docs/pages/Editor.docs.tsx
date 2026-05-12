@@ -1,9 +1,9 @@
-import * as React from 'react'
 import { Router } from '@basis/react'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
-export class EditorDocs extends React.Component {
-  render(): React.ReactNode {
+export class EditorDocs extends Documentation<Record<string, never>> {
+  content() {
     return (
       <>
         <h1>Editor</h1>

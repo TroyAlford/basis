@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { Await, Component } from '@basis/react'
 
 import './Code.styles.ts'
@@ -34,7 +33,7 @@ export class Code extends Component<Props> {
     }
   }
 
-  override content(): React.ReactNode {
+  override content() {
     return super.content(
       <Await fallback="Loading...">
         {this.renderCode()}
@@ -61,7 +60,7 @@ export class Code extends Component<Props> {
       .trim()
   }
 
-  async renderCode(): Promise<React.ReactNode> {
+  async renderCode() {
     const { codeToHtml } = await shiki
     const html = await codeToHtml(this.code, {
       lang: this.props.language,

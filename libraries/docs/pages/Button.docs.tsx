@@ -1,36 +1,40 @@
-import * as React from 'react'
+import type { SyntheticEvent } from 'react'
 import { Button } from '@basis/react'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 interface State {
   buttonType: string,
   selectedValue: string | null,
 }
 
-export class ButtonDocs extends React.Component<unknown, State> {
-  state: State = {
-    buttonType: 'button',
-    selectedValue: null as string | null,
+export class ButtonDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
+      buttonType: 'button',
+      selectedValue: null as string | null,
+    },
   }
 
-  handleButtonClick = (event: React.SyntheticEvent): void => {
+  handleButtonClick = (event: SyntheticEvent): void => {
     const target = event.currentTarget as HTMLButtonElement
     const value = target.dataset.value
     if (value) {
-      this.setState({ selectedValue: value })
+      void this.setState({ current: { ...this.current, selectedValue: value } })
     }
   }
 
-  handleTypeChange = (event: React.SyntheticEvent): void => {
+  handleTypeChange = (event: SyntheticEvent): void => {
     const target = event.currentTarget as HTMLButtonElement
     const value = target.dataset.value
     if (value) {
-      this.setState({ buttonType: value })
+      void this.setState({ current: { ...this.current, buttonType: value } })
     }
   }
 
-  render(): React.ReactNode {
-    const { buttonType, selectedValue } = this.state
+  content() {
+    const { buttonType, selectedValue } = this.current
 
     return (
       <>

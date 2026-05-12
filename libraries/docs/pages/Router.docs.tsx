@@ -1,9 +1,9 @@
-import * as React from 'react'
 import { Router } from '@basis/react'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
-export class RouterDocs extends React.Component {
-  render(): React.ReactNode {
+export class RouterDocs extends Documentation<Record<string, never>> {
+  content() {
     return (
       <>
         <h1>Router</h1>
@@ -158,9 +158,37 @@ export class RouterDocs extends React.Component {
           <p>
             A route component may expose <code>dirty: boolean</code> for automatic unsaved-changes
             confirmation, or implement <code>onBeforeNavigate(url)</code> for custom navigation
-            control. The Router applies these checks when you use <code>Router.Link</code> or{' '}
-            <code>Router.navigate()</code>.
+            control. If both exist, <code>onBeforeNavigate</code> runs first and overrides the
+            default dirty dialog when it returns a value (including <code>true</code> to allow leaving
+            without prompting for discard).
           </p>
+          <p>
+            The Router runs the same guard logic for programmatic navigation, browser Back/Forward,
+            and (where applicable) full document unload:
+          </p>
+          <ul>
+            <li>
+              <strong><code>Router.navigate</code> / <code>Router.Link</code>:</strong> uses the
+              awaitable <code>Dialog.confirm</code> when an <code>OverlayProvider</code> is mounted,
+              otherwise <code>window.confirm</code>.
+            </li>
+            <li>
+              <strong>Browser Back/Forward:</strong> the Router re-renders for the new URL before it
+              awaits leave hooks, so the destination can mount while a prior route&apos;s async{' '}
+              <code>onBeforeNavigate</code> is still pending. Only when the <strong>leaving</strong> route
+              is actually <code>dirty</code> does the Router pin matching to the previous URL until the
+              discard dialog finishes. If the user cancels, the Router calls <code>history.go(±1)</code>{' '}
+              (using <code>basisFrom</code> on session state from <code>Router.navigate</code> /{' '}
+              <code>Router.Link</code>) instead of <code>pushState</code>, so forward entries are not
+              truncated. Each push stores only that key so <code>history.pushState</code> always stays
+              inside the browser structured-clone rules.
+            </li>
+            <li>
+              <strong>Reload or tab close:</strong> uses the browser&apos;s native{' '}
+              <code>beforeunload</code> prompt only (not a Basis dialog); the handler sets{' '}
+              <code>preventDefault</code> and <code>returnValue</code> when the route is dirty.
+            </li>
+          </ul>
           <p>
             <code>Router.navigate()</code> resolves <code>false</code> when navigation is canceled and{' '}
             <code>true</code> when it updates browser history.
@@ -173,10 +201,6 @@ export class RouterDocs extends React.Component {
             <Router.Link to="/components/router/guard-demo">
               Open Router Guard Demo
             </Router.Link>
-          </p>
-          <p>
-            Tab and window close use the browser's native unsaved-changes prompt. Browser back and
-            forward navigation still update the history entry before Router re-renders.
           </p>
         </section>
         <section>

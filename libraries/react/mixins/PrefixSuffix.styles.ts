@@ -12,7 +12,7 @@ style('basis:prefix-suffix', css`
 
   [data-has-prefix] > .prefix,
   [data-has-suffix] > .suffix {
-    align-self: flex-start;
+    align-self: stretch;
     align-items: center;
     display: flex;
     font-size: inherit;
@@ -22,8 +22,14 @@ style('basis:prefix-suffix', css`
     white-space: nowrap;
 
     background-color: var(--basis-prefix-suffix-background);
-    border-radius: inherit;
-    border: var(--basis-prefix-suffix-border);
     color: var(--basis-prefix-suffix-foreground);
+  }
+
+  [data-has-prefix] > .prefix {
+    border-right: var(--basis-prefix-suffix-border);
+  }
+
+  [data-has-suffix] > .suffix {
+    border-left: var(--basis-prefix-suffix-border);
   }
 `)

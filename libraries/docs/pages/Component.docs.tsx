@@ -1,9 +1,9 @@
-import * as React from 'react'
 import { Link } from '../../react/components/Router/Link'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
-export class ComponentDocs extends React.Component {
-  render(): React.ReactNode {
+export class ComponentDocs extends Documentation<Record<string, never>> {
+  content() {
     return (
       <>
         <h1>Component</h1>

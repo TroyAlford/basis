@@ -1,23 +1,26 @@
-import * as React from 'react'
-import { AnchorPoint } from '@basis/react/types/AnchorPoint'
+import { AnchorPoint } from '@basis/react'
 import { Button } from '../../react/components/Button/Button'
 import { Menu } from '../../react/components/Menu/Menu'
 import { PopupMenu } from '../../react/components/PopupMenu/PopupMenu'
 import { Link } from '../../react/components/Router/Link'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 interface State {
   anchorPoint: AnchorPoint,
   visible: boolean,
 }
 
-export class PopupMenuDocs extends React.Component<object, State> {
-  state: State = {
-    anchorPoint: AnchorPoint.Top,
-    visible: true,
+export class PopupMenuDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
+      anchorPoint: AnchorPoint.Top,
+      visible: true,
+    },
   }
 
-  render(): React.ReactNode {
+  content() {
     return (
       <>
         <h1>PopupMenu</h1>
@@ -44,7 +47,7 @@ export class PopupMenuDocs extends React.Component<object, State> {
                 <h4>Anchor Point</h4>
                 <select
                   defaultValue={AnchorPoint.Top}
-                  onChange={e => this.setState({ anchorPoint: e.target.value as AnchorPoint })}
+                  onChange={e => void this.handleField(e.target.value as AnchorPoint, 'anchorPoint')}
                 >
                   <option value={AnchorPoint.Top}>Top</option>
                   <option value={AnchorPoint.TopStart}>Top Start</option>
@@ -63,8 +66,8 @@ export class PopupMenuDocs extends React.Component<object, State> {
               <div>
                 <h4>Visibility</h4>
                 <select
-                  value={this.state.visible.toString()}
-                  onChange={e => this.setState({ visible: e.target.value === 'true' })}
+                  value={String(this.current.visible)}
+                  onChange={e => void this.handleField(e.target.value === 'true', 'visible')}
                 >
                   <option value="true">Visible</option>
                   <option value="false">Hidden</option>
@@ -77,8 +80,8 @@ export class PopupMenuDocs extends React.Component<object, State> {
                 <Button>
                   Reference Element
                   <PopupMenu
-                    anchorPoint={this.state.anchorPoint}
-                    visible={this.state.visible}
+                    anchorPoint={this.current.anchorPoint}
+                    visible={this.current.visible}
                   >
                     <Menu.Item>Menu Item 1</Menu.Item>
                     <Menu.Item>Menu Item 2</Menu.Item>

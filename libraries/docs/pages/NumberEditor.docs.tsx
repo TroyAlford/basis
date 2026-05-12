@@ -1,9 +1,9 @@
-import * as React from 'react'
 import { Tag } from '@basis/react'
 import { NumberEditor } from '../../react/components/NumberEditor/NumberEditor'
 import { Link } from '../../react/components/Router/Link'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 interface State {
   autoFocus: boolean,
@@ -14,17 +14,20 @@ interface State {
   value: number,
 }
 
-export class NumberEditorDocs extends React.Component<object, State> {
-  state: State = {
-    autoFocus: false,
-    placeholder: 'Enter a number...',
-    prefix: '$',
-    step: 1,
-    suffix: 'USD',
-    value: 1000,
+export class NumberEditorDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
+      autoFocus: false,
+      placeholder: 'Enter a number...',
+      prefix: '$',
+      step: 1,
+      suffix: 'USD',
+      value: 1000,
+    },
   }
 
-  render(): React.ReactNode {
+  content() {
     return (
       <>
         <h1>NumberEditor</h1>
@@ -56,8 +59,8 @@ export class NumberEditorDocs extends React.Component<object, State> {
                 <TextEditor
                   field="placeholder"
                   placeholder="Placeholder text"
-                  value={this.state.placeholder}
-                  onChange={value => this.setState({ placeholder: value })}
+                  value={this.current.placeholder}
+                  onChange={this.handleField}
                 />
               </div>
               <div>
@@ -65,22 +68,22 @@ export class NumberEditorDocs extends React.Component<object, State> {
                 <TextEditor
                   field="prefix"
                   placeholder="Prefix (e.g., $, €)"
-                  value={this.state.prefix}
-                  onChange={value => this.setState({ prefix: value })}
+                  value={this.current.prefix}
+                  onChange={this.handleField}
                 />
                 <TextEditor
                   field="suffix"
                   placeholder="Suffix (e.g., USD, items)"
-                  value={this.state.suffix}
-                  onChange={value => this.setState({ suffix: value })}
+                  value={this.current.suffix}
+                  onChange={this.handleField}
                 />
               </div>
               <div>
                 <strong>Step Navigation</strong>
                 <select
                   style={{ padding: '0.5rem', width: '100%' }}
-                  value={this.state.step}
-                  onChange={e => this.setState({ step: Number(e.target.value) })}
+                  value={this.current.step}
+                  onChange={e => void this.handleField(Number(e.target.value), 'step')}
                 >
                   <option value="1">1 (default)</option>
                   <option value="5">5</option>
@@ -93,8 +96,8 @@ export class NumberEditorDocs extends React.Component<object, State> {
                 <NumberEditor
                   field="value"
                   placeholder="Enter value"
-                  value={this.state.value}
-                  onChange={value => this.setState({ value })}
+                  value={this.current.value}
+                  onChange={value => void this.handleField(value, 'value')}
                 />
               </div>
             </div>
@@ -105,14 +108,14 @@ export class NumberEditorDocs extends React.Component<object, State> {
                   NumberEditor with all mixins:
                 </label>
                 <NumberEditor
-                  autoFocus={this.state.autoFocus}
+                  autoFocus={this.current.autoFocus}
                   field="demo"
-                  placeholder={this.state.placeholder}
-                  prefix={this.state.prefix || undefined}
-                  step={this.state.step}
-                  suffix={this.state.suffix || undefined}
-                  value={this.state.value}
-                  onChange={value => this.setState({ value })}
+                  placeholder={this.current.placeholder}
+                  prefix={this.current.prefix || undefined}
+                  step={this.current.step}
+                  suffix={this.current.suffix || undefined}
+                  value={this.current.value}
+                  onChange={value => void this.handleField(value, 'value')}
                 />
               </div>
             </div>

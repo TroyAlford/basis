@@ -1,148 +1,157 @@
-import * as React from 'react'
 import { Image } from '../../react/components/Image/Image'
 import type { Align } from '../../react/types/Align'
 import type { Size } from '../../react/types/Size'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 import { imageURL } from '../utilities/imageURL'
 
-export const ImageDocs = () => {
-  const [config, setConfig] = React.useState({
-    align: Image.Align.Center,
-    size: Image.Size.Natural,
-  })
+interface State {
+  align: Align,
+  size: Size,
+}
 
-  return (
-    <>
-      <h1>Image</h1>
-      <section>
-        <h3>Interactive Demo</h3>
-        <p>
-          Try different alignment and sizing options to see how they affect the image:
-        </p>
-        <div style={{ display: 'grid', gap: '2rem', gridTemplateColumns: '250px 1fr' }}>
-          {/* Configuration Menu */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div>
-              <h4>Size</h4>
-              <select
-                style={{ padding: '0.5rem', width: '100%' }}
-                value={config.size}
-                onChange={e => setConfig(prev => ({ ...prev, size: e.target.value as Size }))}
+export class ImageDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
+      align: Image.Align.Center,
+      size: Image.Size.Natural,
+    },
+  }
+
+  content() {
+    return (
+      <>
+        <h1>Image</h1>
+        <section>
+          <h3>Interactive Demo</h3>
+          <p>
+            Try different alignment and sizing options to see how they affect the image:
+          </p>
+          <div style={{ display: 'grid', gap: '2rem', gridTemplateColumns: '250px 1fr' }}>
+            {/* Configuration Menu */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <h4>Size</h4>
+                <select
+                  style={{ padding: '0.5rem', width: '100%' }}
+                  value={this.current.size}
+                  onChange={e => void this.handleField(e.target.value as Size, 'size')}
+                >
+                  <option value={Image.Size.Natural}>Natural</option>
+                  <option value={Image.Size.Contain}>Contain</option>
+                  <option value={Image.Size.Cover}>Fill</option>
+                </select>
+              </div>
+              <div>
+                <h4>Alignment</h4>
+                <select
+                  style={{ padding: '0.5rem', width: '100%' }}
+                  value={this.current.align}
+                  onChange={e => void this.handleField(e.target.value as Align, 'align')}
+                >
+                  <option value={Image.Align.Center}>Center</option>
+                  <option value={Image.Align.North}>North</option>
+                  <option value={Image.Align.South}>South</option>
+                  <option value={Image.Align.East}>East</option>
+                  <option value={Image.Align.West}>West</option>
+                  <option value={Image.Align.NorthEast}>NorthEast</option>
+                  <option value={Image.Align.NorthWest}>NorthWest</option>
+                  <option value={Image.Align.SouthEast}>SouthEast</option>
+                  <option value={Image.Align.SouthWest}>SouthWest</option>
+                </select>
+              </div>
+              <div style={{
+                backgroundColor: '#f8f9fa',
+                border: '1px solid #dee2e6',
+                borderRadius: '4px',
+                fontSize: '0.875rem',
+                padding: '1rem',
+              }}
               >
-                <option value={Image.Size.Natural}>Natural</option>
-                <option value={Image.Size.Contain}>Contain</option>
-                <option value={Image.Size.Cover}>Fill</option>
-              </select>
+                <h5 style={{ margin: '0 0 0.5rem 0' }}>Current Settings</h5>
+                <div><strong>Size:</strong> {this.current.size}</div>
+                <div><strong>Align:</strong> {this.current.align}</div>
+              </div>
             </div>
+            {/* Image Container */}
             <div>
-              <h4>Alignment</h4>
-              <select
-                style={{ padding: '0.5rem', width: '100%' }}
-                value={config.align}
-                onChange={e => setConfig(prev => ({ ...prev, align: e.target.value as Align }))}
+              <h4>Image Preview</h4>
+              <div style={{
+                backgroundColor: '#f8f8f8',
+                border: '2px solid #e0e0e0',
+                height: '300px',
+                position: 'relative',
+                width: '100%',
+              }}
               >
-                <option value={Image.Align.Center}>Center</option>
-                <option value={Image.Align.North}>North</option>
-                <option value={Image.Align.South}>South</option>
-                <option value={Image.Align.East}>East</option>
-                <option value={Image.Align.West}>West</option>
-                <option value={Image.Align.NorthEast}>NorthEast</option>
-                <option value={Image.Align.NorthWest}>NorthWest</option>
-                <option value={Image.Align.SouthEast}>SouthEast</option>
-                <option value={Image.Align.SouthWest}>SouthWest</option>
-              </select>
-            </div>
-            <div style={{
-              backgroundColor: '#f8f9fa',
-              border: '1px solid #dee2e6',
-              borderRadius: '4px',
-              fontSize: '0.875rem',
-              padding: '1rem',
-            }}
-            >
-              <h5 style={{ margin: '0 0 0.5rem 0' }}>Current Settings</h5>
-              <div><strong>Size:</strong> {config.size}</div>
-              <div><strong>Align:</strong> {config.align}</div>
+                <Image
+                  align={this.current.align}
+                  alt="Interactive demo image"
+                  size={this.current.size}
+                  src={imageURL(256, 256)}
+                />
+              </div>
+              <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                <strong>Container:</strong> 300px × 300px with visible border
+              </p>
             </div>
           </div>
-          {/* Image Container */}
-          <div>
-            <h4>Image Preview</h4>
-            <div style={{
-              backgroundColor: '#f8f8f8',
-              border: '2px solid #e0e0e0',
-              height: '300px',
-              position: 'relative',
-              width: '100%',
-            }}
-            >
-              <Image
-                align={config.align}
-                alt="Interactive demo image"
-                size={config.size}
-                src={imageURL(256, 256)}
-              />
-            </div>
-            <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
-              <strong>Container:</strong> 300px × 300px with visible border
-            </p>
-          </div>
-        </div>
-      </section>
-      <section>
-        <p>
-          The Image component provides a robust, accessible way to display images with built-in
-          loading states, error handling, and intelligent caching. Built on the Component base
-          class, it automatically manages image loading, provides fallbacks, and ensures proper
-          accessibility attributes.
-        </p>
-        <p>
-          Image is particularly useful for applications that need reliable image display with
-          loading indicators, error states, and consistent alignment and sizing options.
-        </p>
-      </section>
-      <section>
-        <h3>Basic Usage</h3>
-        <p>
-          Image accepts a source URL and renders with proper loading states and accessibility:
-        </p>
-        {Code.format(`
+        </section>
+        <section>
+          <p>
+            The Image component provides a robust, accessible way to display images with built-in
+            loading states, error handling, and intelligent caching. Built on the Component base
+            class, it automatically manages image loading, provides fallbacks, and ensures proper
+            accessibility attributes.
+          </p>
+          <p>
+            Image is particularly useful for applications that need reliable image display with
+            loading indicators, error states, and consistent alignment and sizing options.
+          </p>
+        </section>
+        <section>
+          <h3>Basic Usage</h3>
+          <p>
+            Image accepts a source URL and renders with proper loading states and accessibility:
+          </p>
+          {Code.format(`
           <Image src="/path/to/image.jpg" alt="Description of the image" />
         `)}
-      </section>
-      <section>
-        <h3>Component Architecture</h3>
-        <p>Image extends the Component base class and provides intelligent image handling:</p>
-        <ul>
-          <li><strong>Automatic Loading:</strong> Manages image loading with built-in caching</li>
-          <li><strong>Error Handling:</strong> Gracefully handles failed image loads</li>
-          <li><strong>Accessibility:</strong> Provides proper ARIA attributes and alt text</li>
-          <li><strong>Performance:</strong> Intelligent caching prevents duplicate requests</li>
-          <li><strong>Event Handling:</strong> Supports click, touch, and mouse events</li>
-          <li><strong>State Management:</strong> Tracks loading, loaded, and error states</li>
-        </ul>
-      </section>
-      <section>
-        <h3>Implementation Approach</h3>
-        <p>
-          The Image component uses a <code>&lt;div&gt;</code> container with background-image instead
-          of <code>&lt;img&gt;</code> elements. This approach provides several advantages:
-        </p>
-        <ul>
-          <li><strong>Better Sizing Control:</strong> Container dimensions can be explicitly controlled</li>
-          <li><strong>Precise Alignment:</strong> Background positioning gives pixel-perfect control</li>
-          <li><strong>Flexible Layouts:</strong> Container can be styled independently of the image</li>
-          <li><strong>Performance:</strong> Maintains the same caching system for efficiency</li>
-        </ul>
-        <p>
-          The component automatically manages the container sizing based on the selected mode, ensuring
-          consistent behavior across different use cases.
-        </p>
-      </section>
-      <section>
-        <h3>Props Interface</h3>
-        <p>The Image component accepts the following props:</p>
-        {Code.format(`
+        </section>
+        <section>
+          <h3>Component Architecture</h3>
+          <p>Image extends the Component base class and provides intelligent image handling:</p>
+          <ul>
+            <li><strong>Automatic Loading:</strong> Manages image loading with built-in caching</li>
+            <li><strong>Error Handling:</strong> Gracefully handles failed image loads</li>
+            <li><strong>Accessibility:</strong> Provides proper ARIA attributes and alt text</li>
+            <li><strong>Performance:</strong> Intelligent caching prevents duplicate requests</li>
+            <li><strong>Event Handling:</strong> Supports click, touch, and mouse events</li>
+            <li><strong>State Management:</strong> Tracks loading, loaded, and error states</li>
+          </ul>
+        </section>
+        <section>
+          <h3>Implementation Approach</h3>
+          <p>
+            The Image component uses a <code>&lt;div&gt;</code> container with background-image instead
+            of <code>&lt;img&gt;</code> elements. This approach provides several advantages:
+          </p>
+          <ul>
+            <li><strong>Better Sizing Control:</strong> Container dimensions can be explicitly controlled</li>
+            <li><strong>Precise Alignment:</strong> Background positioning gives pixel-perfect control</li>
+            <li><strong>Flexible Layouts:</strong> Container can be styled independently of the image</li>
+            <li><strong>Performance:</strong> Maintains the same caching system for efficiency</li>
+          </ul>
+          <p>
+            The component automatically manages the container sizing based on the selected mode, ensuring
+            consistent behavior across different use cases.
+          </p>
+        </section>
+        <section>
+          <h3>Props Interface</h3>
+          <p>The Image component accepts the following props:</p>
+          {Code.format(`
           interface Props {
             /** Alignment value for positioning within container */
             align?: Align,
@@ -164,11 +173,11 @@ export const ImageDocs = () => {
             src: string,
           }
         `, 'ts')}
-      </section>
-      <section>
-        <h3>Image Alignment</h3>
-        <p>Control how images are positioned within their container using the align prop:</p>
-        {Code.format(`
+        </section>
+        <section>
+          <h3>Image Alignment</h3>
+          <p>Control how images are positioned within their container using the align prop:</p>
+          {Code.format(`
           // Center alignment (default)
           <Image src="/image.jpg" align={Align.Center} alt="Centered image" />
 
@@ -184,22 +193,22 @@ export const ImageDocs = () => {
           <Image src="/image.jpg" align={Align.East} alt="Right edge image" />
           <Image src="/image.jpg" align={Align.West} alt="Left edge image" />
         `)}
-        <p>
-          Available alignment options:
-        </p>
-        <ul>
-          <li><strong>Center:</strong> Centers image both horizontally and vertically</li>
-          <li><strong>North/South:</strong> Aligns to top or bottom edge</li>
-          <li><strong>East/West:</strong> Aligns to right or left edge</li>
-          <li><strong>Corners:</strong> NorthWest, NorthEast, SouthWest, SouthEast</li>
-        </ul>
-      </section>
-      <section>
-        <h3>Image Sizing</h3>
-        <p>
-          Control how images are sized relative to their container:
-        </p>
-        {Code.format(`
+          <p>
+            Available alignment options:
+          </p>
+          <ul>
+            <li><strong>Center:</strong> Centers image both horizontally and vertically</li>
+            <li><strong>North/South:</strong> Aligns to top or bottom edge</li>
+            <li><strong>East/West:</strong> Aligns to right or left edge</li>
+            <li><strong>Corners:</strong> NorthWest, NorthEast, SouthWest, SouthEast</li>
+          </ul>
+        </section>
+        <section>
+          <h3>Image Sizing</h3>
+          <p>
+            Control how images are sized relative to their container:
+          </p>
+          {Code.format(`
           // Natural size (default) - uses image's original dimensions
           <Image src="/image.jpg" size={Size.Natural} alt="Natural size" />
 
@@ -209,17 +218,17 @@ export const ImageDocs = () => {
           // Fill - covers entire container, may crop image
           <Image src="/image.jpg" size={Size.Fill} alt="Filled image" />
         `)}
-        <p>Size behavior:</p>
-        <ul>
-          <li><strong>Natural:</strong> Preserves original dimensions, may overflow container</li>
-          <li><strong>Contain:</strong> Scales to fit container while maintaining proportions</li>
-          <li><strong>Fill:</strong> Scales to cover container, may crop parts of image</li>
-        </ul>
-      </section>
-      <section>
-        <h3>Event Handling</h3>
-        <p>Image supports various interaction events for enhanced functionality:</p>
-        {Code.format(`
+          <p>Size behavior:</p>
+          <ul>
+            <li><strong>Natural:</strong> Preserves original dimensions, may overflow container</li>
+            <li><strong>Contain:</strong> Scales to fit container while maintaining proportions</li>
+            <li><strong>Fill:</strong> Scales to cover container, may crop parts of image</li>
+          </ul>
+        </section>
+        <section>
+          <h3>Event Handling</h3>
+          <p>Image supports various interaction events for enhanced functionality:</p>
+          {Code.format(`
           <Image
             src="/image.jpg"
             alt="Interactive image"
@@ -230,12 +239,12 @@ export const ImageDocs = () => {
             onTouchEnd={(event) => console.log('Touch ended')}
           />
         `)}
-        <p>All event handlers receive the standard React event objects with proper typing.</p>
-      </section>
-      <section>
-        <h3>Data Attributes</h3>
-        <p>The Image component automatically sets data attributes for styling and state detection:</p>
-        {Code.format(`
+          <p>All event handlers receive the standard React event objects with proper typing.</p>
+        </section>
+        <section>
+          <h3>Data Attributes</h3>
+          <p>The Image component automatically sets data attributes for styling and state detection:</p>
+          {Code.format(`
           // Automatically applied data attributes
           <Image 
             src="/image.jpg" 
@@ -251,8 +260,8 @@ export const ImageDocs = () => {
           // data-loading="true" (while loading)
           // data-error="true" (if load failed)
         `)}
-        <p>These attributes can be used for CSS styling based on image state:</p>
-        {Code.format(`
+          <p>These attributes can be used for CSS styling based on image state:</p>
+          {Code.format(`
           /* CSS examples using data attributes */
           img[data-loading="true"] {
             opacity: 0.5;
@@ -267,11 +276,11 @@ export const ImageDocs = () => {
             transition: opacity 0.3s ease;
           }
         `, 'css')}
-      </section>
-      <section>
-        <h3>Caching System</h3>
-        <p>The Image component includes a sophisticated caching system for performance optimization:</p>
-        {Code.format(`
+        </section>
+        <section>
+          <h3>Caching System</h3>
+          <p>The Image component includes a sophisticated caching system for performance optimization:</p>
+          {Code.format(`
           // Static cache properties
           Image.Cache.Loading  // Map of loading promises
           Image.Cache.Resolved // Map of loaded images
@@ -280,18 +289,18 @@ export const ImageDocs = () => {
           const image1 = <Image src="/logo.jpg" alt="Logo" />
           const image2 = <Image src="/logo.jpg" alt="Logo" /> // Uses cached version
         `)}
-        <p>Benefits of the caching system:</p>
-        <ul>
-          <li><strong>Prevents Duplicate Requests:</strong> Same URL won't trigger multiple loads</li>
-          <li><strong>Shared Across Instances:</strong> All Image components share the same cache</li>
-          <li><strong>Automatic Cleanup:</strong> Loading promises are cleaned up after resolution</li>
-          <li><strong>Memory Efficient:</strong> Only stores necessary image references</li>
-        </ul>
-      </section>
-      <section>
-        <h3>State Management</h3>
-        <p>The component automatically manages internal state for loading, success, and error conditions:</p>
-        {Code.format(`
+          <p>Benefits of the caching system:</p>
+          <ul>
+            <li><strong>Prevents Duplicate Requests:</strong> Same URL won't trigger multiple loads</li>
+            <li><strong>Shared Across Instances:</strong> All Image components share the same cache</li>
+            <li><strong>Automatic Cleanup:</strong> Loading promises are cleaned up after resolution</li>
+            <li><strong>Memory Efficient:</strong> Only stores necessary image references</li>
+          </ul>
+        </section>
+        <section>
+          <h3>State Management</h3>
+          <p>The component automatically manages internal state for loading, success, and error conditions:</p>
+          {Code.format(`
           interface State {
             /** Error state indicating load failure */
             error: boolean,
@@ -300,16 +309,16 @@ export const ImageDocs = () => {
           // State is automatically updated during image loading lifecycle
           // error: false → loading starts → error: true (if failed)
         `, 'ts')}
-        <p>
-          The component automatically handles state transitions and provides visual feedback
-          through data attributes.
-        </p>
-      </section>
-      <section>
-        <h2>Best Practices</h2>
-        <h3>Accessibility</h3>
-        <p>Always provide meaningful alt text for screen readers and accessibility:</p>
-        {Code.format(`
+          <p>
+            The component automatically handles state transitions and provides visual feedback
+            through data attributes.
+          </p>
+        </section>
+        <section>
+          <h2>Best Practices</h2>
+          <h3>Accessibility</h3>
+          <p>Always provide meaningful alt text for screen readers and accessibility:</p>
+          {Code.format(`
           // Good: Descriptive alt text
           <Image src="/product.jpg" alt="Red leather wallet with silver buckle" />
 
@@ -329,18 +338,18 @@ export const ImageDocs = () => {
           // Decorative images (empty alt is acceptable)
           <Image src="/decoration.jpg" alt="" />
         `)}
-        <p>The component automatically sets appropriate ARIA attributes based on the alt prop.</p>
-      </section>
-      <section>
-        <h3>Performance Optimization</h3>
-        <p>Leverage the built-in caching system for better performance:</p>
-        <ul>
-          <li><strong>Automatic Caching:</strong> Images are cached after first load</li>
-          <li><strong>Prevent Duplicate Requests:</strong> Same URL won't trigger multiple loads</li>
-          <li><strong>Memory Management:</strong> Cache is shared across all Image instances</li>
-          <li><strong>Efficient Updates:</strong> Only re-renders when necessary</li>
-        </ul>
-        {Code.format(`
+          <p>The component automatically sets appropriate ARIA attributes based on the alt prop.</p>
+        </section>
+        <section>
+          <h3>Performance Optimization</h3>
+          <p>Leverage the built-in caching system for better performance:</p>
+          <ul>
+            <li><strong>Automatic Caching:</strong> Images are cached after first load</li>
+            <li><strong>Prevent Duplicate Requests:</strong> Same URL won't trigger multiple loads</li>
+            <li><strong>Memory Management:</strong> Cache is shared across all Image instances</li>
+            <li><strong>Efficient Updates:</strong> Only re-renders when necessary</li>
+          </ul>
+          {Code.format(`
           // Multiple instances of the same image will share the cached version
           <div>
             <Image src="/logo.jpg" alt="Company logo" />
@@ -348,11 +357,11 @@ export const ImageDocs = () => {
             <Image src="/logo.jpg" alt="Company logo" /> {/* Uses cache */}
           </div>
         `)}
-      </section>
-      <section>
-        <h3>Error Handling</h3>
-        <p>The component automatically handles loading errors and provides visual feedback:</p>
-        {Code.format(`
+        </section>
+        <section>
+          <h3>Error Handling</h3>
+          <p>The component automatically handles loading errors and provides visual feedback:</p>
+          {Code.format(`
           // Error state is automatically managed
           <Image 
             src="/broken-image.jpg" 
@@ -370,14 +379,14 @@ export const ImageDocs = () => {
             }}
           />
         `)}
-        <p>
-          Error handling is automatic - failed loads set the error state and data-error attribute.
-        </p>
-      </section>
-      <section>
-        <h3>Responsive Design</h3>
-        <p>Combine alignment and sizing for responsive layouts:</p>
-        {Code.format(`
+          <p>
+            Error handling is automatic - failed loads set the error state and data-error attribute.
+          </p>
+        </section>
+        <section>
+          <h3>Responsive Design</h3>
+          <p>Combine alignment and sizing for responsive layouts:</p>
+          {Code.format(`
           // Responsive hero image
           <Image 
             src="/hero.jpg" 
@@ -402,11 +411,11 @@ export const ImageDocs = () => {
             align={Align.NorthWest}
           />
         `)}
-      </section>
-      <section>
-        <h3>Integration with Other Components</h3>
-        <p>Image works seamlessly with other components, particularly Carousel:</p>
-        {Code.format(`
+        </section>
+        <section>
+          <h3>Integration with Other Components</h3>
+          <p>Image works seamlessly with other components, particularly Carousel:</p>
+          {Code.format(`
           // Image in a carousel
           <Carousel>
             <Image src="/slide1.jpg" alt="First slide" />
@@ -423,11 +432,11 @@ export const ImageDocs = () => {
             />
           </div>
         `)}
-      </section>
-      <section>
-        <h3>CSS Integration</h3>
-        <p>Use the automatically applied data attributes for advanced styling:</p>
-        {Code.format(`
+        </section>
+        <section>
+          <h3>CSS Integration</h3>
+          <p>Use the automatically applied data attributes for advanced styling:</p>
+          {Code.format(`
           /* Loading state */
           img[data-loading="true"] {
             background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
@@ -456,11 +465,11 @@ export const ImageDocs = () => {
             transform: translateX(-50%);
           }
         `, 'css')}
-      </section>
-      <section>
-        <h3>TypeScript Support</h3>
-        <p>The component provides full TypeScript support with proper type definitions:</p>
-        {Code.format(`
+        </section>
+        <section>
+          <h3>TypeScript Support</h3>
+          <p>The component provides full TypeScript support with proper type definitions:</p>
+          {Code.format(`
           // Enums for type-safe props
           Align.Center    // 'center'
           Align.North     // 'n'
@@ -476,24 +485,25 @@ export const ImageDocs = () => {
           Size.Contain    // 'contain'
           Size.Fill       // 'fill'
         `, 'ts')}
-      </section>
-      <section>
-        <h3>Benefits</h3>
-        <ul>
-          <li>Automatic loading state management</li>
-          <li>Built-in error handling and fallbacks</li>
-          <li>Intelligent caching system</li>
-          <li>Comprehensive accessibility support</li>
-          <li>Flexible alignment and sizing options</li>
-          <li>Touch and mouse event support</li>
-          <li>Performance optimized</li>
-          <li>Consistent with library design principles</li>
-          <li>Full TypeScript support</li>
-          <li>Automatic data attributes for styling</li>
-          <li>Shared cache across instances</li>
-          <li>Built on Component base class</li>
-        </ul>
-      </section>
-    </>
-  )
+        </section>
+        <section>
+          <h3>Benefits</h3>
+          <ul>
+            <li>Automatic loading state management</li>
+            <li>Built-in error handling and fallbacks</li>
+            <li>Intelligent caching system</li>
+            <li>Comprehensive accessibility support</li>
+            <li>Flexible alignment and sizing options</li>
+            <li>Touch and mouse event support</li>
+            <li>Performance optimized</li>
+            <li>Consistent with library design principles</li>
+            <li>Full TypeScript support</li>
+            <li>Automatic data attributes for styling</li>
+            <li>Shared cache across instances</li>
+            <li>Built on Component base class</li>
+          </ul>
+        </section>
+      </>
+    )
+  }
 }

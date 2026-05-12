@@ -1,6 +1,6 @@
-import * as React from 'react'
 import { Button, Notification, Router } from '@basis/react'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 interface State {
   lastHandle: string | null,
@@ -10,9 +10,12 @@ interface State {
  * Documentation for {@link Notification}: static {@link Notification.create}, handle API, and
  * {@link Notification.Intent}.
  */
-export class NotificationDocs extends React.Component<object, State> {
-  state: State = {
-    lastHandle: null,
+export class NotificationDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
+      lastHandle: null as string | null,
+    },
   }
 
   showPrimary = () => {
@@ -22,7 +25,7 @@ export class NotificationDocs extends React.Component<object, State> {
       timeout: 5_000,
       title: 'Saved',
     })
-    this.setState({ lastHandle: handle.id })
+    void this.setState({ current: { ...this.current, lastHandle: handle.id } })
   }
 
   showDanger = () => {
@@ -32,7 +35,7 @@ export class NotificationDocs extends React.Component<object, State> {
       timeout: 5_000,
       title: 'Save failed',
     })
-    this.setState({ lastHandle: handle.id })
+    void this.setState({ current: { ...this.current, lastHandle: handle.id } })
   }
 
   showSuccess = () => {
@@ -42,7 +45,7 @@ export class NotificationDocs extends React.Component<object, State> {
       timeout: 5_000,
       title: 'Uploaded',
     })
-    this.setState({ lastHandle: handle.id })
+    void this.setState({ current: { ...this.current, lastHandle: handle.id } })
   }
 
   showLifecycleDemo = () => {
@@ -52,7 +55,7 @@ export class NotificationDocs extends React.Component<object, State> {
       timeout: null,
       title: 'Working',
     })
-    this.setState({ lastHandle: handle.id })
+    void this.setState({ current: { ...this.current, lastHandle: handle.id } })
     window.setTimeout(() => {
       handle.update({
         content: 'Done.',
@@ -63,8 +66,8 @@ export class NotificationDocs extends React.Component<object, State> {
     }, 1_200)
   }
 
-  render(): React.ReactNode {
-    const { lastHandle } = this.state
+  content() {
+    const { lastHandle } = this.current
 
     return (
       <>

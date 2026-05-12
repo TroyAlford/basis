@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { CheckboxEditor, Section, TextEditor } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
@@ -11,19 +10,17 @@ interface State {
 }
 
 export class CheckboxEditorDocs extends Documentation<State> {
-  static override get defaultProps() {
-    return {
-      ...super.defaultProps,
-      initialValue: {
-        allowIndeterminate: false,
-        checked: false,
-        disabled: false,
-        label: 'Checkbox Label',
-      },
-    }
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
+      allowIndeterminate: false,
+      checked: false,
+      disabled: false,
+      label: 'Checkbox Label',
+    },
   }
 
-  content(): React.ReactNode {
+  content() {
     return (
       <>
         <h1>CheckboxEditor</h1>

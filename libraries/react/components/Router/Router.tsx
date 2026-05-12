@@ -19,6 +19,15 @@ interface Props {
 
 const WILDCARD_ROUTES = ['*', '.*']
 
+/** Session history state key recording this Router's position in the browser history stack. */
+const HISTORY_BASIS_INDEX = 'basisIndex'
+
+/**
+ * If `history.go` does not emit `popstate`, clear {@link Router.#popstateIgnoreOne} so later events
+ * are not swallowed.
+ */
+const POPSTATE_IGNORE_FALLBACK_MS = 250
+
 interface Editable {
   readonly dirty: boolean,
 }
@@ -69,7 +78,9 @@ export class Router extends Component<Props> {
    * @param url The URL to navigate to
    */
   static #commitNavigation(url: string): void {
-    window.history.pushState({}, '', url)
+    const basisIndex = Router.current ? Router.current.#historyIndex + 1 : (Router.#historyIndexFromState() ?? 0) + 1
+    window.history.pushState({ [HISTORY_BASIS_INDEX]: basisIndex }, '', url)
+    if (Router.current) Router.current.#historyIndex = basisIndex
     Router.#handleNavigationScrolling(url)
     window.dispatchEvent(new NavigateEvent(url))
   }
@@ -105,10 +116,37 @@ export class Router extends Component<Props> {
       : Router.location.pathname + Router.location.search
   }
 
+  static #historyIndexFromState(): number | null {
+    if (Router.serverSide) return 0
+    const raw = window.history.state as Record<string, unknown> | null
+    return typeof raw?.[HISTORY_BASIS_INDEX] === 'number' ? raw[HISTORY_BASIS_INDEX] : null
+  }
+
+  #historyIndex = 0
+  #lastAcceptedPathSearch = ''
+  /**
+   * While set, route matching uses this path+search instead of the real location so the previous
+   * route stays mounted during an async popstate guard (dialog).
+   */
+  #pendingPopstateRenderPathSearch: string | null = null
+  /** Cleared when the deferred `popstate` from {@link Router.#revertDeniedPopNavigation} never arrives. */
+  #popstateIgnoreFallbackTimeoutId: ReturnType<typeof setTimeout> | null = null
+  /** Skips one `popstate` emitted by `history.go` after a denied navigation revert. */
+  #popstateIgnoreOne = false
   #routeComponent: RouteComponent | null = null
 
   async canNavigate(url: string): Promise<boolean> {
-    const route = this.#routeComponent
+    return this.#canNavigateWithRoute(url, this.#routeComponent)
+  }
+
+  /**
+   * Runs leave guards for the given route snapshot (used by popstate so the leaving page does not
+   * change mid-await when the address bar already matches the destination).
+   * @param url - Destination pathname+search being navigated to.
+   * @param route - Leaving route instance captured before any intermediate re-render.
+   * @returns Whether navigation may proceed.
+   */
+  async #canNavigateWithRoute(url: string, route: RouteComponent | null): Promise<boolean> {
     if (!route) return true
 
     if ('onBeforeNavigate' in route && typeof route.onBeforeNavigate === 'function') {
@@ -122,26 +160,148 @@ export class Router extends Component<Props> {
     return true
   }
 
+  /**
+   * Pin route matching to the last accepted URL only while awaiting a dirty-leave dialog.
+   * @param route - Leaving route instance.
+   * @returns True when the leaving route is dirty and must stay mounted during the discard prompt.
+   */
+  #routeNeedsRenderPinWhileGuarding(route: RouteComponent | null): boolean {
+    return !!route && 'dirty' in route && route.dirty
+  }
+
   componentDidMount(): void {
     Router.current = this
-    window.addEventListener(NavigateEvent.name, this.#handleUpdate)
-    window.addEventListener('popstate', this.#handleUpdate)
+    this.#lastAcceptedPathSearch = this.props.url ?? Router.windowURL
+    this.#historyIndex = Router.#historyIndexFromState() ?? 0
+    if (!Router.serverSide) {
+      const state = window.history.state as Record<string, unknown> | null
+      if (typeof state?.[HISTORY_BASIS_INDEX] !== 'number') {
+        window.history.replaceState({ ...state, [HISTORY_BASIS_INDEX]: this.#historyIndex }, '', Router.windowURL)
+      }
+    }
+    window.addEventListener(NavigateEvent.name, this.#handleNavigateEvent)
+    window.addEventListener('popstate', this.#handlePopstate)
     window.addEventListener('beforeunload', this.#handleBeforeUnload)
   }
 
   componentWillUnmount(): void {
     if (Router.current === this) Router.current = null
 
-    window.removeEventListener(NavigateEvent.name, this.#handleUpdate)
-    window.removeEventListener('popstate', this.#handleUpdate)
+    this.#clearPopstateIgnoreFallbackTimeout()
+    window.removeEventListener(NavigateEvent.name, this.#handleNavigateEvent)
+    window.removeEventListener('popstate', this.#handlePopstate)
     window.removeEventListener('beforeunload', this.#handleBeforeUnload)
   }
 
-  #handleUpdate = (): void => {
+  #handleNavigateEvent = (): void => {
+    this.#lastAcceptedPathSearch = Router.windowURL
+    this.#historyIndex = Router.#historyIndexFromState() ?? this.#historyIndex
     this.forceUpdate()
     if (typeof window !== 'undefined') {
       Router.#handleNavigationScrolling(window.location.href)
     }
+  }
+
+  #clearPopstateIgnoreFallbackTimeout(): void {
+    if (this.#popstateIgnoreFallbackTimeoutId !== null) {
+      clearTimeout(this.#popstateIgnoreFallbackTimeoutId)
+      this.#popstateIgnoreFallbackTimeoutId = null
+    }
+  }
+
+  #handlePopstate = async (): Promise<void> => {
+    if (Router.serverSide) return
+
+    if (this.#popstateIgnoreOne) {
+      this.#clearPopstateIgnoreFallbackTimeout()
+      this.#popstateIgnoreOne = false
+      this.#historyIndex = Router.#historyIndexFromState() ?? this.#historyIndex
+      this.#lastAcceptedPathSearch = Router.windowURL
+      this.#pendingPopstateRenderPathSearch = null
+      this.forceUpdate()
+      Router.#handleNavigationScrolling(window.location.href)
+      return
+    }
+
+    const attempted = Router.windowURL
+    const attemptedIndex = Router.#historyIndexFromState()
+    const delta = attemptedIndex === null ? -1 : attemptedIndex - this.#historyIndex
+    if (attempted === this.#lastAcceptedPathSearch) {
+      this.#historyIndex = attemptedIndex ?? this.#historyIndex
+      this.forceUpdate()
+      Router.#handleNavigationScrolling(window.location.href)
+      return
+    }
+
+    const leaving = this.#routeComponent
+    if (attempted !== this.#lastAcceptedPathSearch) {
+      if (this.#routeNeedsRenderPinWhileGuarding(leaving)) {
+        this.#pendingPopstateRenderPathSearch = this.#lastAcceptedPathSearch
+      }
+      // Commit destination URL matching before awaiting leave guards (dirty leave keeps pin above).
+      this.forceUpdate()
+    }
+
+    let allowed: boolean
+    try {
+      allowed = await this.#canNavigateWithRoute(attempted, leaving)
+    } catch (error) {
+      this.#revertDeniedPopNavigation(delta)
+      throw error
+    }
+
+    if (!allowed) {
+      this.#revertDeniedPopNavigation(delta)
+      return
+    }
+
+    this.#pendingPopstateRenderPathSearch = null
+    this.#lastAcceptedPathSearch = attempted
+    this.#historyIndex = attemptedIndex ?? this.#historyIndex
+    if (Router.windowURL !== attempted) {
+      Router.#commitNavigation(attempted)
+    } else {
+      this.forceUpdate()
+      Router.#handleNavigationScrolling(window.location.href)
+    }
+  }
+
+  /**
+   * Undo a disallowed browser history step without `pushState`, which would drop forward entries.
+   * Browser POP cannot be cancelled before the URL changes, so this mirrors React Router's index/delta approach:
+   * restore the URL with the inverse delta and ignore the corrective `popstate`.
+   * @param delta - Difference between attempted and last accepted history indexes.
+   */
+  #revertDeniedPopNavigation(delta: number): void {
+    if (Router.windowURL === this.#lastAcceptedPathSearch) return
+
+    this.#clearPopstateIgnoreFallbackTimeout()
+
+    if (delta === 0) {
+      const state = window.history.state as Record<string, unknown> | null
+      window.history.replaceState(
+        { ...state, [HISTORY_BASIS_INDEX]: this.#historyIndex },
+        '',
+        this.#lastAcceptedPathSearch,
+      )
+      this.#pendingPopstateRenderPathSearch = null
+      this.forceUpdate()
+      Router.#handleNavigationScrolling(window.location.href)
+      return
+    }
+
+    this.#popstateIgnoreOne = true
+    window.history.go(-delta)
+
+    this.#popstateIgnoreFallbackTimeoutId = setTimeout(() => {
+      this.#popstateIgnoreFallbackTimeoutId = null
+      if (!this.#popstateIgnoreOne) return
+      this.#popstateIgnoreOne = false
+      this.#historyIndex = Router.#historyIndexFromState() ?? this.#historyIndex
+      this.#lastAcceptedPathSearch = Router.windowURL
+      this.#pendingPopstateRenderPathSearch = null
+      this.forceUpdate()
+    }, POPSTATE_IGNORE_FALLBACK_MS)
   }
 
   #confirmDirtyNavigation = async (): Promise<boolean> => {
@@ -198,7 +358,9 @@ export class Router extends Component<Props> {
      * During hydration, use SSR URL if available, otherwise use window URL
      * This ensures server and client render the same route
      */
-    const currentURL = this.props.url ?? Router.windowURL
+    const currentURL = this.#pendingPopstateRenderPathSearch ??
+      this.props.url ??
+      Router.windowURL
     const route = React.Children.toArray(this.props.children).find(child => {
       if (!React.isValidElement(child) || child.type !== Router.Route) return false
 

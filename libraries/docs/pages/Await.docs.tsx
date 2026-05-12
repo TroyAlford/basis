@@ -1,8 +1,8 @@
-import * as React from 'react'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
-export class AwaitDocs extends React.Component {
-  render(): React.ReactNode {
+export class AwaitDocs extends Documentation<Record<string, never>> {
+  content() {
     return (
       <>
         <h1>Await</h1>

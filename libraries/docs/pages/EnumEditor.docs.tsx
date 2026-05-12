@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { EnumEditor, Section, ToggleEditor } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
@@ -17,7 +16,7 @@ enum SamplePriority {
   Critical = 4,
 }
 
-interface ConfigState {
+interface State {
   closeOnActivate: boolean,
   enumType: 'status' | 'priority',
   priorityValue: SamplePriority,
@@ -25,9 +24,10 @@ interface ConfigState {
   statusValue: SampleStatus,
 }
 
-export class EnumEditorDocs extends Documentation<ConfigState> {
-  state = {
-    current: {
+export class EnumEditorDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
       closeOnActivate: true,
       enumType: 'status' as const,
       priorityValue: SamplePriority.Low,
@@ -36,7 +36,7 @@ export class EnumEditorDocs extends Documentation<ConfigState> {
     },
   }
 
-  content(): React.ReactNode {
+  content() {
     const { closeOnActivate, enumType, priorityValue, readOnly, statusValue } = this.current
 
     return (
@@ -69,7 +69,7 @@ export class EnumEditorDocs extends Documentation<ConfigState> {
                 <select
                   style={{ padding: '0.5rem', width: '100%' }}
                   value={enumType}
-                  onChange={e => this.handleField(e.target.value as ConfigState['enumType'], 'enumType')}
+                  onChange={e => this.handleField(e.target.value as State['enumType'], 'enumType')}
                 >
                   <option value="status">Status (string enum)</option>
                   <option value="priority">Priority (numeric enum)</option>

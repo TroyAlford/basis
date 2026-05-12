@@ -1,19 +1,22 @@
-import * as React from 'react'
 import { Menu } from '../../react/components/Menu/Menu'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 interface State {
   disabled: boolean,
   orientation: Menu['props']['orientation'],
 }
 
-export class MenuDocs extends React.Component<object, State> {
-  state: State = {
-    disabled: false,
-    orientation: Menu.Orientation.Vertical,
+export class MenuDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
+      disabled: false,
+      orientation: Menu.Orientation.Vertical,
+    },
   }
 
-  render(): React.ReactNode {
+  content() {
     return (
       <>
         <h1>Menu</h1>
@@ -47,7 +50,10 @@ export class MenuDocs extends React.Component<object, State> {
                 <select
                   defaultValue={Menu.Orientation.Vertical}
                   style={{ padding: '0.5rem', width: '100%' }}
-                  onChange={e => this.setState({ orientation: e.target.value as Menu['props']['orientation'] })}
+                  onChange={e => void this.handleField(
+                    e.target.value as Menu['props']['orientation'],
+                    'orientation',
+                  )}
                 >
                   <option value={Menu.Orientation.Vertical}>Vertical (default)</option>
                   <option value={Menu.Orientation.Horizontal}>Horizontal</option>
@@ -57,9 +63,9 @@ export class MenuDocs extends React.Component<object, State> {
                 <h4>Disabled State</h4>
                 <label style={{ alignItems: 'center', display: 'flex', gap: '0.5rem' }}>
                   <input
-                    checked={this.state.disabled}
+                    checked={this.current.disabled}
                     type="checkbox"
-                    onChange={e => this.setState({ disabled: e.target.checked })}
+                    onChange={e => void this.handleField(e.target.checked, 'disabled')}
                   /> Disable Menu
                 </label>
               </div>
@@ -69,8 +75,8 @@ export class MenuDocs extends React.Component<object, State> {
               <div style={{ display: 'flex', gap: '2rem', justifyContent: 'center' }}>
                 <div>
                   <Menu
-                    disabled={this.state.disabled}
-                    orientation={this.state.orientation}
+                    disabled={this.current.disabled}
+                    orientation={this.current.orientation}
                   >
                     <Menu.Item>Profile</Menu.Item>
                     <Menu.Item>Settings</Menu.Item>

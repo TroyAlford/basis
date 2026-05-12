@@ -1,7 +1,8 @@
-import * as React from 'react'
+import type { CSSProperties } from 'react'
 import { Button, css, NumberEditor, style } from '@basis/react'
 import * as Icons from '@basis/react/icons'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 import './MoonPhase.styles.ts'
 
@@ -14,18 +15,21 @@ interface State {
   tilt: number,
 }
 
-export class MoonPhaseDocs extends React.Component<Record<string, never>, State> {
-  state = {
-    color: '#336699',
-    day: 3.5,
-    filled: true,
-    period: 28,
-    secondary: '#11111144',
-    tilt: 28.5,
+export class MoonPhaseDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
+      color: '#336699',
+      day: 3.5,
+      filled: true,
+      period: 28,
+      secondary: '#11111144',
+      tilt: 28.5,
+    },
   }
 
-  renderMoonPhaseSection = (): React.ReactNode => {
-    const { color, day, filled, period, secondary, tilt } = this.state
+  renderMoonPhaseSection = () => {
+    const { color, day, filled, period, secondary, tilt } = this.current
 
     return (
       <div className="moon-phase-section">
@@ -38,7 +42,7 @@ export class MoonPhaseDocs extends React.Component<Record<string, never>, State>
                 className="color-input"
                 type="color"
                 value={color}
-                onChange={e => this.setState({ color: e.target.value })}
+                onChange={e => void this.handleField(e.target.value, 'color')}
               />
             </div>
             <div className="control-group">
@@ -47,14 +51,14 @@ export class MoonPhaseDocs extends React.Component<Record<string, never>, State>
                 className="color-input"
                 type="color"
                 value={secondary}
-                onChange={e => this.setState({ secondary: e.target.value })}
+                onChange={e => void this.handleField(e.target.value, 'secondary')}
               />
             </div>
             <div className="control-group">
               <label>Filled</label>
               <Button
                 className={filled ? 'primary' : 'secondary'}
-                onActivate={() => this.setState({ filled: !filled })}
+                onActivate={() => void this.handleField(!filled, 'filled')}
               >
                 {filled ? 'Filled' : 'Outline'}
               </Button>
@@ -65,7 +69,7 @@ export class MoonPhaseDocs extends React.Component<Record<string, never>, State>
               </label>
               <NumberEditor
                 value={day}
-                onChange={value => this.setState({ day: value })}
+                onChange={value => void this.handleField(value, 'day')}
               />
             </div>
             <div className="control-group">
@@ -74,7 +78,7 @@ export class MoonPhaseDocs extends React.Component<Record<string, never>, State>
               </label>
               <NumberEditor
                 value={period}
-                onChange={value => this.setState({ period: value })}
+                onChange={value => void this.handleField(value, 'period')}
               />
             </div>
             <div className="control-group">
@@ -84,7 +88,7 @@ export class MoonPhaseDocs extends React.Component<Record<string, never>, State>
               <NumberEditor
                 step={0.1}
                 value={tilt}
-                onChange={value => this.setState({ tilt: value })}
+                onChange={value => void this.handleField(value, 'tilt')}
               />
             </div>
           </div>
@@ -95,7 +99,7 @@ export class MoonPhaseDocs extends React.Component<Record<string, never>, State>
             style={{
               '--basis-icon-color': color,
               '--basis-icon-color-secondary': secondary,
-            } as React.CSSProperties}
+            } as CSSProperties}
           >
             <Icons.MoonPhase
               day={day}
@@ -112,7 +116,7 @@ export class MoonPhaseDocs extends React.Component<Record<string, never>, State>
     )
   }
 
-  render() {
+  content() {
     style('basis:docs:moonphase:dynamic', css`
       .moon-demo-container {
         --basis-icon-size: 120px;

@@ -1,22 +1,25 @@
-import * as React from 'react'
+import { AnchorPoint } from '@basis/react'
 import { Button } from '../../react/components/Button/Button'
 import { Link } from '../../react/components/Router/Link'
 import { Tooltip } from '../../react/components/Tooltip/Tooltip'
-import { AnchorPoint } from '../../react/types/AnchorPoint'
 import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 interface State {
   anchorPoint: AnchorPoint,
   visible: Tooltip['props']['visible'],
 }
 
-export class TooltipDocs extends React.Component<object, State> {
-  state: State = {
-    anchorPoint: AnchorPoint.Top,
-    visible: true,
+export class TooltipDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
+      anchorPoint: AnchorPoint.Top,
+      visible: true as Tooltip['props']['visible'],
+    },
   }
 
-  render(): React.ReactNode {
+  content() {
     return (
       <>
         <h1>Tooltip</h1>
@@ -42,7 +45,7 @@ export class TooltipDocs extends React.Component<object, State> {
                 <h4>Anchor Point</h4>
                 <select
                   defaultValue={AnchorPoint.Top}
-                  onChange={e => this.setState({ anchorPoint: e.target.value as AnchorPoint })}
+                  onChange={e => void this.handleField(e.target.value as AnchorPoint, 'anchorPoint')}
                 >
                   <option value={AnchorPoint.Top}>Top</option>
                   <option value={AnchorPoint.TopStart}>Top Start</option>
@@ -61,8 +64,14 @@ export class TooltipDocs extends React.Component<object, State> {
               <div>
                 <h4>Visibility</h4>
                 <select
-                  value={this.state.visible.toString()}
-                  onChange={e => this.setState({ visible: e.target.value as State['visible'] })}
+                  value={String(this.current.visible)}
+                  onChange={e => {
+                    const raw = e.target.value
+                    const visible = raw === 'auto'
+                      ? 'auto'
+                      : raw === 'true'
+                    void this.handleField(visible as Tooltip['props']['visible'], 'visible')
+                  }}
                 >
                   <option value="auto">Auto (hover-based)</option>
                   <option value="true">Always Visible</option>
@@ -75,7 +84,7 @@ export class TooltipDocs extends React.Component<object, State> {
               <div style={{ display: 'inline-block', position: 'relative' }}>
                 <Button>
                   Hover Me
-                  <Tooltip anchorPoint={this.state.anchorPoint} visible={this.state.visible}>
+                  <Tooltip anchorPoint={this.current.anchorPoint} visible={this.current.visible}>
                     This tooltip shows contextual information about the button above!
                   </Tooltip>
                 </Button>
@@ -171,6 +180,4 @@ export class TooltipDocs extends React.Component<object, State> {
       </>
     )
   }
-
-  private anchorRef = React.createRef<HTMLDivElement>()
 }

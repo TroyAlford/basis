@@ -1,8 +1,6 @@
-import * as React from 'react'
-import { AnchorPoint } from '@basis/react/types/AnchorPoint'
-import { Code } from '../../../docs/components/Code'
-import { Link } from '../Router/Link'
-import { AutoComplete } from './AutoComplete'
+import { AnchorPoint, AutoComplete, Link } from '@basis/react'
+import { Code } from '../components/Code'
+import { Documentation } from '../components/Documentation'
 
 interface SearchResult {
   headline: string,
@@ -23,10 +21,13 @@ interface State {
   minimumQueryLength: number,
 }
 
-export class AutoCompleteDocs extends React.Component<unknown, State> {
-  state: State = {
-    anchorPoint: AnchorPoint.BottomStart,
-    minimumQueryLength: 0,
+export class AutoCompleteDocs extends Documentation<State> {
+  static override defaultProps = {
+    ...Documentation.defaultProps,
+    initialValue: {
+      anchorPoint: AnchorPoint.BottomStart,
+      minimumQueryLength: 0,
+    },
   }
 
   // Mock search functions for demo
@@ -71,7 +72,7 @@ export class AutoCompleteDocs extends React.Component<unknown, State> {
       || fruit.includes(query.toLowerCase()))
   }
 
-  render(): React.ReactNode {
+  content() {
     return (
       <>
         <h1>AutoComplete</h1>
@@ -103,8 +104,8 @@ export class AutoCompleteDocs extends React.Component<unknown, State> {
               <div>
                 <strong>Anchor Point</strong>
                 <select
-                  value={this.state.anchorPoint}
-                  onChange={e => this.setState({ anchorPoint: e.target.value as AnchorPoint })}
+                  value={this.current.anchorPoint}
+                  onChange={e => void this.handleField(e.target.value as AnchorPoint, 'anchorPoint')}
                 >
                   <option value={AnchorPoint.Top}>Top</option>
                   <option value={AnchorPoint.TopStart}>Top Start</option>
@@ -122,8 +123,8 @@ export class AutoCompleteDocs extends React.Component<unknown, State> {
                   max="10"
                   min="0"
                   type="number"
-                  value={this.state.minimumQueryLength}
-                  onChange={e => this.setState({ minimumQueryLength: Number(e.target.value) })}
+                  value={this.current.minimumQueryLength}
+                  onChange={e => void this.handleField(Number(e.target.value), 'minimumQueryLength')}
                 />
               </div>
             </div>
@@ -131,9 +132,9 @@ export class AutoCompleteDocs extends React.Component<unknown, State> {
             <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '2rem' }}>
               <h3>Article Search</h3>
               <AutoComplete<SearchResult>
-                anchorPoint={this.state.anchorPoint}
+                anchorPoint={this.current.anchorPoint}
                 getOptionValue={result => result.slug}
-                minimumQueryLength={this.state.minimumQueryLength}
+                minimumQueryLength={this.current.minimumQueryLength}
                 placeholder="Search articles..."
                 whenLoading="Searching articles..."
                 whenNotFound="No articles found"
@@ -147,9 +148,9 @@ export class AutoCompleteDocs extends React.Component<unknown, State> {
               />
               <h3>User Search</h3>
               <AutoComplete<User>
-                anchorPoint={this.state.anchorPoint}
+                anchorPoint={this.current.anchorPoint}
                 getOptionValue={user => user.id}
-                minimumQueryLength={this.state.minimumQueryLength}
+                minimumQueryLength={this.current.minimumQueryLength}
                 placeholder="Search users..."
                 whenLoading="Searching users..."
                 whenNotFound="No users found"
@@ -166,10 +167,10 @@ export class AutoCompleteDocs extends React.Component<unknown, State> {
               />
               <h3>Simple String Search</h3>
               <AutoComplete<string>
-                anchorPoint={this.state.anchorPoint}
+                anchorPoint={this.current.anchorPoint}
                 getOptionLabel={fruit => fruit}
                 getOptionValue={fruit => fruit}
-                minimumQueryLength={this.state.minimumQueryLength}
+                minimumQueryLength={this.current.minimumQueryLength}
                 placeholder="Search fruits..."
                 whenLoading="Searching fruits..."
                 whenNotFound="No fruits found"
