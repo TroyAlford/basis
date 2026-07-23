@@ -1,11 +1,13 @@
-import type { ComponentClass, ReactElement, ReactNode, RefObject, SyntheticEvent } from 'react'
+import type { ComponentClass, KeyboardEvent, ReactElement, ReactNode, RefObject, SyntheticEvent } from 'react'
 import { cloneElement, createElement, isValidElement } from 'react'
 import { IconBase } from '../../icons/IconBase/IconBase'
 import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
+import { Keyboard } from '../../types/Keyboard'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Editor } from '../Editor/Editor'
+import { dialogDefaultButtonIndex, dialogEnterConfirms } from './DialogKeyboard.ts'
 import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE.ts'
 
 import './Dialog.styles.ts'
@@ -182,15 +184,52 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   componentDidMount(): void {
     super.componentDidMount()
     this.#syncModalOpenState()
+    this.#syncNativeDismiss()
   }
 
   componentDidUpdate(prevProps: Readonly<Props<unknown>>, prevState: Readonly<object>): void {
     super.componentDidUpdate(prevProps, prevState)
-    if (prevProps.id !== this.props.id) this.#syncModalOpenState()
+    this.#syncModalOpenState()
+    this.#syncNativeDismiss()
+  }
+
+  componentWillUnmount(): void {
+    this.#unbindNativeCancel(this.#nativeCancelNode)
+    this.#nativeCancelNode = null
+    super.componentWillUnmount()
+  }
+
+  #boundNativeCancel = (event: Event): void => {
+    event.preventDefault()
+    this.#dismiss()
+  }
+
+  #bindNativeCancel(): void {
+    const node = this.rootNode as HTMLDialogElement | null
+    node?.addEventListener('cancel', this.#boundNativeCancel)
+  }
+
+  #unbindNativeCancel(node: HTMLDialogElement | null): void {
+    node?.removeEventListener('cancel', this.#boundNativeCancel)
+  }
+
+  #syncNativeDismiss = (): void => {
+    const prev = this.#nativeCancelNode
+    const next = this.rootNode as HTMLDialogElement | null
+    if (prev === next) return
+    this.#unbindNativeCancel(prev)
+    this.#nativeCancelNode = next
+    this.#bindNativeCancel()
+  }
+
+  #nativeCancelNode: HTMLDialogElement | null = null
+
+  #dismiss(): void {
+    this.props.onResolve(false)
   }
 
   #syncModalOpenState(): void {
-    const node = this.props.nodeRef.current
+    const node = this.rootNode as HTMLDialogElement | null
     if (!node) return
 
     if (!node.open && typeof node.showModal === 'function') {
@@ -201,15 +240,55 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   }
 
   get attributes() {
-    const { onResolve } = this.props
     return {
       ...super.attributes,
       'data-intent': this.props.intent ?? Dialog.Intent.Default,
       'onCancel': (event: SyntheticEvent<HTMLDialogElement>) => {
         event.preventDefault()
-        onResolve(false)
+        this.#dismiss()
       },
+      'onKeyDown': this.#handleKeyDown,
+      'onKeyDownCapture': this.#handleKeyDownCapture,
     }
+  }
+
+  #activateButtonAt = (index: number): void => {
+    const button = this.props.buttons[index]
+    const { onResolve } = this.props
+    if (!button) return
+
+    if (isValidElement(button)) {
+      const props = button.props
+      props.onActivate?.({} as SyntheticEvent)
+      onResolve(props['data-value'])
+      return
+    }
+
+    if ('resolve' in button && typeof button.resolve === 'function') {
+      onResolve(button.resolve())
+      return
+    }
+
+    onResolve((button as { value: unknown }).value)
+  }
+
+  #handleKeyDownCapture = (event: KeyboardEvent<HTMLDialogElement>): void => {
+    if (event.key !== Keyboard.Escape) return
+    event.preventDefault()
+    event.stopPropagation()
+    this.#dismiss()
+  }
+
+  #handleKeyDown = (event: KeyboardEvent<HTMLDialogElement>): void => {
+    if (event.defaultPrevented) return
+
+    if (!dialogEnterConfirms(event)) return
+
+    const index = dialogDefaultButtonIndex(this.props.buttons)
+    if (index === null) return
+
+    event.preventDefault()
+    this.#activateButtonAt(index)
   }
 
   get tag() {
@@ -260,7 +339,7 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
           props.onActivate?.(event)
           onResolve(props['data-value'])
         },
-        'type': props.type ?? Button.Type.Submit,
+        'type': props.type ?? Button.Type.Button,
       } as Partial<typeof props> & { key: number })
     }
 
@@ -268,7 +347,7 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
       <Button
         key={index}
         data-intent={button.intent ?? Dialog.Intent.Default}
-        type={Button.Type.Submit}
+        type={Button.Type.Button}
         onActivate={() => {
           if ('resolve' in button && typeof button.resolve === 'function') {
             onResolve(button.resolve())

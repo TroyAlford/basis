@@ -18,6 +18,8 @@ export class DialogEditorExample extends Editor<Value, HTMLDivElement> {
         <div>
           <strong>Name</strong>
           <TextEditor
+            autoFocus
+            selectOnFocus
             field="name"
             placeholder="Name"
             value={this.current.name}
