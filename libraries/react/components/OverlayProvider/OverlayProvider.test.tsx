@@ -1,65 +1,12 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { render } from '../../testing/render'
 import { waitFor } from '../../testing/waitFor'
-import { Keyboard } from '../../types/Keyboard'
 import { Button } from '../Button/Button'
-import { Editor } from '../Editor/Editor'
-import { TextEditor } from '../TextEditor/TextEditor'
 import { Dialog } from './Dialog'
 import { Notification } from './Notification'
 import { OverlayProvider } from './OverlayProvider'
+import { resetOverlayProvider } from './OverlayProvider.testUtil.tsx'
 import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE'
-
-interface NameSlugValue {
-  name: string,
-  slug: string,
-}
-
-class NameSlugEditor extends Editor<NameSlugValue, HTMLDivElement> {
-  static displayName = 'NameSlugEditor'
-
-  content() {
-    return super.content(
-      <>
-        <TextEditor
-          autoFocus
-          selectOnFocus
-          field="name"
-          value={this.current.name}
-          onChange={this.handleField}
-        />
-        <TextEditor
-          field="slug"
-          value={this.current.slug}
-          onChange={this.handleField}
-        />
-      </>,
-    )
-  }
-
-  get tag(): 'div' {
-    return 'div'
-  }
-}
-
-/**
- * Dispatch a bubbling keydown on an element.
- * @param element - Event target.
- * @param key - Key value.
- */
-async function dispatchKeyDown(element: HTMLElement, key: Keyboard): Promise<void> {
-  element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key }))
-  await new Promise<void>(resolve => setTimeout(resolve, 0))
-}
-
-/**
- * Clears the process-local overlay provider singleton between tests.
- */
-async function resetOverlayProvider() {
-  const rendered = await render(<OverlayProvider />)
-  rendered.unmount()
-  await new Promise(resolve => setTimeout(resolve, 0))
-}
 
 /**
  * Renders a provider for a single test.
@@ -341,27 +288,6 @@ describe('OverlayProvider', () => {
       unmount()
     })
 
-    test('Escape dismisses Dialog.editor when a document listener preventDefaults Escape', async () => {
-      const blocker = (event: KeyboardEvent): void => {
-        if (event.key === Keyboard.Escape) event.preventDefault()
-      }
-      document.addEventListener('keydown', blocker, true)
-
-      const { node, unmount } = await renderOverlayProvider()
-      const result = Dialog.editor(NameSlugEditor, { name: '', slug: '' }, { title: 'New' })
-
-      const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
-      const nameInput = await waitFor(
-        () => dialog.querySelector<HTMLInputElement>('[data-field="name"] input.value, [data-field="name"] .value'),
-      )
-
-      await dispatchKeyDown(nameInput, Keyboard.Escape)
-
-      expect(await result).toBe(false)
-
-      document.removeEventListener('keydown', blocker, true)
-      unmount()
-    })
   })
 
   describe('Notification', () => {

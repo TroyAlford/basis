@@ -125,4 +125,14 @@ export const Simulate = {
   ): Promise<void> {
     return Simulate.event(element, handler, { key, timeout, type: 'keydown' })
   },
+
+  /**
+   * Dispatches a bubbling keydown and yields one microtask for async handlers.
+   * @param element - Event target.
+   * @param key - Key value.
+   */
+  async pressKey(element: HTMLElement, key: Keyboard): Promise<void> {
+    element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key }))
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+  },
 }

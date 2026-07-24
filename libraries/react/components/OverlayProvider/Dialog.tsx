@@ -3,7 +3,6 @@ import { cloneElement, createElement, isValidElement } from 'react'
 import { IconBase } from '../../icons/IconBase/IconBase'
 import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
-import { Keyboard } from '../../types/Keyboard'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Editor } from '../Editor/Editor'
@@ -184,18 +183,11 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   componentDidMount(): void {
     super.componentDidMount()
     this.#syncModalOpenState()
-    this.#syncNativeDismiss()
-  }
-
-  componentDidUpdate(prevProps: Readonly<Props<unknown>>, prevState: Readonly<object>): void {
-    super.componentDidUpdate(prevProps, prevState)
-    this.#syncModalOpenState()
-    this.#syncNativeDismiss()
+    this.#bindNativeCancel()
   }
 
   componentWillUnmount(): void {
-    this.#unbindNativeCancel(this.#nativeCancelNode)
-    this.#nativeCancelNode = null
+    this.#unbindNativeCancel()
     super.componentWillUnmount()
   }
 
@@ -205,24 +197,12 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   }
 
   #bindNativeCancel(): void {
-    const node = this.rootNode as HTMLDialogElement | null
-    node?.addEventListener('cancel', this.#boundNativeCancel)
+    this.rootNode?.addEventListener('cancel', this.#boundNativeCancel)
   }
 
-  #unbindNativeCancel(node: HTMLDialogElement | null): void {
-    node?.removeEventListener('cancel', this.#boundNativeCancel)
+  #unbindNativeCancel(): void {
+    this.rootNode?.removeEventListener('cancel', this.#boundNativeCancel)
   }
-
-  #syncNativeDismiss = (): void => {
-    const prev = this.#nativeCancelNode
-    const next = this.rootNode as HTMLDialogElement | null
-    if (prev === next) return
-    this.#unbindNativeCancel(prev)
-    this.#nativeCancelNode = next
-    this.#bindNativeCancel()
-  }
-
-  #nativeCancelNode: HTMLDialogElement | null = null
 
   #dismiss(): void {
     this.props.onResolve(false)
@@ -243,12 +223,7 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     return {
       ...super.attributes,
       'data-intent': this.props.intent ?? Dialog.Intent.Default,
-      'onCancel': (event: SyntheticEvent<HTMLDialogElement>) => {
-        event.preventDefault()
-        this.#dismiss()
-      },
       'onKeyDown': this.#handleKeyDown,
-      'onKeyDownCapture': this.#handleKeyDownCapture,
     }
   }
 
@@ -270,13 +245,6 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     }
 
     onResolve((button as { value: unknown }).value)
-  }
-
-  #handleKeyDownCapture = (event: KeyboardEvent<HTMLDialogElement>): void => {
-    if (event.key !== Keyboard.Escape) return
-    event.preventDefault()
-    event.stopPropagation()
-    this.#dismiss()
   }
 
   #handleKeyDown = (event: KeyboardEvent<HTMLDialogElement>): void => {

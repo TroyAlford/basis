@@ -276,22 +276,24 @@ export class DialogDocs extends Documentation<State> {
         <section>
           <h2>Keyboard</h2>
           <p>
-            The dialog shell listens for <code>keydown</code> on the native <code>&lt;dialog&gt;</code>.
-            Escape is handled in the <strong>capture</strong> phase so it still dismisses when focus is
-            inside a nested <code>TextEditor</code>; Enter uses the bubble phase so nested controls can
-            call <code>preventDefault()</code> first (for example <code>TagsEditor</code> on Enter).
-            The native <code>cancel</code> event is wired as well.
+            While a dialog is open, <code>OverlayProvider</code> listens for Escape on{' '}
+            <code>document</code> in the <strong>capture</strong> phase so dismiss still works when focus
+            is inside nested editors and another listener (for example Monaco) has already called{' '}
+            <code>preventDefault()</code>. The dialog also wires the native <code>cancel</code> event.
+            Enter is handled on the dialog in the bubble phase so nested controls can call{' '}
+            <code>preventDefault()</code> first (for example <code>TagsEditor</code> on Enter).
           </p>
           <ul>
             <li>
               <strong>Escape</strong> — dismisses and resolves <code>false</code> (same as Cancel), including
-              when focus is inside a single-line <code>TextEditor</code>.
+              when focus is inside any dialog field (single- or multiline <code>TextEditor</code>).
             </li>
             <li>
-              <strong>Enter</strong> — activates the default footer action when the dialog has an unambiguous
-              primary button and focus is in a single-line control. Enter in a multiline{' '}
-              <code>TextEditor</code> inserts a newline and does not confirm. Dialogs with multiple
-              non-cancel actions do not bind Enter.
+              <strong>Enter</strong> — activates the default footer action when the dialog has exactly one
+              non-cancel button, or exactly one primary (or affirmative) choice among several. Focus must be
+              in a single-line control; Enter in a multiline <code>TextEditor</code> inserts a newline and
+              does not confirm. Dialogs with multiple non-cancel actions and no unambiguous default do not
+              bind Enter.
             </li>
           </ul>
         </section>

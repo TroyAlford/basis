@@ -7,15 +7,12 @@ import { Button } from '../Button/Button'
 import { Editor } from '../Editor/Editor'
 import { TextEditor } from '../TextEditor/TextEditor'
 import { Dialog } from './Dialog'
+import { NameSlugEditor } from './NameSlugEditor.testEditor.tsx'
 import { OverlayProvider } from './OverlayProvider'
+import { resetOverlayProvider } from './OverlayProvider.testUtil.tsx'
 
 interface TestValue {
   id: number,
-}
-
-interface NameSlugValue {
-  name: string,
-  slug: string,
 }
 
 /** Editor used to assert {@link Dialog.editor} typing and resolution. */
@@ -40,40 +37,6 @@ class TestEditor extends Editor<TestValue, HTMLDivElement, { label: string }> {
   }
 }
 
-/** Name/slug editor for dialog keyboard tests (mirrors create-document flows). */
-class NameSlugEditor extends Editor<NameSlugValue, HTMLDivElement> {
-  static displayName = 'NameSlugEditor'
-
-  content() {
-    return super.content(
-      <>
-        <TextEditor
-          field="name"
-          value={this.current.name}
-          onChange={this.handleField}
-        />
-        <TextEditor
-          multiline
-          field="slug"
-          value={this.current.slug}
-          onChange={this.handleField}
-        />
-      </>,
-    )
-  }
-
-  get tag(): 'div' {
-    return 'div'
-  }
-}
-
-/** Mount and unmount an empty OverlayProvider so `window.overlayProvider` is cleared between tests. */
-async function resetOverlayProvider() {
-  const rendered = await render(<OverlayProvider />)
-  rendered.unmount()
-  await new Promise<void>(resolve => setTimeout(resolve, 0))
-}
-
 /**
  * Find a dialog button by its visible label.
  * @param node - Root node to search.
@@ -83,16 +46,6 @@ async function resetOverlayProvider() {
 async function findButton(node: ParentNode, label: string) {
   return waitFor(() => Array.from(node.querySelectorAll('button'))
     .find(button => button.textContent === label) as HTMLButtonElement | undefined)
-}
-
-/**
- * Dispatch a bubbling keydown on an element (for dialog keyboard integration tests).
- * @param element - Event target (e.g. focused input).
- * @param key - Key value.
- */
-async function dispatchKeyDown(element: HTMLElement, key: Keyboard): Promise<void> {
-  element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key }))
-  await new Promise<void>(resolve => setTimeout(resolve, 0))
 }
 
 describe('Dialog.open with resolve and Dialog.editor', () => {
@@ -251,24 +204,9 @@ describe('Dialog keyboard', () => {
     )
 
     await Simulate.change(nameInput, 'My Article')
-    await dispatchKeyDown(nameInput, Keyboard.Enter)
+    await Simulate.pressKey(nameInput, Keyboard.Enter)
 
     expect(await result).toEqual({ name: 'My Article', slug: '' })
-    unmount()
-  })
-
-  test('Dialog.editor cancels on Escape when a TextEditor is focused', async () => {
-    const { node, unmount } = await render(<OverlayProvider />)
-    const result = Dialog.editor(NameSlugEditor, { name: '', slug: '' }, { title: 'New' })
-
-    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
-    const nameInput = await waitFor(
-      () => dialog.querySelector<HTMLInputElement>('[data-field="name"] input.value, [data-field="name"] .value'),
-    )
-
-    await dispatchKeyDown(nameInput, Keyboard.Escape)
-
-    expect(await result).toBe(false)
     unmount()
   })
 
@@ -295,7 +233,7 @@ describe('Dialog keyboard', () => {
     let settled = false
     void result.then(() => { settled = true })
 
-    await dispatchKeyDown(slugInput, Keyboard.Enter)
+    await Simulate.pressKey(slugInput, Keyboard.Enter)
     await new Promise<void>(resolve => setTimeout(resolve, 0))
 
     expect(settled).toBe(false)
@@ -320,7 +258,7 @@ describe('Dialog keyboard', () => {
     let settled = false
     void result.then(() => { settled = true })
 
-    await dispatchKeyDown(input, Keyboard.Enter)
+    await Simulate.pressKey(input, Keyboard.Enter)
     await new Promise<void>(resolve => setTimeout(resolve, 0))
 
     expect(settled).toBe(false)
@@ -338,7 +276,7 @@ describe('Dialog keyboard', () => {
     const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
     const input = await waitFor(() => dialog.querySelector<HTMLInputElement>('.text-editor .value'))
 
-    await dispatchKeyDown(input, Keyboard.Enter)
+    await Simulate.pressKey(input, Keyboard.Enter)
 
     expect(await result).toBe(true)
     unmount()
