@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import { createRef } from 'react'
 import { hash } from '@basis/utilities/functions/hash'
 import { Intent } from '../../types/Intent'
-import { Keyboard } from '../../types/Keyboard'
 import { Component } from '../Component/Component'
 import type { DialogButton, IDialog } from './Dialog'
 import { Dialog } from './Dialog'
@@ -46,15 +45,9 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
   componentDidMount(): void {
     super.componentDidMount()
     if (typeof window !== 'undefined') window.overlayProvider = this
-    if (typeof document !== 'undefined') {
-      document.addEventListener('keydown', this.#handleDocumentKeyDown, true)
-    }
   }
 
   componentWillUnmount(): void {
-    if (typeof document !== 'undefined') {
-      document.removeEventListener('keydown', this.#handleDocumentKeyDown, true)
-    }
     this.#resolvePendingDialogs()
     if (typeof window !== 'undefined' && window.overlayProvider === this) {
       window.overlayProvider = undefined
@@ -139,23 +132,6 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
         dialogQueue,
       }
     })
-  }
-
-  #handleDocumentKeyDown = (event: globalThis.KeyboardEvent): void => {
-    if (event.key !== Keyboard.Escape) return
-
-    const { activeDialog } = this.state
-    if (!activeDialog) return
-
-    const node = activeDialog.nodeRef.current
-    if (!node?.open) return
-
-    const target = event.target
-    if (target instanceof Node && !node.contains(target)) return
-
-    event.preventDefault()
-    event.stopImmediatePropagation()
-    this.#resolveDialog(false)
   }
 
   #resolvePendingDialogs(): void {

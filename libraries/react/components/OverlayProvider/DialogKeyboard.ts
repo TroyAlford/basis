@@ -1,32 +1,6 @@
-import type * as React from 'react'
 import { isValidElement } from 'react'
 import { Intent } from '../../types/Intent'
-import { Keyboard } from '../../types/Keyboard'
 import type { DialogButton } from './Dialog'
-
-/**
- * Whether Enter on the event target should activate the dialog default action.
- * @param event - Keydown on the dialog root (bubble phase).
- * @returns True when Enter should confirm.
- */
-export function dialogEnterConfirms(event: React.KeyboardEvent<HTMLElement>): boolean {
-  if (event.defaultPrevented) return false
-  if (event.key !== Keyboard.Enter) return false
-  if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false
-
-  const target = event.target
-  if (!(target instanceof HTMLElement)) return false
-
-  if (target.tagName === 'TEXTAREA') return false
-
-  const textEditor = target.closest('.text-editor.component')
-  if (textEditor) {
-    const multiline = textEditor.getAttribute('data-multiline')
-    if (multiline && multiline !== 'false') return false
-  }
-
-  return true
-}
 
 /**
  * Whether a dialog button definition represents cancel / dismiss.

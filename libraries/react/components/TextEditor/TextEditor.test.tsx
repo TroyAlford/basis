@@ -223,6 +223,18 @@ describe('TextEditor', () => {
       await Simulate.keyDown(textarea, Keyboard.Enter, onKeyDown)
       expect(onKeyDown).toHaveBeenCalled()
     })
+
+    test('multiline Enter stops propagation so parent key handlers do not run', async () => {
+      const parentKeyDown = mock(() => undefined)
+      const { node } = await render(
+        <div onKeyDown={parentKeyDown}>
+          <TextEditor multiline onChange={onChange} />
+        </div>,
+      )
+      const textarea = getTextarea(node)
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter' }))
+      expect(parentKeyDown).not.toHaveBeenCalled()
+    })
   })
 
   describe('textarea-specific features', () => {

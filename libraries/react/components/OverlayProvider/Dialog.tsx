@@ -3,10 +3,11 @@ import { cloneElement, createElement, isValidElement } from 'react'
 import { IconBase } from '../../icons/IconBase/IconBase'
 import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
+import { Keyboard } from '../../types/Keyboard'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Editor } from '../Editor/Editor'
-import { dialogDefaultButtonIndex, dialogEnterConfirms } from './DialogKeyboard.ts'
+import { dialogDefaultButtonIndex } from './DialogKeyboard.ts'
 import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE.ts'
 
 import './Dialog.styles.ts'
@@ -249,8 +250,8 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
 
   #handleKeyDown = (event: KeyboardEvent<HTMLDialogElement>): void => {
     if (event.defaultPrevented) return
-
-    if (!dialogEnterConfirms(event)) return
+    if (event.key !== Keyboard.Enter) return
+    if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
 
     const index = dialogDefaultButtonIndex(this.props.buttons)
     if (index === null) return
