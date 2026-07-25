@@ -67,15 +67,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
 
   #handleWindowKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== Keyboard.Escape || event.defaultPrevented) return
-
-    const { activeDialog } = this.state
-    if (!activeDialog) return
-
-    const dialog = activeDialog.nodeRef.current
-    if (!(dialog instanceof HTMLDialogElement) || !dialog.open) return
-
-    const { target } = event
-    if (!(target instanceof Node) || !dialog.contains(target)) return
+    if (!this.state.activeDialog) return
 
     event.preventDefault()
     this.#resolveDialog(false)
@@ -109,7 +101,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
 
     this.#detachActiveDialogListeners()
     node.addEventListener('cancel', this.#handleActiveDialogCancel)
-    node.addEventListener('keydown', this.#handleActiveDialogKeyDown)
+    node.addEventListener('keydown', this.#handleActiveDialogKeyDown, true)
     this.#attachedDialogNode = node
   }
 
@@ -117,7 +109,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     if (!this.#attachedDialogNode) return
 
     this.#attachedDialogNode.removeEventListener('cancel', this.#handleActiveDialogCancel)
-    this.#attachedDialogNode.removeEventListener('keydown', this.#handleActiveDialogKeyDown)
+    this.#attachedDialogNode.removeEventListener('keydown', this.#handleActiveDialogKeyDown, true)
     this.#attachedDialogNode = null
   }
 

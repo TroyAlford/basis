@@ -219,7 +219,7 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
 
     this.#unbindNativeListeners()
     node.addEventListener('cancel', this.#boundNativeCancel)
-    node.addEventListener('keydown', this.#boundNativeKeyDown)
+    node.addEventListener('keydown', this.#boundNativeKeyDown, true)
     this.#listenerNode = node
   }
 
@@ -227,7 +227,7 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     if (!this.#listenerNode) return
 
     this.#listenerNode.removeEventListener('cancel', this.#boundNativeCancel)
-    this.#listenerNode.removeEventListener('keydown', this.#boundNativeKeyDown)
+    this.#listenerNode.removeEventListener('keydown', this.#boundNativeKeyDown, true)
     this.#listenerNode = null
   }
 
@@ -249,6 +249,8 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     } else if (!node.open) {
       node.setAttribute('open', '')
     }
+
+    node.focus()
   }
 
   get attributes() {
