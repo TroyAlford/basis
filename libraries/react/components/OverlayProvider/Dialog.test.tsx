@@ -221,6 +221,32 @@ describe('Dialog keyboard', () => {
     unmount()
   })
 
+  test('Dialog.confirm cancels on Escape key', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.confirm({ title: 'Sure?' })
+
+    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+    await Simulate.pressKey(dialog, Keyboard.Escape)
+
+    expect(await result).toBe(false)
+    unmount()
+  })
+
+  test('Dialog.editor cancels on Escape when focus is in a TextEditor field', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.editor(NameSlugEditor, { name: '', slug: '' }, { title: 'New' })
+
+    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+    const nameInput = await waitFor(
+      () => dialog.querySelector<HTMLInputElement>('[data-field="name"] input.value, [data-field="name"] .value'),
+    )
+
+    await Simulate.pressKey(nameInput, Keyboard.Escape)
+
+    expect(await result).toBe(false)
+    unmount()
+  })
+
   test('Enter in a multiline TextEditor does not confirm Dialog.editor', async () => {
     const { node, unmount } = await render(<OverlayProvider />)
     const result = Dialog.editor(NameSlugEditor, { name: '', slug: '' }, { title: 'New' })

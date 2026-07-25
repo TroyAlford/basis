@@ -184,29 +184,20 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   componentDidMount(): void {
     super.componentDidMount()
     this.#syncModalOpenState()
-    this.#bindNativeCancel()
   }
 
-  componentWillUnmount(): void {
-    this.#unbindNativeCancel()
-    super.componentWillUnmount()
-  }
-
-  #boundNativeCancel = (event: Event): void => {
-    event.preventDefault()
-    this.#dismiss()
-  }
-
-  #bindNativeCancel(): void {
-    this.rootNode?.addEventListener('cancel', this.#boundNativeCancel)
-  }
-
-  #unbindNativeCancel(): void {
-    this.rootNode?.removeEventListener('cancel', this.#boundNativeCancel)
+  componentDidUpdate(prevProps: Readonly<Props<unknown>>, prevState: Readonly<object>): void {
+    super.componentDidUpdate(prevProps, prevState)
+    if (prevProps.id !== this.props.id) this.#syncModalOpenState()
   }
 
   #dismiss(): void {
     this.props.onResolve(false)
+  }
+
+  #handleCancel = (event: SyntheticEvent<HTMLDialogElement>): void => {
+    event.preventDefault()
+    this.#dismiss()
   }
 
   #syncModalOpenState(): void {
@@ -224,6 +215,7 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     return {
       ...super.attributes,
       'data-intent': this.props.intent ?? Dialog.Intent.Default,
+      'onCancel': this.#handleCancel,
       'onKeyDown': this.#handleKeyDown,
     }
   }
@@ -250,6 +242,13 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
 
   #handleKeyDown = (event: KeyboardEvent<HTMLDialogElement>): void => {
     if (event.defaultPrevented) return
+
+    if (event.key === Keyboard.Escape) {
+      event.preventDefault()
+      this.#dismiss()
+      return
+    }
+
     if (event.key !== Keyboard.Enter) return
     if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
 
