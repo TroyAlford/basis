@@ -1,4 +1,5 @@
-import { Editor, TextEditor } from '@basis/react'
+import { Editor } from '../Editor/Editor'
+import { TextEditor } from '../TextEditor/TextEditor'
 
 export interface NameSlugValue {
   name: string,
