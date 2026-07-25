@@ -70,7 +70,7 @@ const plugin = (options: PluginOptions): ConfigWithExtends => {
   return config
 }
 
-const IGNORE_PATHS = ['node_modules', '.cache', 'build', 'dist']
+const IGNORE_PATHS = ['node_modules', '.cache', '.playwright-local', 'build', 'dist', 'test-results']
 
 export default pluginTypescript.config(
   { ignores: IGNORE_PATHS.flatMap(path => [`${path}/**`, `**/${path}/**`]) },

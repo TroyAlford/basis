@@ -1,10 +1,15 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { render } from '../../testing/render'
+import { Simulate } from '../../testing/Simulate'
 import { waitFor } from '../../testing/waitFor'
+import { Keyboard } from '../../types/Keyboard'
 import { Button } from '../Button/Button'
 import { Editor } from '../Editor/Editor'
+import { TextEditor } from '../TextEditor/TextEditor'
 import { Dialog } from './Dialog'
+import { NameSlugEditor } from './NameSlugEditor.testEditor.tsx'
 import { OverlayProvider } from './OverlayProvider'
+import { resetOverlayProvider } from './OverlayProvider.testUtil.tsx'
 
 interface TestValue {
   id: number,
@@ -30,13 +35,6 @@ class TestEditor extends Editor<TestValue, HTMLDivElement, { label: string }> {
   get tag(): 'div' {
     return 'div'
   }
-}
-
-/** Mount and unmount an empty OverlayProvider so `window.overlayProvider` is cleared between tests. */
-async function resetOverlayProvider() {
-  const rendered = await render(<OverlayProvider />)
-  rendered.unmount()
-  await new Promise<void>(resolve => setTimeout(resolve, 0))
 }
 
 /**
@@ -187,6 +185,100 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
     go.click()
 
     expect(await result).toBe('go')
+    unmount()
+  })
+})
+
+describe('Dialog keyboard', () => {
+  beforeEach(async () => {
+    await resetOverlayProvider()
+  })
+
+  test('Dialog.editor confirms on Enter when a single-line TextEditor is focused', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.editor(NameSlugEditor, { name: '', slug: '' }, { title: 'New' })
+
+    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+    const nameInput = await waitFor(
+      () => dialog.querySelector<HTMLInputElement>('[data-field="name"] input.value, [data-field="name"] .value'),
+    )
+
+    await Simulate.change(nameInput, 'My Article')
+    await Simulate.pressKey(nameInput, Keyboard.Enter)
+
+    expect(await result).toEqual({ name: 'My Article', slug: '' })
+    unmount()
+  })
+
+  test('Dialog.editor cancels on native cancel event', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.editor(NameSlugEditor, { name: '', slug: '' }, { title: 'New' })
+
+    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+    dialog.dispatchEvent(new Event('cancel', { cancelable: true }))
+
+    expect(await result).toBe(false)
+    unmount()
+  })
+
+  test('Enter in a multiline TextEditor does not confirm Dialog.editor', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.editor(NameSlugEditor, { name: '', slug: '' }, { title: 'New' })
+
+    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+    const slugInput = await waitFor(
+      () => dialog.querySelector<HTMLTextAreaElement>('[data-field="slug"] textarea.value, [data-field="slug"] .value'),
+    )
+
+    let settled = false
+    void result.then(() => { settled = true })
+
+    await Simulate.pressKey(slugInput, Keyboard.Enter)
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(settled).toBe(false)
+    expect(dialog.open).toBe(true)
+    unmount()
+  })
+
+  test('Enter does not confirm when multiple non-cancel actions are ambiguous', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.open<'x' | 'y'>({
+      buttons: [
+        { label: 'X', value: 'x' },
+        { label: 'Y', value: 'y' },
+      ],
+      content: <TextEditor initialValue="draft" />,
+      title: 'Pick',
+    })
+
+    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+    const input = await waitFor(() => dialog.querySelector<HTMLInputElement>('.text-editor .value'))
+
+    let settled = false
+    void result.then(() => { settled = true })
+
+    await Simulate.pressKey(input, Keyboard.Enter)
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(settled).toBe(false)
+    expect(dialog.open).toBe(true)
+    unmount()
+  })
+
+  test('Dialog.confirm confirms on Enter when focus is in content TextEditor', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.confirm({
+      content: <TextEditor initialValue="typed" />,
+      title: 'Sure?',
+    })
+
+    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+    const input = await waitFor(() => dialog.querySelector<HTMLInputElement>('.text-editor .value'))
+
+    await Simulate.pressKey(input, Keyboard.Enter)
+
+    expect(await result).toBe(true)
     unmount()
   })
 })

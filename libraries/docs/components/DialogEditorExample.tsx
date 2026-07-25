@@ -2,6 +2,7 @@ import { Editor, TextEditor } from '@basis/react'
 
 interface Value {
   name: string,
+  notes: string,
   slug: string,
 }
 
@@ -18,6 +19,8 @@ export class DialogEditorExample extends Editor<Value, HTMLDivElement> {
         <div>
           <strong>Name</strong>
           <TextEditor
+            autoFocus
+            selectOnFocus
             field="name"
             placeholder="Name"
             value={this.current.name}
@@ -30,6 +33,16 @@ export class DialogEditorExample extends Editor<Value, HTMLDivElement> {
             field="slug"
             placeholder="slug"
             value={this.current.slug}
+            onChange={this.handleField}
+          />
+        </div>
+        <div>
+          <strong>Notes</strong>
+          <TextEditor
+            multiline
+            field="notes"
+            placeholder="Optional notes"
+            value={this.current.notes}
             onChange={this.handleField}
           />
         </div>

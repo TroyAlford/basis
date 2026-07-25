@@ -1,7 +1,6 @@
 import type * as React from 'react'
 import { NavigateEvent } from '../../events/NavigateEvent'
 import { Component } from '../Component/Component'
-import { Router } from './Router'
 
 import './Link.styles.ts'
 
@@ -51,6 +50,7 @@ export class Link extends Component<Props> {
 
     if (this.isActive) return // do not navigate if this is already the route
 
+    const { Router } = await import('./Router')
     await Router.navigate(this.props.to)
   }
 

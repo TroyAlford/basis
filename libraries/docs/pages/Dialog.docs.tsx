@@ -26,6 +26,7 @@ export class DialogDocs extends Documentation<State> {
       DialogEditorExample,
       {
         name: '',
+        notes: '',
         slug: '',
       },
       {
@@ -272,6 +273,30 @@ export class DialogDocs extends Documentation<State> {
               title: 'Remove tag?',
             })
           `)}
+        </section>
+        <section>
+          <h2>Keyboard</h2>
+          <p>
+            Keyboard behavior follows the normal DOM contract. Controls and editors inside the dialog decide
+            whether a key is handled locally by calling <code>preventDefault()</code> and/or{' '}
+            <code>stopPropagation()</code>. The dialog listens for bubbled <code>keydown</code> on the native{' '}
+            <code>&lt;dialog&gt;</code> element and wires the native <code>cancel</code> event for Escape
+            dismiss.
+          </p>
+          <ul>
+            <li>
+              <strong>Escape</strong> — native <code>cancel</code> on the modal dialog; resolves{' '}
+              <code>false</code> (same as Cancel).
+            </li>
+            <li>
+              <strong>Enter</strong> — when an unhandled Enter reaches the dialog (not{' '}
+              <code>defaultPrevented</code>, no modifier keys), activates the default footer action when the
+              dialog has exactly one non-cancel button, or exactly one primary (or affirmative) choice among
+              several. For example, multiline <code>TextEditor</code> stops propagation on Enter so the
+              browser inserts a newline without confirming; <code>TagsEditor</code> calls{' '}
+              <code>preventDefault()</code> when Enter adds a tag.
+            </li>
+          </ul>
         </section>
         <section>
           <h2>Related</h2>

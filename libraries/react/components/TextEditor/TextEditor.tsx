@@ -7,6 +7,7 @@ import type { IPlaceholder } from '../../mixins/Placeholder'
 import { Placeholder } from '../../mixins/Placeholder'
 import type { IPrefixSuffix } from '../../mixins/PrefixSuffix'
 import { PrefixSuffix } from '../../mixins/PrefixSuffix'
+import { Keyboard } from '../../types/Keyboard'
 import type { Mixin } from '../../types/Mixin.ts'
 import { Editor } from '../Editor/Editor'
 
@@ -83,6 +84,13 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     }
   }
 
+  #handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
+    if (this.props.multiline !== false && event.key === Keyboard.Enter) {
+      event.stopPropagation()
+    }
+    this.props.onKeyDown?.(event)
+  }
+
   override get attributes() {
     return {
       ...super.attributes,
@@ -137,7 +145,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
         wrap={this.props.wrap}
         onChange={this.#handleChange}
         onFocus={this.#handleFocus}
-        onKeyDown={this.props.onKeyDown}
+        onKeyDown={this.#handleKeyDown}
       />
     ) : (
       <input
@@ -150,7 +158,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
         value={this.current || ''}
         onChange={this.#handleChange}
         onFocus={this.#handleFocus}
-        onKeyDown={this.props.onKeyDown}
+        onKeyDown={this.#handleKeyDown}
       />
     )
 

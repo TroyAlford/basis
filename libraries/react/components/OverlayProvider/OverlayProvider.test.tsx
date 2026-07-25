@@ -5,16 +5,8 @@ import { Button } from '../Button/Button'
 import { Dialog } from './Dialog'
 import { Notification } from './Notification'
 import { OverlayProvider } from './OverlayProvider'
+import { resetOverlayProvider } from './OverlayProvider.testUtil.tsx'
 import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE'
-
-/**
- * Clears the process-local overlay provider singleton between tests.
- */
-async function resetOverlayProvider() {
-  const rendered = await render(<OverlayProvider />)
-  rendered.unmount()
-  await new Promise(resolve => setTimeout(resolve, 0))
-}
 
 /**
  * Renders a provider for a single test.
@@ -295,6 +287,7 @@ describe('OverlayProvider', () => {
 
       unmount()
     })
+
   })
 
   describe('Notification', () => {
