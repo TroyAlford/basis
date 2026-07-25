@@ -247,6 +247,21 @@ describe('Dialog keyboard', () => {
     unmount()
   })
 
+  test('Dialog.confirm cancels on Escape when focus is on the confirm button', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.confirm({
+      labelConfirm: 'Discard changes',
+      title: 'Discard unsaved changes?',
+    })
+
+    const discard = await findButton(node, 'Discard changes')
+    discard.focus()
+    await Simulate.pressKey(discard, Keyboard.Escape)
+
+    expect(await result).toBe(false)
+    unmount()
+  })
+
   test('Enter in a multiline TextEditor does not confirm Dialog.editor', async () => {
     const { node, unmount } = await render(<OverlayProvider />)
     const result = Dialog.editor(NameSlugEditor, { name: '', slug: '' }, { title: 'New' })

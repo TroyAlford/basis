@@ -184,11 +184,51 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   componentDidMount(): void {
     super.componentDidMount()
     this.#syncModalOpenState()
+    this.#bindNativeListeners()
   }
 
   componentDidUpdate(prevProps: Readonly<Props<unknown>>, prevState: Readonly<object>): void {
     super.componentDidUpdate(prevProps, prevState)
     if (prevProps.id !== this.props.id) this.#syncModalOpenState()
+    this.#bindNativeListeners()
+  }
+
+  componentWillUnmount(): void {
+    this.#unbindNativeListeners()
+    super.componentWillUnmount()
+  }
+
+  #listenerNode: HTMLDialogElement | null = null
+
+  #boundNativeCancel = (event: Event): void => {
+    event.preventDefault()
+    this.#dismiss()
+  }
+
+  #boundNativeKeyDown = (event: Event): void => {
+    if (event.defaultPrevented) return
+    if (!(event instanceof KeyboardEvent) || event.key !== Keyboard.Escape) return
+
+    event.preventDefault()
+    this.#dismiss()
+  }
+
+  #bindNativeListeners(): void {
+    const node = this.rootNode as HTMLDialogElement | null
+    if (!node || this.#listenerNode === node) return
+
+    this.#unbindNativeListeners()
+    node.addEventListener('cancel', this.#boundNativeCancel)
+    node.addEventListener('keydown', this.#boundNativeKeyDown)
+    this.#listenerNode = node
+  }
+
+  #unbindNativeListeners(): void {
+    if (!this.#listenerNode) return
+
+    this.#listenerNode.removeEventListener('cancel', this.#boundNativeCancel)
+    this.#listenerNode.removeEventListener('keydown', this.#boundNativeKeyDown)
+    this.#listenerNode = null
   }
 
   #dismiss(): void {
@@ -242,13 +282,6 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
 
   #handleKeyDown = (event: KeyboardEvent<HTMLDialogElement>): void => {
     if (event.defaultPrevented) return
-
-    if (event.key === Keyboard.Escape) {
-      event.preventDefault()
-      this.#dismiss()
-      return
-    }
-
     if (event.key !== Keyboard.Enter) return
     if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
 
