@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { parseTemplateURI } from '@basis/utilities'
 import { NavigateEvent } from '../../events/NavigateEvent'
+import { ensureNavigateRequestListener, registerNavigateHandler } from '../../events/NavigateRequestEvent'
 import { Component } from '../Component/Component'
 import { Dialog } from '../OverlayProvider/Dialog'
 import { Link } from './Link'
@@ -57,6 +58,11 @@ const isRouteComponent = (value: unknown): value is RouteComponent => (
  * </Router>
  */
 export class Router extends Component<Props> {
+  static {
+    registerNavigateHandler(url => Router.navigate(url))
+    ensureNavigateRequestListener()
+  }
+
   static current: Router | null = null
 
   static Link = Link
