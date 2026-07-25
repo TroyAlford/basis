@@ -59,10 +59,10 @@ const isRouteComponent = (value: unknown): value is RouteComponent => (
 export class Router extends Component<Props> {
   static current: Router | null = null
 
-  static Link: typeof Link
-  static Route: typeof Route
-  static Switch: typeof Switch
-  static Redirect: typeof Redirect
+  static Link = Link
+  static Route = Route
+  static Switch = Switch
+  static Redirect = Redirect
 
   static async navigate(url: string): Promise<boolean> {
     const router = Router.current
@@ -399,8 +399,3 @@ export class Router extends Component<Props> {
     )
   }
 }
-
-Router.Link = Link
-Router.Route = Route
-Router.Switch = Switch
-Router.Redirect = Redirect
