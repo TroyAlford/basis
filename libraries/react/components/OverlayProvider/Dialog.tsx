@@ -184,29 +184,60 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   componentDidMount(): void {
     super.componentDidMount()
     this.#syncModalOpenState()
-    this.#bindNativeCancel()
+    this.#bindNativeListeners()
+  }
+
+  componentDidUpdate(prevProps: Readonly<Props<unknown>>, prevState: Readonly<object>): void {
+    super.componentDidUpdate(prevProps, prevState)
+    if (prevProps.id !== this.props.id) this.#syncModalOpenState()
+    this.#bindNativeListeners()
   }
 
   componentWillUnmount(): void {
-    this.#unbindNativeCancel()
+    this.#unbindNativeListeners()
     super.componentWillUnmount()
   }
+
+  #listenerNode: HTMLDialogElement | null = null
 
   #boundNativeCancel = (event: Event): void => {
     event.preventDefault()
     this.#dismiss()
   }
 
-  #bindNativeCancel(): void {
-    this.rootNode?.addEventListener('cancel', this.#boundNativeCancel)
+  #boundNativeKeyDown = (event: Event): void => {
+    if (event.defaultPrevented) return
+    if (!(event instanceof KeyboardEvent) || event.key !== Keyboard.Escape) return
+
+    event.preventDefault()
+    this.#dismiss()
   }
 
-  #unbindNativeCancel(): void {
-    this.rootNode?.removeEventListener('cancel', this.#boundNativeCancel)
+  #bindNativeListeners(): void {
+    const node = this.rootNode as HTMLDialogElement | null
+    if (!node || this.#listenerNode === node) return
+
+    this.#unbindNativeListeners()
+    node.addEventListener('cancel', this.#boundNativeCancel)
+    node.addEventListener('keydown', this.#boundNativeKeyDown, true)
+    this.#listenerNode = node
+  }
+
+  #unbindNativeListeners(): void {
+    if (!this.#listenerNode) return
+
+    this.#listenerNode.removeEventListener('cancel', this.#boundNativeCancel)
+    this.#listenerNode.removeEventListener('keydown', this.#boundNativeKeyDown, true)
+    this.#listenerNode = null
   }
 
   #dismiss(): void {
     this.props.onResolve(false)
+  }
+
+  #handleCancel = (event: SyntheticEvent<HTMLDialogElement>): void => {
+    event.preventDefault()
+    this.#dismiss()
   }
 
   #syncModalOpenState(): void {
@@ -218,12 +249,15 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     } else if (!node.open) {
       node.setAttribute('open', '')
     }
+
+    node.focus()
   }
 
   get attributes() {
     return {
       ...super.attributes,
       'data-intent': this.props.intent ?? Dialog.Intent.Default,
+      'onCancel': this.#handleCancel,
       'onKeyDown': this.#handleKeyDown,
     }
   }

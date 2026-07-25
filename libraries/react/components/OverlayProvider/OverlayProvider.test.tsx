@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { render } from '../../testing/render'
+import { Simulate } from '../../testing/Simulate'
 import { waitFor } from '../../testing/waitFor'
+import { Keyboard } from '../../types/Keyboard'
 import { Button } from '../Button/Button'
 import { Dialog } from './Dialog'
 import { Notification } from './Notification'
@@ -74,6 +76,25 @@ describe('OverlayProvider', () => {
       dialog.dispatchEvent(new Event('cancel', { bubbles: false, cancelable: true }))
 
       expect(await result).toBe(false)
+
+      unmount()
+    })
+
+    test('Dialog.confirm cancels on Escape when focus is on the confirm button', async () => {
+      const { node, unmount } = await renderOverlayProvider()
+      const result = Dialog.confirm({
+        labelCancel: 'Stay',
+        labelConfirm: 'Discard changes',
+        title: 'Discard unsaved changes?',
+      })
+
+      const discard = await waitFor(() => Array.from(node.querySelectorAll('button'))
+        .find(button => button.textContent === 'Discard changes') as HTMLButtonElement | undefined)
+      discard.focus()
+      await Simulate.pressKey(discard, Keyboard.Escape)
+
+      expect(await result).toBe(false)
+      expect(node.querySelector('dialog')).toBeNull()
 
       unmount()
     })

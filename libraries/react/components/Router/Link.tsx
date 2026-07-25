@@ -1,5 +1,6 @@
 import type * as React from 'react'
 import { NavigateEvent } from '../../events/NavigateEvent'
+import { ensureNavigateRequestListener, NavigateRequestEvent } from '../../events/NavigateRequestEvent'
 import { Component } from '../Component/Component'
 
 import './Link.styles.ts'
@@ -45,13 +46,13 @@ export class Link extends Component<Props> {
       : false
   }
 
-  handleClick: React.MouseEventHandler<HTMLAnchorElement> = async event => {
+  handleClick: React.MouseEventHandler<HTMLAnchorElement> = event => {
     event.preventDefault()
 
     if (this.isActive) return // do not navigate if this is already the route
 
-    const { Router } = await import('./Router')
-    await Router.navigate(this.props.to)
+    ensureNavigateRequestListener()
+    window.dispatchEvent(new NavigateRequestEvent(this.props.to))
   }
 
   content(): React.ReactNode {

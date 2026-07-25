@@ -280,13 +280,13 @@ export class DialogDocs extends Documentation<State> {
             Keyboard behavior follows the normal DOM contract. Controls and editors inside the dialog decide
             whether a key is handled locally by calling <code>preventDefault()</code> and/or{' '}
             <code>stopPropagation()</code>. The dialog listens for bubbled <code>keydown</code> on the native{' '}
-            <code>&lt;dialog&gt;</code> element and wires the native <code>cancel</code> event for Escape
-            dismiss.
+            <code>&lt;dialog&gt;</code> element (Enter confirm) and handles Escape via native{' '}
+            <code>keydown</code> and <code>cancel</code> listeners on the modal.
           </p>
           <ul>
             <li>
-              <strong>Escape</strong> — native <code>cancel</code> on the modal dialog; resolves{' '}
-              <code>false</code> (same as Cancel).
+              <strong>Escape</strong> — native <code>keydown</code> (including when focus is on a footer
+              button) or <code>cancel</code> on the modal dialog; resolves <code>false</code> (same as Cancel).
             </li>
             <li>
               <strong>Enter</strong> — when an unhandled Enter reaches the dialog (not{' '}

@@ -3,6 +3,8 @@ import * as React from 'react'
 import { NavigateEvent } from '../../events/NavigateEvent'
 import { render } from '../../testing/render'
 import { Simulate } from '../../testing/Simulate'
+import { waitFor } from '../../testing/waitFor'
+import { Keyboard } from '../../types/Keyboard'
 import { Component } from '../Component/Component'
 import { Dialog } from '../OverlayProvider/Dialog'
 import { OverlayProvider } from '../OverlayProvider/OverlayProvider'
@@ -301,6 +303,38 @@ describe('Router', () => {
     } finally {
       rendered.unmount()
       confirm.mockRestore()
+      pushState.mockRestore()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('Escape on dirty navigation confirm stays without navigating', async () => {
+    window.location.pathname = '/dirty'
+    const overlayRendered = await render(<OverlayProvider />)
+    const pushState = spyOn(window.history, 'pushState')
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/dirty">
+          <DirtyRoute />
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      const pending = Router.navigate('/other')
+      await tick()
+
+      const discard = await waitFor(() => Array.from(overlayRendered.node.querySelectorAll('button'))
+        .find(button => button.textContent === 'Discard changes') as HTMLButtonElement | undefined)
+      discard.focus()
+      await Simulate.pressKey(discard, Keyboard.Escape)
+
+      expect(await pending).toBe(false)
+      expect(pushState).not.toHaveBeenCalled()
+      expect(overlayRendered.node.querySelector('dialog')).toBeNull()
+    } finally {
+      rendered.unmount()
       pushState.mockRestore()
       overlayRendered.unmount()
       await tick()
