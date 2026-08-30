@@ -210,14 +210,80 @@ describe('Dialog keyboard', () => {
     unmount()
   })
 
-  test('Dialog.editor cancels on native cancel event', async () => {
+  test('Escape listeners bind to the dialog element, not footer buttons', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    void Dialog.confirm({ title: 'Sure?' })
+
+    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+    const cancel = await findButton(node, 'Cancel')
+
+    let dialogHeard = false
+    let buttonHeard = false
+    const onDialog = () => { dialogHeard = true }
+    const onButton = () => { buttonHeard = true }
+
+    dialog.addEventListener('keydown', onDialog)
+    cancel.addEventListener('keydown', onButton)
+
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' }))
+
+    dialog.removeEventListener('keydown', onDialog)
+    cancel.removeEventListener('keydown', onButton)
+
+    expect(dialogHeard).toBe(true)
+    expect(buttonHeard).toBe(false)
+    unmount()
+  })
+
+  test('Dialog.confirm cancels on Escape when focus is on the primary button', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.confirm({ title: 'Sure?' })
+
+    const ok = await findButton(node, 'OK')
+    ok.focus()
+    await Simulate.pressKey(ok, Keyboard.Escape)
+
+    expect(await result).toBe(false)
+    unmount()
+  })
+
+  test('Dialog.editor cancels on Escape key', async () => {
     const { node, unmount } = await render(<OverlayProvider />)
     const result = Dialog.editor(NameSlugEditor, { name: '', slug: '' }, { title: 'New' })
 
     const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+    await Simulate.pressKey(dialog, Keyboard.Escape)
+
+    expect(await result).toBe(false)
+    unmount()
+  })
+
+  test('native cancel dismisses when Escape keydown did not run', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.confirm({ title: 'Sure?' })
+
+    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+
     dialog.dispatchEvent(new Event('cancel', { cancelable: true }))
 
     expect(await result).toBe(false)
+    unmount()
+  })
+
+  test('Escape keydown dismisses once when cancel also fires', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const result = Dialog.confirm({ title: 'Sure?' })
+
+    const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
+
+    let resolveCount = 0
+    void result.then(() => { resolveCount += 1 })
+
+    await Simulate.pressKey(dialog, Keyboard.Escape)
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(await result).toBe(false)
+    expect(resolveCount).toBe(1)
     unmount()
   })
 

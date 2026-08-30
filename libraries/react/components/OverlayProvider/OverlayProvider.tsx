@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import { createRef } from 'react'
 import { hash } from '@basis/utilities/functions/hash'
 import { Intent } from '../../types/Intent'
-import { Keyboard } from '../../types/Keyboard'
 import { Component } from '../Component/Component'
 import type { DialogButton, IDialog } from './Dialog'
 import { Dialog } from './Dialog'
@@ -34,8 +33,6 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
   }
 
   #notificationTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
-  #attachedDialogNode: HTMLDialogElement | null = null
-  #attachDialogAttempts = 0
 
   get defaultState(): State {
     return {
@@ -45,72 +42,24 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     }
   }
 
+  constructor(props: object) {
+    super(props)
+    if (typeof window !== 'undefined') window.overlayProvider = this
+  }
+
   componentDidMount(): void {
     super.componentDidMount()
-    if (typeof window !== 'undefined') {
-      window.overlayProvider = this
-      window.addEventListener('keydown', this.#handleWindowKeyDown)
-    }
+    if (typeof window !== 'undefined') window.overlayProvider = this
   }
 
   componentWillUnmount(): void {
     this.#resolvePendingDialogs()
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('keydown', this.#handleWindowKeyDown)
-      if (window.overlayProvider === this) window.overlayProvider = undefined
+    if (typeof window !== 'undefined' && window.overlayProvider === this) {
+      window.overlayProvider = undefined
     }
-    this.#detachActiveDialogListeners()
     this.#notificationTimeouts.forEach(timeout => clearTimeout(timeout))
     this.#notificationTimeouts.clear()
     super.componentWillUnmount()
-  }
-
-  #handleWindowKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== Keyboard.Escape || event.defaultPrevented) return
-    if (!this.state.activeDialog) return
-
-    event.preventDefault()
-    this.#resolveDialog(false)
-  }
-
-  #handleActiveDialogCancel = (event: Event): void => {
-    event.preventDefault()
-    this.#resolveDialog(false)
-  }
-
-  #handleActiveDialogKeyDown = (event: Event): void => {
-    if (event.defaultPrevented) return
-    if (!(event instanceof KeyboardEvent) || event.key !== Keyboard.Escape) return
-
-    event.preventDefault()
-    this.#resolveDialog(false)
-  }
-
-  #attachActiveDialogListeners(): void {
-    const node = this.state.activeDialog?.nodeRef.current
-    if (!(node instanceof HTMLDialogElement)) {
-      if (this.state.activeDialog && this.#attachDialogAttempts < 5) {
-        this.#attachDialogAttempts += 1
-        requestAnimationFrame(() => this.#attachActiveDialogListeners())
-      }
-      return
-    }
-
-    this.#attachDialogAttempts = 0
-    if (this.#attachedDialogNode === node) return
-
-    this.#detachActiveDialogListeners()
-    node.addEventListener('cancel', this.#handleActiveDialogCancel)
-    node.addEventListener('keydown', this.#handleActiveDialogKeyDown, true)
-    this.#attachedDialogNode = node
-  }
-
-  #detachActiveDialogListeners(): void {
-    if (!this.#attachedDialogNode) return
-
-    this.#attachedDialogNode.removeEventListener('cancel', this.#handleActiveDialogCancel)
-    this.#attachedDialogNode.removeEventListener('keydown', this.#handleActiveDialogKeyDown, true)
-    this.#attachedDialogNode = null
   }
 
   createNotification(request: Partial<INotification>) {
@@ -160,7 +109,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
         state.activeDialog
           ? { activeDialog: state.activeDialog, dialogQueue: [...state.dialogQueue, entry] }
           : { activeDialog: entry, dialogQueue: state.dialogQueue }
-      ), () => this.#attachActiveDialogListeners())
+      ))
     })
   }
 
@@ -178,7 +127,6 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     const { activeDialog } = this.state
     if (!activeDialog) return
 
-    this.#detachActiveDialogListeners()
     activeDialog.nodeRef.current?.close()
     activeDialog.onResolve(value)
 
@@ -188,7 +136,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
         activeDialog: nextDialog ?? null,
         dialogQueue,
       }
-    }, () => this.#attachActiveDialogListeners())
+    })
   }
 
   #resolvePendingDialogs(): void {

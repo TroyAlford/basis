@@ -1,13 +1,21 @@
 import { describe, expect, test } from 'bun:test'
 import { Intent } from '../../types/Intent'
 import { Button } from '../Button/Button'
-import { dialogDefaultButtonIndex, isDialogCancelButton } from './DialogKeyboard.ts'
+import { dialogCancelButtonIndex, dialogDefaultButtonIndex, isDialogCancelButton } from './DialogKeyboard.ts'
 
 describe('DialogKeyboard', () => {
   test('isDialogCancelButton detects cancel footer buttons', () => {
     expect(isDialogCancelButton({ label: 'Cancel', value: false })).toBe(true)
     expect(isDialogCancelButton(<Button data-value={false}>Cancel</Button>)).toBe(true)
     expect(isDialogCancelButton(<Button data-value={true}>OK</Button>)).toBe(false)
+  })
+
+  test('dialogCancelButtonIndex picks the sole cancel button', () => {
+    const buttons = [
+      { intent: Intent.Primary, label: 'OK', value: true },
+      { label: 'Cancel', value: false },
+    ]
+    expect(dialogCancelButtonIndex(buttons)).toBe(1)
   })
 
   test('dialogDefaultButtonIndex picks the sole non-cancel button', () => {

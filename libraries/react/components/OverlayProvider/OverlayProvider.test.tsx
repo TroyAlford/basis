@@ -68,12 +68,12 @@ describe('OverlayProvider', () => {
       unmount()
     })
 
-    test('Dialog.open default native cancel resolves false', async () => {
+    test('Dialog.open default Escape resolves false', async () => {
       const { node, unmount } = await renderOverlayProvider()
       const result = Dialog.open()
 
       const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
-      dialog.dispatchEvent(new Event('cancel', { bubbles: false, cancelable: true }))
+      await Simulate.pressKey(dialog, Keyboard.Escape)
 
       expect(await result).toBe(false)
 
@@ -194,7 +194,7 @@ describe('OverlayProvider', () => {
       expect(await second).toBe(false)
     })
 
-    test('native cancel resolves false', async () => {
+    test('Escape resolves false', async () => {
       const { node, unmount } = await renderOverlayProvider()
       const result = Dialog.open<'ok' | 'cancel'>({
         buttons: [
@@ -204,7 +204,7 @@ describe('OverlayProvider', () => {
       })
 
       const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
-      dialog.dispatchEvent(new Event('cancel', { bubbles: false, cancelable: true }))
+      await Simulate.pressKey(dialog, Keyboard.Escape)
 
       expect(await result).toBe(false)
       await waitFor(() => !node.querySelector('dialog'))

@@ -248,9 +248,11 @@ export class Router extends Component<Props> {
       this.forceUpdate()
     }
 
+    const route = leaving ?? this.#routeComponent
+
     let allowed: boolean
     try {
-      allowed = await this.#canNavigateWithRoute(attempted, leaving)
+      allowed = await this.#canNavigateWithRoute(attempted, route)
     } catch (error) {
       this.#revertDeniedPopNavigation(delta)
       throw error

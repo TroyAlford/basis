@@ -737,6 +737,41 @@ describe('Router', () => {
     }
   })
 
+  test('popstate with dirty route renders a native dialog element', async () => {
+    window.location.pathname = '/dirty'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/dirty">
+          <DirtyRoute />
+        </Router.Route>
+        <Router.Route template="/away">
+          <span className="away">away</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      window.history.replaceState({ basisIndex: 0 }, '', '/away')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      const dialog = overlayRendered.node.querySelector('dialog.dialog.component')
+      expect(dialog).toBeInstanceOf(HTMLDialogElement)
+      expect((dialog as HTMLDialogElement).open).toBe(true)
+      expect(dialog?.textContent).toContain('Discard changes')
+    } finally {
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
   test('popstate onto clean TextEditor does not call Dialog.confirm before the editor mounts', async () => {
     window.location.pathname = '/home'
     const overlayRendered = await render(<OverlayProvider />)
