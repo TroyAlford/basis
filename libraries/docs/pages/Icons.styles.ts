@@ -5,7 +5,6 @@ import.meta.hot.accept()
 style('basis:docs:icons', css`
   .icon-demo-container {
     --basis-icon-color: var(--demo-icon-color, currentColor);
-    --basis-icon-stroke: var(--demo-icon-color, currentColor);
     --basis-icon-size: var(--demo-icon-size, 1em);
   }
   .icons-docs {
@@ -150,7 +149,6 @@ style('basis:docs:icons', css`
 
     .moon-demo-container {
       --basis-icon-color: var(--demo-icon-color, currentColor);
-      --basis-icon-stroke: var(--demo-icon-color, currentColor);
       --basis-icon-size: 120px;
       background-color: white;
       border: 1px solid #dee2e6;
@@ -164,6 +162,39 @@ style('basis:docs:icons', css`
       font-size: 14px;
       font-weight: 500;
       text-align: center;
+    }
+
+    .overlay-section {
+      background-color: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      margin-bottom: 24px;
+      padding: 24px;
+
+      > .overlay-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+
+        > .overlay-row {
+          display: grid;
+          gap: 16px;
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+
+      > .overlay-demo-container {
+        align-items: center;
+        background-color: white;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        display: flex;
+        justify-content: center;
+        min-height: 240px;
+      }
     }
 
   }

@@ -11,9 +11,15 @@ import './IconBase.styles.ts'
 export type IconProps<P = object> = Component<{
   disabled?: boolean,
   filled?: boolean,
+  height?: number | string,
   onClick?: MouseEventHandler<SVGSVGElement>,
-  overlay?: typeof IconBase,
+  overlay?: React.ReactElement | typeof IconBase,
+  paintOrder?: string,
+  strokeWidth?: number | string,
   title?: string,
+  width?: number | string,
+  x?: number | string,
+  y?: number | string,
 }>['props'] & P
 
 export abstract class IconBase<
@@ -26,14 +32,14 @@ export abstract class IconBase<
       filled: false,
       onClick: noop,
       overlay: null,
-      overlayColor: 'var(--basis-icon-overlay-color, currentColor)',
-      overlayStroke: 'var(--basis-icon-overlay-stroke)',
-      stroke: 'var(--basis-icon-stroke, transparent)',
     }
   }
   static isIcon(ctor: unknown): ctor is new (...args: unknown[]) => IconBase {
     return typeof ctor === 'function' && ctor.prototype instanceof IconBase
   }
+
+  static #nextOverlayMask = 0
+  #overlayMaskId = `overlay-${IconBase.#nextOverlayMask++}`
 
   renderContent: () => React.ReactNode = () => null
   viewBox = '-100 -100 200 200'
@@ -42,18 +48,24 @@ export abstract class IconBase<
   get tag() { return 'svg' as const }
 
   get attributes() {
-    const { disabled, onClick } = this.props
+    const { disabled, height, onClick, paintOrder, strokeWidth, width, x, y } = this.props
     const clickable = Boolean(!disabled && onClick !== noop)
 
     return {
       ...super.attributes,
       'aria-label': this.props.title,
+      'height': height,
       'onClick': clickable ? onClick : undefined,
+      'paintOrder': paintOrder,
       'role': clickable ? 'button' : 'img',
+      'strokeWidth': strokeWidth,
       'tabIndex': clickable ? 0 : undefined,
       'version': '1.1',
       'viewBox': this.viewBox,
+      'width': width,
+      'x': x,
       'xmlns': 'http://www.w3.org/2000/svg',
+      'y': y,
     }
   }
 
@@ -92,26 +104,54 @@ export abstract class IconBase<
   }
 
   content(): React.ReactNode {
-    const { overlay, title } = this.props
-    const Overlay = overlay as typeof IconBase
+    const { title } = this.props
+    const overlayElement = this.#overlayElement()
+
+    if (!overlayElement) {
+      return (
+        <g style={{ pointerEvents: 'none' }}>
+          {title && <title>{title}</title>}
+          {this.renderContent()}
+        </g>
+      )
+    }
+
+    const overlayMask = this.mask(this.#overlayMaskId, React.cloneElement(overlayElement, {
+      className: { mask: true, overlay: true },
+      filled: true,
+      height: 100,
+      paintOrder: 'stroke',
+      strokeWidth: 40,
+      width: 100,
+      x: 0,
+      y: 0,
+    }))
 
     return (
       <g style={{ pointerEvents: 'none' }}>
         {title && <title>{title}</title>}
-        {this.renderContent()}
-        {Overlay && ( // @ts-expect-error - TS doesn't like the SVGProps definitions
-          <Overlay
-            className="overlay"
-            height={50}
-            paintOrder="stroke"
-            strokeWidth={50}
-            width={50}
-            x={50}
-            y={50}
-          />
-        )}
+        <defs>{overlayMask}</defs>
+        <g mask={overlayMask.props.url}>
+          {this.renderContent()}
+        </g>
+        {React.cloneElement(overlayElement, {
+          className: 'overlay',
+          height: 100,
+          paintOrder: 'stroke',
+          width: 100,
+          x: 0,
+          y: 0,
+        })}
       </g>
     )
+  }
+
+  #overlayElement(): React.ReactElement<IconProps> | null {
+    const { filled, overlay } = this.props
+    if (React.isValidElement(overlay)) return overlay as React.ReactElement<IconProps>
+    if (!overlay) return null
+
+    return React.createElement(overlay as unknown as React.ComponentType<IconProps>, { filled })
   }
 
   /**

@@ -1,7 +1,8 @@
-import type { ComponentType } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import type { IconProps } from '@basis/react'
-import { Button, css, NumberEditor, Router, style, TextEditor } from '@basis/react'
+import { Button, css, EnumEditor, NumberEditor, Router, style, TextEditor } from '@basis/react'
 import * as Icons from '@basis/react/icons'
+import { IconBase } from '../../react/icons/IconBase/IconBase'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
 
@@ -11,6 +12,13 @@ interface State {
   color: string,
   filled: boolean,
   filterText: string,
+  iconColor: string,
+  iconFilled: boolean,
+  overlayColor: string,
+  overlayFilled: boolean,
+  overlayIcon: string,
+  overlaySize: number,
+  primaryIcon: string,
   showNames: boolean,
   size: number,
 }
@@ -22,6 +30,13 @@ export class IconsDocs extends Documentation<State> {
       color: '#000000',
       filled: false,
       filterText: '',
+      iconColor: '#222222',
+      iconFilled: false,
+      overlayColor: '#66aa66',
+      overlayFilled: false,
+      overlayIcon: 'Plus',
+      overlaySize: 192,
+      primaryIcon: 'Lightning',
       showNames: true,
       size: 60,
     },
@@ -64,6 +79,29 @@ export class IconsDocs extends Documentation<State> {
     )
   }
 
+  get overlayableIconEnum(): Record<string, string> {
+    return Object.fromEntries(
+      Object.entries(Icons)
+        .filter(([, ctor]) => IconBase.isIcon(ctor))
+        .map(([name]) => [name, name])
+        .sort(([a], [b]) => a.localeCompare(b)),
+    )
+  }
+
+  renderOverlayDemo = (): ReactNode => {
+    const { iconFilled, overlayFilled, overlayIcon, primaryIcon } = this.current
+    const icons = Icons as unknown as Record<string, ComponentType<IconProps>>
+    const Main = icons[primaryIcon]
+    const Overlay = icons[overlayIcon]
+    if (!Main || !Overlay) return null
+
+    if (overlayFilled === iconFilled) {
+      return <Main filled={iconFilled} overlay={Overlay as unknown as typeof IconBase} />
+    }
+
+    return <Main filled={iconFilled} overlay={<Overlay filled={overlayFilled} />} />
+  }
+
   renderSpecialIcons = () => (
     <div className="special-icons-grid">
       {/* Triangle Component */}
@@ -100,11 +138,20 @@ export class IconsDocs extends Documentation<State> {
   )
 
   content() {
-    const { color, filled, filterText, showNames, size } = this.current
+    const {
+      color, filled, filterText, iconColor, iconFilled, overlayColor, overlayFilled,
+      overlayIcon, overlaySize, primaryIcon, showNames, size,
+    } = this.current
     style('basis:docs:icons:dynamic', css`
       .icon-demo-container {
         --demo-icon-color: ${color};
         --demo-icon-size: ${size}px;
+      }
+
+      .overlay-demo-container {
+        --basis-icon-color: ${iconColor};
+        --basis-icon-overlay-color: ${overlayColor};
+        --basis-icon-size: ${overlaySize}px;
       }
     `)
 
@@ -241,11 +288,9 @@ export class IconsDocs extends Documentation<State> {
           support the following styling options:
         </p>
         <ul>
-          <li><strong>--basis-icon-size</strong> - Icon size (default: 1em)</li>
           <li><strong>--basis-icon-color</strong> - Icon color (default: currentColor, shown as #000000 in picker)</li>
-          <li><strong>--basis-icon-stroke</strong> - Icon stroke color (default: transparent)</li>
           <li><strong>--basis-icon-overlay-color</strong> - Overlay color (default: currentColor)</li>
-          <li><strong>--basis-icon-overlay-stroke</strong> - Overlay stroke color (default: currentColor)</li>
+          <li><strong>--basis-icon-size</strong> - Icon size (default: 1em)</li>
         </ul>
         <h3>Icon Props</h3>
         <p>
@@ -254,8 +299,99 @@ export class IconsDocs extends Documentation<State> {
         <ul>
           <li><strong>disabled</strong> - Whether the icon is disabled (default: false)</li>
           <li><strong>onClick</strong> - Click handler function</li>
-          <li><strong>overlay</strong> - Overlay component for additional graphics</li>
+          <li>
+            <strong>overlay</strong> - Component (inherits <code>filled</code>) or element (keeps its own) in the
+            lower-right quadrant
+          </li>
         </ul>
+        <h2>Overlays</h2>
+        <p>
+          Pass another icon as <code>overlay</code>. It fills the lower-right quadrant of the viewBox
+          (half the width and height, a quarter of the area). A component overlay inherits
+          {' '}<code>filled</code> from the main icon; pass an element to override. Color the main icon with
+          {' '}<code>--basis-icon-color</code> and the overlay with <code>--basis-icon-overlay-color</code>.
+        </p>
+        <div className="overlay-section">
+          <div className="overlay-controls">
+            <div className="overlay-row">
+              <div className="control-group">
+                <label>Main Icon</label>
+                <EnumEditor
+                  enum={this.overlayableIconEnum}
+                  value={primaryIcon}
+                  onChange={value => void this.handleField(String(value), 'primaryIcon')}
+                />
+              </div>
+              <div className="control-group">
+                <label>Overlay Icon</label>
+                <EnumEditor
+                  enum={this.overlayableIconEnum}
+                  value={overlayIcon}
+                  onChange={value => void this.handleField(String(value), 'overlayIcon')}
+                />
+              </div>
+              <div className="control-group">
+                <label>Icon Size: {overlaySize}px</label>
+                <NumberEditor
+                  step={4}
+                  value={overlaySize}
+                  onChange={value => void this.handleField(value, 'overlaySize')}
+                />
+              </div>
+            </div>
+            <div className="overlay-row">
+              <div className="control-group">
+                <label>Main color</label>
+                <input
+                  className="color-input"
+                  type="color"
+                  value={iconColor}
+                  onChange={event => void this.handleField(event.target.value, 'iconColor')}
+                />
+              </div>
+              <div className="control-group">
+                <label>Filled</label>
+                <Button
+                  className={iconFilled ? 'primary' : 'secondary'}
+                  onActivate={() => void this.handleField(!iconFilled, 'iconFilled')}
+                >
+                  {iconFilled ? 'Filled' : 'Outline'}
+                </Button>
+              </div>
+            </div>
+            <div className="overlay-row">
+              <div className="control-group">
+                <label>Overlay color</label>
+                <input
+                  className="color-input"
+                  type="color"
+                  value={overlayColor}
+                  onChange={event => void this.handleField(event.target.value, 'overlayColor')}
+                />
+              </div>
+              <div className="control-group">
+                <label>Filled</label>
+                <Button
+                  className={overlayFilled ? 'primary' : 'secondary'}
+                  onActivate={() => void this.handleField(!overlayFilled, 'overlayFilled')}
+                >
+                  {overlayFilled ? 'Filled' : 'Outline'}
+                </Button>
+              </div>
+            </div>
+          </div>
+          <div className="overlay-demo-container">
+            {this.renderOverlayDemo()}
+          </div>
+        </div>
+        {Code.format(`
+          import { Lightning, Plus } from '@basis/react'
+
+          <Lightning overlay={Plus} />
+          <Lightning filled overlay={Plus} />
+          <Lightning overlay={<Plus filled />} />
+          <Lightning filled overlay={<Plus />} />
+        `)}
         <h2>Accessibility</h2>
         <p>
           All icons are built with accessibility in mind:
@@ -276,7 +412,6 @@ export class IconsDocs extends Documentation<State> {
           .my-icon-container {
             --basis-icon-color: #000000;
             --basis-icon-size: 32px;
-            --basis-icon-stroke: #0056b3;
             transition: --basis-icon-color 0.2s ease;
           }
 
