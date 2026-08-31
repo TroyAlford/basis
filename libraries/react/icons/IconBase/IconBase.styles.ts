@@ -22,9 +22,17 @@ style('basis:icon', css`
       cursor: pointer;
     }
 
-    > .overlay {
+    > .overlay,
+    &.overlay {
+      --basis-icon-color: var(--basis-icon-overlay-color);
+      --basis-icon-stroke: var(--basis-icon-overlay-stroke);
+      display: unset;
       fill: var(--basis-icon-overlay-color);
+      height: unset;
+      margin: 0;
+      overflow: visible;
       stroke: var(--basis-icon-overlay-stroke);
+      width: unset;
     }
   }
 `)

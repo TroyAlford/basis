@@ -11,9 +11,17 @@ import './IconBase.styles.ts'
 export type IconProps<P = object> = Component<{
   disabled?: boolean,
   filled?: boolean,
+  height?: number | string,
   onClick?: MouseEventHandler<SVGSVGElement>,
-  overlay?: typeof IconBase,
+  overlay?: React.ReactElement | typeof IconBase,
+  overlayColor?: string,
+  overlayStroke?: string,
+  paintOrder?: string,
+  strokeWidth?: number | string,
   title?: string,
+  width?: number | string,
+  x?: number | string,
+  y?: number | string,
 }>['props'] & P
 
 export abstract class IconBase<
@@ -42,18 +50,24 @@ export abstract class IconBase<
   get tag() { return 'svg' as const }
 
   get attributes() {
-    const { disabled, onClick } = this.props
+    const { disabled, height, onClick, paintOrder, strokeWidth, width, x, y } = this.props
     const clickable = Boolean(!disabled && onClick !== noop)
 
     return {
       ...super.attributes,
       'aria-label': this.props.title,
+      'height': height,
       'onClick': clickable ? onClick : undefined,
+      'paintOrder': paintOrder,
       'role': clickable ? 'button' : 'img',
+      'strokeWidth': strokeWidth,
       'tabIndex': clickable ? 0 : undefined,
       'version': '1.1',
       'viewBox': this.viewBox,
+      'width': width,
+      'x': x,
       'xmlns': 'http://www.w3.org/2000/svg',
+      'y': y,
     }
   }
 
@@ -92,24 +106,26 @@ export abstract class IconBase<
   }
 
   content(): React.ReactNode {
-    const { overlay, title } = this.props
-    const Overlay = overlay as typeof IconBase
+    const { filled, overlay, title } = this.props
+    const overlayElement: React.ReactElement<IconProps> | null = React.isValidElement(overlay)
+      ? overlay as React.ReactElement<IconProps>
+      : overlay
+        ? React.createElement(overlay as unknown as React.ComponentType<IconProps>, { filled })
+        : null
 
     return (
       <g style={{ pointerEvents: 'none' }}>
         {title && <title>{title}</title>}
         {this.renderContent()}
-        {Overlay && ( // @ts-expect-error - TS doesn't like the SVGProps definitions
-          <Overlay
-            className="overlay"
-            height={50}
-            paintOrder="stroke"
-            strokeWidth={50}
-            width={50}
-            x={50}
-            y={50}
-          />
-        )}
+        {overlayElement && React.cloneElement(overlayElement, {
+          className: 'overlay',
+          height: 100,
+          paintOrder: 'stroke',
+          strokeWidth: 50,
+          width: 100,
+          x: 0,
+          y: 0,
+        })}
       </g>
     )
   }
