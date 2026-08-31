@@ -14,12 +14,10 @@ interface State {
   filterText: string,
   iconColor: string,
   iconFilled: boolean,
-  iconStroke: string,
   overlayColor: string,
   overlayFilled: boolean,
   overlayIcon: string,
   overlaySize: number,
-  overlayStroke: string,
   primaryIcon: string,
   showNames: boolean,
   size: number,
@@ -34,12 +32,10 @@ export class IconsDocs extends Documentation<State> {
       filterText: '',
       iconColor: '#222222',
       iconFilled: false,
-      iconStroke: '#222222',
       overlayColor: '#66aa66',
       overlayFilled: false,
       overlayIcon: 'Plus',
       overlaySize: 192,
-      overlayStroke: '#558855',
       primaryIcon: 'Lightning',
       showNames: true,
       size: 60,
@@ -143,8 +139,8 @@ export class IconsDocs extends Documentation<State> {
 
   content() {
     const {
-      color, filled, filterText, iconColor, iconFilled, iconStroke, overlayColor, overlayFilled,
-      overlayIcon, overlaySize, overlayStroke, primaryIcon, showNames, size,
+      color, filled, filterText, iconColor, iconFilled, overlayColor, overlayFilled,
+      overlayIcon, overlaySize, primaryIcon, showNames, size,
     } = this.current
     style('basis:docs:icons:dynamic', css`
       .icon-demo-container {
@@ -155,9 +151,7 @@ export class IconsDocs extends Documentation<State> {
       .overlay-demo-container {
         --basis-icon-color: ${iconColor};
         --basis-icon-overlay-color: ${overlayColor};
-        --basis-icon-overlay-stroke: ${overlayStroke};
         --basis-icon-size: ${overlaySize}px;
-        --basis-icon-stroke: ${iconStroke};
       }
     `)
 
@@ -294,11 +288,9 @@ export class IconsDocs extends Documentation<State> {
           support the following styling options:
         </p>
         <ul>
-          <li><strong>--basis-icon-size</strong> - Icon size (default: 1em)</li>
           <li><strong>--basis-icon-color</strong> - Icon color (default: currentColor, shown as #000000 in picker)</li>
-          <li><strong>--basis-icon-stroke</strong> - Icon stroke color (default: transparent)</li>
           <li><strong>--basis-icon-overlay-color</strong> - Overlay color (default: currentColor)</li>
-          <li><strong>--basis-icon-overlay-stroke</strong> - Overlay stroke color (default: currentColor)</li>
+          <li><strong>--basis-icon-size</strong> - Icon size (default: 1em)</li>
         </ul>
         <h3>Icon Props</h3>
         <p>
@@ -317,8 +309,7 @@ export class IconsDocs extends Documentation<State> {
           Pass another icon as <code>overlay</code>. It fills the lower-right quadrant of the viewBox
           (half the width and height, a quarter of the area). A component overlay inherits
           {' '}<code>filled</code> from the main icon; pass an element to override. Color the main icon with
-          {' '}<code>--basis-icon-color</code> and <code>--basis-icon-stroke</code>, and the overlay with
-          {' '}<code>--basis-icon-overlay-color</code> and <code>--basis-icon-overlay-stroke</code>.
+          {' '}<code>--basis-icon-color</code> and the overlay with <code>--basis-icon-overlay-color</code>.
         </p>
         <div className="overlay-section">
           <div className="overlay-controls">
@@ -350,16 +341,7 @@ export class IconsDocs extends Documentation<State> {
             </div>
             <div className="overlay-row">
               <div className="control-group">
-                <label>Main stroke</label>
-                <input
-                  className="color-input"
-                  type="color"
-                  value={iconStroke}
-                  onChange={event => void this.handleField(event.target.value, 'iconStroke')}
-                />
-              </div>
-              <div className="control-group">
-                <label>Main fill</label>
+                <label>Main color</label>
                 <input
                   className="color-input"
                   type="color"
@@ -379,16 +361,7 @@ export class IconsDocs extends Documentation<State> {
             </div>
             <div className="overlay-row">
               <div className="control-group">
-                <label>Overlay stroke</label>
-                <input
-                  className="color-input"
-                  type="color"
-                  value={overlayStroke}
-                  onChange={event => void this.handleField(event.target.value, 'overlayStroke')}
-                />
-              </div>
-              <div className="control-group">
-                <label>Overlay fill</label>
+                <label>Overlay color</label>
                 <input
                   className="color-input"
                   type="color"
@@ -439,7 +412,6 @@ export class IconsDocs extends Documentation<State> {
           .my-icon-container {
             --basis-icon-color: #000000;
             --basis-icon-size: 32px;
-            --basis-icon-stroke: #0056b3;
             transition: --basis-icon-color 0.2s ease;
           }
 

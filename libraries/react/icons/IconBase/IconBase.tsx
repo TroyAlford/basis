@@ -14,8 +14,6 @@ export type IconProps<P = object> = Component<{
   height?: number | string,
   onClick?: MouseEventHandler<SVGSVGElement>,
   overlay?: React.ReactElement | typeof IconBase,
-  overlayColor?: string,
-  overlayStroke?: string,
   paintOrder?: string,
   strokeWidth?: number | string,
   title?: string,
@@ -34,14 +32,14 @@ export abstract class IconBase<
       filled: false,
       onClick: noop,
       overlay: null,
-      overlayColor: 'var(--basis-icon-overlay-color, currentColor)',
-      overlayStroke: 'var(--basis-icon-overlay-stroke)',
-      stroke: 'var(--basis-icon-stroke, transparent)',
     }
   }
   static isIcon(ctor: unknown): ctor is new (...args: unknown[]) => IconBase {
     return typeof ctor === 'function' && ctor.prototype instanceof IconBase
   }
+
+  static #nextOverlayMask = 0
+  #overlayMaskId = `overlay-${IconBase.#nextOverlayMask++}`
 
   renderContent: () => React.ReactNode = () => null
   viewBox = '-100 -100 200 200'
@@ -106,28 +104,54 @@ export abstract class IconBase<
   }
 
   content(): React.ReactNode {
-    const { filled, overlay, title } = this.props
-    const overlayElement: React.ReactElement<IconProps> | null = React.isValidElement(overlay)
-      ? overlay as React.ReactElement<IconProps>
-      : overlay
-        ? React.createElement(overlay as unknown as React.ComponentType<IconProps>, { filled })
-        : null
+    const { title } = this.props
+    const overlayElement = this.#overlayElement()
+
+    if (!overlayElement) {
+      return (
+        <g style={{ pointerEvents: 'none' }}>
+          {title && <title>{title}</title>}
+          {this.renderContent()}
+        </g>
+      )
+    }
+
+    const overlayMask = this.mask(this.#overlayMaskId, React.cloneElement(overlayElement, {
+      className: { mask: true, overlay: true },
+      filled: true,
+      height: 100,
+      paintOrder: 'stroke',
+      strokeWidth: 40,
+      width: 100,
+      x: 0,
+      y: 0,
+    }))
 
     return (
       <g style={{ pointerEvents: 'none' }}>
         {title && <title>{title}</title>}
-        {this.renderContent()}
-        {overlayElement && React.cloneElement(overlayElement, {
+        <defs>{overlayMask}</defs>
+        <g mask={overlayMask.props.url}>
+          {this.renderContent()}
+        </g>
+        {React.cloneElement(overlayElement, {
           className: 'overlay',
           height: 100,
           paintOrder: 'stroke',
-          strokeWidth: 50,
           width: 100,
           x: 0,
           y: 0,
         })}
       </g>
     )
+  }
+
+  #overlayElement(): React.ReactElement<IconProps> | null {
+    const { filled, overlay } = this.props
+    if (React.isValidElement(overlay)) return overlay as React.ReactElement<IconProps>
+    if (!overlay) return null
+
+    return React.createElement(overlay as unknown as React.ComponentType<IconProps>, { filled })
   }
 
   /**

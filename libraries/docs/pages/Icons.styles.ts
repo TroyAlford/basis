@@ -5,7 +5,6 @@ import.meta.hot.accept()
 style('basis:docs:icons', css`
   .icon-demo-container {
     --basis-icon-color: var(--demo-icon-color, currentColor);
-    --basis-icon-stroke: var(--demo-icon-color, currentColor);
     --basis-icon-size: var(--demo-icon-size, 1em);
   }
   .icons-docs {
@@ -150,7 +149,6 @@ style('basis:docs:icons', css`
 
     .moon-demo-container {
       --basis-icon-color: var(--demo-icon-color, currentColor);
-      --basis-icon-stroke: var(--demo-icon-color, currentColor);
       --basis-icon-size: 120px;
       background-color: white;
       border: 1px solid #dee2e6;

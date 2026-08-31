@@ -4,9 +4,7 @@ style('basis:icon', css`
   :root {
     --basis-icon-color: currentColor;
     --basis-icon-overlay-color: currentColor;
-    --basis-icon-overlay-stroke: currentColor;
     --basis-icon-size: 1em;
-    --basis-icon-stroke: currentColor;
   }
 
   svg.icon.component {
@@ -14,7 +12,7 @@ style('basis:icon', css`
     fill: var(--basis-icon-color);
     height: var(--basis-icon-size, 1em);
     margin: .1em;
-    stroke: var(--basis-icon-stroke);
+    stroke: var(--basis-icon-color);
     vertical-align: middle;
     width: var(--basis-icon-size, 1em);
 
@@ -25,14 +23,23 @@ style('basis:icon', css`
     > .overlay,
     &.overlay {
       --basis-icon-color: var(--basis-icon-overlay-color);
-      --basis-icon-stroke: var(--basis-icon-overlay-stroke);
       display: unset;
-      fill: var(--basis-icon-overlay-color);
       height: unset;
       margin: 0;
       overflow: visible;
-      stroke: var(--basis-icon-overlay-stroke);
       width: unset;
+
+      &.mask {
+        --basis-icon-color: #000;
+        fill: #000;
+        stroke: #000;
+
+        circle, ellipse, line, path, polygon, polyline, rect {
+          fill: #000;
+          stroke: #000;
+          stroke-width: 40;
+        }
+      }
     }
   }
 `)
