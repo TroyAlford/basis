@@ -3,6 +3,8 @@ import * as React from 'react'
 import { NavigateEvent } from '../../events/NavigateEvent'
 import { render } from '../../testing/render'
 import { Simulate } from '../../testing/Simulate'
+import { waitFor } from '../../testing/waitFor'
+import { Keyboard } from '../../types/Keyboard'
 import { Component } from '../Component/Component'
 import { Dialog } from '../OverlayProvider/Dialog'
 import { OverlayProvider } from '../OverlayProvider/OverlayProvider'
@@ -301,6 +303,38 @@ describe('Router', () => {
     } finally {
       rendered.unmount()
       confirm.mockRestore()
+      pushState.mockRestore()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('Escape on dirty navigation confirm stays without navigating', async () => {
+    window.location.pathname = '/dirty'
+    const overlayRendered = await render(<OverlayProvider />)
+    const pushState = spyOn(window.history, 'pushState')
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/dirty">
+          <DirtyRoute />
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      const pending = Router.navigate('/other')
+      await tick()
+
+      const discard = await waitFor(() => Array.from(overlayRendered.node.querySelectorAll('button'))
+        .find(button => button.textContent === 'Discard changes') as HTMLButtonElement | undefined)
+      discard.focus()
+      await Simulate.pressKey(discard, Keyboard.Escape)
+
+      expect(await pending).toBe(false)
+      expect(pushState).not.toHaveBeenCalled()
+      expect(overlayRendered.node.querySelector('dialog')).toBeNull()
+    } finally {
+      rendered.unmount()
       pushState.mockRestore()
       overlayRendered.unmount()
       await tick()
@@ -695,6 +729,41 @@ describe('Router', () => {
       expect(rendered.node.className).toContain('away')
     } finally {
       confirm.mockRestore()
+      pushState.mockRestore()
+      replaceState.mockRestore()
+      rendered.unmount()
+      overlayRendered.unmount()
+      await tick()
+    }
+  })
+
+  test('popstate with dirty route renders a native dialog element', async () => {
+    window.location.pathname = '/dirty'
+    const { pushState, replaceState } = mockHistoryWritesLocation()
+    const overlayRendered = await render(<OverlayProvider />)
+
+    const rendered = await render<Router>(
+      <Router>
+        <Router.Route template="/dirty">
+          <DirtyRoute />
+        </Router.Route>
+        <Router.Route template="/away">
+          <span className="away">away</span>
+        </Router.Route>
+      </Router>,
+    )
+
+    try {
+      window.history.replaceState({ basisIndex: 0 }, '', '/away')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await tick()
+      await tick()
+
+      const dialog = overlayRendered.node.querySelector('dialog.dialog.component')
+      expect(dialog).toBeInstanceOf(HTMLDialogElement)
+      expect((dialog as HTMLDialogElement).open).toBe(true)
+      expect(dialog?.textContent).toContain('Discard changes')
+    } finally {
       pushState.mockRestore()
       replaceState.mockRestore()
       rendered.unmount()

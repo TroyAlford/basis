@@ -28,6 +28,21 @@ export function isDialogPrimaryButton(button: DialogButton<unknown>): boolean {
 }
 
 /**
+ * Index of the footer button Escape should activate, or null when there is no cancel action.
+ * @param buttons - Dialog footer buttons.
+ * @returns Button index, or null when Escape should dismiss without a footer button.
+ */
+export function dialogCancelButtonIndex(buttons: DialogButton<unknown>[]): number | null {
+  const cancel = buttons
+    .map((button, index) => ({ button, index }))
+    .filter(({ button }) => isDialogCancelButton(button))
+
+  if (cancel.length === 1) return cancel[0].index
+
+  return null
+}
+
+/**
  * Index of the footer button Enter should activate, or null when ambiguous.
  * @param buttons - Dialog footer buttons.
  * @returns Button index, or null when Enter should not confirm.

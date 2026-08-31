@@ -56,7 +56,8 @@ describe('Link', () => {
     )
 
     const event = new MouseEvent('click')
-    await instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
+    instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
 
     // Should now be at the new location
     expect(window.location.pathname).toBe('/new/path')
@@ -78,10 +79,10 @@ describe('Link', () => {
 
     try {
       const event = new MouseEvent('click')
-      const pending = instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
+      instance.handleClick(event as unknown as React.MouseEvent<HTMLAnchorElement, MouseEvent>)
 
       expect(navigateFinished).toBe(false)
-      await pending
+      await new Promise<void>(resolve => setTimeout(resolve, 20))
       expect(navigateFinished).toBe(true)
       expect(navigateSpy).toHaveBeenCalledWith('/delayed')
     } finally {

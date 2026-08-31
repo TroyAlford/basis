@@ -84,7 +84,7 @@ var plugin = function (options) {
         config.files = files;
     return config;
 };
-var IGNORE_PATHS = ['node_modules', '.cache', 'build', 'dist'];
+var IGNORE_PATHS = ['node_modules', '.cache', '.playwright-local', 'build', 'dist', 'test-results'];
 export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__spreadArray(__spreadArray([{ ignores: IGNORE_PATHS.flatMap(function (path) { return ["".concat(path, "/**"), "**/".concat(path, "/**")]; }) },
     eslint.configs.recommended,
     pluginJSDoc.configs['flat/recommended-typescript-error']], __read(pluginTypescript.configs.strict), false), __read(pluginTypescript.configs.stylistic), false), [plugin({

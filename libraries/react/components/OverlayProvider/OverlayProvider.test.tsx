@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { render } from '../../testing/render'
+import { Simulate } from '../../testing/Simulate'
 import { waitFor } from '../../testing/waitFor'
+import { Keyboard } from '../../types/Keyboard'
 import { Button } from '../Button/Button'
 import { Dialog } from './Dialog'
 import { Notification } from './Notification'
@@ -66,14 +68,33 @@ describe('OverlayProvider', () => {
       unmount()
     })
 
-    test('Dialog.open default native cancel resolves false', async () => {
+    test('Dialog.open default Escape resolves false', async () => {
       const { node, unmount } = await renderOverlayProvider()
       const result = Dialog.open()
 
       const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
-      dialog.dispatchEvent(new Event('cancel', { bubbles: false, cancelable: true }))
+      await Simulate.pressKey(dialog, Keyboard.Escape)
 
       expect(await result).toBe(false)
+
+      unmount()
+    })
+
+    test('Dialog.confirm cancels on Escape when focus is on the confirm button', async () => {
+      const { node, unmount } = await renderOverlayProvider()
+      const result = Dialog.confirm({
+        labelCancel: 'Stay',
+        labelConfirm: 'Discard changes',
+        title: 'Discard unsaved changes?',
+      })
+
+      const discard = await waitFor(() => Array.from(node.querySelectorAll('button'))
+        .find(button => button.textContent === 'Discard changes') as HTMLButtonElement | undefined)
+      discard.focus()
+      await Simulate.pressKey(discard, Keyboard.Escape)
+
+      expect(await result).toBe(false)
+      expect(node.querySelector('dialog')).toBeNull()
 
       unmount()
     })
@@ -173,7 +194,7 @@ describe('OverlayProvider', () => {
       expect(await second).toBe(false)
     })
 
-    test('native cancel resolves false', async () => {
+    test('Escape resolves false', async () => {
       const { node, unmount } = await renderOverlayProvider()
       const result = Dialog.open<'ok' | 'cancel'>({
         buttons: [
@@ -183,7 +204,7 @@ describe('OverlayProvider', () => {
       })
 
       const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog'))
-      dialog.dispatchEvent(new Event('cancel', { bubbles: false, cancelable: true }))
+      await Simulate.pressKey(dialog, Keyboard.Escape)
 
       expect(await result).toBe(false)
       await waitFor(() => !node.querySelector('dialog'))

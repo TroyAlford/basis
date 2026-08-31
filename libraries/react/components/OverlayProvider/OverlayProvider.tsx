@@ -42,6 +42,11 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     }
   }
 
+  constructor(props: object) {
+    super(props)
+    if (typeof window !== 'undefined') window.overlayProvider = this
+  }
+
   componentDidMount(): void {
     super.componentDidMount()
     if (typeof window !== 'undefined') window.overlayProvider = this

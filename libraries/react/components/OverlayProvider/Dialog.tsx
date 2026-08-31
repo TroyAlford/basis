@@ -1,5 +1,6 @@
-import type { ComponentClass, KeyboardEvent, ReactElement, ReactNode, RefObject, SyntheticEvent } from 'react'
+import type { ComponentClass, KeyboardEvent as ReactKeyboardEvent, MutableRefObject, ReactElement, ReactNode, RefObject, SyntheticEvent } from 'react'
 import { cloneElement, createElement, isValidElement } from 'react'
+import { classNames } from '@basis/utilities'
 import { IconBase } from '../../icons/IconBase/IconBase'
 import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
@@ -7,7 +8,7 @@ import { Keyboard } from '../../types/Keyboard'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
 import { Editor } from '../Editor/Editor'
-import { dialogDefaultButtonIndex } from './DialogKeyboard.ts'
+import { dialogCancelButtonIndex, dialogDefaultButtonIndex } from './DialogKeyboard.ts'
 import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE.ts'
 
 import './Dialog.styles.ts'
@@ -181,28 +182,102 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     }).then(result => (result === confirmToken ? value : result as Value | false))
   }
 
+  #escapeCloseHandled = false
+
+  #dialogNode: HTMLDialogElement | null = null
+
+  /**
+   * Attach modal keyboard listeners to the native `<dialog>` root only.
+   * Escape on `showModal()` dialogs is not delivered through React `onKeyDown`; use bubbling
+   * `keydown` on the dialog element itself (same contract as Enter via `#handleKeyDown`).
+   * @param node - The dialog element from the root ref, or null on unmount.
+   */
+  #setDialogNode(node: HTMLDialogElement | null): void {
+    if (node === this.#dialogNode) return
+
+    this.#unbindModalListeners()
+    this.#dialogNode = node
+
+    if (!node || node.tagName !== 'DIALOG') return
+
+    node.addEventListener('keydown', this.#boundNativeEscapeKeyDown)
+    node.addEventListener('cancel', this.#handleNativeCancel)
+    this.#escapeKeydownListenerNode = node
+    this.#cancelListenerNode = node
+  }
+
+  #boundNativeEscapeKeyDown = (event: Event): void => {
+    if (event.defaultPrevented) return
+    if (!(event instanceof KeyboardEvent) || event.key !== Keyboard.Escape) return
+    this.#handleKeyboardShortcut(event)
+  }
+
+  #handleNativeCancel = (event: Event): void => {
+    event.preventDefault()
+    if (this.#escapeCloseHandled) return
+    this.#dismissFromEscape()
+  }
+
+  #dismissFromEscape(): void {
+    const index = dialogCancelButtonIndex(this.props.buttons)
+    if (index === null) {
+      this.#dismiss()
+      return
+    }
+    this.#activateButtonAt(index)
+  }
+
+  #escapeKeydownListenerNode: HTMLDialogElement | null = null
+
+  #cancelListenerNode: HTMLDialogElement | null = null
+
+  #unbindModalListeners(): void {
+    if (this.#escapeKeydownListenerNode) {
+      this.#escapeKeydownListenerNode.removeEventListener('keydown', this.#boundNativeEscapeKeyDown)
+      this.#escapeKeydownListenerNode = null
+    }
+    if (this.#cancelListenerNode) {
+      this.#cancelListenerNode.removeEventListener('cancel', this.#handleNativeCancel)
+      this.#cancelListenerNode = null
+    }
+  }
+
+  #bindDialogRef = (node: HTMLDialogElement | null): void => {
+    const { nodeRef } = this.props
+    if (nodeRef) (nodeRef as MutableRefObject<HTMLDialogElement | null>).current = node
+    this.#setDialogNode(node)
+    if (node) this.#syncModalOpenState()
+  }
+
   componentDidMount(): void {
     super.componentDidMount()
     this.#syncModalOpenState()
-    this.#bindNativeCancel()
+  }
+
+  componentDidUpdate(prevProps: Readonly<Props<unknown>>, prevState: Readonly<object>): void {
+    super.componentDidUpdate(prevProps, prevState)
+    if (prevProps.id !== this.props.id) this.#syncModalOpenState()
   }
 
   componentWillUnmount(): void {
-    this.#unbindNativeCancel()
+    this.#unbindModalListeners()
+    this.#dialogNode = null
     super.componentWillUnmount()
   }
 
-  #boundNativeCancel = (event: Event): void => {
-    event.preventDefault()
-    this.#dismiss()
-  }
+  override render(): ReactNode {
+    const Tag = this.tag
+    const { className } = this.props
 
-  #bindNativeCancel(): void {
-    this.rootNode?.addEventListener('cancel', this.#boundNativeCancel)
-  }
-
-  #unbindNativeCancel(): void {
-    this.rootNode?.removeEventListener('cancel', this.#boundNativeCancel)
+    return (
+      <Tag
+        ref={this.#bindDialogRef}
+        {...this.attributes}
+        className={classNames(className, this.classNames)}
+      >
+        {this.content()}
+      </Tag>
+    )
   }
 
   #dismiss(): void {
@@ -210,14 +285,19 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   }
 
   #syncModalOpenState(): void {
-    const node = this.rootNode as HTMLDialogElement | null
-    if (!node) return
+    const node = this.#dialogNode ?? this.rootNode as HTMLDialogElement | null
+    if (!node) {
+      requestAnimationFrame(() => this.#syncModalOpenState())
+      return
+    }
 
     if (!node.open && typeof node.showModal === 'function') {
       node.showModal()
     } else if (!node.open) {
       node.setAttribute('open', '')
     }
+
+    node.focus()
   }
 
   get attributes() {
@@ -225,6 +305,7 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
       ...super.attributes,
       'data-intent': this.props.intent ?? Dialog.Intent.Default,
       'onKeyDown': this.#handleKeyDown,
+      'tabIndex': -1,
     }
   }
 
@@ -248,8 +329,21 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     onResolve((button as { value: unknown }).value)
   }
 
-  #handleKeyDown = (event: KeyboardEvent<HTMLDialogElement>): void => {
+  #handleKeyDown = (event: ReactKeyboardEvent<HTMLDialogElement>): void => {
+    this.#handleKeyboardShortcut(event)
+  }
+
+  #handleKeyboardShortcut(event: KeyboardEvent | ReactKeyboardEvent<HTMLDialogElement>): void {
     if (event.defaultPrevented) return
+
+    if (event.key === Keyboard.Escape) {
+      event.preventDefault()
+      this.#escapeCloseHandled = true
+      this.#dismissFromEscape()
+      queueMicrotask(() => { this.#escapeCloseHandled = false })
+      return
+    }
+
     if (event.key !== Keyboard.Enter) return
     if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
 

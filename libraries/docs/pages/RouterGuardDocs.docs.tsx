@@ -1,23 +1,24 @@
-import { Component } from 'react'
-import { Button, Router, TextEditor } from '@basis/react'
+import { Button, Component, Router, TextEditor } from '@basis/react'
 
 interface State {
   value: string,
 }
 
 /** Docs route component with a `dirty` getter so Router can guard navigation via a ref. */
-export class RouterGuardDocs extends Component<unknown, State> {
-  state: State = {
-    value: 'clean',
+export class RouterGuardDocs extends Component<unknown, HTMLDivElement, State> {
+  static displayName = 'RouterGuardDocs'
+
+  get defaultState(): State {
+    return { value: 'clean' }
   }
 
   get dirty(): boolean {
     return this.state.value !== 'clean'
   }
 
-  render() {
+  content() {
     return (
-      <section>
+      <>
         <h1>Router Guard Demo</h1>
         <p>
           Change the value, then use the docs navigation to leave this page.
@@ -48,7 +49,7 @@ export class RouterGuardDocs extends Component<unknown, State> {
             Back to Router docs
           </Router.Link>
         </p>
-      </section>
+      </>
     )
   }
 }
