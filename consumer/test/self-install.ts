@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { findInstalledInstances } from '../patches/install'
@@ -50,6 +50,20 @@ const PATCH_MARKERS: PatchMarker[] = [
   },
 ]
 
+const APP_PACKAGE = JSON.stringify(
+  {
+    devDependencies: {
+      '@types/bun': '^1.3.11',
+      'eslint-plugin-import': '2.32.0',
+    },
+    name: 'basis-consumer-fixture',
+    private: true,
+    type: 'module',
+  },
+  null,
+  2,
+)
+
 const APP_TSCONFIG = JSON.stringify({ extends: 'basis/tsconfig/bun.json', include: ['src'] }, null, 2)
 
 const APP_ESLINT_CONFIG = "export { default } from 'basis/eslint'\n"
@@ -82,7 +96,7 @@ const write = (path: string, contents: string): void => {
  * Runs a command and returns stdout, throwing when the command fails.
  * @param command The executable and arguments.
  * @param cwd Working directory for the command.
- * @param env Extra environment variables.
+ * @param env Environment overrides merged over the parent process environment.
  * @returns Captured standard output.
  */
 const run = (command: string[], cwd: string, env: Record<string, string> = {}): string => {
@@ -138,25 +152,26 @@ const main = (): void => {
   const workspace = mkdtempSync(join(tmpdir(), 'basis-consumer-'))
   const source = join(workspace, 'basis-source')
   const app = join(workspace, 'app')
+  const binDir = join(workspace, 'bin')
   const tag = 'basis-self-install-e2e'
 
   try {
-    run(['git', 'clone', '--quiet', '--local', '--no-hardlinks', repoRoot, source], workspace)
-    run(['git', 'tag', tag], source)
+    /*
+     * A transitive dependency's postinstall calls `node`. Point `node` at the
+     * running Bun so the fixture stays hermetic on Bun-only machines.
+     */
+    mkdirSync(binDir, { recursive: true })
+    symlinkSync(process.execPath, join(binDir, 'bun'))
+    if (Bun.which('node') === null) {
+      write(join(binDir, 'node'), `#!/bin/sh\nexec "${process.execPath}" "$@"\n`)
+      chmodSync(join(binDir, 'node'), 0o755)
+    }
+    const env = { PATH: `${binDir}:${process.env.PATH ?? ''}` }
 
-    write(
-      join(app, 'package.json'),
-      JSON.stringify(
-        {
-          devDependencies: { 'eslint-plugin-import': '2.32.0' },
-          name: 'basis-consumer-fixture',
-          private: true,
-          type: 'module',
-        },
-        null,
-        2,
-      ),
-    )
+    run(['git', 'clone', '--quiet', '--local', '--no-hardlinks', repoRoot, source], workspace, env)
+    run(['git', 'tag', tag], source, env)
+
+    write(join(app, 'package.json'), APP_PACKAGE)
     write(join(app, 'tsconfig.json'), APP_TSCONFIG)
     write(join(app, 'eslint.config.mjs'), APP_ESLINT_CONFIG)
     write(join(app, 'src', 'greeter.ts'), APP_SOURCE)
@@ -165,24 +180,25 @@ const main = (): void => {
      * The host directly depends on a package Basis also patches, so the shared
      * exact-version copy must come out patched rather than an accidental copy.
      */
-    run(['bun', 'add', '--dev', '--trust', `git+file://${source}#${tag}`], app)
+    run(['bun', 'add', '--dev', '--trust', `git+file://${source}#${tag}`], app, env)
 
     const basisDir = join(app, 'node_modules', 'basis')
     assert(existsSync(join(basisDir, 'package.json')), 'basis is installed')
     assert(existsSync(join(basisDir, 'consumer', 'eslint.ts')), 'basis ESLint surface is present')
     assert(existsSync(join(basisDir, 'consumer', 'tsconfig', 'bun.json')), 'basis tsconfig preset is present')
 
-    const eslintSurface = run(['bun', '-e', SURFACE_CHECK], app)
+    const eslintSurface = run(['bun', '-e', SURFACE_CHECK], app, env)
     assert(eslintSurface.includes('ok'), 'basis/eslint resolves to a flat config')
 
     assertPatchesActive(app)
 
     const basisBin = join(app, 'node_modules', '.bin', 'basis')
-    run(['bun', basisBin, 'lint'], app)
-    run(['bun', basisBin, 'typecheck'], app)
+    run(['bun', basisBin, 'lint'], app, env)
+    run(['bun', basisBin, 'typecheck'], app, env)
 
-    // The hook must be safe to run again and must not corrupt an already patched tree.
-    run(['bun', join(basisDir, 'consumer', 'install.ts')], app, { INIT_CWD: app })
+    // A clean reinstall plus a re-run of the hook must stay green and idempotent.
+    run(['bun', 'install'], app, env)
+    run(['bun', join(basisDir, 'consumer', 'install.ts')], app, { ...env, INIT_CWD: app })
     assertPatchesActive(app)
 
     process.stdout.write(`[basis] consumer self-install: ok (${workspace})\n`)

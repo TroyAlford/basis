@@ -301,6 +301,12 @@ export default pluginTypescript.config(
     },
   }),
   plugin({
+    files: ['*.config.*', '**/*.config.*', 'eslint.config.*', '**/eslint.config.*'],
+    rules: {
+      '@import/no-default-export': 'off',
+    },
+  }),
+  plugin({
     files: ['*.test.ts', '*.test.tsx'],
     rules: {
       'dot-notation': 'off',

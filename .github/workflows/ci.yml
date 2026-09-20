@@ -41,6 +41,14 @@ jobs:
       - name: Run TypeScript Type Check
         run: bun tsc
 
+  consumer-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asdf-setup
+      - name: Run consumer self-install contract
+        run: bun run test:consumer
+
   # publish-dry-run:
   #   runs-on: ubuntu-latest
   #   steps:
@@ -75,6 +83,7 @@ jobs:
       - eslint
       - run-tests
       - type-check
+      - consumer-install
       # - publish-dry-run
     runs-on: ubuntu-latest
     steps:

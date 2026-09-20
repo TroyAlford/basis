@@ -2,6 +2,16 @@
 
 This monorepo provides a suite of development tools and utilities designed specifically for the Bun ecosystem.
 
+## Consuming Basis
+
+The repository is the distribution artifact: consumers pin it as a Git
+dependency and import its stable source surfaces. See [consumer/README.md](./consumer/README.md)
+for the ESLint, TypeScript, CLI, and patch contract.
+
+```bash
+bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
+```
+
 ## Workspaces
 
 ### [@basis/workspaces](./libraries/workspaces)
