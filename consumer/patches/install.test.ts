@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { applyBasisPatches, findInstalledInstances, loadBasisPatches } from './install'
@@ -174,5 +174,46 @@ describe('applyBasisPatches', () => {
     applyBasisPatches({ basisDir: basis, rootDir: root })
 
     expect(readFileSync(join(target, 'index.js'), 'utf8')).toBe(REPATCHED)
+  })
+
+  test('forgets a retired patch whose copy is already pristine', () => {
+    const { basis, root, target } = prepare()
+    applyBasisPatches({ basisDir: basis, rootDir: root })
+    writeFileSync(join(target, 'index.js'), UNPATCHED)
+
+    writeFileSync(join(basis, 'package.json'), JSON.stringify({ name: 'basis', patchedDependencies: {} }))
+    expect(applyBasisPatches({ basisDir: basis, rootDir: root }).retired).toEqual(['foo@1.0.0'])
+    expect(readFileSync(join(target, 'index.js'), 'utf8')).toBe(UNPATCHED)
+  })
+
+  test('keeps state when a retired patch no longer resolves', () => {
+    const { basis, root, target } = prepare()
+    applyBasisPatches({ basisDir: basis, rootDir: root })
+    writeFileSync(join(target, 'index.js'), 'module.exports = 99\n')
+
+    writeFileSync(join(basis, 'package.json'), JSON.stringify({ name: 'basis', patchedDependencies: {} }))
+    expect(() => applyBasisPatches({ basisDir: basis, rootDir: root })).toThrow(/could not resolve retired/)
+
+    const retained = join(root, 'node_modules', '.basis', 'patches', 'foo@1.0.0.patch')
+    expect(existsSync(retained)).toBe(true)
+    expect(existsSync(join(root, 'node_modules', '.basis', 'patches.json'))).toBe(true)
+  })
+
+  test('keeps state when a retained patch copy is missing', () => {
+    const { basis, root } = prepare()
+    applyBasisPatches({ basisDir: basis, rootDir: root })
+    rmSync(join(root, 'node_modules', '.basis', 'patches', 'foo@1.0.0.patch'))
+
+    writeFileSync(join(basis, 'package.json'), JSON.stringify({ name: 'basis', patchedDependencies: {} }))
+    expect(() => applyBasisPatches({ basisDir: basis, rootDir: root })).toThrow(/retained patch .* is missing/)
+    expect(existsSync(join(root, 'node_modules', '.basis', 'patches.json'))).toBe(true)
+  })
+
+  test('fails loudly on an unreadable patch state file', () => {
+    const { basis, root } = prepare()
+    applyBasisPatches({ basisDir: basis, rootDir: root })
+    writeFileSync(join(root, 'node_modules', '.basis', 'patches.json'), '{ not json')
+
+    expect(() => applyBasisPatches({ basisDir: basis, rootDir: root })).toThrow(/unreadable/)
   })
 })

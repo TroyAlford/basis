@@ -198,7 +198,9 @@ const applyPatchToPackage = (patchPath: string, packageDir: string, key: string)
 const stateDir = (rootDir: string): string => join(rootDir, 'node_modules', '.basis')
 
 /**
- * Reads the recorded patch state, tolerating a missing or unreadable file.
+ * Reads the recorded patch state. A missing file is an empty state, but an
+ * unreadable or malformed file fails loudly: silently treating it as empty
+ * would forget which patches still need reconciling.
  * @param rootDir Absolute path to the consumer project root.
  * @returns The recorded state.
  */
@@ -206,12 +208,19 @@ const readState = (rootDir: string): PatchState => {
   const path = join(stateDir(rootDir), 'patches.json')
   if (!existsSync(path)) return { patches: {} }
 
+  let state: PatchState
   try {
-    const state = readJson<PatchState>(path)
-    return { patches: state.patches ?? {} }
-  } catch {
-    return { patches: {} }
+    state = readJson<PatchState>(path)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`[basis] patch state at ${path} is unreadable: ${message}`, { cause: error })
   }
+
+  if (state === null || typeof state !== 'object' || state.patches === null || typeof state.patches !== 'object') {
+    throw new Error(`[basis] patch state at ${path} is malformed`)
+  }
+
+  return { patches: state.patches }
 }
 
 /**
@@ -339,22 +348,41 @@ export const findInstalledInstances = (rootDir: string, name: string): Installed
 
 /**
  * Reverses every applied copy of a patch that Basis no longer ships.
+ *
+ * Retirement is strict: a patch that cannot be proven either applied or fully
+ * pristine is drift, and the install fails while keeping the retained patch and
+ * state entry so the situation stays recoverable. A package version that no
+ * longer exists has nothing to reverse and is safe to forget.
  * @param rootDir Absolute path to the consumer project root.
  * @param key The retired `name@version` key.
  * @param applied The recorded patch.
  */
 const retirePatch = (rootDir: string, key: string, applied: AppliedPatch): void => {
   const patchPath = join(stateDir(rootDir), applied.path)
-  if (existsSync(patchPath)) {
-    const { name, version } = splitKey(key)
-    for (const instance of findInstalledInstances(rootDir, name)) {
-      if (instance.version !== version) continue
-      if (!isPatchApplied(patchPath, instance.path)) continue
-      gitApply(instance.path, ['--reverse'], patchPath)
-    }
+  if (!existsSync(patchPath)) {
+    throw new Error(`[basis] retained patch for ${key} is missing at ${patchPath}; keeping recorded state`)
   }
 
-  removePatchCopy(rootDir, applied)
+  const { name, version } = splitKey(key)
+  const matches = findInstalledInstances(rootDir, name)
+    .filter(instance => instance.version === version)
+
+  for (const instance of matches) {
+    if (isPatchApplied(patchPath, instance.path)) {
+      const reversed = gitApply(instance.path, ['--reverse'], patchPath)
+      if (reversed.code !== 0) {
+        const detail = reversed.stderr.trim()
+        throw new Error(`[basis] could not reverse retired ${key} at ${instance.path}; keeping state: ${detail}`)
+      }
+      continue
+    }
+
+    const pristine = gitApply(instance.path, ['--check'], patchPath)
+    if (pristine.code !== 0) {
+      const detail = pristine.stderr.trim()
+      throw new Error(`[basis] could not resolve retired ${key} at ${instance.path}; keeping state: ${detail}`)
+    }
+  }
 }
 
 /**
@@ -383,19 +411,28 @@ export const applyBasisPatches = (options: ApplyBasisPatchesOptions): ApplyBasis
   for (const [key, entry] of Object.entries(state.patches)) {
     if (current.has(key)) continue
     retired.push(key)
-    if (write) retirePatch(rootDir, key, entry)
-    Reflect.deleteProperty(state.patches, key)
+
+    if (write) {
+      retirePatch(rootDir, key, entry)
+      Reflect.deleteProperty(state.patches, key)
+      writeState(rootDir, state)
+      removePatchCopy(rootDir, entry)
+    }
   }
 
   for (const patch of patches) {
     const key = `${patch.name}@${patch.version}`
     const contents = readFileSync(patch.path, 'utf8')
     const hash = hashPatch(contents)
+    const recorded = state.patches[key]
 
-    if (state.patches[key] !== undefined && state.patches[key]?.hash !== hash) {
-      const recorded = state.patches[key]
-      if (write && recorded !== undefined) retirePatch(rootDir, key, recorded)
-      Reflect.deleteProperty(state.patches, key)
+    if (recorded !== undefined && recorded.hash !== hash) {
+      if (write) {
+        retirePatch(rootDir, key, recorded)
+        Reflect.deleteProperty(state.patches, key)
+        writeState(rootDir, state)
+        removePatchCopy(rootDir, recorded)
+      }
     }
 
     const matches = findInstalledInstances(rootDir, patch.name)
@@ -414,13 +451,12 @@ export const applyBasisPatches = (options: ApplyBasisPatchesOptions): ApplyBasis
 
     if (write && state.patches[key] === undefined) {
       state.patches[key] = { hash, path: storePatchCopy(rootDir, key, contents) }
+      writeState(rootDir, state)
     }
 
     if (pending) applied.push(key)
     else skipped.push(key)
   }
-
-  if (write) writeState(rootDir, state)
 
   return { applied, retired, skipped }
 }
