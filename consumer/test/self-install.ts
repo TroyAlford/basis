@@ -1,201 +1,71 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { findInstalledInstances } from '../patches/install'
+import { readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { assert, assertDoctorOk, assertEslintSurface, assertNodeFree, assertPatchesActive, initApp, makeTempDir, makeToolPath, run } from './harness'
 
 /**
- * A source marker proving a Basis-owned patch is active in an installed copy.
+ * A minimal package manifest, used for assertions.
  */
-interface PatchMarker {
-  /** Package-relative file that the patch rewrites. */
-  file: string,
-  /** Package the marker applies to. */
-  name: string,
-  /** Text that must be present once the patch is applied. */
-  snippet: string,
-  /** Exact patched version. */
-  version: string,
-}
-
-const PATCH_MARKERS: PatchMarker[] = [
-  {
-    file: 'lib/core/sourceType.js',
-    name: 'eslint-plugin-import',
-    snippet: "context.parserOptions && 'sourceType' in context.parserOptions",
-    version: '2.32.0',
-  },
-  {
-    file: 'dist/rules/named-import-spacing.js',
-    name: 'eslint-plugin-named-import-spacing',
-    snippet: 'const sourceCode = context.sourceCode;',
-    version: '1.0.3',
-  },
-  {
-    file: 'lib/rules/sort-keys-fix.js',
-    name: 'eslint-plugin-sort-keys-fix',
-    snippet: 'const sourceCode = context.sourceCode',
-    version: '1.1.2',
-  },
-  {
-    file: 'lib/index.cjs.js',
-    name: 'eslint-plugin-typescript-sort-keys',
-    snippet: 'const sourceCode = context.sourceCode;',
-    version: '3.3.0',
-  },
-  {
-    file: 'lib/index.mjs',
-    name: 'eslint-plugin-typescript-sort-keys',
-    snippet: 'const sourceCode = context.sourceCode;',
-    version: '3.3.0',
-  },
-]
-
-const APP_PACKAGE = JSON.stringify(
-  {
-    devDependencies: {
-      '@types/bun': '^1.3.11',
-      'eslint-plugin-import': '2.32.0',
-    },
-    name: 'basis-consumer-fixture',
-    private: true,
-    type: 'module',
-  },
-  null,
-  2,
-)
-
-const APP_TSCONFIG = JSON.stringify({ extends: 'basis/tsconfig/bun.json', include: ['src'] }, null, 2)
-
-const APP_ESLINT_CONFIG = "export { default } from 'basis/eslint'\n"
-
-const APP_SOURCE = `/**
- * Formats a greeting for a name.
- * @param name The name to greet.
- * @returns The greeting.
- */
-export const greet = (name: string): string => \`Hello, \${name}!\`
-`
-
-const SURFACE_CHECK = [
-  "import config from 'basis/eslint'",
-  "if (!Array.isArray(config) || config.length === 0) throw new Error('bad surface')",
-  "process.stdout.write('ok')",
-].join('; ')
-
-/**
- * Writes a file, creating parent directories as needed.
- * @param path Absolute file path.
- * @param contents File contents.
- */
-const write = (path: string, contents: string): void => {
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, contents)
+interface PackageManifest {
+  /** Bun-owned patch map; must stay empty in the consumer. */
+  patchedDependencies?: Record<string, string>,
+  /** Packages Bun is allowed to run install lifecycle scripts for. */
+  trustedDependencies?: string[],
 }
 
 /**
- * Runs a command and returns stdout, throwing when the command fails.
- * @param command The executable and arguments.
- * @param cwd Working directory for the command.
- * @param env Environment overrides merged over the parent process environment.
- * @returns Captured standard output.
- */
-const run = (command: string[], cwd: string, env: Record<string, string> = {}): string => {
-  const result = Bun.spawnSync({
-    cmd: command,
-    cwd,
-    env: { ...process.env, ...env },
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
-
-  const stdout = result.stdout.toString()
-  const stderr = result.stderr.toString()
-  if (!result.success) {
-    throw new Error(`command failed (${result.exitCode}): ${command.join(' ')}\n${stdout}\n${stderr}`)
-  }
-
-  return stdout
-}
-
-/**
- * Throws when a required condition is not met.
- * @param condition The condition expected to hold.
- * @param message Human-readable failure description.
- */
-const assert = (condition: boolean, message: string): void => {
-  if (!condition) throw new Error(`assertion failed: ${message}`)
-}
-
-/**
- * Verifies that every installed exact-version copy of a patched package carries
- * the observable marker the patch produces.
- * @param appRoot Absolute path to the fixture application.
- */
-const assertPatchesActive = (appRoot: string): void => {
-  for (const marker of PATCH_MARKERS) {
-    const matches = findInstalledInstances(appRoot, marker.name)
-      .filter(instance => instance.version === marker.version)
-    assert(matches.length > 0, `${marker.name}@${marker.version} is installed`)
-
-    for (const instance of matches) {
-      const contents = readFileSync(join(instance.path, marker.file), 'utf8')
-      assert(contents.includes(marker.snippet), `${marker.name} is patched at ${instance.path}`)
-    }
-  }
-}
-
-/**
- * Runs the full clean-install contract against the current checkout.
+ * Runs the full clean-install contract against the current checkout:
+ * a trusted Git install, a genuinely Node-free PATH, `basis doctor`, host
+ * lint/typecheck, a true clean reinstall, and strict isolated linking.
  */
 const main = (): void => {
   const repoRoot = join(import.meta.dir, '..', '..')
-  const workspace = mkdtempSync(join(tmpdir(), 'basis-consumer-'))
+  const workspace = makeTempDir('basis-consumer-')
   const source = join(workspace, 'basis-source')
-  const app = join(workspace, 'app')
-  const binDir = join(workspace, 'bin')
   const tag = 'basis-self-install-e2e'
+  const { path } = makeToolPath(workspace)
+  const env = { PATH: path }
 
   try {
-    /*
-     * Ensure child processes resolve the same Bun that is running this test, so
-     * the fixture never falls back to a different runtime.
-     */
-    mkdirSync(binDir, { recursive: true })
-    symlinkSync(process.execPath, join(binDir, 'bun'))
-    const env = { PATH: `${binDir}:${process.env.PATH ?? ''}` }
-
     run(['git', 'clone', '--quiet', '--local', '--no-hardlinks', repoRoot, source], workspace, env)
     run(['git', 'tag', tag], source, env)
+    const spec = `git+file://${source}#${tag}`
 
-    write(join(app, 'package.json'), APP_PACKAGE)
-    write(join(app, 'tsconfig.json'), APP_TSCONFIG)
-    write(join(app, 'eslint.config.mjs'), APP_ESLINT_CONFIG)
-    write(join(app, 'src', 'greeter.ts'), APP_SOURCE)
+    // Trusted install into a fresh host via the documented command.
+    const app = join(workspace, 'app')
+    initApp(app, spec, { includeBasis: false })
+    run(['bun', 'add', '--dev', '--trust', spec], app, env)
 
-    /*
-     * The host directly depends on a package Basis also patches, so the shared
-     * exact-version copy must come out patched rather than an accidental copy.
-     */
-    run(['bun', 'add', '--dev', '--trust', `git+file://${source}#${tag}`], app, env)
-
-    const basisDir = join(app, 'node_modules', 'basis')
-    assert(existsSync(join(basisDir, 'package.json')), 'basis is installed')
-    assert(existsSync(join(basisDir, 'consumer', 'eslint.ts')), 'basis ESLint surface is present')
-    assert(existsSync(join(basisDir, 'consumer', 'tsconfig', 'bun.json')), 'basis tsconfig preset is present')
-
-    const eslintSurface = run(['bun', '-e', SURFACE_CHECK], app, env)
-    assert(eslintSurface.includes('ok'), 'basis/eslint resolves to a flat config')
-
+    assertNodeFree(app, env)
+    assertEslintSurface(app, env)
     assertPatchesActive(app)
+    assertDoctorOk(app, env)
+
+    const manifest = JSON.parse(readFileSync(join(app, 'package.json'), 'utf8')) as PackageManifest
+    assert((manifest.trustedDependencies ?? []).includes('basis'), 'basis is trusted')
+    assert(
+      Object.keys(manifest.patchedDependencies ?? {}).length === 0,
+      'consumer has no copied patchedDependencies',
+    )
 
     const basisBin = join(app, 'node_modules', '.bin', 'basis')
     run(['bun', basisBin, 'lint'], app, env)
     run(['bun', basisBin, 'typecheck'], app, env)
 
-    // A clean reinstall plus a re-run of the hook must stay green and idempotent.
+    // True clean reinstall: drop node_modules and the lockfile, install again.
+    rmSync(join(app, 'node_modules'), { force: true, recursive: true })
+    rmSync(join(app, 'bun.lock'), { force: true })
     run(['bun', 'install'], app, env)
-    run(['bun', join(basisDir, 'consumer', 'install.ts')], app, { ...env, INIT_CWD: app })
     assertPatchesActive(app)
+    assertDoctorOk(app, env)
+
+    // Strict isolated linking must be patched as well.
+    const isolated = join(workspace, 'isolated')
+    initApp(isolated, spec)
+    run(['bun', 'install', '--linker=isolated'], isolated, env)
+    assertNodeFree(isolated, env)
+    assertEslintSurface(isolated, env)
+    assertPatchesActive(isolated)
+    assertDoctorOk(isolated, env)
 
     process.stdout.write(`[basis] consumer self-install: ok (${workspace})\n`)
   } finally {

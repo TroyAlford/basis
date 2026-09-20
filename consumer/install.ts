@@ -22,6 +22,9 @@ const main = (): void => {
     if (result.applied.length > 0) {
       process.stdout.write(`[basis] applied owned patch(es): ${result.applied.join(', ')}\n`)
     }
+    if (result.retired.length > 0) {
+      process.stdout.write(`[basis] reversed retired patch(es): ${result.retired.join(', ')}\n`)
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     process.stderr.write(`[basis] failed to apply owned patches: ${message}\n`)

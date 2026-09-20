@@ -63,7 +63,7 @@
     "lint:ts": "bun ./node_modules/typescript/bin/tsc --noEmit",
     "postinstall": "bun ./consumer/install.ts",
     "prepare": "bun ./scripts/prepare.ts",
-    "test:consumer": "bun ./consumer/test/self-install.ts",
+    "test:consumer": "bun ./consumer/test/self-install.ts && bun ./consumer/test/cache-isolation.ts",
     "test:develop": "bun test --watch",
     "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces",
     "update:linter": "bun --filter=@basis/eslint-plugin run build",

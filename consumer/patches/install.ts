@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -43,8 +43,29 @@ export interface ApplyBasisPatchesOptions {
 export interface ApplyBasisPatchesResult {
   /** `name@version` patches that were pending and have now been applied. */
   applied: string[],
+  /** `name@version` patches recorded in a previous install that Basis no longer ships. */
+  retired: string[],
   /** `name@version` patches that were already applied. */
   skipped: string[],
+}
+
+/**
+ * A patch recorded as applied during an earlier install.
+ */
+interface AppliedPatch {
+  /** Content hash of the patch file that was applied. */
+  hash: string,
+  /** Path to the retained patch copy, relative to the Basis state directory. */
+  path: string,
+}
+
+/**
+ * Install-time patch state, kept under `node_modules` so it disappears with the
+ * patched files it describes.
+ */
+interface PatchState {
+  /** Applied patches keyed by `name@version`. */
+  patches: Record<string, AppliedPatch>,
 }
 
 /**
@@ -103,6 +124,23 @@ const gitBinary = (): string => {
 }
 
 /**
+ * Splits a `name@version` key into its parts.
+ * @param key The patch key.
+ * @returns The package name and exact version.
+ */
+const splitKey = (key: string): { name: string, version: string } => {
+  const separator = key.lastIndexOf('@')
+  return { name: key.slice(0, separator), version: key.slice(separator + 1) }
+}
+
+/**
+ * Hashes patch contents so changed patch files can be detected.
+ * @param contents The patch file contents.
+ * @returns A hex-encoded SHA-256 digest.
+ */
+const hashPatch = (contents: string): string => new Bun.CryptoHasher('sha256').update(contents).digest('hex')
+
+/**
  * Runs `git apply` inside a package directory, outside any repository.
  * @param packageDir Absolute path to the package being patched.
  * @param args Arguments for `git apply`.
@@ -153,6 +191,65 @@ const applyPatchToPackage = (patchPath: string, packageDir: string, key: string)
 }
 
 /**
+ * Locates the directory holding Basis install state for a consumer.
+ * @param rootDir Absolute path to the consumer project root.
+ * @returns Absolute path to the state directory.
+ */
+const stateDir = (rootDir: string): string => join(rootDir, 'node_modules', '.basis')
+
+/**
+ * Reads the recorded patch state, tolerating a missing or unreadable file.
+ * @param rootDir Absolute path to the consumer project root.
+ * @returns The recorded state.
+ */
+const readState = (rootDir: string): PatchState => {
+  const path = join(stateDir(rootDir), 'patches.json')
+  if (!existsSync(path)) return { patches: {} }
+
+  try {
+    const state = readJson<PatchState>(path)
+    return { patches: state.patches ?? {} }
+  } catch {
+    return { patches: {} }
+  }
+}
+
+/**
+ * Persists the recorded patch state.
+ * @param rootDir Absolute path to the consumer project root.
+ * @param state The state to write.
+ */
+const writeState = (rootDir: string, state: PatchState): void => {
+  const dir = stateDir(rootDir)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'patches.json'), `${JSON.stringify(state, null, 2)}\n`)
+}
+
+/**
+ * Stores a copy of an applied patch so a later Basis version can reverse it.
+ * @param rootDir Absolute path to the consumer project root.
+ * @param key The `name@version` key.
+ * @param contents The patch contents.
+ * @returns The path recorded in the state, relative to the state directory.
+ */
+const storePatchCopy = (rootDir: string, key: string, contents: string): string => {
+  const filename = `${key.replaceAll('/', '+')}.patch`
+  const relativePath = join('patches', filename)
+  mkdirSync(join(stateDir(rootDir), 'patches'), { recursive: true })
+  writeFileSync(join(stateDir(rootDir), relativePath), contents)
+  return relativePath
+}
+
+/**
+ * Drops a stored patch copy when it is no longer needed.
+ * @param rootDir Absolute path to the consumer project root.
+ * @param applied The recorded patch.
+ */
+const removePatchCopy = (rootDir: string, applied: AppliedPatch): void => {
+  rmSync(join(stateDir(rootDir), applied.path), { force: true })
+}
+
+/**
  * Loads the patch set Basis owns from the installed package's own
  * `patchedDependencies` map, so the list never drifts from the release.
  * @param basisDir Absolute path to the installed Basis package root.
@@ -164,56 +261,100 @@ export const loadBasisPatches = (basisDir: string): BasisPatch[] => {
 
   return Object.entries(patchedDependencies)
     .map(([key, patchPath]) => {
-      const separator = key.lastIndexOf('@')
-      return {
-        name: key.slice(0, separator),
-        path: join(basisDir, patchPath),
-        version: key.slice(separator + 1),
-      }
+      const { name, version } = splitKey(key)
+      return { name, path: join(basisDir, patchPath), version }
     })
     .sort((left, right) => left.name.localeCompare(right.name))
 }
 
 /**
- * Finds every installed copy of a package, including nested and hoisted
- * instances, so the exact-version patch is applied wherever it can be resolved.
+ * Finds every installed copy of a package across Bun's hoisted, nested, scoped
+ * and isolated (`.bun/<name>@<version>/node_modules/...`) layouts, deduplicated
+ * by physical location so hardlinked or symlinked copies are patched once.
  * @param rootDir Absolute path to the consumer project root.
  * @param name The package name to look for.
  * @returns One entry per physical `node_modules` copy of the package.
  */
 export const findInstalledInstances = (rootDir: string, name: string): InstalledInstance[] => {
   const instances: InstalledInstance[] = []
-  const pending = [join(rootDir, 'node_modules')]
+  const seen = new Set<string>()
 
-  while (pending.length > 0) {
-    const nodeModules = pending.pop()
-    if (nodeModules === undefined || !isDirectory(nodeModules)) continue
+  const inspect = (dir: string): void => {
+    let resolved: string
+    try {
+      resolved = realpathSync(dir)
+    } catch {
+      return
+    }
+    if (seen.has(resolved)) return
 
+    const manifestPath = join(dir, 'package.json')
+    if (existsSync(manifestPath)) {
+      const manifest = readJson<PackageManifest>(manifestPath)
+      if (manifest.name === name) {
+        seen.add(resolved)
+        instances.push({ name, path: resolved, version: manifest.version ?? '0.0.0' })
+      }
+    }
+  }
+
+  const walk = (nodeModules: string): void => {
     for (const entry of readdirSync(nodeModules)) {
-      if (entry === '.bin' || entry === '.cache') continue
+      if (entry === '.bin' || entry === '.cache' || entry === '.basis') continue
       const entryPath = join(nodeModules, entry)
+
+      /*
+       * Bun's isolated store: .bun/<name>@<version>/node_modules/<package>,
+       * plus the .bun/node_modules compatibility hoist when present.
+       */
+      if (entry === '.bun') {
+        const compat = join(entryPath, 'node_modules')
+        if (isDirectory(compat)) walk(compat)
+        for (const storeEntry of readdirSync(entryPath)) {
+          if (storeEntry === 'node_modules') continue
+          const storeNodeModules = join(entryPath, storeEntry, 'node_modules')
+          if (isDirectory(storeNodeModules)) walk(storeNodeModules)
+        }
+        continue
+      }
+
+      if (!isDirectory(entryPath)) continue
       const candidates = entry.startsWith('@')
         ? readdirSync(entryPath).map(scoped => join(entryPath, scoped))
         : [entryPath]
 
       for (const candidate of candidates) {
         if (!isDirectory(candidate)) continue
-
-        const manifestPath = join(candidate, 'package.json')
-        if (existsSync(manifestPath)) {
-          const manifest = readJson<PackageManifest>(manifestPath)
-          if (manifest.name === name) {
-            instances.push({ name, path: candidate, version: manifest.version ?? '0.0.0' })
-          }
-        }
+        inspect(candidate)
 
         const nested = join(candidate, 'node_modules')
-        if (isDirectory(nested)) pending.push(nested)
+        if (isDirectory(nested)) walk(nested)
       }
     }
   }
 
+  walk(join(rootDir, 'node_modules'))
   return instances
+}
+
+/**
+ * Reverses every applied copy of a patch that Basis no longer ships.
+ * @param rootDir Absolute path to the consumer project root.
+ * @param key The retired `name@version` key.
+ * @param applied The recorded patch.
+ */
+const retirePatch = (rootDir: string, key: string, applied: AppliedPatch): void => {
+  const patchPath = join(stateDir(rootDir), applied.path)
+  if (existsSync(patchPath)) {
+    const { name, version } = splitKey(key)
+    for (const instance of findInstalledInstances(rootDir, name)) {
+      if (instance.version !== version) continue
+      if (!isPatchApplied(patchPath, instance.path)) continue
+      gitApply(instance.path, ['--reverse'], patchPath)
+    }
+  }
+
+  removePatchCopy(rootDir, applied)
 }
 
 /**
@@ -224,16 +365,39 @@ export const findInstalledInstances = (rootDir: string, name: string): Installed
  * with `git apply` after install. Each patch is matched by exact
  * `name@version`, applied idempotently to every installed copy of that version,
  * and a missing version or a patch that no longer matches fails loudly.
+ *
+ * Applied patches are recorded so that a patch dropped or changed by a later
+ * Basis version is reversed instead of sticking around.
  * @param options The Basis package root, consumer root, and write mode.
- * @returns The entries applied and those already registered.
+ * @returns The entries applied, skipped, and retired.
  */
 export const applyBasisPatches = (options: ApplyBasisPatchesOptions): ApplyBasisPatchesResult => {
   const { basisDir, rootDir, write = true } = options
+  const patches = loadBasisPatches(basisDir)
+  const current = new Map(patches.map(patch => [`${patch.name}@${patch.version}`, patch]))
+  const state = readState(rootDir)
   const applied: string[] = []
   const skipped: string[] = []
+  const retired: string[] = []
 
-  for (const patch of loadBasisPatches(basisDir)) {
+  for (const [key, entry] of Object.entries(state.patches)) {
+    if (current.has(key)) continue
+    retired.push(key)
+    if (write) retirePatch(rootDir, key, entry)
+    Reflect.deleteProperty(state.patches, key)
+  }
+
+  for (const patch of patches) {
     const key = `${patch.name}@${patch.version}`
+    const contents = readFileSync(patch.path, 'utf8')
+    const hash = hashPatch(contents)
+
+    if (state.patches[key] !== undefined && state.patches[key]?.hash !== hash) {
+      const recorded = state.patches[key]
+      if (write && recorded !== undefined) retirePatch(rootDir, key, recorded)
+      Reflect.deleteProperty(state.patches, key)
+    }
+
     const matches = findInstalledInstances(rootDir, patch.name)
       .filter(instance => instance.version === patch.version)
 
@@ -248,9 +412,15 @@ export const applyBasisPatches = (options: ApplyBasisPatchesOptions): ApplyBasis
       pending = true
     }
 
+    if (write && state.patches[key] === undefined) {
+      state.patches[key] = { hash, path: storePatchCopy(rootDir, key, contents) }
+    }
+
     if (pending) applied.push(key)
     else skipped.push(key)
   }
 
-  return { applied, skipped }
+  if (write) writeState(rootDir, state)
+
+  return { applied, retired, skipped }
 }

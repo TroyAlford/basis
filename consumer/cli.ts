@@ -14,6 +14,8 @@ interface BasisManifest {
   name?: string,
   /** Bun-owned patch map, keyed by `name@version`. */
   patchedDependencies?: Record<string, string>,
+  /** Packages Bun is allowed to run install lifecycle scripts for. */
+  trustedDependencies?: string[],
   /** Declared package version. */
   version?: string,
 }
@@ -109,16 +111,28 @@ const doctor = (): number => {
 
   try {
     const result = applyBasisPatches({ basisDir: root, rootDir: installRoot, write: false })
-    write(`[basis] owned patches ${result.applied.length + result.skipped.length}`)
+    write(`[basis] owned patches ${result.applied.length + result.retired.length + result.skipped.length}`)
 
     for (const key of result.skipped) write(`[basis] patch ${key} applied`)
-    for (const key of result.applied) write(`[basis] patch ${key} pending`)
+    for (const key of result.applied) {
+      failures += 1
+      write(`[basis] patch ${key} pending (run \`bun install\`)`)
+    }
+    for (const key of result.retired) {
+      failures += 1
+      write(`[basis] patch ${key} retired but still installed (run \`bun install\`)`)
+    }
   } catch (error) {
     failures += 1
     write(`[basis] patch ${error instanceof Error ? error.message : String(error)}`)
   }
 
   const consumerManifest = readJson<BasisManifest>(join(installRoot, 'package.json'))
+  if (!(consumerManifest.trustedDependencies ?? []).includes('basis')) {
+    failures += 1
+    write('[basis] trustedDependencies is missing "basis"; lifecycle hook will not run')
+  }
+
   const consumerPatches = Object.keys(consumerManifest.patchedDependencies ?? {})
   const ownedPatches = Object.keys(manifest.patchedDependencies ?? {})
   const copied = consumerPatches.filter(key => ownedPatches.includes(key))
