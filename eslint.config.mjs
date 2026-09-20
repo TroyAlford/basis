@@ -1,4 +1,4 @@
-/* eslint-disable @import/extensions, @import/no-default-export */
-import basisConfig from './libraries/eslint-plugin/dist/index.js'
+/* eslint-disable @import/no-default-export */
+import { createConfig } from './consumer/eslint'
 
-export default basisConfig
+export default createConfig()
