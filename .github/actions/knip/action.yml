@@ -1,0 +1,78 @@
+name: 'Knip Dead-Code Check'
+description: 'Run the Basis-owned knip dead-code analysis against a repository'
+
+inputs:
+  config:
+    description: >-
+      Path to a repository-specific knip config, relative to the working
+      directory. When empty, an existing repository config is used if present;
+      otherwise the shared Basis config bundled with this action.
+    required: false
+    default: ''
+  args:
+    description: 'Additional space-separated arguments passed to knip.'
+    required: false
+    default: ''
+  version:
+    description: 'knip version to run. Pinned by Basis so consumers do not track it.'
+    required: false
+    default: '6.37.0'
+  working-directory:
+    description: 'Directory to analyze, relative to the repository root.'
+    required: false
+    default: '.'
+  fail-on-findings:
+    description: >-
+      When `true`, findings fail the job. Set to `false` for an advisory rollout
+      before promoting the check to required.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Run knip
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        KNIP_VERSION: ${{ inputs.version }}
+        KNIP_CONFIG: ${{ inputs.config }}
+        KNIP_ARGS: ${{ inputs.args }}
+        KNIP_FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+        KNIP_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -uo pipefail
+
+        # Resolve the config: an explicit input wins, then a repository-local
+        # config, then the conservative Basis default shipped with this action.
+        config="$KNIP_CONFIG"
+        if [ -z "$config" ]; then
+          for candidate in knip.json knip.jsonc knip.ts knip.js knip.config.ts knip.config.js; do
+            if [ -f "$candidate" ]; then
+              config="$candidate"
+              break
+            fi
+          done
+        fi
+        if [ -z "$config" ]; then
+          config="$KNIP_ACTION_PATH/knip.json"
+        fi
+
+        args=(--no-progress --config "$config")
+        if [ -n "$KNIP_ARGS" ]; then
+          # Deliberate word-splitting: `args` is a space-separated argument list.
+          # shellcheck disable=SC2206
+          extra=($KNIP_ARGS)
+          args+=("${extra[@]}")
+        fi
+
+        echo "Running knip@${KNIP_VERSION} with config: ${config}"
+        bunx --package "knip@${KNIP_VERSION}" knip-bun "${args[@]}"
+        status=$?
+
+        if [ "$status" -ne 0 ] && [ "$KNIP_FAIL_ON_FINDINGS" != 'true' ]; then
+          echo "::warning title=Basis knip::knip reported findings (advisory; this job is not failing)"
+          exit 0
+        fi
+
+        exit "$status"

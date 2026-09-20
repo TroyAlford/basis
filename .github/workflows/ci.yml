@@ -49,6 +49,18 @@ jobs:
       - name: Run consumer self-install contract
         run: bun run test:consumer
 
+  knip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asdf-setup
+      # Advisory while the repository baseline is established. Flip
+      # `fail-on-findings` to `true` (or drop the input) to make it required.
+      - name: Knip dead-code check
+        uses: ./.github/actions/knip
+        with:
+          fail-on-findings: 'false'
+
   # publish-dry-run:
   #   runs-on: ubuntu-latest
   #   steps:
@@ -83,6 +95,7 @@ jobs:
       - eslint
       - run-tests
       - type-check
+      - knip
       - consumer-install
       # - publish-dry-run
     runs-on: ubuntu-latest

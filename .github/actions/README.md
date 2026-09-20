@@ -22,6 +22,10 @@ These actions are provided to create reusable pieces of a standard GitHub reposi
    - Description: Creates a new release based on Conventional Commits.
    - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/create-release)
 
+4. **Knip Dead-Code Check**
+   - Description: Runs the Basis-owned knip dead-code analysis, using the shared version pin and default config instead of each repository declaring its own.
+   - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/knip)
+
 ## Usage
 
 To use these actions in your workflows, reference them in your `.yml` files as shown in the individual action documentation.
