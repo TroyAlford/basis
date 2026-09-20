@@ -26,15 +26,14 @@ which is why the trusted hook exists.
 export { default } from 'basis/eslint'
 ```
 
-`basis/eslint` is the shared flat config. Point the import resolver at a
-different tsconfig or append local policy with the factory:
+`basis/eslint` is the shared flat config. Append repository-specific policy
+with the factory:
 
 ```js
 // eslint.config.mjs
 import { createConfig } from 'basis/eslint'
 
 export default createConfig({
-  tsconfig: './tsconfig.json',
   overrides: [{ files: ['src/index.ts'], rules: { 'no-console': 'off' } }],
 })
 ```

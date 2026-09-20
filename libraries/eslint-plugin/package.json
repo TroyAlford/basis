@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "bun build:tsc && bun build:fix-extensions",
-    "build:tsc": "bun tsc ./index.ts --allowSyntheticDefaultImports --downLevelIteration --esModuleInterop --module ESNext --moduleResolution bundler --outDir ./dist --skipLibCheck",
+    "build:tsc": "bun ../../node_modules/typescript/bin/tsc ./index.ts --allowSyntheticDefaultImports --downLevelIteration --esModuleInterop --module ESNext --moduleResolution bundler --outDir ./dist --skipLibCheck",
     "build:fix-extensions": "bun scripts/fix-extensions.ts"
   },
   "dependencies": {
@@ -24,7 +24,6 @@
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^5.10.0",
     "@typescript-eslint/utils": "^8.57.2",
-    "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import-newlines": "^2.0.0",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-jsdoc": "^62.8.1",

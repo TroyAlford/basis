@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { applyBasisPatches, loadBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
 
@@ -16,6 +16,14 @@ interface BasisManifest {
   patchedDependencies?: Record<string, string>,
   /** Declared package version. */
   version?: string,
+}
+
+/**
+ * The subset of a dependency manifest needed to locate a binary.
+ */
+interface BinaryManifest {
+  /** Declared `bin` field, which may be a single path or a name-to-path map. */
+  bin?: Record<string, string> | string,
 }
 
 const REQUIRED_EXPORTS = [
@@ -46,6 +54,38 @@ const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) 
  * @returns Absolute path to the installed Basis package root.
  */
 const basisDir = (): string => join(import.meta.dir, '..')
+
+/**
+ * Locates the JavaScript entrypoint behind a dependency's named binary.
+ * @param packageName The dependency package name.
+ * @param binName The binary name to resolve.
+ * @returns Absolute path to the binary's JavaScript entrypoint.
+ */
+const resolveBin = (packageName: string, binName: string): string => {
+  const manifestPath = Bun.resolveSync(`${packageName}/package.json`, import.meta.dir)
+  const manifest = readJson<BinaryManifest>(manifestPath)
+  const relative = typeof manifest.bin === 'string' ? manifest.bin : manifest.bin?.[binName]
+
+  if (!relative) throw new Error(`[basis] ${packageName} does not expose a ${binName} binary`)
+
+  return join(dirname(manifestPath), relative)
+}
+
+/**
+ * Runs a dependency binary through Bun itself, so no Node shebang is required.
+ * @param packageName The dependency package name.
+ * @param binName The binary name to run.
+ * @param args Arguments for the binary.
+ * @returns The child process exit code.
+ */
+const runBin = (packageName: string, binName: string, args: string[]): number => {
+  const result = Bun.spawnSync([process.execPath, resolveBin(packageName, binName), ...args], {
+    stderr: 'inherit',
+    stdin: 'inherit',
+    stdout: 'inherit',
+  })
+  return result.exitCode
+}
 
 /**
  * Verifies the installed Basis surface and its owned patches.
@@ -91,20 +131,6 @@ const doctor = (): number => {
 }
 
 /**
- * Runs a locally installed binary through Bun, forwarding stdio and the exit code.
- * @param args The binary and its arguments.
- * @returns The child process exit code.
- */
-const run = (args: string[]): number => {
-  const result = Bun.spawnSync(['bun', 'x', ...args], {
-    stderr: 'inherit',
-    stdin: 'inherit',
-    stdout: 'inherit',
-  })
-  return result.exitCode
-}
-
-/**
  * Prints usage information for the CLI.
  */
 const usage = (): void => {
@@ -118,11 +144,11 @@ const main = (): void => {
   const [command] = process.argv.slice(2)
 
   if (command === 'doctor') process.exit(doctor())
-  if (command === 'lint') process.exit(run(['eslint', '.']))
-  if (command === 'typecheck') process.exit(run(['tsc', '--noEmit']))
+  if (command === 'lint') process.exit(runBin('eslint', 'eslint', ['.']))
+  if (command === 'typecheck') process.exit(runBin('typescript', 'tsc', ['--noEmit']))
   if (command === 'check') {
-    const lintCode = run(['eslint', '.'])
-    const typeCode = lintCode === 0 ? run(['tsc', '--noEmit']) : lintCode
+    const lintCode = runBin('eslint', 'eslint', ['.'])
+    const typeCode = lintCode === 0 ? runBin('typescript', 'tsc', ['--noEmit']) : lintCode
     process.exit(typeCode)
   }
 

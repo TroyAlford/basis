@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
       - name: Run ESLint
-        run: NODE_NO_WARNINGS=1 bun eslint
+        run: NODE_NO_WARNINGS=1 bun ./node_modules/eslint/bin/eslint.js
 
   run-tests:
     runs-on: ubuntu-latest
@@ -39,7 +39,7 @@ jobs:
           fetch-tags: true
       - uses: ./.github/actions/asdf-setup
       - name: Run TypeScript Type Check
-        run: bun tsc
+        run: bun ./node_modules/typescript/bin/tsc
 
   consumer-install:
     runs-on: ubuntu-latest

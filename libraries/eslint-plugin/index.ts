@@ -57,12 +57,6 @@ const plugin = (options: PluginOptions): ConfigWithExtends => {
         '@stylistic/parser': ['.js', '.mjs', '.ts', '.tsx'],
         '@typescript-eslint/parser': ['.ts', '.tsx'],
       },
-      '@import/resolver': {
-        typescript: {
-          alwaysTryTypes: true,
-          project: '../../tsconfig.json',
-        },
-      },
       'react': { version: 'detect' },
     },
   }

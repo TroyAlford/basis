@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { findInstalledInstances } from '../patches/install'
@@ -157,15 +157,11 @@ const main = (): void => {
 
   try {
     /*
-     * A transitive dependency's postinstall calls `node`. Point `node` at the
-     * running Bun so the fixture stays hermetic on Bun-only machines.
+     * Ensure child processes resolve the same Bun that is running this test, so
+     * the fixture never falls back to a different runtime.
      */
     mkdirSync(binDir, { recursive: true })
     symlinkSync(process.execPath, join(binDir, 'bun'))
-    if (Bun.which('node') === null) {
-      write(join(binDir, 'node'), `#!/bin/sh\nexec "${process.execPath}" "$@"\n`)
-      chmodSync(join(binDir, 'node'), 0o755)
-    }
     const env = { PATH: `${binDir}:${process.env.PATH ?? ''}` }
 
     run(['git', 'clone', '--quiet', '--local', '--no-hardlinks', repoRoot, source], workspace, env)
