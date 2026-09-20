@@ -68,6 +68,20 @@ jobs:
 
 Pin the action to a released Basis tag, as with the other Basis actions.
 
+## Self-test
+
+The action logic lives in `run.sh`; `.github/actions/knip/test.sh` exercises that
+same script directly (no test framework) and asserts:
+
+- advisory + findings → success;
+- required + findings → failure;
+- advisory + broken config → failure (exit 2);
+- `.knip.json` is respected;
+- `package.json#knip` is respected.
+
+Run it locally with `bash .github/actions/knip/test.sh`; Basis CI runs it as part
+of the `knip` job.
+
 ## Notes
 
 - Requires `bun`/`bunx` on `PATH`; it does not add knip to the repository's

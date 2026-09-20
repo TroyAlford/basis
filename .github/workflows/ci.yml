@@ -54,6 +54,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
+      # Exercises the action's exit-code and config-discovery behavior directly.
+      - name: Knip action self-test
+        run: bash .github/actions/knip/test.sh
       # Advisory while the repository baseline is established. Flip
       # `fail-on-findings` to `true` (or drop the input) to make it required.
       - name: Knip dead-code check
