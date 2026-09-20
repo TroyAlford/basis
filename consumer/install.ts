@@ -5,20 +5,22 @@ import { resolveInstallRoot } from './patches/root'
 
 /**
  * Trusted install hook that makes Basis-owned transitive patches effective in a
- * consuming project. Bun only honors root-level `patchedDependencies`, so this
- * hook re-applies the exact-version patch set the installed Basis release owns.
+ * consuming project.
+ *
+ * Bun applies `patchedDependencies` during install and only from the install
+ * root, so a dependency cannot declare patches transitively. The hook instead
+ * applies Basis's exact patch files with `git apply` once the dependencies are
+ * on disk, matched by exact `name@version`.
  */
 const main = (): void => {
   const basisDir = join(import.meta.dir, '..')
   const rootDir = resolveInstallRoot(basisDir)
 
   try {
-    const results = applyBasisPatches({ basisDir, rootDir })
-    const applied = results.filter(result => result.status === 'applied')
+    const result = applyBasisPatches({ basisDir, rootDir })
 
-    if (applied.length > 0) {
-      const summary = applied.map(result => `${result.name}@${result.version}`).join(', ')
-      process.stdout.write(`[basis] applied owned patch(es): ${summary}\n`)
+    if (result.applied.length > 0) {
+      process.stdout.write(`[basis] applied owned patch(es): ${result.applied.join(', ')}\n`)
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { applyBasisPatches, loadBasisPatches } from './patches/install'
+import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
 
 /**
@@ -108,10 +108,11 @@ const doctor = (): number => {
   }
 
   try {
-    const patches = loadBasisPatches(root)
-    const statuses = applyBasisPatches({ basisDir: root, rootDir: installRoot, write: false })
-    write(`[basis] owned patches ${patches.length}`)
-    for (const status of statuses) write(`[basis] patch ${status.name}@${status.version} ${status.status}`)
+    const result = applyBasisPatches({ basisDir: root, rootDir: installRoot, write: false })
+    write(`[basis] owned patches ${result.applied.length + result.skipped.length}`)
+
+    for (const key of result.skipped) write(`[basis] patch ${key} applied`)
+    for (const key of result.applied) write(`[basis] patch ${key} pending`)
   } catch (error) {
     failures += 1
     write(`[basis] patch ${error instanceof Error ? error.message : String(error)}`)

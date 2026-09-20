@@ -64,7 +64,19 @@ bunx basis check
 ## Patches
 
 Patch files live in `patches/` and are declared in the root
-`patchedDependencies` map, which is also the manifest the install hook reads.
-The hook applies each `name@version` patch to every installed copy of that exact
-version in the consumer graph. Unrelated versions are untouched and a missing
-expected version fails the install loudly.
+`patchedDependencies` map, which is the manifest the install hook reads.
+
+Bun applies `patchedDependencies` during install, and only from the install
+root: a dependency's patches are never applied transitively, and there is no
+standalone Bun command that applies an existing patch file. The trusted install
+hook therefore applies Basis's exact patch files with `git apply` once the
+dependencies are on disk:
+
+- every patch is matched by exact `name@version`;
+- every installed copy of that exact version is patched;
+- already-applied patches are detected and skipped, so installs are idempotent;
+- a patch that no longer matches the installed source, or a missing expected
+  version, fails the install loudly.
+
+Git is required (consumers install Basis from Git, and Bun's own patch tooling
+also depends on Git). Consumers never copy patch files or `patchedDependencies`.

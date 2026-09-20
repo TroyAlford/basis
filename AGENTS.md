@@ -30,5 +30,5 @@ Guidance for humans and coding agents working in this repository.
 
 - The root `package.json` is the public facade for consumers. Keep `exports` limited to supported source/config entrypoints (`basis/eslint`, `basis/tsconfig/*`, `basis/cli`) and do not expose internal workspace paths.
 - Public source must declare every dependency it imports in the root `dependencies`; consumers must not enumerate the ESLint plugin stack themselves.
-- Patch files stay in `patches/` and are declared in the root `patchedDependencies` map. The trusted `postinstall` hook (`consumer/install.ts`) applies them to exact `name@version` installs; keep it deterministic, idempotent, and loud on drift.
+- Patch files stay in `patches/` and are declared in the root `patchedDependencies` map. The trusted `postinstall` hook (`consumer/install.ts`) applies them to exact `name@version` installs with `git apply` (Bun cannot apply a dependency's patches transitively and exposes no standalone apply command). Do not reintroduce a hand-rolled diff applier; keep it deterministic, idempotent, and loud on drift.
 - `bun run test:consumer` performs a real Git-dependency install into a temporary host app. Run it when changing `exports`, dependencies, presets, or patch handling.

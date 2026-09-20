@@ -1,45 +1,50 @@
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { applyPatchToText } from './apply'
-import type { PatchFile } from './parse'
-import { parsePatch } from './parse'
 
 /**
- * A single patch Basis owns, derived from the root `patchedDependencies` map.
+ * A single patch Basis owns, sourced from the root `patchedDependencies` map.
  */
 export interface BasisPatch {
   /** Package name the patch targets, for example `eslint-plugin-import`. */
   name: string,
   /** Absolute path to the patch file inside the installed Basis package. */
-  patchPath: string,
+  path: string,
   /** Exact package version the patch was authored against. */
   version: string,
 }
 
 /**
- * A physical installation of a Basis-owned dependency that the hook inspected.
+ * A physical installation of a Basis-owned dependency.
  */
 export interface InstalledInstance {
   /** Package name read from the installed `package.json`. */
   name: string,
   /** Absolute path to the installed package directory. */
   path: string,
-  /** Whether the patch changed the package, or was already in place. */
-  status: 'applied' | 'unchanged',
   /** Installed package version. */
   version: string,
 }
 
 /**
- * Options controlling where Basis reads its patches from and what it patches.
+ * Options controlling where Basis reads patches from and what it patches.
  */
-export interface ApplyPatchesOptions {
+export interface ApplyBasisPatchesOptions {
   /** Absolute path to the installed Basis package root. */
   basisDir: string,
   /** Absolute path to the consumer project root whose `node_modules` is patched. */
   rootDir: string,
   /** When `false`, report the outcome without writing any files. Defaults to `true`. */
   write?: boolean,
+}
+
+/**
+ * Outcome of applying the Basis-owned patch set.
+ */
+export interface ApplyBasisPatchesResult {
+  /** `name@version` patches that were pending and have now been applied. */
+  applied: string[],
+  /** `name@version` patches that were already applied. */
+  skipped: string[],
 }
 
 /**
@@ -52,6 +57,16 @@ interface PackageManifest {
   patchedDependencies?: Record<string, string>,
   /** Declared package version. */
   version?: string,
+}
+
+/**
+ * Result of running a `git apply` subcommand.
+ */
+interface GitApplyResult {
+  /** Process exit code. */
+  code: number,
+  /** Captured standard error, used for loud failure messages. */
+  stderr: string,
 }
 
 /**
@@ -75,8 +90,71 @@ const isDirectory = (path: string): boolean => {
 }
 
 /**
- * Loads the patch set Basis owns, sourced from the installed package's own
- * `patchedDependencies` map so the patch list never drifts from the release.
+ * Resolves the `git` binary once so patch application can fail with a clear
+ * message when Git is unavailable.
+ * @returns Absolute path to the git binary.
+ */
+const gitBinary = (): string => {
+  const git = Bun.which('git')
+  if (git === null) {
+    throw new Error('[basis] git is required to apply Basis-owned patches')
+  }
+  return git
+}
+
+/**
+ * Runs `git apply` inside a package directory, outside any repository.
+ * @param packageDir Absolute path to the package being patched.
+ * @param args Arguments for `git apply`.
+ * @param patchPath Absolute path to the patch file.
+ * @returns The exit code and captured standard error.
+ */
+const gitApply = (packageDir: string, args: string[], patchPath: string): GitApplyResult => {
+  const result = Bun.spawnSync([gitBinary(), 'apply', '-p1', ...args, patchPath], {
+    cwd: packageDir,
+    env: { ...process.env, GIT_CEILING_DIRECTORIES: packageDir },
+    stderr: 'pipe',
+    stdin: 'ignore',
+    stdout: 'pipe',
+  })
+
+  return { code: result.exitCode, stderr: result.stderr.toString() }
+}
+
+/**
+ * Reports whether a patch is already present in an installed package.
+ * @param patchPath Absolute path to the patch file.
+ * @param packageDir Absolute path to the installed package directory.
+ * @returns Whether the patch is already applied.
+ */
+const isPatchApplied = (patchPath: string, packageDir: string): boolean => gitApply(
+  packageDir,
+  ['--reverse', '--check'],
+  patchPath,
+).code === 0
+
+/**
+ * Applies one patch to an installed package, failing loudly when it no longer
+ * matches the exact installed source.
+ * @param patchPath Absolute path to the patch file.
+ * @param packageDir Absolute path to the installed package directory.
+ * @param key The `name@version` key, for error messages.
+ */
+const applyPatchToPackage = (patchPath: string, packageDir: string, key: string): void => {
+  const check = gitApply(packageDir, ['--check'], patchPath)
+  if (check.code !== 0) {
+    throw new Error(`[basis] ${key} no longer applies to ${packageDir}: ${check.stderr.trim()}`)
+  }
+
+  const applied = gitApply(packageDir, [], patchPath)
+  if (applied.code !== 0) {
+    throw new Error(`[basis] failed to apply ${key} to ${packageDir}: ${applied.stderr.trim()}`)
+  }
+}
+
+/**
+ * Loads the patch set Basis owns from the installed package's own
+ * `patchedDependencies` map, so the list never drifts from the release.
  * @param basisDir Absolute path to the installed Basis package root.
  * @returns The declared patches, sorted by package name for deterministic output.
  */
@@ -85,11 +163,11 @@ export const loadBasisPatches = (basisDir: string): BasisPatch[] => {
   const patchedDependencies = manifest.patchedDependencies ?? {}
 
   return Object.entries(patchedDependencies)
-    .map(([key, relativePath]) => {
+    .map(([key, patchPath]) => {
       const separator = key.lastIndexOf('@')
       return {
         name: key.slice(0, separator),
-        patchPath: join(basisDir, relativePath),
+        path: join(basisDir, patchPath),
         version: key.slice(separator + 1),
       }
     })
@@ -125,12 +203,7 @@ export const findInstalledInstances = (rootDir: string, name: string): Installed
         if (existsSync(manifestPath)) {
           const manifest = readJson<PackageManifest>(manifestPath)
           if (manifest.name === name) {
-            instances.push({
-              name,
-              path: candidate,
-              status: 'unchanged',
-              version: manifest.version ?? '0.0.0',
-            })
+            instances.push({ name, path: candidate, version: manifest.version ?? '0.0.0' })
           }
         }
 
@@ -144,58 +217,40 @@ export const findInstalledInstances = (rootDir: string, name: string): Installed
 }
 
 /**
- * Applies every file in a parsed patch to one installed package copy.
- * @param instance The installed package copy to patch.
- * @param files The parsed patch files.
- * @param write Whether to persist changes.
- * @returns The same instance with an updated status.
- */
-const patchInstance = (instance: InstalledInstance, files: PatchFile[], write: boolean): InstalledInstance => {
-  let status: InstalledInstance['status'] = 'unchanged'
-
-  for (const file of files) {
-    const target = join(instance.path, file.newPath)
-    if (!existsSync(target)) throw new Error(`[basis] expected patched file is missing: ${target}`)
-
-    const result = applyPatchToText(readFileSync(target, 'utf8'), file)
-    if (result.applied) {
-      if (write) writeFileSync(target, result.content)
-      status = 'applied'
-    }
-  }
-
-  return { ...instance, status }
-}
-
-/**
  * Applies the Basis-owned transitive patch set to a consumer installation.
  *
- * The set is derived from the installed Basis version, matched by exact
- * `name@version`, and applied to every physical install of that exact version.
- * Unrelated versions are left untouched, and a missing expected version throws
- * rather than guessing.
+ * Bun applies `patchedDependencies` during install and cannot apply a
+ * dependency's patches transitively, so the hook applies the exact patch files
+ * with `git apply` after install. Each patch is matched by exact
+ * `name@version`, applied idempotently to every installed copy of that version,
+ * and a missing version or a patch that no longer matches fails loudly.
  * @param options The Basis package root, consumer root, and write mode.
- * @returns The inspected instances and their resulting status.
+ * @returns The entries applied and those already registered.
  */
-export const applyBasisPatches = (options: ApplyPatchesOptions): InstalledInstance[] => {
+export const applyBasisPatches = (options: ApplyBasisPatchesOptions): ApplyBasisPatchesResult => {
   const { basisDir, rootDir, write = true } = options
-  const results: InstalledInstance[] = []
+  const applied: string[] = []
+  const skipped: string[] = []
 
-  for (const basisPatch of loadBasisPatches(basisDir)) {
-    const files = parsePatch(readFileSync(basisPatch.patchPath, 'utf8'))
-    const matches = findInstalledInstances(rootDir, basisPatch.name)
-      .filter(instance => instance.version === basisPatch.version)
+  for (const patch of loadBasisPatches(basisDir)) {
+    const key = `${patch.name}@${patch.version}`
+    const matches = findInstalledInstances(rootDir, patch.name)
+      .filter(instance => instance.version === patch.version)
 
     if (matches.length === 0) {
-      throw new Error(
-        `[basis] no installed ${basisPatch.name}@${basisPatch.version} found under ${rootDir}`,
-      )
+      throw new Error(`[basis] no installed copy at the patched version for: ${key}`)
     }
 
+    let pending = false
     for (const instance of matches) {
-      results.push(patchInstance(instance, files, write))
+      if (isPatchApplied(patch.path, instance.path)) continue
+      if (write) applyPatchToPackage(patch.path, instance.path, key)
+      pending = true
     }
+
+    if (pending) applied.push(key)
+    else skipped.push(key)
   }
 
-  return results
+  return { applied, skipped }
 }
