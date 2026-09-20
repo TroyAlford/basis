@@ -58,15 +58,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up toolchain and install dependencies
-        uses: TroyAlford/basis/.github/actions/asdf-setup@v3.24.0
+        uses: TroyAlford/basis/.github/actions/asdf-setup@vX.Y.Z
 
       - name: Knip dead-code check
-        uses: TroyAlford/basis/.github/actions/knip@v3.24.0
+        uses: TroyAlford/basis/.github/actions/knip@vX.Y.Z
         with:
           fail-on-findings: 'false' # advisory during rollout
 ```
 
-Pin the action to a released Basis tag, as with the other Basis actions.
+Pin both to a released Basis tag (the release that contains this action), as
+with the other Basis actions.
 
 ## Self-test
 
