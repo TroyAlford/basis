@@ -1,14 +1,3 @@
-var __values = (this && this.__values) || function(o) {
-    var s = typeof Symbol === "function" && Symbol.iterator, m = s && o[s], i = 0;
-    if (m) return m.call(o);
-    if (o && typeof o.length === "number") return {
-        next: function () {
-            if (o && i >= o.length) o = void 0;
-            return { value: o && o[i++], done: !o };
-        }
-    };
-    throw new TypeError(s ? "Object is not iterable." : "Symbol.iterator is not defined.");
-};
 var __read = (this && this.__read) || function (o, n) {
     var m = typeof Symbol === "function" && o[Symbol.iterator];
     if (!m) return o;
@@ -29,7 +18,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 var BUILT_IN_MODULES = new Set(builtinModules);
-var GLOB_REGEXP_SPECIALS = '.+^${}()|[]\\';
 var dependencyCache = new Map();
 var emptyDependencyFields = function () { return ({
     bundledDependencies: [],
@@ -75,15 +63,6 @@ var readDependencyFields = function (packageJsonPath) {
     dependencyCache.set(packageJsonPath, fields);
     return fields;
 };
-var readDependencyFieldsStrict = function (packageJsonPath) {
-    var cached = dependencyCache.get(packageJsonPath);
-    if (cached)
-        return cached;
-    var pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
-    var fields = extractDependencyFields(pkg);
-    dependencyCache.set(packageJsonPath, fields);
-    return fields;
-};
 var findNearestPackageJson = function (filename) {
     var directory = dirname(resolve(filename));
     while (true) {
@@ -96,17 +75,6 @@ var findNearestPackageJson = function (filename) {
         directory = parent_1;
     }
 };
-var mergeDependencyFields = function (target, source) {
-    if (!source)
-        return;
-    Object.assign(target.bundledDependencies, source.bundledDependencies);
-    Object.assign(target.dependencies, source.dependencies);
-    Object.assign(target.devDependencies, source.devDependencies);
-    Object.assign(target.optionalDependencies, source.optionalDependencies);
-    Object.assign(target.peerDependencies, source.peerDependencies);
-    if (source.name)
-        target.name = source.name;
-};
 var hasAnyDependencies = function (fields) {
     if (fields.bundledDependencies.length > 0)
         return true;
@@ -118,57 +86,12 @@ var hasAnyDependencies = function (fields) {
         return true;
     return Object.keys(fields.peerDependencies).length > 0;
 };
-var getErrorCode = function (error) {
-    if (error instanceof Error && 'code' in error)
-        return String(error.code);
-    return undefined;
-};
-var toPackageReadError = function (error) {
-    if (error instanceof SyntaxError)
-        return { data: { error: error.message }, messageId: 'packageUnparsable' };
-    if (getErrorCode(error) === 'ENOENT')
-        return { messageId: 'packageNotFound' };
-    return null;
-};
-var collectDependencies = function (filename, packageDir) {
-    var e_1, _a;
-    var fields = emptyDependencyFields();
-    var errors = [];
-    var directories = packageDir
-        ? (Array.isArray(packageDir) ? packageDir : [packageDir]).map(function (directory) { return resolve(directory); })
-        : [];
-    if (directories.length > 0) {
-        try {
-            for (var directories_1 = __values(directories), directories_1_1 = directories_1.next(); !directories_1_1.done; directories_1_1 = directories_1.next()) {
-                var directory = directories_1_1.value;
-                var packageJsonPath = join(directory, 'package.json');
-                if (directories.length > 1) {
-                    mergeDependencyFields(fields, readDependencyFields(packageJsonPath));
-                    continue;
-                }
-                try {
-                    mergeDependencyFields(fields, readDependencyFieldsStrict(packageJsonPath));
-                }
-                catch (error) {
-                    var readError = toPackageReadError(error);
-                    if (readError)
-                        errors.push(readError);
-                }
-            }
-        }
-        catch (e_1_1) { e_1 = { error: e_1_1 }; }
-        finally {
-            try {
-                if (directories_1_1 && !directories_1_1.done && (_a = directories_1.return)) _a.call(directories_1);
-            }
-            finally { if (e_1) throw e_1.error; }
-        }
-    }
-    else {
-        var packageJsonPath = findNearestPackageJson(filename);
-        mergeDependencyFields(fields, packageJsonPath ? readDependencyFields(packageJsonPath) : null);
-    }
-    return { errors: errors, fields: hasAnyDependencies(fields) ? fields : null };
+var collectDependencies = function (filename) {
+    var packageJsonPath = findNearestPackageJson(filename);
+    var fields = packageJsonPath ? readDependencyFields(packageJsonPath) : null;
+    if (!fields || !hasAnyDependencies(fields))
+        return null;
+    return fields;
 };
 var getModuleOriginalName = function (specifier) {
     var _a = __read(specifier.split('/'), 2), first = _a[0], second = _a[1];
@@ -212,108 +135,28 @@ var getStringLiteralValue = function (node) {
         return node.value;
     return null;
 };
-var checkDependencyDeclaration = function (deps, packageName, status) {
-    if (status === void 0) { status = {
-        isInBundledDeps: false,
-        isInDeps: false,
-        isInDevDeps: false,
-        isInOptDeps: false,
-        isInPeerDeps: false,
-    }; }
-    var hierarchy = [];
-    var parts = packageName.split('/');
-    parts.forEach(function (part, index) {
-        if (!part.startsWith('@'))
-            hierarchy.push(parts.slice(0, index + 1).join('/'));
-    });
-    return hierarchy.reduce(function (result, ancestorName) { return ({
-        isInBundledDeps: result.isInBundledDeps || deps.bundledDependencies.includes(ancestorName),
-        isInDeps: result.isInDeps || deps.dependencies[ancestorName] !== undefined,
-        isInDevDeps: result.isInDevDeps || deps.devDependencies[ancestorName] !== undefined,
-        isInOptDeps: result.isInOptDeps || deps.optionalDependencies[ancestorName] !== undefined,
-        isInPeerDeps: result.isInPeerDeps || deps.peerDependencies[ancestorName] !== undefined,
-    }); }, status);
-};
-var globToRegExp = function (glob) {
-    var _a;
-    var expression = '';
-    for (var index = 0; index < glob.length; index++) {
-        var character = (_a = glob[index]) !== null && _a !== void 0 ? _a : '';
-        if (character === '*') {
-            if (glob[index + 1] === '*') {
-                index++;
-                if (glob[index + 1] === '/') {
-                    index++;
-                    expression += '(?:.*/)?';
-                }
-                else {
-                    expression += '.*';
-                }
-            }
-            else {
-                expression += '[^/]*';
-            }
-            continue;
-        }
-        if (character === '?') {
-            expression += '[^/]';
-            continue;
-        }
-        expression += GLOB_REGEXP_SPECIALS.includes(character) ? "\\".concat(character) : character;
-    }
-    return new RegExp("^".concat(expression, "$"));
-};
-var matchesGlob = function (filename, glob) {
-    var normalizedFilename = filename.replace(/\\/g, '/');
-    var cwdGlob = join(process.cwd(), glob).replace(/\\/g, '/');
-    return globToRegExp(glob.replace(/\\/g, '/')).test(normalizedFilename)
-        || globToRegExp(cwdGlob).test(normalizedFilename);
-};
-var testConfig = function (config, filename) {
-    if (typeof config === 'boolean' || typeof config === 'undefined')
-        return config;
-    return config.some(function (glob) { return matchesGlob(filename, glob); });
-};
-var resolveOptions = function (options, filename) {
-    var _a;
-    return ({
-        allowBundledDeps: testConfig(options.bundledDependencies, filename) !== false,
-        allowDevDeps: testConfig(options.devDependencies, filename) !== false,
-        allowModules: new Set((_a = options.allowModules) !== null && _a !== void 0 ? _a : []),
-        allowOptDeps: testConfig(options.optionalDependencies, filename) !== false,
-        allowPeerDeps: testConfig(options.peerDependencies, filename) !== false,
-        verifyTypeImports: Boolean(options.verifyTypeImports) || Boolean(options.includeTypes),
-    });
+var isDeclared = function (deps, packageName) {
+    if (deps.dependencies[packageName] !== undefined)
+        return true;
+    if (deps.devDependencies[packageName] !== undefined)
+        return true;
+    if (deps.optionalDependencies[packageName] !== undefined)
+        return true;
+    if (deps.peerDependencies[packageName] !== undefined)
+        return true;
+    return deps.bundledDependencies.includes(packageName);
 };
 export var noExtraneousDependencies = {
     create: function (context) {
-        var e_2, _a;
-        var _b;
-        var options = ((_b = context.options[0]) !== null && _b !== void 0 ? _b : {});
-        var filename = context.physicalFilename;
-        var resolvedOptions = resolveOptions(options, filename);
-        var _c = collectDependencies(filename, options.packageDir), errors = _c.errors, fields = _c.fields;
-        var deps = fields !== null && fields !== void 0 ? fields : emptyDependencyFields();
-        try {
-            for (var errors_1 = __values(errors), errors_1_1 = errors_1.next(); !errors_1_1.done; errors_1_1 = errors_1.next()) {
-                var error = errors_1_1.value;
-                context.report({ data: error.data, loc: { column: 0, line: 0 }, messageId: error.messageId });
-            }
-        }
-        catch (e_2_1) { e_2 = { error: e_2_1 }; }
-        finally {
-            try {
-                if (errors_1_1 && !errors_1_1.done && (_a = errors_1.return)) _a.call(errors_1);
-            }
-            finally { if (e_2) throw e_2.error; }
-        }
+        var _a;
+        var deps = (_a = collectDependencies(context.physicalFilename)) !== null && _a !== void 0 ? _a : emptyDependencyFields();
         var report = function (node, specifier) {
             if (!specifier || isBuiltInModule(specifier) || !isBareSpecifier(specifier))
                 return;
-            if (!resolvedOptions.verifyTypeImports && isTypeOnly(node))
+            if (isTypeOnly(node))
                 return;
             var packageName = getModuleOriginalName(specifier);
-            if (!packageName || resolvedOptions.allowModules.has(packageName))
+            if (!packageName)
                 return;
             /*
              * The nearest package importing itself by name (`@basis/react` inside
@@ -321,25 +164,8 @@ export var noExtraneousDependencies = {
              */
             if (packageName === deps.name)
                 return;
-            var status = checkDependencyDeclaration(deps, packageName);
-            if (status.isInDeps)
+            if (isDeclared(deps, packageName))
                 return;
-            if (resolvedOptions.allowDevDeps && status.isInDevDeps)
-                return;
-            if (resolvedOptions.allowPeerDeps && status.isInPeerDeps)
-                return;
-            if (resolvedOptions.allowOptDeps && status.isInOptDeps)
-                return;
-            if (resolvedOptions.allowBundledDeps && status.isInBundledDeps)
-                return;
-            if (status.isInDevDeps && !resolvedOptions.allowDevDeps) {
-                context.report({ data: { packageName: packageName }, messageId: 'devDependency', node: node });
-                return;
-            }
-            if (status.isInOptDeps && !resolvedOptions.allowOptDeps) {
-                context.report({ data: { packageName: packageName }, messageId: 'optionalDependency', node: node });
-                return;
-            }
             context.report({ data: { packageName: packageName }, messageId: 'missingDependency', node: node });
         };
         return {
@@ -372,32 +198,12 @@ export var noExtraneousDependencies = {
             description: 'Forbid the use of extraneous packages.',
         },
         messages: {
-            devDependency: "'{{packageName}}' should be listed in the project's dependencies, not devDependencies.",
             missingDependency: [
                 "'{{packageName}}' should be listed in the project's dependencies.",
                 " Run 'npm i -S {{packageName}}' to add it",
             ].join(''),
-            optionalDependency: "'{{packageName}}' should be listed in the project's dependencies, not optionalDependencies.",
-            packageNotFound: 'The package.json file could not be found.',
-            packageUnparsable: 'The package.json file could not be parsed: {{error}}',
         },
-        schema: [
-            {
-                additionalProperties: false,
-                properties: {
-                    allowModules: { items: { type: 'string' }, type: 'array' },
-                    bundledDependencies: { type: ['array', 'boolean'] },
-                    devDependencies: { type: ['array', 'boolean'] },
-                    includeInternal: { type: 'boolean' },
-                    includeTypes: { type: 'boolean' },
-                    optionalDependencies: { type: ['array', 'boolean'] },
-                    packageDir: { type: ['array', 'string'] },
-                    peerDependencies: { type: ['array', 'boolean'] },
-                    verifyTypeImports: { type: 'boolean' },
-                },
-                type: 'object',
-            },
-        ],
+        schema: [],
         type: 'problem',
     },
 };

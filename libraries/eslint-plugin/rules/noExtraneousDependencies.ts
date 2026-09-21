@@ -3,29 +3,24 @@
  * (https://github.com/import-js/eslint-plugin-import), released under the MIT
  * license. Original copyright (c) 2015 Ben Mosher and contributors.
  *
- * Basis only relies on the rule's observable behavior for bare imports/exports,
- * so this port matches the declared package name against the nearest
- * `package.json` directly instead of resolving the module on disk. Bundler and
- * `tsconfig` alias resolution is intentionally not implemented (`includeInternal`
- * is accepted but ignored), because Basis declares every `@basis/*` workspace
- * dependency explicitly. A package that imports itself by name is treated as
- * internal, matching the original's resolved-path behavior. As a consequence,
- * an undeclared package is reported even when it is not installed, which the
- * original rule would silently skip.
+ * Basis consumes this rule with a single, non-configurable policy:
+ *  - a bare (non-relative) import/export is fine when its package is declared in
+ *    the nearest `package.json` in any of `dependencies`, `devDependencies`,
+ *    `optionalDependencies`, `peerDependencies`, or `bundledDependencies`;
+ *  - type-only imports/exports, relative/absolute specifiers, Node and Bun
+ *    builtins, and self-references are always ignored.
+ *
+ * The declared package name is matched against `package.json` directly rather
+ * than resolving the module on disk, and bundler/`tsconfig` alias resolution is
+ * intentionally not implemented (`@basis/*` workspace dependencies are declared
+ * explicitly). Consequently, an undeclared package is reported even when it is
+ * not installed, which the original rule would silently skip.
  */
 import type { Rule } from 'eslint'
 import type * as ESTree from 'estree'
 import { existsSync, readFileSync } from 'node:fs'
 import { builtinModules } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-
-interface DeclarationStatus {
-  isInBundledDeps: boolean,
-  isInDeps: boolean,
-  isInDevDeps: boolean,
-  isInOptDeps: boolean,
-  isInPeerDeps: boolean,
-}
 
 interface DependencyFields {
   bundledDependencies: string[],
@@ -36,34 +31,7 @@ interface DependencyFields {
   peerDependencies: Record<string, unknown>,
 }
 
-interface PackageReadError {
-  data?: { error: string },
-  messageId: 'packageNotFound' | 'packageUnparsable',
-}
-
-interface ResolvedOptions {
-  allowBundledDeps: boolean,
-  allowDevDeps: boolean,
-  allowModules: Set<string>,
-  allowOptDeps: boolean,
-  allowPeerDeps: boolean,
-  verifyTypeImports: boolean,
-}
-
-interface RuleOptions {
-  allowModules?: string[],
-  bundledDependencies?: boolean | string[],
-  devDependencies?: boolean | string[],
-  includeInternal?: boolean,
-  includeTypes?: boolean,
-  optionalDependencies?: boolean | string[],
-  packageDir?: string | string[],
-  peerDependencies?: boolean | string[],
-  verifyTypeImports?: boolean,
-}
-
 const BUILT_IN_MODULES = new Set(builtinModules)
-const GLOB_REGEXP_SPECIALS = '.+^${}()|[]\\'
 
 const dependencyCache = new Map<string, DependencyFields | null>()
 
@@ -109,15 +77,6 @@ const readDependencyFields = (packageJsonPath: string): DependencyFields | null 
   return fields
 }
 
-const readDependencyFieldsStrict = (packageJsonPath: string): DependencyFields => {
-  const cached = dependencyCache.get(packageJsonPath)
-  if (cached) return cached
-  const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as Record<string, unknown>
-  const fields = extractDependencyFields(pkg)
-  dependencyCache.set(packageJsonPath, fields)
-  return fields
-}
-
 const findNearestPackageJson = (filename: string): string | null => {
   let directory = dirname(resolve(filename))
   while (true) {
@@ -129,16 +88,6 @@ const findNearestPackageJson = (filename: string): string | null => {
   }
 }
 
-const mergeDependencyFields = (target: DependencyFields, source: DependencyFields | null): void => {
-  if (!source) return
-  Object.assign(target.bundledDependencies, source.bundledDependencies)
-  Object.assign(target.dependencies, source.dependencies)
-  Object.assign(target.devDependencies, source.devDependencies)
-  Object.assign(target.optionalDependencies, source.optionalDependencies)
-  Object.assign(target.peerDependencies, source.peerDependencies)
-  if (source.name) target.name = source.name
-}
-
 const hasAnyDependencies = (fields: DependencyFields): boolean => {
   if (fields.bundledDependencies.length > 0) return true
   if (Object.keys(fields.dependencies).length > 0) return true
@@ -147,47 +96,11 @@ const hasAnyDependencies = (fields: DependencyFields): boolean => {
   return Object.keys(fields.peerDependencies).length > 0
 }
 
-const getErrorCode = (error: unknown): string | undefined => {
-  if (error instanceof Error && 'code' in error) return String((error as { code?: unknown }).code)
-  return undefined
-}
-
-const toPackageReadError = (error: unknown): PackageReadError | null => {
-  if (error instanceof SyntaxError) return { data: { error: error.message }, messageId: 'packageUnparsable' }
-  if (getErrorCode(error) === 'ENOENT') return { messageId: 'packageNotFound' }
-  return null
-}
-
-const collectDependencies = (
-  filename: string,
-  packageDir: string | string[] | undefined,
-): { errors: PackageReadError[], fields: DependencyFields | null } => {
-  const fields = emptyDependencyFields()
-  const errors: PackageReadError[] = []
-  const directories = packageDir
-    ? (Array.isArray(packageDir) ? packageDir : [packageDir]).map(directory => resolve(directory))
-    : []
-
-  if (directories.length > 0) {
-    for (const directory of directories) {
-      const packageJsonPath = join(directory, 'package.json')
-      if (directories.length > 1) {
-        mergeDependencyFields(fields, readDependencyFields(packageJsonPath))
-        continue
-      }
-      try {
-        mergeDependencyFields(fields, readDependencyFieldsStrict(packageJsonPath))
-      } catch (error) {
-        const readError = toPackageReadError(error)
-        if (readError) errors.push(readError)
-      }
-    }
-  } else {
-    const packageJsonPath = findNearestPackageJson(filename)
-    mergeDependencyFields(fields, packageJsonPath ? readDependencyFields(packageJsonPath) : null)
-  }
-
-  return { errors, fields: hasAnyDependencies(fields) ? fields : null }
+const collectDependencies = (filename: string): DependencyFields | null => {
+  const packageJsonPath = findNearestPackageJson(filename)
+  const fields = packageJsonPath ? readDependencyFields(packageJsonPath) : null
+  if (!fields || !hasAnyDependencies(fields)) return null
+  return fields
 }
 
 const getModuleOriginalName = (specifier: string): string | null => {
@@ -226,119 +139,32 @@ const getStringLiteralValue = (node: ESTree.Node | null | undefined): string | n
   return null
 }
 
-const checkDependencyDeclaration = (
-  deps: DependencyFields,
-  packageName: string,
-  status: DeclarationStatus = {
-    isInBundledDeps: false,
-    isInDeps: false,
-    isInDevDeps: false,
-    isInOptDeps: false,
-    isInPeerDeps: false,
-  },
-): DeclarationStatus => {
-  const hierarchy: string[] = []
-  const parts = packageName.split('/')
-  parts.forEach((part, index) => {
-    if (!part.startsWith('@')) hierarchy.push(parts.slice(0, index + 1).join('/'))
-  })
-  return hierarchy.reduce<DeclarationStatus>((result, ancestorName) => ({
-    isInBundledDeps: result.isInBundledDeps || deps.bundledDependencies.includes(ancestorName),
-    isInDeps: result.isInDeps || deps.dependencies[ancestorName] !== undefined,
-    isInDevDeps: result.isInDevDeps || deps.devDependencies[ancestorName] !== undefined,
-    isInOptDeps: result.isInOptDeps || deps.optionalDependencies[ancestorName] !== undefined,
-    isInPeerDeps: result.isInPeerDeps || deps.peerDependencies[ancestorName] !== undefined,
-  }), status)
+const isDeclared = (deps: DependencyFields, packageName: string): boolean => {
+  if (deps.dependencies[packageName] !== undefined) return true
+  if (deps.devDependencies[packageName] !== undefined) return true
+  if (deps.optionalDependencies[packageName] !== undefined) return true
+  if (deps.peerDependencies[packageName] !== undefined) return true
+  return deps.bundledDependencies.includes(packageName)
 }
-
-const globToRegExp = (glob: string): RegExp => {
-  let expression = ''
-  for (let index = 0; index < glob.length; index++) {
-    const character = glob[index] ?? ''
-    if (character === '*') {
-      if (glob[index + 1] === '*') {
-        index++
-        if (glob[index + 1] === '/') {
-          index++
-          expression += '(?:.*/)?'
-        } else {
-          expression += '.*'
-        }
-      } else {
-        expression += '[^/]*'
-      }
-      continue
-    }
-    if (character === '?') {
-      expression += '[^/]'
-      continue
-    }
-    expression += GLOB_REGEXP_SPECIALS.includes(character) ? `\\${character}` : character
-  }
-  return new RegExp(`^${expression}$`)
-}
-
-const matchesGlob = (filename: string, glob: string): boolean => {
-  const normalizedFilename = filename.replace(/\\/g, '/')
-  const cwdGlob = join(process.cwd(), glob).replace(/\\/g, '/')
-  return globToRegExp(glob.replace(/\\/g, '/')).test(normalizedFilename)
-    || globToRegExp(cwdGlob).test(normalizedFilename)
-}
-
-const testConfig = (config: boolean | string[] | undefined, filename: string): boolean | undefined => {
-  if (typeof config === 'boolean' || typeof config === 'undefined') return config
-  return config.some(glob => matchesGlob(filename, glob))
-}
-
-const resolveOptions = (options: RuleOptions, filename: string): ResolvedOptions => ({
-  allowBundledDeps: testConfig(options.bundledDependencies, filename) !== false,
-  allowDevDeps: testConfig(options.devDependencies, filename) !== false,
-  allowModules: new Set(options.allowModules ?? []),
-  allowOptDeps: testConfig(options.optionalDependencies, filename) !== false,
-  allowPeerDeps: testConfig(options.peerDependencies, filename) !== false,
-  verifyTypeImports: Boolean(options.verifyTypeImports) || Boolean(options.includeTypes),
-})
 
 export const noExtraneousDependencies: Rule.RuleModule = {
   create(context: Rule.RuleContext): Rule.RuleListener {
-    const options = (context.options[0] ?? {}) as unknown as RuleOptions
-    const filename = context.physicalFilename
-    const resolvedOptions = resolveOptions(options, filename)
-    const { errors, fields } = collectDependencies(filename, options.packageDir)
-    const deps = fields ?? emptyDependencyFields()
-
-    for (const error of errors) {
-      context.report({ data: error.data, loc: { column: 0, line: 0 }, messageId: error.messageId })
-    }
+    const deps = collectDependencies(context.physicalFilename) ?? emptyDependencyFields()
 
     const report = (node: ESTree.Node, specifier: string | null | undefined): void => {
       if (!specifier || isBuiltInModule(specifier) || !isBareSpecifier(specifier)) return
-      if (!resolvedOptions.verifyTypeImports && isTypeOnly(node)) return
+      if (isTypeOnly(node)) return
 
       const packageName = getModuleOriginalName(specifier)
-      if (!packageName || resolvedOptions.allowModules.has(packageName)) return
+      if (!packageName) return
 
       /*
        * The nearest package importing itself by name (`@basis/react` inside
        * `@basis/react`) resolves internally; the original skips it as internal.
        */
       if (packageName === deps.name) return
+      if (isDeclared(deps, packageName)) return
 
-      const status = checkDependencyDeclaration(deps, packageName)
-      if (status.isInDeps) return
-      if (resolvedOptions.allowDevDeps && status.isInDevDeps) return
-      if (resolvedOptions.allowPeerDeps && status.isInPeerDeps) return
-      if (resolvedOptions.allowOptDeps && status.isInOptDeps) return
-      if (resolvedOptions.allowBundledDeps && status.isInBundledDeps) return
-
-      if (status.isInDevDeps && !resolvedOptions.allowDevDeps) {
-        context.report({ data: { packageName }, messageId: 'devDependency', node })
-        return
-      }
-      if (status.isInOptDeps && !resolvedOptions.allowOptDeps) {
-        context.report({ data: { packageName }, messageId: 'optionalDependency', node })
-        return
-      }
       context.report({ data: { packageName }, messageId: 'missingDependency', node })
     }
 
@@ -375,32 +201,12 @@ export const noExtraneousDependencies: Rule.RuleModule = {
       description: 'Forbid the use of extraneous packages.',
     },
     messages: {
-      devDependency: "'{{packageName}}' should be listed in the project's dependencies, not devDependencies.",
       missingDependency: [
         "'{{packageName}}' should be listed in the project's dependencies.",
         " Run 'npm i -S {{packageName}}' to add it",
       ].join(''),
-      optionalDependency: "'{{packageName}}' should be listed in the project's dependencies, not optionalDependencies.",
-      packageNotFound: 'The package.json file could not be found.',
-      packageUnparsable: 'The package.json file could not be parsed: {{error}}',
     },
-    schema: [
-      {
-        additionalProperties: false,
-        properties: {
-          allowModules: { items: { type: 'string' }, type: 'array' },
-          bundledDependencies: { type: ['array', 'boolean'] },
-          devDependencies: { type: ['array', 'boolean'] },
-          includeInternal: { type: 'boolean' },
-          includeTypes: { type: 'boolean' },
-          optionalDependencies: { type: ['array', 'boolean'] },
-          packageDir: { type: ['array', 'string'] },
-          peerDependencies: { type: ['array', 'boolean'] },
-          verifyTypeImports: { type: 'boolean' },
-        },
-        type: 'object',
-      },
-    ],
+    schema: [],
     type: 'problem',
   },
 }

@@ -63,20 +63,7 @@ export default pluginTypescript.config(
   ...pluginTypescript.configs.stylistic,
   plugin({
     rules: {
-      '@basis/import-extensions': ['error', {
-        cjs: 'always',
-        css: 'always',
-        jpg: 'always',
-        js: 'never',
-        json: 'always',
-        mjs: 'always',
-        png: 'always',
-        scss: 'always',
-        sql: 'always',
-        svg: 'always',
-        ts: 'never',
-        tsx: 'never',
-      }],
+      '@basis/import-extensions': 'error',
       '@basis/no-default-export': 'error',
       '@basis/no-extraneous-dependencies': 'error',
       '@basis/no-mixed-type-imports': 'error',
@@ -299,7 +286,6 @@ export default pluginTypescript.config(
   plugin({
     files: ['*.test.ts', '*.test.tsx'],
     rules: {
-      '@basis/no-extraneous-dependencies': ['error', { devDependencies: true }],
       'dot-notation': 'off',
     },
   }),

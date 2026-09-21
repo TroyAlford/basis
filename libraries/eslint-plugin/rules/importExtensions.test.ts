@@ -5,21 +5,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { importExtensions } from './importExtensions'
 
-const EXTENSION_OPTIONS = {
-  cjs: 'always',
-  css: 'always',
-  jpg: 'always',
-  js: 'never',
-  json: 'always',
-  mjs: 'always',
-  png: 'always',
-  scss: 'always',
-  sql: 'always',
-  svg: 'always',
-  ts: 'never',
-  tsx: 'never',
-}
-
 const CONFIG: Linter.Config = {
   files: ['**/*.ts', '**/*.tsx'],
   languageOptions: {
@@ -34,7 +19,7 @@ const CONFIG: Linter.Config = {
     },
   },
   rules: {
-    'test/import-extensions': ['error', EXTENSION_OPTIONS],
+    'test/import-extensions': 'error',
   },
 }
 
