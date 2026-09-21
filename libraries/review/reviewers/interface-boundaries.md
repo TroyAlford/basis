@@ -90,3 +90,110 @@ owns whether a seam should exist and what the caller-facing contract represents.
 Do not punish simple coupling merely for being simple. When the concrete
 dependency is appropriate, treat it as `keep-concrete`. Use `abstain` only when
 the available evidence cannot support a review at all.
+
+## Canonical examples
+
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
+
+### Speculative interface with no useful boundary
+
+```ts
+interface UserStore {
+  get(id: string): User
+  save(user: User): void
+}
+
+class PostgresUserStore implements UserStore {
+  get(id: string): User { /* ... */ }
+  save(user: User): void { /* ... */ }
+}
+```
+
+There is one implementation, callers know the concrete type, and the interface
+is only mirroring the class.
+
+Expected: `finding / remove-speculative-abstraction`
+
+Expected review feedback:
+
+> This interface adds a concept without protecting a demonstrated boundary. It is
+> a one-for-one mirror of `PostgresUserStore`, with no second implementation,
+> ownership split, or testing seam. Keep the class concrete until a real boundary
+> appears.
+
+### Real interchangeable boundary
+
+```ts
+interface UserStore {
+  get(id: string): User
+  save(user: User): void
+}
+
+class PostgresUserStore implements UserStore { /* ... */ }
+class InMemoryUserStore implements UserStore { /* ... */ }
+
+class UserService {
+  constructor(private readonly store: UserStore) {}
+}
+```
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### Callers branching on interchangeable implementations
+
+```ts
+class ReportService {
+  constructor(private readonly store: PostgresReportStore | InMemoryReportStore) {}
+
+  publish(id: string): void {
+    if (this.store instanceof PostgresReportStore) {
+      this.store.insertReport(id)
+    } else {
+      this.store.saveReport(id)
+    }
+  }
+}
+```
+
+Two interchangeable stores already exist, but the caller branches on the
+concrete type and uses store-specific methods.
+
+Expected: `finding / introduce-contract`
+
+Expected review feedback:
+
+> Two interchangeable stores already exist, but this service branches on
+> `instanceof` and calls store-specific methods. Callers should depend on one
+> consumer-shaped capability (for example `save`) instead of knowing which
+> concrete store they hold.
+
+### A second implementation is emerging
+
+```ts
+class ReportService {
+  constructor(private readonly store: PostgresReportStore) {}
+
+  publish(id: string): void {
+    this.store.insertReport(id)
+  }
+}
+
+class InMemoryReportStore {
+  insertReport(id: string): void { /* ... */ }
+}
+```
+
+An in-memory store now exists for tests, but no shared capability has been
+declared and the service still names the concrete Postgres type.
+
+Expected: `question / consider-boundary`
+
+Expected review feedback:
+
+> A second store implementation now exists, but there is no shared capability yet
+> and the service still names the concrete Postgres type. Is a real seam intended
+> here, or is the in-memory store only for tests? If the stores are meant to be
+> interchangeable, a consumer-shaped contract is worth introducing.

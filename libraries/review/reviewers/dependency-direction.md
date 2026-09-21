@@ -92,3 +92,67 @@ responsibility, the repository's existing layering, which unit is foundational
 versus higher-order, current ownership and module boundaries, whether one side is
 made to know details it should not need, and the current scale and complexity. Do
 not turn one heuristic into a theorem.
+
+## Canonical examples
+
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
+
+### A dependency cycle
+
+```ts
+// order-service.ts
+import { InvoiceService } from './invoice-service'
+
+// invoice-service.ts
+import { OrderService } from './order-service'
+```
+
+The two services depend on each other.
+
+Expected: `finding / dependency-cycle`
+
+Expected review feedback:
+
+> `OrderService` and `InvoiceService` import each other, so neither can be
+> understood, tested, or changed alone. Break the cycle: one of them should not
+> need to know about the other.
+
+### A foundational unit reaching upward
+
+```ts
+// format-amount.ts
+import { notifyAdmin } from '../services/notifications'
+
+export const formatAmount = (amount: number): string => {
+  if (amount < 0) notifyAdmin('negative amount')
+  return amount.toFixed(2)
+}
+```
+
+A low-level formatting utility imports an application service.
+
+Expected: `finding / layering-confusion`
+
+Expected review feedback:
+
+> A formatting utility is importing an application service to send
+> notifications. Foundational helpers should not reach upward into application
+> behavior; move that decision to the layer that owns it.
+
+### One-directional composition
+
+```ts
+// checkout-page.ts
+import { CheckoutService } from '../services/checkout'
+import { formatMoney } from '../utilities/money'
+
+export const renderCheckout = (cart: Cart): string =>
+  `${formatMoney(cart.total)} — ${CheckoutService.describe(cart)}`
+```
+
+Higher-order code uses lower-level building blocks, one direction only.
+
+Expected: `no_finding`
+
+Expected review feedback: none.

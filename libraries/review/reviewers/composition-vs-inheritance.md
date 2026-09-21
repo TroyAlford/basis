@@ -86,3 +86,77 @@ inheritance or composition is the right mechanism for the relationship.
 Use `appropriate-inheritance` or `appropriate-composition` when the chosen
 mechanism matches the relationship, and `abstain` only when the available
 evidence cannot support a review at all.
+
+## Canonical examples
+
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
+
+### Inheritance used to borrow a helper
+
+```ts
+class HttpClient {
+  protected async request(path: string, body: unknown): Promise<Response> { /* ... */ }
+}
+
+class UserService extends HttpClient {
+  async create(input: CreateUser): Promise<User> {
+    const response = await this.request('/users', input)
+    return response.json()
+  }
+}
+```
+
+`UserService` extends `HttpClient` only to reuse `request`.
+
+Expected: `finding / misused-inheritance`
+
+Expected review feedback:
+
+> `UserService` extends `HttpClient` only to borrow a request helper; the two
+> share no identity. Compose an HTTP client (or extract a helper) instead of
+> inheriting from an unrelated type.
+
+### Shared default behavior
+
+```ts
+abstract class RetryingService {
+  protected async withRetry<T>(work: () => Promise<T>): Promise<T> { /* ... */ }
+}
+
+class OrderService extends RetryingService { /* uses withRetry unchanged */ }
+class InvoiceService extends RetryingService { /* uses withRetry unchanged */ }
+```
+
+Every subclass inherits the same retry behavior unchanged.
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### A capability that varies independently
+
+```ts
+abstract class RetryingService {
+  protected async withRetry<T>(work: () => Promise<T>): Promise<T> {
+    if (process.env.NODE_ENV === 'test') return work()
+    /* production retry policy */
+  }
+}
+
+class OrderService extends RetryingService {
+  override protected async withRetry<T>(work: () => Promise<T>): Promise<T> {
+    /* different policy */
+  }
+}
+```
+
+Retry behavior varies per service and per environment.
+
+Expected: `finding / variable-capability`
+
+Expected review feedback:
+
+> Retry behavior differs per service and environment, so it is not shared default
+> behavior — it is an independently variable capability. Inject a retry policy
+> rather than hard-wiring it into a base class.

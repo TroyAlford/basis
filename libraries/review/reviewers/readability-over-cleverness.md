@@ -65,3 +65,73 @@ to understand than the underlying problem requires?"
 Do not recommend a fashionable idiom merely because it is more common in the
 wider ecosystem. Readability is judged in the context of this codebase and its
 established design conventions.
+
+## Canonical examples
+
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
+
+### Compressed beyond clarity
+
+```ts
+const totals = orders.reduce(
+  (a, o) => ({ ...a, [o.id]: (a[o.id] ?? 0) + o.total }),
+  {} as Record<string, number>,
+)
+```
+
+Expected: `finding / simplify`
+
+Expected review feedback:
+
+> This packs several operations into one expression. A simple loop with
+> descriptive names would be easier to follow and just as correct.
+
+### Names that require translation
+
+```ts
+function calc(d: Document, opts: CalcOpts): number {
+  const r = d.rows.filter(x => x.v > 0)
+  return r.reduce((s, x) => s + x.v, 0)
+}
+```
+
+Expected: `finding / clarify-naming`
+
+Expected review feedback:
+
+> Names like `d`, `opts`, `r`, `x`, `s`, and `v` make the reader decode every
+> line. Use descriptive names such as `document`, `options`, `rows`, `row`,
+> `sum`, and `value`.
+
+### Direct and clear
+
+```ts
+function totalPositive(values: number[]): number {
+  let sum = 0
+  for (const value of values) {
+    if (value > 0) sum += value
+  }
+  return sum
+}
+```
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### Necessary complexity without explanation
+
+```ts
+const hash = (value: number): number => (value ^ (value >>> 16)) * 0x45d9f3b
+```
+
+Non-obvious, but it may be deliberate.
+
+Expected: `question / explain-necessary-complexity`
+
+Expected review feedback:
+
+> This bitwise hash is not obvious. If its form is required (for example, for
+> distribution or performance), add a comment explaining why so the next reader
+> does not simplify it away. Otherwise, prefer something clearer.

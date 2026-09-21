@@ -67,3 +67,65 @@ independent meaning, keeping them together can be clearer.
 When the conceptual boundary is ambiguous, ask what independently changes,
 reuses, or owns the candidate unit. The answer should determine the file
 boundary.
+
+## Canonical examples
+
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
+
+### A grab bag of unrelated helpers
+
+```ts
+// utils.ts
+export const formatDate = (date: Date): string => { /* ... */ }
+export const slugify = (value: string): string => { /* ... */ }
+export const fetchJson = async (url: string): Promise<unknown> => { /* ... */ }
+export const clamp = (value: number, min: number, max: number): number => { /* ... */ }
+```
+
+Expected: `finding / split-unit`
+
+Expected review feedback:
+
+> `utils.ts` holds unrelated date, string, HTTP, and numeric helpers whose only
+> relationship is convenience. Split them into files named for what they
+> contain.
+
+### A reusable unit buried in an unrelated file
+
+```ts
+// report-renderer.ts
+export class ReportRenderer { render(report: Report): string { /* ... */ } }
+
+export interface Money {
+  amount: number
+  currency: string
+}
+```
+
+`Money` is reusable and unrelated to rendering.
+
+Expected: `finding / move-unit`
+
+Expected review feedback:
+
+> `Money` is a reusable concept defined inside the report renderer. Give it its
+> own file so it can be found and reused without importing the renderer.
+
+### One coherent unit in a long file
+
+```ts
+// csv-parser.ts
+export class CsvParser {
+  parse(input: string): Row[] { /* ... */ }
+
+  private splitRows(input: string): string[] { /* ... */ }
+  private parseRow(line: string): Row { /* ... */ }
+}
+```
+
+A long file, but one coherent implementation and its private helpers.
+
+Expected: `no_finding`
+
+Expected review feedback: none.

@@ -72,3 +72,65 @@ extraction.
 
 The highest-order rubric is unchanged: software must work and meet its
 specification; after that it should be readable and maintainable.
+
+## Canonical examples
+
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
+
+### Divergent use cases forced through flags
+
+```ts
+type ReportFormat = 'html' | 'csv' | 'pdf'
+
+class ReportService {
+  generate(report: Report, format: ReportFormat, includeCharts: boolean): string { /* ... */ }
+  email(report: Report, format: ReportFormat): void { /* ... */ }
+  archive(report: Report, format: ReportFormat): void { /* ... */ }
+}
+```
+
+Every operation threads `format`, and each format follows different rules.
+
+Expected: `finding / forced-variation`
+
+Expected review feedback:
+
+> Every method threads `format` and each format follows different rules, so three
+> use cases are being forced through one identity. Extract a renderer per format
+> (or one renderer abstraction) instead of threading the flag everywhere.
+
+### Machinery that no longer coheres
+
+```ts
+class UserService {
+  create(input: CreateUser): User { /* ... */ }
+  updateProfile(user: User, profile: Profile): void { /* ... */ }
+  scheduleNightlyBackup(): void { /* ... */ }
+  invalidateCache(key: string): void { /* ... */ }
+}
+```
+
+Expected: `finding / incoherent-unit`
+
+Expected review feedback:
+
+> `UserService` now also owns scheduled backups and cache invalidation, which
+> share no identity with user behavior. Move those to the units that own them.
+
+### A coherent identity
+
+```ts
+class UserService {
+  create(input: CreateUser): User { /* ... */ }
+  sendWelcome(user: User): void { /* ... */ }
+  updateProfile(user: User, profile: Profile): void { /* ... */ }
+  resetPassword(user: User): void { /* ... */ }
+}
+```
+
+Create, welcome, profile, and reset are all actions of the user service.
+
+Expected: `no_finding`
+
+Expected review feedback: none.

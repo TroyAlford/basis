@@ -73,3 +73,74 @@ sliced into useful capability boundaries.
 
 Use `coherent-interface` when the current interface is a coherent capability,
 and `abstain` only when the available evidence cannot support a review at all.
+
+## Canonical examples
+
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
+
+### Implementations forced to disown part of the contract
+
+```ts
+interface UserRepository {
+  findById(id: string): User
+  save(user: User): void
+  delete(id: string): void
+  search(query: string): User[]
+  exportCsv(): string
+}
+
+class ReadOnlyUserRepository implements UserRepository {
+  search(query: string): User[] { throw new Error('not supported') }
+  exportCsv(): string { throw new Error('not supported') }
+  /* ... */
+}
+```
+
+Expected: `finding / forced-members`
+
+Expected review feedback:
+
+> This implementation has to throw for `search` and `export`, which are not part
+> of its capability. That is evidence the contract is too broad, not that the
+> implementation is wrong. Split the capabilities.
+
+### A reusable capability across unrelated types
+
+```ts
+class UserRepository { findById() {} save() {} delete() {} search() {} exportCsv() {} }
+class ProductRepository { findById() {} save() {} delete() {} search() {} exportCsv() {} }
+class AuditLogRepository { findById() {} save() {} search() {} exportCsv() {} }
+```
+
+Several otherwise unrelated stores share search and export behavior.
+
+Expected: `finding / emergent-capability`
+
+Expected review feedback:
+
+> These otherwise unrelated stores share the same search and export behavior. A
+> reusable capability has emerged; callers that only search or export should
+> depend on that capability rather than a whole repository.
+
+### Consumers using different subsets of one coherent interface
+
+```ts
+interface UserRepository {
+  findById(id: string): User
+  save(user: User): void
+  delete(id: string): void
+  search(query: string): User[]
+  exportCsv(): string
+}
+
+class UserService {
+  constructor(private readonly users: UserRepository) {}
+}
+```
+
+Consumers use different subsets, but this is still one coherent capability.
+
+Expected: `no_finding`
+
+Expected review feedback: none.
