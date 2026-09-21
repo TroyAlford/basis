@@ -8,6 +8,7 @@
 set -uo pipefail
 
 ACTION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$ACTION_DIR/../../.." && pwd)"
 RUN="$ACTION_DIR/run.sh"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
@@ -24,6 +25,12 @@ fail() {
 make_fixture() {
   local dir="$1"
   mkdir -p "$dir/src"
+  # asdf/mise are directory-scoped. The fixtures live under a temp dir, so give
+  # them the repository's tool pin; otherwise the `bun` shim fails with
+  # "No version is set for command bun" when the test runs from a temp dir.
+  if [ -f "$REPO_ROOT/.tool-versions" ]; then
+    cp "$REPO_ROOT/.tool-versions" "$dir/.tool-versions"
+  fi
   cat > "$dir/package.json" <<'JSON'
 { "name": "knip-selftest", "private": true, "type": "module", "main": "src/index.ts" }
 JSON
