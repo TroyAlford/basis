@@ -26,6 +26,7 @@ const CONTEXT_REQUIREMENTS: readonly ContextRequirement[] = [
   'enclosing-scope',
   'package-manifest',
   'related-tests',
+  'repository-search',
   'schemas',
 ]
 
