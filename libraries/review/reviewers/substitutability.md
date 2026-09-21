@@ -82,3 +82,19 @@ Keep ownership distinct:
 
 Use `valid-substitute` when an implementation honors the contract, and `abstain`
 only when the available evidence cannot support a review at all.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — a valid substitute.** Two processors implement `charge`; both
+  accept the same inputs, return the same result shape, and document the same
+  failure mode. Expected: `valid-substitute`.
+- **Finding — undeclared failure.** One implementation of `charge` throws for an
+  input the contract says is supported. Expected: `contract-violation`.
+- **Finding — callers need concrete knowledge.** Callers check
+  `instanceof OfflineProcessor` before calling a shared `charge`. Expected:
+  `implementation-specific-knowledge`.
+- **Question — shared shape only.** Two unrelated types both expose `invoke()`,
+  with no evidence they are interchangeable. Expected: `clarify-shared-contract`.

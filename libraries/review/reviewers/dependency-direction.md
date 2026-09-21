@@ -92,3 +92,21 @@ responsibility, the repository's existing layering, which unit is foundational
 versus higher-order, current ownership and module boundaries, whether one side is
 made to know details it should not need, and the current scale and complexity. Do
 not turn one heuristic into a theorem.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — higher-order uses foundational.** A page composes a service, and
+  the service uses utilities and shared types. The flow is one-directional.
+  Expected: `pragmatic-coupling`.
+- **Finding — a cycle.** `OrderService` imports `InvoiceService` and
+  `InvoiceService` imports `OrderService`, so neither can be understood or tested
+  alone. Expected: `dependency-cycle`.
+- **Finding — a foundational unit reaches upward.** A low-level formatting
+  utility imports an application service to send a notification when it
+  encounters bad input. Expected: `layering-confusion`.
+- **Question — boundary pressure is growing.** A shared module is accumulating
+  both storage and UI knowledge as the application grows, and intent is unclear.
+  Expected: `consider-boundary`.

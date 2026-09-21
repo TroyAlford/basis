@@ -78,3 +78,18 @@ that the author intended to wire up is worse.
 Report a `finding` only when the evidence shows what should change. Treat
 intentional dynamic use as `no_finding`. Use `abstain` only when the available
 evidence cannot support a review at all.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — dynamic or framework use.** An export is referenced only by a
+  framework convention or generated entrypoint, and Knip reports it unused.
+  Expected: `false-positive`.
+- **Finding — created but not wired up.** A new helper is exported but never
+  imported, and no consumer exists yet. Expected: `wire-up`.
+- **Question — preparatory work.** A new module is unused but looks like
+  groundwork for an in-progress feature. Expected: `clarify-intent`.
+- **Finding — genuinely orphaned.** An obsolete helper is unreferenced and
+  nothing suggests it is intended. Expected: `remove`.

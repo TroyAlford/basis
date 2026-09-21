@@ -72,3 +72,21 @@ extraction.
 
 The highest-order rubric is unchanged: software must work and meet its
 specification; after that it should be readable and maintainable.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — a coherent identity.** A `UserService` owns create, welcome
+  email, profile update, and password reset; callers use it as one concept.
+  Expected: `coherent-unit`.
+- **Finding — divergent use cases force variation.** The same `ReportService`
+  threads `format: 'html' | 'csv' | 'pdf'` through every method, and each format
+  follows different rules. Expected: `forced-variation`.
+- **Finding — machinery no longer coheres.** A `UserService` also owns an
+  unrelated background scheduler and a cache-invalidation protocol with no shared
+  identity. Expected: `incoherent-unit`.
+- **Question — a reusable capability appears.** A `UserService` contains a
+  generic retry routine that an unrelated service now wants; intent is unclear.
+  Expected: `consider-extraction`.

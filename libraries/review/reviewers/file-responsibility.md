@@ -67,3 +67,17 @@ independent meaning, keeping them together can be clearer.
 When the conceptual boundary is ambiguous, ask what independently changes,
 reuses, or owns the candidate unit. The answer should determine the file
 boundary.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — one cohesive unit.** A long file contains one substantial
+  implementation and its private helpers. Expected: `cohesive-file`.
+- **Finding — a grab bag.** A `utils` file accumulates unrelated date, string,
+  and HTTP helpers with no shared concept. Expected: `split-unit`.
+- **Finding — a reusable unit is buried.** A reusable `Money` type is defined
+  inside the implementation file of an unrelated service. Expected: `move-unit`.
+- **Question — an unclear ownership boundary.** A file contains two concepts
+  whose independent ownership is unclear. Expected: `clarify-boundary`.

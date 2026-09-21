@@ -73,3 +73,21 @@ sliced into useful capability boundaries.
 
 Use `coherent-interface` when the current interface is a coherent capability,
 and `abstain` only when the available evidence cannot support a review at all.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — a coherent interface.** One `UserRepository` serves several
+  consumers; each uses a different subset, but it is a single coherent
+  capability. Expected: `coherent-interface`.
+- **Finding — an emergent reusable capability.** Several unrelated stores now
+  support search, and callers want to search across them without knowing which
+  store they hold. Expected: `emergent-capability`.
+- **Finding — implementations are forced to lie.** A broad repository
+  implementation must throw for `search` and `export`, which do not belong to it.
+  Expected: `forced-members`.
+- **Question — overlap is emerging.** A second export-capable type appears, and
+  whether export is a reusable capability is unclear. Expected:
+  `consider-capability`.

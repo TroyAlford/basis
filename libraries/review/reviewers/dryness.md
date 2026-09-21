@@ -67,3 +67,20 @@ Do not recommend replacing repository conventions with whatever library,
 framework, or community practice happens to be fashionable. Local architecture
 and established dependencies are authoritative unless the change is explicitly
 about replacing them.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — similar syntax, different concepts.** A `Money` formatter and a
+  `Percentage` formatter share arithmetic but differ in rounding, locale, and
+  domain. Expected: `meaningfully-distinct`.
+- **Finding — semantic duplication.** Two modules each implement retry with
+  backoff with the same semantics. Expected: `reuse-existing`.
+- **Finding — consolidate a shared concept.** Three adapters each translate the
+  same event shape differently; one shared translation belongs to the concept.
+  Expected: `consolidate`.
+- **Question — overlap with unclear intent.** A new `HttpClient` substantially
+  overlaps an adopted client but adds streaming; intent is unclear. Expected:
+  `justify-duplication`.

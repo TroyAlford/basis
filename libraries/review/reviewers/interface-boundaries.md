@@ -90,3 +90,22 @@ owns whether a seam should exist and what the caller-facing contract represents.
 Do not punish simple coupling merely for being simple. When the concrete
 dependency is appropriate, treat it as `keep-concrete`. Use `abstain` only when
 the available evidence cannot support a review at all.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — one concrete collaborator, no pressure.** A small application's
+  report service constructs the single concrete `PostgresReportStore` it uses.
+  There is no second implementation, no ownership or module boundary, and tests
+  construct the real collaborator directly. Expected: `keep-concrete`.
+- **Question — a boundary is emerging.** A second store implementation is being
+  introduced for an in-memory scenario, but callers still name the concrete type
+  and no shared capability has been declared. Expected: `consider-boundary`.
+- **Finding — callers depend on interchangeable implementations.** The service
+  receives interchangeable stores but branches on `instanceof` and reads
+  Postgres-specific fields to decide behavior. Expected: `introduce-contract`.
+- **Finding — a mirror interface with no boundary.** `IReportStore` copies every
+  public method of `PostgresReportStore`, has one implementation, and protects no
+  boundary. Expected: `remove-speculative-abstraction`.

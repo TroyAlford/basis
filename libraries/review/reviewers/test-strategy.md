@@ -108,3 +108,21 @@ coverage percentage into the reviewer.
 
 Use `appropriate-test-level` when coverage is proportionate, and `abstain` only
 when the available evidence cannot support a review at all.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — proportionate.** A pure function with several branches has
+  direct unit tests covering each meaningful path and edge case. Expected:
+  `appropriate-test-level`.
+- **Finding — critical logic only proven expensively.** The primary proof of the
+  pricing rules is an end-to-end flow that boots the application and a database;
+  the rules are never tested directly. Expected: `expensive-critical-coverage`.
+- **Finding — claimed integration is mocked.** A test claims the service and its
+  repository interoperate, but the repository mock reimplements query semantics.
+  Expected: `mocked-integration`.
+- **Question — a seam would make testing cheaper.** Critical authorization logic
+  can only run inside the framework request lifecycle; a small seam may make it
+  cheaply testable. Expected: `consider-test-seam`.

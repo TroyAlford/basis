@@ -86,3 +86,21 @@ inheritance or composition is the right mechanism for the relationship.
 Use `appropriate-inheritance` or `appropriate-composition` when the chosen
 mechanism matches the relationship, and `abstain` only when the available
 evidence cannot support a review at all.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — shared default behavior.** Several services extend a base class
+  that provides identical retry behavior, inherited unchanged. Expected:
+  `appropriate-inheritance`.
+- **No finding — independently variable capability.** A service receives a
+  configurable retry policy because tests and production need different
+  strategies. Expected: `appropriate-composition`.
+- **Finding — borrowing a helper across unrelated types.** A `UserService`
+  extends `HttpClient` only to reuse a request helper; the two share no identity.
+  Expected: `misused-inheritance`.
+- **Finding — a variable capability is hard-wired.** Retry behavior lives in a
+  base class, each service overrides it differently, and environments select
+  strategies at runtime. Expected: `variable-capability`.

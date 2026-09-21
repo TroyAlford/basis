@@ -65,3 +65,19 @@ to understand than the underlying problem requires?"
 Do not recommend a fashionable idiom merely because it is more common in the
 wider ecosystem. Readability is judged in the context of this codebase and its
 established design conventions.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — direct and clear.** A straightforward loop with descriptive
+  names. Expected: `clear`.
+- **Finding — compressed beyond clarity.** A dense `reduce` with single-letter
+  names computes a value a simple loop would express directly. Expected:
+  `simplify`.
+- **Finding — names that require translation.** Parameters named `d` for
+  `document` and `opts` for `options`. Expected: `clarify-naming`.
+- **Question — necessary but unexplained complexity.** A carefully chosen bitwise
+  operation is non-obvious but performance-critical, and the reason is
+  undocumented. Expected: `explain-necessary-complexity`.

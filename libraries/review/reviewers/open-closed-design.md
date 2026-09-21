@@ -71,3 +71,20 @@ problem, not whether a pattern should be introduced for its own sake.
 Use `local-branching` when explicit branching remains the simplest readable
 solution, and `abstain` only when the available evidence cannot support a review
 at all.
+
+## Canonical examples
+
+These examples are part of this reviewer's specification and instructions. They
+calibrate the intended judgment boundary and are not exhaustive.
+
+- **No finding — local branching.** A single `switch` with two payment providers
+  is the only place the discriminator appears. Expected: `local-branching`.
+- **No finding — hypothetical variation is not evidence.** A two-case switch is
+  flagged only because a third provider "might" be added later. Expected:
+  `local-branching`.
+- **Question — variation is emerging.** The provider discriminator now appears in
+  two places and a third provider is on the roadmap, but extraction is not yet
+  clearly worthwhile. Expected: `consider-extension-point`.
+- **Finding — repeated variation.** The provider discriminator is switched on in
+  checkout, refunds, reporting, and webhooks; adding a provider edits all four
+  central branches. Expected: `repeated-variation`.
