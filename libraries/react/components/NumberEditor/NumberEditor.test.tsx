@@ -444,8 +444,7 @@ describe('NumberEditor', () => {
       { description: 'empty decimal', input: '.0', output: '.0' },
     ])('formats $description', async ({ input, output }) => {
       expect(NumberEditor.formatNumber(input)).toBe(output)
-      // @ts-expect-error - value is a string
-      const { node } = await render(<NumberEditor value={input} />)
+      const { node } = await render(<NumberEditor value={input as number} />)
       expect(node.querySelector('input').value).toBe(output)
     })
   })

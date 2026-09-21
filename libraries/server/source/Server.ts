@@ -1,4 +1,4 @@
-import type { Server as BunServer } from 'bun'
+import type { Server as BunServer, ServerWebSocket } from 'bun'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as React from 'react'
@@ -25,7 +25,7 @@ export class Server {
   #root: string = process.cwd()
   #scripts: [string, string][] = []
   #server: BunServer<undefined> | null = null
-  #websockets = new Set<WebSocket>()
+  #websockets = new Set<ServerWebSocket>()
 
   constructor() {
     this.#builder = new Builder({

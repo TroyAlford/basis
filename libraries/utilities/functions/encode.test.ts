@@ -13,7 +13,7 @@ describe('encode/decode', () => {
     [{ a: 1, b: 2 }, 'H-eyJhIjoxLCJiIjoyfQ'],
   ])('handles %p', (value, expected: `H-${string}`) => {
     expect(encode(value)).toEqual(expected)
-    expect(decode(expected)).toEqual(value)
+    expect(decode<unknown>(expected)).toEqual(value)
   })
 
   test.each([
