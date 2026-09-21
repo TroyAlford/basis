@@ -12,12 +12,16 @@ const preset = JSON.parse(readFileSync(join(import.meta.dir, 'base.json'), 'utf8
 
 describe('basis/tsconfig/base.json', () => {
   /*
-   * The exported preset keeps its deliberate `strict: true` policy while pinning
-   * the other pre-TS6 values that TS 6/7 flipped, so a consumer extending it
-   * does not silently change type-checking policy.
+   * Basis ships as TypeScript source, so a downstream compile pulls imported
+   * Basis `.ts` files into the consumer program. Basis source is not yet
+   * strict-clean, so the exported preset pins `strict: false` and
+   * `noImplicitOverride: false` (matching the monorepo) rather than forcing
+   * those errors from Basis source onto consumers. The other flipped TS 6
+   * defaults are pinned explicitly.
    */
-  test('keeps the strict policy and pins the TS6 compatibility defaults', () => {
-    expect(preset.compilerOptions?.strict).toBe(true)
+  test('pins the pre-TS6 defaults and keeps the consumer experience working', () => {
+    expect(preset.compilerOptions?.strict).toBe(false)
+    expect(preset.compilerOptions?.noImplicitOverride).toBe(false)
     expect(preset.compilerOptions?.noUncheckedSideEffectImports).toBe(false)
     expect(preset.compilerOptions?.types).toEqual(['*'])
     expect(preset.compilerOptions?.libReplacement).toBe(true)
