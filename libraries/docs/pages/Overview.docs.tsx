@@ -101,6 +101,10 @@ export class OverviewDocs extends Documentation<Record<string, never>> {
               If you just want to leverage basis components as a component library, browse the
               component docs on the left to see accessibility and styling details in context.
             </li>
+            <li>
+              The <Router.Link to="/engineering-principles">Engineering Principles</Router.Link> page
+              explains the philosophy behind the architecture and the reviewer policies.
+            </li>
           </ul>
         </section>
       </>

@@ -8,6 +8,7 @@ import { ComponentDocs } from './pages/Component.docs.tsx'
 import { DialogDocs } from './pages/Dialog.docs.tsx'
 import { DropdownMenuDocs } from './pages/DropdownMenu.docs.tsx'
 import { EditorDocs } from './pages/Editor.docs.tsx'
+import { EngineeringPrinciplesDocs } from './pages/EngineeringPrinciples.docs.tsx'
 import { EnumEditorDocs } from './pages/EnumEditor.docs.tsx'
 import { IconsDocs } from './pages/Icons.docs.tsx'
 import { ImageDocs } from './pages/Image.docs.tsx'
@@ -73,6 +74,7 @@ export const routes = ([
   docs({ component: DropdownMenuDocs, path: '/components/dropdown-menu', title: 'DropdownMenu' }),
   docs({ component: EditorDocs, path: '/components/editor', title: 'Editor' }),
   docs({ component: EnumEditorDocs, path: '/components/enum-editor', title: 'EnumEditor' }),
+  docs({ component: EngineeringPrinciplesDocs, path: '/engineering-principles', title: 'Engineering Principles' }),
   docs({ component: IconsDocs, path: '/icons', title: 'Icons' }),
   docs({ component: ImageDocs, path: '/components/image', title: 'Image' }),
   docs({ component: MenuDocs, path: '/components/menu', title: 'Menu' }),

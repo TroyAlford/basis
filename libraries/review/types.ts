@@ -37,6 +37,7 @@ export type ContextRequirement =
   | 'enclosing-scope'
   | 'package-manifest'
   | 'related-tests'
+  | 'repository-search'
   | 'schemas'
 
 /** Where an effective reviewer came from. */
