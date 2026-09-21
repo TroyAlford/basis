@@ -73,6 +73,18 @@ logger.stopwatchStop(stopwatch, 'request handled')
 Use `withPrefix` to derive a scoped view, and the `stopwatchStart` /
 `stopwatchSplit` / `stopwatchStop` helpers to measure durations.
 
+## Review policy
+
+```ts
+import { STANDARD_REVIEW_MANIFEST, composeReviewPolicy } from 'basis/review'
+```
+
+`basis/review` exposes the shared, versioned reviewer policy (see
+`libraries/review/README.md`). Resolve the repository's effective policy by
+composing the standard manifest with `.basis/reviewers/` overlays; reviewers are
+addressed by stable id. Basis owns the policy only — running detectors, calling
+models, and publishing reviews belong to the consumer.
+
 ## CLI
 
 ```bash
