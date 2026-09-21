@@ -63,5 +63,5 @@ if [ -n "$KNIP_ARGS" ]; then
 fi
 
 echo "Running knip@${KNIP_VERSION}: knip-bun ${args[*]}"
-bunx --package "knip@${KNIP_VERSION}" knip-bun "${args[@]}"
+bun x --package "knip@${KNIP_VERSION}" knip-bun "${args[@]}"
 exit $?

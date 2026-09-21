@@ -48,7 +48,7 @@ the default `true`.
 ## Usage
 
 Run it after the toolchain is installed (for example with `asdf-setup`), which
-provides `bun`/`bunx` on `PATH`:
+provides `bun` on `PATH`:
 
 ```yaml
 jobs:
@@ -85,7 +85,7 @@ of the `knip` job.
 
 ## Notes
 
-- Requires `bun`/`bunx` on `PATH`; it does not add knip to the repository's
+- Requires `bun` on `PATH`; it does not add knip to the repository's
   dependencies.
 - Uses knip's `knip-bun` binary so it runs without a system `node`.
 - For a repository that must be reviewed against the shared dead-code policy
