@@ -16,7 +16,7 @@ outcomes:
   - category: remove-speculative-abstraction
     disposition: finding
     destructive: false
-  - category: clarify-intent
+  - category: consider-boundary
     disposition: question
     destructive: false
   - category: keep-concrete
@@ -32,44 +32,39 @@ threshold:
 
 # Interface boundaries
 
-Depending on a concrete implementation is the default. Introduce a contract
-between a caller and a collaborator only when there is a real reason the caller
-should not depend on that concrete implementation.
+Depending on a concrete implementation is the default, and for small or simple
+code it is often the right answer. Introduce a contract between a caller and a
+collaborator only when real pressure justifies it.
 
-"Every class needs an interface" is not the principle. An interface named after
-a class, sitting beside that class, with one implementation and no boundary it
-protects, is speculative abstraction rather than design.
+Premature abstraction and failure to abstract are opposite errors. Abstraction
+should emerge from demonstrated reuse, variation, ownership, testing, or
+architectural pressure.
 
-Keep the concrete type when the collaborator is a value, a helper, or an
-in-memory dependency that callers can construct and exercise directly; when
-there is one implementation and no layer or process boundary that a contract
-would protect; or when the concrete type itself is the concept the caller needs.
-A class that is part of the mechanism — a storage adapter, a driver wrapper —
-may legitimately depend on its concrete mechanism. The problem is not
-concreteness; it is policy depending on mechanism.
+"Every class needs an interface" is not the principle. Neither is "any class
+that names an infrastructure type is wrong." A higher-level class depending
+directly on one database, provider, or transport is not a finding merely because
+an architectural layer could be drawn between them. Direct coupling that stays
+easy to read and change is preferable to ceremony that multiplies the code
+without improving comprehension.
 
-Introduce a contract when at least one of these is true:
+An infrastructure seam becomes increasingly warranted as pressure appears:
 
-- **Architectural boundary.** A higher-level policy is coupled to a lower-level
-  mechanism — storage, transport, the clock, the filesystem, a process, a
-  third-party SDK. The mechanism's details leak upward even when only one
-  implementation exists.
-- **Genuine substitution.** More than one implementation exists, or a committed
-  requirement calls for one, including product variants such as pluggable
-  backends, environment-specific implementations, or an implementation supplied
-  by another package.
-- **Boundary test substitution.** The real collaborator crosses a system or
-  process boundary and cannot be exercised cheaply, deterministically, or
-  offline. Testability is a consequence of a real boundary, not an independent
-  reason to abstract an in-memory object that tests could construct directly.
-- **Published or cross-module contract.** The contract is consumed across a
-  module or package boundary, so callers must be able to depend on a stable
-  capability rather than a particular implementation.
+- actual reuse or substitution of the collaborator;
+- existing or committed multiple implementations;
+- a real ownership, team, module, or package boundary;
+- test isolation that cannot cheaply exercise the real collaborator;
+- mechanism details materially leaking into policy and making the caller harder
+  to reason about or change;
+- architectural growth already visible in the repository or roadmap.
 
-Weigh these by how much they are facts about this change rather than
-predictions. A real architectural boundary or a committed substitution is a
-reason now. "We might need another implementation someday" is not; it is a bet
-that usually produces a mirror interface with one implementation forever.
+Weigh these as evidence rather than predictions. Demonstrated reuse, a committed
+substitution, or a boundary that already exists is a reason now. "We might need
+another implementation someday" is not; it usually produces a mirror interface
+with one implementation forever.
+
+When the signal is present but intent or roadmap determines the answer, prefer a
+`question` — this is starting to look like a boundary — over manufacturing a
+finding because a diagram could contain two layers.
 
 Shape a new contract to the consumer, not the implementation. Depending on
 `PostgresDatabase` is often wrong, but so is depending on a generic `Database`
@@ -82,15 +77,16 @@ that is being introduced belongs here; an existing contract that forces
 consumers to depend on members they do not use belongs to
 `interface-segregation`.
 
-When the primary defect is that the dependency graph points the wrong way — a
-domain importing infrastructure, a core importing an adapter — that finding
-belongs to `dependency-direction`; remediation may still mention the seam. This
-reviewer owns whether a seam should exist here and what the caller-facing
-contract should represent.
+An interface named after its one implementation, with no boundary it protects,
+that only restates the concrete class's surface, is a finding: it adds
+indirection without adding comprehension or reuse. This is the opposite error
+from failing to abstract, and both are defects.
 
-Do not report a finding merely because a concrete type is injected. When the
-concrete dependency is appropriate, treat it as `no_finding`. When a new
-contract has a single implementation and no obvious boundary, ask whether
-another implementation or an architectural boundary is expected before assuming
-either correction. Use `abstain` only when the available evidence cannot
-support a review at all.
+When the primary problem is that a dependency has tangled ownership or forced a
+foundational unit to know application-level behavior, that finding belongs to
+`dependency-direction`; remediation may still mention the seam. This reviewer
+owns whether a seam should exist and what the caller-facing contract represents.
+
+Do not punish simple coupling merely for being simple. When the concrete
+dependency is appropriate, treat it as `keep-concrete`. Use `abstain` only when
+the available evidence cannot support a review at all.
