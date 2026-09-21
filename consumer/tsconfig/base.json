@@ -18,7 +18,7 @@
     "noUncheckedSideEffectImports": false,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "strict": false,
+    "strict": true,
     "target": "ESNext",
     "types": ["*"],
     "verbatimModuleSyntax": true

@@ -12,12 +12,12 @@ const preset = JSON.parse(readFileSync(join(import.meta.dir, 'base.json'), 'utf8
 
 describe('basis/tsconfig/base.json', () => {
   /*
-   * TypeScript 6 flipped several compiler defaults. The exported preset must
-   * pin the pre-TS6 values explicitly, so a consumer extending it does not
-   * silently change type-checking policy as part of the compiler upgrade.
+   * The exported preset keeps its deliberate `strict: true` policy while pinning
+   * the other pre-TS6 values that TS 6/7 flipped, so a consumer extending it
+   * does not silently change type-checking policy.
    */
-  test('pins the pre-TS6 defaults that TS 6/7 flipped', () => {
-    expect(preset.compilerOptions?.strict).toBe(false)
+  test('keeps the strict policy and pins the TS6 compatibility defaults', () => {
+    expect(preset.compilerOptions?.strict).toBe(true)
     expect(preset.compilerOptions?.noUncheckedSideEffectImports).toBe(false)
     expect(preset.compilerOptions?.types).toEqual(['*'])
     expect(preset.compilerOptions?.libReplacement).toBe(true)
