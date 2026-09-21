@@ -21,32 +21,21 @@
     "bun": ">=1.4.0"
   },
   "dependencies": {
-    "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^5.10.0",
-    "@typescript-eslint/eslint-plugin": "^8",
-    "@typescript-eslint/parser": "^8",
-    "@typescript-eslint/utils": "^8.57.2",
+    "@typescript-eslint/parser": "^8.70.0",
+    "@typescript-eslint/utils": "^8.70.0",
     "chalk": "^5.6.2",
-    "eslint": "^10.1.0",
-    "eslint-config-airbnb": "^19.0.4",
-    "eslint-config-airbnb-base": "^15.0.0",
-    "eslint-plugin-import": "2.32.0",
+    "eslint": "^10.11.0",
     "eslint-plugin-import-newlines": "^2.0.0",
-    "eslint-plugin-import-order-alphabetical": "^1.0.1",
-    "eslint-plugin-jsx-a11y": "^6.10.2",
-    "eslint-plugin-jsdoc": "^62.8.1",
-    "eslint-plugin-named-import-spacing": "1.0.3",
-    "eslint-plugin-react": "^7.37.5",
-    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-jsdoc": "^64.5.4",
+    "eslint-plugin-perfectionist": "^5.11.1",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "eslint-plugin-sort-destructure-keys": "^3.0.0",
-    "eslint-plugin-sort-keys-fix": "1.1.2",
-    "eslint-plugin-typescript-sort-keys": "3.3.0",
     "react": "^19",
     "react-dom": "^19",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.2"
+    "typescript-eslint": "^8.70.0"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.8.9",
@@ -80,11 +69,5 @@
   ],
   "trustedDependencies": [
     "@basis/workspaces"
-  ],
-  "patchedDependencies": {
-    "eslint-plugin-import@2.32.0": "patches/eslint-plugin-import@2.32.0.patch",
-    "eslint-plugin-named-import-spacing@1.0.3": "patches/eslint-plugin-named-import-spacing@1.0.3.patch",
-    "eslint-plugin-sort-keys-fix@1.1.2": "patches/eslint-plugin-sort-keys-fix@1.1.2.patch",
-    "eslint-plugin-typescript-sort-keys@3.3.0": "patches/eslint-plugin-typescript-sort-keys@3.3.0.patch"
-  }
+  ]
 }

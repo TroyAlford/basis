@@ -27,7 +27,9 @@ const main = (): void => {
 
   try {
     run(['git', 'clone', '--quiet', '--local', '--no-hardlinks', repoRoot, source], workspace, env)
-    run(['git', 'tag', tag], source, env)
+    // Force a lightweight tag so the fixture works even on hosts that enable
+    // global tag signing (which would otherwise require a tag message).
+    run(['git', '-c', 'tag.gpgsign=false', 'tag', tag], source, env)
     const spec = `git+file://${source}#${tag}`
 
     // Trusted install into a fresh host via the documented command.

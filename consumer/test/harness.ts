@@ -17,38 +17,12 @@ export interface PatchMarker {
   version: string,
 }
 
-export const PATCH_MARKERS: PatchMarker[] = [
-  {
-    file: 'lib/core/sourceType.js',
-    name: 'eslint-plugin-import',
-    snippet: "context.parserOptions && 'sourceType' in context.parserOptions",
-    version: '2.32.0',
-  },
-  {
-    file: 'dist/rules/named-import-spacing.js',
-    name: 'eslint-plugin-named-import-spacing',
-    snippet: 'const sourceCode = context.sourceCode;',
-    version: '1.0.3',
-  },
-  {
-    file: 'lib/rules/sort-keys-fix.js',
-    name: 'eslint-plugin-sort-keys-fix',
-    snippet: 'const sourceCode = context.sourceCode',
-    version: '1.1.2',
-  },
-  {
-    file: 'lib/index.cjs.js',
-    name: 'eslint-plugin-typescript-sort-keys',
-    snippet: 'const sourceCode = context.sourceCode;',
-    version: '3.3.0',
-  },
-  {
-    file: 'lib/index.mjs',
-    name: 'eslint-plugin-typescript-sort-keys',
-    snippet: 'const sourceCode = context.sourceCode;',
-    version: '3.3.0',
-  },
-]
+/**
+ * Basis-owned patches and the observable markers they produce in an installed
+ * copy. Basis currently owns none, so this is empty; keep it as the single
+ * source of truth for the patch assertions below.
+ */
+export const PATCH_MARKERS: PatchMarker[] = []
 
 export const APP_TSCONFIG = JSON.stringify({ extends: 'basis/tsconfig/bun.json', include: ['src'] }, null, 2)
 
@@ -153,7 +127,6 @@ export const initApp = (
   const { includeBasis = true, trust = true } = options
   const devDependencies: Record<string, string> = {
     '@types/bun': '^1.3.11',
-    'eslint-plugin-import': '2.32.0',
   }
   if (includeBasis) devDependencies.basis = basisSpec
 
