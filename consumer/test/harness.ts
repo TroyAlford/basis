@@ -28,12 +28,20 @@ export const APP_TSCONFIG = JSON.stringify({ extends: 'basis/tsconfig/bun.json',
 
 export const APP_ESLINT_CONFIG = "export { default } from 'basis/eslint'\n"
 
-export const APP_SOURCE = `/**
+export const APP_SOURCE = `import { Logger } from 'basis/logger'
+
+const logger = new Logger({ prefix: '[fixture]' })
+
+/**
  * Formats a greeting for a name.
  * @param name The name to greet.
  * @returns The greeting.
  */
-export const greet = (name: string): string => \`Hello, \${name}!\`
+export const greet = (name: string): string => {
+  const greeting = \`Hello, \${name}!\`
+  logger.info(greeting)
+  return greeting
+}
 `
 
 const SURFACE_CHECK = [

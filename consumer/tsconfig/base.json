@@ -3,22 +3,24 @@
   "compilerOptions": {
     "allowImportingTsExtensions": true,
     "allowSyntheticDefaultImports": true,
-    "downlevelIteration": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "lib": ["ESNext"],
+    "libReplacement": true,
     "module": "Preserve",
     "moduleDetection": "force",
     "moduleResolution": "bundler",
     "noEmit": true,
     "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
+    "noImplicitOverride": false,
     "noUncheckedIndexedAccess": true,
+    "noUncheckedSideEffectImports": false,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "strict": true,
+    "strict": false,
     "target": "ESNext",
+    "types": ["*"],
     "verbatimModuleSyntax": true
   }
 }

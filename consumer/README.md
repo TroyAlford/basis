@@ -52,6 +52,17 @@ do not enumerate or install the plugin stack.
 Presets: `basis/tsconfig/base.json`, `basis/tsconfig/bun.json`,
 `basis/tsconfig/react.json`. They contain no Basis-monorepo path mappings.
 
+Basis targets TypeScript 7 (the native compiler). Since TS 7 ships no
+programmatic API, the workspace installs it side-by-side:
+
+- `@typescript/native` (aliased to `typescript@^7`) provides the native `tsc`
+  that `basis typecheck` / `basis check` run.
+- `typescript` is aliased to `@typescript/typescript6` so tooling that needs the
+  TypeScript 6 API (notably typescript-eslint) keeps working.
+
+The presets target TS 6/7 and so omit options removed in that release (for
+example `downlevelIteration`).
+
 ## Logger
 
 `basis/logger` exports the shared `Logger` and its `ILogger` / `LoggerOptions`

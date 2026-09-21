@@ -162,10 +162,10 @@ const main = (): void => {
 
   if (command === 'doctor') process.exit(doctor())
   if (command === 'lint') process.exit(runBin('eslint', 'eslint', ['.']))
-  if (command === 'typecheck') process.exit(runBin('typescript', 'tsc', ['--noEmit']))
+  if (command === 'typecheck') process.exit(runBin('@typescript/native', 'tsc', ['--noEmit']))
   if (command === 'check') {
     const lintCode = runBin('eslint', 'eslint', ['.'])
-    const typeCode = lintCode === 0 ? runBin('typescript', 'tsc', ['--noEmit']) : lintCode
+    const typeCode = lintCode === 0 ? runBin('@typescript/native', 'tsc', ['--noEmit']) : lintCode
     process.exit(typeCode)
   }
 
