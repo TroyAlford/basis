@@ -1,0 +1,7 @@
+{
+  "name": "@basis/review",
+  "description": "Shared versioned code-review policy and standard reviewer library.",
+  "exports": {
+    ".": "./index.ts"
+  }
+}

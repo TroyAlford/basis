@@ -108,6 +108,9 @@
         "@basis/utilities": "workspace:*",
       },
     },
+    "libraries/review": {
+      "name": "@basis/review",
+    },
     "libraries/server": {
       "name": "@basis/server",
       "dependencies": {
@@ -215,6 +218,8 @@
     "@basis/eslint-plugin": ["@basis/eslint-plugin@workspace:libraries/eslint-plugin"],
 
     "@basis/react": ["@basis/react@workspace:libraries/react"],
+
+    "@basis/review": ["@basis/review@workspace:libraries/review"],
 
     "@basis/server": ["@basis/server@workspace:libraries/server"],
 

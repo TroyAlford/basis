@@ -12,6 +12,7 @@
     "./eslint.config.mjs": "./eslint.config.mjs",
     "./logger": "./consumer/logger.ts",
     "./package.json": "./package.json",
+    "./review": "./consumer/review.ts",
     "./tsconfig/base.json": "./consumer/tsconfig/base.json",
     "./tsconfig/bun.json": "./consumer/tsconfig/bun.json",
     "./tsconfig/react.json": "./consumer/tsconfig/react.json"

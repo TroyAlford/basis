@@ -32,6 +32,7 @@ const REQUIRED_EXPORTS = [
   './cli',
   './eslint',
   './logger',
+  './review',
   './tsconfig/base.json',
   './tsconfig/bun.json',
   './tsconfig/react.json',
