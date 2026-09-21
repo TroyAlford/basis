@@ -39,7 +39,7 @@ jobs:
           fetch-tags: true
       - uses: ./.github/actions/asdf-setup
       - name: Run TypeScript Type Check
-        run: bun ./node_modules/typescript/bin/tsc
+        run: bun run lint:ts
 
   consumer-install:
     runs-on: ubuntu-latest

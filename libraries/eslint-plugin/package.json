@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "bun build:tsc && bun build:fix-extensions",
-    "build:tsc": "bun ../../node_modules/typescript/bin/tsc ./index.ts --allowSyntheticDefaultImports --downLevelIteration --esModuleInterop --module ESNext --moduleResolution bundler --outDir ./dist --skipLibCheck",
+    "build:tsc": "bun ../../node_modules/@typescript/native/bin/tsc ./index.ts --ignoreConfig --allowSyntheticDefaultImports --esModuleInterop --module ESNext --moduleResolution bundler --outDir ./dist --skipLibCheck --strict false --types bun-types",
     "build:fix-extensions": "bun scripts/fix-extensions.ts"
   },
   "dependencies": {
@@ -29,6 +29,6 @@
     "@typescript-eslint/rule-tester": "^8.70.0"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^6"
   }
 }

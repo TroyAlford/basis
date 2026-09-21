@@ -1,43 +1,18 @@
-var __read = (this && this.__read) || function (o, n) {
-    var m = typeof Symbol === "function" && o[Symbol.iterator];
-    if (!m) return o;
-    var i = m.call(o), r, ar = [], e;
-    try {
-        while ((n === void 0 || n-- > 0) && !(r = i.next()).done) ar.push(r.value);
-    }
-    catch (error) { e = { error: error }; }
-    finally {
-        try {
-            if (r && !r.done && (m = i["return"])) m.call(i);
-        }
-        finally { if (e) throw e.error; }
-    }
-    return ar;
-};
-var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
-    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
-        if (ar || !(i in from)) {
-            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
-            ar[i] = from[i];
-        }
-    }
-    return to.concat(ar || Array.prototype.slice.call(from));
-};
-export var noMixedTypeImports = {
-    create: function (context) {
+export const noMixedTypeImports = {
+    create(context) {
         return {
-            ImportDeclaration: function (node) {
+            ImportDeclaration(node) {
                 // With `@typescript-eslint/parser`, this is a `TSESTree` tree; ESLint's visitor type is ESTree-only.
-                var decl = node;
-                var imports = {
+                const decl = node;
+                const imports = {
                     type: new Set(),
                     value: new Set(),
                 };
-                var semi = context.sourceCode.getText(decl).endsWith(';') ? ';' : '';
-                decl.specifiers.forEach(function (specifier) {
+                const semi = context.sourceCode.getText(decl).endsWith(';') ? ';' : '';
+                decl.specifiers.forEach(specifier => {
                     if (specifier.type !== 'ImportSpecifier')
                         return;
-                    var importedName = specifier.imported.type === 'Identifier'
+                    const importedName = specifier.imported.type === 'Identifier'
                         ? specifier.imported.name
                         : specifier.imported.value;
                     imports[specifier.importKind].add(importedName);
@@ -45,12 +20,12 @@ export var noMixedTypeImports = {
                 if (!imports.type.size || !imports.value.size)
                     return;
                 context.report({
-                    fix: function (fixer) { return fixer.replaceTextRange(decl.range, [
-                        "import type { ".concat(__spreadArray([], __read(imports.type), false).join(', '), " } from '").concat(decl.source.value, "'").concat(semi),
-                        "import { ".concat(__spreadArray([], __read(imports.value), false).join(', '), " } from '").concat(decl.source.value, "'").concat(semi),
-                    ].join('\n')); },
+                    fix: fixer => fixer.replaceTextRange(decl.range, [
+                        `import type { ${[...imports.type].join(', ')} } from '${decl.source.value}'${semi}`,
+                        `import { ${[...imports.value].join(', ')} } from '${decl.source.value}'${semi}`,
+                    ].join('\n')),
                     messageId: 'noMixedTypeImports',
-                    node: node,
+                    node,
                 });
             },
         };

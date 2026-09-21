@@ -1,21 +1,21 @@
 import { AST_NODE_TYPES } from '@typescript-eslint/utils';
 import { createReporter } from './sortInterface.js';
-var stringEnumInvalidOrder = [
+const stringEnumInvalidOrder = [
     'Expected string enum members to be in {{ order }}ending order.',
     " '{{ thisName }}' should be before '{{ prevName }}'.",
 ].join('');
-export var sortStringEnum = {
-    create: function (context) {
-        var ruleContext = context;
-        var compareNodeListAndReport = createReporter(ruleContext, function (node) { return ({
+export const sortStringEnum = {
+    create(context) {
+        const ruleContext = context;
+        const compareNodeListAndReport = createReporter(ruleContext, node => ({
             loc: node.loc,
             messageId: 'invalidOrder',
-        }); });
-        var listener = {
-            TSEnumDeclaration: function (node) {
-                var body = node.body.members;
-                var isStringEnum = body.every(function (member) {
-                    var initializer = member.initializer;
+        }));
+        const listener = {
+            TSEnumDeclaration(node) {
+                const body = node.body.members;
+                const isStringEnum = body.every(member => {
+                    const { initializer } = member;
                     if (!initializer || initializer.type !== AST_NODE_TYPES.Literal)
                         return false;
                     return typeof initializer.value === 'string';
