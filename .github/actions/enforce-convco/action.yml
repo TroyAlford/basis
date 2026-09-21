@@ -62,14 +62,19 @@ runs:
         # Find existing comment
         comment_id=$(find_comment_id)
         
+        # The comment is informational; enforcement is the exit status below.
+        # Fork PRs run with a read-only GITHUB_TOKEN and cannot post it, so a
+        # failed comment must never fail the title check.
         if [ -n "$comment_id" ] && [ "$comment_id" != "null" ]; then
           # Update existing comment
-          gh api "repos/$REPO/issues/comments/$comment_id" -X PATCH -f body="$message"
+          gh api "repos/$REPO/issues/comments/$comment_id" -X PATCH -f body="$message" \
+            || echo "::warning::could not update the PR title comment (missing write token)"
         else
           # Create new comment. Use the API with an explicit repo rather than
           # `gh pr comment`, which needs a local git checkout; consumers run
           # this from a fork-safe `pull_request_target` workflow with none.
-          gh api "repos/$REPO/issues/$PR_NUMBER/comments" -f body="$message"
+          gh api "repos/$REPO/issues/$PR_NUMBER/comments" -f body="$message" \
+            || echo "::warning::could not post the PR title comment (missing write token)"
         fi
         
         # Exit with error if title is invalid
