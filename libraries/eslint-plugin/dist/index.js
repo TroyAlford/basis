@@ -71,12 +71,6 @@ var plugin = function (options) {
                 '@stylistic/parser': ['.js', '.mjs', '.ts', '.tsx'],
                 '@typescript-eslint/parser': ['.ts', '.tsx'],
             },
-            '@import/resolver': {
-                typescript: {
-                    alwaysTryTypes: true,
-                    project: '../../tsconfig.json',
-                },
-            },
             'react': { version: 'detect' },
         },
     };
@@ -307,6 +301,12 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
             'sort-vars': ['error', { ignoreCase: true }],
             'typescript-sort-keys/interface': 'error',
             'typescript-sort-keys/string-enum': 'error',
+        },
+    }),
+    plugin({
+        files: ['*.config.*', '**/*.config.*', 'eslint.config.*', '**/eslint.config.*'],
+        rules: {
+            '@import/no-default-export': 'off',
         },
     }),
     plugin({

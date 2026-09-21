@@ -23,5 +23,12 @@ Guidance for humans and coding agents working in this repository.
 
 ## CI and releases
 
-- **Pull requests** to `main` run `.github/workflows/ci.yml` (ESLint, tests, TypeScript). That workflow must pass before merge.
+- **Pull requests** to `main` run `.github/workflows/ci.yml` (ESLint, tests, TypeScript, and the consumer self-install contract). That workflow must pass before merge.
 - **After merge to `main`**, `.github/workflows/release.yml` runs. It determines the next semantic version and creates a GitHub release and tag. Downstream repos (for example consumers pinning `github:…/basis#v…`) should use that tag.
+
+## Consumer package surface
+
+- The root `package.json` is the public facade for consumers. Keep `exports` limited to supported source/config entrypoints (`basis/eslint`, `basis/tsconfig/*`, `basis/cli`) and do not expose internal workspace paths.
+- Public source must declare every dependency it imports in the root `dependencies`; consumers must not enumerate the ESLint plugin stack themselves.
+- Patch files stay in `patches/` and are declared in the root `patchedDependencies` map. The trusted `postinstall` hook (`consumer/install.ts`) applies them to exact `name@version` installs with `git apply` (Bun cannot apply a dependency's patches transitively and exposes no standalone apply command). Do not reintroduce a hand-rolled diff applier; keep it deterministic, idempotent, and loud on drift.
+- `bun run test:consumer` performs a real Git-dependency install into a temporary host app. Run it when changing `exports`, dependencies, presets, or patch handling.
