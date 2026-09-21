@@ -45,7 +45,8 @@ outcomes:
 threshold:
   minimumConfidence: 0.6
   severity: warning
-verification: Re-run knip at the review ref and confirm the finding is gone.
+verification:
+  detector: knip
 ---
 
 # Dead code

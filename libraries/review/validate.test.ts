@@ -41,6 +41,9 @@ describe('assertReviewerPolicy', () => {
       ],
     }
     expect(() => assertReviewerPolicy(duplicateOutcomes, 'test')).toThrow('outcome categories must be unique')
+
+    const proseVerification = { ...deadCode(), verification: 'Re-run knip.' }
+    expect(() => assertReviewerPolicy(proseVerification, 'test')).toThrow('verification: must be an object')
   })
 })
 

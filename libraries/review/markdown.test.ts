@@ -18,6 +18,8 @@ outcomes:
 threshold:
   minimumConfidence: 0.5
   severity: info
+verification:
+  detector: knip
 ---
 
 Body guidance.
@@ -82,6 +84,7 @@ describe('parseReviewerSource', () => {
     const policy = parseReviewerSource(VALID_REVIEWER, 'test')
     expect(policy.id).toBe('sample')
     expect(policy.instructions).toBe('Body guidance.')
+    expect(policy.verification).toEqual({ detector: 'knip' })
   })
 
   test('rejects instructions in the front-matter', () => {
@@ -115,6 +118,11 @@ describe('parseReviewerOverlaySource', () => {
   test('rejects a disable overlay that carries policy fields', () => {
     const source = DISABLE_OVERLAY.replace('reason: Handled elsewhere.', 'reason: off\nverification: nope')
     expect(() => parseReviewerOverlaySource(source, 'test')).toThrow('may only carry')
+  })
+
+  test('rejects a disable overlay that carries a body', () => {
+    const source = '---\nid: dead-code\nmode: disable\nreason: off\n---\n\nWhy it is off.\n'
+    expect(() => parseReviewerOverlaySource(source, 'test')).toThrow('must not carry a Markdown body')
   })
 
   test('parses an add overlay with a full policy', () => {

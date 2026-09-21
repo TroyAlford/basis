@@ -7,7 +7,7 @@
  * error. The composer invokes these validators before anything is executed.
  */
 
-import type { ContextRequirement, DetectorRequirement, ExecutionProfile, OutcomeDefinition, OverlayMode, ReportingThreshold, ReviewDisposition, ReviewerOverlay, ReviewerPolicy, Severity } from './types'
+import type { ContextRequirement, DetectorRequirement, ExecutionProfile, OutcomeDefinition, OverlayMode, ReportingThreshold, ReviewDisposition, ReviewerOverlay, ReviewerPolicy, Severity, VerificationCheck } from './types'
 
 /** Supported execution profiles. */
 const EXECUTION_PROFILES: readonly ExecutionProfile[] = [
@@ -285,6 +285,18 @@ function assertThreshold(value: unknown, label: string): ReportingThreshold {
 }
 
 /**
+ * Validates a registered deterministic verification check.
+ * @param value Candidate value.
+ * @param label Value being validated.
+ * @returns The validated verification check.
+ */
+function assertVerification(value: unknown, label: string): VerificationCheck {
+  if (!isRecord(value)) reviewPolicyError(label, 'must be an object')
+  assertKnownKeys(value, ['detector'], label)
+  return { detector: requireString(value.detector, label, 'detector') }
+}
+
+/**
  * Validates a fully materialized reviewer policy.
  * @param value Candidate value, typically parsed from repository files.
  * @param label Value being validated.
@@ -302,7 +314,8 @@ export function assertReviewerPolicy(value: unknown, label: string): ReviewerPol
   const outcomes = mapEntries(value.outcomes, label, 'outcomes', parseOutcomeEntry)
   const threshold = assertThreshold(value.threshold, `${label}.threshold`)
   const title = requireString(value.title, label, 'title')
-  const verification = requireOptionalString(value.verification, label, 'verification')
+  const verification =
+    value.verification === undefined ? undefined : assertVerification(value.verification, `${label}.verification`)
 
   if (outcomes.length === 0) reviewPolicyError(label, 'must declare at least one outcome')
   const categories = outcomes.map(outcome => outcome.category)
@@ -352,7 +365,7 @@ function assertReviewerPatch(value: unknown, label: string): Partial<ReviewerPol
   if (value.threshold !== undefined) patch.threshold = assertThreshold(value.threshold, `${label}.threshold`)
   if (value.title !== undefined) patch.title = requireString(value.title, label, 'title')
   if (value.verification !== undefined) {
-    patch.verification = requireOptionalString(value.verification, label, 'verification')
+    patch.verification = assertVerification(value.verification, `${label}.verification`)
   }
   return patch
 }

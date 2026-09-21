@@ -22,4 +22,9 @@ describe('standard review manifest', () => {
       expect(reviewer.threshold.minimumConfidence).toBeLessThanOrEqual(1)
     }
   })
+
+  test('dead-code declares a registered verification check', () => {
+    const reviewer = STANDARD_REVIEW_MANIFEST.reviewers.find(candidate => candidate.id === 'dead-code')
+    expect(reviewer?.verification).toEqual({ detector: 'knip' })
+  })
 })

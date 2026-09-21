@@ -10,7 +10,6 @@
 
 export { composeReviewPolicy } from './compose'
 export type { ComposeReviewPolicyOptions } from './compose'
-export { STANDARD_REVIEW_FIXTURES } from './fixtures'
 export {
   REVIEW_OVERLAY_DIRECTORY,
   REVIEW_POLICY_SCHEMA_VERSION,
@@ -31,11 +30,11 @@ export type {
   OverlayMode,
   ReportingThreshold,
   ReviewDisposition,
-  ReviewFixture,
   ReviewManifest,
   ReviewerOverlay,
   ReviewerPolicy,
   ReviewerSource,
   Severity,
+  VerificationCheck,
 } from './types'
 export { assertReviewerOverlay, assertReviewerPolicy, parseReviewerOverlays } from './validate'

@@ -75,6 +75,9 @@ export function parseReviewerOverlaySource(source: string, label: string): Revie
   if (reason !== undefined) overlay.reason = reason
 
   if (mode === 'disable') {
+    if (body.length > 0) {
+      reviewPolicyError(label, 'disable overlays must not carry a Markdown body')
+    }
     if (Object.keys(policyFields).length > 0) {
       reviewPolicyError(label, `disable overlays may only carry: ${OVERLAY_CONTROL_KEYS.join(', ')}`)
     }

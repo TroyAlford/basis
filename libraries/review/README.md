@@ -36,7 +36,7 @@ Front-matter fields:
 | `context` | context the runtime must assemble before adjudication |
 | `outcomes` | `[{ category, disposition, destructive }]` the reviewer may return |
 | `threshold` | `{ minimumConfidence, severity }` reporting gate |
-| `verification` | optional deterministic check that proves a repair |
+| `verification` | optional registered check that proves a repair: `{ detector }` |
 
 A `disposition` is one of `finding`, `question`, `no_finding`, or `abstain`:
 
@@ -66,7 +66,8 @@ outcomes:
 threshold:
   minimumConfidence: 0.6
   severity: warning
-verification: Re-run the detector and confirm the finding is gone.
+verification:
+  detector: knip
 ---
 
 # Example
@@ -92,7 +93,8 @@ An overlay's front-matter declares `id` and `mode` (`add`, `extend`, `replace`,
 or `disable`); its body is contributed `instructions`. For `extend`, front-matter
 scalars replace and arrays append, and the body is **appended** to the standard
 instructions. A `disable` overlay carries its `reason` in the front-matter and
-may not carry policy fields.
+may carry neither policy fields nor a body: authored policy is never silently
+discarded.
 
 ````md
 ---
@@ -117,9 +119,7 @@ and is fail-closed: documents and objects are parsed from `unknown` and validate
 before they are applied. Every effective reviewer carries `sources`
 (`basis-standard` and/or `repo-local`); an extended reviewer reports both.
 
-## Fixtures
+## Scope
 
-`STANDARD_REVIEW_FIXTURES` holds labelled positive/negative diffs for the
-reference reviewer. A consumer's evaluator runs the reviewer against a fixture
-and compares the adjudicated disposition. Basis ships **no** model runtime and
-does **not** publish reviews.
+Basis owns policy only: it ships no evaluation corpus, model runtime, or review
+publication. Evaluation-corpus modeling belongs to the consumer (`ai-dispatcher`).

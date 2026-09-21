@@ -71,6 +71,12 @@ export interface ReportingThreshold {
   severity: Severity,
 }
 
+/** A registered deterministic check that proves a repair. */
+export interface VerificationCheck {
+  /** Detector id registered with the executor (for example `knip`). */
+  detector: string,
+}
+
 /** The derived runtime representation of a reviewer. */
 export interface ReviewerPolicy {
   /** Context the reviewer needs assembled before adjudication. */
@@ -89,8 +95,8 @@ export interface ReviewerPolicy {
   threshold: ReportingThreshold,
   /** Short human-readable title. */
   title: string,
-  /** Deterministic check that proves a repair, when one exists. */
-  verification?: string,
+  /** Registered deterministic check that proves a repair, when one exists. */
+  verification?: VerificationCheck,
 }
 
 /** A versioned set of reviewer policies. */
@@ -145,20 +151,4 @@ export interface EffectiveReviewPolicy {
   reviewers: readonly EffectiveReviewer[],
   /** Schema version of the composed policy. */
   schemaVersion: number,
-}
-
-/** A labelled example used to evaluate a reviewer policy. */
-export interface ReviewFixture {
-  /** Expected outcome category, when the fixture pins one. */
-  category?: string,
-  /** Why this fixture exists. */
-  description: string,
-  /** Unified diff text the reviewer runs against. */
-  diff: string,
-  /** Expected disposition for this fixture. */
-  expectation: ReviewDisposition,
-  /** Fixture id, unique within the manifest. */
-  id: string,
-  /** Reviewer the fixture exercises. */
-  reviewerId: string,
 }
