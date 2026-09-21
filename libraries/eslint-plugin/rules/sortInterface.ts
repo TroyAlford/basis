@@ -222,6 +222,7 @@ export const sortInterface: Rule.RuleModule = {
     messages: {
       invalidOrder: interfaceInvalidOrder,
     },
+    schema: [],
     type: 'suggestion',
   },
 }

@@ -44,6 +44,7 @@ export const sortStringEnum: Rule.RuleModule = {
     messages: {
       invalidOrder: stringEnumInvalidOrder,
     },
+    schema: [],
     type: 'suggestion',
   },
 }

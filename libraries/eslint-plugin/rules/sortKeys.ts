@@ -100,6 +100,7 @@ export const sortKeys: Rule.RuleModule = {
     messages: {
       sortKeys: "Expected object keys to be in {{order}}ending order. '{{thisName}}' should be before '{{prevName}}'.",
     },
+    schema: [],
     type: 'suggestion',
   },
 }

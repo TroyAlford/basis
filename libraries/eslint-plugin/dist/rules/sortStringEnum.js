@@ -34,6 +34,7 @@ export var sortStringEnum = {
         messages: {
             invalidOrder: stringEnumInvalidOrder,
         },
+        schema: [],
         type: 'suggestion',
     },
 };

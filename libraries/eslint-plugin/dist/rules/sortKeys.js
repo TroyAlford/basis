@@ -106,6 +106,7 @@ export var sortKeys = {
         messages: {
             sortKeys: "Expected object keys to be in {{order}}ending order. '{{thisName}}' should be before '{{prevName}}'.",
         },
+        schema: [],
         type: 'suggestion',
     },
 };

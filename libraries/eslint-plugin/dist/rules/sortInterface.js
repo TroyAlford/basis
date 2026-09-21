@@ -220,6 +220,7 @@ export var sortInterface = {
         messages: {
             invalidOrder: interfaceInvalidOrder,
         },
+        schema: [],
         type: 'suggestion',
     },
 };
