@@ -1,6 +1,23 @@
 import { afterAll, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { loadImage } from './loadImage'
 
+/**
+ * Creates a real `Image` whose `src` is captured instead of loaded, so the
+ * mocked `onload`/`onerror` callbacks fully control the result. happy-dom loads
+ * images for real and would otherwise fire `onerror` before the mock's timer.
+ * @returns An image element with an inert `src` accessor.
+ */
+const createImage = (): HTMLImageElement => {
+  const img = new Image()
+  let source = ''
+  Object.defineProperty(img, 'src', {
+    configurable: true,
+    get: () => source,
+    set: (value: string) => { source = value },
+  })
+  return img
+}
+
 describe('loadImage', () => {
   let imageSpy: ReturnType<typeof spyOn>
 
@@ -13,7 +30,7 @@ describe('loadImage', () => {
 
   test('resolves with image element on successful load', async () => {
     imageSpy.mockImplementation(() => {
-      const img = new Image()
+      const img = createImage()
       setTimeout(() => img.onload?.(new Event('load')), 0)
       return img
     })
@@ -25,7 +42,7 @@ describe('loadImage', () => {
 
   test('resolves with null on failed load', async () => {
     imageSpy.mockImplementation(() => {
-      const img = new Image()
+      const img = createImage()
       setTimeout(() => img.onerror?.(new Event('error')), 0)
       return img
     })
@@ -38,7 +55,7 @@ describe('loadImage', () => {
     let callCount = 0
     imageSpy.mockImplementation(() => {
       callCount++
-      const img = new Image()
+      const img = createImage()
       setTimeout(() => img.onload?.(new Event('load')), 0)
       return img
     })
