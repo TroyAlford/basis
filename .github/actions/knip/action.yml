@@ -1,0 +1,45 @@
+name: 'Knip Dead-Code Check'
+description: 'Run the Basis-owned knip dead-code analysis against a repository'
+
+inputs:
+  config:
+    description: >-
+      Path to a repository-specific knip config, relative to the working
+      directory. When empty, a repository-local knip config is used if present;
+      otherwise the shared Basis config bundled with this action.
+    required: false
+    default: ''
+  args:
+    description: 'Additional space-separated arguments passed to knip.'
+    required: false
+    default: ''
+  version:
+    description: 'knip version to run. Pinned by Basis so consumers do not track it.'
+    required: false
+    default: '6.37.0'
+  working-directory:
+    description: 'Directory to analyze, relative to the repository root.'
+    required: false
+    default: '.'
+  fail-on-findings:
+    description: >-
+      When `true`, findings fail the job. Set to `false` for an advisory rollout
+      before promoting the check to required. Advisory mode still fails on a knip
+      configuration/input error (exit code 2).
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Run knip
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        KNIP_VERSION: ${{ inputs.version }}
+        KNIP_CONFIG: ${{ inputs.config }}
+        KNIP_ARGS: ${{ inputs.args }}
+        KNIP_FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+        KNIP_ACTION_PATH: ${{ github.action_path }}
+      # The logic lives in run.sh so the self-test exercises the same code.
+      run: bash "${{ github.action_path }}/run.sh"

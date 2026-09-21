@@ -66,8 +66,10 @@ runs:
           # Update existing comment
           gh api "repos/$REPO/issues/comments/$comment_id" -X PATCH -f body="$message"
         else
-          # Create new comment
-          gh pr comment "$PR_NUMBER" --body "$message"
+          # Create new comment. Use the API with an explicit repo rather than
+          # `gh pr comment`, which needs a local git checkout; consumers run
+          # this from a fork-safe `pull_request_target` workflow with none.
+          gh api "repos/$REPO/issues/$PR_NUMBER/comments" -f body="$message"
         fi
         
         # Exit with error if title is invalid
