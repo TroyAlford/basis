@@ -37,6 +37,7 @@ Build plugins for the Bun runtime:
 Common utility functions:
 - Formatting helpers
 - Type utilities
+- Shared logger with an optional bounded file sink
 - Development tools
 
 ## Development

@@ -52,6 +52,27 @@ do not enumerate or install the plugin stack.
 Presets: `basis/tsconfig/base.json`, `basis/tsconfig/bun.json`,
 `basis/tsconfig/react.json`. They contain no Basis-monorepo path mappings.
 
+## Logger
+
+`basis/logger` exports the shared `Logger` and its `ILogger` / `LoggerOptions`
+types. Basis owns the logger's dependencies (for example `chalk`), so consumers
+do not install them:
+
+```ts
+import { Logger } from 'basis/logger'
+
+const logger = new Logger({ prefix: '[app]', logFilePath: '/tmp/app.log', maxLogLines: 5000 })
+
+logger.info('server listening')
+const stopwatch = logger.stopwatchStart()
+// ...
+logger.stopwatchStop(stopwatch, 'request handled')
+```
+
+`LoggerOptions` supports `prefix`, `silent`, `logFilePath`, and `maxLogLines`.
+Use `withPrefix` to derive a scoped view, and the `stopwatchStart` /
+`stopwatchSplit` / `stopwatchStop` helpers to measure durations.
+
 ## CLI
 
 ```bash

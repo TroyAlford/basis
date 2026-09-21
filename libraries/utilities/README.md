@@ -62,3 +62,22 @@ const result = match(5)
 
 console.log(result); // Output: "five"
 ```
+
+### Logging
+
+The `Logger` provides timestamped, severity-formatted console output with an
+optional bounded file sink and stopwatch helpers. It is also exposed through the
+Basis package facade as `basis/logger`.
+
+```ts
+import { Logger } from '@basis/utilities'
+
+const logger = new Logger({ prefix: '[worker]' })
+logger.info('started')
+
+const stopwatch = logger.stopwatchStart()
+logger.stopwatchStop(stopwatch, 'iteration complete')
+```
+
+`LoggerOptions` supports `prefix`, `silent`, `logFilePath`, and `maxLogLines`.
+Use `withPrefix` to derive a scoped view that shares the same destination.
