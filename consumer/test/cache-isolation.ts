@@ -6,8 +6,8 @@ import { assert, assertPatchesAbsent, assertPatchesActive, initApp, linkCount, m
 /**
  * Regression test for Bun's shared install cache. Two hosts install Basis
  * through one temporary cache; a third installs the same packages from that
- * cache with scripts disabled. If patching mutated a hardlinked cache entry,
- * the third host would receive patched bytes. It must not.
+ * cache with scripts disabled. When Basis owns patches, this also proves that
+ * patching replaced cache files instead of mutating hardlinked cache entries.
  */
 const main = (): void => {
   const repoRoot = join(import.meta.dir, '..', '..')
@@ -20,7 +20,9 @@ const main = (): void => {
 
   try {
     run(['git', 'clone', '--quiet', '--local', '--no-hardlinks', repoRoot, source], workspace, env)
-    run(['git', 'tag', tag], source, env)
+    // Force a lightweight tag so the fixture works even on hosts that enable
+    // global tag signing (which would otherwise require a tag message).
+    run(['git', '-c', 'tag.gpgsign=false', 'tag', tag], source, env)
     const spec = `git+file://${source}#${tag}`
 
     const hostA = join(workspace, 'host-a')
@@ -28,16 +30,22 @@ const main = (): void => {
     run(['bun', 'install', '--cache-dir', cache], hostA, env)
     assertPatchesActive(hostA)
 
-    // Patching must replace the file rather than mutate a hardlinked cache copy.
-    const importMarker = PATCH_MARKERS[0]
-    assert(importMarker !== undefined, 'expected an eslint-plugin-import marker')
-    const [instance] = findInstalledInstances(hostA, importMarker.name)
-      .filter(candidate => candidate.version === importMarker.version)
-    assert(instance !== undefined, 'host A has the patched package')
-    assert(
-      linkCount(join(instance.path, importMarker.file)) === 1,
-      'patched file is not hardlinked into the shared cache',
-    )
+    /*
+     * Basis currently owns no patches, so there is no patched file to inspect.
+     * If patches return, assert each patched file was replaced (link count 1)
+     * rather than mutated in the shared cache.
+     */
+    if (PATCH_MARKERS.length > 0) {
+      const marker = PATCH_MARKERS[0]
+      assert(marker !== undefined, 'expected a Basis-owned patch marker')
+      const [instance] = findInstalledInstances(hostA, marker.name)
+        .filter(candidate => candidate.version === marker.version)
+      assert(instance !== undefined, 'host A has the patched package')
+      assert(
+        linkCount(join(instance.path, marker.file)) === 1,
+        'patched file is not hardlinked into the shared cache',
+      )
+    }
 
     const hostB = join(workspace, 'host-b')
     initApp(hostB, spec)

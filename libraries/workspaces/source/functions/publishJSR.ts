@@ -164,7 +164,7 @@ export async function publishJSR(options: Options) {
         }
       }
 
-      /* eslint-disable sort-keys-fix/sort-keys-fix */
+      /* eslint-disable @basis/sort-keys */
       const config: Record<string, unknown> = {
         name: packageJson.name,
         version,
@@ -175,7 +175,7 @@ export async function publishJSR(options: Options) {
           exclude: ['package.json', '*.test.*'],
         },
       }
-      /* eslint-enable sort-keys-fix/sort-keys-fix */
+      /* eslint-enable @basis/sort-keys */
       if (!packageJson.description) delete config.description
       if (!Object.keys(imports).length) delete config.imports
 

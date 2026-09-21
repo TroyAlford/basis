@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { match } from '@basis/utilities/index.ts'
+import { match } from '@basis/utilities'
 import { Square } from '../../icons/Square'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'

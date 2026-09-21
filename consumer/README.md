@@ -84,8 +84,10 @@ bunx basis check
 
 ## Patches
 
-Patch files live in `patches/` and are declared in the root
-`patchedDependencies` map, which is the manifest the install hook reads.
+Basis currently owns **no** patches, so a normal install applies nothing. The
+mechanism remains in place for future Basis-owned patches: patch files live in
+`patches/` and are declared in the root `patchedDependencies` map, which is the
+manifest the install hook reads.
 
 Bun applies `patchedDependencies` during install, and only from the install
 root: a dependency's patches are never applied transitively, and there is no

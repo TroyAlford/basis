@@ -23,17 +23,14 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     }
     return to.concat(ar || Array.prototype.slice.call(from));
 };
-/* eslint-disable @import/no-default-export */
+/* eslint-disable @basis/no-default-export */
 import eslint from '@eslint/js';
 import pluginStylistic from '@stylistic/eslint-plugin';
-import pluginImport from 'eslint-plugin-import';
 import pluginImportNewlines from 'eslint-plugin-import-newlines';
 import pluginJSDoc from 'eslint-plugin-jsdoc';
-import pluginNamedImportSpacing from 'eslint-plugin-named-import-spacing';
+import pluginPerfectionist from 'eslint-plugin-perfectionist';
 import pluginImportSort from 'eslint-plugin-simple-import-sort';
 import pluginSortDestructureKeys from 'eslint-plugin-sort-destructure-keys';
-import pluginSortKeys from 'eslint-plugin-sort-keys-fix';
-import pluginTypescriptSortKeys from 'eslint-plugin-typescript-sort-keys';
 import pluginTypescript from 'typescript-eslint';
 import pluginBasis from './rules/index.js';
 /**
@@ -50,28 +47,20 @@ var plugin = function (options) {
         },
         plugins: {
             '@basis': pluginBasis,
-            '@import': pluginImport,
             '@import-newlines': pluginImportNewlines,
             '@jsdoc': pluginJSDoc,
-            '@named-import-spacing': pluginNamedImportSpacing,
             '@stylistic': pluginStylistic,
             '@stylistic/js': pluginStylistic,
             '@stylistic/jsx': pluginStylistic,
             '@stylistic/ts': pluginStylistic,
             '@typescript-eslint': pluginTypescript.plugin,
+            'perfectionist': pluginPerfectionist,
             'simple-import-sort': pluginImportSort,
             'sort-destructure-keys': pluginSortDestructureKeys,
-            'sort-keys-fix': pluginSortKeys,
-            'typescript-sort-keys': pluginTypescriptSortKeys,
         },
         rules: rules,
         settings: {
-            '@import/core-modules': ['bun:test'],
-            '@import/parsers': {
-                '@stylistic/parser': ['.js', '.mjs', '.ts', '.tsx'],
-                '@typescript-eslint/parser': ['.ts', '.tsx'],
-            },
-            'react': { version: 'detect' },
+            react: { version: 'detect' },
         },
     };
     if (files)
@@ -83,10 +72,7 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
     eslint.configs.recommended,
     pluginJSDoc.configs['flat/recommended-typescript-error']], __read(pluginTypescript.configs.strict), false), __read(pluginTypescript.configs.stylistic), false), [plugin({
         rules: {
-            '@basis/no-mixed-type-imports': 'error',
-            '@basis/no-object-padding': 'error',
-            '@import-newlines/enforce': ['error', { items: Infinity, semi: false }],
-            '@import/extensions': ['error', {
+            '@basis/import-extensions': ['error', {
                     cjs: 'always',
                     css: 'always',
                     jpg: 'always',
@@ -100,11 +86,14 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
                     ts: 'never',
                     tsx: 'never',
                 }],
-            '@import/no-default-export': 'error',
-            '@import/no-extraneous-dependencies': 'error',
-            '@import/no-unresolved': 'off',
-            '@import/prefer-default-export': 'off',
-            '@named-import-spacing/named-import-spacing': 'error',
+            '@basis/no-default-export': 'error',
+            '@basis/no-extraneous-dependencies': 'error',
+            '@basis/no-mixed-type-imports': 'error',
+            '@basis/no-object-padding': 'error',
+            '@basis/sort-interface': 'error',
+            '@basis/sort-keys': 'error',
+            '@basis/sort-string-enum': 'error',
+            '@import-newlines/enforce': ['error', { items: Infinity, semi: false }],
             '@stylistic/array-bracket-newline': ['error', 'consistent'],
             '@stylistic/array-bracket-spacing': ['error', 'never'],
             '@stylistic/arrow-parens': ['error', 'as-needed'],
@@ -179,13 +168,6 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
                 }],
             '@stylistic/jsx/jsx-props-no-spreading': 'off',
             '@stylistic/jsx/jsx-self-closing-comp': ['error', { component: true, html: true }],
-            '@stylistic/jsx/jsx-sort-props': ['error', {
-                    callbacksLast: true,
-                    ignoreCase: true,
-                    multiline: 'last',
-                    reservedFirst: ['key', 'ref'],
-                    shorthandFirst: true,
-                }],
             '@stylistic/jsx/jsx-tag-spacing': ['error', {
                     afterOpening: 'never',
                     beforeClosing: 'proportional-always',
@@ -212,6 +194,7 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
             '@stylistic/no-namespace': 'off',
             '@stylistic/nonblock-statement-body-position': ['error', 'beside'],
             '@stylistic/space-in-parens': ['error', 'never'],
+            '@stylistic/ts/arrow-spacing': ['error', { after: true, before: true }],
             '@stylistic/ts/block-spacing': ['error', 'always'],
             '@stylistic/ts/brace-style': ['error', '1tbs', { allowSingleLine: true }],
             '@stylistic/ts/class-literal-property-style': 'off',
@@ -255,7 +238,7 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
             '@stylistic/ts/type-annotation-spacing': ['error', {
                     after: true,
                     before: false,
-                    overrides: { arrow: { after: true, before: true } },
+                    overrides: { arrow: 'ignore' },
                 }],
             '@typescript-eslint/ban-ts-comment': 'warn',
             '@typescript-eslint/class-literal-property-style': 'off',
@@ -294,26 +277,39 @@ export default pluginTypescript.config.apply(pluginTypescript, __spreadArray(__s
             'no-shadow': 'error',
             'no-unused-vars': 'off',
             'no-var': 'error',
+            'perfectionist/sort-jsx-props': ['error', {
+                    customGroups: [
+                        { elementNamePattern: '^(key|ref)$', groupName: 'reserved' },
+                        { elementNamePattern: '^on[A-Z]', groupName: 'multiline-callback', modifiers: ['multiline'] },
+                        { elementNamePattern: '^on[A-Z]', groupName: 'callback' },
+                    ],
+                    groups: [
+                        'reserved',
+                        'shorthand-prop',
+                        'unknown',
+                        'multiline-prop',
+                        'callback',
+                        'multiline-callback',
+                    ],
+                    ignoreCase: true,
+                }],
             'prefer-destructuring': ['error', { AssignmentExpression: { array: false, object: false } }],
             'simple-import-sort/imports': ['error', { groups: [['^[a-z@]', '^@basis/', '^([.]+[/])+', '.s?css$']] }],
             'sort-destructure-keys/sort-destructure-keys': ['error', { caseSensitive: false }],
-            'sort-keys-fix/sort-keys-fix': 'error',
             'sort-vars': ['error', { ignoreCase: true }],
-            'typescript-sort-keys/interface': 'error',
-            'typescript-sort-keys/string-enum': 'error',
         },
     }),
     plugin({
         files: ['*.config.*', '**/*.config.*', 'eslint.config.*', '**/eslint.config.*'],
         rules: {
-            '@import/no-default-export': 'off',
+            '@basis/no-default-export': 'off',
         },
     }),
     plugin({
         files: ['*.test.ts', '*.test.tsx'],
         rules: {
+            '@basis/no-extraneous-dependencies': ['error', { devDependencies: true }],
             'dot-notation': 'off',
-            'import/no-extraneous-dependencies': ['error', { devDependencies: true }],
         },
     }),
     plugin({

@@ -1,4 +1,4 @@
-/* eslint-disable @import/no-default-export */
+/* eslint-disable @basis/no-default-export */
 import type { Linter } from 'eslint'
 import basisConfig from '../libraries/eslint-plugin'
 

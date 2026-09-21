@@ -9,7 +9,7 @@ interface Props {
 }
 
 // @ts-expect-error - this is a valid dynamic import
-// eslint-disable-next-line @import/extensions
+// eslint-disable-next-line @basis/import-extensions
 const shiki = await import('https://esm.sh/shiki@3.0.0')
 
 export class Code extends Component<Props> {
