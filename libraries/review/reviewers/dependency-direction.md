@@ -11,17 +11,17 @@ context:
   - repository-search
 detectors: []
 outcomes:
-  - category: relocate-responsibility
+  - category: dependency-cycle
     disposition: finding
     destructive: false
-  - category: invert-dependency
+  - category: layering-confusion
     disposition: finding
     destructive: false
-  - category: correct-direction
-    disposition: no_finding
-    destructive: false
-  - category: clarify-ownership
+  - category: consider-boundary
     disposition: question
+    destructive: false
+  - category: pragmatic-coupling
+    disposition: no_finding
     destructive: false
   - category: abstain
     disposition: abstain
@@ -33,46 +33,62 @@ threshold:
 
 # Dependency direction
 
-High-level policy must not depend on low-level mechanism.
+Keep the dependency graph understandable and generally one-directional.
 
-When a unit that expresses a rule, decision, or domain concept imports,
-constructs, or reaches into a lower-level mechanism — a database or ORM, a
-transport or HTTP client, the filesystem, the clock, a process, a vendor SDK, a
-framework — the dependency graph points the wrong way. Changes to the mechanism
-now force changes to the policy, and the mechanism's details leak into decisions
-that should not know about them. This is a defect whether or not a second
-implementation exists.
+A useful default mental model is that simpler, foundational units are used by
+higher-order composition:
 
-Direction is about which side owns the knowledge. Lower-level code may depend on
-higher-level policy; the reverse is the problem.
+```
+types / utilities  ->  classes / services  ->  applications / pages
+```
 
-These are correct and should be treated as `no_finding`:
+Higher-order code using lower-level building blocks is normal and is not itself
+a defect. The problem is tangled, surprising, or cyclical coupling — not
+coupling as such.
 
-- a mechanism implementing a contract defined by the policy it serves;
+Report a finding only when the graph is already damaged:
+
+- **Dependency cycle.** Two or more units depend on each other, so neither can be
+  understood, tested, or changed independently.
+- **Layering confusion.** A dependency materially tangles ownership or forces a
+  foundational, simple unit to reach upward into application-level behavior — a
+  utility that imports an application service, or a core type that knows a page
+  or transport's details.
+
+Avoid inheritance diamonds: a type reachable through more than one inheritance
+path makes structure and behavior order-dependent. When the real fix is a
+different mechanism, that belongs to `composition-vs-inheritance`.
+
+These are normal and should be treated as `pragmatic-coupling`:
+
+- higher-order code depending on lower-level utilities or services;
 - low-level code depending on other low-level code;
-- a composition root constructing concrete implementations and passing them
-  inward.
+- a mechanism implementing a contract defined by the policy it serves;
+- a composition root constructing concrete implementations and passing them in;
+- direct coupling in small, simple software that remains easy to read and
+  change.
 
-Do not automatically prescribe an interface. Inverting the dependency can take
-several forms, and the simplest correct fix is often to remove the dependency
-rather than abstract it:
+Stronger boundaries become valuable when complexity, reuse, ownership, team size,
+testing, or change coordination creates real pressure — not merely because a
+package or service boundary could be drawn. A monolith or monorepo with direct
+coupling is often preferable to premature package or service boundaries.
+Architecture exists to improve readability and maintainability, not to satisfy a
+diagram.
 
-- move the logic to the layer that already owns the mechanism, so the policy
-  works with the data it needs instead of a handle to the mechanism;
-- pass the required data or a narrow value rather than the mechanism itself;
-- define the capability where the policy needs it and have the mechanism depend
-  on that definition.
+Do not automatically prescribe an interface, and do not assume inversion is the
+fix. Depending on the condition, the correct remediation may be to move behavior,
+pass data, accept the coupling, or introduce a seam. When a seam is the answer,
+whether it should exist and what the caller-facing contract represents belongs to
+`interface-boundaries`. This reviewer owns the shape and direction of the graph,
+not the contract design.
 
-Prefer the option that leaves the fewest layers knowing about the mechanism.
-When a seam is genuinely required, whether it should exist and what the
-caller-facing contract should represent belongs to `interface-boundaries`. This
-reviewer owns the direction of the dependency, not the contract design.
+Use `consider-boundary` as a question when scale, ownership, reuse, or testing
+pressure suggests a seam may now be useful but intent or roadmap decides. Use
+`abstain` only when the available evidence cannot support a review at all.
 
-Do not flag a lower-level type merely because it is concrete, infrastructure-
-flavored, or injected. The finding is a high-level policy depending on a
-lower-level mechanism, not the presence of infrastructure. When it is unclear
-which layer owns a responsibility, ask which side would have to change if the
-mechanism changed; ownership belongs to the side whose reasons do not include
-the mechanism.
-
-Use `abstain` only when the available evidence cannot support a review at all.
+"Which side would have to change if the mechanism changed?" is one useful
+diagnostic clue, not the ownership rule. Infer ownership from the domain
+responsibility, the repository's existing layering, which unit is foundational
+versus higher-order, current ownership and module boundaries, whether one side is
+made to know details it should not need, and the current scale and complexity. Do
+not turn one heuristic into a theorem.
