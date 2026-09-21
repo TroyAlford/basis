@@ -22,19 +22,6 @@ const countLines = (path: string): number => {
   return content.length === 0 ? 0 : content.split('\n').length
 }
 
-/**
- * Polls `predicate` until it returns true or `timeout` elapses.
- * @param predicate - Condition to wait for.
- * @param timeout - Maximum number of milliseconds to wait.
- */
-const waitFor = async (predicate: () => boolean, timeout: number): Promise<void> => {
-  const start = Date.now()
-  while (!predicate()) {
-    if ((Date.now() - start) > timeout) throw new Error('Timed out waiting for condition')
-    await Bun.sleep(10)
-  }
-}
-
 describe('Logger', () => {
   let captures: string[][]
   let restoreLog: () => void
@@ -129,7 +116,7 @@ describe('Logger', () => {
     }
   })
 
-  test('trims the log file to maxLogLines', async () => {
+  test('trims synchronously so later appends cannot be lost', () => {
     const dir = mkdtempSync(join(tmpdir(), 'basis-logger-'))
     const path = join(dir, 'app.log')
 
@@ -138,12 +125,19 @@ describe('Logger', () => {
 
       for (let index = 0; index < 100; index += 1) logger.info(`line-${index}`)
 
-      await waitFor(() => countLines(path) <= 10, 2000)
+      /*
+       * The trim must complete within the append that triggers it. An async trim would
+       * leave the untrimmed file visible here and could overwrite newer lines later.
+       */
+      expect(countLines(path)).toBe(10)
+      expect(stripAnsi(readFileSync(path, 'utf8'))).toContain('line-99')
+
+      for (let index = 100; index < 150; index += 1) logger.info(`line-${index}`)
 
       const lines = readFileSync(path, 'utf8').trimEnd().split('\n')
-      expect(lines).toHaveLength(10)
-      expect(stripAnsi(lines[lines.length - 1])).toContain('line-99')
+      expect(lines).toHaveLength(60)
       expect(stripAnsi(lines[0])).toContain('line-90')
+      expect(stripAnsi(lines[lines.length - 1])).toContain('line-149')
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }

@@ -1,7 +1,6 @@
 /* eslint-disable no-console */
 import chalk from 'chalk'
-import { appendFileSync, mkdirSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { LOG_COLORS } from '../constants/LogColors'
 
@@ -59,8 +58,8 @@ export interface LoggerOptions {
   logFilePath?: string,
   /**
    * When set alongside `logFilePath`, the file is trimmed to at most this many lines (keeping the
-   * newest) once it grows past the threshold. Trimming is asynchronous and non-blocking.
-   * Recommended: `5000`.
+   * newest) once it grows past the threshold. Trimming is synchronous and bounded, so it cannot
+   * overwrite lines appended after the trim begins. Recommended: `5000`.
    */
   maxLogLines?: number,
   /** Prefix to prepend to all log messages. */
@@ -108,8 +107,6 @@ export class Logger implements ILogger {
   private options: LoggerOptions
   /** Active timers mapped by symbol. */
   private stopwatches = new Map<symbol, Stopwatch>()
-  /** True while an async trim is in progress (prevents concurrent re-entry). */
-  private trimPending = false
 
   /**
    * Creates a new Logger instance.
@@ -174,7 +171,7 @@ export class Logger implements ILogger {
       mkdirSync(dirname(logFilePath), { recursive: true })
       appendFileSync(logFilePath, `${line}\n`, 'utf8')
       if (maxLogLines && (++this.appendCount % 100 === 0)) {
-        void this.trimLogFile(logFilePath, maxLogLines)
+        this.trimLogFile(logFilePath, maxLogLines)
       }
     } catch {
       // Avoid throwing from logging
@@ -182,23 +179,22 @@ export class Logger implements ILogger {
   }
 
   /**
-   * Trims the log file to the newest `maxLogLines` lines. Fire-and-forget; failures are swallowed.
+   * Trims the log file to the newest `maxLogLines` lines.
+   *
+   * This runs synchronously and completes within the append that triggers it, so no append can
+   * interleave between reading the snapshot and replacing the file. Failures are swallowed so
+   * logging never throws.
    * @param path - Absolute path to the log file.
    * @param maxLogLines - Maximum number of lines to retain.
    */
-  private async trimLogFile(path: string, maxLogLines: number): Promise<void> {
-    if (this.trimPending) return
-    this.trimPending = true
-
+  private trimLogFile(path: string, maxLogLines: number): void {
     try {
-      const content = await readFile(path, 'utf8')
+      const content = readFileSync(path, 'utf8')
       const lines = content.endsWith('\n') ? content.slice(0, -1).split('\n') : content.split('\n')
       if (lines.length <= maxLogLines) return
-      await writeFile(path, `${lines.slice(-maxLogLines).join('\n')}\n`, 'utf8')
+      writeFileSync(path, `${lines.slice(-maxLogLines).join('\n')}\n`, 'utf8')
     } catch {
       // Trim failures are non-fatal
-    } finally {
-      this.trimPending = false
     }
   }
 
