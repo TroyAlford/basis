@@ -113,13 +113,14 @@ class PostgresUserStore implements UserStore {
 There is one implementation, callers know the concrete type, and the interface
 is only mirroring the class.
 
-Expected: `question / consider-boundary`
+Expected: `finding / remove-speculative-abstraction`
 
 Expected review feedback:
 
-> This interface is just mirroring the concrete implementation right now. What
-> boundary is it protecting? If there is no real substitution, ownership, or
-> testing seam here, I would keep this concrete until one emerges.
+> This interface adds a concept without protecting a demonstrated boundary. It is
+> a one-for-one mirror of `PostgresUserStore`, with no second implementation,
+> ownership split, or testing seam. Keep the class concrete until a real boundary
+> appears.
 
 ### Real interchangeable boundary
 
@@ -168,3 +169,31 @@ Expected review feedback:
 > `instanceof` and calls store-specific methods. Callers should depend on one
 > consumer-shaped capability (for example `save`) instead of knowing which
 > concrete store they hold.
+
+### A second implementation is emerging
+
+```ts
+class ReportService {
+  constructor(private readonly store: PostgresReportStore) {}
+
+  publish(id: string): void {
+    this.store.insertReport(id)
+  }
+}
+
+class InMemoryReportStore {
+  insertReport(id: string): void { /* ... */ }
+}
+```
+
+An in-memory store now exists for tests, but no shared capability has been
+declared and the service still names the concrete Postgres type.
+
+Expected: `question / consider-boundary`
+
+Expected review feedback:
+
+> A second store implementation now exists, but there is no shared capability yet
+> and the service still names the concrete Postgres type. Is a real seam intended
+> here, or is the in-memory store only for tests? If the stores are meant to be
+> interchangeable, a consumer-shaped contract is worth introducing.

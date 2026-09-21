@@ -145,30 +145,45 @@ Expected review feedback:
 > application and a database. Test `priceFor` directly across the branches and
 > edge cases, and keep the end-to-end flow for wiring rather than the rules.
 
-### A mock that reimplements the collaborator
+### A fake that reproduces the real collaborator's semantics
 
 ```ts
 class FakeUserRepository {
-  findById(id: string): User {
-    return { id, displayName: `user-${id}` }
+  private readonly rows: User[] = []
+
+  findActive(sortedBy: 'name' | 'createdAt'): User[] {
+    return this.rows
+      .filter(user => user.active)
+      .sort((a, b) =>
+        sortedBy === 'name' ? a.name.localeCompare(b.name) : a.createdAt - b.createdAt,
+      )
+  }
+
+  save(user: User): void {
+    this.rows.push(user)
   }
 }
 
-test('service displays a user', async () => {
-  const service = new UserService(new FakeUserRepository())
-  expect(await service.display('1')).toBe('user-1')
+test('service returns active users in order', async () => {
+  const repository = new FakeUserRepository()
+  const service = new UserService(repository)
+  await service.createMany([/* ... */])
+  expect((await service.activeUsers('name')).map(user => user.name)).toEqual(['Ada', 'Grace'])
 })
 ```
 
-The fake reimplements query behavior, so the test mostly proves the fake.
+The fake reimplements the repository's filtering and sorting, and the test is
+offered as proof that the service and repository work together.
 
 Expected: `finding / mocked-integration`
 
 Expected review feedback:
 
-> This test claims the service and repository work together, but the fake
-> reimplements the repository's query semantics. Test the real repository
-> against a real store, or mock only the boundary without encoding query logic.
+> This test duplicates the repository's filtering and sorting in a fake, then
+> treats the result as evidence that the service and repository integrate. It
+> only proves the fake. Test the real repository against a real store, and prove
+> the service against a contract-level fake that does not reimplement query
+> behavior.
 
 ### Proportionate direct coverage
 
@@ -191,3 +206,24 @@ test('returns null for non-numeric input', () => expect(parseAmount('abc')).toBe
 Expected: `no_finding`
 
 Expected review feedback: none.
+
+### No proof that the assembled system works
+
+```ts
+// user-service.test.ts
+test('formats a user', () => { /* ... */ })
+
+// user-repository.test.ts
+test('saves and loads a user', async () => { /* real store integration */ })
+```
+
+Unit and integration coverage is good, but nothing starts the deployed
+application, validates its configuration, or exercises real wiring.
+
+Expected: `finding / missing-system-proof`
+
+Expected review feedback:
+
+> Unit and integration coverage look solid, but there is no smoke test that the
+> assembled application starts with valid configuration and working wiring. That
+> is the risk this change carries; add the smallest real check for it.
