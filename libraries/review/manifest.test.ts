@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { DEAD_CODE_REVIEWER_ID, PLACEHOLDER_DOCUMENTATION_REVIEWER_ID, REVIEW_POLICY_SCHEMA_VERSION, STANDARD_REVIEW_POLICY_ID, TOOLING_CONFORMANCE_CHURN_REVIEWER_ID, WARNING_BASELINE_REGRESSION_REVIEWER_ID } from './ids'
 import { STANDARD_REVIEW_MANIFEST } from './manifest'
-import { DEAD_CODE_KNIP_CATEGORIES } from './reviewers/deadCode'
 
 describe('standard review manifest', () => {
   test('is the versioned Basis standard', () => {
@@ -23,7 +22,10 @@ describe('standard review manifest', () => {
   })
 
   test('dead-code consumes only dead-code knip categories', () => {
-    const categories = DEAD_CODE_KNIP_CATEGORIES.map(category => category.category)
+    const reviewer = STANDARD_REVIEW_MANIFEST.reviewers.find(candidate => candidate.id === DEAD_CODE_REVIEWER_ID)
+    if (reviewer === undefined) throw new Error('missing dead-code reviewer')
+
+    const categories = reviewer.detectors.flatMap(detector => detector.categories.map(category => category.category))
     expect(categories).toContain('exports')
     expect(categories).toContain('files')
     expect(categories).not.toContain('unresolved')

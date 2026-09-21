@@ -4,14 +4,14 @@
  * Basis owns the durable opinion — stable reviewer ids, their questions,
  * evidence and abstention rules, structured outcomes, and reporting thresholds
  * — while consumers own execution (running detectors, calling models, and
- * publishing results). Repositories address standard reviewers by id through
- * local overlays; see {@link composeReviewPolicy}.
+ * publishing results). Reviewers are authored as Markdown documents with YAML
+ * front-matter (see {@link parseReviewerSource}); repositories address standard
+ * reviewers by id through local overlays (see {@link composeReviewPolicy}).
  */
 
 export { composeReviewPolicy } from './compose'
 export type { ComposeReviewPolicyOptions } from './compose'
 export { STANDARD_REVIEW_FIXTURES } from './fixtures'
-export { assertReviewerOverlay, assertReviewerPolicy, parseReviewerOverlays } from './validate'
 export {
   DEAD_CODE_REVIEWER_ID,
   PLACEHOLDER_DOCUMENTATION_REVIEWER_ID,
@@ -21,12 +21,10 @@ export {
   TOOLING_CONFORMANCE_CHURN_REVIEWER_ID,
   WARNING_BASELINE_REGRESSION_REVIEWER_ID,
 } from './ids'
+export { loadReviewerDirectory } from './load'
 export { STANDARD_REVIEW_MANIFEST } from './manifest'
+export { parseFrontMatter, parseReviewerSource } from './markdown'
 export { STANDARD_REVIEWERS } from './reviewers'
-export { DEAD_CODE_KNIP_CATEGORIES, deadCode } from './reviewers/deadCode'
-export { placeholderDocumentation } from './reviewers/placeholderDocumentation'
-export { toolingConformanceChurn } from './reviewers/toolingConformanceChurn'
-export { warningBaselineRegression } from './reviewers/warningBaselineRegression'
 export type {
   ContextRequirement,
   DetectorCategory,
@@ -47,3 +45,4 @@ export type {
   ReviewerSource,
   Severity,
 } from './types'
+export { assertReviewerOverlay, assertReviewerPolicy, parseReviewerOverlays } from './validate'

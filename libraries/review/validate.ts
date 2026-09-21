@@ -62,7 +62,7 @@ const REVIEWER_OVERLAY_KEYS = ['id', 'mode', 'policy', 'reason'] as const
  * @param label Value being validated.
  * @param message Failure description.
  */
-function fail(label: string, message: string): never {
+export function reviewPolicyError(label: string, message: string): never {
   throw new Error(`[basis/review] ${label}: ${message}`)
 }
 
@@ -71,7 +71,7 @@ function fail(label: string, message: string): never {
  * @param value Value to test.
  * @returns `true` for plain objects.
  */
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
@@ -87,7 +87,7 @@ const assertKnownKeys = (
   label: string,
 ): void => {
   for (const key of Object.keys(value)) {
-    if (!allowed.includes(key)) fail(label, `unknown field "${key}"`)
+    if (!allowed.includes(key)) reviewPolicyError(label, `unknown field "${key}"`)
   }
 }
 
@@ -100,7 +100,7 @@ const assertKnownKeys = (
  */
 const requireString = (value: unknown, label: string, field: string): string => {
   if (typeof value === 'string' && value.trim().length > 0) return value
-  return fail(label, `"${field}" must be a non-empty string`)
+  return reviewPolicyError(label, `"${field}" must be a non-empty string`)
 }
 
 /**
@@ -113,7 +113,7 @@ const requireString = (value: unknown, label: string, field: string): string => 
 const requireOptionalString = (value: unknown, label: string, field: string): string | undefined => {
   if (value === undefined) return undefined
   if (typeof value === 'string' && value.trim().length > 0) return value
-  return fail(label, `"${field}" must be a non-empty string when present`)
+  return reviewPolicyError(label, `"${field}" must be a non-empty string when present`)
 }
 
 /**
@@ -125,7 +125,7 @@ const requireOptionalString = (value: unknown, label: string, field: string): st
  */
 const requireNumber = (value: unknown, label: string, field: string): number => {
   if (typeof value === 'number' && Number.isFinite(value)) return value
-  return fail(label, `"${field}" must be a finite number`)
+  return reviewPolicyError(label, `"${field}" must be a finite number`)
 }
 
 /**
@@ -137,7 +137,7 @@ const requireNumber = (value: unknown, label: string, field: string): number => 
  */
 const requireBoolean = (value: unknown, label: string, field: string): boolean => {
   if (typeof value === 'boolean') return value
-  return fail(label, `"${field}" must be a boolean`)
+  return reviewPolicyError(label, `"${field}" must be a boolean`)
 }
 
 /**
@@ -149,7 +149,7 @@ const requireBoolean = (value: unknown, label: string, field: string): boolean =
  */
 const requireArray = (value: unknown, label: string, field: string): unknown[] => {
   if (Array.isArray(value)) return value
-  return fail(label, `"${field}" must be an array`)
+  return reviewPolicyError(label, `"${field}" must be an array`)
 }
 
 /**
@@ -167,7 +167,7 @@ const requireChoice = <T extends string>(
   allowed: readonly T[],
 ): T => {
   if (typeof value === 'string' && (allowed as readonly string[]).includes(value)) return value as T
-  return fail(label, `"${field}" must be one of: ${allowed.join(', ')}`)
+  return reviewPolicyError(label, `"${field}" must be one of: ${allowed.join(', ')}`)
 }
 
 /**
@@ -266,7 +266,7 @@ function parseOutOfScopeEntry(entry: unknown, index: number, label: string): str
  * @returns The validated category.
  */
 function assertDetectorCategory(value: unknown, label: string): DetectorCategory {
-  if (!isRecord(value)) fail(label, 'must be an object')
+  if (!isRecord(value)) reviewPolicyError(label, 'must be an object')
   assertKnownKeys(value, ['category', 'description'], label)
   return {
     category: requireString(value.category, label, 'category'),
@@ -281,7 +281,7 @@ function assertDetectorCategory(value: unknown, label: string): DetectorCategory
  * @returns The validated detector requirement.
  */
 function assertDetectorRequirement(value: unknown, label: string): DetectorRequirement {
-  if (!isRecord(value)) fail(label, 'must be an object')
+  if (!isRecord(value)) reviewPolicyError(label, 'must be an object')
   assertKnownKeys(value, ['categories', 'detector'], label)
   return {
     categories: mapEntries(value.categories, label, 'categories', parseDetectorCategory),
@@ -296,7 +296,7 @@ function assertDetectorRequirement(value: unknown, label: string): DetectorRequi
  * @returns The validated evidence requirement.
  */
 function assertEvidenceRequirement(value: unknown, label: string): EvidenceRequirement {
-  if (!isRecord(value)) fail(label, 'must be an object')
+  if (!isRecord(value)) reviewPolicyError(label, 'must be an object')
   assertKnownKeys(value, ['id', 'requirement'], label)
   return {
     id: requireString(value.id, label, 'id'),
@@ -311,7 +311,7 @@ function assertEvidenceRequirement(value: unknown, label: string): EvidenceRequi
  * @returns The validated outcome.
  */
 function assertOutcomeDefinition(value: unknown, label: string): OutcomeDefinition {
-  if (!isRecord(value)) fail(label, 'must be an object')
+  if (!isRecord(value)) reviewPolicyError(label, 'must be an object')
   assertKnownKeys(value, ['category', 'description', 'destructive', 'outcome'], label)
   return {
     category: requireString(value.category, label, 'category'),
@@ -328,11 +328,11 @@ function assertOutcomeDefinition(value: unknown, label: string): OutcomeDefiniti
  * @returns The validated threshold.
  */
 function assertThreshold(value: unknown, label: string): ReportingThreshold {
-  if (!isRecord(value)) fail(label, 'must be an object')
+  if (!isRecord(value)) reviewPolicyError(label, 'must be an object')
   assertKnownKeys(value, ['minimumConfidence', 'severity'], label)
   const minimumConfidence = requireNumber(value.minimumConfidence, label, 'minimumConfidence')
   if (minimumConfidence < 0 || minimumConfidence > 1) {
-    fail(label, 'minimumConfidence must be within [0, 1]')
+    reviewPolicyError(label, 'minimumConfidence must be within [0, 1]')
   }
   return {
     minimumConfidence,
@@ -347,7 +347,7 @@ function assertThreshold(value: unknown, label: string): ReportingThreshold {
  * @returns The validated reviewer policy.
  */
 export function assertReviewerPolicy(value: unknown, label: string): ReviewerPolicy {
-  if (!isRecord(value)) fail(label, 'must be a reviewer object')
+  if (!isRecord(value)) reviewPolicyError(label, 'must be a reviewer object')
   assertKnownKeys(value, REVIEWER_POLICY_KEYS, label)
 
   const context = mapEntries(value.context, label, 'context', parseContextEntry)
@@ -363,10 +363,10 @@ export function assertReviewerPolicy(value: unknown, label: string): ReviewerPol
   const title = requireString(value.title, label, 'title')
   const verification = requireOptionalString(value.verification, label, 'verification')
 
-  if (outcomes.length === 0) fail(label, 'must declare at least one outcome')
+  if (outcomes.length === 0) reviewPolicyError(label, 'must declare at least one outcome')
   const categories = outcomes.map(outcome => outcome.category)
   if (new Set(categories).size !== categories.length) {
-    fail(label, 'outcome categories must be unique')
+    reviewPolicyError(label, 'outcome categories must be unique')
   }
 
   return {
@@ -393,7 +393,7 @@ export function assertReviewerPolicy(value: unknown, label: string): ReviewerPol
  * @returns The validated patch.
  */
 function assertReviewerPatch(value: unknown, label: string): Partial<ReviewerPolicy> {
-  if (!isRecord(value)) fail(label, 'must be a reviewer patch object')
+  if (!isRecord(value)) reviewPolicyError(label, 'must be a reviewer patch object')
   assertKnownKeys(value, REVIEWER_POLICY_KEYS, label)
 
   const patch: Partial<ReviewerPolicy> = {}
@@ -432,7 +432,7 @@ function assertReviewerPatch(value: unknown, label: string): Partial<ReviewerPol
  * @returns The validated overlay.
  */
 export function assertReviewerOverlay(value: unknown): ReviewerOverlay {
-  if (!isRecord(value)) fail('overlay', 'must be an object')
+  if (!isRecord(value)) reviewPolicyError('overlay', 'must be an object')
   assertKnownKeys(value, REVIEWER_OVERLAY_KEYS, 'overlay')
   const id = requireString(value.id, 'overlay', 'id')
   const label = `overlay "${id}"`
@@ -440,16 +440,16 @@ export function assertReviewerOverlay(value: unknown): ReviewerOverlay {
   const reason = requireOptionalString(value.reason, label, 'reason')
 
   if (mode === 'disable') {
-    if (reason === undefined) fail(label, 'disable requires a reason')
-    if (value.policy !== undefined) fail(label, 'disable must not carry a policy')
+    if (reason === undefined) reviewPolicyError(label, 'disable requires a reason')
+    if (value.policy !== undefined) reviewPolicyError(label, 'disable must not carry a policy')
     return { id, mode, reason }
   }
 
-  if (value.policy === undefined) fail(label, `${mode} requires a policy`)
+  if (value.policy === undefined) reviewPolicyError(label, `${mode} requires a policy`)
   if (mode === 'extend') return { id, mode, policy: assertReviewerPatch(value.policy, label) }
 
   const policy = assertReviewerPolicy(value.policy, label)
-  if (policy.id !== id) fail(label, `policy id "${policy.id}" does not match overlay id`)
+  if (policy.id !== id) reviewPolicyError(label, `policy id "${policy.id}" does not match overlay id`)
   return { id, mode, policy }
 }
 

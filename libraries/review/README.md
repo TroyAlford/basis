@@ -7,7 +7,10 @@ and abstention rules, structured outcomes, and reporting thresholds.
 Consumers own execution: running detectors, calling models, repairing code, and
 publishing reviews. A reviewer is a specification, not a model and not a prompt.
 
-The surface is exposed to consumers as `basis/review`.
+The surface is exposed to consumers as `basis/review`. Reviewers are authored as
+**Markdown documents with YAML front-matter**: the front-matter is the
+machine-readable contract below, and the Markdown body is the long-form
+adjudication guidance.
 
 ## Standard reviewers
 
@@ -34,6 +37,50 @@ Each reviewer declares:
 `deterministic`, `detector-then-adjudicate`, `local-semantic`, and
 `frontier-semantic` are the supported profiles. A reviewer never makes a
 destructive change on a detector finding alone.
+
+## Authoring a reviewer
+
+Reviewers live in `libraries/review/reviewers/` as `.md` documents. The YAML
+front-matter carries the machine-readable metadata; the Markdown body is the
+adjudication guidance (`instructions`). `parseReviewerSource` parses one
+document and `loadReviewerDirectory` loads a directory; both fail closed.
+
+````md
+---
+id: dead-code
+title: Dead code
+question: Why is this code unused, and what is the intended correction?
+executionProfile: detector-then-adjudicate
+context:
+  - detector-finding
+detectors:
+  - detector: knip
+    categories:
+      - category: exports
+        description: Module export that is never imported.
+evidence:
+  - id: finding
+    requirement: The detector finding and the changed symbol.
+outOfScope:
+  - Dynamic or reflective use that a static analyzer cannot see.
+outcomes:
+  - category: remove
+    description: Genuinely dead code that should be removed.
+    destructive: true
+    outcome: finding
+threshold:
+  minimumConfidence: 0.6
+  severity: warning
+verification: Re-run knip at the review ref and confirm the finding is gone.
+---
+
+Knip is the detector, not the reviewer. A finding is a candidate to adjudicate,
+never an instruction to delete.
+````
+
+`instructions` must live in the body; supplying it in the front-matter is
+rejected. Invalid YAML, a missing or unterminated block, unknown keys, an empty
+body, and malformed nested values all fail closed with a `[basis/review]` error.
 
 ### Dead code
 
