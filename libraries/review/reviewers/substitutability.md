@@ -85,16 +85,63 @@ only when the available evidence cannot support a review at all.
 
 ## Canonical examples
 
-These examples are part of this reviewer's specification and instructions. They
-calibrate the intended judgment boundary and are not exhaustive.
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
 
-- **No finding — a valid substitute.** Two processors implement `charge`; both
-  accept the same inputs, return the same result shape, and document the same
-  failure mode. Expected: `valid-substitute`.
-- **Finding — undeclared failure.** One implementation of `charge` throws for an
-  input the contract says is supported. Expected: `contract-violation`.
-- **Finding — callers need concrete knowledge.** Callers check
-  `instanceof OfflineProcessor` before calling a shared `charge`. Expected:
-  `implementation-specific-knowledge`.
-- **Question — shared shape only.** Two unrelated types both expose `invoke()`,
-  with no evidence they are interchangeable. Expected: `clarify-shared-contract`.
+### An implementation that throws for a valid operation
+
+```ts
+interface PaymentProcessor {
+  charge(amount: Money): Promise<Receipt>
+}
+
+class OfflineProcessor implements PaymentProcessor {
+  async charge(amount: Money): Promise<Receipt> {
+    throw new Error('Offline invoices cannot be charged immediately')
+  }
+}
+```
+
+Expected: `finding / contract-violation`
+
+Expected review feedback:
+
+> `charge` is part of the shared contract, and this implementation throws for an
+> input the contract says is valid. Either failure is part of the declared
+> contract and every caller must handle it, or this is not a valid substitute.
+
+### Callers needing concrete-type knowledge
+
+```ts
+if (processor instanceof OfflineProcessor) {
+  queueForLater(processor)
+} else {
+  await processor.charge(amount)
+}
+```
+
+Expected: `finding / implementation-specific-knowledge`
+
+Expected review feedback:
+
+> Callers need `instanceof` to use the abstraction correctly, which means the
+> shared contract is not truthful. Move the difference into the contract so
+> callers can rely on it without knowing the concrete type.
+
+### A valid substitute
+
+```ts
+class StripeProcessor implements PaymentProcessor {
+  async charge(amount: Money): Promise<Receipt> { /* ... */ }
+}
+
+class FakeProcessor implements PaymentProcessor {
+  async charge(amount: Money): Promise<Receipt> { /* ... */ }
+}
+```
+
+Both accept the same inputs and honor the same documented failure mode.
+
+Expected: `no_finding`
+
+Expected review feedback: none.

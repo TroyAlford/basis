@@ -89,18 +89,74 @@ evidence cannot support a review at all.
 
 ## Canonical examples
 
-These examples are part of this reviewer's specification and instructions. They
-calibrate the intended judgment boundary and are not exhaustive.
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
 
-- **No finding — shared default behavior.** Several services extend a base class
-  that provides identical retry behavior, inherited unchanged. Expected:
-  `appropriate-inheritance`.
-- **No finding — independently variable capability.** A service receives a
-  configurable retry policy because tests and production need different
-  strategies. Expected: `appropriate-composition`.
-- **Finding — borrowing a helper across unrelated types.** A `UserService`
-  extends `HttpClient` only to reuse a request helper; the two share no identity.
-  Expected: `misused-inheritance`.
-- **Finding — a variable capability is hard-wired.** Retry behavior lives in a
-  base class, each service overrides it differently, and environments select
-  strategies at runtime. Expected: `variable-capability`.
+### Inheritance used to borrow a helper
+
+```ts
+class HttpClient {
+  protected async request(path: string, body: unknown): Promise<Response> { /* ... */ }
+}
+
+class UserService extends HttpClient {
+  async create(input: CreateUser): Promise<User> {
+    const response = await this.request('/users', input)
+    return response.json()
+  }
+}
+```
+
+`UserService` extends `HttpClient` only to reuse `request`.
+
+Expected: `finding / misused-inheritance`
+
+Expected review feedback:
+
+> `UserService` extends `HttpClient` only to borrow a request helper; the two
+> share no identity. Compose an HTTP client (or extract a helper) instead of
+> inheriting from an unrelated type.
+
+### Shared default behavior
+
+```ts
+abstract class RetryingService {
+  protected async withRetry<T>(work: () => Promise<T>): Promise<T> { /* ... */ }
+}
+
+class OrderService extends RetryingService { /* uses withRetry unchanged */ }
+class InvoiceService extends RetryingService { /* uses withRetry unchanged */ }
+```
+
+Every subclass inherits the same retry behavior unchanged.
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### A capability that varies independently
+
+```ts
+abstract class RetryingService {
+  protected async withRetry<T>(work: () => Promise<T>): Promise<T> {
+    if (process.env.NODE_ENV === 'test') return work()
+    /* production retry policy */
+  }
+}
+
+class OrderService extends RetryingService {
+  override protected async withRetry<T>(work: () => Promise<T>): Promise<T> {
+    /* different policy */
+  }
+}
+```
+
+Retry behavior varies per service and per environment.
+
+Expected: `finding / variable-capability`
+
+Expected review feedback:
+
+> Retry behavior differs per service and environment, so it is not shared default
+> behavior — it is an independently variable capability. Inject a retry policy
+> rather than hard-wiring it into a base class.

@@ -80,6 +80,26 @@ finding, when to ask the author a question, and when to abstain.
 rejected. Invalid YAML, a missing or unterminated block, unknown keys, an empty
 body, and malformed nested values all fail closed with a `[basis/review]` error.
 
+## Canonical examples
+
+A reviewer body is the complete prompt specification. The parser and loader
+read only the Markdown document, and a runtime reviewer never resolves
+auxiliary example files or corpora. Authors therefore teach the reviewer's
+judgment directly, in the body, with a short `## Canonical examples` section.
+
+Each example is inline and concrete:
+
+- the code (or a small before/after pair) the reviewer should notice;
+- one sentence of context;
+- the expected disposition and outcome category;
+- the review feedback the reviewer should produce, or `none` when the code is
+  acceptable.
+
+Prefer contrastive examples: bad code with the expected finding, a good version
+of the same idea with no comment, and an ambiguous boundary with the expected
+question. These examples are part of the production prompt; keep them realistic
+and architectural rather than tied to specific files or PRs.
+
 ## Repository-local overlays
 
 A repository extends the standard policy through the conventional overlay

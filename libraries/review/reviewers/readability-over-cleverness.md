@@ -68,16 +68,70 @@ established design conventions.
 
 ## Canonical examples
 
-These examples are part of this reviewer's specification and instructions. They
-calibrate the intended judgment boundary and are not exhaustive.
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
 
-- **No finding — direct and clear.** A straightforward loop with descriptive
-  names. Expected: `clear`.
-- **Finding — compressed beyond clarity.** A dense `reduce` with single-letter
-  names computes a value a simple loop would express directly. Expected:
-  `simplify`.
-- **Finding — names that require translation.** Parameters named `d` for
-  `document` and `opts` for `options`. Expected: `clarify-naming`.
-- **Question — necessary but unexplained complexity.** A carefully chosen bitwise
-  operation is non-obvious but performance-critical, and the reason is
-  undocumented. Expected: `explain-necessary-complexity`.
+### Compressed beyond clarity
+
+```ts
+const totals = orders.reduce(
+  (a, o) => ({ ...a, [o.id]: (a[o.id] ?? 0) + o.total }),
+  {} as Record<string, number>,
+)
+```
+
+Expected: `finding / simplify`
+
+Expected review feedback:
+
+> This packs several operations into one expression. A simple loop with
+> descriptive names would be easier to follow and just as correct.
+
+### Names that require translation
+
+```ts
+function calc(d: Document, opts: CalcOpts): number {
+  const r = d.rows.filter(x => x.v > 0)
+  return r.reduce((s, x) => s + x.v, 0)
+}
+```
+
+Expected: `finding / clarify-naming`
+
+Expected review feedback:
+
+> Names like `d`, `opts`, `r`, `x`, `s`, and `v` make the reader decode every
+> line. Use descriptive names such as `document`, `options`, `rows`, `row`,
+> `sum`, and `value`.
+
+### Direct and clear
+
+```ts
+function totalPositive(values: number[]): number {
+  let sum = 0
+  for (const value of values) {
+    if (value > 0) sum += value
+  }
+  return sum
+}
+```
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### Necessary complexity without explanation
+
+```ts
+const hash = (value: number): number => (value ^ (value >>> 16)) * 0x45d9f3b
+```
+
+Non-obvious, but it may be deliberate.
+
+Expected: `question / explain-necessary-complexity`
+
+Expected review feedback:
+
+> This bitwise hash is not obvious. If its form is required (for example, for
+> distribution or performance), add a comment explaining why so the next reader
+> does not simplify it away. Otherwise, prefer something clearer.

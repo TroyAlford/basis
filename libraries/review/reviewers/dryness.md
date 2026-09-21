@@ -70,17 +70,77 @@ about replacing them.
 
 ## Canonical examples
 
-These examples are part of this reviewer's specification and instructions. They
-calibrate the intended judgment boundary and are not exhaustive.
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
 
-- **No finding — similar syntax, different concepts.** A `Money` formatter and a
-  `Percentage` formatter share arithmetic but differ in rounding, locale, and
-  domain. Expected: `meaningfully-distinct`.
-- **Finding — semantic duplication.** Two modules each implement retry with
-  backoff with the same semantics. Expected: `reuse-existing`.
-- **Finding — consolidate a shared concept.** Three adapters each translate the
-  same event shape differently; one shared translation belongs to the concept.
-  Expected: `consolidate`.
-- **Question — overlap with unclear intent.** A new `HttpClient` substantially
-  overlaps an adopted client but adds streaming; intent is unclear. Expected:
-  `justify-duplication`.
+### Two implementations of one concept
+
+```ts
+export async function retry<T>(work: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try { return await work() }
+    catch (error) { lastError = error; await delay(2 ** attempt * 100) }
+  }
+  throw lastError
+}
+
+export async function withBackoff<T>(work: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try { return await work() }
+    catch (error) { lastError = error; await sleep(2 ** attempt * 100) }
+  }
+  throw lastError
+}
+```
+
+Same attempts and exponential delay, different names.
+
+Expected: `finding / reuse-existing`
+
+Expected review feedback:
+
+> `retry` and `withBackoff` are two implementations of the same concept. Use one
+> of them, or extend the existing one, rather than shipping a second copy. Is
+> there a reason they must stay separate?
+
+### Similar syntax, different concepts
+
+```ts
+export const formatMoney = (amount: number, currency: string): string =>
+  `${amount.toFixed(2)} ${currency}`
+
+export const formatPercentage = (ratio: number): string =>
+  `${(ratio * 100).toFixed(1)}%`
+```
+
+Both use `toFixed`, but they format different domains.
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### Overlap whose intent is unclear
+
+```ts
+class HttpClient {
+  async get(url: string): Promise<Response> { /* ... */ }
+  async post(url: string, body: unknown): Promise<Response> { /* ... */ }
+}
+
+class StreamingClient {
+  async get(url: string): Promise<Response> { /* ... */ }
+  async stream(url: string): Promise<ReadableStream> { /* ... */ }
+}
+```
+
+Substantial overlap, but the new client adds streaming.
+
+Expected: `question / justify-duplication`
+
+Expected review feedback:
+
+> `StreamingClient` overlaps `HttpClient` for requests but adds streaming. Is
+> this intentionally a separate concept, or should it reuse or extend the
+> existing client?

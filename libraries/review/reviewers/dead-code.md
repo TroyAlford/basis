@@ -81,15 +81,75 @@ evidence cannot support a review at all.
 
 ## Canonical examples
 
-These examples are part of this reviewer's specification and instructions. They
-calibrate the intended judgment boundary and are not exhaustive.
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
 
-- **No finding — dynamic or framework use.** An export is referenced only by a
-  framework convention or generated entrypoint, and Knip reports it unused.
-  Expected: `false-positive`.
-- **Finding — created but not wired up.** A new helper is exported but never
-  imported, and no consumer exists yet. Expected: `wire-up`.
-- **Question — preparatory work.** A new module is unused but looks like
-  groundwork for an in-progress feature. Expected: `clarify-intent`.
-- **Finding — genuinely orphaned.** An obsolete helper is unreferenced and
-  nothing suggests it is intended. Expected: `remove`.
+### Created but never wired up
+
+```ts
+// money.ts
+export const parseAmount = (input: string): number | null => {
+  /* ... */
+}
+```
+
+Nothing imports `parseAmount`, and no consumer is being added.
+
+Expected: `finding / wire-up`
+
+Expected review feedback:
+
+> `parseAmount` is exported but nothing imports it. Wire it into the code that
+> needs it, or drop it from this change.
+
+### Genuinely orphaned
+
+```ts
+// legacy-format.ts
+export const formatLegacyId = (id: string): string => {
+  /* ... */
+}
+```
+
+Unreferenced, with nothing to suggest it is still intended.
+
+Expected: `finding / remove`
+
+Expected review feedback:
+
+> This helper is unused and nothing indicates it is still needed. Remove it.
+
+### Dynamic or framework use
+
+```ts
+// routes.ts
+export const routes = [
+  { component: HomePage, path: '/' },
+  { component: SettingsPage, path: '/settings' },
+]
+```
+
+Knip reports `routes` unused, but a framework convention references it.
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### Preparatory work
+
+```ts
+// refund-types.ts
+export interface RefundRequest {
+  orderId: string
+  amount: Money
+}
+```
+
+Unused so far, but it looks like groundwork for an in-progress feature.
+
+Expected: `question / clarify-intent`
+
+Expected review feedback:
+
+> This module is unused so far, but it looks like groundwork for an in-progress
+> feature. Is it meant to be wired up in this PR, or should it wait?

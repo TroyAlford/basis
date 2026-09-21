@@ -111,18 +111,83 @@ when the available evidence cannot support a review at all.
 
 ## Canonical examples
 
-These examples are part of this reviewer's specification and instructions. They
-calibrate the intended judgment boundary and are not exhaustive.
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
 
-- **No finding — proportionate.** A pure function with several branches has
-  direct unit tests covering each meaningful path and edge case. Expected:
-  `appropriate-test-level`.
-- **Finding — critical logic only proven expensively.** The primary proof of the
-  pricing rules is an end-to-end flow that boots the application and a database;
-  the rules are never tested directly. Expected: `expensive-critical-coverage`.
-- **Finding — claimed integration is mocked.** A test claims the service and its
-  repository interoperate, but the repository mock reimplements query semantics.
-  Expected: `mocked-integration`.
-- **Question — a seam would make testing cheaper.** Critical authorization logic
-  can only run inside the framework request lifecycle; a small seam may make it
-  cheaply testable. Expected: `consider-test-seam`.
+### Important rules proven only end-to-end
+
+```ts
+export function priceFor(order: Order): Money {
+  if (order.total.gte(money('10000'))) return order.total.times(0.9)
+  if (order.customer.isMember) return order.total.times(0.95)
+  return order.total
+}
+```
+
+```ts
+// pricing.e2e.test.ts
+test('member discount', async () => {
+  const app = await startApplication()
+  await app.database.seedMemberWithTotal('10000')
+  const response = await app.request('/orders/1/receipt')
+  expect(await response.text()).toContain('95.00')
+  await app.stop()
+})
+```
+
+The discount rules are only proven by booting the application and a database.
+
+Expected: `finding / expensive-critical-coverage`
+
+Expected review feedback:
+
+> The discount rules are important business logic, but their only proof boots the
+> application and a database. Test `priceFor` directly across the branches and
+> edge cases, and keep the end-to-end flow for wiring rather than the rules.
+
+### A mock that reimplements the collaborator
+
+```ts
+class FakeUserRepository {
+  findById(id: string): User {
+    return { id, displayName: `user-${id}` }
+  }
+}
+
+test('service displays a user', async () => {
+  const service = new UserService(new FakeUserRepository())
+  expect(await service.display('1')).toBe('user-1')
+})
+```
+
+The fake reimplements query behavior, so the test mostly proves the fake.
+
+Expected: `finding / mocked-integration`
+
+Expected review feedback:
+
+> This test claims the service and repository work together, but the fake
+> reimplements the repository's query semantics. Test the real repository
+> against a real store, or mock only the boundary without encoding query logic.
+
+### Proportionate direct coverage
+
+```ts
+export function parseAmount(input: string): number | null {
+  const normalized = input.trim().replace(/,/g, '')
+  if (normalized.length === 0) return null
+  const value = Number(normalized)
+  return Number.isFinite(value) ? value : null
+}
+```
+
+```ts
+test('parses plain numbers', () => expect(parseAmount('10')).toBe(10))
+test('parses thousands separators', () => expect(parseAmount('1,000')).toBe(1000))
+test('returns null for empty input', () => expect(parseAmount('  ')).toBeNull())
+test('returns null for non-numeric input', () => expect(parseAmount('abc')).toBeNull())
+```
+
+Expected: `no_finding`
+
+Expected review feedback: none.

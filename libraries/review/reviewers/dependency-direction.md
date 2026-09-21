@@ -95,18 +95,64 @@ not turn one heuristic into a theorem.
 
 ## Canonical examples
 
-These examples are part of this reviewer's specification and instructions. They
-calibrate the intended judgment boundary and are not exhaustive.
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
 
-- **No finding — higher-order uses foundational.** A page composes a service, and
-  the service uses utilities and shared types. The flow is one-directional.
-  Expected: `pragmatic-coupling`.
-- **Finding — a cycle.** `OrderService` imports `InvoiceService` and
-  `InvoiceService` imports `OrderService`, so neither can be understood or tested
-  alone. Expected: `dependency-cycle`.
-- **Finding — a foundational unit reaches upward.** A low-level formatting
-  utility imports an application service to send a notification when it
-  encounters bad input. Expected: `layering-confusion`.
-- **Question — boundary pressure is growing.** A shared module is accumulating
-  both storage and UI knowledge as the application grows, and intent is unclear.
-  Expected: `consider-boundary`.
+### A dependency cycle
+
+```ts
+// order-service.ts
+import { InvoiceService } from './invoice-service'
+
+// invoice-service.ts
+import { OrderService } from './order-service'
+```
+
+The two services depend on each other.
+
+Expected: `finding / dependency-cycle`
+
+Expected review feedback:
+
+> `OrderService` and `InvoiceService` import each other, so neither can be
+> understood, tested, or changed alone. Break the cycle: one of them should not
+> need to know about the other.
+
+### A foundational unit reaching upward
+
+```ts
+// format-amount.ts
+import { notifyAdmin } from '../services/notifications'
+
+export const formatAmount = (amount: number): string => {
+  if (amount < 0) notifyAdmin('negative amount')
+  return amount.toFixed(2)
+}
+```
+
+A low-level formatting utility imports an application service.
+
+Expected: `finding / layering-confusion`
+
+Expected review feedback:
+
+> A formatting utility is importing an application service to send
+> notifications. Foundational helpers should not reach upward into application
+> behavior; move that decision to the layer that owns it.
+
+### One-directional composition
+
+```ts
+// checkout-page.ts
+import { CheckoutService } from '../services/checkout'
+import { formatMoney } from '../utilities/money'
+
+export const renderCheckout = (cart: Cart): string =>
+  `${formatMoney(cart.total)} — ${CheckoutService.describe(cart)}`
+```
+
+Higher-order code uses lower-level building blocks, one direction only.
+
+Expected: `no_finding`
+
+Expected review feedback: none.

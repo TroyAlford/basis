@@ -70,14 +70,62 @@ boundary.
 
 ## Canonical examples
 
-These examples are part of this reviewer's specification and instructions. They
-calibrate the intended judgment boundary and are not exhaustive.
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
 
-- **No finding — one cohesive unit.** A long file contains one substantial
-  implementation and its private helpers. Expected: `cohesive-file`.
-- **Finding — a grab bag.** A `utils` file accumulates unrelated date, string,
-  and HTTP helpers with no shared concept. Expected: `split-unit`.
-- **Finding — a reusable unit is buried.** A reusable `Money` type is defined
-  inside the implementation file of an unrelated service. Expected: `move-unit`.
-- **Question — an unclear ownership boundary.** A file contains two concepts
-  whose independent ownership is unclear. Expected: `clarify-boundary`.
+### A grab bag of unrelated helpers
+
+```ts
+// utils.ts
+export const formatDate = (date: Date): string => { /* ... */ }
+export const slugify = (value: string): string => { /* ... */ }
+export const fetchJson = async (url: string): Promise<unknown> => { /* ... */ }
+export const clamp = (value: number, min: number, max: number): number => { /* ... */ }
+```
+
+Expected: `finding / split-unit`
+
+Expected review feedback:
+
+> `utils.ts` holds unrelated date, string, HTTP, and numeric helpers whose only
+> relationship is convenience. Split them into files named for what they
+> contain.
+
+### A reusable unit buried in an unrelated file
+
+```ts
+// report-renderer.ts
+export class ReportRenderer { render(report: Report): string { /* ... */ } }
+
+export interface Money {
+  amount: number
+  currency: string
+}
+```
+
+`Money` is reusable and unrelated to rendering.
+
+Expected: `finding / move-unit`
+
+Expected review feedback:
+
+> `Money` is a reusable concept defined inside the report renderer. Give it its
+> own file so it can be found and reused without importing the renderer.
+
+### One coherent unit in a long file
+
+```ts
+// csv-parser.ts
+export class CsvParser {
+  parse(input: string): Row[] { /* ... */ }
+
+  private splitRows(input: string): string[] { /* ... */ }
+  private parseRow(line: string): Row { /* ... */ }
+}
+```
+
+A long file, but one coherent implementation and its private helpers.
+
+Expected: `no_finding`
+
+Expected review feedback: none.

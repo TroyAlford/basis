@@ -74,17 +74,70 @@ at all.
 
 ## Canonical examples
 
-These examples are part of this reviewer's specification and instructions. They
-calibrate the intended judgment boundary and are not exhaustive.
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
 
-- **No finding — local branching.** A single `switch` with two payment providers
-  is the only place the discriminator appears. Expected: `local-branching`.
-- **No finding — hypothetical variation is not evidence.** A two-case switch is
-  flagged only because a third provider "might" be added later. Expected:
-  `local-branching`.
-- **Question — variation is emerging.** The provider discriminator now appears in
-  two places and a third provider is on the roadmap, but extraction is not yet
-  clearly worthwhile. Expected: `consider-extension-point`.
-- **Finding — repeated variation.** The provider discriminator is switched on in
-  checkout, refunds, reporting, and webhooks; adding a provider edits all four
-  central branches. Expected: `repeated-variation`.
+### Repeated variation across central branches
+
+```ts
+// checkout.ts
+switch (provider) {
+  case 'stripe': return chargeStripe(cart)
+  case 'paypal': return chargePayPal(cart)
+}
+
+// refunds.ts
+switch (provider) {
+  case 'stripe': return refundStripe(order)
+  case 'paypal': return refundPayPal(order)
+}
+
+// webhooks.ts
+switch (provider) {
+  case 'stripe': return handleStripeWebhook(body)
+  case 'paypal': return handlePayPalWebhook(body)
+}
+```
+
+The same discriminator is switched on in several places.
+
+Expected: `finding / repeated-variation`
+
+Expected review feedback:
+
+> The same provider discriminator is switched on in checkout, refunds, and
+> webhooks, so adding a provider means editing all three. Variation is now
+> architectural: introduce one extension point that dispatch goes through.
+
+### Local branching
+
+```ts
+const label = provider === 'stripe' ? 'Card' : 'PayPal'
+```
+
+A single local branch; variation is not repeated.
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### Variation that is emerging, not yet settled
+
+```ts
+// checkout.ts
+if (provider === 'stripe') { /* ... */ } else if (provider === 'paypal') { /* ... */ }
+
+// settings.ts
+if (provider === 'stripe') { /* ... */ } else if (provider === 'paypal') { /* ... */ }
+```
+
+The discriminator now appears twice and a third provider is planned, but the
+shape of an extension point is not yet clear.
+
+Expected: `question / consider-extension-point`
+
+Expected review feedback:
+
+> The provider discriminator now appears in two places and a third provider is
+> planned. Is variation becoming a reusable concept here? If so, one extension
+> point may be simpler than editing each branch as providers grow.

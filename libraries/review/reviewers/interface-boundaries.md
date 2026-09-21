@@ -93,19 +93,78 @@ the available evidence cannot support a review at all.
 
 ## Canonical examples
 
-These examples are part of this reviewer's specification and instructions. They
-calibrate the intended judgment boundary and are not exhaustive.
+Concrete examples of the code this reviewer should notice and the feedback it
+should give. These examples are part of the reviewer instructions.
 
-- **No finding — one concrete collaborator, no pressure.** A small application's
-  report service constructs the single concrete `PostgresReportStore` it uses.
-  There is no second implementation, no ownership or module boundary, and tests
-  construct the real collaborator directly. Expected: `keep-concrete`.
-- **Question — a boundary is emerging.** A second store implementation is being
-  introduced for an in-memory scenario, but callers still name the concrete type
-  and no shared capability has been declared. Expected: `consider-boundary`.
-- **Finding — callers depend on interchangeable implementations.** The service
-  receives interchangeable stores but branches on `instanceof` and reads
-  Postgres-specific fields to decide behavior. Expected: `introduce-contract`.
-- **Finding — a mirror interface with no boundary.** `IReportStore` copies every
-  public method of `PostgresReportStore`, has one implementation, and protects no
-  boundary. Expected: `remove-speculative-abstraction`.
+### Speculative interface with no useful boundary
+
+```ts
+interface UserStore {
+  get(id: string): User
+  save(user: User): void
+}
+
+class PostgresUserStore implements UserStore {
+  get(id: string): User { /* ... */ }
+  save(user: User): void { /* ... */ }
+}
+```
+
+There is one implementation, callers know the concrete type, and the interface
+is only mirroring the class.
+
+Expected: `question / consider-boundary`
+
+Expected review feedback:
+
+> This interface is just mirroring the concrete implementation right now. What
+> boundary is it protecting? If there is no real substitution, ownership, or
+> testing seam here, I would keep this concrete until one emerges.
+
+### Real interchangeable boundary
+
+```ts
+interface UserStore {
+  get(id: string): User
+  save(user: User): void
+}
+
+class PostgresUserStore implements UserStore { /* ... */ }
+class InMemoryUserStore implements UserStore { /* ... */ }
+
+class UserService {
+  constructor(private readonly store: UserStore) {}
+}
+```
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### Callers branching on interchangeable implementations
+
+```ts
+class ReportService {
+  constructor(private readonly store: PostgresReportStore | InMemoryReportStore) {}
+
+  publish(id: string): void {
+    if (this.store instanceof PostgresReportStore) {
+      this.store.insertReport(id)
+    } else {
+      this.store.saveReport(id)
+    }
+  }
+}
+```
+
+Two interchangeable stores already exist, but the caller branches on the
+concrete type and uses store-specific methods.
+
+Expected: `finding / introduce-contract`
+
+Expected review feedback:
+
+> Two interchangeable stores already exist, but this service branches on
+> `instanceof` and calls store-specific methods. Callers should depend on one
+> consumer-shaped capability (for example `save`) instead of knowing which
+> concrete store they hold.
