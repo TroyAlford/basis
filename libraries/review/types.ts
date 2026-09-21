@@ -154,16 +154,16 @@ export interface DisabledReviewer {
   id: string,
   /** Why it was disabled. */
   reason: string,
-  /** Where the reviewer came from before it was disabled. */
-  source: ReviewerSource,
+  /** Every source that shaped the reviewer before it was disabled. */
+  sources: readonly ReviewerSource[],
 }
 
-/** An effective reviewer plus where it was sourced from. */
+/** An effective reviewer plus the sources that shaped it. */
 export interface EffectiveReviewer {
   /** The effective reviewer policy. */
   policy: ReviewerPolicy,
-  /** Whether the reviewer came from Basis or a repository-local overlay. */
-  source: ReviewerSource,
+  /** Every source that shaped the reviewer, Basis first. */
+  sources: readonly ReviewerSource[],
 }
 
 /** The effective policy produced by composing a standard manifest with overlays. */

@@ -11,6 +11,7 @@
 export { composeReviewPolicy } from './compose'
 export type { ComposeReviewPolicyOptions } from './compose'
 export { STANDARD_REVIEW_FIXTURES } from './fixtures'
+export { assertReviewerOverlay, assertReviewerPolicy, parseReviewerOverlays } from './validate'
 export {
   DEAD_CODE_REVIEWER_ID,
   PLACEHOLDER_DOCUMENTATION_REVIEWER_ID,

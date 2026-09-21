@@ -82,8 +82,11 @@ const effective = composeReviewPolicy({
 
 `extend` replaces scalar fields and appends array fields. `replace` requires a
 full reviewer. `disable` requires a reason and records the reviewer in
-`disabled`. The result carries `provenance` per reviewer (`basis-standard` or
-`repo-local`) so review output can show where a policy came from.
+`disabled`. Composition is fail-closed: overlays are validated from `unknown`
+before they are applied, so malformed repository policy is rejected rather than
+executed. Every effective reviewer carries `sources` (`basis-standard` and/or
+`repo-local`) so review output can show where a policy came from — an extended
+reviewer reports both.
 
 ## Fixtures
 

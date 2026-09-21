@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import { composeReviewPolicy } from './compose'
 import { DEAD_CODE_REVIEWER_ID, TOOLING_CONFORMANCE_CHURN_REVIEWER_ID } from './ids'
 import { STANDARD_REVIEW_MANIFEST } from './manifest'
-import type { OverlayMode } from './types'
 
 describe('composeReviewPolicy', () => {
   test('returns the standard reviewers with Basis provenance', () => {
@@ -10,7 +9,7 @@ describe('composeReviewPolicy', () => {
     expect(effective.id).toBe(STANDARD_REVIEW_MANIFEST.id)
     expect(effective.schemaVersion).toBe(STANDARD_REVIEW_MANIFEST.schemaVersion)
     expect(effective.reviewers).toHaveLength(STANDARD_REVIEW_MANIFEST.reviewers.length)
-    expect(effective.reviewers.every(reviewer => reviewer.source === 'basis-standard')).toBe(true)
+    expect(effective.reviewers.every(reviewer => reviewer.sources.join() === 'basis-standard')).toBe(true)
     expect(effective.disabled).toEqual([])
     expect(effective.basisVersion).toBeUndefined()
   })
@@ -33,10 +32,10 @@ describe('composeReviewPolicy', () => {
     })
 
     const added = effective.reviewers.find(reviewer => reviewer.policy.id === 'repo/extra')
-    expect(added?.source).toBe('repo-local')
+    expect(added?.sources).toEqual(['repo-local'])
   })
 
-  test('extends arrays and replaces scalars', () => {
+  test('extends arrays, replaces scalars, and keeps both provenances', () => {
     const base = STANDARD_REVIEW_MANIFEST.reviewers.find(reviewer => reviewer.id === DEAD_CODE_REVIEWER_ID)
     if (base === undefined) throw new Error('missing dead-code reviewer')
 
@@ -59,7 +58,7 @@ describe('composeReviewPolicy', () => {
     expect(reviewer?.policy.outOfScope).toHaveLength(base.outOfScope.length + 1)
     expect(reviewer?.policy.threshold).toEqual({ minimumConfidence: 0.9, severity: 'error' })
     expect(reviewer?.policy.verification).toBe('Re-run knip twice.')
-    expect(reviewer?.source).toBe('basis-standard')
+    expect(reviewer?.sources).toEqual(['basis-standard', 'repo-local'])
   })
 
   test('replaces a reviewer entirely', () => {
@@ -78,10 +77,10 @@ describe('composeReviewPolicy', () => {
 
     const reviewer = effective.reviewers.find(candidate => candidate.policy.id === DEAD_CODE_REVIEWER_ID)
     expect(reviewer?.policy.title).toBe('Repository dead code')
-    expect(reviewer?.source).toBe('repo-local')
+    expect(reviewer?.sources).toEqual(['repo-local'])
   })
 
-  test('disables a reviewer with a reason', () => {
+  test('disables a reviewer and keeps its provenance', () => {
     const effective = composeReviewPolicy({
       overlays: [
         {
@@ -99,7 +98,7 @@ describe('composeReviewPolicy', () => {
       {
         id: TOOLING_CONFORMANCE_CHURN_REVIEWER_ID,
         reason: 'No tooling migrations in this repository.',
-        source: 'basis-standard',
+        sources: ['basis-standard'],
       },
     ])
   })
@@ -142,23 +141,25 @@ describe('composeReviewPolicy validation', () => {
   })
 
   test('rejects extending, replacing, or disabling an unknown reviewer', () => {
-    expect(() => composeReviewPolicy({ overlays: [{ id: 'nope', mode: 'extend', policy: {} }] }))
-      .toThrow('cannot extend reviewer')
+    expect(() => composeReviewPolicy({ overlays: [{ id: 'nope', mode: 'extend', policy: {} }] })).toThrow(
+      'cannot extend reviewer',
+    )
     expect(() => composeReviewPolicy({ overlays: [{ id: 'nope', mode: 'disable', reason: 'x' }] })).toThrow(
       'cannot disable reviewer',
     )
   })
 
   test('requires a reason to disable and forbids a policy payload', () => {
-    expect(() => composeReviewPolicy({ overlays: [{ id: DEAD_CODE_REVIEWER_ID, mode: 'disable' }] }))
-      .toThrow('requires a reason')
+    expect(() => composeReviewPolicy({ overlays: [{ id: DEAD_CODE_REVIEWER_ID, mode: 'disable' }] })).toThrow(
+      'disable requires a reason',
+    )
 
     const base = STANDARD_REVIEW_MANIFEST.reviewers.find(reviewer => reviewer.id === DEAD_CODE_REVIEWER_ID)
     if (base === undefined) throw new Error('missing dead-code reviewer')
 
     expect(() => composeReviewPolicy({
       overlays: [{ id: DEAD_CODE_REVIEWER_ID, mode: 'disable', policy: base, reason: 'x' }],
-    })).toThrow('must not carry a policy')
+    })).toThrow('disable must not carry a policy')
   })
 
   test('rejects an overlay whose policy id does not match', () => {
@@ -167,7 +168,7 @@ describe('composeReviewPolicy validation', () => {
 
     expect(() => composeReviewPolicy({
       overlays: [{ id: 'repo/extra', mode: 'add', policy: { ...base, id: 'repo/other' } }],
-    })).toThrow('but its policy id')
+    })).toThrow('does not match overlay id')
   })
 
   test('rejects a missing required field and out-of-range values', () => {
@@ -176,10 +177,9 @@ describe('composeReviewPolicy validation', () => {
 
     expect(() => composeReviewPolicy({
       overlays: [{ id: 'repo/extra', mode: 'add', policy: { ...base, id: 'repo/extra', title: undefined } }],
-    })).toThrow('missing "title"')
+    })).toThrow('"title" must be a non-empty string')
 
-    expect(() => composeReviewPolicy({ overlays: [{ id: 'nope', mode: 'x' as unknown as OverlayMode }] }))
-      .toThrow('unknown mode')
+    expect(() => composeReviewPolicy({ overlays: [{ id: 'nope', mode: 'x' }] })).toThrow('"mode" must be one of')
 
     expect(() => composeReviewPolicy({
       overlays: [
@@ -189,6 +189,6 @@ describe('composeReviewPolicy validation', () => {
           policy: { ...base, id: 'repo/extra', threshold: { minimumConfidence: 5, severity: 'warning' } },
         },
       ],
-    })).toThrow('minimumConfidence')
+    })).toThrow('minimumConfidence must be within [0, 1]')
   })
 })
