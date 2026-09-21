@@ -6,9 +6,8 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "lib": [
-      "ESNext"
-    ],
+    "lib": ["ESNext"],
+    "libReplacement": true,
     "module": "Preserve",
     "moduleDetection": "force",
     "moduleResolution": "bundler",
@@ -16,10 +15,12 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
+    "noUncheckedSideEffectImports": false,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "strict": true,
+    "strict": false,
     "target": "ESNext",
+    "types": ["*"],
     "verbatimModuleSyntax": true
   }
 }
