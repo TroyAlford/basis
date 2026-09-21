@@ -11,6 +11,7 @@
         "@typescript-eslint/eslint-plugin": "^8",
         "@typescript-eslint/parser": "^8",
         "@typescript-eslint/utils": "^8.57.2",
+        "chalk": "^5.6.2",
         "eslint": "^10.1.0",
         "eslint-config-airbnb": "^19.0.4",
         "eslint-config-airbnb-base": "^15.0.0",
@@ -37,7 +38,6 @@
         "@types/react": "^19",
         "@types/react-dom": "^19",
         "bun-types": "^1.3.11",
-        "chalk": "^5.6.2",
         "husky": "^9.1.7",
         "svg-path-commander": "^2.1.11",
       },
@@ -135,6 +135,9 @@
     },
     "libraries/utilities": {
       "name": "@basis/utilities",
+      "dependencies": {
+        "chalk": "^5.6.2",
+      },
     },
     "libraries/workspaces": {
       "name": "@basis/workspaces",

@@ -31,6 +31,7 @@ interface BinaryManifest {
 const REQUIRED_EXPORTS = [
   './cli',
   './eslint',
+  './logger',
   './tsconfig/base.json',
   './tsconfig/bun.json',
   './tsconfig/react.json',
