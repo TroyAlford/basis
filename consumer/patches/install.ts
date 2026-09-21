@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-
+import { dirname, join } from 'node:path'
 /**
  * A single patch Basis owns, sourced from the root `patchedDependencies` map.
  */
@@ -150,7 +149,17 @@ const hashPatch = (contents: string): string => new Bun.CryptoHasher('sha256').u
 const gitApply = (packageDir: string, args: string[], patchPath: string): GitApplyResult => {
   const result = Bun.spawnSync([gitBinary(), 'apply', '-p1', ...args, patchPath], {
     cwd: packageDir,
-    env: { ...process.env, GIT_CEILING_DIRECTORIES: packageDir },
+    /*
+     * Force `git apply` to treat the package directory as the working tree even
+     * when the consumer project is itself a Git repository. The ceiling must be
+     * an ancestor of the package, not the package directory itself: Git only
+     * refuses to ascend *into* ceiling entries and always inspects the current
+     * directory, so a ceiling equal to the cwd leaves the consumer repository
+     * discoverable. Git would then resolve patch paths against that repository
+     * root, skip the package-relative paths ("Skipped patch ..."), and still
+     * exit 0 — silently reporting the patch as applied when it was not.
+     */
+    env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(packageDir) },
     stderr: 'pipe',
     stdin: 'ignore',
     stdout: 'pipe',

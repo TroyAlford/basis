@@ -174,6 +174,15 @@ export const initApp = (
   write(join(app, 'tsconfig.json'), APP_TSCONFIG)
   write(join(app, 'eslint.config.mjs'), APP_ESLINT_CONFIG)
   write(join(app, 'src', 'greeter.ts'), APP_SOURCE)
+
+  /*
+   * Real consumers are Git repositories. Initialize one here so the patch hook
+   * is exercised with Git repository discovery active: without it, `git apply`
+   * silently skips package-relative paths and the install looks successful.
+   */
+  const git = Bun.which('git')
+  if (git === null) throw new Error('git is required to run the consumer fixtures')
+  run([git, 'init', '--quiet'], app)
 }
 
 /**
