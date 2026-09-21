@@ -44,26 +44,26 @@ const withSource = (sources: readonly ReviewerSource[], source: ReviewerSource):
 }
 
 /**
- * Merges an `extend` patch into a base reviewer. Scalar fields are replaced;
- * array fields are appended, so a repository adds rules without restating them.
- * The merged result is re-validated so composition stays fail-closed.
+ * Merges an `extend` patch into a base reviewer. Scalar fields are replaced and
+ * array fields are appended; `instructions` are appended so repository guidance
+ * extends the standard policy instead of replacing it. The merged result is
+ * re-validated so composition stays fail-closed.
  * @param base Standard reviewer being extended.
  * @param patch Validated partial policy supplied by the repository.
  * @returns The merged reviewer policy.
  */
 const mergeReviewer = (base: ReviewerPolicy, patch: Partial<ReviewerPolicy>): ReviewerPolicy => {
   const verification = patch.verification ?? base.verification
+  const instructions =
+    patch.instructions === undefined ? base.instructions : `${base.instructions}\n\n${patch.instructions}`
   return assertReviewerPolicy(
     {
       context: [...base.context, ...(patch.context ?? [])],
       detectors: [...base.detectors, ...(patch.detectors ?? [])],
-      evidence: [...base.evidence, ...(patch.evidence ?? [])],
       executionProfile: patch.executionProfile ?? base.executionProfile,
       id: base.id,
-      instructions: patch.instructions ?? base.instructions,
-      outOfScope: [...base.outOfScope, ...(patch.outOfScope ?? [])],
+      instructions,
       outcomes: [...base.outcomes, ...(patch.outcomes ?? [])],
-      question: patch.question ?? base.question,
       threshold: patch.threshold ?? base.threshold,
       title: patch.title ?? base.title,
       ...(verification !== undefined && { verification }),

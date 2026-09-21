@@ -2,142 +2,124 @@
 
 Shared, **versioned** code-review policy for the first-party ecosystem.
 
-Basis owns the durable opinion — stable reviewer ids, their questions, evidence
-and abstention rules, structured outcomes, and reporting thresholds.
-Consumers own execution: running detectors, calling models, repairing code, and
-publishing reviews. A reviewer is a specification, not a model and not a prompt.
+The model is a strict separation of layers:
 
-The surface is exposed to consumers as `basis/review`. Reviewers are authored as
-**Markdown documents with YAML front-matter**: the front-matter is the
-machine-readable contract below, and the Markdown body is the long-form
-adjudication guidance.
+```
+reviewer Markdown                 canonical policy and documentation
+Basis parser/validator            safety and type boundary
+typed TS objects                  derived runtime representation
+ai-dispatcher                     execution
+```
 
-## Standard reviewers
+Basis owns the durable opinion. Consumers own execution: running detectors,
+calling models, repairing code, and publishing reviews. Adding a reviewer is
+adding one Markdown document, not editing a TypeScript registry.
 
-| Reviewer id | Profile | Purpose |
-| --- | --- | --- |
-| `placeholder-documentation` | detector + adjudication | Documentation added only to satisfy a rule. |
-| `warning-baseline-regression` | detector + adjudication | A newly normalized or increased warning baseline. |
-| `tooling-conformance-churn` | local semantic | Source churn that only satisfies tooling. |
-| `dead-code` | detector + adjudication | Diff-scoped unused files/exports/dependencies. |
-
-Each reviewer declares:
-
-- `id`, `title`, and the exact `question` it answers;
-- `executionProfile` (how much model judgment it needs);
-- `detectors` and the detector `categories` that feed it;
-- `evidence` required before it may report a finding;
-- `outOfScope` and abstention rules;
-- `context` it needs assembled;
-- `outcomes`, each of which is `finding`, `no_finding`, or `abstain`, and each
-  of which marks whether remediation is `destructive`;
-- `threshold` (minimum confidence and default severity);
-- optional `verification` — the deterministic check that proves a repair.
-
-`deterministic`, `detector-then-adjudicate`, `local-semantic`, and
-`frontier-semantic` are the supported profiles. A reviewer never makes a
-destructive change on a detector finding alone.
+The surface is exposed to consumers as `basis/review`.
 
 ## Authoring a reviewer
 
-Reviewers live in `libraries/review/reviewers/` as `.md` documents. The YAML
-front-matter carries the machine-readable metadata; the Markdown body is the
-adjudication guidance (`instructions`). `parseReviewerSource` parses one
-document and `loadReviewerDirectory` loads a directory; both fail closed.
+Standard reviewers live in `libraries/review/reviewers/` as Markdown documents.
+The YAML front-matter carries **only mechanical metadata the runtime needs**;
+the body carries the engineering principle, reasoning, exceptions, and
+instructions. `parseReviewerSource` parses one document and
+`loadReviewerDirectory` loads a directory; both fail closed.
+
+Front-matter fields:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | stable reviewer id (addressable by overlays) |
+| `title` | short human-readable title |
+| `executionProfile` | `deterministic`, `detector-then-adjudicate`, `local-semantic`, or `frontier-semantic` |
+| `detectors` | `[{ detector, categories }]` selectors that feed the reviewer |
+| `context` | context the runtime must assemble before adjudication |
+| `outcomes` | `[{ category, disposition, destructive }]` the reviewer may return |
+| `threshold` | `{ minimumConfidence, severity }` reporting gate |
+| `verification` | optional deterministic check that proves a repair |
+
+A `disposition` is one of `finding`, `question`, `no_finding`, or `abstain`:
+
+- `finding` — enough evidence that something should change;
+- `question` — the author must resolve an ambiguity or explain intent;
+- `no_finding` — the candidate is adequately explained or acceptable;
+- `abstain` — the reviewer cannot perform the review from the available evidence.
 
 ````md
 ---
-id: dead-code
-title: Dead code
-question: Why is this code unused, and what is the intended correction?
+id: example
+title: Example
 executionProfile: detector-then-adjudicate
 context:
-  - detector-finding
+  - changed-lines
 detectors:
   - detector: knip
     categories:
-      - category: exports
-        description: Module export that is never imported.
-evidence:
-  - id: finding
-    requirement: The detector finding and the changed symbol.
-outOfScope:
-  - Dynamic or reflective use that a static analyzer cannot see.
+      - exports
 outcomes:
   - category: remove
-    description: Genuinely dead code that should be removed.
+    disposition: finding
     destructive: true
-    outcome: finding
+  - category: clarify-intent
+    disposition: question
+    destructive: false
 threshold:
   minimumConfidence: 0.6
   severity: warning
-verification: Re-run knip at the review ref and confirm the finding is gone.
+verification: Re-run the detector and confirm the finding is gone.
 ---
 
-Knip is the detector, not the reviewer. A finding is a candidate to adjudicate,
-never an instruction to delete.
+# Example
+
+The engineering principle, what the detector result means, when to report a
+finding, when to ask the author a question, and when to abstain.
 ````
 
 `instructions` must live in the body; supplying it in the front-matter is
 rejected. Invalid YAML, a missing or unterminated block, unknown keys, an empty
 body, and malformed nested values all fail closed with a `[basis/review]` error.
 
-### Dead code
-
-`dead-code` consumes knip categories that are genuinely dead-code semantics
-(`files`, `exports`, `types`, `nsExports`, `nsTypes`, `enumMembers`,
-`namespaceMembers`, `dependencies`, `devDependencies`,
-`optionalPeerDependencies`). Other knip categories — `unresolved`, `unlisted`,
-`cycles`, `duplicates` — are **not** dead-code semantics; the detector still
-normalizes them, but the policy routes them elsewhere. Category names are used
-exactly as knip reports them.
-
 ## Repository-local overlays
 
-A repository addresses standard reviewers by stable id through the conventional
-overlay directory:
+A repository extends the standard policy through the conventional overlay
+directory, authored with the same Markdown + front-matter model:
 
 ```
 .basis/reviewers/
 ```
 
-Each overlay is `add`, `extend`, `replace`, or `disable`. Composition is keyed by
-reviewer id and never depends on filename or overlay order. Duplicate overlays
-for the same id are rejected.
+An overlay's front-matter declares `id` and `mode` (`add`, `extend`, `replace`,
+or `disable`); its body is contributed `instructions`. For `extend`, front-matter
+scalars replace and arrays append, and the body is **appended** to the standard
+instructions. A `disable` overlay carries its `reason` in the front-matter and
+may not carry policy fields.
+
+````md
+---
+id: example
+mode: extend
+---
+
+Repository-specific guidance appended to the standard example policy.
+````
 
 ```ts
-import { composeReviewPolicy } from 'basis/review'
+import { composeReviewPolicy, loadOverlayDirectory } from 'basis/review'
 
 const effective = composeReviewPolicy({
   basisVersion: 'v3.26.0',
-  overlays: [
-    {
-      id: 'dead-code',
-      mode: 'extend',
-      policy: {
-        outOfScope: ['Generated migration modules under src/migrations/.'],
-      },
-    },
-    {
-      id: 'tooling-conformance-churn',
-      mode: 'disable',
-      reason: 'This repository has no tooling migrations.',
-    },
-  ],
+  overlays: loadOverlayDirectory('.basis/reviewers'),
 })
 ```
 
-`extend` replaces scalar fields and appends array fields. `replace` requires a
-full reviewer. `disable` requires a reason and records the reviewer in
-`disabled`. Composition is fail-closed: overlays are validated from `unknown`
-before they are applied, so malformed repository policy is rejected rather than
-executed. Every effective reviewer carries `sources` (`basis-standard` and/or
-`repo-local`) so review output can show where a policy came from — an extended
-reviewer reports both.
+Composition is keyed by stable reviewer id — never filename or overlay order —
+and is fail-closed: documents and objects are parsed from `unknown` and validated
+before they are applied. Every effective reviewer carries `sources`
+(`basis-standard` and/or `repo-local`); an extended reviewer reports both.
 
 ## Fixtures
 
 `STANDARD_REVIEW_FIXTURES` holds labelled positive/negative diffs for the
-standard reviewers. A consumer's evaluator runs each reviewer against a fixture
-and compares the adjudicated outcome. Basis ships **no** model runtime and does
-**not** publish reviews.
+reference reviewer. A consumer's evaluator runs the reviewer against a fixture
+and compares the adjudicated disposition. Basis ships **no** model runtime and
+does **not** publish reviews.

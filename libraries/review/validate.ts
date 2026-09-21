@@ -7,7 +7,7 @@
  * error. The composer invokes these validators before anything is executed.
  */
 
-import type { ContextRequirement, DetectorCategory, DetectorRequirement, EvidenceRequirement, ExecutionProfile, OutcomeDefinition, OverlayMode, ReportingThreshold, ReviewerOverlay, ReviewerPolicy, ReviewOutcome, Severity } from './types'
+import type { ContextRequirement, DetectorRequirement, ExecutionProfile, OutcomeDefinition, OverlayMode, ReportingThreshold, ReviewDisposition, ReviewerOverlay, ReviewerPolicy, Severity } from './types'
 
 /** Supported execution profiles. */
 const EXECUTION_PROFILES: readonly ExecutionProfile[] = [
@@ -32,8 +32,8 @@ const CONTEXT_REQUIREMENTS: readonly ContextRequirement[] = [
 /** Supported overlay modes. */
 const OVERLAY_MODES: readonly OverlayMode[] = ['add', 'disable', 'extend', 'replace']
 
-/** Supported review outcomes. */
-const REVIEW_OUTCOMES: readonly ReviewOutcome[] = ['abstain', 'finding', 'no_finding']
+/** Supported review dispositions. */
+const REVIEW_DISPOSITIONS: readonly ReviewDisposition[] = ['abstain', 'finding', 'no_finding', 'question']
 
 /** Supported severities. */
 const SEVERITIES: readonly Severity[] = ['error', 'info', 'warning']
@@ -42,13 +42,10 @@ const SEVERITIES: readonly Severity[] = ['error', 'info', 'warning']
 const REVIEWER_POLICY_KEYS = [
   'context',
   'detectors',
-  'evidence',
   'executionProfile',
   'id',
   'instructions',
   'outcomes',
-  'outOfScope',
-  'question',
   'threshold',
   'title',
   'verification',
@@ -205,6 +202,17 @@ function parseContextEntry(entry: unknown, index: number, label: string): Contex
 }
 
 /**
+ * Parses one detector category selector.
+ * @param entry Candidate entry.
+ * @param index Entry index.
+ * @param label Value being validated.
+ * @returns The validated category selector.
+ */
+function parseCategoryEntry(entry: unknown, index: number, label: string): string {
+  return requireString(entry, label, `categories[${index}]`)
+}
+
+/**
  * Parses one detector requirement.
  * @param entry Candidate entry.
  * @param index Entry index.
@@ -213,28 +221,6 @@ function parseContextEntry(entry: unknown, index: number, label: string): Contex
  */
 function parseDetectorEntry(entry: unknown, index: number, label: string): DetectorRequirement {
   return assertDetectorRequirement(entry, `${label}.detectors[${index}]`)
-}
-
-/**
- * Parses one detector category.
- * @param entry Candidate entry.
- * @param index Entry index.
- * @param label Value being validated.
- * @returns The validated detector category.
- */
-function parseDetectorCategory(entry: unknown, index: number, label: string): DetectorCategory {
-  return assertDetectorCategory(entry, `${label}.categories[${index}]`)
-}
-
-/**
- * Parses one evidence requirement.
- * @param entry Candidate entry.
- * @param index Entry index.
- * @param label Value being validated.
- * @returns The validated evidence requirement.
- */
-function parseEvidenceEntry(entry: unknown, index: number, label: string): EvidenceRequirement {
-  return assertEvidenceRequirement(entry, `${label}.evidence[${index}]`)
 }
 
 /**
@@ -249,32 +235,6 @@ function parseOutcomeEntry(entry: unknown, index: number, label: string): Outcom
 }
 
 /**
- * Parses one out-of-scope rule.
- * @param entry Candidate entry.
- * @param index Entry index.
- * @param label Value being validated.
- * @returns The validated rule.
- */
-function parseOutOfScopeEntry(entry: unknown, index: number, label: string): string {
-  return requireString(entry, label, `outOfScope[${index}]`)
-}
-
-/**
- * Validates a detector category.
- * @param value Candidate value.
- * @param label Value being validated.
- * @returns The validated category.
- */
-function assertDetectorCategory(value: unknown, label: string): DetectorCategory {
-  if (!isRecord(value)) reviewPolicyError(label, 'must be an object')
-  assertKnownKeys(value, ['category', 'description'], label)
-  return {
-    category: requireString(value.category, label, 'category'),
-    description: requireString(value.description, label, 'description'),
-  }
-}
-
-/**
  * Validates a detector requirement.
  * @param value Candidate value.
  * @param label Value being validated.
@@ -284,23 +244,8 @@ function assertDetectorRequirement(value: unknown, label: string): DetectorRequi
   if (!isRecord(value)) reviewPolicyError(label, 'must be an object')
   assertKnownKeys(value, ['categories', 'detector'], label)
   return {
-    categories: mapEntries(value.categories, label, 'categories', parseDetectorCategory),
+    categories: mapEntries(value.categories, label, 'categories', parseCategoryEntry),
     detector: requireString(value.detector, label, 'detector'),
-  }
-}
-
-/**
- * Validates an evidence requirement.
- * @param value Candidate value.
- * @param label Value being validated.
- * @returns The validated evidence requirement.
- */
-function assertEvidenceRequirement(value: unknown, label: string): EvidenceRequirement {
-  if (!isRecord(value)) reviewPolicyError(label, 'must be an object')
-  assertKnownKeys(value, ['id', 'requirement'], label)
-  return {
-    id: requireString(value.id, label, 'id'),
-    requirement: requireString(value.requirement, label, 'requirement'),
   }
 }
 
@@ -312,12 +257,11 @@ function assertEvidenceRequirement(value: unknown, label: string): EvidenceRequi
  */
 function assertOutcomeDefinition(value: unknown, label: string): OutcomeDefinition {
   if (!isRecord(value)) reviewPolicyError(label, 'must be an object')
-  assertKnownKeys(value, ['category', 'description', 'destructive', 'outcome'], label)
+  assertKnownKeys(value, ['category', 'destructive', 'disposition'], label)
   return {
     category: requireString(value.category, label, 'category'),
-    description: requireString(value.description, label, 'description'),
     destructive: requireBoolean(value.destructive, label, 'destructive'),
-    outcome: requireChoice(value.outcome, label, 'outcome', REVIEW_OUTCOMES),
+    disposition: requireChoice(value.disposition, label, 'disposition', REVIEW_DISPOSITIONS),
   }
 }
 
@@ -352,13 +296,10 @@ export function assertReviewerPolicy(value: unknown, label: string): ReviewerPol
 
   const context = mapEntries(value.context, label, 'context', parseContextEntry)
   const detectors = mapEntries(value.detectors, label, 'detectors', parseDetectorEntry)
-  const evidence = mapEntries(value.evidence, label, 'evidence', parseEvidenceEntry)
   const executionProfile = requireChoice(value.executionProfile, label, 'executionProfile', EXECUTION_PROFILES)
   const id = requireString(value.id, label, 'id')
   const instructions = requireString(value.instructions, label, 'instructions')
   const outcomes = mapEntries(value.outcomes, label, 'outcomes', parseOutcomeEntry)
-  const outOfScope = mapEntries(value.outOfScope, label, 'outOfScope', parseOutOfScopeEntry)
-  const question = requireString(value.question, label, 'question')
   const threshold = assertThreshold(value.threshold, `${label}.threshold`)
   const title = requireString(value.title, label, 'title')
   const verification = requireOptionalString(value.verification, label, 'verification')
@@ -372,13 +313,10 @@ export function assertReviewerPolicy(value: unknown, label: string): ReviewerPol
   return {
     context,
     detectors,
-    evidence,
     executionProfile,
     id,
     instructions,
-    outOfScope,
     outcomes,
-    question,
     threshold,
     title,
     ...(verification !== undefined && { verification }),
@@ -403,9 +341,6 @@ function assertReviewerPatch(value: unknown, label: string): Partial<ReviewerPol
   if (value.detectors !== undefined) {
     patch.detectors = mapEntries(value.detectors, label, 'detectors', parseDetectorEntry)
   }
-  if (value.evidence !== undefined) {
-    patch.evidence = mapEntries(value.evidence, label, 'evidence', parseEvidenceEntry)
-  }
   if (value.executionProfile !== undefined) {
     patch.executionProfile = requireChoice(value.executionProfile, label, 'executionProfile', EXECUTION_PROFILES)
   }
@@ -414,10 +349,6 @@ function assertReviewerPatch(value: unknown, label: string): Partial<ReviewerPol
   if (value.outcomes !== undefined) {
     patch.outcomes = mapEntries(value.outcomes, label, 'outcomes', parseOutcomeEntry)
   }
-  if (value.outOfScope !== undefined) {
-    patch.outOfScope = mapEntries(value.outOfScope, label, 'outOfScope', parseOutOfScopeEntry)
-  }
-  if (value.question !== undefined) patch.question = requireString(value.question, label, 'question')
   if (value.threshold !== undefined) patch.threshold = assertThreshold(value.threshold, `${label}.threshold`)
   if (value.title !== undefined) patch.title = requireString(value.title, label, 'title')
   if (value.verification !== undefined) {

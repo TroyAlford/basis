@@ -1,17 +1,21 @@
 /**
  * Markdown + YAML front-matter authoring for reviewer policy.
  *
- * Reviewers are authored as Markdown documents: machine-readable metadata in a
- * YAML front-matter block, and the long-form adjudication guidance as the
- * document body. This module parses that form and hands the result to the
- * fail-closed validator; it performs no filesystem access.
+ * Humans and LLMs author Markdown; Basis validates it; the runtime consumes
+ * typed objects. A document's front-matter carries only the mechanical
+ * metadata the runtime needs, and the body carries the engineering principle,
+ * reasoning, and instructions. This module parses that form and hands the
+ * result to the fail-closed validator; it performs no filesystem access.
  */
 
-import type { ReviewerPolicy } from './types'
-import { assertReviewerPolicy, isRecord, reviewPolicyError } from './validate'
+import type { ReviewerOverlay, ReviewerPolicy } from './types'
+import { assertReviewerOverlay, assertReviewerPolicy, isRecord, reviewPolicyError } from './validate'
 
 /** Delimiter marking the start and end of a YAML front-matter block. */
 const FRONT_MATTER_DELIMITER = '---'
+
+/** Overlay front-matter keys that are not part of the reviewer policy. */
+const OVERLAY_CONTROL_KEYS = ['id', 'mode', 'reason'] as const
 
 /**
  * Splits a Markdown document into its YAML front-matter and body.
@@ -37,8 +41,8 @@ export function parseFrontMatter(source: string, label: string): { body: string,
 }
 
 /**
- * Parses a Markdown reviewer document into a validated reviewer policy. The
- * front-matter carries the machine-readable metadata and the body carries the
+ * Parses a standard Markdown reviewer document into a validated policy. The
+ * front-matter carries the mechanical metadata and the body carries the
  * adjudication instructions.
  * @param source Raw Markdown document.
  * @param label Value being parsed, for error messages.
@@ -52,4 +56,33 @@ export function parseReviewerSource(source: string, label: string): ReviewerPoli
   }
   if (body.length === 0) reviewPolicyError(label, 'the Markdown body (instructions) must not be empty')
   return assertReviewerPolicy({ ...data, instructions: body }, label)
+}
+
+/**
+ * Parses a repository-local Markdown overlay document into a validated overlay.
+ * `id` and `mode` are required; `reason` is required for `disable`. The body is
+ * the overlay's contributed instructions.
+ * @param source Raw Markdown document.
+ * @param label Value being parsed, for error messages.
+ * @returns The validated overlay.
+ */
+export function parseReviewerOverlaySource(source: string, label: string): ReviewerOverlay {
+  const { body, data } = parseFrontMatter(source, label)
+  if (!isRecord(data)) reviewPolicyError(label, 'front-matter must be a YAML mapping')
+
+  const { id, mode, reason, ...policyFields } = data
+  const overlay: Record<string, unknown> = { id, mode }
+  if (reason !== undefined) overlay.reason = reason
+
+  if (mode === 'disable') {
+    if (Object.keys(policyFields).length > 0) {
+      reviewPolicyError(label, `disable overlays may only carry: ${OVERLAY_CONTROL_KEYS.join(', ')}`)
+    }
+  } else {
+    const policy: Record<string, unknown> = { ...policyFields }
+    if (id !== undefined) policy.id = id
+    if (body.length > 0) policy.instructions = body
+    overlay.policy = policy
+  }
+  return assertReviewerOverlay(overlay)
 }

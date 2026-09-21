@@ -2,10 +2,10 @@
  * Reviewer-policy types for the shared Basis review standard.
  *
  * A reviewer is a named, versionable specification — not a model and not a
- * prompt. It declares the question it answers, which deterministic detectors
- * feed it, the evidence it must gather, when it must abstain, and the structured
- * outcomes it may return. Execution (running detectors, calling models,
- * publishing reviews) belongs to the consumer; Basis owns only the policy.
+ * prompt. Its canonical form is a Markdown document: mechanical metadata in the
+ * YAML front-matter and the engineering principle, reasoning, and instructions
+ * in the body. These types are the derived runtime representation the executor
+ * consumes.
  */
 
 /** Severity rendered for a reported finding. */
@@ -18,8 +18,15 @@ export type ExecutionProfile =
   | 'frontier-semantic'
   | 'local-semantic'
 
-/** Portable outcome of a review, after any adjudication. */
-export type ReviewOutcome = 'abstain' | 'finding' | 'no_finding'
+/**
+ * Portable disposition of a review.
+ *
+ * - `finding` — sufficient evidence that something should change;
+ * - `question` — the author must resolve an ambiguity or explain intent;
+ * - `no_finding` — the candidate is adequately explained or acceptable;
+ * - `abstain` — the reviewer cannot perform the review from the available evidence.
+ */
+export type ReviewDisposition = 'abstain' | 'finding' | 'no_finding' | 'question'
 
 /** Data a reviewer needs assembled before it can adjudicate. */
 export type ContextRequirement =
@@ -38,40 +45,22 @@ export type ReviewerSource = 'basis-standard' | 'repo-local'
 /** How a repository-local overlay combines with the standard policy. */
 export type OverlayMode = 'add' | 'disable' | 'extend' | 'replace'
 
-/** A detector category that can feed a reviewer. */
-export interface DetectorCategory {
-  /** Category id exactly as the detector reports it (for example `nsExports`). */
-  category: string,
-  /** What the category means. */
-  description: string,
-}
-
-/** A deterministic detector a reviewer consumes, and the categories that feed it. */
+/** A deterministic detector and the category selectors that feed a reviewer. */
 export interface DetectorRequirement {
-  /** Categories that feed this reviewer; an empty list means every category. */
-  categories: readonly DetectorCategory[],
+  /** Detector category selectors; an empty list means every category. */
+  categories: readonly string[],
   /** Detector id (for example `knip`). */
   detector: string,
 }
 
-/** Evidence a reviewer must gather before it may report a finding. */
-export interface EvidenceRequirement {
-  /** Stable evidence id. */
-  id: string,
-  /** What the evidence must demonstrate. */
-  requirement: string,
-}
-
-/** One outcome a reviewer may return, and how the automation must treat it. */
+/** One disposition a reviewer may return. */
 export interface OutcomeDefinition {
   /** Outcome category id (for example `remove`). */
   category: string,
-  /** What this outcome means and when it applies. */
-  description: string,
   /** Whether remediation may delete or rewrite code without human review. */
   destructive: boolean,
-  /** The portable outcome this category reports. */
-  outcome: ReviewOutcome,
+  /** Portable disposition this category maps to. */
+  disposition: ReviewDisposition,
 }
 
 /** Confidence/severity gate applied before a finding is reported. */
@@ -82,26 +71,20 @@ export interface ReportingThreshold {
   severity: Severity,
 }
 
-/** A versioned, machine-readable reviewer specification. */
+/** The derived runtime representation of a reviewer. */
 export interface ReviewerPolicy {
   /** Context the reviewer needs assembled before adjudication. */
   context: readonly ContextRequirement[],
   /** Deterministic detectors that feed the reviewer. */
   detectors: readonly DetectorRequirement[],
-  /** Evidence required before reporting a finding. */
-  evidence: readonly EvidenceRequirement[],
   /** How much model judgment the reviewer needs. */
   executionProfile: ExecutionProfile,
-  /** Stable reviewer id (for example `dead-code`). */
+  /** Stable reviewer id, taken from the front-matter. */
   id: string,
-  /** Prose instructions supplied to semantic adjudication. */
+  /** Adjudication instructions, authored as the Markdown body. */
   instructions: string,
-  /** Explicit out-of-scope and abstention rules. */
-  outOfScope: readonly string[],
-  /** Outcomes the reviewer may return. */
+  /** Dispositions the reviewer may return. */
   outcomes: readonly OutcomeDefinition[],
-  /** The exact question the reviewer answers. */
-  question: string,
   /** Reporting threshold. */
   threshold: ReportingThreshold,
   /** Short human-readable title. */
@@ -118,22 +101,6 @@ export interface ReviewManifest {
   reviewers: readonly ReviewerPolicy[],
   /** Schema version of the policy format. */
   schemaVersion: number,
-}
-
-/** A labelled example used to evaluate a reviewer policy. */
-export interface ReviewFixture {
-  /** Expected outcome category, when the fixture pins one. */
-  category?: string,
-  /** Why this fixture exists. */
-  description: string,
-  /** Unified diff text the reviewer runs against. */
-  diff: string,
-  /** Expected outcome for this fixture. */
-  expectation: ReviewOutcome,
-  /** Fixture id, unique within the manifest. */
-  id: string,
-  /** Reviewer the fixture exercises. */
-  reviewerId: string,
 }
 
 /** A repository-local reviewer overlay, keyed by stable reviewer id. */
@@ -178,4 +145,20 @@ export interface EffectiveReviewPolicy {
   reviewers: readonly EffectiveReviewer[],
   /** Schema version of the composed policy. */
   schemaVersion: number,
+}
+
+/** A labelled example used to evaluate a reviewer policy. */
+export interface ReviewFixture {
+  /** Expected outcome category, when the fixture pins one. */
+  category?: string,
+  /** Why this fixture exists. */
+  description: string,
+  /** Unified diff text the reviewer runs against. */
+  diff: string,
+  /** Expected disposition for this fixture. */
+  expectation: ReviewDisposition,
+  /** Fixture id, unique within the manifest. */
+  id: string,
+  /** Reviewer the fixture exercises. */
+  reviewerId: string,
 }

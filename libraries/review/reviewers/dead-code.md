@@ -1,7 +1,6 @@
 ---
 id: dead-code
 title: Dead code
-question: Why is this code unused, and what is the intended correction?
 executionProfile: detector-then-adjudicate
 context:
   - changed-files
@@ -14,68 +13,67 @@ context:
 detectors:
   - detector: knip
     categories:
-      - category: dependencies
-        description: Runtime dependency declared but never imported.
-      - category: devDependencies
-        description: Dev dependency declared but never used.
-      - category: enumMembers
-        description: Enum member that is never referenced.
-      - category: exports
-        description: Module export that is never imported.
-      - category: files
-        description: Source file that is never imported.
-      - category: namespaceMembers
-        description: Namespace member that is never referenced.
-      - category: nsExports
-        description: Export reachable only through a namespace that is unused.
-      - category: nsTypes
-        description: Type export reachable only through a namespace that is unused.
-      - category: optionalPeerDependencies
-        description: Optional peer dependency declared but never used.
-      - category: types
-        description: Type export that is never imported.
-evidence:
-  - id: finding
-    requirement: The detector finding and the changed file or symbol it is attributed to.
-  - id: usage
-    requirement: Evidence of dynamic, reflective, framework, or entrypoint use, when any.
-outOfScope:
-  - Dynamic or reflective use that a static analyzer cannot see.
-  - Framework entrypoints and convention files.
-  - Generated code and test-only exports.
-  - Public package entrypoints whose removal would change the public API.
+      - dependencies
+      - devDependencies
+      - enumMembers
+      - exports
+      - files
+      - namespaceMembers
+      - nsExports
+      - nsTypes
+      - optionalPeerDependencies
+      - types
 outcomes:
   - category: remove
-    description: Genuinely dead code that should be removed.
+    disposition: finding
     destructive: true
-    outcome: finding
   - category: wire-up
-    description: Code that should have been used and needs connecting.
+    disposition: finding
     destructive: false
-    outcome: finding
   - category: fix-reference
-    description: A missing entrypoint, configuration, or export reference.
+    disposition: finding
     destructive: false
-    outcome: finding
   - category: false-positive
-    description: Intentional dynamic, framework, or convention use; not dead.
+    disposition: no_finding
     destructive: false
-    outcome: no_finding
+  - category: clarify-intent
+    disposition: question
+    destructive: false
   - category: abstain
-    description: Intent cannot be established safely from the supplied evidence.
+    disposition: abstain
     destructive: false
-    outcome: abstain
 threshold:
   minimumConfidence: 0.6
   severity: warning
 verification: Re-run knip at the review ref and confirm the finding is gone.
 ---
 
-Knip is the detector, not the reviewer. A finding is a candidate to adjudicate,
-never an instruction to delete.
+# Dead code
 
-Decide *why* the symbol is unused and the intended correction before any repair
-is proposed: genuinely dead code to remove, code that should have been wired up,
-a missing entrypoint or reference, an intentional dynamic/framework use, or a
-half-implemented feature. Abstain when intent cannot be established from the
-supplied evidence.
+Do not ship dead code. Keep the codebase clean rather than leaving abandoned
+implementations, obsolete helpers, unused exports, or dependencies behind.
+
+Knip is evidence, not an instruction to delete. An "unused" result can mean very
+different things, so inspect the purpose of this PR and enough of the surrounding
+repository to decide which it is:
+
+- **genuinely orphaned code** — an abandoned implementation or obsolete helper
+  that nothing references and nothing should;
+- **newly-created code that should have been wired up** — the author added a
+  helper, export, or dependency but forgot to connect it;
+- **preparatory work** — code added ahead of the feature that will use it, and
+  that may not belong in this PR;
+- **a missing reference/entrypoint/registration** — the symbol is unused only
+  because a barrel, entrypoint, plugin registry, or configuration was not updated;
+- **intentional dynamic or framework use** — reached by reflection, a framework
+  convention, a generated entrypoint, or a test-only export.
+
+Do not invent a definitive answer when intent is unclear. If the candidate looks
+half-wired, preparatory, or otherwise ambiguous about the intended correction,
+ask the author the right question rather than deleting it or abstaining.
+Silently dropping an ambiguous candidate is a failure of review; deleting one
+that the author intended to wire up is worse.
+
+Report a `finding` only when the evidence shows what should change. Treat
+intentional dynamic use as `no_finding`. Use `abstain` only when the available
+evidence cannot support a review at all.
