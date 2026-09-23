@@ -161,7 +161,8 @@ export class IconsDocs extends Documentation<State> {
         <p>
           The icons library provides a comprehensive collection of SVG icons for use throughout the application.
           All icons are built on the <code>IconBase</code> component and support consistent styling, sizing, and
-          theming.
+          theming. The table glyph is exported as <code>Table</code> from <code>@basis/react/icons</code> so it
+          does not collide with the <code>Table</code> component.
         </p>
         <h2>Icon Grid</h2>
         <p>
@@ -229,12 +230,15 @@ export class IconsDocs extends Documentation<State> {
         <h2>Usage Examples</h2>
         <h3>Basic Icon Usage</h3>
         {Code.format(`
-          import { Plus, Search, Gear } from '@basis/react'
+          import { AlignLeft, ListBulleted, Plus, Search } from '@basis/react'
+          import { Table } from '@basis/react/icons'
 
           // Use individual icons
           <Plus />
           <Search />
-          <Gear />
+          <AlignLeft />
+          <ListBulleted />
+          <Table />
 
           // With custom styling via CSS custom properties
           <div style={{ '--basis-icon-color': '#000000', '--basis-icon-size': '32px' }}>
