@@ -1,0 +1,261 @@
+import { afterEach, describe, expect, test } from 'bun:test'
+import { join } from 'node:path'
+import { Builder } from './Builder'
+import { Server } from './Server'
+
+/*
+ * The happy-dom test preload replaces `globalThis.fetch` with a browser fetch
+ * that blocks cross-origin requests, so the fixtures are probed with Bun's
+ * native `Bun.fetch`.
+ */
+
+/** A running server fixture. */
+interface ServerHarness {
+  /** The port the fixture bound. */
+  port: number,
+  /** Sends SIGTERM and resolves with the child's exit code. */
+  stop: () => Promise<number>,
+}
+
+/** The subset of the health payload the tests inspect. */
+interface HealthBody {
+  /** Present when the build/readiness failed. */
+  error?: string,
+  /** The application readiness. */
+  status?: string,
+  /** The release version. */
+  version?: string,
+}
+
+const repoRoot = join(import.meta.dir, '..', '..', '..')
+const fixtureRoot = join(repoRoot, 'testing', 'server')
+const fixture = join(fixtureRoot, 'index.ts')
+const active = new Set<ServerHarness>()
+
+/**
+ * Spawns the managed-application fixture and waits for its listening line.
+ * @param mode The server mode to run the fixture in.
+ * @param extraEnv Additional environment for the child.
+ * @returns A harness exposing the bound port and an idempotent stop.
+ */
+const startServer = async (
+  mode: 'development' | 'production',
+  extraEnv: Record<string, string> = {},
+): Promise<ServerHarness> => {
+  const proc = Bun.spawn([process.execPath, fixture], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      HOST: '127.0.0.1',
+      MODE: mode,
+      PORT: '0',
+      VERSION: 'test-version',
+      ...extraEnv,
+    },
+    stderr: 'pipe',
+    stdout: 'pipe',
+  })
+
+  const reader = proc.stdout.getReader()
+  const decoder = new TextDecoder()
+  let output = ''
+  let port: number | null = null
+  const deadline = Date.now() + 30_000
+
+  while (port === null && Date.now() < deadline) {
+    const { done, value } = await reader.read()
+    if (done) break
+    output += decoder.decode(value)
+    const match = output.match(/listening http:\/\/[^:]+:(\d+)/)
+    if (match) port = Number(match[1])
+  }
+
+  if (port === null) {
+    proc.kill()
+    const stderr = await new Response(proc.stderr).text()
+    throw new Error(`server fixture did not start (${mode}):\n${output}\n${stderr}`)
+  }
+
+  // Keep draining stdout so the child never blocks on a full pipe.
+  void (async () => {
+    for (;;) {
+      const { done } = await reader.read()
+      if (done) break
+    }
+  })()
+
+  let exit: Promise<number> | null = null
+  const harness: ServerHarness = {
+    port,
+    stop: async () => {
+      if (exit) return exit
+      proc.kill('SIGTERM')
+      exit = proc.exited
+      return exit
+    },
+  }
+
+  active.add(harness)
+  return harness
+}
+
+/**
+ * Polls `/health` until it satisfies the predicate.
+ * @param base The server origin.
+ * @param predicate The condition the health response must satisfy.
+ * @returns The matching response and parsed body.
+ */
+const waitForHealth = async (
+  base: string,
+  predicate: (response: Response, body: HealthBody) => boolean,
+): Promise<{ body: HealthBody, response: Response }> => {
+  const deadline = Date.now() + 30_000
+  let last: { body: HealthBody, response: Response } | null = null
+
+  while (Date.now() < deadline) {
+    const response = await Bun.fetch(`${base}/health`)
+    const body = await response.json() as HealthBody
+    last = { body, response }
+    if (predicate(response, body)) return last
+    await Bun.sleep(50)
+  }
+
+  throw new Error(`health never reached the expected state: ${JSON.stringify(last?.body)}`)
+}
+
+afterEach(async () => {
+  for (const harness of active) {
+    await harness.stop()
+    active.delete(harness)
+  }
+})
+
+describe('Server production mode', () => {
+  test('serves the managed app, health, and assets without development machinery', async () => {
+    const server = await startServer('production')
+    const base = `http://127.0.0.1:${server.port}`
+
+    // Health only turns ok once the initial production build succeeded.
+    const { body, response } = await waitForHealth(base, (result, payload) => (
+      result.status === 200 && payload.status === 'ok'
+    ))
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    expect(body).toMatchObject({ status: 'ok', version: 'test-version' })
+
+    // The endpoint stays reachable under its namespaced route too.
+    const namespaced = await Bun.fetch(`${base}/api/health`)
+    expect(namespaced.status).toBe(200)
+    expect(await namespaced.json()).toMatchObject({ status: 'ok', version: 'test-version' })
+
+    const ui = await Bun.fetch(base)
+    const html = await ui.text()
+    expect(ui.headers.get('content-type')).toContain('text/html')
+    expect(html).toContain('/scripts/index.js')
+    expect(html).not.toContain('hmr.js')
+    expect(html).not.toContain('/modules/')
+
+    // Unmatched paths fall back to the SPA shell.
+    const spa = await Bun.fetch(`${base}/decks/123`)
+    expect(spa.status).toBe(200)
+    expect(await spa.text()).toContain('/scripts/index.js')
+
+    const script = await Bun.fetch(`${base}/scripts/index.js`)
+    expect(script.status).toBe(200)
+    expect(script.headers.get('content-type')).toContain('javascript')
+    expect(await script.text()).toContain('Basis managed server')
+
+    expect((await Bun.fetch(`${base}/assets/favicon.svg`)).status).toBe(200)
+
+    // The development CDN proxy is not part of the production path.
+    expect((await Bun.fetch(`${base}/modules/react@19.3.0/umd/react.development.js`)).status).toBe(404)
+
+    expect(await server.stop()).toBe(0)
+  })
+
+  test('never reports healthy when the initial build fails', async () => {
+    const server = await startServer('production', { ENTRY: './Broken.tsx' })
+    const base = `http://127.0.0.1:${server.port}`
+
+    const { body, response } = await waitForHealth(base, (result, payload) => (
+      result.status === 503 && payload.status === 'error'
+    ))
+    expect(response.status).toBe(503)
+    expect(body).toMatchObject({ status: 'error', version: 'test-version' })
+    expect(body.error).toBeTruthy()
+
+    // A failed build serves no entrypoint.
+    expect((await Bun.fetch(`${base}/scripts/index.js`)).status).toBe(404)
+
+    expect(await server.stop()).toBe(0)
+  })
+})
+
+describe('Server development mode', () => {
+  test('keeps the live-build, HMR, and module-proxy path', async () => {
+    const server = await startServer('development')
+    const base = `http://127.0.0.1:${server.port}`
+
+    await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
+
+    const html = await Bun.fetch(base).then(response => response.text())
+    expect(html).toContain('/modules/react@')
+    expect(html).toContain('/scripts/hmr.js')
+    expect(html).toContain('/scripts/index.js')
+
+    expect((await Bun.fetch(`${base}/scripts/index.js`)).status).toBe(200)
+    expect((await Bun.fetch(`${base}/scripts/hmr.js`)).status).toBe(200)
+  })
+})
+
+describe('Server readiness', () => {
+  test('ready resolves once the initial build succeeds', async () => {
+    const server = new Server()
+      .root(fixtureRoot)
+      .main('./Application.tsx')
+      .start({ development: false, hostname: '127.0.0.1', port: 0, version: 'test-version' })
+
+    try {
+      await expect(server.ready()).resolves.toBeUndefined()
+    } finally {
+      server.stop()
+    }
+  })
+
+  test('ready rejects when the initial build fails', async () => {
+    const server = new Server()
+      .root(fixtureRoot)
+      .main('./Broken.tsx')
+      .start({ development: false, hostname: '127.0.0.1', port: 0, version: 'test-version' })
+
+    try {
+      await expect(server.ready()).rejects.toThrow()
+    } finally {
+      server.stop()
+    }
+  })
+})
+
+describe('Builder', () => {
+  test('does not establish a watcher when watching is disabled', async () => {
+    const builder = new Builder({ development: false, root: fixtureRoot, watch: false })
+    await builder.add('index.js', './Application.tsx')
+
+    const outputs = await builder.initialBuild()
+    expect(builder.watching).toBe(false)
+    expect(outputs).toHaveLength(1)
+
+    await builder.stop()
+  })
+
+  test('establishes a watcher in development', async () => {
+    const builder = new Builder({ development: true, root: fixtureRoot, watch: true })
+    await builder.add('index.js', './Application.tsx')
+    await builder.initialBuild()
+
+    expect(builder.watching).toBe(true)
+
+    await builder.stop()
+    expect(builder.watching).toBe(false)
+  })
+})

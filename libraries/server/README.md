@@ -1,109 +1,97 @@
-Here's a README.md for the @basis/server workspace:
-
 # @basis/server
 
-## Overview
-
-The `@basis/server` package provides a development server for live-compiling, serving, and hot reloading React applications. It's built specifically for Bun and offers features like:
-
-- **Live Development Server**: Automatically recompiles and serves your React application during development
-- **Hot Module Reloading (HMR)**: Updates your application in real-time as you make changes
-- **API Route Handling**: Simple API route definition and handling
-- **Asset Management**: Serves and caches static assets efficiently
-- **WebSocket Support**: Built-in WebSocket support for real-time updates
-- **Module Resolution**: Handles module imports and dependencies
+A Bun application server for Basis React applications. One `Server` supports two
+explicit modes: a live-development server and a deterministic managed-production
+runtime.
 
 ## Installation
 
-```sh
-bunx jsr add @basis/server
-```
+`@basis/server` is consumed from the Basis repository over a pinned Git tag (see
+[`consumer/README.md`](../../consumer/README.md)). There is no npm/JSR publish
+step.
 
-> **Note:** All `@basis` packages, including this one, are published via `jsr` instead of `npm`. This approach ensures a streamlined and efficient package management experience tailored for Bun.
-
-## Usage Example
-
-Here's a basic example of setting up a development server:
+## Usage
 
 ```ts
 import { Server } from '@basis/server'
 
-const server = new Server()
-  .root(__dirname) // Set the project root
-  .assets('./assets') // Serve static assets from ./assets
-  .main('./main.tsx') // Set the main entry point
-  .start() // Start the server
-```
-
-### API Routes
-
-You can define API routes with specific HTTP verbs:
-
-```ts
-import { HttpVerb } from '@basis/utilities';
-import type { APIRoute } from '@basis/server';
-
-const helloRoute: APIRoute = {
-  handler: () => new Response('Hello, World!'),
-  verbs: new Set([HttpVerb.Get]),
-};
-
-server.api([HttpVerb.Get], '/hello', helloRoute);
-```
-
-## Key Features
-
-### Hot Module Reloading
-
-The server includes built-in HMR support that:
-- Watches for file changes in your source directory
-- Automatically rebuilds affected modules
-- Updates the browser without full page reloads
-- Maintains application state during updates
-
-### Build System
-
-The server includes a sophisticated build system that:
-- Handles TypeScript and JSX compilation
-- Supports SASS/SCSS processing
-- Manages source maps
-- Optimizes builds for development
-
-### API Route Handling
-
-The server provides a flexible API route system that:
-- Supports all standard HTTP verbs
-- Handles route parameters
-- Returns proper HTTP responses
-- Includes built-in health and ping endpoints
-
-## Configuration
-
-The server can be configured with various options:
-
-```ts
-const server = new Server({
-  // Server configuration options
-}).main('./src/index.tsx')
+new Server()
+  .root(import.meta.dir)
+  .assets('./assets')
+  .main('./Application.tsx')
   .start({
-    port: 3000,  // Default is 80
-  });
+    development: Bun.env.NODE_ENV !== 'production',
+    hostname: Bun.env.HOST ?? '127.0.0.1',
+    port: Number(Bun.env.PORT ?? 80),
+    version: Bun.env.VERSION ?? 'development',
+  })
 ```
 
-## Development Workflow
+`root` resolves relative entrypoint and asset paths, `assets` serves a static
+asset directory, and `main` registers the browser entrypoint compiled from
+source.
 
-1. Create your React application entry point
-2. Initialize the server with the entry point
-3. Start the development server
-4. Make changes to your code
-5. See changes reflected immediately in the browser
+`start` options:
 
-The server handles all the complexity of:
-- File watching
-- Code compilation
-- Module bundling
-- Live reloading
-- Asset serving
-- API routing
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `development` | `NODE_ENV !== 'production'` | Select the live-development or managed-production workflow. |
+| `hostname` | `HOST`, then `127.0.0.1` | Interface to bind. |
+| `port` | `PORT`, then `80` | Port to bind. `0` binds an ephemeral port. |
+| `version` | `VERSION`, then `development` | Release version reported by `/health`. |
 
-This provides a seamless development experience while maintaining high performance and reliability.
+## Development mode
+
+Development preserves the live workflow:
+
+- entrypoints are compiled from source and rebuilt on change;
+- a Chokidar watcher drives rebuilds;
+- a WebSocket broadcasts HMR notifications;
+- React/ReactDOM stay external and are loaded as browser globals, proxied through
+  the module route.
+
+## Production mode
+
+Production is deterministic and self-contained:
+
+- the application builds once at startup, bundling the installed dependency
+  graph, so no third-party CDN is required;
+- file watching, HMR, and the module proxy are not started;
+- the SPA shell is served for unmatched paths, alongside configured assets;
+- `SIGINT`/`SIGTERM` stop the server and exit cleanly, suitable for PM2.
+
+## Readiness and health
+
+`/health` (also `/api/health`) is the managed-application readiness contract. It
+only responds `200` once the initial build has succeeded:
+
+```json
+{ "status": "ok", "version": "0.6.1" }
+```
+
+`version` is the authoritative release version from the strict semver release
+tag, injected by command-center as `VERSION`; the exact deployed checkout is a
+separate `GIT_SHA`, and `package.json.version` is never the source.
+
+While the build is pending it responds `503 { "status": "starting", ... }`, and
+after a failed build `503 { "status": "error", "error": "...", ... }`. A
+deployment verifier therefore never sees a healthy process for an application
+that did not build. Bun version and uptime are additive diagnostics on the ready
+response.
+
+`server.ready()` resolves when the initial build succeeds and rejects when it
+fails, for processes that prefer to signal readiness directly. In production the
+process stays up and keeps reporting the failure on `/health` rather than
+crashing, so command-center can observe and act on it.
+
+## API routes
+
+```ts
+import { HttpVerb } from '@basis/utilities'
+
+const server = new Server()
+server.api([HttpVerb.Get], 'hello/:name', ({ name }) => new Response(`Hello, ${name}`))
+```
+
+Templates match the route under `/api` (`/api/hello/world`) and, for root-level
+paths, the first path segment (so built-in `/health` and `/ping` resolve).

@@ -105,17 +105,55 @@ resolver plugin, or `node_modules/basis/libraries/*` imports.
 
 ## Server runtime
 
-`basis/server` exposes the Bun development server:
+`basis/server` exposes the Bun application server:
 
 ```ts
 import { Server } from 'basis/server'
+
+new Server()
+  .root(import.meta.dir)
+  .assets('./assets')
+  .main('./Application.tsx')
+  .start({
+    development: Bun.env.NODE_ENV !== 'production',
+    hostname: Bun.env.HOST ?? '127.0.0.1',
+    port: Number(Bun.env.PORT ?? 80),
+    version: Bun.env.VERSION ?? 'development',
+  })
 ```
 
-The server surface shares the same React contract, and its runtime dependencies
-(for example `chokidar`, the Babel parser stack, and the `less`/`sass` plugins
-used by `@basis/bun-plugins`) are declared by Basis so consumers do not install
-them. `@basis/server` is not yet production-ready; the supported public surface
-is the `Server` class and the `APIRoute` type.
+One server supports two explicit modes. Development keeps the live-compile,
+file-watch, HMR, and module-proxy workflow. Production builds once, bundles the
+installed application/Basis dependency graph (so serving never needs a
+third-party CDN), serves the SPA and its assets, and shuts down gracefully on
+`SIGINT`/`SIGTERM`.
+
+`start` options are `development`, `hostname`, `port`, and `version`; each falls
+back to `NODE_ENV`, `HOST`, `PORT`, and `VERSION`. A managed process should bind
+loopback and the deployment-assigned port, and pass the release version.
+
+`/health` reports the managed-application contract only once the application is
+built and ready:
+
+```json
+{ "status": "ok", "version": "0.6.1" }
+```
+
+`version` is the authoritative release version from the strict semver release
+tag that command-center injects as `VERSION`. The exact deployed checkout is a
+separate `GIT_SHA`, and `package.json.version` is never the source.
+
+While the initial build is pending it responds `503 { "status": "starting", ... }`,
+and after a failed build `503 { "status": "error", "error": "...", ... }`, so a
+verifier can never observe a healthy process for an application that did not
+build. `server.ready()` resolves when the build succeeds and rejects when it
+fails, for processes that signal readiness directly. Bun version and uptime are
+additive diagnostics. The same endpoint is reachable at `/api/health`, and
+applications do not have to reimplement it. The server surface shares the React
+contract from `basis/react`, and its runtime dependencies are declared by Basis.
+
+`@basis/server` is still maturing; the supported public surface is the `Server`
+class, its `ServerOptions`, and the `APIRoute` and `HealthOptions` types.
 
 Only the deliberately supported surfaces above are exported. Internal
 workspaces are not exposed just because they exist.
