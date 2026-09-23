@@ -177,6 +177,14 @@ export class MixinsDocs extends Documentation<Record<string, never>> {
             is provided, the popup positions relative to that element. When omitted, it falls back to parent-based
             positioning.
           </p>
+          <h5>Clipping Boundary</h5>
+          <p>
+            By default, Floating UI keeps the popup inside the window. Pass <code>boundary</code> with an
+            element or ref to clip against that container’s visible box — for example a scrolling article pane.
+            {' '}
+            <code>flip</code> and <code>shift</code> both honor that box, so the popup can flip when the anchor
+            reaches a visible edge instead of sliding out of view.
+          </p>
         </Section>
         <Section title="Creating Custom Mixins">
           <p>
