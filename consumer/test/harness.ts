@@ -55,17 +55,15 @@ export const REACT_TSCONFIG = JSON.stringify(
 )
 
 /**
- * React fixture source that typechecks against the supported runtime surfaces.
+ * React fixture client entry. It typechecks and builds against `basis/react`.
  */
 export const REACT_APP_SOURCE = `import { Button, Theme } from 'basis/react'
-import { Server } from 'basis/server'
 
 export const component = (
   <Theme>
     <Button disabled>Hello</Button>
   </Theme>
 )
-export const server = Server
 `
 
 /**
@@ -81,6 +79,25 @@ if (!html.includes('Hello')) throw new Error(\`render failed: \${JSON.stringify(
 if (typeof Server !== 'function') throw new Error('basis/server did not export Server')
 
 process.stdout.write('runtime-ok')
+`
+
+/**
+ * React fixture managed-production entrypoint. It starts `basis/server` in
+ * production mode and prints the bound address for the test harness.
+ */
+export const REACT_APP_SERVER = `import { Server } from 'basis/server'
+
+const server = new Server()
+  .root(import.meta.dir)
+  .main('./app.tsx')
+  .start({
+    development: false,
+    hostname: '127.0.0.1',
+    port: 0,
+    version: 'consumer-version',
+  })
+
+process.stdout.write(\`listening http://\${server.hostname}:\${server.port}\\n\`)
 `
 
 const SURFACE_CHECK = [
@@ -258,6 +275,7 @@ export const initReactApp = (app: string, basisSpec: string): void => {
   write(join(app, 'tsconfig.json'), REACT_TSCONFIG)
   write(join(app, 'src', 'app.tsx'), REACT_APP_SOURCE)
   write(join(app, 'src', 'runtime.tsx'), REACT_APP_RUNTIME)
+  write(join(app, 'src', 'server.ts'), REACT_APP_SERVER)
 
   const git = Bun.which('git')
   if (git === null) throw new Error('git is required to run the consumer fixtures')
@@ -328,7 +346,7 @@ export const assertNoBasisRuntimeHacks = (app: string): void => {
   assert(!tsconfig.includes('"paths"'), 'fixture tsconfig declares no path mappings')
   assert(!tsconfig.includes('libraries/'), 'fixture tsconfig does not target Basis library paths')
 
-  for (const file of ['src/app.tsx', 'src/runtime.tsx']) {
+  for (const file of ['src/app.tsx', 'src/runtime.tsx', 'src/server.ts']) {
     const contents = readFileSync(join(app, file), 'utf8')
     assert(!contents.includes('@basis/'), `${file} does not import internal Basis workspaces`)
     assert(!contents.includes('node_modules/basis/libraries'), `${file} does not import Basis library paths`)
