@@ -33,16 +33,21 @@ jobs:
       # First determine if a release is needed
       - name: Determine Version
         id: version
-        uses: TroyAlford/basis/.github/actions/determine-version@v4.0.0
+        uses: TroyAlford/basis/.github/actions/determine-version@main
 
       # Then create the release if needed
       - name: Create Release
         if: steps.version.outputs.release-needed == 'true'
-        uses: TroyAlford/basis/.github/actions/create-release@v4.0.0
+        uses: TroyAlford/basis/.github/actions/create-release@main
         with:
           github-token: ${{ github.token }}
           version: ${{ steps.version.outputs.next-version }}
 ```
+
+> **Self-reference vs. consumers.** The example above lives in Basis and uses
+> `@main`, so it never lags the latest action. Repositories *consuming* Basis
+> should pin a released tag (or a commit SHA) instead — or call the reusable
+> [`release.yml`](../../workflows/release.yml) workflow, which the caller pins.
 
 ## Release Notes
 

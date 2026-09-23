@@ -33,7 +33,7 @@ jobs:
 
       - name: Determine Version
         id: version
-        uses: TroyAlford/basis/.github/actions/determine-version@v4.0.0
+        uses: TroyAlford/basis/.github/actions/determine-version@main
 
       # Use the outputs in subsequent steps
       - name: Use Version Info
@@ -42,6 +42,11 @@ jobs:
           echo "Current version: ${{ steps.version.outputs.current-version }}"
           echo "Next version: ${{ steps.version.outputs.next-version }}"
 ```
+
+> **Self-reference vs. consumers.** The example above lives in Basis and uses
+> `@main`, so it never lags the latest action. Repositories *consuming* Basis
+> should pin a released tag (or a commit SHA) instead — or call the reusable
+> [`release.yml`](../../workflows/release.yml) workflow, which the caller pins.
 
 ## Version Calculation Rules
 
