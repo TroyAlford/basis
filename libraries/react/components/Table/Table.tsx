@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { get, sortBy } from '@basis/utilities'
+import { get, sortBy } from '../../../utilities'
 import type { PathOf } from '../../../utilities/types/PathOf'
 import type { Mixin } from '../../types/Mixin'
 import { Pin } from '../../types/Pin'

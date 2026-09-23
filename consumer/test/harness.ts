@@ -44,6 +44,45 @@ export const greet = (name: string): string => {
 }
 `
 
+/**
+ * React fixture tsconfig. It extends the shipped preset and declares no Basis
+ * path mappings, so it fails if the runtime surfaces need workspace aliases.
+ */
+export const REACT_TSCONFIG = JSON.stringify(
+  { extends: 'basis/tsconfig/react.json', include: ['src'] },
+  null,
+  2,
+)
+
+/**
+ * React fixture source that typechecks against the supported runtime surfaces.
+ */
+export const REACT_APP_SOURCE = `import { Button, Theme } from 'basis/react'
+import { Server } from 'basis/server'
+
+export const component = (
+  <Theme>
+    <Button disabled>Hello</Button>
+  </Theme>
+)
+export const server = Server
+`
+
+/**
+ * React fixture entrypoint that proves runtime module resolution by rendering a
+ * Basis component and touching the server export.
+ */
+export const REACT_APP_RUNTIME = `import { renderToString } from 'react-dom/server'
+import { Button } from 'basis/react'
+import { Server } from 'basis/server'
+
+const html = renderToString(<Button data-x="1">Hello</Button>)
+if (!html.includes('Hello')) throw new Error(\`render failed: \${JSON.stringify(html)}\`)
+if (typeof Server !== 'function') throw new Error('basis/server did not export Server')
+
+process.stdout.write('runtime-ok')
+`
+
 const SURFACE_CHECK = [
   "import config from 'basis/eslint'",
   "if (!Array.isArray(config) || config.length === 0) throw new Error('bad surface')",
@@ -167,6 +206,65 @@ export const initApp = (
 }
 
 /**
+ * Reads the root Basis manifest's dependency map. The root manifest is the
+ * distribution contract, so fixtures reuse its versions instead of duplicating
+ * them and drifting whenever Basis bumps a package.
+ * @returns The root `dependencies` map.
+ */
+const basisDependencies = (): Record<string, string> => {
+  const manifest = JSON.parse(
+    readFileSync(join(import.meta.dir, '..', '..', 'package.json'), 'utf8'),
+  ) as { dependencies?: Record<string, string> }
+  return manifest.dependencies ?? {}
+}
+
+/**
+ * Creates an external React/server fixture app wired to the shipped
+ * `basis/tsconfig/react.json` preset, with no Basis path mappings.
+ *
+ * The app declares the same React/ReactDOM range as Basis (read from the root
+ * manifest), modeling a real React consumer (for example mtg-proxifier). That
+ * lets the fixture prove the two deduplicate into a single runtime rather than
+ * each installing a copy.
+ * @param app Absolute path to the application directory.
+ * @param basisSpec The Basis dependency specifier.
+ */
+export const initReactApp = (app: string, basisSpec: string): void => {
+  const dependencies = basisDependencies()
+  const react = dependencies.react
+  const reactDom = dependencies['react-dom']
+  if (react === undefined || reactDom === undefined) {
+    throw new Error('basis package.json must declare react and react-dom dependencies')
+  }
+
+  write(
+    join(app, 'package.json'),
+    JSON.stringify(
+      {
+        dependencies: { react, 'react-dom': reactDom },
+        devDependencies: {
+          '@types/bun': '^1.4.2',
+          'basis': basisSpec,
+        },
+        name: 'basis-react-consumer-fixture',
+        private: true,
+        trustedDependencies: ['basis'],
+        type: 'module',
+      },
+      null,
+      2,
+    ),
+  )
+  write(join(app, 'tsconfig.json'), REACT_TSCONFIG)
+  write(join(app, 'src', 'app.tsx'), REACT_APP_SOURCE)
+  write(join(app, 'src', 'runtime.tsx'), REACT_APP_RUNTIME)
+
+  const git = Bun.which('git')
+  if (git === null) throw new Error('git is required to run the consumer fixtures')
+  run([git, 'init', '--quiet'], app)
+}
+
+/**
  * Asserts that every installed exact-version copy of every patched package
  * carries the observable marker the patch produces.
  * @param appRoot Absolute path to the fixture application.
@@ -218,6 +316,23 @@ export const assertNodeFree = (app: string, env: Record<string, string>): void =
 export const assertEslintSurface = (app: string, env: Record<string, string>): void => {
   const output = run(['bun', '-e', SURFACE_CHECK], app, env)
   assert(output.includes('ok'), 'basis/eslint resolves to a flat config')
+}
+
+/**
+ * Asserts that a React fixture reaches Basis only through the supported public
+ * exports: no Basis path mappings and no direct library-path imports.
+ * @param app Absolute path to the fixture application.
+ */
+export const assertNoBasisRuntimeHacks = (app: string): void => {
+  const tsconfig = readFileSync(join(app, 'tsconfig.json'), 'utf8')
+  assert(!tsconfig.includes('"paths"'), 'fixture tsconfig declares no path mappings')
+  assert(!tsconfig.includes('libraries/'), 'fixture tsconfig does not target Basis library paths')
+
+  for (const file of ['src/app.tsx', 'src/runtime.tsx']) {
+    const contents = readFileSync(join(app, file), 'utf8')
+    assert(!contents.includes('@basis/'), `${file} does not import internal Basis workspaces`)
+    assert(!contents.includes('node_modules/basis/libraries'), `${file} does not import Basis library paths`)
+  }
 }
 
 /**

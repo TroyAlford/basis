@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { createPortal } from 'react-dom'
-import { match, noop } from '@basis/utilities'
+import { match, noop } from '../../../utilities'
 import { Align } from '../../types/Align'
 import type { ImageConfig } from '../../types/ImageConfig'
 import type { ImageInput } from '../../types/ImageInput'

@@ -1,6 +1,6 @@
 import * as React from 'react'
 import * as ReactDOM from 'react-dom/client'
-import { noop } from '@basis/utilities'
+import { noop } from '../../utilities'
 
 type Class<T> = new (...args: unknown[]) => T
 type Fn<T> = (...args: unknown[]) => T

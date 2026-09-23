@@ -1,4 +1,4 @@
-import { kebabCase } from '@basis/utilities/functions/kebabCase'
+import { kebabCase } from '../../utilities/functions/kebabCase'
 
 /**
  * Filters an object's properties by prefix, removing the prefix and kebab-casing the remaining key

@@ -1,4 +1,4 @@
-import type { HttpVerb } from '@basis/utilities'
+import type { HttpVerb } from '../../utilities'
 
 /** An API route. */
 export interface APIRoute<Params extends object = object> {

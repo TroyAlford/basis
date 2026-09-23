@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { isNil, match, noop } from '@basis/utilities'
+import { isNil, match, noop } from '../../../utilities'
 import type { IAccessible } from '../../mixins/Accessible'
 import type { IFocusable } from '../../mixins/Focusable'
 import type { IPlaceholder } from '../../mixins/Placeholder'

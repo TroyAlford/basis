@@ -1,4 +1,4 @@
-import { match, noop } from '@basis/utilities'
+import { match, noop } from '../../../utilities'
 import { Keyboard } from '../../types/Keyboard'
 import { Component } from '../Component/Component'
 

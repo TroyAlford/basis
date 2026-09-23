@@ -1,5 +1,5 @@
 import type * as React from 'react'
-import { isRefObject, match } from '@basis/utilities'
+import { isRefObject, match } from '../../utilities'
 import { AnchorPoint } from '../types/AnchorPoint'
 import type { Mixin } from '../types/Mixin'
 import { cleanupRepositioning, repositionPopup } from '../utilities/repositionPopup'

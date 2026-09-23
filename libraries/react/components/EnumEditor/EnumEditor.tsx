@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { sortBy, titleCase } from '@basis/utilities'
+import { sortBy, titleCase } from '../../../utilities'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
 import type { IFocusable } from '../../mixins/Focusable'

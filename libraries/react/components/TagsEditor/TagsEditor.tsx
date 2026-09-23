@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { deburr, match } from '@basis/utilities'
+import { deburr, match } from '../../../utilities'
 import { Keyboard } from '../../types/Keyboard'
 import { css, style } from '../../utilities/style'
 import { Editor } from '../Editor/Editor'

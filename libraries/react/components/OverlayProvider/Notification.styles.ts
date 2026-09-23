@@ -1,4 +1,4 @@
-import { Intent } from '@basis/react/types/Intent'
+import { Intent } from '../../types/Intent'
 import { css, style } from '../../utilities/style'
 
 style('basis:notification', css`

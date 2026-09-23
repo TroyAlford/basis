@@ -2,7 +2,7 @@ import type { BuildArtifact } from 'bun'
 import type { FSWatcher } from 'chokidar'
 import { watch } from 'chokidar'
 import * as path from 'node:path'
-import { pluginGlobals, pluginSASS } from '@basis/bun-plugins'
+import { pluginGlobals, pluginSASS } from '../../bun-plugins'
 import { transformJsxDev } from './utilities/transformJsxDev'
 
 /** A build output. */

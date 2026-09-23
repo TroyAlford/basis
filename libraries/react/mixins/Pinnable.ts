@@ -1,4 +1,4 @@
-import { match } from '@basis/utilities'
+import { match } from '../../utilities'
 import type { Component } from '../components/Component/Component'
 import type { Mixin } from '../types/Mixin'
 import { Pin } from '../types/Pin'

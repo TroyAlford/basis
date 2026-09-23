@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { createElement } from 'react'
-import { IconBase } from '@basis/react/icons/IconBase/IconBase'
 import { Remove } from '../../icons'
+import { IconBase } from '../../icons/IconBase/IconBase'
 import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
 import { Component } from '../Component/Component'

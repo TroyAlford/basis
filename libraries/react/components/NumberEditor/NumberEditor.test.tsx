@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
 import * as React from 'react'
-import { isNil } from '@basis/utilities'
+import { isNil } from '../../../utilities'
 import { render } from '../../testing/render'
 import { Simulate } from '../../testing/Simulate'
 import { Keyboard } from '../../types/Keyboard'

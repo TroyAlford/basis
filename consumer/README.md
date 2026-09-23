@@ -84,6 +84,42 @@ logger.stopwatchStop(stopwatch, 'request handled')
 Use `withPrefix` to derive a scoped view, and the `stopwatchStart` /
 `stopwatchSplit` / `stopwatchStop` helpers to measure durations.
 
+## React runtime
+
+`basis/react` exposes the supported React component library:
+
+```tsx
+import { AutoComplete, Button, Theme } from 'basis/react'
+```
+
+Basis owns the React runtime contract. React and ReactDOM are pinned at
+`^19.3.0` in Basis's manifest, and Basis also declares the React type packages
+(`@types/react`, `@types/react-dom`) and its other runtime dependencies
+(`@floating-ui/dom`). A consumer that pins the same React range resolves one
+deduplicated React runtime rather than a copy per package.
+
+Components are consumed directly from source — there is no Basis build step. The
+surface is self-contained: internal imports resolve through package-relative
+paths, so `basis/react` never needs Basis-workspace path aliases, a consumer
+resolver plugin, or `node_modules/basis/libraries/*` imports.
+
+## Server runtime
+
+`basis/server` exposes the Bun development server:
+
+```ts
+import { Server } from 'basis/server'
+```
+
+The server surface shares the same React contract, and its runtime dependencies
+(for example `chokidar`, the Babel parser stack, and the `less`/`sass` plugins
+used by `@basis/bun-plugins`) are declared by Basis so consumers do not install
+them. `@basis/server` is not yet production-ready; the supported public surface
+is the `Server` class and the `APIRoute` type.
+
+Only the deliberately supported surfaces above are exported. Internal
+workspaces are not exposed just because they exist.
+
 ## Review policy
 
 ```ts

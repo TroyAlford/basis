@@ -1,5 +1,5 @@
 import type * as React from 'react'
-import { match } from '@basis/utilities'
+import { match } from '../../../utilities'
 import { Keyboard } from '../../types/Keyboard'
 import { Orientation } from '../../types/Orientation'
 import { Component } from '../Component/Component'

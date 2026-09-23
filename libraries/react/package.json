@@ -1,11 +1,11 @@
 {
   "name": "@basis/react",
   "dependencies": {
-    "@floating-ui/dom": "^1.7.6",
-    "react": "^19",
-    "react-dom": "^19"
+    "@floating-ui/dom": "^1.7.6"
   },
   "peerDependencies": {
-    "@basis/utilities": "workspace:*"
+    "@basis/utilities": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   }
 }

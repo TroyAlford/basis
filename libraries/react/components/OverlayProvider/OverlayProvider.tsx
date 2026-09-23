@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { createRef } from 'react'
-import { hash } from '@basis/utilities/functions/hash'
+import { hash } from '../../../utilities/functions/hash'
 import { Intent } from '../../types/Intent'
 import { Component } from '../Component/Component'
 import type { DialogButton, IDialog } from './Dialog'

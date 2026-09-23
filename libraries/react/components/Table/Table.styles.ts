@@ -1,4 +1,4 @@
-import { Pin } from '@basis/react/types/Pin'
+import { Pin } from '../../types/Pin'
 import { css, style } from '../../utilities/style'
 
 style('basis:table', css`

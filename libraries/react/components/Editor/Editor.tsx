@@ -1,5 +1,5 @@
-import type { PathOf, TypeAt } from '@basis/utilities'
-import { clone, deepEquals, isNil, noop, set } from '@basis/utilities'
+import type { PathOf, TypeAt } from '../../../utilities'
+import { clone, deepEquals, isNil, noop, set } from '../../../utilities'
 import { Component } from '../Component/Component'
 
 interface TProps<Value> {

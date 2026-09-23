@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { isNil, match, noop } from '@basis/utilities'
+import { isNil, match, noop } from '../../../utilities'
 import type { IPopup } from '../../mixins/Popup'
 import { AnchorPoint } from '../../types/AnchorPoint'
 import { Keyboard } from '../../types/Keyboard'

@@ -6,26 +6,21 @@
   "exports": {
     ".": "./index.ts"
   },
-  "peerDependencies": {
-    "@basis/bun-plugins": "workspace:*",
-    "@basis/react": "workspace:*",
-    "@basis/utilities": "workspace:*",
-    "react-dom": "^18",
-    "react": "^18"
-  },
-  "devDependencies": {
+  "dependencies": {
     "@babel/generator": "^7.29.1",
     "@babel/parser": "^7.29.2",
     "@babel/traverse": "^7.29.0",
     "@babel/types": "^7.29.0",
+    "chokidar": "^5.0.0"
+  },
+  "peerDependencies": {
     "@basis/bun-plugins": "workspace:*",
     "@basis/react": "workspace:*",
     "@basis/utilities": "workspace:*",
-    "@types/bun": "^1.4.2",
-    "react": "^19",
-    "react-dom": "^19"
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
-  "dependencies": {
-    "chokidar": "^5.0.0"
+  "devDependencies": {
+    "@types/bun": "^1.4.2"
   }
 }
