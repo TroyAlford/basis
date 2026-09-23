@@ -14,6 +14,8 @@ export interface IPopup {
   anchorTo?: HTMLElement | React.RefObject<HTMLElement>,
   /** Whether to show an arrow pointing to the reference element. */
   arrow?: boolean,
+  /** Optional element that clips the popup, intersected with the viewport. */
+  boundary?: HTMLElement | React.RefObject<HTMLElement>,
   /** Bound the popup's height to the available viewport space (long content scrolls). */
   constrainHeight?: boolean,
   /** The offset distance between the popup and reference element. */
@@ -22,23 +24,36 @@ export interface IPopup {
   sameWidth?: boolean,
 }
 
+/**
+ * Resolves a popup target from an element, ref, or fallback.
+ * @param value The element or ref to resolve.
+ * @param fallback The element to use when value is empty.
+ * @returns The resolved element, or null.
+ */
+function resolveElement(
+  value: HTMLElement | React.RefObject<HTMLElement> | undefined,
+  fallback: HTMLElement | null = null,
+): HTMLElement | null {
+  return match(value)
+    .when(isRefObject).then(ref => ref.current)
+    .when(el => el instanceof HTMLElement).then(el => el as HTMLElement)
+    .else(fallback)
+}
+
 const reposition = (
   component: { props: IPopup, rootNode: HTMLElement | SVGElement | null },
 ) => {
-  const { anchorPoint, anchorTo, constrainHeight, offset, sameWidth } = component.props
+  const { anchorPoint, anchorTo, boundary, constrainHeight, offset, sameWidth } = component.props
   const popup = component.rootNode as HTMLElement
 
   if (!popup) return
 
-  const anchor: HTMLElement | null = match(anchorTo)
-    .when(isRefObject).then(ref => ref.current)
-    .when(el => el instanceof HTMLElement).then(el => el as HTMLElement)
-    .else(popup.parentElement)
-
+  const anchor = resolveElement(anchorTo, popup.parentElement)
   if (!anchor) return
 
   repositionPopup(popup, anchor, {
     anchorPoint: anchorPoint ?? AnchorPoint.Top,
+    boundary: resolveElement(boundary) ?? undefined,
     constrainHeight,
     offset: offset ?? 0,
     sameWidth,
@@ -65,17 +80,13 @@ export const Popup: Mixin<IPopup> = {
 
   componentDidUpdate<E extends HTMLElement | SVGElement>(
     component: { props: IPopup, rootNode: E | null },
-    prevProps: IPopup,
   ): void {
-    if (
-      prevProps.anchorTo !== component.props.anchorTo
-      || prevProps.anchorPoint !== component.props.anchorPoint
-      || prevProps.arrow !== component.props.arrow
-      || prevProps.sameWidth !== component.props.sameWidth
-      || prevProps.constrainHeight !== component.props.constrainHeight
-    ) {
-      reposition(component)
-    }
+    /*
+     * Reposition after every update: the anchor or boundary element can change
+     * without its prop identity changing, and repositionPopup rebinds
+     * autoUpdate only when the resolved anchor actually moved.
+     */
+    reposition(component)
   },
 
   componentWillUnmount<E extends HTMLElement | SVGElement>(
@@ -89,6 +100,8 @@ export const Popup: Mixin<IPopup> = {
     anchorPoint: AnchorPoint.Top,
     anchorTo: undefined,
     arrow: false,
+    boundary: undefined,
+    offset: 0,
   },
 
   post: true,
