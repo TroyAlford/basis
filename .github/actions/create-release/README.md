@@ -9,6 +9,13 @@ This action creates a GitHub release with automatically generated release notes.
 - **github-token**: GitHub token for creating the release (Required)
 - **version**: The version to release (Required)
 
+## Requirements
+
+The action is self-contained: it does **not** install a toolchain. `gh` is
+preinstalled on GitHub-hosted runners, and the action runs in the checked-out
+repository, so check the repository out first. The tag is created by
+`gh release create` if it does not already exist.
+
 ## Usage Example
 ```yaml
 jobs:
@@ -17,18 +24,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      
+
+      # The action only needs `bun` and `git` on PATH; no dependencies.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
       # First determine if a release is needed
       - name: Determine Version
         id: version
-        uses: ./.github/actions/determine-version
+        uses: TroyAlford/basis/.github/actions/determine-version@v4.0.0
 
       # Then create the release if needed
       - name: Create Release
         if: steps.version.outputs.release-needed == 'true'
-        uses: ./.github/actions/create-release
+        uses: TroyAlford/basis/.github/actions/create-release@v4.0.0
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           version: ${{ steps.version.outputs.next-version }}
 ```
 

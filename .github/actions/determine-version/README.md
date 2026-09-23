@@ -10,6 +10,13 @@ This action analyzes conventional commits to determine if a new version is neede
 - **current-version**: The current version from git tags (e.g. `v1.2.3`)
 - **next-version**: The computed next version (same as current if no release needed)
 
+## Requirements
+
+The action is self-contained: it does **not** install a toolchain. Ensure `bun`
+(>= 1.4) and `git` are on `PATH` first, and check out full history **and tags**
+(`actions/checkout` with `fetch-depth: 0`). It only runs the copied TypeScript
+with `bun`, so no `node_modules` are required.
+
 ## Usage Example
 ```yaml
 jobs:
@@ -18,9 +25,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+
+      # Any Bun setup works; this action only needs `bun` on PATH.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
       - name: Determine Version
         id: version
-        uses: ./.github/actions/determine-version
+        uses: TroyAlford/basis/.github/actions/determine-version@v4.0.0
 
       # Use the outputs in subsequent steps
       - name: Use Version Info
