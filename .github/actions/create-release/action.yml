@@ -12,20 +12,19 @@ inputs:
 outputs:
   current-version:
     description: 'The current version before any release'
-    value: ${{ steps.version.outputs.current-version }}
+    value: ${{ steps.release.outputs.current-version }}
   released:
     description: 'Whether a release was created'
-    value: ${{ steps.version.outputs.release-needed }}
+    value: ${{ steps.release.outputs.release-needed }}
   version:
     description: 'The version that was released (or current version if no release created)'
-    value: ${{ steps.version.outputs.next-version }}
+    value: ${{ steps.release.outputs.next-version }}
 
 runs:
   using: "composite"
   steps:
-    - uses: ./.github/actions/asdf-setup
-
     - name: Create GitHub Release
+      id: release
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -34,3 +33,6 @@ runs:
         gh release create "$version" \
           --title "$version" \
           --generate-notes
+        echo "current-version=${version}" >> "$GITHUB_OUTPUT"
+        echo "release-needed=true" >> "$GITHUB_OUTPUT"
+        echo "next-version=${version}" >> "$GITHUB_OUTPUT"

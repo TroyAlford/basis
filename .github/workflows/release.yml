@@ -1,9 +1,23 @@
 name: Release
 
+# Publishes a semantic-versioned GitHub release on every push to `main`, using
+# the Basis release actions. It is also a reusable workflow, so any repository
+# can publish the same way with a tiny caller:
+#
+#   jobs:
+#     release:
+#       permissions:
+#         contents: write
+#       uses: TroyAlford/basis/.github/workflows/release.yml@<released-tag>
+#
+# Self-references to Basis's own actions use `@main` on purpose: pinning a
+# self-reference to a tag is always one release behind the action it targets.
+
 on:
   push:
     branches: [ 'main' ]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
@@ -21,10 +35,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: ./.github/actions/asdf-setup
+
+      # The release job only needs `bun` (no dependencies), so install it
+      # directly. This keeps the reusable workflow portable to consumers that
+      # do not use ASDF.
+      - name: Resolve pinned Bun version
+        id: bun
+        shell: bash
+        run: echo "version=$(awk '$1 == "bun" { print $2 }' .tool-versions)" >> "$GITHUB_OUTPUT"
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
       - name: Determine Version
         id: version
-        uses: ./.github/actions/determine-version
+        uses: TroyAlford/basis/.github/actions/determine-version@main
 
   create-release:
     needs: determine-version
@@ -33,10 +59,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: ./.github/actions/asdf-setup
-      - uses: ./.github/actions/create-release
+
+      # `gh` is preinstalled on hosted runners. `github.token` is the caller's
+      # token, which works for both this repository and reusable callers.
+      - uses: TroyAlford/basis/.github/actions/create-release@main
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           version: ${{ needs.determine-version.outputs.next-version }}
 
   # publish:

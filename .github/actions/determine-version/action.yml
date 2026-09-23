@@ -15,8 +15,6 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - uses: ./.github/actions/asdf-setup
-
     - name: Determine Version
       id: version
       shell: bash
