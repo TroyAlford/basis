@@ -3,7 +3,7 @@
  *
  * These values correspond to the `event.key` property from keyboard events.
  * @example
- * import { Keyboard } from '@basis/react/types/Keyboard'
+ * import { Keyboard } from 'basis/react'
  *
  * if (event.key === Keyboard.Enter) {
  *   // Handle Enter key

@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
-import { Keyboard } from '@basis/react/types/Keyboard'
 import { render } from '../../testing/render'
+import { Keyboard } from '../../types/Keyboard'
 import { Carousel } from './Carousel'
 
 describe('Carousel', () => {

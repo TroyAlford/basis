@@ -1,4 +1,4 @@
-import { formatMilliseconds, Milliseconds } from '@basis/utilities'
+import { formatMilliseconds, Milliseconds } from '../../utilities'
 
 /**
  * Returns a response with the health information.

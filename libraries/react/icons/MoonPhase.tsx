@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { randomHash } from '@basis/utilities'
+import { randomHash } from '../../utilities'
 import type { IconProps } from './IconBase/IconBase'
 import { IconBase } from './IconBase/IconBase'
 import { Circle } from './parts/Circle'

@@ -1,6 +1,6 @@
 import type { ComponentClass, KeyboardEvent as ReactKeyboardEvent, MutableRefObject, ReactElement, ReactNode, RefObject, SyntheticEvent } from 'react'
 import { cloneElement, createElement, isValidElement } from 'react'
-import { classNames } from '@basis/utilities'
+import { classNames } from '../../../utilities'
 import { IconBase } from '../../icons/IconBase/IconBase'
 import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'

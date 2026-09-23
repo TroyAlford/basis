@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { deepEquals } from '@basis/utilities'
+import { deepEquals } from '../../../utilities'
 import { Component } from '../Component/Component'
 import { OverlayProvider } from '../OverlayProvider/OverlayProvider'
 import { Router } from '../Router/Router'

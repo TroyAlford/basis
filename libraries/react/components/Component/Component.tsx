@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import * as React from 'react'
-import { classNames, deepEquals, kebabCase, noop } from '@basis/utilities'
+import { classNames, deepEquals, kebabCase, noop } from '../../../utilities'
 import type { Mixin } from '../../types/Mixin'
 import { filterByPrefix } from '../../utilities/filterByPrefix'
 import { prefixObject } from '../../utilities/prefixObject'

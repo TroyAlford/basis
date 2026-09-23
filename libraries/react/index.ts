@@ -1,3 +1,4 @@
+import './types/global'
 export { ApplicationBase } from './components/ApplicationBase/ApplicationBase'
 export { AutoComplete } from './components/AutoComplete/AutoComplete'
 export { Await } from './components/Await/Await'

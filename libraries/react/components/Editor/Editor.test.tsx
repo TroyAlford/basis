@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
-import type { PathOf, TypeAt } from '@basis/utilities'
+import type { PathOf, TypeAt } from '../../../utilities'
 import { render } from '../../testing/render'
 import { Editor } from './Editor'
 

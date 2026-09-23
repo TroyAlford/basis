@@ -1,6 +1,6 @@
 import * as React from 'react'
-import type { TypeAt } from '@basis/utilities/types/TypeAt'
 import type { PathOf } from '../../../utilities/types/PathOf'
+import type { TypeAt } from '../../../utilities/types/TypeAt'
 import type { IPinnable } from '../../mixins/Pinnable'
 import { Pinnable } from '../../mixins/Pinnable'
 import type { Mixin } from '../../types/Mixin'

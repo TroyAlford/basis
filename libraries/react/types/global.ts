@@ -1,4 +1,4 @@
-import type { OverlayProvider } from './components/OverlayProvider/OverlayProvider'
+import type { OverlayProvider } from '../components/OverlayProvider/OverlayProvider'
 
 declare global {
   interface Window {

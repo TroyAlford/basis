@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { kebabCase } from '@basis/utilities'
+import { kebabCase } from '../../../utilities'
 import { Component } from '../Component/Component'
 import { Router } from '../Router/Router.tsx'
 

@@ -1,7 +1,7 @@
 import type * as React from 'react'
-import { Color } from '@basis/utilities/functions/Color'
-import { kebabCase } from '@basis/utilities/functions/kebabCase'
-import { merge } from '@basis/utilities/functions/merge'
+import { Color } from '../../../utilities/functions/Color'
+import { kebabCase } from '../../../utilities/functions/kebabCase'
+import { merge } from '../../../utilities/functions/merge'
 import { style } from '../../utilities/style'
 import { Component } from '../Component/Component'
 

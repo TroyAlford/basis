@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { parseTemplateURI } from '@basis/utilities'
+import { parseTemplateURI } from '../../../utilities'
 import { NavigateEvent } from '../../events/NavigateEvent'
 import { ensureNavigateRequestListener, registerNavigateHandler } from '../../events/NavigateRequestEvent'
 import { Component } from '../Component/Component'

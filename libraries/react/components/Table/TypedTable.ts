@@ -1,4 +1,4 @@
-import type { PathOf } from '@basis/utilities/types/PathOf'
+import type { PathOf } from '../../../utilities/types/PathOf'
 import type { ColumnProps } from './Column'
 import { Column } from './Column'
 import { Table } from './Table'

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { clamp, formatNumber, isNil } from '@basis/utilities'
+import { clamp, formatNumber, isNil } from '../../../utilities'
 import type { IAccessible } from '../../mixins/Accessible'
 import { Accessible } from '../../mixins/Accessible'
 import type { IFocusable } from '../../mixins/Focusable'

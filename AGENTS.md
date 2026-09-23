@@ -28,7 +28,8 @@ Guidance for humans and coding agents working in this repository.
 
 ## Consumer package surface
 
-- The root `package.json` is the public facade for consumers. Keep `exports` limited to supported source/config entrypoints (`basis/eslint`, `basis/tsconfig/*`, `basis/cli`) and do not expose internal workspace paths.
+- The root `package.json` is the public facade for consumers. Keep `exports` limited to supported source/config entrypoints (`basis/eslint`, `basis/logger`, `basis/react`, `basis/review`, `basis/server`, `basis/tsconfig/*`, `basis/cli`) and do not expose internal workspace paths.
+- Runtime surfaces consumed from source (`basis/react`, `basis/server`) must resolve without Basis-monorepo `paths` aliases or `node_modules/basis/libraries/*` imports. Keep cross-workspace imports package-relative and declare every external runtime dependency in the root `dependencies`.
 - Public source must declare every dependency it imports in the root `dependencies`; consumers must not enumerate the ESLint plugin stack themselves.
 - Patch files stay in `patches/` and are declared in the root `patchedDependencies` map. The trusted `postinstall` hook (`consumer/install.ts`) applies them to exact `name@version` installs with `git apply` (Bun cannot apply a dependency's patches transitively and exposes no standalone apply command). Do not reintroduce a hand-rolled diff applier; keep it deterministic, idempotent, and loud on drift.
 - `bun run test:consumer` performs a real Git-dependency install into a temporary host app. Run it when changing `exports`, dependencies, presets, or patch handling.

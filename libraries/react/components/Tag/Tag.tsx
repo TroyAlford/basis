@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { noop } from '@basis/utilities'
+import { noop } from '../../../utilities'
 import { Component } from '../Component/Component'
 
 import './Tag.styles.ts'

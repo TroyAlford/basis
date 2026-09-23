@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import { IconBase } from '@basis/react/icons/IconBase/IconBase'
-import { match } from '@basis/utilities'
+import { match } from '../../utilities'
 import { Intent as Enum } from '../types/Intent'
+import { IconBase } from './IconBase/IconBase'
 import { SquareCheck } from './SquareCheck'
 import { Warning } from './Warning'
 

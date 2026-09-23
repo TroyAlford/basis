@@ -1,5 +1,5 @@
 import * as React from 'react'
-import type { PathOf } from '@basis/utilities'
+import type { PathOf } from '../../../utilities'
 import { Sort } from '../../icons/Sort'
 import { Pinnable } from '../../mixins/Pinnable'
 import type { Mixin } from '../../types/Mixin'

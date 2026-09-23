@@ -1,7 +1,7 @@
 import type { MouseEventHandler } from 'react'
 import React from 'react'
 import type { JsxChild, JsxFragment } from 'typescript'
-import { noop } from '@basis/utilities'
+import { noop } from '../../../utilities'
 import { Component } from '../../components/Component/Component'
 import { Rect } from '../parts/Rect'
 import type { Shape } from '../parts/Shape'

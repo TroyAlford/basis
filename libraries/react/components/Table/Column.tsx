@@ -1,5 +1,5 @@
 import * as React from 'react'
-import type { TypeAt } from '@basis/utilities'
+import type { TypeAt } from '../../../utilities'
 import type { PathOf } from '../../../utilities/types/PathOf'
 import { Pin } from '../../types/Pin'
 import { SortBy } from '../../types/SortBy'
