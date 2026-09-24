@@ -194,14 +194,14 @@ describe('Server production mode', () => {
 })
 
 describe('Server development mode', () => {
-  test('keeps the live-build, HMR, and module-proxy path', async () => {
+  test('keeps live-build, HMR, and bundled dependencies (no CDN)', async () => {
     const server = await startServer('development')
     const base = `http://127.0.0.1:${server.port}`
 
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
     const html = await Bun.fetch(base).then(response => response.text())
-    expect(html).toContain('/modules/react@')
+    expect(html).not.toContain('/modules/')
     expect(html).toContain('/scripts/hmr.js')
     expect(html).toContain('/scripts/index.js')
 

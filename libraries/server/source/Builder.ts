@@ -1,10 +1,9 @@
 import type { BuildArtifact, BunPlugin } from 'bun'
 import type { FSWatcher } from 'chokidar'
 import * as path from 'node:path'
-import { pluginGlobals, pluginSASS } from '../../bun-plugins'
+import { pluginSASS } from '../../bun-plugins'
 import type { ILogger } from '../../utilities'
 import { Logger } from '../../utilities'
-import { transformJsxDev } from './utilities/transformJsxDev'
 
 /** A build output. */
 interface BuildOutput {
@@ -33,9 +32,10 @@ const buildError = (error: unknown): Error => {
 /** The builder options. */
 interface BuilderOptions {
   /**
-   * Build for live development: keep React external and mapped onto browser
-   * globals, and rewrite the JSX dev runtime for the globals build. When
-   * `false`, dependencies are bundled from the installed graph.
+   * Run the live-development build/watch workflow. Development compiles from
+   * source, rebuilds on change, and broadcasts HMR; dependencies are bundled in
+   * both modes, so no CDN or browser globals are required.
+   * Defaults to `NODE_ENV !== 'production'`.
    */
   development?: boolean,
   /** Log sink for build/HMR lifecycle output; defaults to a standard logger. */
@@ -142,13 +142,6 @@ export class Builder {
 
     const development = this.#development
     const plugins: BunPlugin[] = [pluginSASS()]
-    if (development) {
-      plugins.unshift(pluginGlobals({
-        'react': 'window.React',
-        'react-dom': 'window.ReactDOM',
-        'react-dom/client': 'window.ReactDOM',
-      }))
-    }
 
     this.#build = Bun.build({
       define: {
@@ -158,11 +151,11 @@ export class Builder {
         path.isAbsolute(file) ? file : path.join(this.#root, file)
       )),
       /*
-       * Development keeps React external and mapped to browser globals so the
-       * UMD builds served through the module proxy are reused. Production
-       * bundles the installed dependency graph, so no CDN is required.
+       * Dependencies are bundled in both modes, so development needs no CDN or
+       * browser globals; development only trades stronger minification for
+       * readable output and keeps the watcher.
        */
-      external: development ? ['react', 'react-dom'] : [],
+      external: [],
       minify: development
         ? { identifiers: false, syntax: true, whitespace: true }
         : true,
@@ -176,16 +169,10 @@ export class Builder {
 
       const outputs = build.outputs
         .filter(o => o.kind === 'entry-point')
-        .map<BuildOutput>((output, index) => {
-          if (development) {
-            const outputText = output.text.bind(output)
-            output.text = () => outputText().then(transformJsxDev)
-          }
-          return ({
-            name: this.#entrypoints[index][0],
-            output,
-          })
-        })
+        .map<BuildOutput>((output, index) => ({
+          name: this.#entrypoints[index][0],
+          output,
+        }))
 
       await this.#onRebuild?.(outputs)
       return outputs

@@ -23,9 +23,10 @@ import { normalizeMountPrefix, serveMount } from './StaticMount'
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
   /**
-   * Run the live-development build/watch/HMR workflow. When `false`, the
-   * server builds once, bundles the installed dependency graph, and does not
-   * watch, broadcast HMR, or proxy modules through a CDN.
+   * Run the live-development build/watch/HMR workflow. Development compiles
+   * from source and rebuilds on change; dependencies are bundled by default, so
+   * no CDN is required. When `false`, the server builds once and does not watch
+   * or broadcast HMR.
    * Defaults to `NODE_ENV !== 'production'`.
    */
   development?: boolean,
@@ -53,10 +54,12 @@ export interface ServerOptions {
  * A server for building, serving, and (in development) hot reloading React
  * applications.
  *
- * One server supports two explicit modes. Development keeps the live-compile,
- * file-watch, HMR, and module-proxy workflow. Production builds once, bundles
- * the installed dependency graph, serves the SPA and its assets, reports the
- * release version on `/health`, and shuts down gracefully on SIGINT/SIGTERM.
+ * One server supports two explicit modes. Development keeps live-compile,
+ * file-watch, and HMR, bundling dependencies by default (an opt-in
+ * `globals` mode reuses browser-global builds through the module proxy).
+ * Production builds once, bundles the installed dependency graph, serves the
+ * SPA and its assets, reports the release version on `/health`, and shuts down
+ * gracefully on SIGINT/SIGTERM.
  *
  * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
  * (`socket`), and static-mount (`mount`) facilities. HMR is implemented as an
@@ -316,7 +319,6 @@ export class Server {
    */
   async handleUI(): Promise<Response> {
     const html = await renderToString(React.createElement(IndexHTML, {
-      development: this.#development,
       runtime: this.runtime,
       scripts: this.#scriptNames(),
       title: this.#title,
