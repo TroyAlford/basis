@@ -1,4 +1,8 @@
 export type { APIRoute } from './types/APIRoute'
 export type { HealthOptions, HealthStatus } from './apis/health'
+export type { RouteContext } from './types/RouteContext'
+export { sseResponse } from './source/Sse'
+export type { SseChannel, SseHandler } from './types/SseChannel'
 export { Server } from './source/Server'
 export type { ServerOptions } from './source/Server'
+export type { Socket, SocketHandlers } from './types/Socket'

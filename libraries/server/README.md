@@ -19,6 +19,7 @@ new Server()
   .root(import.meta.dir)
   .assets('./assets')
   .main('./Application.tsx')
+  .title('My Application')
   .start({
     development: Bun.env.NODE_ENV !== 'production',
     hostname: Bun.env.HOST ?? '127.0.0.1',
@@ -28,8 +29,8 @@ new Server()
 ```
 
 `root` resolves relative entrypoint and asset paths, `assets` serves a static
-asset directory, and `main` registers the browser entrypoint compiled from
-source.
+asset directory, `main` registers the browser entrypoint compiled from source,
+and `title` sets the SPA document title.
 
 `start` options:
 
@@ -70,7 +71,7 @@ Development preserves the live workflow:
 
 - entrypoints are compiled from source and rebuilt on change;
 - a Chokidar watcher drives rebuilds;
-- a WebSocket broadcasts HMR notifications;
+- a WebSocket (served through the general `socket` facility) broadcasts HMR notifications;
 - React/ReactDOM stay external and are loaded as browser globals, proxied through
   the module route.
 
@@ -114,8 +115,66 @@ crashing, so command-center can observe and act on it.
 import { HttpVerb } from '@basis/utilities'
 
 const server = new Server()
-server.api([HttpVerb.Get], 'hello/:name', ({ name }) => new Response(`Hello, ${name}`))
+server.api([HttpVerb.Get], 'hello/:name', ({ name }, { logger, request }) => {
+  logger.info(`hello ${name}`)
+  return new Response(`Hello, ${name}`)
+})
 ```
 
 Templates match the route under `/api` (`/api/hello/world`) and, for root-level
-paths, the first path segment (so built-in `/health` and `/ping` resolve).
+paths, the first path segment (so built-in `/health` and `/ping` resolve). Every
+handler receives the request and the server's logger.
+
+## Server-sent events
+
+`sse` registers a GET-only event stream. Handlers publish named events and
+register teardown for client disconnect:
+
+```ts
+server.sse('events', (params, { logger }, channel) => {
+  const timer = setInterval(() => channel.send('snapshot', currentState()), 2_000)
+  channel.onClose(() => clearInterval(timer))
+})
+```
+
+The server owns the `text/event-stream` framing, proxy-friendly headers
+(`x-accel-buffering: no`), disconnect cleanup, and a bounded per-connection
+buffer: if a client stops reading, frames are dropped rather than queued without
+limit. `channel.send` returns `false` when a frame was dropped.
+
+## WebSockets
+
+`socket` registers a first-class WebSocket route. The server owns routing,
+upgrade negotiation, and lifecycle dispatch; HMR is implemented as an internal
+consumer of this same facility rather than a separate mechanism.
+
+```ts
+server.socket('room/:id', {
+  open: socket => socket.publish('joined', { id: socket.params.id }),
+  message: (socket, data) => socket.publish('echo', String(data)),
+  close: socket => console.log('left', socket.params.id),
+})
+```
+
+`Socket.publish(event, data)` writes the `{ event, data }` envelope that the
+`ServerSocket` client transport consumes; `send` writes a raw frame.
+
+## Static mounts
+
+`mount` serves an allow-listed folder under a URL prefix, with the server owning
+traversal protection, content type, and missing-file handling. This is the
+supported way to expose assets that must not pass through the bundler:
+
+```ts
+server.mount('/vendor', './node_modules', {
+  allow: ['@blueprintjs', 'normalize.css'],
+})
+```
+
+## Runtime context
+
+The server embeds immutable platform facts (`SERVICE_NAME`, `VERSION`,
+`GIT_SHA`) into the SPA shell it serves, so the browser boots the application
+runtime context without an extra fetch. On the client, `ApplicationBase` reads
+them via `readBasisRuntime()`; see the `@basis/react` runtime surface.
+

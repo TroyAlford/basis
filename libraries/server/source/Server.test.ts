@@ -356,3 +356,29 @@ describe('Server logging', () => {
     }
   })
 })
+
+describe('Server WebSocket routes', () => {
+  test('accepts upgrades on a registered route, including the internal HMR route', async () => {
+    const server = await startServer('production')
+
+    /*
+     * Connect from a native child process: the happy-dom test preload replaces
+     * `WebSocket` with a browser stand-in that does not perform a real upgrade.
+     */
+    const script = [
+      `const ws = new WebSocket('ws://127.0.0.1:${server.port}/hmr')`,
+      "ws.onopen = () => { console.log('connected'); ws.close(); process.exit(0) }",
+      "ws.onerror = () => { console.log('failed'); process.exit(1) }",
+      "setTimeout(() => { console.log('timeout'); process.exit(2) }, 5000)",
+    ].join('\n')
+
+    const proc = Bun.spawn([process.execPath, '-e', script], { stderr: 'pipe', stdout: 'pipe' })
+    const stdout = await new Response(proc.stdout).text()
+    const code = await proc.exited
+
+    expect(stdout).toContain('connected')
+    expect(code).toBe(0)
+
+    expect(await server.stop()).toBe(0)
+  })
+})

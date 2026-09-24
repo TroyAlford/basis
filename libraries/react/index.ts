@@ -47,6 +47,22 @@ export { TextAlign } from './types/TextAlign'
 
 export { css, style } from './utilities/style'
 
+export type {
+  ApplicationRuntime,
+  ServerEvent,
+  ServerEventsStatus,
+  SubscriptionDefinition,
+  SubscriptionTransport,
+} from './runtime'
+export {
+  BASIS_RUNTIME_ELEMENT_ID,
+  parseServerEvent,
+  readBasisRuntime,
+  ServerEvents,
+  ServerSocket,
+  ServerSubscriptions,
+} from './runtime'
+
 export { Circle } from './icons/parts/Circle'
 export { IconBase } from './icons/IconBase/IconBase'
 export type { IconProps } from './icons/IconBase/IconBase'
