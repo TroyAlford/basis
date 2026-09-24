@@ -37,8 +37,32 @@ source.
 | --- | --- | --- |
 | `development` | `NODE_ENV !== 'production'` | Select the live-development or managed-production workflow. |
 | `hostname` | `HOST`, then `127.0.0.1` | Interface to bind. |
+| `logger` | a standard Basis `Logger` | Sink for server/HMR lifecycle output. |
 | `port` | `PORT`, then `80` | Port to bind. `0` binds an ephemeral port. |
 | `version` | `VERSION`, then `development` | Release version reported by `/health`. |
+
+## Logging
+
+`Server` owns a standard Basis `Logger` and writes its lifecycle output through
+it: the `listening http://<host>:<port>` startup line, `stopping` on shutdown,
+build failures, and the development/HMR watcher messages. Applications do not
+need to construct or configure a logger; use the server's logger for
+application-specific messages:
+
+```ts
+const server = new Server().root(import.meta.dir).main('./Application.tsx')
+server.start()
+server.logger.info('background worker ready')
+```
+
+Records carry a UTC ISO-8601 timestamp (date and timezone), a level, and any
+automatic runtime context. The platform context (`SERVICE_NAME`, `VERSION`,
+`GIT_SHA`) is read from the environment, so a managed app is identified without
+per-app setup. Output stays colorized — including under PM2, whose ANSI styling
+command-center renders — and only the conventional `NO_COLOR` opt-out (or an
+explicit `logger: new Logger({ colors: false })`) disables it. Inject a custom
+`logger` to redirect or silence lifecycle output.
+
 
 ## Development mode
 

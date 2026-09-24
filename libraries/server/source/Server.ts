@@ -4,8 +4,8 @@ import * as path from 'node:path'
 import * as React from 'react'
 import { renderToString } from 'react-dom/server'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
-import type { URI } from '../../utilities'
-import { HttpVerb, parseTemplateURI, parseURI } from '../../utilities'
+import type { ILogger, URI } from '../../utilities'
+import { HttpVerb, Logger, parseTemplateURI, parseURI } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
@@ -23,6 +23,12 @@ export interface ServerOptions {
   development?: boolean,
   /** Interface to bind. Defaults to `HOST`, then `127.0.0.1`. */
   hostname?: string,
+  /**
+   * Log sink for server/HMR lifecycle output. Defaults to a standard Basis
+   * {@link Logger} carrying the platform context (`SERVICE_NAME`, `VERSION`,
+   * `GIT_SHA`) and colorized output. Inject one to customize or silence it.
+   */
+  logger?: ILogger,
   /** Port to bind. Defaults to `PORT`, then `80`. Use `0` for an ephemeral port. */
   port?: number,
   /**
@@ -44,8 +50,6 @@ export interface ServerOptions {
  * the installed dependency graph, serves the SPA and its assets, reports the
  * release version on `/health`, and shuts down gracefully on SIGINT/SIGTERM.
  */
-/* eslint-disable no-console */
-/* TODO: add a proper logger */
 export class Server {
   static BadRequest: Response = new Response(null, { status: 400, statusText: 'Bad Request' })
   static NotFound: Response = new Response(null, { status: 404, statusText: 'Not Found' })
@@ -55,6 +59,7 @@ export class Server {
   #builder: Builder | null = null
   #development = true
   #entrypoints: [string, string][] = []
+  #logger: ILogger = new Logger()
   #modules = new Map<string, string>()
   #ready: Promise<void> = Promise.resolve()
   #readyError: Error | null = null
@@ -91,6 +96,18 @@ export class Server {
    */
   get port(): number | undefined {
     return this.#server?.port
+  }
+
+  /**
+   * The logger the server uses for lifecycle output.
+   *
+   * Applications should log through this surface so their messages share the
+   * standard format, platform context, and colorized output. Inject a custom
+   * logger through {@link ServerOptions.logger} to redirect or silence it.
+   * @returns The server's logger.
+   */
+  get logger(): ILogger {
+    return this.#logger
   }
 
   /**
@@ -232,9 +249,14 @@ export class Server {
    * for example `0.6.1`) and `GIT_SHA` (the exact deployed checkout). This
    * server echoes `VERSION` on `/health`; `GIT_SHA` stays provenance supplied
    * by command-center.
+   *
+   * Lifecycle output (startup, shutdown, build failures, HMR) is written
+   * through the server's {@link Logger}, which picks up `SERVICE_NAME`,
+   * `VERSION`, and `GIT_SHA` automatically.
    * @param options - The options to start the server with.
    * @param options.development - Whether to run the development workflow.
    * @param options.hostname - The interface to bind.
+   * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
    * @param options.version - The release version reported by `/health`.
    * @returns The server.
@@ -242,14 +264,17 @@ export class Server {
   start = ({
     development = Bun.env.NODE_ENV !== 'production',
     hostname = Bun.env.HOST ?? '127.0.0.1',
+    logger,
     port = Number(Bun.env.PORT ?? 80),
     version = Bun.env.VERSION ?? 'development',
   }: ServerOptions = {}): Server => {
+    if (logger) this.#logger = logger
     this.#development = development
     this.#version = version
 
     const builder = new Builder({
       development,
+      logger: this.#logger,
       onRebuild: () => {
         this.#readyError = null
         this.#status = 'ok'
@@ -276,6 +301,7 @@ export class Server {
         const failure = error instanceof Error ? error : new Error(String(error))
         this.#readyError = failure
         this.#status = 'error'
+        this.#logger.error(`build failed: ${failure.message}`)
         throw failure
       })
     // Avoid an unhandled rejection when a caller never awaits `ready()`.
@@ -289,14 +315,14 @@ export class Server {
         port,
         websocket: {
           close: ws => {
-            console.log('[WS] Client disconnected')
+            this.#logger.info('[WS] Client disconnected')
             this.#websockets.delete(ws)
           },
           message: (ws, message) => {
-            console.log('[WS] Received message:', message)
+            this.#logger.info('[WS] Received message:', String(message))
           },
           open: ws => {
-            console.log('[WS] Client connected')
+            this.#logger.info('[WS] Client connected')
             this.#websockets.add(ws)
           },
         },
@@ -313,6 +339,8 @@ export class Server {
     process.on('SIGINT', this.#handleSignal)
     process.on('SIGTERM', this.#handleSignal)
 
+    this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
+
     return this
   }
 
@@ -323,6 +351,8 @@ export class Server {
   stop = (): Server => {
     process.off('SIGINT', this.#handleSignal)
     process.off('SIGTERM', this.#handleSignal)
+
+    this.#logger.info('stopping')
 
     void this.#builder?.stop()
     this.#builder = null
@@ -401,7 +431,7 @@ export class Server {
   #broadcast(): void {
     if (!this.#development) return
 
-    console.log('[HMR] Rebuild complete')
+    this.#logger.info('[HMR] Rebuild complete')
     const message = JSON.stringify({ timestamp: Date.now(), type: 'hmr' })
     this.#websockets.forEach(ws => ws.send(message))
   }

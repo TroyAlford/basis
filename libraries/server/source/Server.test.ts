@@ -1,5 +1,7 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { join } from 'node:path'
+import type { ILogger } from '../../utilities'
+import { Logger } from '../../utilities'
 import { Builder } from './Builder'
 import { Server } from './Server'
 
@@ -257,5 +259,100 @@ describe('Builder', () => {
 
     await builder.stop()
     expect(builder.watching).toBe(false)
+  })
+})
+
+/**
+ * Build a logger that records every message instead of writing to the console.
+ * @returns The recording logger and the messages it captured.
+ */
+function createRecordingLogger(): { readonly logger: ILogger, readonly messages: string[] } {
+  const messages: string[] = []
+  const logger: ILogger = {
+    error: (...values: string[]) => { messages.push(`error ${values.join(' ')}`) },
+    info: (...values: string[]) => { messages.push(`info ${values.join(' ')}`) },
+    stopwatchSplit: () => 0,
+    stopwatchStart: () => Symbol('stopwatch'),
+    stopwatchStop: () => 0,
+    warn: (...values: string[]) => { messages.push(`warn ${values.join(' ')}`) },
+  }
+  return { logger, messages }
+}
+
+/**
+ * Restore environment variables that a test overwrote.
+ * @param previous - The values captured before the test ran.
+ */
+function restoreEnv(previous: Readonly<Record<string, string | undefined>>): void {
+  for (const key of Object.keys(previous)) {
+    const value = previous[key]
+    if (value === undefined) Reflect.deleteProperty(process.env, key)
+    else process.env[key] = value
+  }
+}
+
+describe('Server logging', () => {
+  test('constructs a standard Basis Logger and exposes it', () => {
+    const server = new Server()
+
+    expect(server.logger).toBeInstanceOf(Logger)
+  })
+
+  test('routes startup and shutdown through the injected logger', () => {
+    const { logger, messages } = createRecordingLogger()
+    const server = new Server()
+      .root(fixtureRoot)
+      .main('./Application.tsx')
+      .start({ development: false, hostname: '127.0.0.1', logger, port: 0, version: 'test-version' })
+
+    try {
+      expect(messages.some(message => message.includes('listening http://'))).toBe(true)
+    } finally {
+      server.stop()
+    }
+
+    expect(messages.some(message => message.includes('stopping'))).toBe(true)
+  })
+
+  test('does not write lifecycle output through raw console when a logger is injected', () => {
+    const { logger } = createRecordingLogger()
+    const logged = spyOn(console, 'log').mockImplementation(() => undefined)
+    const server = new Server()
+      .root(fixtureRoot)
+      .main('./Application.tsx')
+      .start({ development: false, hostname: '127.0.0.1', logger, port: 0, version: 'test-version' })
+
+    try {
+      expect(logged).not.toHaveBeenCalled()
+    } finally {
+      server.stop()
+      logged.mockRestore()
+    }
+  })
+
+  test('attaches SERVICE_NAME, VERSION, and GIT_SHA to the default logger', () => {
+    const previous = {
+      GIT_SHA: process.env.GIT_SHA,
+      SERVICE_NAME: process.env.SERVICE_NAME,
+      VERSION: process.env.VERSION,
+    }
+    process.env.SERVICE_NAME = 'mtg-proxifier'
+    process.env.VERSION = '1.2.3'
+    process.env.GIT_SHA = 'abc123'
+
+    const captures: string[] = []
+    const logged = spyOn(console, 'log').mockImplementation((...values: unknown[]) => {
+      captures.push(values.map(String).join(' '))
+    })
+
+    try {
+      const server = new Server()
+      server.logger.info('hello')
+
+      expect(captures.join('\n')).toContain('[mtg-proxifier 1.2.3 abc123]')
+    } finally {
+      logged.mockRestore()
+      restoreEnv(previous)
+    }
   })
 })

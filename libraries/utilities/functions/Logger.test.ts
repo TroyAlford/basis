@@ -48,6 +48,88 @@ describe('Logger', () => {
     expect(Logger.DEFAULT_OPTIONS).toEqual({ prefix: '' })
   })
 
+  test('emits a UTC ISO-8601 timestamp, level, and message', () => {
+    const logger = new Logger({ colors: false })
+
+    logger.info('hello')
+
+    const [timestamp, level, ...rest] = captures[0]
+    expect(stripAnsi(String(timestamp))).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+    expect(stripAnsi(String(level))).toContain('INFO')
+    expect(rest.join(' ')).toContain('hello')
+  })
+
+  test('attaches explicit runtime context', () => {
+    const logger = new Logger({
+      colors: false,
+      context: { gitSha: 'abc123', service: 'mtg-proxifier', version: '1.2.3' },
+    })
+
+    logger.info('hello')
+
+    expect(captures[0].join(' ')).toContain('[mtg-proxifier 1.2.3 abc123]')
+  })
+
+  test('reads SERVICE_NAME, VERSION, and GIT_SHA from the environment by default', () => {
+    const previous = {
+      GIT_SHA: process.env.GIT_SHA,
+      SERVICE_NAME: process.env.SERVICE_NAME,
+      VERSION: process.env.VERSION,
+    }
+    process.env.SERVICE_NAME = 'command-center'
+    process.env.VERSION = '9.9.9'
+    process.env.GIT_SHA = 'deadbeef'
+
+    try {
+      new Logger({ colors: false }).info('hello')
+
+      expect(captures[0].join(' ')).toContain('[command-center 9.9.9 deadbeef]')
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) Reflect.deleteProperty(process.env, key)
+        else process.env[key] = value
+      }
+    }
+  })
+
+  test('colorizes output by default and honors an explicit opt-out', () => {
+    new Logger({ colors: true }).info('colored')
+
+    expect(captures[0].join(' ')).toContain('\u001b[')
+
+    captures = []
+    new Logger({ colors: false }).info('plain')
+
+    expect(captures[0].join(' ')).not.toContain('\u001b[')
+  })
+
+  test('honors the conventional NO_COLOR opt-out', () => {
+    const previous = process.env.NO_COLOR
+    process.env.NO_COLOR = '1'
+
+    try {
+      new Logger().info('plain')
+
+      expect(captures[0].join(' ')).not.toContain('\u001b[')
+    } finally {
+      if (previous === undefined) delete process.env.NO_COLOR
+      else process.env.NO_COLOR = previous
+    }
+  })
+
+  test('keeps color available when NO_COLOR is unset, even without a TTY', () => {
+    const previous = process.env.NO_COLOR
+    delete process.env.NO_COLOR
+
+    try {
+      new Logger().info('colored under pm2')
+
+      expect(captures[0].join(' ')).toContain('\u001b[')
+    } finally {
+      if (previous !== undefined) process.env.NO_COLOR = previous
+    }
+  })
+
   test('logs info, warn, and error with severity headers', () => {
     const logger = new Logger()
 

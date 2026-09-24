@@ -2,6 +2,8 @@ import type { BuildArtifact, BunPlugin } from 'bun'
 import type { FSWatcher } from 'chokidar'
 import * as path from 'node:path'
 import { pluginGlobals, pluginSASS } from '../../bun-plugins'
+import type { ILogger } from '../../utilities'
+import { Logger } from '../../utilities'
 import { transformJsxDev } from './utilities/transformJsxDev'
 
 /** A build output. */
@@ -36,6 +38,8 @@ interface BuilderOptions {
    * `false`, dependencies are bundled from the installed graph.
    */
   development?: boolean,
+  /** Log sink for build/HMR lifecycle output; defaults to a standard logger. */
+  logger?: ILogger,
   /** The callback to call when the build is rebuilt. */
   onRebuild?: (outputs: BuildOutput[]) => void | Promise<void>,
   /** The root directory of the project. */
@@ -45,12 +49,11 @@ interface BuilderOptions {
 }
 
 /** A builder for compiling React code from source. */
-/* eslint-disable no-console */
-/* TODO: add a proper logger */
 export class Builder {
   #build: Promise<BuildOutput[]> = Promise.resolve([])
   #development: boolean
   #entrypoints: [string, string][] = []
+  #logger: ILogger
   #onRebuild: BuilderOptions['onRebuild']
   #root: string
   #watch: boolean
@@ -58,11 +61,13 @@ export class Builder {
 
   constructor({
     development = true,
+    logger,
     onRebuild,
     root = process.cwd(),
     watch = true,
   }: BuilderOptions = {}) {
     this.#development = development
+    this.#logger = logger ?? new Logger()
     this.#onRebuild = onRebuild
     this.#root = root
     this.#watch = watch
@@ -112,9 +117,9 @@ export class Builder {
       clearTimeout(rebuildTimeout)
 
       rebuildTimeout = setTimeout(() => {
-        console.log(`[HMR] File changed: ${changedPath}`)
+        this.#logger.info(`[HMR] File changed: ${changedPath}`)
         this.rebuild().catch((error: unknown) => {
-          console.error('[HMR] Rebuild failed:', error)
+          this.#logger.error('[HMR] Rebuild failed:', String(error))
         })
         rebuildTimeout = null
       }, 100)
@@ -124,7 +129,7 @@ export class Builder {
       .on('change', handleChange)
       .on('add', handleChange)
       .on('error', error => {
-        console.error('[HMR] Watcher error:', error)
+        this.#logger.error('[HMR] Watcher error:', String(error))
       })
   }
 
@@ -186,7 +191,7 @@ export class Builder {
       return outputs
     }).catch((error: unknown) => {
       // Surface build failures to callers instead of resolving with no output.
-      console.error('[basis] build failed:', error)
+      this.#logger.error('[basis] build failed:', String(error))
       throw buildError(error)
     })
 
