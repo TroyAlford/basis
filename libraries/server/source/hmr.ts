@@ -1,7 +1,8 @@
 /* eslint-disable no-console */
 if (typeof window !== 'undefined') {
   const connectWebSocket = () => {
-    const ws = new WebSocket(`ws://${window.location.host}`)
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${protocol}//${window.location.host}/hmr`)
 
     ws.onmessage = async event => {
       const data = JSON.parse(event.data)

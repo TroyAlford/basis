@@ -4,13 +4,21 @@ import * as path from 'node:path'
 import * as React from 'react'
 import { renderToString } from 'react-dom/server'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
-import type { URI } from '../../utilities'
-import { HttpVerb, parseTemplateURI, parseURI } from '../../utilities'
+import type { BasisRuntime, ILogger, URI } from '../../utilities'
+import { HttpVerb, Logger, parseTemplateURI, parseURI } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
 import type { APIRoute } from '../types/APIRoute'
+import type { RouteContext } from '../types/RouteContext'
+import type { Socket, SocketHandlers } from '../types/Socket'
+import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
+import type { SocketData } from './Sockets'
+import { createSocket, normalizeSocketTemplate } from './Sockets'
+import { sseResponse } from './Sse'
+import type { StaticMount } from './StaticMount'
+import { normalizeMountPrefix, serveMount } from './StaticMount'
 
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
@@ -23,14 +31,20 @@ export interface ServerOptions {
   development?: boolean,
   /** Interface to bind. Defaults to `HOST`, then `127.0.0.1`. */
   hostname?: string,
+  /**
+   * Log sink for server/HMR lifecycle output. Defaults to a standard Basis
+   * {@link Logger} carrying the platform context (`SERVICE_NAME`, `VERSION`,
+   * `GIT_SHA`) and colorized output. Inject one to customize or silence it.
+   */
+  logger?: ILogger,
   /** Port to bind. Defaults to `PORT`, then `80`. Use `0` for an ephemeral port. */
   port?: number,
   /**
-   * Release version reported by `/health`. Defaults to `VERSION`, then
-   * `development`. Alforge supplies this as the authoritative release version
-   * from the strict semver release tag (for example `0.6.1`); the exact
-   * deployed checkout is a separate `GIT_SHA`, and `package.json.version` is
-   * never the source.
+   * Release version reported by `/health` and embedded as runtime context.
+   * Defaults to `VERSION`, then `development`. Alforge supplies this as the
+   * authoritative release version from the strict semver release tag (for
+   * example `0.6.1`); the exact deployed checkout is a separate `GIT_SHA`, and
+   * `package.json.version` is never the source.
    */
   version?: string,
 }
@@ -43,9 +57,11 @@ export interface ServerOptions {
  * file-watch, HMR, and module-proxy workflow. Production builds once, bundles
  * the installed dependency graph, serves the SPA and its assets, reports the
  * release version on `/health`, and shuts down gracefully on SIGINT/SIGTERM.
+ *
+ * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
+ * (`socket`), and static-mount (`mount`) facilities. HMR is implemented as an
+ * internal consumer of the same WebSocket facility, not a separate mechanism.
  */
-/* eslint-disable no-console */
-/* TODO: add a proper logger */
 export class Server {
   static BadRequest: Response = new Response(null, { status: 400, statusText: 'Bad Request' })
   static NotFound: Response = new Response(null, { status: 404, statusText: 'Not Found' })
@@ -55,18 +71,35 @@ export class Server {
   #builder: Builder | null = null
   #development = true
   #entrypoints: [string, string][] = []
+  #hmrClients = new Set<Socket>()
+  #logger: ILogger = new Logger()
   #modules = new Map<string, string>()
+  #mounts: StaticMount[] = []
   #ready: Promise<void> = Promise.resolve()
   #readyError: Error | null = null
   #root: string = process.cwd()
-  #server: BunServer<undefined> | null = null
+  #server: BunServer<SocketData> | null = null
+  #sockets = new Map<string, SocketHandlers>()
+  #sse = new Map<string, SseHandler>()
   #status: HealthStatus = 'starting'
+  #title = 'Document'
   #version = 'development'
-  #websockets = new Set<ServerWebSocket>()
 
   constructor() {
     this.api([HttpVerb.Get], 'health', () => this.#health())
     this.api([HttpVerb.Get], 'ping', ping)
+    /*
+     * HMR is an internal consumer of the general WebSocket facility: it is just
+     * a socket route whose connections the server broadcasts to on rebuild.
+     */
+    this.socket('hmr', {
+      close: socket => {
+        this.#hmrClients.delete(socket)
+      },
+      open: socket => {
+        this.#hmrClients.add(socket)
+      },
+    })
   }
 
   /**
@@ -86,11 +119,37 @@ export class Server {
   }
 
   /**
+   * The logger the server uses for lifecycle output.
+   *
+   * Applications should log through this surface so their messages share the
+   * standard format, platform context, and colorized output. Inject a custom
+   * logger through {@link ServerOptions.logger} to redirect or silence it.
+   * @returns The server's logger.
+   */
+  get logger(): ILogger {
+    return this.#logger
+  }
+
+  /**
    * The bound port.
    * @returns The bound port, or `undefined` before starting.
    */
   get port(): number | undefined {
     return this.#server?.port
+  }
+
+  /**
+   * Immutable runtime facts embedded into the SPA shell for the client
+   * application context. `SERVICE_NAME`, `VERSION`, and `GIT_SHA` are read from
+   * the platform environment; unknown values are `null`.
+   * @returns The runtime facts.
+   */
+  get runtime(): BasisRuntime {
+    return {
+      gitSha: nonEmpty(Bun.env.GIT_SHA),
+      serviceName: nonEmpty(Bun.env.SERVICE_NAME),
+      version: this.#version === 'development' ? nonEmpty(Bun.env.VERSION) : this.#version,
+    }
   }
 
   /**
@@ -110,24 +169,62 @@ export class Server {
    * segment at the root, so conventional endpoints such as `/health` and
    * `/api/health` both resolve.
    * @param uri - The URI to handle.
-   * @param method - The HTTP method to handle.
+   * @param request - The incoming request.
    * @returns The API response, or `null` when no template matches.
    */
-  async handleAPI(uri: URI, method: string): Promise<Response | null> {
-    const targets = uri.type === 'api'
-      ? [uri.route]
-      : uri.route ? [] : [uri.type]
+  async handleAPI(uri: URI, request: Request): Promise<Response | null> {
+    const context: RouteContext = { logger: this.#logger, request }
 
-    for (const target of targets) {
+    for (const target of this.#targets(uri)) {
       if (!target) continue
 
       for (const [template, { handler, verbs }] of this.#apis.entries()) {
-        if (!verbs.has(method as HttpVerb)) continue
+        if (!verbs.has(request.method as HttpVerb)) continue
 
         const params = parseTemplateURI(target, template)
         if (!params) continue
 
-        return handler(params)
+        return await handler(params, context)
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * Handles a request against the registered static mounts.
+   * @param uri - The URI to handle.
+   * @returns The mounted response, or `null` when no mount claims the path.
+   */
+  async handleMount(uri: URI): Promise<Response | null> {
+    for (const mount of this.#mounts) {
+      const response = await serveMount(mount, uri.path)
+      if (response !== null) return response
+    }
+    return null
+  }
+
+  /**
+   * Processes an SSE request (GET only).
+   * @param uri - The URI to handle.
+   * @param request - The incoming request.
+   * @returns The event-stream response, a `405`, or `null` when no template matches.
+   */
+  async handleSse(uri: URI, request: Request): Promise<Response | null> {
+    for (const target of this.#targets(uri)) {
+      if (!target) continue
+
+      for (const [template, handler] of this.#sse.entries()) {
+        const params = parseTemplateURI(target, template)
+        if (!params) continue
+        if (request.method !== 'GET') {
+          return new Response(null, {
+            headers: { allow: 'GET' },
+            status: 405,
+            statusText: 'Method Not Allowed',
+          })
+        }
+        return sseResponse(params, { logger: this.#logger, request }, handler)
       }
     }
 
@@ -220,7 +317,9 @@ export class Server {
   async handleUI(): Promise<Response> {
     const html = await renderToString(React.createElement(IndexHTML, {
       development: this.#development,
+      runtime: this.runtime,
       scripts: this.#scriptNames(),
+      title: this.#title,
     }))
     return new Response(html, { headers: { 'Content-Type': 'text/html' } })
   }
@@ -230,11 +329,16 @@ export class Server {
    *
    * Managed deployments inject `VERSION` (the authoritative release version,
    * for example `0.6.1`) and `GIT_SHA` (the exact deployed checkout). This
-   * server echoes `VERSION` on `/health`; `GIT_SHA` stays provenance supplied
-   * by command-center.
+   * server echoes `VERSION` on `/health` and embeds all three platform facts
+   * into the SPA shell as client runtime context.
+   *
+   * Lifecycle output (startup, shutdown, build failures, HMR) is written
+   * through the server's {@link Logger}, which picks up `SERVICE_NAME`,
+   * `VERSION`, and `GIT_SHA` automatically.
    * @param options - The options to start the server with.
    * @param options.development - Whether to run the development workflow.
    * @param options.hostname - The interface to bind.
+   * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
    * @param options.version - The release version reported by `/health`.
    * @returns The server.
@@ -242,14 +346,17 @@ export class Server {
   start = ({
     development = Bun.env.NODE_ENV !== 'production',
     hostname = Bun.env.HOST ?? '127.0.0.1',
+    logger,
     port = Number(Bun.env.PORT ?? 80),
     version = Bun.env.VERSION ?? 'development',
   }: ServerOptions = {}): Server => {
+    if (logger) this.#logger = logger
     this.#development = development
     this.#version = version
 
     const builder = new Builder({
       development,
+      logger: this.#logger,
       onRebuild: () => {
         this.#readyError = null
         this.#status = 'ok'
@@ -276,42 +383,36 @@ export class Server {
         const failure = error instanceof Error ? error : new Error(String(error))
         this.#readyError = failure
         this.#status = 'error'
+        this.#logger.error(`build failed: ${failure.message}`)
         throw failure
       })
     // Avoid an unhandled rejection when a caller never awaits `ready()`.
     void this.#ready.catch(() => undefined)
 
-    if (development) {
-      this.#server = Bun.serve({
-        development,
-        fetch: this.#handleRequest,
-        hostname,
-        port,
-        websocket: {
-          close: ws => {
-            console.log('[WS] Client disconnected')
-            this.#websockets.delete(ws)
-          },
-          message: (ws, message) => {
-            console.log('[WS] Received message:', message)
-          },
-          open: ws => {
-            console.log('[WS] Client connected')
-            this.#websockets.add(ws)
-          },
+    this.#server = Bun.serve({
+      development,
+      fetch: this.#handleRequest,
+      hostname,
+      port,
+      websocket: {
+        close: (ws, code, reason) => {
+          this.#sockets.get(ws.data.route)?.close?.(this.#socketFor(ws), code, reason)
         },
-      })
-    } else {
-      this.#server = Bun.serve({
-        development,
-        fetch: this.#handleRequest,
-        hostname,
-        port,
-      })
-    }
+        message: (ws, message) => {
+          this.#sockets.get(ws.data.route)?.message?.(this.#socketFor(ws), message)
+        },
+        open: ws => {
+          const socket = createSocket(ws)
+          ws.data.socket = socket
+          this.#sockets.get(ws.data.route)?.open?.(socket)
+        },
+      },
+    })
 
     process.on('SIGINT', this.#handleSignal)
     process.on('SIGTERM', this.#handleSignal)
+
+    this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
 
     return this
   }
@@ -323,6 +424,10 @@ export class Server {
   stop = (): Server => {
     process.off('SIGINT', this.#handleSignal)
     process.off('SIGTERM', this.#handleSignal)
+
+    this.#logger.info('stopping')
+
+    this.#hmrClients.clear()
 
     void this.#builder?.stop()
     this.#builder = null
@@ -360,6 +465,16 @@ export class Server {
     return this
   }
 
+  /**
+   * Sets the SPA document title.
+   * @param title - The document title.
+   * @returns The server.
+   */
+  title(title: string): Server {
+    this.#title = title
+    return this
+  }
+
   #checkPath(absolutePath: string): void {
     if (!fs.existsSync(absolutePath)) {
       throw new Error(`Path "${absolutePath}" does not exist`)
@@ -376,9 +491,60 @@ export class Server {
   api<Params extends object = object>(
     verbs: HttpVerb[],
     template: string,
-    handler: (params: Params) => Response,
+    handler: (params: Params, context: RouteContext) => Response | Promise<Response>,
   ): Server {
     this.#apis.set(template, { handler, verbs: new Set(verbs) })
+    return this
+  }
+
+  /**
+   * Adds a GET-only Server-Sent Events route.
+   *
+   * The handler receives a bounded {@link SseChannel}; it may return a disposer
+   * that runs when the client disconnects.
+   * @param template - The template URI to handle.
+   * @param handler - The SSE handler.
+   * @returns The server.
+   */
+  sse<Params extends object = object>(template: string, handler: SseHandler<Params>): Server {
+    this.#sse.set(template, handler)
+    return this
+  }
+
+  /**
+   * Adds a first-class WebSocket route.
+   * @param template - The path template to upgrade, for example `hmr` or `/room/:id`.
+   * @param handlers - Lifecycle handlers for connected clients.
+   * @returns The server.
+   */
+  socket(template: string, handlers: SocketHandlers): Server {
+    this.#sockets.set(template, handlers)
+    return this
+  }
+
+  /**
+   * Serves an allow-listed folder under a URL prefix.
+   *
+   * The server owns traversal protection, allow-list enforcement, content type,
+   * and missing-file handling, so a consumer can expose a directory (for
+   * example legacy vendor assets) without a bespoke route.
+   * @param prefix - URL prefix to mount, for example `/vendor`.
+   * @param folder - Folder to serve, absolute or relative to the server root.
+   * @param options - Optional allow-list of top-level entries beneath the mount.
+   * @param options.allow - Top-level files/folders permitted; all when omitted.
+   * @returns The server.
+   */
+  mount(prefix: string, folder: string, options: { allow?: readonly string[] } = {}): Server {
+    const absolute = path.isAbsolute(folder) ? folder : path.join(this.#root, folder)
+    if (!fs.existsSync(absolute)) {
+      throw new Error(`Mount folder "${absolute}" does not exist`)
+    }
+
+    this.#mounts.push({
+      allow: options.allow ?? null,
+      folder: absolute,
+      prefix: normalizeMountPrefix(prefix),
+    })
     return this
   }
 
@@ -401,9 +567,9 @@ export class Server {
   #broadcast(): void {
     if (!this.#development) return
 
-    console.log('[HMR] Rebuild complete')
+    this.#logger.info('[HMR] Rebuild complete')
     const message = JSON.stringify({ timestamp: Date.now(), type: 'hmr' })
-    this.#websockets.forEach(ws => ws.send(message))
+    for (const socket of this.#hmrClients) socket.send(message)
   }
 
   /**
@@ -424,9 +590,16 @@ export class Server {
    * @returns The response, or `undefined` when a WebSocket upgrade is handled.
    */
   #handleRequest = async (request: Request): Promise<Response | undefined> => {
-    // WebSocket upgrades back the development HMR client only.
-    if (this.#development && request.headers.get('upgrade') === 'websocket') {
-      const upgraded = this.#server?.upgrade(request)
+    // Every WebSocket upgrade is dispatched to a registered socket route.
+    if (request.headers.get('upgrade') === 'websocket') {
+      const uri = parseURI(request.url)
+      const match = this.#matchSocket(uri.path)
+      if (match === null) {
+        return new Response('WebSocket route not found', { status: 404 })
+      }
+      const upgraded = this.#server?.upgrade(request, {
+        data: { params: match.params, route: match.route, socket: null },
+      })
       if (!upgraded) {
         return new Response('WebSocket upgrade failed', { status: 400 })
       }
@@ -435,8 +608,14 @@ export class Server {
 
     const uri = parseURI(request.url)
 
-    const api = await this.handleAPI(uri, request.method)
+    const sse = await this.handleSse(uri, request)
+    if (sse) return sse
+
+    const api = await this.handleAPI(uri, request)
     if (api) return api
+
+    const mounted = await this.handleMount(uri)
+    if (mounted) return mounted
 
     switch (uri.type) {
       case 'api': return Server.BadRequest
@@ -445,6 +624,42 @@ export class Server {
       case 'scripts': return this.handleScripts(uri)
       default: return this.handleUI()
     }
+  }
+
+  /**
+   * Find the socket route matching a request pathname.
+   * @param pathname - The request pathname.
+   * @returns The matched handlers, params, and template, or `null`.
+   */
+  #matchSocket(pathname: string): {
+    readonly handlers: SocketHandlers,
+    readonly params: Record<string, string>,
+    readonly route: string,
+  } | null {
+    for (const [template, handlers] of this.#sockets.entries()) {
+      const params = parseTemplateURI(pathname, normalizeSocketTemplate(template))
+      if (params) return { handlers, params, route: template }
+    }
+    return null
+  }
+
+  /**
+   * Resolve the socket view for a connection, reusing the one built on open.
+   * @param ws - The raw Bun socket.
+   * @returns The Basis socket view.
+   */
+  #socketFor(ws: ServerWebSocket<SocketData>): Socket {
+    return ws.data.socket ?? createSocket(ws)
+  }
+
+  /**
+   * The route targets a URI can match, matching the API convention: the route
+   * under `/api`, or the first path segment at the root.
+   * @param uri - The parsed URI.
+   * @returns Candidate template targets.
+   */
+  #targets(uri: URI): string[] {
+    return uri.type === 'api' ? [uri.route] : uri.route ? [] : [uri.type]
   }
 
   /** Handles process shutdown signals by stopping and exiting cleanly. */
@@ -462,4 +677,15 @@ export class Server {
     if (this.#development) names.push('hmr.js')
     return names
   }
+}
+
+/**
+ * Normalize an optional environment value.
+ * @param value - Raw environment value.
+ * @returns The trimmed value, or `null` when effectively unset.
+ */
+function nonEmpty(value: string | undefined): string | null {
+  if (value === undefined) return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }

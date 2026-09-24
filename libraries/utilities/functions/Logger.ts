@@ -1,8 +1,26 @@
 /* eslint-disable no-console */
-import chalk from 'chalk'
+import type { ChalkInstance } from 'chalk'
+import { Chalk } from 'chalk'
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { LOG_COLORS } from '../constants/LogColors'
+
+/**
+ * Automatic runtime context attached to every log record.
+ *
+ * The platform supplies these values as the environment variables
+ * `SERVICE_NAME`, `VERSION`, and `GIT_SHA`. They are read automatically when
+ * present so an application gets identified logs without any per-app setup;
+ * explicit values passed to the logger take precedence.
+ */
+export interface LoggerContext {
+  /** Observed deployed checkout revision (`GIT_SHA`). */
+  gitSha?: string,
+  /** Service identity, conventionally the repository name (`SERVICE_NAME`). */
+  service?: string,
+  /** Authoritative release version (`VERSION`). */
+  version?: string,
+}
 
 /** Interface for basic logging functionality. */
 export interface ILogger {
@@ -37,7 +55,7 @@ export interface ILogger {
    * Stops a stopwatch and optionally logs the duration.
    * @param stopwatch - Stopwatch identifier to stop.
    * @param description - Optional description to include in the log.
-   * @returns Duration in milliseconds, or `NaN` if the stopwatch is not found.
+   * @returns Current duration in milliseconds, or `NaN` if the stopwatch is not found.
    */
   stopwatchStop: (stopwatch: symbol, description?: string) => number,
 
@@ -50,6 +68,18 @@ export interface ILogger {
 
 /** Logger configuration options. */
 export interface LoggerOptions {
+  /**
+   * Whether to emit ANSI color. Defaults to `true` whenever the conventional
+   * `NO_COLOR` opt-out is not set, so color survives non-interactive sinks such
+   * as PM2's log files (command-center renders their ANSI styling). Set `false`
+   * to force plain output, or leave unset to respect `NO_COLOR`/`FORCE_COLOR`.
+   */
+  colors?: boolean,
+  /**
+   * Runtime context attached to every record. Values not supplied here fall
+   * back to the platform environment (`SERVICE_NAME`, `VERSION`, `GIT_SHA`).
+   */
+  context?: LoggerContext,
   /**
    * When set, each log line is also appended to this UTF-8 file (the same content as the console
    * line, including any ANSI escapes emitted by chalk and callers). The parent directory is created
@@ -75,13 +105,6 @@ enum Severity {
   Warn = 'WARN',
 }
 
-/** Styled header formats for different severity levels. */
-const HEADERS = {
-  ERROR: chalk.bgRed(chalk.black(' ERROR ')),
-  INFO: chalk.hex(LOG_COLORS.info)('INFO'),
-  WARN: chalk.bgYellow(chalk.black(' WARN ')),
-}
-
 /** Timer tracking information. */
 interface Stopwatch {
   /** Start time of the timer. */
@@ -89,11 +112,57 @@ interface Stopwatch {
 }
 
 /**
- * Logger implementation with timestamp and severity formatting.
+ * Resolve the ANSI color level for a logger.
  *
- * Supports an optional message prefix, silent mode, an optional bounded file sink, and stopwatch
- * helpers. The logger writes to the console; callers that need scoped output can derive a prefixed
- * view with {@link Logger.withPrefix}.
+ * `NO_COLOR` always wins, per the conventional opt-out. Otherwise color stays
+ * available: an interactive terminal keeps chalk's detected depth, while a
+ * non-interactive sink (a pipe, a file, or PM2) gets basic 16-color output
+ * rather than none, because those logs are rendered by command-center.
+ * @returns The color support level (`0` disables color).
+ */
+function resolveColorLevel(): 0 | 1 | 2 | 3 {
+  const env = typeof Bun === 'undefined' ? process.env : Bun.env
+  const noColor = env.NO_COLOR
+  if (typeof noColor === 'string' && noColor.length > 0) return 0
+
+  const force = env.FORCE_COLOR
+  if (typeof force === 'string') {
+    if (force === '0' || force === 'false') return 0
+    const level = Number(force)
+    if (Number.isInteger(level) && level >= 0 && level <= 3) return level as 0 | 1 | 2 | 3
+    return 1
+  }
+
+  const interactive = typeof process.stdout?.isTTY === 'boolean' && process.stdout.isTTY
+  if (interactive) {
+    // The default instance has already detected the terminal's depth.
+    const detected = new Chalk().level
+    return detected > 0 ? detected : 1
+  }
+  // Keep color available under PM2 and other non-interactive sinks.
+  return 1
+}
+
+/**
+ * Read the platform runtime context from the environment.
+ * @returns The context fields the environment provides.
+ */
+function contextFromEnvironment(): LoggerContext {
+  const env = typeof Bun === 'undefined' ? process.env : Bun.env
+  const context: LoggerContext = {}
+  if (typeof env.SERVICE_NAME === 'string' && env.SERVICE_NAME.length > 0) context.service = env.SERVICE_NAME
+  if (typeof env.VERSION === 'string' && env.VERSION.length > 0) context.version = env.VERSION
+  if (typeof env.GIT_SHA === 'string' && env.GIT_SHA.length > 0) context.gitSha = env.GIT_SHA
+  return context
+}
+
+/**
+ * Logger implementation with a UTC ISO-8601 timestamp, severity, and automatic
+ * service context.
+ *
+ * Supports an optional message prefix, silent mode, an optional bounded file
+ * sink, and stopwatch helpers. The logger writes to the console; callers that
+ * need scoped output can derive a prefixed view with {@link Logger.withPrefix}.
  */
 export class Logger implements ILogger {
   /** Default configuration options for the logger. */
@@ -103,10 +172,16 @@ export class Logger implements ILogger {
 
   /** Number of lines appended since the last trim check. */
   private appendCount = 0
+  /** Resolved runtime context attached to every record. */
+  private readonly context: LoggerContext
+  /** Palette configured for the resolved color level. */
+  private readonly palette: ChalkInstance
   /** Logger configuration options. */
   private options: LoggerOptions
   /** Active timers mapped by symbol. */
   private stopwatches = new Map<symbol, Stopwatch>()
+  /** Severity headers styled for the resolved color level. */
+  private readonly headers: Record<Severity, string>
 
   /**
    * Creates a new Logger instance.
@@ -114,20 +189,37 @@ export class Logger implements ILogger {
    */
   constructor(options: LoggerOptions = {}) {
     this.options = { ...Logger.DEFAULT_OPTIONS, ...options }
+    this.context = { ...contextFromEnvironment(), ...options.context }
+
+    const level = options.colors === true
+      ? (resolveColorLevel() || 1)
+      : options.colors === false ? 0 : resolveColorLevel()
+    this.palette = new Chalk({ level })
+    this.headers = {
+      [Severity.Error]: this.palette.bgRed(this.palette.black(' ERROR ')),
+      [Severity.Info]: this.palette.hex(LOG_COLORS.info)('INFO'),
+      [Severity.Warn]: this.palette.bgYellow(this.palette.black(' WARN ')),
+    }
   }
 
   /**
-   * Current timestamp in `HH:MM:SS.mmm` format.
+   * Current timestamp as a UTC ISO-8601 instant, including date and timezone
+   * (for example `2026-09-24T12:34:56.789Z`).
    * @returns The formatted timestamp.
    */
   get timestamp(): string {
-    const now = new Date()
-    const HMS = [now.getHours(), now.getMinutes(), now.getSeconds()]
-      .map(value => value.toString().padStart(2, '0'))
-      .join(':')
-    const MS = now.getMilliseconds().toString().padStart(3, '0')
+    return new Date().toISOString()
+  }
 
-    return `${HMS}.${MS}`
+  /**
+   * Render the service context segment for a record.
+   * @returns The bracketed context, or an empty string when no context is set.
+   */
+  private formatContext(): string {
+    const tokens = [this.context.service, this.context.version, this.context.gitSha]
+      .filter((token): token is string => typeof token === 'string' && token.length > 0)
+    if (tokens.length === 0) return ''
+    return this.palette.gray(`[${tokens.join(' ')}]`)
   }
 
   /**
@@ -157,8 +249,9 @@ export class Logger implements ILogger {
     if (this.options.silent) return
     const parts = [
       this.options.prefix,
-      chalk.hex(LOG_COLORS.yellow)(this.timestamp),
-      HEADERS[severity],
+      this.palette.hex(LOG_COLORS.yellow)(this.timestamp),
+      this.headers[severity],
+      this.formatContext(),
       ...messages,
     ].filter(Boolean)
     console.log(...parts)
@@ -212,7 +305,7 @@ export class Logger implements ILogger {
 
   /**
    * Logs a warning message.
-   * @param messages - Messages to log at warning level.
+   * @param messages - Messages to log at warn level.
    */
   warn = (...messages: string[]): void => { this.log(Severity.Warn, ...messages) }
 
@@ -274,7 +367,7 @@ export class Logger implements ILogger {
    * Stops a stopwatch and optionally logs the duration.
    * @param stopwatch - Stopwatch identifier to stop.
    * @param description - Optional description to include in the log.
-   * @returns Duration in milliseconds, or `NaN` if the stopwatch is not found.
+   * @returns Current duration in milliseconds, or `NaN` if the stopwatch is not found.
    */
   stopwatchStop(stopwatch: symbol, description?: string): number {
     const stopwatchData = this.stopwatches.get(stopwatch)

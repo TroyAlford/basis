@@ -3,7 +3,8 @@ import { Server } from '@basis/server'
 /*
  * Managed-application fixture. `MODE=production` selects the managed runtime;
  * any other value runs the development workflow. `PORT=0` binds an ephemeral
- * port and the resolved address is printed for the test harness.
+ * port and the server logs the resolved `listening http://<host>:<port>` line
+ * through the Basis Logger for the test harness.
  */
 
 /*
@@ -18,7 +19,7 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   return realFetch(input, init)
 }) as typeof fetch
 
-const server = new Server()
+new Server()
   .root(import.meta.dir)
   .assets('./assets')
   .main(Bun.env.ENTRY ?? './Application.tsx')
@@ -29,4 +30,7 @@ const server = new Server()
     version: Bun.env.VERSION ?? 'development',
   })
 
-process.stdout.write(`listening http://${server.hostname}:${server.port}\n`)
+/*
+ * The server logs its own `listening http://<host>:<port>` line on startup
+ * through the Basis Logger; the fixture adds nothing.
+ */
