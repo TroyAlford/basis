@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { sseResponse } from '../../server/source/Sse'
+import { Logger } from '../../utilities'
 import type { ServerEvent } from './ServerEvent'
 import { parseServerEvent } from './ServerEvent'
 import { ServerEvents } from './ServerEvents'
@@ -173,5 +175,37 @@ describe('ServerSubscriptions', () => {
     manager.closeAll()
     expect(FakeEventSource.instances[0].closed).toBe(true)
     expect(FakeWebSocket.instances[0].closed).toBe(true)
+  })
+})
+
+describe('SSE framing integration', () => {
+  test('a real server SSE frame reaches the client transport as a named event', async () => {
+    /*
+     * The server-side frame and the client-side parser are exercised together:
+     * the raw frame produced by `channel.send` is fed verbatim to `ServerEvents`.
+     * Hand-authoring the frame here would let the two formats drift again.
+     */
+    const response = sseResponse(
+      {},
+      {
+        logger: new Logger({ colors: false, silent: true }),
+        request: { signal: new AbortController().signal } as unknown as Request,
+      },
+      (_params, _context, channel) => {
+        channel.send('snapshot', { ok: true })
+        channel.close()
+      },
+    )
+    const frame = await response.text()
+    expect(frame.startsWith('data: ')).toBe(true)
+
+    const received: ServerEvent[] = []
+    const events = new ServerEvents('/events')
+    events.subscribe(event => received.push(event))
+    const source = FakeEventSource.instances[FakeEventSource.instances.length - 1]
+    source.open()
+    source.emit(frame.replace(/^data: /, '').replace(/\n\n$/, ''))
+
+    expect(received).toEqual([{ data: { ok: true }, event: 'snapshot' }])
   })
 })

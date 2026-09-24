@@ -73,7 +73,13 @@ export function sseResponse<Params extends object>(
       if (closed || controller === null) return false
       if (controller.desiredSize !== null && controller.desiredSize <= 0) return false
       try {
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+        /*
+         * Emit an ordinary message frame whose payload is the shared
+         * `{ event, data }` envelope. `EventSource.onmessage` receives every
+         * frame, so dynamic event names work without pre-registering browser
+         * listeners (there is no named-event wildcard).
+         */
+        controller.enqueue(encoder.encode(`data: ${eventEnvelope(event, data)}\n\n`))
         return true
       } catch {
         finish()
@@ -111,6 +117,10 @@ export function sseResponse<Params extends object>(
 /**
  * Serialize one server-published event into the `{ event, data }` envelope
  * shared by the SSE and WebSocket transports.
+ *
+ * SSE writes it as the payload of an ordinary `data:` frame so the client's
+ * `onmessage` handler receives every event regardless of its name; WebSocket
+ * writes the same JSON as a text frame.
  * @param event - Event name.
  * @param data - JSON-serializable payload.
  * @returns The serialized envelope.

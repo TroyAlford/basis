@@ -37,7 +37,8 @@ describe('sseResponse', () => {
 
     const reader = response.body?.getReader()
     const first = await reader?.read()
-    expect(new TextDecoder().decode(first?.value)).toBe('event: snapshot\ndata: {"ok":true}\n\n')
+    expect(new TextDecoder().decode(first?.value))
+      .toBe('data: {"data":{"ok":true},"event":"snapshot"}\n\n')
 
     controller.abort()
     await Bun.sleep(0)
@@ -61,7 +62,7 @@ describe('sseResponse', () => {
     expect(accepted.value).toBe(16)
 
     const text = await response.text()
-    expect(text.match(/event: tick/g) ?? []).toHaveLength(16)
+    expect(text.match(/"event":"tick"/g) ?? []).toHaveLength(16)
   })
 
   test('runs every teardown exactly once', () => {
