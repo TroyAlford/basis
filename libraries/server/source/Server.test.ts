@@ -210,6 +210,42 @@ describe('Server development mode', () => {
   })
 })
 
+describe('Server SSE idle streams', () => {
+  test('keeps an idle SSE stream open beyond the server idle timeout', async () => {
+    const server = await startServer('production', { IDLE_TIMEOUT: '1' })
+    const base = `http://127.0.0.1:${server.port}`
+    await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
+
+    const response = await Bun.fetch(`${base}/idle`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/event-stream')
+
+    const reader = response.body?.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    const readUntil = async (needle: string): Promise<boolean> => {
+      const deadline = Date.now() + 5_000
+      while (!text.includes(needle) && Date.now() < deadline) {
+        const { done, value } = await reader?.read() ?? { done: true, value: undefined }
+        if (done) break
+        if (value) text += decoder.decode(value)
+      }
+      return text.includes(needle)
+    }
+
+    expect(await readUntil('"event":"ready"')).toBe(true)
+    /*
+     * The server idle timeout is 1s and the next frame is at 2.5s: without the
+     * per-request `server.timeout(request, 0)` Bun closes the stream mid-idle
+     * and this frame never arrives.
+     */
+    expect(await readUntil('"event":"pong"')).toBe(true)
+
+    await reader?.cancel()
+    expect(await server.stop()).toBe(0)
+  }, 15_000)
+})
+
 describe('Server readiness', () => {
   test('ready resolves once the initial build succeeds', async () => {
     const server = new Server()

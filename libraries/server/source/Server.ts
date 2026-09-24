@@ -33,6 +33,12 @@ export interface ServerOptions {
   /** Interface to bind. Defaults to `HOST`, then `127.0.0.1`. */
   hostname?: string,
   /**
+   * HTTP idle timeout in seconds passed to `Bun.serve` (maximum 255; `0`
+   * disables it globally). SSE responses always opt out per request, so this
+   * only affects other requests; leave unset for Bun's default.
+   */
+  idleTimeout?: number,
+  /**
    * Log sink for server/HMR lifecycle output. Defaults to a standard Basis
    * {@link Logger} carrying the platform context (`SERVICE_NAME`, `VERSION`,
    * `GIT_SHA`) and colorized output. Inject one to customize or silence it.
@@ -340,6 +346,7 @@ export class Server {
    * @param options - The options to start the server with.
    * @param options.development - Whether to run the development workflow.
    * @param options.hostname - The interface to bind.
+   * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
    * @param options.version - The release version reported by `/health`.
@@ -348,6 +355,7 @@ export class Server {
   start = ({
     development = Bun.env.NODE_ENV !== 'production',
     hostname = Bun.env.HOST ?? '127.0.0.1',
+    idleTimeout,
     logger,
     port = Number(Bun.env.PORT ?? 80),
     version = Bun.env.VERSION ?? 'development',
@@ -395,6 +403,7 @@ export class Server {
       development,
       fetch: this.#handleRequest,
       hostname,
+      ...(idleTimeout === undefined ? {} : { idleTimeout }),
       port,
       websocket: {
         close: (ws, code, reason) => {
@@ -611,7 +620,18 @@ export class Server {
     const uri = parseURI(request.url)
 
     const sse = await this.handleSse(uri, request)
-    if (sse) return sse
+    if (sse) {
+      /*
+       * An SSE stream may be quiet for a long time between events. Bun's HTTP
+       * idle timeout would otherwise close it and `EventSource` would
+       * reconnect, so opt this request out of the timeout. This is scoped to
+       * the SSE request and leaves the global timeout untouched.
+       */
+      if (sse.headers.get('content-type')?.includes('text/event-stream')) {
+        this.#server?.timeout(request, 0)
+      }
+      return sse
+    }
 
     const api = await this.handleAPI(uri, request)
     if (api) return api
