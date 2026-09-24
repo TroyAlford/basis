@@ -72,8 +72,9 @@ Development preserves the live workflow:
 - entrypoints are compiled from source and rebuilt on change;
 - a Chokidar watcher drives rebuilds;
 - a WebSocket (served through the general `socket` facility) broadcasts HMR notifications;
-- React/ReactDOM stay external and are loaded as browser globals, proxied through
-  the module route.
+- dependencies (including React) are bundled, so no CDN is required; the
+  `/modules` proxy route remains available for explicit module requests but is
+  not used by the default build.
 
 ## Production mode
 
@@ -81,7 +82,8 @@ Production is deterministic and self-contained:
 
 - the application builds once at startup, bundling the installed dependency
   graph, so no third-party CDN is required;
-- file watching, HMR, and the module proxy are not started;
+- file watching, HMR, and the development module proxy are not started
+  (production bundles every dependency, including React);
 - the SPA shell is served for unmatched paths, alongside configured assets;
 - `SIGINT`/`SIGTERM` stop the server and exit cleanly, suitable for PM2.
 

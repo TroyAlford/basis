@@ -35,7 +35,6 @@ style('basis:table', css`
       
       th, td {
         height: var(--basis-table-row-height);
-        vertical-align: middle;
         &[data-pin="${Pin.Left}"], &[data-pin="${Pin.Right}"] {
           background-color: inherit;
         }
