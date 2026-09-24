@@ -401,7 +401,7 @@ export class Server {
 
     this.#server = Bun.serve({
       development,
-      fetch: this.#handleRequest,
+      fetch: this.handle,
       hostname,
       ...(idleTimeout === undefined ? {} : { idleTimeout }),
       port,
@@ -596,11 +596,22 @@ export class Server {
   }
 
   /**
+   * Keep a long-lived SSE response alive past the HTTP idle timeout.
+   *
+   * Overridable so a host (or a test) can observe or adjust the transport
+   * contract; the default disables the idle timeout for this request only.
+   * @param request - The SSE request whose stream should not idle out.
+   */
+  protected keepSseStreamAlive(request: Request): void {
+    this.#server?.timeout(request, 0)
+  }
+
+  /**
    * Handles an incoming request across both modes.
    * @param request - The incoming request.
    * @returns The response, or `undefined` when a WebSocket upgrade is handled.
    */
-  #handleRequest = async (request: Request): Promise<Response | undefined> => {
+  handle = async (request: Request): Promise<Response | undefined> => {
     // Every WebSocket upgrade is dispatched to a registered socket route.
     if (request.headers.get('upgrade') === 'websocket') {
       const uri = parseURI(request.url)
@@ -628,7 +639,7 @@ export class Server {
        * the SSE request and leaves the global timeout untouched.
        */
       if (sse.headers.get('content-type')?.includes('text/event-stream')) {
-        this.#server?.timeout(request, 0)
+        this.keepSseStreamAlive(request)
       }
       return sse
     }

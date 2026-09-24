@@ -211,7 +211,38 @@ describe('Server development mode', () => {
 })
 
 describe('Server SSE idle streams', () => {
-  test('keeps an idle SSE stream open beyond the server idle timeout', async () => {
+  test('opts every SSE response out of the HTTP idle timeout per request', async () => {
+    class RecordingServer extends Server {
+      readonly keepAlives: number[] = []
+      protected override keepSseStreamAlive(request: Request): void {
+        this.keepAlives.push(0)
+        super.keepSseStreamAlive(request)
+      }
+    }
+
+    const server = new RecordingServer()
+    server.sse('events', (_params, _context, channel) => {
+      channel.send('ready', {})
+    })
+
+    /*
+     * Drive the router directly; this asserts the SSE path opts out and that a
+     * non-SSE path does not, independent of the Bun runtime's timeout behavior.
+     */
+    await server.handle(new Request('http://localhost/events'))
+    expect(server.keepAlives).toEqual([0])
+
+    await server.handle(new Request('http://localhost/health'))
+    expect(server.keepAlives).toEqual([0])
+  })
+
+  test('delivers a later event on a stream idle past the server idle timeout', async () => {
+    /*
+     * Integration/compatibility test: verifies the final behavior on a runtime
+     * that enforces idleTimeout. On Bun 1.4.2 a quiet ReadableStream response is
+     * not closed by idleTimeout, so this does not by itself demonstrate the
+     * timeout contract; the per-request opt-out test above does.
+     */
     const server = await startServer('production', { IDLE_TIMEOUT: '1' })
     const base = `http://127.0.0.1:${server.port}`
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
@@ -234,11 +265,7 @@ describe('Server SSE idle streams', () => {
     }
 
     expect(await readUntil('"event":"ready"')).toBe(true)
-    /*
-     * The server idle timeout is 1s and the next frame is at 2.5s: without the
-     * per-request `server.timeout(request, 0)` Bun closes the stream mid-idle
-     * and this frame never arrives.
-     */
+    // The stream is idle from 0s to 2.5s while the server idleTimeout is 1s.
     expect(await readUntil('"event":"pong"')).toBe(true)
 
     await reader?.cancel()
