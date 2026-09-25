@@ -70,7 +70,8 @@ explicit `logger: new Logger({ colors: false })`) disables it. Inject a custom
 Development preserves the live workflow:
 
 - entrypoints are compiled from source and rebuilt on change;
-- a Chokidar watcher drives rebuilds;
+- a Chokidar watcher drives rebuilds for source, style, and bundled asset
+  (image/font) changes;
 - a WebSocket (served through the general `socket` facility) broadcasts HMR notifications;
 - dependencies (including React) are bundled, so no CDN is required; the
   `/modules` proxy route remains available for explicit module requests but is
@@ -86,6 +87,28 @@ Production is deterministic and self-contained:
   (production bundles every dependency, including React);
 - the SPA shell is served for unmatched paths, alongside configured assets;
 - `SIGINT`/`SIGTERM` stop the server and exit cleanly, suitable for PM2.
+
+### Bundled assets
+
+The SPA shell loads entrypoints as classic `<script defer>` tags, so they are
+compiled as IIFEs (`format: 'iife'`). An entrypoint may export bindings without
+leaving an `export{…}` statement in the served bundle — which would be a syntax
+error — and module-local names never leak onto `window`.
+
+Imported non-JS assets (images, fonts, …) are emitted as separate build outputs
+and served under the same `/scripts/<file>` route as the entrypoints. The bundle
+references them by an absolute `/scripts/...` URL, so `import icon from
+'./icon.png'` works with no extra configuration:
+
+```ts
+import icon from './icon.png'
+
+new Server().root(import.meta.dir).main('./Application.tsx').start()
+// the bundle references /scripts/icon-<hash>.png; the server serves it
+```
+
+`server.assets(...)` remains the way to serve a fixed directory of runtime assets
+outside the bundler; `server.mount(...)` does the same with an allow-list.
 
 ## Readiness and health
 

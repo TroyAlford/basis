@@ -300,20 +300,25 @@ export class Server {
   }
 
   /**
-   * Handles a script request.
+   * Handles a request for a compiled build output.
+   *
+   * The route serves every output the builder produces, not only entrypoints:
+   * bundler-emitted assets (images, fonts) and sourcemaps are addressed by the
+   * same `/scripts/<file>` base the bundle embeds (see `Builder`'s `publicPath`).
+   * Byte output is returned as-is, so binary assets are not corrupted.
    * @param uri - The URI to handle.
-   * @returns The script response.
+   * @returns The output response.
    */
   async handleScripts(uri: URI): Promise<Response> {
     if (!this.#builder) return Server.NotFound
 
     // A failed build rejects the output promise; serve nothing rather than 500.
     const built = await this.#builder.getOutputs().catch(() => [])
-    const script = built.find(s => s.name === uri.route)
-    if (!script) return Server.NotFound
+    const output = built.find(s => s.name === uri.route)
+    if (!output) return Server.NotFound
 
-    return new Response(await script.output.text(), {
-      headers: { 'Content-Type': script.output.type },
+    return new Response(await output.output.arrayBuffer(), {
+      headers: { 'Content-Type': output.output.type },
       status: 200,
       statusText: 'OK',
     })
