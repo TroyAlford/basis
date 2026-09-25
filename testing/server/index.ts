@@ -23,9 +23,15 @@ new Server()
   .root(import.meta.dir)
   .assets('./assets')
   .main(Bun.env.ENTRY ?? './Application.tsx')
+  // A quiet SSE route used to prove idle streams survive the HTTP idle timeout.
+  .sse('idle', (_params, _context, channel) => {
+    channel.send('ready', {})
+    setTimeout(() => channel.send('pong', {}), 2_500)
+  })
   .start({
     development: Bun.env.MODE !== 'production',
     hostname: Bun.env.HOST ?? '127.0.0.1',
+    idleTimeout: Bun.env.IDLE_TIMEOUT === undefined ? undefined : Number(Bun.env.IDLE_TIMEOUT),
     port: Number(Bun.env.PORT ?? 0),
     version: Bun.env.VERSION ?? 'development',
   })

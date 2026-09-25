@@ -210,6 +210,69 @@ describe('Server development mode', () => {
   })
 })
 
+describe('Server SSE idle streams', () => {
+  test('opts every SSE response out of the HTTP idle timeout per request', async () => {
+    class RecordingServer extends Server {
+      readonly keepAlives: number[] = []
+      protected override keepSseStreamAlive(request: Request): void {
+        this.keepAlives.push(0)
+        super.keepSseStreamAlive(request)
+      }
+    }
+
+    const server = new RecordingServer()
+    server.sse('events', (_params, _context, channel) => {
+      channel.send('ready', {})
+    })
+
+    /*
+     * Drive the router directly; this asserts the SSE path opts out and that a
+     * non-SSE path does not, independent of the Bun runtime's timeout behavior.
+     */
+    await server.handle(new Request('http://localhost/events'))
+    expect(server.keepAlives).toEqual([0])
+
+    await server.handle(new Request('http://localhost/health'))
+    expect(server.keepAlives).toEqual([0])
+  })
+
+  test('delivers a later event on a stream idle past the server idle timeout', async () => {
+    /*
+     * Integration/compatibility test: verifies the final behavior on a runtime
+     * that enforces idleTimeout. On Bun 1.4.2 a quiet ReadableStream response is
+     * not closed by idleTimeout, so this does not by itself demonstrate the
+     * timeout contract; the per-request opt-out test above does.
+     */
+    const server = await startServer('production', { IDLE_TIMEOUT: '1' })
+    const base = `http://127.0.0.1:${server.port}`
+    await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
+
+    const response = await Bun.fetch(`${base}/idle`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/event-stream')
+
+    const reader = response.body?.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    const readUntil = async (needle: string): Promise<boolean> => {
+      const deadline = Date.now() + 5_000
+      while (!text.includes(needle) && Date.now() < deadline) {
+        const { done, value } = await reader?.read() ?? { done: true, value: undefined }
+        if (done) break
+        if (value) text += decoder.decode(value)
+      }
+      return text.includes(needle)
+    }
+
+    expect(await readUntil('"event":"ready"')).toBe(true)
+    // The stream is idle from 0s to 2.5s while the server idleTimeout is 1s.
+    expect(await readUntil('"event":"pong"')).toBe(true)
+
+    await reader?.cancel()
+    expect(await server.stop()).toBe(0)
+  }, 15_000)
+})
+
 describe('Server readiness', () => {
   test('ready resolves once the initial build succeeds', async () => {
     const server = new Server()

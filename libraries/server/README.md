@@ -127,6 +127,13 @@ Templates match the route under `/api` (`/api/hello/world`) and, for root-level
 paths, the first path segment (so built-in `/health` and `/ping` resolve). Every
 handler receives the request and the server's logger.
 
+## Embedding
+
+`server.handle(request)` dispatches one request through the same routing the
+server uses internally, for hosts that mount Basis Server inside another fetch
+handler. SSE responses are opted out of the HTTP idle timeout automatically, so
+idle streams stay open without changing the global timeout.
+
 ## Server-sent events
 
 `sse` registers a GET-only event stream. Handlers publish named events and
