@@ -87,6 +87,28 @@ Production is deterministic and self-contained:
 - the SPA shell is served for unmatched paths, alongside configured assets;
 - `SIGINT`/`SIGTERM` stop the server and exit cleanly, suitable for PM2.
 
+### Bundled assets
+
+The SPA shell loads entrypoints as classic `<script defer>` tags, so they are
+compiled as IIFEs (`format: 'iife'`). An entrypoint may export bindings without
+leaving an `export{…}` statement in the served bundle — which would be a syntax
+error — and module-local names never leak onto `window`.
+
+Imported non-JS assets (images, fonts, …) are emitted as separate build outputs
+and served under the same `/scripts/<file>` route as the entrypoints. The bundle
+references them by an absolute `/scripts/...` URL, so `import icon from
+'./icon.png'` works with no extra configuration:
+
+```ts
+import icon from './icon.png'
+
+new Server().root(import.meta.dir).main('./Application.tsx').start()
+// the bundle references /scripts/icon-<hash>.png; the server serves it
+```
+
+`server.assets(...)` remains the way to serve a fixed directory of runtime assets
+outside the bundler; `server.mount(...)` does the same with an allow-list.
+
 ## Readiness and health
 
 `/health` (also `/api/health`) is the managed-application readiness contract. It

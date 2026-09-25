@@ -156,10 +156,24 @@ export class Builder {
        * readable output and keeps the watcher.
        */
       external: [],
+      /*
+       * The SPA shell loads entrypoints as classic `<script defer>` tags, so the
+       * bundle must be classic-script compatible. `iife` guarantees that even
+       * when an entrypoint exports a binding (the default `esm` format would end
+       * with `export{…}`, a syntax error in a classic script) and keeps every
+       * module-local name off `window`.
+       */
+      format: 'iife',
       minify: development
         ? { identifiers: false, syntax: true, whitespace: true }
         : true,
       plugins,
+      /*
+       * Imported assets (images, fonts, …) are emitted as separate files. Reference
+       * them at the absolute `/scripts/` base so the URLs the bundle embeds resolve
+       * to the same route `handleScripts` serves them from.
+       */
+      publicPath: '/scripts/',
       sourcemap: 'external',
     }).then(async build => {
       if (!build.success) {
@@ -167,12 +181,24 @@ export class Builder {
         throw new Error(details.length > 0 ? details : 'Build failed')
       }
 
-      const outputs = build.outputs
-        .filter(o => o.kind === 'entry-point')
-        .map<BuildOutput>((output, index) => ({
-          name: this.#entrypoints[index][0],
+      /*
+       * Entrypoints keep their logical route name (`index.js`, `hmr.js`); every
+       * other output — bundler-emitted assets and sourcemaps — is served under
+       * its own file name. Bun lists entry-point outputs first, in entrypoint
+       * order.
+       */
+      const entries = build.outputs.filter(output => output.kind === 'entry-point')
+      const extras = build.outputs.filter(output => output.kind !== 'entry-point')
+      const outputs = [
+        ...entries.map<BuildOutput>((output, index) => ({
+          name: this.#entrypoints[index]?.[0] ?? path.basename(output.path),
           output,
-        }))
+        })),
+        ...extras.map<BuildOutput>(output => ({
+          name: path.basename(output.path),
+          output,
+        })),
+      ]
 
       await this.#onRebuild?.(outputs)
       return outputs

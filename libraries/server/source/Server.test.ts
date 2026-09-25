@@ -165,12 +165,46 @@ describe('Server production mode', () => {
     const script = await Bun.fetch(`${base}/scripts/index.js`)
     expect(script.status).toBe(200)
     expect(script.headers.get('content-type')).toContain('javascript')
-    expect(await script.text()).toContain('Basis managed server')
+
+    /*
+     * The shell loads entrypoints as classic `<script defer>` tags, and
+     * `Application.tsx` exports a binding. The served bundle must therefore be
+     * classic-script compatible: no top-level ESM statements, and it must
+     * compile as a script (an IIFE; issue #154).
+     */
+    const scriptCode = await script.text()
+    expect(scriptCode).toContain('Basis managed server')
+    expect(scriptCode).not.toMatch(/^\s*(?:export|import)\b/m)
+    expect(() => new Function(scriptCode)).not.toThrow()
 
     expect((await Bun.fetch(`${base}/assets/favicon.svg`)).status).toBe(200)
 
     // The development CDN proxy is not part of the production path.
     expect((await Bun.fetch(`${base}/modules/react@19.3.0/umd/react.development.js`)).status).toBe(404)
+
+    expect(await server.stop()).toBe(0)
+  })
+
+  test('serves bundler-emitted assets referenced by the bundle', async () => {
+    const server = await startServer('production', { ENTRY: './WithAsset.tsx' })
+    const base = `http://127.0.0.1:${server.port}`
+
+    await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
+
+    /*
+     * The bundle references its emitted asset by an absolute `/scripts/...` URL
+     * (Builder's `publicPath`); that same route must serve the bytes (issue #155).
+     */
+    const code = await Bun.fetch(`${base}/scripts/index.js`).then(response => response.text())
+    const assetUrl = code.match(/\/scripts\/[A-Za-z0-9._-]+\.png/)?.[0]
+    if (!assetUrl) throw new Error('the bundle did not reference an emitted asset')
+
+    const asset = await Bun.fetch(`${base}${assetUrl}`)
+    expect(asset.status).toBe(200)
+    expect(asset.headers.get('content-type')).toContain('image/png')
+    expect(new Uint8Array(await asset.arrayBuffer())).toEqual(
+      new Uint8Array(await Bun.file(join(fixtureRoot, 'pixel.png')).arrayBuffer()),
+    )
 
     expect(await server.stop()).toBe(0)
   })
@@ -308,7 +342,11 @@ describe('Builder', () => {
 
     const outputs = await builder.initialBuild()
     expect(builder.watching).toBe(false)
-    expect(outputs).toHaveLength(1)
+    /*
+     * `index.js` is the logical route name; the run also emits a sourcemap, so
+     * assert the entrypoint is present rather than a total count.
+     */
+    expect(outputs.map(output => output.name)).toContain('index.js')
 
     await builder.stop()
   })
