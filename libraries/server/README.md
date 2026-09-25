@@ -70,7 +70,8 @@ explicit `logger: new Logger({ colors: false })`) disables it. Inject a custom
 Development preserves the live workflow:
 
 - entrypoints are compiled from source and rebuilt on change;
-- a Chokidar watcher drives rebuilds;
+- a Chokidar watcher drives rebuilds for source, style, and bundled asset
+  (image/font) changes;
 - a WebSocket (served through the general `socket` facility) broadcasts HMR notifications;
 - dependencies (including React) are bundled, so no CDN is required; the
   `/modules` proxy route remains available for explicit module requests but is

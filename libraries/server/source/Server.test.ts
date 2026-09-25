@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ILogger } from '../../utilities'
 import { Logger } from '../../utilities'
@@ -361,6 +363,61 @@ describe('Builder', () => {
     await builder.stop()
     expect(builder.watching).toBe(false)
   })
+})
+
+describe('Builder file watching', () => {
+  test('rebuilds when an imported asset changes in development', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'basis-asset-watch-'))
+
+    try {
+      await Bun.write(join(dir, 'pixel.png'), await Bun.file(join(fixtureRoot, 'pixel.png')).arrayBuffer())
+      await Bun.write(
+        join(dir, 'entry.ts'),
+        "import pixel from './pixel.png'\n;(globalThis as { __pixel?: string }).__pixel = pixel\n",
+      )
+
+      let rebuilds = 0
+      const builder = new Builder({
+        development: true,
+        onRebuild: () => { rebuilds += 1 },
+        root: dir,
+        watch: true,
+      })
+
+      try {
+        await builder.add('index.js', './entry.ts')
+        const initial = await builder.initialBuild()
+        const before = initial.find(output => output.output.kind === 'asset')
+        if (!before) throw new Error('the initial build emitted no asset')
+        const beforeBytes = new Uint8Array(await before.output.arrayBuffer())
+
+        /*
+         * The changed file is an imported asset, not TS/JS, but it is a bundle
+         * input: the watcher must rebuild and emit the new bytes.
+         */
+        rebuilds = 0
+        await Bun.write(join(dir, 'pixel.png'), new Uint8Array([...beforeBytes, 0]))
+
+        const deadline = Date.now() + 15_000
+        let changed = false
+        while (!changed && Date.now() < deadline) {
+          const outputs = await builder.getOutputs()
+          const asset = outputs.find(output => output.output.kind === 'asset')
+          if (asset) {
+            changed = new Uint8Array(await asset.output.arrayBuffer()).length !== beforeBytes.length
+          }
+          if (!changed) await Bun.sleep(50)
+        }
+
+        expect(rebuilds).toBeGreaterThan(0)
+        expect(changed).toBe(true)
+      } finally {
+        await builder.stop()
+      }
+    } finally {
+      await rm(dir, { force: true, recursive: true })
+    }
+  }, 20_000)
 })
 
 /**
