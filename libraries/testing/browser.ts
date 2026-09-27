@@ -9,7 +9,20 @@ let browser: Browser | null = null
  */
 export async function getBrowser(): Promise<Browser> {
   if (!browser || !browser.isConnected()) {
-    browser = await chromium.launch()
+    browser = await chromium.launch({
+      /*
+       * Deterministic rasterisation: grayscale anti-aliasing, no font hinting
+       * or subpixel positioning, and portable Skia paths, so the same markup
+       * renders identically across machines and architectures.
+       */
+      args: [
+        '--disable-lcd-text',
+        '--disable-font-subpixel-positioning',
+        '--disable-skia-runtime-opts',
+        '--font-render-hinting=none',
+        '--force-color-profile=srgb',
+      ],
+    })
   }
   return browser
 }
@@ -22,24 +35,32 @@ export async function closeBrowser(): Promise<void> {
   browser = null
 }
 
-/** Options for {@link newPage}. */
+/** A viewport size. */
+export interface Viewport {
+  /** Viewport height in pixels. */
+  height: number,
+  /** Viewport width in pixels. */
+  width: number,
+}
+
+/** Options for {@link withPage}. */
 export interface PageOptions {
   /** Additional Playwright context options, merged over the deterministic defaults. */
   context?: BrowserContextOptions,
   /** Viewport size. Defaults to `1280x800`. */
-  viewport?: { height: number, width: number },
+  viewport?: Viewport,
 }
 
 /**
- * Open a page with deterministic defaults suitable for screenshots.
- *
- * Animations are disabled at capture time by the matcher; the context fixes the
- * viewport, device scale factor, colour scheme, and reduced motion so two runs
- * on the same platform render identically.
- * @param options - Page options.
- * @returns A new Playwright page.
+ * Open a deterministically configured page, run a callback, then tear it down.
+ * @param fn - Callback receiving the page.
+ * @param options - Context options.
+ * @returns The callback's result.
  */
-export async function newPage(options: PageOptions = {}): Promise<Page> {
+export async function withPage<T>(
+  fn: (page: Page) => Promise<T>,
+  options: PageOptions = {},
+): Promise<T> {
   const instance = await getBrowser()
   const context = await instance.newContext({
     colorScheme: 'light',
@@ -48,5 +69,9 @@ export async function newPage(options: PageOptions = {}): Promise<Page> {
     viewport: options.viewport ?? { height: 800, width: 1280 },
     ...options.context,
   })
-  return context.newPage()
+  try {
+    return await fn(await context.newPage())
+  } finally {
+    await context.close()
+  }
 }

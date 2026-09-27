@@ -1,59 +1,27 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 import pixelmatch from 'pixelmatch'
 import { PNG } from 'pngjs'
 
 /**
- * Options controlling where a screenshot baseline lives and how it is compared.
+ * Fraction of differing pixels tolerated when no explicit budget is given.
+ *
+ * Absorbs anti-aliasing noise between machines (for example arm64 vs x64 text
+ * rendering) without hiding meaningful visual changes.
  */
+export const DEFAULT_MAX_DIFF_PIXEL_RATIO = 0.001
+
+/** Absolute number of differing pixels tolerated when no explicit budget is given. */
+export const DEFAULT_MAX_DIFF_PIXELS = 10
+
+/** Options controlling how a screenshot is compared with its snapshot. */
 export interface ScreenshotOptions {
-  /** Directory holding baselines and diff artifacts. Defaults to `<cwd>/__screenshots__`. */
-  dir?: string,
-  /** Maximum fraction of differing pixels allowed. When omitted, only the pixel budget applies. */
+  /** Maximum fraction of differing pixels allowed. Overrides the default tolerance. */
   maxDiffPixelRatio?: number,
-  /** Maximum number of differing pixels allowed. Defaults to `0`. */
+  /** Maximum number of differing pixels allowed. When omitted, only the ratio budget applies. */
   maxDiffPixels?: number,
   /** Colour-distance threshold forwarded to pixelmatch. Defaults to `0.2`. */
   threshold?: number,
-  /** Force-rewrite the baseline instead of comparing. Defaults to `UPDATE_SNAPSHOTS=1`. */
-  update?: boolean,
-}
-
-/** Platform + architecture key, so local and CI baselines never collide. */
-export const platformKey = `${process.platform}-${process.arch}`
-
-/**
- * Resolve the directory that holds baselines and artifacts.
- * @param options - Screenshot options.
- * @returns The absolute baseline directory.
- */
-export function screenshotDir(options: ScreenshotOptions = {}): string {
-  return options.dir ?? join(process.cwd(), '__screenshots__')
-}
-
-/**
- * Resolve the baseline path for a named screenshot.
- * @param name - Screenshot name, relative to the baseline directory.
- * @param options - Screenshot options.
- * @returns The absolute baseline PNG path.
- */
-export function screenshotPath(name: string, options: ScreenshotOptions = {}): string {
-  return join(screenshotDir(options), `${name}.${platformKey}.png`)
-}
-
-/**
- * Resolve the path of an on-failure artifact.
- * @param name - Screenshot name.
- * @param kind - Whether this is the actual or the diff image.
- * @param options - Screenshot options.
- * @returns The absolute artifact PNG path.
- */
-export function artifactPath(
-  name: string,
-  kind: 'actual' | 'diff',
-  options: ScreenshotOptions = {},
-): string {
-  return join(screenshotDir(options), `${name}.${platformKey}.${kind}.png`)
 }
 
 /**
@@ -75,7 +43,7 @@ export function writePng(path: string, png: PNG): void {
   writeFileSync(path, PNG.sync.write(png))
 }
 
-/** Outcome of comparing an actual screenshot against its baseline. */
+/** Outcome of comparing an actual screenshot against its snapshot. */
 export interface ScreenshotComparison {
   /** Image highlighting the differing pixels. */
   diff: PNG,
@@ -105,7 +73,7 @@ function pad(source: PNG, width: number, height: number): PNG {
 
 /**
  * Compare two decoded PNGs with pixelmatch.
- * @param expected - Baseline image.
+ * @param expected - Snapshot image.
  * @param actual - Captured image.
  * @param options - Comparison options.
  * @returns The comparison result, including the diff image.
@@ -128,8 +96,11 @@ export function comparePng(
   )
   const total = width * height
   const ratio = total === 0 ? 0 : diffPixels / total
-  const { maxDiffPixelRatio, maxDiffPixels = 0 } = options
-  const pass = diffPixels <= maxDiffPixels
+  const { maxDiffPixelRatio, maxDiffPixels } = options
+  const hasBudget = maxDiffPixels !== undefined || maxDiffPixelRatio !== undefined
+  const defaultBudget = Math.max(DEFAULT_MAX_DIFF_PIXELS, Math.ceil(total * DEFAULT_MAX_DIFF_PIXEL_RATIO))
+  const pass = (maxDiffPixels === undefined || diffPixels <= maxDiffPixels)
     && (maxDiffPixelRatio === undefined || ratio <= maxDiffPixelRatio)
+    && (hasBudget || diffPixels <= defaultBudget)
   return { diff, diffPixels, pass, ratio, total }
 }

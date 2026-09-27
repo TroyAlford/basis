@@ -28,17 +28,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
-      - run: bun test
-
-  visual-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/asdf-setup
       - name: Install Chromium
         run: bun ./node_modules/playwright/cli.js install --with-deps chromium
-      - name: Run visual tests
-        run: VISUAL=1 bun test libraries/testing
+      - run: bun test
+      - name: Upload snapshot artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: '**/__screenshots__/**'
+          if-no-files-found: ignore
 
   type-check:
     runs-on: ubuntu-latest
@@ -107,7 +106,6 @@ jobs:
     needs:
       - eslint
       - run-tests
-      - visual-tests
       - type-check
       - knip
       - consumer-install

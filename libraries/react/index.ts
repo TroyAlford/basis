@@ -27,7 +27,7 @@ export { Tag } from './components/Tag/Tag'
 export { TagsEditor } from './components/TagsEditor/TagsEditor'
 export { TextEditor } from './components/TextEditor/TextEditor'
 export { ToggleEditor } from './components/ToggleEditor/ToggleEditor'
-export { Theme } from './components/Theme/Theme'
+export { Theme, themeStyles } from './components/Theme/Theme'
 export { Tooltip } from './components/Tooltip/Tooltip'
 
 export { Accessible } from './mixins/Accessible'
@@ -45,7 +45,7 @@ export { SortBy } from './types/SortBy'
 export { SortDirection } from './types/SortDirection'
 export { TextAlign } from './types/TextAlign'
 
-export { css, style } from './utilities/style'
+export { css, style, styles } from './utilities/style'
 
 export type {
   ApplicationRuntime,

@@ -6,6 +6,8 @@
  * want to ensure styles are only injected once per component/module.
  */
 
+const injected = new Map<string, string>()
+
 /**
  * Creates or updates a style tag with the given ID and CSS content
  *
@@ -49,6 +51,8 @@
  * ```
  */
 export function style(id: string, cssString: string): void {
+  injected.set(id, cssString)
+
   if (typeof globalThis.document === 'undefined') return // support for SSR
   if (!document.head) return // wait for DOM to be ready
 
@@ -62,6 +66,17 @@ export function style(id: string, cssString: string): void {
   }
 
   styleElement.textContent = cssString
+}
+
+/**
+ * Every stylesheet registered through {@link style}, in registration order.
+ *
+ * Kept in memory so styles can be extracted even when no document exists (SSR)
+ * or the document is reset between tests.
+ * @returns The concatenated CSS.
+ */
+export function styles(): string {
+  return [...injected.values()].join('\n')
 }
 
 /**

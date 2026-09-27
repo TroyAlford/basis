@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
 import { join } from 'node:path'
+import { installChromium } from './browser'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
 
 /**
  * Trusted install hook that makes Basis-owned transitive patches effective in a
- * consuming project.
+ * consuming project, and downloads the Chromium browser that visual snapshot
+ * tests use.
  *
  * Bun applies `patchedDependencies` during install and only from the install
  * root, so a dependency cannot declare patches transitively. The hook instead
@@ -29,6 +31,10 @@ const main = (): void => {
     const message = error instanceof Error ? error.message : String(error)
     process.stderr.write(`[basis] failed to apply owned patches: ${message}\n`)
     process.exit(1)
+  }
+
+  if (!installChromium(basisDir)) {
+    process.stderr.write('[basis] visual snapshot tests need Chromium; install it to run them\n')
   }
 }
 

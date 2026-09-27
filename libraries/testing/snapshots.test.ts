@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { PNG } from 'pngjs'
-import { artifactPath, comparePng, platformKey, screenshotPath } from './snapshots'
+import { comparePng } from './snapshots'
 
 /**
  * Build a solid-colour PNG for comparison tests.
@@ -21,13 +21,6 @@ function solid(width: number, height: number, color: [number, number, number]): 
 }
 
 describe('testing/snapshots', () => {
-  test('keys baselines and artifacts by platform and architecture', () => {
-    expect(screenshotPath('a/b', { dir: '/tmp/x' })).toBe(`/tmp/x/a/b.${platformKey}.png`)
-    expect(artifactPath('a/b', 'diff', { dir: '/tmp/x' })).toBe(
-      `/tmp/x/a/b.${platformKey}.diff.png`,
-    )
-  })
-
   test('passes identical images', () => {
     const result = comparePng(solid(4, 4, [255, 0, 0]), solid(4, 4, [255, 0, 0]))
     expect(result.pass).toBe(true)
@@ -41,13 +34,24 @@ describe('testing/snapshots', () => {
     expect(result.ratio).toBe(1)
   })
 
-  test('tolerates differences within the configured budget', () => {
-    const expected = solid(4, 4, [255, 0, 0])
-    const actual = solid(4, 4, [255, 0, 0])
+  test('tolerates anti-aliasing noise by default', () => {
+    const expected = solid(100, 100, [255, 0, 0])
+    const actual = solid(100, 100, [255, 0, 0])
     actual.data[0] = 0
     actual.data[1] = 255
 
+    expect(comparePng(expected, actual).pass).toBe(true)
+  })
+
+  test('tolerates differences within the configured budget', () => {
+    const expected = solid(100, 100, [255, 0, 0])
+    const actual = solid(100, 100, [255, 0, 0])
+    for (let offset = 0; offset < 200; offset += 4) {
+      actual.data[offset] = 0
+      actual.data[offset + 1] = 255
+    }
+
     expect(comparePng(expected, actual).pass).toBe(false)
-    expect(comparePng(expected, actual, { maxDiffPixels: 1 }).pass).toBe(true)
+    expect(comparePng(expected, actual, { maxDiffPixels: 100 }).pass).toBe(true)
   })
 })
