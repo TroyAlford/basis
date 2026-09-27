@@ -124,6 +124,14 @@
         "react-dom": "^19.3.0",
       },
     },
+    "libraries/testing": {
+      "name": "@basis/testing",
+      "dependencies": {
+        "pixelmatch": "^7.2.0",
+        "playwright": "^1.63.0",
+        "pngjs": "^7.0.0",
+      },
+    },
     "libraries/utilities": {
       "name": "@basis/utilities",
       "dependencies": {
@@ -202,6 +210,8 @@
     "@basis/review": ["@basis/review@workspace:libraries/review"],
 
     "@basis/server": ["@basis/server@workspace:libraries/server"],
+
+    "@basis/testing": ["@basis/testing@workspace:libraries/testing"],
 
     "@basis/utilities": ["@basis/utilities@workspace:libraries/utilities"],
 
