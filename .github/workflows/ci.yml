@@ -30,6 +30,16 @@ jobs:
       - uses: ./.github/actions/asdf-setup
       - run: bun test
 
+  visual-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asdf-setup
+      - name: Install Chromium
+        run: bun ./node_modules/playwright/cli.js install --with-deps chromium
+      - name: Run visual tests
+        run: VISUAL=1 bun test libraries/testing
+
   type-check:
     runs-on: ubuntu-latest
     steps:
@@ -97,6 +107,7 @@ jobs:
     needs:
       - eslint
       - run-tests
+      - visual-tests
       - type-check
       - knip
       - consumer-install
