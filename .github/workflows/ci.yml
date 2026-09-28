@@ -28,7 +28,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
+      - name: Install Chromium
+        run: bun ./node_modules/playwright/cli.js install --with-deps chromium
       - run: bun test
+      - name: Upload snapshot artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: '**/__screenshots__/**'
+          if-no-files-found: ignore
 
   type-check:
     runs-on: ubuntu-latest

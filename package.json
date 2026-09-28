@@ -15,6 +15,8 @@
     "./react": "./consumer/react.ts",
     "./review": "./consumer/review.ts",
     "./server": "./consumer/server.ts",
+    "./testing": "./consumer/testing.ts",
+    "./testing/bun": "./consumer/testing-bun.ts",
     "./tsconfig/base.json": "./consumer/tsconfig/base.json",
     "./tsconfig/bun.json": "./consumer/tsconfig/bun.json",
     "./tsconfig/react.json": "./consumer/tsconfig/react.json"
@@ -29,6 +31,7 @@
     "@babel/types": "^7.29.0",
     "@eslint/js": "^10.0.1",
     "@floating-ui/dom": "^1.7.6",
+    "@happy-dom/global-registrator": "^20.14.5",
     "@stylistic/eslint-plugin": "^5.10.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -44,6 +47,9 @@
     "eslint-plugin-simple-import-sort": "^14.0.0",
     "eslint-plugin-sort-destructure-keys": "^3.0.0",
     "less": "^4.6.4",
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.63.0",
+    "pngjs": "^7.0.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "sass": "1.98.0",
@@ -51,8 +57,9 @@
     "typescript-eslint": "^8.70.0"
   },
   "devDependencies": {
-    "@happy-dom/global-registrator": "^20.14.5",
     "@types/bun": "^1.4.2",
+    "@types/pixelmatch": "^7.1.0",
+    "@types/pngjs": "^6.0.5",
     "bun-types": "^1.4.2",
     "husky": "^9.1.7",
     "svg-path-commander": "^2.3.3"

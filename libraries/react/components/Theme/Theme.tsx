@@ -170,53 +170,72 @@ export class Theme extends Component<Props> {
   componentDidMount(): void { this.injectStyles() }
   componentDidUpdate(): void { this.injectStyles() }
 
-  private processColor(color: string): string {
-    return Color.from(color).toString()
-  }
-
-  private processObject(prefix: string, values: Record<string, unknown>): string[] {
-    if (!values || typeof values !== 'object') return []
-    const namespace = kebabCase(prefix)
-
-    return Object.entries(values)
-      .filter(([, value]) => value != null)
-      .map(([key, value]) => {
-        const cssKey = `--basis-${namespace}-${kebabCase(key)}`
-        let cssValue = value
-
-        if (namespace === 'font-size') {
-          cssValue = `${value}%`
-        } else if (namespace === 'color' && typeof value === 'string') {
-          cssValue = this.processColor(value)
-        } else if (typeof value === 'number' && !cssKey.includes('transition')) {
-          cssValue = `${value}px`
-        }
-
-        return `${cssKey}: ${cssValue};`
-      })
-  }
-
-  private getCSSVariables(): string {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { name, nodeRef, ...props } = this.props
-    const { ...theme } = merge<Props>(DEFAULT_THEME, props)
-    const variables = Object.entries(theme)
-      .filter(([, values]) => values && typeof values === 'object')
-      .flatMap(([category, values]) => this.processObject(category, values as Record<string, unknown>))
-    variables.push(`--basis-color-contrast: ${Color.from(theme.color.primary).contrast()};`)
-    variables.push(`--basis-color-danger-contrast: ${Color.from(theme.color.danger).contrast()};`)
-    variables.push(`--basis-color-success-contrast: ${Color.from(theme.color.success).contrast()};`)
-
-    return name?.trim()
-      ? `:root [data-theme="${name}"] { ${variables.join('\n')} }`
-      : `:root { ${variables.join('\n')} }`
-  }
-
   private injectStyles(): void {
-    const cssContent = this.getCSSVariables()
     const themeName = this.props.name?.trim() || 'default'
-    style(`basis:theme:${themeName}`, cssContent)
+    style(`basis:theme:${themeName}`, themeStyles(this.props))
   }
 
   override render = (): React.ReactNode => null
+}
+
+// Derived from the defaults so a new theme category is picked up automatically.
+const CATEGORIES = Object.keys(DEFAULT_THEME) as (keyof typeof DEFAULT_THEME)[]
+
+/**
+ * Format a colour for use in a CSS variable.
+ * @param color - The colour to format.
+ * @returns The formatted colour.
+ */
+function processColor(color: string): string {
+  return Color.from(color).toString()
+}
+
+/**
+ * Render a theme category as CSS custom properties.
+ * @param prefix - The category name.
+ * @param values - The category values.
+ * @returns The custom property declarations.
+ */
+function processObject(prefix: string, values: Record<string, unknown>): string[] {
+  if (!values || typeof values !== 'object') return []
+  const namespace = kebabCase(prefix)
+
+  return Object.entries(values)
+    .filter(([, value]) => value != null)
+    .map(([key, value]) => {
+      const cssKey = `--basis-${namespace}-${kebabCase(key)}`
+      let cssValue = value
+
+      if (namespace === 'font-size') {
+        cssValue = `${value}%`
+      } else if (namespace === 'color' && typeof value === 'string') {
+        cssValue = processColor(value)
+      } else if (typeof value === 'number' && !cssKey.includes('transition')) {
+        cssValue = `${value}px`
+      }
+
+      return `${cssKey}: ${cssValue};`
+    })
+}
+
+/**
+ * Build the CSS custom properties for a theme without mounting a `Theme`.
+ * @param props - Theme overrides.
+ * @returns The theme stylesheet.
+ */
+export function themeStyles(props: Props = {}): string {
+  const theme = merge<Props>(DEFAULT_THEME, props)
+  const variables = CATEGORIES.flatMap(category => {
+    const values = theme[category]
+    return values && typeof values === 'object'
+      ? processObject(category, values as Record<string, unknown>)
+      : []
+  })
+  variables.push(`--basis-color-contrast: ${Color.from(theme.color.primary).contrast()};`)
+  variables.push(`--basis-color-danger-contrast: ${Color.from(theme.color.danger).contrast()};`)
+  variables.push(`--basis-color-success-contrast: ${Color.from(theme.color.success).contrast()};`)
+
+  return props.name?.trim()
+    ? `:root [data-theme="${props.name}"] { ${variables.join('\n')} }`
+    : `:root { ${variables.join('\n')} }`
 }

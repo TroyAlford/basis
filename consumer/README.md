@@ -103,6 +103,24 @@ surface is self-contained: internal imports resolve through package-relative
 paths, so `basis/react` never needs Basis-workspace path aliases, a consumer
 resolver plugin, or `node_modules/basis/libraries/*` imports.
 
+## Testing
+
+`basis/testing` is the single test surface: the shared `render`, `Simulate`, and
+`waitFor` helpers, the shared `test`/`it`/`describe` (which track the current
+test name for snapshot keys), the shared matchers, and browser-backed visual
+snapshots. Add the preload to `bunfig.toml`:
+
+```toml
+[test]
+preload = ["basis/testing/bun"]
+```
+
+`bun test` then runs the whole suite. Chromium for snapshot tests is downloaded
+by Basis's install hook during `bun install`; set `BASIS_SKIP_BROWSER_INSTALL=1`
+to skip the download. On a bare Linux runner, install the browser's system
+libraries with
+`bun ./node_modules/playwright/cli.js install --with-deps chromium`.
+
 ## Server runtime
 
 `basis/server` exposes the Bun application server:
