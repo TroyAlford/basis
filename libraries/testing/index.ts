@@ -1,12 +1,13 @@
 import type { ScreenshotOptions } from './snapshots'
 
 export { startApplication } from './application'
-export type { ApplicationHandle, StartApplicationOptions } from './application'
-export { withPage } from './browser'
-export type { PageOptions, Viewport } from './browser'
-export { blockExternalRequests, stubRequest } from './network'
-export type { BlockExternalOptions, StubOptions } from './network'
-export { seedLocalStorage } from './state'
+export type {
+  ApplicationHandle,
+  StartApplicationOptions,
+  VisitCallback,
+  VisitOptions,
+} from './application'
+export type { StubResponse } from './network'
 export { render } from '../react/testing/render'
 export { Simulate } from '../react/testing/Simulate'
 export { waitFor } from '../react/testing/waitFor'

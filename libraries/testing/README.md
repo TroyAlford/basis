@@ -71,22 +71,13 @@ Boot the real server and drive it in Chromium:
 
 ```tsx
 import { expect } from 'bun:test'
-import {
-  blockExternalRequests,
-  seedLocalStorage,
-  startApplication,
-  test,
-  withPage,
-} from 'basis/testing'
+import { startApplication, test } from 'basis/testing'
 
 test('renders the application', async () => {
   const app = await startApplication({ entry: './src/serve.ts' })
   try {
-    await withPage(async page => {
-      await seedLocalStorage(page, { 'mtg-deck': '{}' })
-      await blockExternalRequests(page)
-      await page.goto(app.url)
-      await expect(page.locator('[data-testid="panel"]')).toMatchScreenshot()
+    await app.visit('/deck', async page => {
+      await expect(page.locator('.deck-builder')).toMatchScreenshot()
     })
   } finally {
     await app.stop()
@@ -94,15 +85,28 @@ test('renders the application', async () => {
 })
 ```
 
-- `startApplication` spawns `entry` on a free loopback port and waits for
-  readiness on `/health`; `stop()` is idempotent.
-- `withPage` opens a deterministically configured page and tears it down.
-- `blockExternalRequests` aborts non-loopback requests, so snapshots do not
-  depend on a CDN.
-- `stubRequest(page, url, { body })` fulfils a specific request locally, for an
-  external dependency that the app genuinely needs (register it after the
-  blocker; later routes win).
-- `seedLocalStorage` seeds state before any application script runs.
+`startApplication({ entry })` spawns the entry on a free loopback port and waits
+for readiness on `/health`; `stop()` is idempotent. `app.visit(path, options?, fn)`
+opens a deterministic page, applies the network policy, navigates to `url + path`,
+runs `fn`, then disposes the page.
+
+Network is deterministic by default — non-loopback requests are blocked, so a
+snapshot cannot silently depend on a CDN:
+
+- `stubs` fulfils specific external URLs locally (for example a CDN module);
+- `allow` lets specific hosts through.
+
+`init(page)` runs before navigation for page setup, such as seeding storage with
+Playwright's own API:
+
+```tsx
+await app.visit('/deck', {
+  stubs: { 'https://esm.sh/shiki@3.0.0': shikiStub },
+  init: page => page.addInitScript(value => localStorage.setItem('mtg-deck', value), deckJson),
+}, async page => {
+  await expect(page.locator('.deck-builder')).toMatchScreenshot()
+})
+```
 
 Basis's own docs site is captured this way in `libraries/testing/docs.test.ts`
 (a Button example and the icon grid), which keeps the fixture honest.

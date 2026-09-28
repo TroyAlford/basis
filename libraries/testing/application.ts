@@ -1,4 +1,9 @@
 import { get } from 'node:http'
+import type { Page } from 'playwright'
+import type { Viewport } from './browser'
+import { withPage } from './browser'
+import type { NetworkOptions } from './network'
+import { installNetwork } from './network'
 
 /** Options for {@link startApplication}. */
 export interface StartApplicationOptions {
@@ -14,12 +19,33 @@ export interface StartApplicationOptions {
   timeoutMs?: number,
 }
 
+/** Options for {@link ApplicationHandle.visit}. */
+export interface VisitOptions extends NetworkOptions {
+  /** Runs before navigation, for page setup such as `page.addInitScript(...)`. */
+  init?: (page: Page) => unknown,
+  /** Viewport override. */
+  viewport?: Viewport,
+}
+
+/** A visit callback receiving the navigated page. */
+export type VisitCallback<T> = (page: Page) => Promise<T> | T
+
 /** A running application under test. */
 export interface ApplicationHandle {
   /** Stop the application; idempotent. */
   stop: () => Promise<void>,
   /** The base URL of the running application. */
   url: string,
+  /**
+   * Open a deterministic page at `path`, run a callback, then dispose it.
+   *
+   * Non-loopback requests are blocked unless allowed or stubbed, so a snapshot
+   * cannot silently depend on a CDN. `options.init` runs before navigation.
+   */
+  visit: {
+    <T>(path: string, fn: VisitCallback<T>): Promise<T>,
+    <T>(path: string, options: VisitOptions, fn: VisitCallback<T>): Promise<T>,
+  },
 }
 
 /**
@@ -82,14 +108,14 @@ async function waitForReady(url: string, timeoutMs: number, output: () => string
 }
 
 /**
- * Boot the application's Basis server entry on an ephemeral loopback port.
+ * Boot the application's server entry on an ephemeral loopback port.
  *
  * The entry is spawned as a child process (the same shape as a managed
  * deployment), so it can be the consumer's real server module. `HOST` and a
  * free `PORT` are injected; `NODE_ENV` defaults to `production` for
  * deterministic output and can be overridden through `env`.
  * @param options - Startup options.
- * @returns A handle with the base URL and an idempotent stop.
+ * @returns A handle with the base URL, an idempotent stop, and `visit`.
  */
 export async function startApplication(
   options: StartApplicationOptions,
@@ -133,5 +159,21 @@ export async function startApplication(
     throw error
   }
 
-  return { stop, url }
+  const visit = async <T>(
+    path: string,
+    optionsOrFn: VisitOptions | VisitCallback<T>,
+    maybeFn?: VisitCallback<T>,
+  ): Promise<T> => {
+    const visitOptions: VisitOptions = typeof optionsOrFn === 'function' ? {} : optionsOrFn
+    const callback = (typeof optionsOrFn === 'function' ? optionsOrFn : maybeFn) as VisitCallback<T>
+
+    return await withPage(async page => {
+      await installNetwork(page, visitOptions)
+      if (visitOptions.init) await visitOptions.init(page)
+      await page.goto(`${url}${path}`, { waitUntil: 'load' })
+      return await callback(page)
+    }, { viewport: visitOptions.viewport })
+  }
+
+  return { stop, url, visit }
 }
