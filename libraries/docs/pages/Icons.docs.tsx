@@ -134,6 +134,15 @@ export class IconsDocs extends Documentation<State> {
           Grip (Horizontal)
         </span>
       </div>
+      {/* Zoom Component */}
+      <div className="special-icon-item">
+        <div className="icon-demo-container">
+          <Icons.Zoom direction={Icons.Zoom.Direction.In} />
+        </div>
+        <span className="special-icon-name">
+          Zoom (In)
+        </span>
+      </div>
     </div>
   )
 
@@ -246,17 +255,18 @@ export class IconsDocs extends Documentation<State> {
         {this.renderSpecialIcons()}
         <p>
           Some icons are more than simple graphics - they're interactive components with their own props and behavior.
-          The following three components follow the same pattern of grouping icon variants into a single component:
+          The following components follow the same pattern of grouping icon variants into a single component:
         </p>
         <ul>
           <li><strong>Triangle</strong>: Directional triangles with an <code>orientation</code> prop</li>
           <li><strong>Sort</strong>: Sort indicators with <code>sortBy</code> and <code>direction</code> props</li>
           <li><strong>Grip</strong>: Grip handles with an <code>orientation</code> prop</li>
+          <li><strong>Zoom</strong>: Magnifiers with a <code>direction</code> prop</li>
         </ul>
         <p>This reduces the number of individual icon components while providing type-safe access to all variants.</p>
         <h3>Usage</h3>
         {Code.format(`
-          import { Triangle, Sort, Grip } from '@basis/react'
+          import { Triangle, Sort, Grip, Zoom } from '@basis/react'
 
           // Triangle - directional arrows
           <Triangle orientation={Triangle.Orientation.Right} />
@@ -277,6 +287,14 @@ export class IconsDocs extends Documentation<State> {
           <Grip orientation={Grip.Orientation.Vertical} />
           <Grip orientation={Grip.Orientation.TopLeft} />
           <Grip orientation={Grip.Orientation.BottomRight} />
+
+          // Zoom - magnifier direction
+          <Zoom direction={Zoom.Direction.In} />
+          <Zoom direction={Zoom.Direction.Out} />
+
+          // Alternative syntax - direct component access
+          <Zoom.In />
+          <Zoom.Out />
         `)}
         <p>
           For detailed information about the Moon Phase component, see the
