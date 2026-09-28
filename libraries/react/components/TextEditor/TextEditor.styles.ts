@@ -3,15 +3,15 @@ import { css, style } from '../../utilities/style'
 style('basis:text-editor', css`
   :root {
     --basis-text-editor-background: var(--basis-color-background);
-    --basis-text-editor-border-radius: var(--basis-radius-sm);
     --basis-text-editor-border: 1px solid var(--basis-color-foreground);
+    --basis-text-editor-border-radius: var(--basis-radius-sm);
     --basis-text-editor-foreground: var(--basis-color-foreground);
     --basis-text-editor-padding: var(--basis-unit-xs);
   }
 
   .text-editor.component {
-    border-radius: var(--basis-text-editor-border-radius);
     border: var(--basis-text-editor-border);
+    border-radius: var(--basis-text-editor-border-radius);
     display: flex;
     font-size: 1em;
     gap: 0;

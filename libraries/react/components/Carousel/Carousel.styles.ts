@@ -29,8 +29,8 @@ style('basis:carousel', css`
       > .button, > .counter {
         align-items: center;
         background: var(--basis-color-overlay-dark);
-        border-radius: var(--basis-radius-round);
         border: none;
+        border-radius: var(--basis-radius-round);
         color: var(--basis-color-background);
         display: inline-flex;
         font-size: 0.75em;
@@ -80,7 +80,7 @@ style('basis:carousel', css`
       width: 100%;
     }
 
-    // Alignment modifiers for contain mode
+    /* Alignment modifiers for contain mode */
     &[data-size="contain"][data-align="nw"] > img { margin: 0 auto auto 0; }
     &[data-size="contain"][data-align="n"] > img { margin: 0 auto auto auto; }
     &[data-size="contain"][data-align="ne"] > img { margin: 0 0 auto auto; }
@@ -91,7 +91,7 @@ style('basis:carousel', css`
     &[data-size="contain"][data-align="w"] > img { margin: auto 0 auto 0; }
     &[data-size="contain"][data-align="center"] > img { margin: auto; }
 
-    // Alignment modifiers for fill mode
+    /* Alignment modifiers for fill mode */
     &[data-size="fill"][data-align="nw"] > img { object-position: left top; }
     &[data-size="fill"][data-align="n"] > img { object-position: center top; }
     &[data-size="fill"][data-align="ne"] > img { object-position: right top; }
@@ -117,8 +117,8 @@ style('basis:carousel', css`
       > .close-button {
         align-items: center;
         background: var(--basis-color-overlay-dark);
-        border-radius: var(--basis-radius-round);
         border: none;
+        border-radius: var(--basis-radius-round);
         color: var(--basis-color-background);
         cursor: pointer;
         display: flex;
@@ -161,7 +161,7 @@ style('basis:carousel', css`
 
       > .navigation {
         bottom: var(--basis-unit-sm);
-        opacity: 1;  // Always visible in lightbox mode
+        opacity: 1; /* Always visible in lightbox mode */
       }
 
       > .lightbox-caption {

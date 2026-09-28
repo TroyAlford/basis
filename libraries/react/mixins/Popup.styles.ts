@@ -2,14 +2,14 @@ import { css, style } from '../utilities/style'
 
 style('basis:popup', css`
   :root {
-    --basis-popup-arrow-size: 8px;
     --basis-popup-arrow-offset: calc(var(--basis-popup-arrow-size) / 2);
+    --basis-popup-arrow-size: 8px;
     --basis-popup-offset: 0;
   }
 
   [data-popup='true'] {
-    position: absolute;
     isolation: isolate;
+    position: absolute;
 
     &[data-popup-arrow='true'] {
       overflow: visible;
@@ -23,8 +23,8 @@ style('basis:popup', css`
         border-style: inherit;
         border-top-width: inherit;
         content: '';
-        position: absolute;
         height: var(--basis-popup-arrow-size);
+        position: absolute;
         width: var(--basis-popup-arrow-size);
       }
 
@@ -34,8 +34,8 @@ style('basis:popup', css`
         transform: translateY(calc(-1 * var(--basis-popup-arrow-size)));
 
         &::after {
-          top: calc(100% - var(--basis-popup-arrow-offset));
           rotate: 135deg;
+          top: calc(100% - var(--basis-popup-arrow-offset));
         }
       }
 

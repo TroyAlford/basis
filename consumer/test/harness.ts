@@ -106,6 +106,13 @@ const SURFACE_CHECK = [
   "process.stdout.write('ok')",
 ].join('; ')
 
+const STYLELINT_SURFACE_CHECK = [
+  "import config from 'basis/stylelint'",
+  "if (!config || !config.customSyntax || !config.rules) throw new Error('bad surface')",
+  "if (!config.rules['basis/no-state-classes']) throw new Error('missing basis rules')",
+  "process.stdout.write('ok')",
+].join('; ')
+
 /**
  * Throws when a required condition is not met.
  * @param condition The condition expected to hold.
@@ -334,6 +341,17 @@ export const assertNodeFree = (app: string, env: Record<string, string>): void =
 export const assertEslintSurface = (app: string, env: Record<string, string>): void => {
   const output = run(['bun', '-e', SURFACE_CHECK], app, env)
   assert(output.includes('ok'), 'basis/eslint resolves to a flat config')
+}
+
+/**
+ * Asserts that `basis/stylelint` resolves to the Basis Stylelint config inside
+ * a fixture.
+ * @param app Absolute path to the fixture application.
+ * @param env The restricted environment.
+ */
+export const assertStylelintSurface = (app: string, env: Record<string, string>): void => {
+  const output = run(['bun', '-e', STYLELINT_SURFACE_CHECK], app, env)
+  assert(output.includes('ok'), 'basis/stylelint resolves to a Stylelint config')
 }
 
 /**

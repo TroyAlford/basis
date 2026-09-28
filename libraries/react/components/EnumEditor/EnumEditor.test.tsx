@@ -3,8 +3,6 @@ import * as React from 'react'
 import { render } from '../../testing/render'
 import { EnumEditor } from './EnumEditor'
 
-import './EnumEditor.styles.ts'
-
 // Sample enums for testing
 enum TestStatus {
   Archived = 'archived',

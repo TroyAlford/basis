@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pruneDirectory } from './cleanup'
+import { pruneDirectory, pruneSnapshots } from './cleanup'
 
 /**
  * Build a throwaway snapshot directory populated with the given filenames.
@@ -54,5 +54,27 @@ describe('testing/cleanup', () => {
 
   test('ignores a missing directory', () => {
     expect(pruneDirectory(join(tmpdir(), 'basis-snapshots-missing'), new Set())).toEqual([])
+  })
+
+  test('never deletes a committed baseline unless updating', () => {
+    const dir = snapshotDir('kept-1.png', 'orphan-1.png')
+    const seen = new Set([join(dir, 'kept-1.png')])
+
+    const removed = pruneSnapshots({ directories: [dir], seen, updating: false })
+
+    expect(removed).toEqual([])
+    expect(entries(dir)).toEqual(['kept-1.png', 'orphan-1.png'])
+    rmSync(dir, { force: true, recursive: true })
+  })
+
+  test('prunes orphaned baselines only when updating', () => {
+    const dir = snapshotDir('kept-1.png', 'orphan-1.png')
+    const seen = new Set([join(dir, 'kept-1.png')])
+
+    const removed = pruneSnapshots({ directories: [dir], seen, updating: true })
+
+    expect(removed).toEqual([join(dir, 'orphan-1.png')])
+    expect(entries(dir)).toEqual(['kept-1.png'])
+    rmSync(dir, { force: true, recursive: true })
   })
 })

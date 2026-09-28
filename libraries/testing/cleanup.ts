@@ -2,6 +2,7 @@ import { readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { snapshotDirectory } from './snapshots'
 import { fullyRunFiles } from './test'
+import { updating } from './update'
 
 /** Committed snapshot baselines written or compared during this run. */
 const touched = new Set<string>()
@@ -46,18 +47,40 @@ export function pruneDirectory(directory: string, seen: ReadonlySet<string>): st
   return removed
 }
 
+/** Options accepted by {@link pruneSnapshots}. */
+export interface PruneOptions {
+  /** Directories to prune. Defaults to the fully executed test files' directories. */
+  directories?: string[],
+  /** Baselines to keep. Defaults to the snapshots touched during this run. */
+  seen?: ReadonlySet<string>,
+  /** Whether snapshots may be rewritten. Defaults to {@link updating}. */
+  updating?: boolean,
+}
+
 /**
  * Prune orphaned snapshots after the run.
  *
- * Scoped to test files whose entire suite executed: a file filtered with `-t`,
- * or one containing a skipped test, is skipped so its snapshots are never
- * mistaken for orphans. Registered as a preload `afterAll`.
+ * Deleting a committed baseline is a destructive operation, so it happens only
+ * when the run explicitly asked to update snapshots (`--update-snapshots` /
+ * `UPDATE_SNAPSHOTS=1`). A normal, failed, or browser-less run never deletes a
+ * baseline. When updating, pruning is scoped to test files whose entire suite
+ * executed: a file filtered with `-t`, or one containing a skipped test, is
+ * skipped so its snapshots are never mistaken for orphans. Registered as a
+ * preload `afterAll`.
+ * @param options - Pruning overrides, used by tests; production passes none.
  * @returns The paths that were removed.
  */
-export function pruneSnapshots(): string[] {
+export function pruneSnapshots(options: PruneOptions = {}): string[] {
+  const {
+    directories,
+    seen = touched,
+    updating: force = updating(),
+  } = options
+
+  if (!force) return []
+
+  const targets = directories ?? fullyRunFiles().map(snapshotDirectory)
   const removed: string[] = []
-  for (const file of fullyRunFiles()) {
-    removed.push(...pruneDirectory(snapshotDirectory(file), touched))
-  }
+  for (const directory of targets) removed.push(...pruneDirectory(directory, seen))
   return removed
 }

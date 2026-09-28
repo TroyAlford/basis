@@ -260,11 +260,11 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
     let content: React.ReactNode
 
     if (loading) {
-      content = loadingContent ?? <div className="loading">Loading...</div>
+      content = loadingContent ?? <div data-state="loading">Loading...</div>
     } else if (error) {
-      content = <div className="error">Error: {error.message}</div>
+      content = <div data-state="error">Error: {error.message}</div>
     } else if ((options ?? []).length === 0) {
-      content = notFoundContent ?? <div className="not-found">No results found</div>
+      content = notFoundContent ?? <div data-state="not-found">No results found</div>
     } else {
       content = menuItems
     }

@@ -24,8 +24,8 @@ style('basis:table-header-cell', css`
       > .title {
         flex: 1;
         overflow: hidden;
-        user-select: none;
         text-overflow: ellipsis;
+        user-select: none;
         white-space: nowrap;
       }
 

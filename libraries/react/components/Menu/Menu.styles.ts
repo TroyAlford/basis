@@ -59,8 +59,8 @@ style('basis:menu', css`
 
     &[data-orientation='${Orientation.Horizontal}'] {
       > .menu-divider.component {
-        width: 1px;
         margin: 0 0.25em;
+        width: 1px;
       }
     }
   }

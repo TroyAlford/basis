@@ -1,14 +1,18 @@
 import type { Browser, BrowserContextOptions, Page } from 'playwright'
-import { chromium } from 'playwright'
 
 let browser: Browser | null = null
 
 /**
  * Lazily launch (and cache) the shared Chromium instance.
+ *
+ * Playwright is imported dynamically so a suite that never captures a
+ * screenshot (the normal, pre-commit suite) never loads the browser stack and
+ * does not need a Playwright-capable host.
  * @returns The connected browser.
  */
 export async function getBrowser(): Promise<Browser> {
   if (!browser || !browser.isConnected()) {
+    const { chromium } = await import('playwright')
     browser = await chromium.launch({
       /*
        * Deterministic rasterisation: grayscale anti-aliasing, no font hinting

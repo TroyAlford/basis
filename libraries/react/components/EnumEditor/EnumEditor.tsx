@@ -9,8 +9,6 @@ import { DropdownMenu } from '../DropdownMenu/DropdownMenu'
 import { Editor } from '../Editor/Editor'
 import type { MenuItem } from '../Menu/MenuItem.tsx'
 
-import './EnumEditor.styles.ts'
-
 /** Type constraint for enum objects */
 type EnumType = Record<string, string | number>
 

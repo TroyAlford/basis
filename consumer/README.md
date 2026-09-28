@@ -41,6 +41,59 @@ export default createConfig({
 Every ESLint plugin the config imports is declared by Basis itself, so consumers
 do not enumerate or install the plugin stack.
 
+## CSS linting
+
+Component CSS lives in `*.styles.ts` as `css` tagged template literals. Basis
+lints it with Stylelint through the `postcss-styled-syntax` custom syntax, so the
+embedded stylesheet is parsed as real CSS (including nesting and `${...}`
+interpolations) rather than matched as text.
+
+The supported zero-config route is the CLI, which runs the ESLint and CSS
+policies together:
+
+```bash
+bunx basis lint
+```
+
+To run Stylelint directly, point it at the Basis config:
+
+```bash
+bunx stylelint "**/*.styles.ts" --config ./node_modules/basis/stylelint.config.mjs --allow-empty-input
+```
+
+A consumer can also adopt the shared config from their own Stylelint
+configuration:
+
+```js
+// stylelint.config.mjs
+export { default } from 'basis/stylelint'
+```
+
+`basis/stylelint` exports the ready configuration as its default export and a
+`createConfig` factory for appending repository-specific rule settings or
+overrides:
+
+```js
+import { createConfig } from 'basis/stylelint'
+
+export default createConfig({
+  rules: { 'basis/no-state-classes': [true, { ignore: ['open'] }] },
+})
+```
+
+The policy enforces correctness (parse validity, unknown properties, malformed
+selectors, accidental duplicates, lowercase type selectors), deterministic
+ordering (custom properties, then ordinary declarations, then nested selector
+blocks; safely autofixable), nesting guardrails, and Basis selector semantics.
+Component state and variants use native pseudo-classes/attributes, ARIA
+attributes, or `data-*` attributes instead of ad-hoc state classes such as
+`.disabled`, `.active`, `.selected`, and `.open`; structural, component, and
+mixin classes (`.button.component`, `.table.editor.component`, `.value`,
+`.prefix`, `.suffix`) remain valid.
+
+Stylelint, the custom syntax, and every plugin are declared by Basis, so
+consumers never enumerate the CSS lint dependency or configuration graph.
+
 ## TypeScript
 
 ```json
@@ -115,11 +168,24 @@ snapshots. Add the preload to `bunfig.toml`:
 preload = ["basis/testing/bun"]
 ```
 
-`bun test` then runs the whole suite. Chromium for snapshot tests is downloaded
-by Basis's install hook during `bun install`; set `BASIS_SKIP_BROWSER_INSTALL=1`
-to skip the download. On a bare Linux runner, install the browser's system
-libraries with
-`bun ./node_modules/playwright/cli.js install --with-deps chromium`.
+It registers happy-dom, the shared matchers, and the browser lifecycle. The
+ordinary `bun test` suite is browser-free; name browser-backed snapshot tests
+`*.browser.test.ts` / `*.browser.test.tsx` and keep them out of the default run
+(for example with `[test] pathIgnorePatterns`) so `bun test` and pre-commit work
+without Chromium system dependencies.
+
+Chromium for snapshot tests is downloaded by Basis's install hook during
+`bun install`; set `BASIS_SKIP_BROWSER_INSTALL=1` to skip the download. The
+browser suite additionally needs the browser's system libraries on a bare Linux
+runner:
+
+```bash
+bun ./node_modules/playwright/cli.js install --with-deps chromium
+```
+
+`toMatchScreenshot` never modifies or deletes a committed baseline unless the run
+explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A capture or
+comparison failure leaves baselines untouched.
 
 ## Server runtime
 

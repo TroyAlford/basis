@@ -5,15 +5,15 @@ import.meta.hot.accept()
 style('basis:number-editor', css`
   :root {
     --basis-number-editor-background: var(--basis-color-background);
-    --basis-number-editor-border-radius: var(--basis-radius-sm);
     --basis-number-editor-border: 1px solid var(--basis-color-foreground);
+    --basis-number-editor-border-radius: var(--basis-radius-sm);
     --basis-number-editor-foreground: var(--basis-color-foreground);
     --basis-number-editor-padding: var(--basis-unit-xs);
   }
 
   .number-editor.component {
-    border-radius: var(--basis-number-editor-border-radius);
     border: var(--basis-number-editor-border);
+    border-radius: var(--basis-number-editor-border-radius);
     display: flex;
     font-size: 1em;
     gap: 0;

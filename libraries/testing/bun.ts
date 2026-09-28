@@ -8,5 +8,5 @@ import '../react/testing/bun/register'
 
 expect.extend({ toMatchScreenshot })
 
-afterAll(pruneSnapshots)
+afterAll(() => { pruneSnapshots() })
 afterAll(closeBrowser)

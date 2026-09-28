@@ -16,7 +16,7 @@ style('basis:icon', css`
     vertical-align: middle;
     width: var(--basis-icon-size, 1em);
 
-    &.clickable {
+    &[role="button"] {
       cursor: pointer;
     }
 

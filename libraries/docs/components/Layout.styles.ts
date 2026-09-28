@@ -14,10 +14,10 @@ style('basis:docs:layout', css`
 
   .layout.component {
     display: grid;
-    grid-template-columns: 200px 1fr;
     grid-template-areas: 'nav main';
-    overflow: hidden;
+    grid-template-columns: 200px 1fr;
     height: 100vh;
+    overflow: hidden;
     width: 100vw;
 
     > nav.links {
@@ -32,17 +32,17 @@ style('basis:docs:layout', css`
         background-color: var(--basis-color-foreground);
         color: var(--basis-color-background);
         font-size: var(--basis-font-size-xxl);
-        padding: var(--basis-unit-md);
         margin: 0;
+        padding: var(--basis-unit-md);
       }
 
-        UL, LI {
+        ul, li {
           list-style: none;
           margin: 0;
           padding: 0;
         }
-        LI {
-          > A {
+        li {
+          > a {
             display: block;
             padding: var(--basis-unit-sm) var(--basis-unit-md);
             text-decoration: none;
@@ -53,7 +53,7 @@ style('basis:docs:layout', css`
             }
           }
 
-          > UL > LI {
+          > ul > li {
             padding-left: var(--basis-unit-md);
           }
         }

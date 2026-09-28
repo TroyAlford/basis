@@ -3,8 +3,8 @@ import { css, style } from '../../utilities/style'
 style('basis:auto-complete', css`
   :root {
     --basis-auto-complete-background: var(--basis-color-background);
-    --basis-auto-complete-border-radius: var(--basis-radius-sm);
     --basis-auto-complete-border: 1px solid var(--basis-color-foreground);
+    --basis-auto-complete-border-radius: var(--basis-radius-sm);
     --basis-auto-complete-foreground: var(--basis-color-foreground);
     --basis-auto-complete-padding: var(--basis-unit-sm);
   }
@@ -35,7 +35,7 @@ style('basis:auto-complete', css`
           color: var(--basis-color-primary-contrast);
         }
 
-        &.selected {
+        &[aria-selected="true"] {
           background-color: var(--basis-color-primary);
           color: var(--basis-color-contrast);
         }
@@ -47,24 +47,24 @@ style('basis:auto-complete', css`
         }
       }
 
-      > .error,
-      > .loading,
-      > .not-found {
+      > [data-state="error"],
+      > [data-state="loading"],
+      > [data-state="not-found"] {
         color: var(--basis-color-foreground);
         font-style: italic;
         padding: var(--basis-auto-complete-padding);
         text-align: center;
       }
 
-      > .loading {
+      > [data-state="loading"] {
         font-style: italic;
       }
 
-      > .error {
+      > [data-state="error"] {
         color: var(--basis-color-error);
       }
 
-      > .not-found {
+      > [data-state="not-found"] {
         color: var(--basis-color-foreground);
         opacity: 0.7;
       }

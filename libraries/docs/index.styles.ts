@@ -32,8 +32,8 @@ style('basis:docs:index', css`
 
     ul {
       list-style: disc;
-      padding-left: 0;
       margin: 0;
+      padding-left: 0;
 
       > li {
         margin: 0.25em 0 0 2em;

@@ -11,6 +11,7 @@ import { formatSnapshotKey, slug } from '../naming'
 import type { ScreenshotOptions } from '../snapshots'
 import { comparePng, readPng, snapshotDirectory, writePng } from '../snapshots'
 import { currentTestName, nextSnapshotIndex } from '../test'
+import { updating } from '../update'
 
 /** Result returned by the {@link toMatchScreenshot} matcher. */
 export interface MatcherResult {
@@ -76,14 +77,6 @@ function snapshotPaths(file: string, key: string): SnapshotPaths {
     baseline: join(dir, `${stem}.png`),
     diff: join(dir, `${stem}.diff.png`),
   }
-}
-
-/**
- * Whether snapshots should be rewritten instead of compared.
- * @returns True when `--update-snapshots` or `UPDATE_SNAPSHOTS=1` is set.
- */
-function updating(): boolean {
-  return process.argv.includes('--update-snapshots') || process.env.UPDATE_SNAPSHOTS === '1'
 }
 
 let warnedMissingTestName = false
@@ -200,40 +193,32 @@ async function capture(subject: ScreenshotSubject, options: ScreenshotOptions): 
 }
 
 /**
- * Assert that a subject matches a committed PNG snapshot.
+ * Apply a captured screenshot against the committed baseline for a key.
  *
- * Mirrors `toMatchSnapshot`: when no snapshot exists (or `--update-snapshots` /
- * `UPDATE_SNAPSHOTS=1` is set) the capture is written and the assertion passes;
- * otherwise the capture is compared and a mismatch fails, writing
- * `*.actual.png` / `*.diff.png` artifacts beside the snapshot.
- * @param received - The subject to capture: a React element, Playwright page, or locator.
- * @param hint - Optional hint; the snapshot is keyed by test name and hint.
+ * This is the only place the matcher writes to disk. An existing baseline is
+ * replaced only when `update` is true (`--update-snapshots` /
+ * `UPDATE_SNAPSHOTS=1`); a comparison failure writes `*.actual.png` /
+ * `*.diff.png` artifacts beside the baseline and never touches the baseline
+ * itself. A failed or browser-less run therefore cannot mutate committed
+ * snapshots. Exported so tests can prove that guarantee without a browser.
+ * @param file - The calling test file.
+ * @param key - The snapshot key.
+ * @param bytes - The captured PNG bytes.
  * @param options - Comparison options.
+ * @param update - Whether to rewrite the baseline. Defaults to {@link updating}.
  * @returns The matcher result.
  */
-export async function toMatchScreenshot(
-  received: ScreenshotSubject,
-  hint?: string,
+export function commitScreenshot(
+  file: string,
+  key: string,
+  bytes: Buffer,
   options: ScreenshotOptions = {},
-): Promise<MatcherResult> {
-  if (
-    !received
-    || typeof received !== 'object'
-    || (!('type' in received) && !isScreenshotTarget(received))
-  ) {
-    return {
-      message: () => 'toMatchScreenshot: expected a React element, Playwright page, or locator',
-      pass: false,
-    }
-  }
-
-  const file = resolvedCallerFile()
-  const key = snapshotKey(file, hint)
-  const actual = PNG.sync.read(await capture(received, options))
+  update = updating(),
+): MatcherResult {
+  const actual = PNG.sync.read(bytes)
   const { actual: actualPath, baseline, diff: diffPath } = snapshotPaths(file, key)
-  trackSnapshot(baseline)
 
-  if (!existsSync(baseline) || updating()) {
+  if (update || !existsSync(baseline)) {
     writePng(baseline, actual)
     return { message: () => `toMatchScreenshot: wrote ${baseline}`, pass: true }
   }
@@ -262,4 +247,80 @@ export async function toMatchScreenshot(
     ].join('\n'),
     pass: false,
   }
+}
+
+/**
+ * Injectable seams for {@link runScreenshot}, used by tests to prove the
+ * baseline-mutation guarantees without a browser.
+ */
+interface ScreenshotRun {
+  /** Capture implementation. Defaults to the Playwright/render capture. */
+  capture?: (subject: ScreenshotSubject, options: ScreenshotOptions) => Promise<Buffer>,
+  /** Calling test file. Defaults to the stack-derived caller. */
+  file?: string,
+  /** Snapshot key. Defaults to the test-name-derived key. */
+  key?: string,
+}
+
+/**
+ * Run one screenshot assertion: validate, mark the baseline in scope, capture,
+ * then compare or write.
+ *
+ * The baseline is tracked before capture so a capture failure cannot make it
+ * look orphaned, and nothing is written until capture returns bytes.
+ * @param received - The subject to capture.
+ * @param hint - Optional hint; the snapshot is keyed by test name and hint.
+ * @param options - Comparison options.
+ * @param run - Injectable seams. Tests only.
+ * @returns The matcher result.
+ */
+export async function runScreenshot(
+  received: ScreenshotSubject,
+  hint?: string,
+  options: ScreenshotOptions = {},
+  run: ScreenshotRun = {},
+): Promise<MatcherResult> {
+  if (
+    !received
+    || typeof received !== 'object'
+    || (!('type' in received) && !isScreenshotTarget(received))
+  ) {
+    return {
+      message: () => 'toMatchScreenshot: expected a React element, Playwright page, or locator',
+      pass: false,
+    }
+  }
+
+  const file = run.file ?? resolvedCallerFile()
+  const key = run.key ?? snapshotKey(file, hint)
+
+  /*
+   * Track the baseline before capturing: if acquisition fails, the baseline
+   * must be treated as in scope (protected from pruning) rather than stale.
+   */
+  trackSnapshot(snapshotPaths(file, key).baseline)
+  const bytes = await (run.capture ?? capture)(received, options)
+  return commitScreenshot(file, key, bytes, options)
+}
+
+/**
+ * Assert that a subject matches a committed PNG snapshot.
+ *
+ * Mirrors `toMatchSnapshot`: when no snapshot exists (or `--update-snapshots` /
+ * `UPDATE_SNAPSHOTS=1` is set) the capture is written and the assertion passes;
+ * otherwise the capture is compared and a mismatch fails, writing
+ * `*.actual.png` / `*.diff.png` artifacts beside the snapshot. An existing
+ * baseline is never written unless updating, and a capture failure (for example
+ * a missing browser) leaves every baseline untouched.
+ * @param received - The subject to capture: a React element, Playwright page, or locator.
+ * @param hint - Optional hint; the snapshot is keyed by test name and hint.
+ * @param options - Comparison options.
+ * @returns The matcher result.
+ */
+export async function toMatchScreenshot(
+  received: ScreenshotSubject,
+  hint?: string,
+  options: ScreenshotOptions = {},
+): Promise<MatcherResult> {
+  return runScreenshot(received, hint, options)
 }
