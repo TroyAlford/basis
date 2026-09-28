@@ -162,6 +162,9 @@ const DEFAULT_THEME = {
  */
 export class Theme extends Component<Props> {
   static displayName = 'Theme'
+
+  /** `color` is the Theme palette, not a native `color` attribute. */
+  static ownedNativeProps = ['color']
   static defaultProps: Component<Props>['props'] = {
     ...Component.defaultProps,
     ...DEFAULT_THEME,

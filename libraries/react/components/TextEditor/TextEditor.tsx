@@ -74,6 +74,9 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     wrap: Wrap.Soft,
   }
 
+  /** `onKeyDown` targets the inner input/textarea, not the component root. */
+  static ownedNativeProps = ['onKeyDown']
+
   input = React.createRef<HTMLInputElement | HTMLTextAreaElement>()
 
   #handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {

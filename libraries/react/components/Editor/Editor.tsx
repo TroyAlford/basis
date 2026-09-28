@@ -56,6 +56,9 @@ export abstract class Editor<
     readOnly: false,
   }
 
+  /** `onChange` is the Basis editor value contract, not a native root event. */
+  static ownedNativeProps = ['onChange']
+
   /**
    * Checks if a constructor is an Editor
    * @param ctor - The constructor to check

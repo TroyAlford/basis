@@ -132,28 +132,53 @@ describe('Component', () => {
   describe('native props', () => {
     test('forwards standard native attributes and events to the root element', async () => {
       const onFocus = mock()
+      const onKeyDown = mock()
       const { node } = await render(
-        <TestComponent id="thing" role="region" tabIndex={3} onFocus={onFocus} />,
+        <TestComponent
+          id="thing"
+          role="region"
+          tabIndex={3}
+          title="A thing"
+          onFocus={onFocus}
+          onKeyDown={onKeyDown}
+        />,
       )
 
       expect(node).toHaveAttribute('id', 'thing')
       expect(node).toHaveAttribute('role', 'region')
       expect(node).toHaveAttribute('tabindex', '3')
+      expect(node).toHaveAttribute('title', 'A thing')
 
       node.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
       expect(onFocus).toHaveBeenCalledTimes(1)
+
+      node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }))
+      expect(onKeyDown).toHaveBeenCalledTimes(1)
     })
 
-    test('does not forward component-specific props to the root element', async () => {
-      class OwnedComponent extends Component<{ content?: React.ReactNode, orientation?: string }> {
+    test('suppresses native forwarding for names the component explicitly owns', async () => {
+      class OwnedComponent extends Component<{ orientation?: string, title?: React.ReactNode }> {
         static displayName = 'OwnedComponent'
-        static defaultProps = { ...Component.defaultProps, orientation: 'horizontal' }
+        static ownedNativeProps = ['title']
       }
 
-      const { node } = await render(<OwnedComponent content="owned" orientation="vertical" />)
+      const { node } = await render(<OwnedComponent orientation="vertical" title="owned" />)
 
-      expect(node.hasAttribute('content')).toBe(false)
+      expect(node.hasAttribute('title')).toBe(false)
       expect(node.hasAttribute('orientation')).toBe(false)
+    })
+
+    test('composes native prop ownership through inheritance', async () => {
+      class OwnedComponent extends Component<{ title?: React.ReactNode }> {
+        static displayName = 'OwnedComponent'
+        static ownedNativeProps = ['title']
+      }
+      class SubComponent extends OwnedComponent {
+        static displayName = 'SubComponent'
+      }
+
+      const { node } = await render(<SubComponent title="owned" />)
+      expect(node.hasAttribute('title')).toBe(false)
     })
   })
 })

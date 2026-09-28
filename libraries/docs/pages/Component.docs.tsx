@@ -189,11 +189,13 @@ export class ComponentDocs extends Documentation<Record<string, never>> {
             Standard native attributes and event handlers for the root element are also forwarded
             automatically, typed from React's element attributes for the component's tag. A
             descendant can accept <code>id</code>, <code>role</code>, <code>tabIndex</code>,{' '}
-            <code>onFocus</code>, <code>onClick</code>, and the rest of the common HTML/SVG surface
-            without declaring them. Component-specific props are never forwarded, and props a
-            component or mixin owns (or names such as <code>color</code>, <code>content</code>,{' '}
-            <code>title</code>, <code>fill</code>, <code>stroke</code>, <code>prefix</code>) stay
-            under that component's control.
+            <code>title</code>, <code>onFocus</code>, <code>onKeyDown</code>, and the rest of the
+            common HTML/SVG surface without declaring them. Component-specific props are never
+            forwarded. When a component or mixin intentionally reuses a native name for its own
+            semantics, it declares that name explicitly (for example{' '}
+            <code>static ownedNativeProps = ['title']</code>), and ownership composes through
+            inheritance and mixins — for example <code>Notification</code>/<code>Dialog</code> own
+            their React-node <code>title</code>.
           </p>
           <h3>Theme Integration</h3>
           <p>

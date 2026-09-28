@@ -42,6 +42,9 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
   extends Component<ColumnProps<TRow, TField>> {
   static displayName = 'Table.Column'
 
+  /** `title` is the column heading, not a native `title` tooltip. */
+  static ownedNativeProps = ['title']
+
   static get defaultProps() {
     return {
       ...super.defaultProps,

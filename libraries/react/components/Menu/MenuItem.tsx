@@ -21,16 +21,19 @@ export class MenuItem<P = unknown> extends Component<ItemProps<P> & P> {
   }
 
   get attributes() {
-    const { disabled, role, selected, tabIndex } = this.props
+    const { disabled, selected } = this.props
+    const inherited = super.attributes
+    const forward = inherited as Record<string, unknown>
+
     return {
-      ...super.attributes,
+      ...inherited,
       'aria-disabled': disabled,
       'aria-selected': selected === undefined ? undefined : String(selected),
       'disabled': disabled ? 'disabled' : undefined,
       'onClick': this.handleActivate,
       'onKeyDown': this.handleActivate,
-      'role': role ?? 'menuitem',
-      'tabIndex': disabled ? -1 : (tabIndex ?? 0),
+      'role': forward.role ?? 'menuitem',
+      'tabIndex': disabled ? -1 : (forward.tabIndex ?? 0),
     }
   }
   get tag(): keyof React.JSX.IntrinsicElements { return 'li' }

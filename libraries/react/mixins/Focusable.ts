@@ -61,4 +61,7 @@ export const Focusable: Mixin<IFocusable> = {
     readOnly: false,
     tabIndex: 0,
   },
+
+  /** Native props applied to the inner element, not the component root. */
+  ownedNativeProps: ['onBlur', 'onFocus', 'tabIndex'],
 }

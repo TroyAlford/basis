@@ -78,6 +78,9 @@ interface Props<T = unknown> extends IDialog<T> {
  */
 export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   static displayName = 'Dialog'
+
+  /** `title`/`content` are Dialog semantics, not native root attributes. */
+  static ownedNativeProps = ['content', 'title']
   static readonly Intent = Intent
 
   static confirm({

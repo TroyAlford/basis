@@ -2,6 +2,7 @@ import * as React from 'react'
 import { deepEquals } from '../../../utilities'
 import type { ApplicationRuntime, ServerEvent, SubscriptionDefinition } from '../../runtime'
 import { readBasisRuntime, ServerSubscriptions } from '../../runtime'
+import type { ComponentProps } from '../Component/Component'
 import { Component } from '../Component/Component'
 import { OverlayProvider } from '../OverlayProvider/OverlayProvider'
 import { Router } from '../Router/Router'
@@ -86,7 +87,7 @@ export class ApplicationBase<
 
   get tag() { return 'div' as const }
 
-  constructor(props: P & Props) {
+  constructor(props: ComponentProps<HTMLElement, P & Props>) {
     super(props)
 
     if (typeof window !== 'undefined') {

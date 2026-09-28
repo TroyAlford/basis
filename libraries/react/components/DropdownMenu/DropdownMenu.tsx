@@ -47,6 +47,9 @@ export class DropdownMenu extends Component<Props, HTMLDivElement, State> {
   static Divider = Menu.Divider
 
   static displayName = 'DropdownMenu'
+
+  /** `onClose` is a DropdownMenu callback, not a native root event. */
+  static ownedNativeProps = ['onClose']
   static defaultProps = {
     ...super.defaultProps,
     anchorPoint: AnchorPoint.BottomStart,

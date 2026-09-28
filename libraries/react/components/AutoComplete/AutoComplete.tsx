@@ -72,6 +72,9 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
 
   static displayName = 'AutoComplete'
 
+  /** `onClose` and `onSelect` are AutoComplete callbacks, not native root events. */
+  static ownedNativeProps = ['onClose', 'onSelect']
+
   static get defaultProps() {
     return {
       ...super.defaultProps,

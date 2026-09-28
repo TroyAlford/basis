@@ -38,6 +38,9 @@ export abstract class IconBase<
     return typeof ctor === 'function' && ctor.prototype instanceof IconBase
   }
 
+  /** `title` renders an SVG `<title>`, not a native `title` attribute. */
+  static ownedNativeProps = ['title']
+
   static #nextOverlayMask = 0
   #overlayMaskId = `overlay-${IconBase.#nextOverlayMask++}`
 

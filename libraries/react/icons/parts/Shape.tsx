@@ -21,6 +21,9 @@ export abstract class Shape<P extends Props = Props> extends Component<P, SVGEle
     }
   }
 
+  /** `color`/`fill`/`mask`/`stroke` are Shape semantics, not native attributes. */
+  static ownedNativeProps = ['color', 'fill', 'mask', 'stroke']
+
   get attributes() {
     return {
       ...super.attributes,

@@ -26,6 +26,11 @@ export interface Mixin<Props = unknown> {
   ): T,
   /** Default props for the mixin. */
   defaultProps: Partial<Props>,
+  /**
+   * Native prop names this mixin owns and applies to an inner element, so the
+   * base `Component` does not also forward them to the root element.
+   */
+  ownedNativeProps?: readonly string[],
   /** Whether this mixin should be applied after other mixins (mutative mixins). */
   post?: boolean,
   /** Applies mixin props to a React element. */
