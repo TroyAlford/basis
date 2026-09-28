@@ -158,6 +158,16 @@
         "@basis/utilities": "workspace:*",
       },
     },
+    "testing/docs": {
+      "name": "@/docs-fixture",
+      "dependencies": {
+        "@basis/react": "workspace:*",
+        "@basis/server": "workspace:*",
+        "@basis/utilities": "workspace:*",
+        "react": "^19",
+        "react-dom": "^19",
+      },
+    },
     "testing/e2e": {
       "name": "@/test",
       "dependencies": {
@@ -183,6 +193,8 @@
     "@basis/workspaces",
   ],
   "packages": {
+    "@/docs-fixture": ["@/docs-fixture@workspace:testing/docs"],
+
     "@/server-fixture": ["@/server-fixture@workspace:testing/server"],
 
     "@/test": ["@/test@workspace:testing/e2e"],
