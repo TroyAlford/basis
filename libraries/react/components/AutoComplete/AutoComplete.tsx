@@ -11,7 +11,9 @@ import { Component } from '../Component/Component'
 import { Menu } from '../Menu/Menu'
 import { PopupMenu } from '../PopupMenu/PopupMenu'
 import { TextEditor } from '../TextEditor/TextEditor'
-import { autoCompleteStyles } from './AutoComplete.styles.ts'
+import { AutoCompleteStatus } from './AutoCompleteStatus'
+
+import './AutoComplete.styles.ts'
 
 /** Props for the AutoComplete component. */
 interface Props<T = unknown>
@@ -61,21 +63,9 @@ interface State<T = unknown> {
   search: string,
 }
 
-/** The finite content states AutoComplete renders inside its popup. */
-enum Status {
-  /** The search completed with an error. */
-  Error = 'error',
-  /** A search is in flight. */
-  Loading = 'loading',
-  /** The search completed with no matching options. */
-  NotFound = 'not-found',
-}
-
-autoCompleteStyles(Status)
-
 /** Generic autocomplete component that combines TextEditor with PopupMenu for async search functionality. */
 export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElement, State<T>> {
-  static Status = Status
+  static Status = AutoCompleteStatus
 
   static displayName = 'AutoComplete'
 
@@ -273,11 +263,11 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
     let content: React.ReactNode
 
     if (loading) {
-      content = loadingContent ?? <div data-state={Status.Loading}>Loading...</div>
+      content = loadingContent ?? <div data-state={AutoCompleteStatus.Loading}>Loading...</div>
     } else if (error) {
-      content = <div data-state={Status.Error}>Error: {error.message}</div>
+      content = <div data-state={AutoCompleteStatus.Error}>Error: {error.message}</div>
     } else if ((options ?? []).length === 0) {
-      content = notFoundContent ?? <div data-state={Status.NotFound}>No results found</div>
+      content = notFoundContent ?? <div data-state={AutoCompleteStatus.NotFound}>No results found</div>
     } else {
       content = menuItems
     }
