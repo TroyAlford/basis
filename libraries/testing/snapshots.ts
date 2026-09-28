@@ -73,7 +73,11 @@ export interface ScreenshotComparison {
 function pad(source: PNG, width: number, height: number): PNG {
   if (source.width === width && source.height === height) return source
   const canvas = new PNG({ height, width })
-  source.bitblt(canvas, 0, 0, source.width, source.height, 0, 0)
+  const rowBytes = source.width * 4
+  for (let y = 0; y < source.height; y += 1) {
+    const from = y * rowBytes
+    source.data.copy(canvas.data, y * width * 4, from, from + rowBytes)
+  }
   return canvas
 }
 
