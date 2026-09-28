@@ -40,9 +40,11 @@ test('renders a button', async () => {
 
 Snapshot tests are ordinary `*.test.*` files, so `bun test` discovers them.
 
-`toMatchScreenshot` renders the element to HTML, inlines the component styles
-and the default theme, captures it in headless Chromium cropped to the rendered
-content, and mirrors `toMatchSnapshot`:
+`toMatchScreenshot` accepts a React element, a Playwright `Page`, or a
+`Locator`. A React element is rendered to HTML, the component styles and the
+default theme are inlined, and the capture is cropped to the rendered content;
+a page is captured at its viewport and a locator at its element box. Either way
+it mirrors `toMatchSnapshot`:
 
 - no snapshot exists → the capture is written and the assertion passes;
 - a snapshot exists → a new capture is compared; a mismatch fails and writes
@@ -62,6 +64,42 @@ Import `test`, `it`, and `describe` from `basis/testing` so the current test nam
 is tracked (Bun does not expose it to custom matchers). Pass a hint
 (`toMatchScreenshot('primary')`) to disambiguate multiple captures in one test,
 exactly like `toMatchSnapshot('hint')`.
+
+## Application tests
+
+Boot the real server and drive it in Chromium:
+
+```tsx
+import { expect } from 'bun:test'
+import {
+  blockExternalRequests,
+  seedLocalStorage,
+  startApplication,
+  test,
+  withPage,
+} from 'basis/testing'
+
+test('renders the application', async () => {
+  const app = await startApplication({ entry: './src/serve.ts' })
+  try {
+    await withPage(async page => {
+      await seedLocalStorage(page, { 'mtg-deck': '{}' })
+      await blockExternalRequests(page)
+      await page.goto(app.url)
+      await expect(page.locator('[data-testid="panel"]')).toMatchScreenshot()
+    })
+  } finally {
+    await app.stop()
+  }
+})
+```
+
+- `startApplication` spawns `entry` on a free loopback port and waits for
+  readiness; `stop()` is idempotent.
+- `withPage` opens a deterministically configured page and tears it down.
+- `blockExternalRequests` aborts non-loopback requests, so snapshots do not
+  depend on a CDN.
+- `seedLocalStorage` seeds state before any application script runs.
 
 Text and Skia rasterisation are pinned (grayscale anti-aliasing, no hinting,
 portable Skia), and the default comparison budget tolerates the greater of 10
