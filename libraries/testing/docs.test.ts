@@ -81,4 +81,69 @@ describe('testing/docs', () => {
       })
     })
   }, 60_000)
+
+  /*
+   * The AutoComplete dropdown is promoted to the browser top layer, so these
+   * assert the sizing contract Basis owns: it matches its editor, stays within
+   * the viewport, wraps rich option content, and follows a named theme.
+   */
+  test('aligns the AutoComplete dropdown to its editor', async () => {
+    await app.visit('/components/auto-complete', { stubs: STUBS }, async page => {
+      const search = page.locator('.auto-complete').first()
+      const input = search.locator('input')
+      const menu = search.locator('.popup-menu')
+
+      await input.click()
+      await input.fill('a')
+      await page.waitForSelector('.auto-complete .popup-menu .menu-item.component')
+
+      // Matches the editor width and stays within the viewport.
+      const editor = await search.locator('.text-editor').boundingBox()
+      const box = await menu.boundingBox()
+      const viewportHeight = await page.evaluate(() => innerHeight)
+      expect(Math.abs((box?.width ?? 0) - (editor?.width ?? 0))).toBeLessThanOrEqual(2)
+      expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(viewportHeight)
+
+      /*
+       * Real wrapping: narrow the editor so a rich option cannot fit on one
+       * line, then prove it wraps (no horizontal overflow, more than one line)
+       * rather than asserting the declaration alone.
+       */
+      await page.addStyleTag({ content: '.auto-complete { width: 160px; }' })
+      await page.waitForTimeout(150)
+      const wrapped = await menu.locator('.menu-item.component').first().evaluate(el => ({
+        clientWidth: el.clientWidth,
+        height: el.getBoundingClientRect().height,
+        lineHeight: Number.parseFloat(getComputedStyle(el).lineHeight),
+        overflow: el.scrollWidth - el.clientWidth,
+      }))
+      expect(wrapped.overflow).toBeLessThanOrEqual(1)
+      expect(wrapped.height).toBeGreaterThan(wrapped.lineHeight * 1.8)
+
+      /*
+       * Deterministic visual contract for the open dropdown (light). Text
+       * anti-aliasing differs across machines, so allow the same budget the
+       * other docs snapshots use.
+       */
+      await expect(menu).toMatchScreenshot('open dropdown', { maxDiffPixelRatio: 0.02 })
+
+      /*
+       * The surface follows a named theme applied to a descendant. The theme is
+       * injected because the docs app is light-only; the point is the token
+       * flowing from the [data-theme] ancestor into the top-layer popup.
+       */
+      await page.addStyleTag({
+        content: [
+          ':root [data-theme="verify"] {',
+          '  --basis-color-background: #000000;',
+          '  --basis-color-foreground: #ffffff;',
+          '}',
+        ].join(' '),
+      })
+      await page.evaluate(() => document.querySelector('.auto-complete')?.setAttribute('data-theme', 'verify'))
+      const background = await menu.evaluate(el => getComputedStyle(el).backgroundColor)
+      expect(background).toBe('rgb(0, 0, 0)')
+      await expect(menu).toMatchScreenshot('open dropdown dark', { maxDiffPixelRatio: 0.02 })
+    })
+  }, 60_000)
 })

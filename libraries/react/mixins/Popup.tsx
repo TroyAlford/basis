@@ -14,14 +14,18 @@ export interface IPopup {
   anchorTo?: HTMLElement | React.RefObject<HTMLElement>,
   /** Whether to show an arrow pointing to the reference element. */
   arrow?: boolean,
+  /** Bound the popup's height to the available viewport space (long content scrolls). */
+  constrainHeight?: boolean,
   /** The offset distance between the popup and reference element. */
   offset?: number,
+  /** Match the popup's width to its anchor's. */
+  sameWidth?: boolean,
 }
 
 const reposition = (
   component: { props: IPopup, rootNode: HTMLElement | SVGElement | null },
 ) => {
-  const { anchorPoint, anchorTo, offset } = component.props
+  const { anchorPoint, anchorTo, constrainHeight, offset, sameWidth } = component.props
   const popup = component.rootNode as HTMLElement
 
   if (!popup) return
@@ -35,7 +39,9 @@ const reposition = (
 
   repositionPopup(popup, anchor, {
     anchorPoint: anchorPoint ?? AnchorPoint.Top,
+    constrainHeight,
     offset: offset ?? 0,
+    sameWidth,
   })
 }
 
@@ -65,6 +71,8 @@ export const Popup: Mixin<IPopup> = {
       prevProps.anchorTo !== component.props.anchorTo
       || prevProps.anchorPoint !== component.props.anchorPoint
       || prevProps.arrow !== component.props.arrow
+      || prevProps.sameWidth !== component.props.sameWidth
+      || prevProps.constrainHeight !== component.props.constrainHeight
     ) {
       reposition(component)
     }
