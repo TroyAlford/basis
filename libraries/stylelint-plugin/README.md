@@ -40,15 +40,24 @@ required to precede nested selector blocks.
 ### `basis/no-state-classes`
 
 Forbids representing component state and variants with ad-hoc state classes.
-Basis state uses native pseudo-classes/attributes, ARIA attributes, and
-`data-*` attributes. Each rejected class reports the semantic selector to prefer
-(for example `.disabled` → `:disabled` or `[disabled]`, `.selected` →
-`[aria-selected="true"]` or `[data-selected]`).
+The rule owns exactly one deterministic claim: this class name is transient
+state and should not be a class. It cannot know an element's real accessibility
+semantics from CSS, so it never recommends an ARIA attribute or role.
 
-ARIA selectors are appropriate only when the ARIA attribute represents the
-element's real accessibility semantics. Do not add ARIA merely as a CSS styling
-hook. When application state has no corresponding semantic ARIA or native state,
-use `data-*` instead.
+Each rejected class reports a deterministic recommendation:
+
+- genuinely CSS-native state stays native (`:hover`, `:focus`,
+  `:focus-visible`, `[hidden]`);
+- application state recommends a neutral `data-*` attribute (for example
+  `.active` → `[data-active]`, `.selected` → `[data-selected]`, `.clickable` →
+  `[data-clickable]`);
+- states where a native element semantic may apply — `disabled`, `checked`,
+  `invalid`, `read-only` — recommend the native semantic when the element
+  supports it, otherwise `data-*`.
+
+Choosing an existing genuine native/ARIA semantic as the better selector is the
+semantic reviewer's job (`component-style-semantics`), not this rule's, because
+it depends on the element and cannot be decided from CSS alone.
 
 The default vocabulary is the explicit Basis policy:
 

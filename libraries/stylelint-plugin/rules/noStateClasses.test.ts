@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import * as postcssStyledSyntax from 'postcss-styled-syntax'
 import type { Config } from 'stylelint'
 import { lintStyles } from '../testUtils'
-import { noStateClasses, ruleName } from './noStateClasses'
+import { noStateClasses, ruleName, STATE_CLASSES } from './noStateClasses'
 
 const config = (ignore?: string[]): Config => ({
   customSyntax: postcssStyledSyntax,
@@ -87,6 +87,47 @@ describe('basis/no-state-classes', () => {
     expect(warnings).toHaveLength(1)
     expect(warnings[0]?.text).toContain('[data-dragging]')
     expect(warnings[0]?.text).not.toContain('aria-grabbed')
+  })
+
+  test('recommends neutral data-* for application-state vocabulary', async () => {
+    const states = [
+      'active', 'clickable', 'closed', 'collapsed', 'dragging', 'editing',
+      'expanded', 'loading', 'open', 'pressed', 'selected', 'visible',
+    ]
+    const body = states.map(state => `.foo.component.${state} { color: red; }`).join('\n')
+    const { warnings } = await lintStyles(body, { config: config() })
+
+    expect(warnings).toHaveLength(states.length)
+    for (const state of states) {
+      const warning = warnings.find(candidate => candidate.text.includes(`.${state}"`))
+      expect(warning?.text).toContain(`[data-${state}]`)
+    }
+  })
+
+  test('makes element-dependent native states conditional, never ARIA', async () => {
+    const fallbacks: Record<string, string> = {
+      'checked': '[data-checked]',
+      'disabled': '[data-disabled]',
+      'invalid': '[data-invalid]',
+      'read-only': '[data-read-only]',
+    }
+
+    for (const [state, fallback] of Object.entries(fallbacks)) {
+      const { warnings } = await lintStyles(`
+        .foo.component.${state} { color: red; }
+      `, { config: config() })
+
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]?.text).toContain('native semantic')
+      expect(warnings[0]?.text).toContain(fallback)
+      expect(warnings[0]?.text).not.toMatch(/aria-|role=/)
+    }
+  })
+
+  test('never prescribes synthetic accessibility semantics', () => {
+    for (const suggestion of Object.values(STATE_CLASSES)) {
+      expect(suggestion).not.toMatch(/aria-|role=/)
+    }
   })
 
   test('parses interpolated attribute selectors without flagging them', async () => {

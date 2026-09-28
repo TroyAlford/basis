@@ -73,8 +73,9 @@ export class CssLintingDocs extends Documentation<Record<string, never>> {
             </li>
             <li>
               <strong>Basis semantics</strong> — component state and variants are expressed with
-              native pseudo-classes/attributes, ARIA attributes, or <code>data-*</code> attributes,
-              not ad-hoc state classes.
+              genuinely CSS-native state, neutral <code>data-*</code>, or a native element semantic
+              when it applies — never an ad-hoc state class, and never an ARIA hook the rule
+              invents.
             </li>
           </ul>
           <p>
@@ -92,29 +93,34 @@ export class CssLintingDocs extends Documentation<Record<string, never>> {
             <code>.expanded</code>, <code>.pressed</code>, <code>.read-only</code>,{' '}
             <code>.visible</code>, and <code>.loading</code>).
           </p>
+          <p>
+            The deterministic rule owns one claim — this class name is transient state and should
+            not be a class. It cannot know an element's real accessibility semantics from CSS, so
+            it never prescribes an ARIA attribute or role. It recommends:
+          </p>
           <ul>
             <li>
-              Prefer the native semantic where one exists: <code>:disabled</code>,{' '}
-              <code>[disabled]</code>, <code>:checked</code>, <code>:hover</code>,{' '}
-              <code>:focus-visible</code>, <code>:invalid</code>, <code>:hidden</code>, and{' '}
-              <code>[readonly]</code>.
+              genuinely CSS-native state where it applies: <code>:hover</code>, <code>:focus</code>,{' '}
+              <code>:focus-visible</code>, and <code>[hidden]</code>;
             </li>
             <li>
-              Prefer ARIA attributes for accessibility state: <code>[aria-selected="true"]</code>,{' '}
-              <code>[aria-expanded="true"]</code>, <code>[aria-pressed="true"]</code>,{' '}
-              <code>[aria-busy="true"]</code>, and <code>[aria-disabled="true"]</code>.
+              a neutral <code>[data-*]</code> attribute for application state, for example{' '}
+              <code>[data-active]</code>, <code>[data-selected]</code>, <code>[data-open]</code>,{' '}
+              <code>[data-loading]</code>, and <code>[data-visible]</code>;
             </li>
             <li>
-              Use <code>[data-*]</code> for Basis/application state and variants a component
-              exposes, for example <code>[data-open]</code>, <code>[data-loading]</code>,{' '}
-              <code>[data-state="on"]</code>, and <code>[data-visible]</code>.
+              for states where a native element semantic may apply — <code>disabled</code>,{' '}
+              <code>checked</code>, <code>invalid</code>, and <code>read-only</code> — the native
+              semantic when the element supports it, otherwise <code>[data-*]</code> (for example{' '}
+              <code>:disabled</code>/<code>[disabled]</code> when supported, otherwise{' '}
+              <code>[data-disabled]</code>).
             </li>
           </ul>
           <p>
-            ARIA selectors are appropriate only when the ARIA attribute represents the element's
-            real accessibility semantics. Do not add ARIA merely as a CSS styling hook; use{' '}
-            <code>[data-*]</code> for application state when no corresponding semantic ARIA or
-            native state exists.
+            Choosing an existing genuine native/ARIA semantic as the better selector belongs to the{' '}
+            <code>component-style-semantics</code> reviewer, because it depends on the element.
+            ARIA attributes and roles must never be added merely to give CSS a selector. Use{' '}
+            <code>[data-*]</code> for application state that has no real semantic already present.
           </p>
           <p>
             Structural, component, and mixin classes remain valid: <code>.button.component</code>,{' '}

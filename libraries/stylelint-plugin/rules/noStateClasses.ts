@@ -9,39 +9,43 @@ export const ruleName = 'basis/no-state-classes'
 
 /**
  * State/variant class names Basis forbids in `*.styles.ts`, mapped to the
- * native pseudo-class, attribute, ARIA, or `data-*` selector that should
- * express the same state.
+ * deterministic recommendation for expressing the same state without an ad-hoc
+ * class.
+ *
+ * CSS alone cannot know an element's real accessibility semantics, so this rule
+ * never prescribes an ARIA attribute or role. It recommends genuinely
+ * CSS-native state (`:hover`, `:focus`, `:focus-visible`, `[hidden]`), a neutral
+ * `data-*` attribute for application state, or — where a native element
+ * semantic may apply (`disabled`, `checked`, `invalid`, `read-only`) — the
+ * native semantic when the element supports it, otherwise `data-*`. Recognizing
+ * an existing genuine native/ARIA semantic as the better selector is the
+ * semantic reviewer's job, not this rule's.
  *
  * This is the explicit Basis semantic policy: the list is the vocabulary, not a
  * guess derived from arbitrary class names. Consumers can extend or narrow it
  * with the rule's `ignore` secondary option.
- *
- * ARIA selectors appear here only where the ARIA attribute represents the
- * element's real accessibility semantics. Do not add ARIA merely as a CSS
- * styling hook; use `data-*` for application state when no corresponding
- * semantic ARIA or native state exists.
  */
 export const STATE_CLASSES: Readonly<Record<string, string>> = {
-  'active': '[data-active] or [aria-current]',
-  'checked': ':checked or [aria-checked="true"]',
-  'clickable': '[role="button"]',
-  'closed': '[data-closed] or [aria-expanded="false"]',
-  'collapsed': '[aria-expanded="false"]',
-  'disabled': ':disabled or [disabled]',
+  'active': '[data-active]',
+  'checked': 'the native semantic when supported (`:checked`), otherwise `[data-checked]`',
+  'clickable': '[data-clickable]',
+  'closed': '[data-closed]',
+  'collapsed': '[data-collapsed]',
+  'disabled': 'the native semantic when supported (`:disabled` or `[disabled]`), otherwise `[data-disabled]`',
   'dragging': '[data-dragging]',
   'editing': '[data-editing]',
-  'expanded': '[aria-expanded="true"]',
+  'expanded': '[data-expanded]',
   'focused': ':focus or :focus-visible',
   'hidden': '[hidden] or [data-hidden]',
   'hover': ':hover',
   'hovered': ':hover',
-  'invalid': ':invalid or [aria-invalid="true"]',
-  'loading': '[data-loading] or [aria-busy="true"]',
-  'open': '[data-open] or [aria-expanded="true"]',
-  'pressed': '[aria-pressed="true"]',
-  'read-only': '[readonly] or [aria-readonly="true"]',
-  'readonly': '[readonly] or [aria-readonly="true"]',
-  'selected': '[aria-selected="true"] or [data-selected]',
+  'invalid': 'the native semantic when supported (`:invalid`), otherwise `[data-invalid]`',
+  'loading': '[data-loading]',
+  'open': '[data-open]',
+  'pressed': '[data-pressed]',
+  'read-only': 'the native semantic when supported (`[readonly]`), otherwise `[data-read-only]`',
+  'readonly': 'the native semantic when supported (`[readonly]`), otherwise `[data-readonly]`',
+  'selected': '[data-selected]',
   'visible': '[data-visible]',
 }
 

@@ -85,13 +85,17 @@ The policy enforces correctness (parse validity, unknown properties, malformed
 selectors, accidental duplicates, lowercase type selectors), deterministic
 ordering (custom properties, then ordinary declarations, then nested selector
 blocks; safely autofixable), nesting guardrails, and Basis selector semantics.
-Component state and variants use native pseudo-classes/attributes, ARIA
-attributes, or `data-*` attributes instead of ad-hoc state classes such as
-`.disabled`, `.active`, `.selected`, and `.open`; structural, component, and
-mixin classes (`.button.component`, `.table.editor.component`, `.value`,
-`.prefix`, `.suffix`) remain valid. ARIA selectors are appropriate only when the
-ARIA attribute represents the element's real accessibility semantics; use
-`data-*` for application state that has no semantic ARIA or native equivalent.
+The deterministic state rule owns one claim — a state class name is transient
+state and should not be a class — and never prescribes ARIA or a role, because
+CSS cannot know an element's real accessibility semantics. It recommends
+genuinely CSS-native state (`:hover`, `:focus`, `:focus-visible`, `[hidden]`),
+neutral `data-*` for application state (for example `.active` → `[data-active]`,
+`.selected` → `[data-selected]`), and, for `disabled`/`checked`/`invalid`/
+`read-only`, the native semantic when the element supports it, otherwise
+`data-*`. Structural, component, and mixin classes (`.button.component`,
+`.table.editor.component`, `.value`, `.prefix`, `.suffix`) remain valid.
+Choosing an existing genuine native/ARIA semantic as the better selector is the
+`component-style-semantics` reviewer's job.
 
 Stylelint, the custom syntax, and every plugin are declared by Basis, so
 consumers never enumerate the CSS lint dependency or configuration graph.
