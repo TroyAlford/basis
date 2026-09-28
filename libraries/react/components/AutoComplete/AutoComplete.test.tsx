@@ -5,7 +5,6 @@ import { Simulate } from '../../testing/Simulate'
 import { waitFor } from '../../testing/waitFor'
 import { styles } from '../../utilities/style'
 import { AutoComplete } from './AutoComplete'
-import { AutoCompleteStatus } from './AutoCompleteStatus'
 
 describe('AutoComplete', () => {
   describe('search counter behavior', () => {
@@ -136,12 +135,12 @@ describe('AutoComplete', () => {
       await Simulate.change(input, 'test')
 
       const content = await waitFor(
-        () => node.querySelector(`[data-state="${AutoCompleteStatus.Error}"]`),
+        () => node.querySelector(`[data-state="${AutoComplete.Status.Error}"]`),
         { timeout: 1_000 },
       )
 
       expect(content).not.toBeNull()
-      expect(styles()).toContain(`[data-state="${AutoCompleteStatus.Error}"]`)
+      expect(styles()).toContain(`[data-state="${AutoComplete.Status.Error}"]`)
     })
 
     test('emits the shared not-found status and styles it by the same value', async () => {
@@ -159,16 +158,16 @@ describe('AutoComplete', () => {
       await Simulate.change(input, 'test')
 
       const content = await waitFor(
-        () => node.querySelector(`[data-state="${AutoCompleteStatus.NotFound}"]`),
+        () => node.querySelector(`[data-state="${AutoComplete.Status.NotFound}"]`),
         { timeout: 1_000 },
       )
 
       expect(content).not.toBeNull()
-      expect(styles()).toContain(`[data-state="${AutoCompleteStatus.NotFound}"]`)
+      expect(styles()).toContain(`[data-state="${AutoComplete.Status.NotFound}"]`)
     })
 
     test('styles every declared status value', () => {
-      for (const status of Object.values(AutoCompleteStatus)) {
+      for (const status of Object.values(AutoComplete.Status)) {
         expect(styles()).toContain(`[data-state="${status}"]`)
       }
     })
