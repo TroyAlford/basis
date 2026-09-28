@@ -30,6 +30,15 @@ function isScreenshotTarget(value: ScreenshotSubject): value is Page | Locator {
   return typeof (value as { screenshot?: unknown }).screenshot === 'function'
 }
 
+/**
+ * Whether a Playwright target is a page (as opposed to a locator).
+ * @param value - The target.
+ * @returns True for a page.
+ */
+function isPage(value: Page | Locator): value is Page {
+  return typeof (value as Page).goto === 'function'
+}
+
 /** Paths a snapshot and its failure artifacts resolve to. */
 interface SnapshotPaths {
   /** Captured image, written on a mismatch. */
@@ -125,11 +134,16 @@ function snapshotKey(file: string, hint?: string): string {
  * to its element); a React element is rendered to a standalone document and
  * cropped to its content.
  * @param subject - What to capture.
+ * @param options - Capture options.
  * @returns The PNG bytes.
  */
-async function capture(subject: ScreenshotSubject): Promise<Buffer> {
+async function capture(subject: ScreenshotSubject, options: ScreenshotOptions): Promise<Buffer> {
   if (isScreenshotTarget(subject)) {
-    const shot = await subject.screenshot({ animations: 'disabled', caret: 'hide' })
+    const shot = await subject.screenshot({
+      animations: 'disabled',
+      caret: 'hide',
+      ...(isPage(subject) ? { fullPage: options.fullPage ?? true } : {}),
+    })
     return Buffer.isBuffer(shot) ? shot : Buffer.from(shot)
   }
 
@@ -183,7 +197,7 @@ export async function toMatchScreenshot(
 
   const file = callerFile()
   const key = snapshotKey(file, hint)
-  const actual = PNG.sync.read(await capture(received))
+  const actual = PNG.sync.read(await capture(received, options))
   const { actual: actualPath, baseline, diff: diffPath } = snapshotPaths(file, key)
 
   if (!existsSync(baseline) || updating()) {

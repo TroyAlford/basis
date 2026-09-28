@@ -14,8 +14,14 @@ export const DEFAULT_MAX_DIFF_PIXEL_RATIO = 0.001
 /** Absolute number of differing pixels tolerated when no explicit budget is given. */
 export const DEFAULT_MAX_DIFF_PIXELS = 10
 
-/** Options controlling how a screenshot is compared with its snapshot. */
+/** Options controlling how a screenshot is captured and compared. */
 export interface ScreenshotOptions {
+  /**
+   * Capture the entire scrollable page rather than just the viewport. Applies
+   * to a Playwright page and defaults to `true`; set `false` for the viewport.
+   * A locator is already its element's full box.
+   */
+  fullPage?: boolean,
   /** Maximum fraction of differing pixels allowed. Overrides the default tolerance. */
   maxDiffPixelRatio?: number,
   /** Maximum number of differing pixels allowed. When omitted, only the ratio budget applies. */
