@@ -69,6 +69,26 @@ describe('basis/no-state-classes', () => {
     expect(warnings).toHaveLength(0)
   })
 
+  test('recommends the standard hidden attribute for .hidden, not :hidden', async () => {
+    const { warnings } = await lintStyles(`
+      .foo.component.hidden { display: none; }
+    `, { config: config() })
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]?.text).toContain('[hidden] or [data-hidden]')
+    expect(warnings[0]?.text).not.toContain(':hidden')
+  })
+
+  test('does not recommend deprecated aria-grabbed for .dragging', async () => {
+    const { warnings } = await lintStyles(`
+      .foo.component.dragging { opacity: 0.5; }
+    `, { config: config() })
+
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]?.text).toContain('[data-dragging]')
+    expect(warnings[0]?.text).not.toContain('aria-grabbed')
+  })
+
   test('parses interpolated attribute selectors without flagging them', async () => {
     const { warnings } = await lintStyles(`
       .foo.component[data-state="\${State.Selected}"] { color: red; }

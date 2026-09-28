@@ -111,6 +111,12 @@ export class CssLintingDocs extends Documentation<Record<string, never>> {
             </li>
           </ul>
           <p>
+            ARIA selectors are appropriate only when the ARIA attribute represents the element's
+            real accessibility semantics. Do not add ARIA merely as a CSS styling hook; use{' '}
+            <code>[data-*]</code> for application state when no corresponding semantic ARIA or
+            native state exists.
+          </p>
+          <p>
             Structural, component, and mixin classes remain valid: <code>.button.component</code>,{' '}
             <code>.table.editor.component</code>, <code>.value</code>, <code>.prefix</code>,{' '}
             <code>.suffix</code>, and the like. The rule only rejects the explicit state-class

@@ -45,6 +45,11 @@ Basis state uses native pseudo-classes/attributes, ARIA attributes, and
 (for example `.disabled` → `:disabled` or `[disabled]`, `.selected` →
 `[aria-selected="true"]` or `[data-selected]`).
 
+ARIA selectors are appropriate only when the ARIA attribute represents the
+element's real accessibility semantics. Do not add ARIA merely as a CSS styling
+hook. When application state has no corresponding semantic ARIA or native state,
+use `data-*` instead.
+
 The default vocabulary is the explicit Basis policy:
 
 `active`, `checked`, `clickable`, `closed`, `collapsed`, `disabled`, `dragging`,

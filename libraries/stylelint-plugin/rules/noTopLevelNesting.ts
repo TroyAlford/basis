@@ -34,11 +34,37 @@ const isTopLevel = (rule: Rule): boolean => {
 }
 
 /**
+ * Whether a top-level selector narrows or chains off a class-rooted scope and
+ * should instead be nested inside that scope.
+ *
+ * A selector is rejected when its first compound contains a class selector and
+ * either (a) the first compound also carries a state/narrowing selector (an
+ * attribute, pseudo-class, or pseudo-element) or (b) a combinator follows. A
+ * scope that is not class-rooted is left alone: `:root`, `html`, `body`, bare
+ * attribute roots such as `[data-pin]`, and functional pseudo roots such as
+ * `:is(...)` are legitimate top-level scopes.
+ * @param selector - A parsed selector.
+ * @returns True when the selector must be nested inside its owner.
+ */
+const shouldNest = (selector: selectorParser.Selector): boolean => {
+  const nodes = selector.nodes
+  const firstCombinator = nodes.findIndex(node => node.type === 'combinator')
+  const scope = firstCombinator === -1 ? nodes : nodes.slice(0, firstCombinator)
+  const classRooted = scope.some(node => node.type === 'class')
+  const narrowed = scope.some(node => node.type === 'attribute' || node.type === 'pseudo')
+
+  return classRooted && (narrowed || firstCombinator !== -1)
+}
+
+/**
  * Requires descendant, state, and pseudo-selectors to be nested inside their
  * owning selector instead of repeating avoidable top-level selector chains.
  *
- * A top-level selector that contains a combinator (descendant, child, or
- * sibling) is reported; the same selector nested inside its owner is fine.
+ * A class-rooted top-level selector is reported when it chains a descendant,
+ * child, or sibling combinator, or attaches a state/narrowing selector
+ * (attribute, pseudo-class, or pseudo-element). The same selectors nested inside
+ * their owner are fine, as are non-class scopes (`:root`, `html`, `body`, bare
+ * attribute roots, and functional pseudo roots).
  * @param primary Whether the rule is enabled.
  * @returns A Stylelint rule visitor.
  */
@@ -62,11 +88,7 @@ const visitor = (primary: boolean) => (
         return
       }
 
-      const chained = parsed.nodes.some(selector => (
-        selector.nodes.some(node => node.type === 'combinator')
-      ))
-
-      if (!chained) return
+      if (!parsed.nodes.some(shouldNest)) return
 
       report({
         message: messages.rejected(rule.selector),

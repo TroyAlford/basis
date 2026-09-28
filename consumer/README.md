@@ -89,7 +89,9 @@ Component state and variants use native pseudo-classes/attributes, ARIA
 attributes, or `data-*` attributes instead of ad-hoc state classes such as
 `.disabled`, `.active`, `.selected`, and `.open`; structural, component, and
 mixin classes (`.button.component`, `.table.editor.component`, `.value`,
-`.prefix`, `.suffix`) remain valid.
+`.prefix`, `.suffix`) remain valid. ARIA selectors are appropriate only when the
+ARIA attribute represents the element's real accessibility semantics; use
+`data-*` for application state that has no semantic ARIA or native equivalent.
 
 Stylelint, the custom syntax, and every plugin are declared by Basis, so
 consumers never enumerate the CSS lint dependency or configuration graph.

@@ -15,6 +15,11 @@ export const ruleName = 'basis/no-state-classes'
  * This is the explicit Basis semantic policy: the list is the vocabulary, not a
  * guess derived from arbitrary class names. Consumers can extend or narrow it
  * with the rule's `ignore` secondary option.
+ *
+ * ARIA selectors appear here only where the ARIA attribute represents the
+ * element's real accessibility semantics. Do not add ARIA merely as a CSS
+ * styling hook; use `data-*` for application state when no corresponding
+ * semantic ARIA or native state exists.
  */
 export const STATE_CLASSES: Readonly<Record<string, string>> = {
   'active': '[data-active] or [aria-current]',
@@ -23,11 +28,11 @@ export const STATE_CLASSES: Readonly<Record<string, string>> = {
   'closed': '[data-closed] or [aria-expanded="false"]',
   'collapsed': '[aria-expanded="false"]',
   'disabled': ':disabled or [disabled]',
-  'dragging': '[data-dragging] or [aria-grabbed="true"]',
+  'dragging': '[data-dragging]',
   'editing': '[data-editing]',
   'expanded': '[aria-expanded="true"]',
   'focused': ':focus or :focus-visible',
-  'hidden': ':hidden or [hidden]',
+  'hidden': '[hidden] or [data-hidden]',
   'hover': ':hover',
   'hovered': ':hover',
   'invalid': ':invalid or [aria-invalid="true"]',
