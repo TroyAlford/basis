@@ -1,17 +1,15 @@
 import { css, style } from '../../utilities/style'
 
+/*
+ * See Button.styles.ts: component tokens use `var(..., default)` fallbacks so
+ * they resolve against the element's inherited theme rather than the root.
+ */
 style('basis:text-editor', css`
-  :root {
-    --basis-text-editor-background: var(--basis-color-background);
-    --basis-text-editor-border-radius: var(--basis-radius-sm);
-    --basis-text-editor-border: 1px solid var(--basis-color-foreground);
-    --basis-text-editor-foreground: var(--basis-color-foreground);
-    --basis-text-editor-padding: var(--basis-unit-xs);
-  }
-
   .text-editor.component {
-    border-radius: var(--basis-text-editor-border-radius);
-    border: var(--basis-text-editor-border);
+    background: var(--basis-text-editor-background, var(--basis-color-background));
+    border-radius: var(--basis-text-editor-border-radius, var(--basis-radius-sm));
+    border: var(--basis-text-editor-border, 1px solid var(--basis-color-foreground));
+    color: var(--basis-text-editor-foreground, var(--basis-color-foreground));
     display: flex;
     font-size: 1em;
     gap: 0;
@@ -23,14 +21,16 @@ style('basis:text-editor', css`
 
 
     > .value, &::before {
+      background: transparent;
       border: none;
+      color: inherit;
       flex-grow: 1;
       font-family: inherit;
       font-size: inherit;
       line-height: inherit;
       margin: 0;
       outline: none;
-      padding: var(--basis-text-editor-padding);
+      padding: var(--basis-text-editor-padding, var(--basis-unit-xs));
       resize: none;
       white-space: pre-wrap;
     }
