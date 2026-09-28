@@ -1,5 +1,16 @@
 import { describe as bunDescribe, it as bunIt, test as bunTest } from 'bun:test'
 
+/*
+ * Bun does not expose the current test name to custom matchers (there is no
+ * `expect.getState()`), so `toMatchScreenshot` cannot key snapshots the way
+ * `toMatchSnapshot` does. This module wraps `test`, `it`, and `describe` to
+ * record the name while a body runs and to compose `describe` ancestors.
+ *
+ * A recursive Proxy preserves Bun's full modifier surface (`.skip`, `.only`,
+ * `.each`, `.if`, ...) without re-declaring it. The `as unknown as` casts are
+ * required because a Proxy cannot preserve the nominal function type.
+ */
+
 let currentName: string | null = null
 const describeStack: string[] = []
 const counts = new Map<string, number>()

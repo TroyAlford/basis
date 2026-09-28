@@ -4,6 +4,7 @@ import { PNG } from 'pngjs'
 import type * as React from 'react'
 import { withPage } from '../browser'
 import { renderHtml } from '../document'
+import { formatSnapshotKey, slug } from '../naming'
 import type { ScreenshotOptions } from '../snapshots'
 import { comparePng, readPng, writePng } from '../snapshots'
 import { currentTestName, nextSnapshotIndex } from '../test'
@@ -28,6 +29,10 @@ interface SnapshotPaths {
 
 /**
  * Resolve the test file that invoked the matcher.
+ *
+ * Bun exposes no test-path API to custom matchers (there is no
+ * `expect.getState()`), so the calling frame is read from the stack; frames from
+ * `node_modules` and non-test files are skipped.
  * @returns The caller's file path, or a synthetic path when it cannot be found.
  */
 function callerFile(): string {
@@ -41,18 +46,6 @@ function callerFile(): string {
     return file
   }
   return join(process.cwd(), 'snapshot.test.ts')
-}
-
-/**
- * Turn a snapshot key into a filesystem-safe, lowercase name.
- * @param value - The snapshot key.
- * @returns A kebab-cased filename stem.
- */
-function slug(value: string): string {
-  return value
-    .replace(/[^a-z0-9]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase() || 'snapshot'
 }
 
 /**
@@ -82,6 +75,21 @@ function updating(): boolean {
   return process.argv.includes('--update-snapshots') || process.env.UPDATE_SNAPSHOTS === '1'
 }
 
+let warnedMissingTestName = false
+
+/**
+ * Warn once when a snapshot is taken outside a test registered through the
+ * wrapped `test`/`describe`, since the key then omits the test name.
+ */
+function warnMissingTestName(): void {
+  if (warnedMissingTestName) return
+  warnedMissingTestName = true
+  process.stderr.write(
+    '[basis/testing] toMatchScreenshot was used outside a test registered via ' +
+      "basis/testing's test/describe; the snapshot key will omit the test name\n",
+  )
+}
+
 /**
  * Build the snapshot key from the current test name, an optional hint, and the
  * per-key counter — the same shape as Bun's own snapshot keys.
@@ -90,10 +98,11 @@ function updating(): boolean {
  * @returns The snapshot key.
  */
 function snapshotKey(file: string, hint?: string): string {
-  const testName = currentTestName() ?? 'screenshot'
-  const base = hint ? `${testName}: ${hint}` : testName
-  const index = nextSnapshotIndex(`${file}#${testName}#${hint ?? ''}`)
-  return `${base} ${index}`
+  const testName = currentTestName()
+  if (!testName) warnMissingTestName()
+  const resolved = testName ?? 'screenshot'
+  const index = nextSnapshotIndex(`${file}#${resolved}#${hint ?? ''}`)
+  return formatSnapshotKey(resolved, hint, index)
 }
 
 /**

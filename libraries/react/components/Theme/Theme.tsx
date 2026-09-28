@@ -178,7 +178,8 @@ export class Theme extends Component<Props> {
   override render = (): React.ReactNode => null
 }
 
-const CATEGORIES = ['color', 'fontSize', 'radius', 'shadow', 'transition', 'unit'] as const
+// Derived from the defaults so a new theme category is picked up automatically.
+const CATEGORIES = Object.keys(DEFAULT_THEME) as (keyof typeof DEFAULT_THEME)[]
 
 /**
  * Format a colour for use in a CSS variable.
