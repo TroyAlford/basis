@@ -293,6 +293,8 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
         />
         {this.isOpen && (
           <PopupMenu
+            constrainHeight
+            sameWidth
             anchorPoint={this.props.anchorPoint}
             anchorTo={this.input.current?.rootNode}
             disabled={this.props.disabled}
