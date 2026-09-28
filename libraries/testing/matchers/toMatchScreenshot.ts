@@ -128,6 +128,26 @@ function snapshotKey(file: string, hint?: string): string {
 }
 
 /**
+ * Run a screenshot action, retrying the transient capture failures Chromium
+ * occasionally reports in headless runs.
+ * @param action - The screenshot action.
+ * @param attempts - Maximum attempts. Defaults to 3.
+ * @returns The action's result.
+ */
+async function screenshotWithRetry<T>(action: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await action()
+    } catch (error) {
+      lastError = error
+      await Bun.sleep(100 * (attempt + 1))
+    }
+  }
+  throw lastError
+}
+
+/**
  * Capture a subject to a PNG buffer.
  *
  * A Playwright page or locator is screenshotted directly (a locator is cropped
@@ -139,11 +159,11 @@ function snapshotKey(file: string, hint?: string): string {
  */
 async function capture(subject: ScreenshotSubject, options: ScreenshotOptions): Promise<Buffer> {
   if (isScreenshotTarget(subject)) {
-    const shot = await subject.screenshot({
+    const shot = await screenshotWithRetry(() => subject.screenshot({
       animations: 'disabled',
       caret: 'hide',
       ...(isPage(subject) ? { fullPage: options.fullPage ?? true } : {}),
-    })
+    }))
     return Buffer.isBuffer(shot) ? shot : Buffer.from(shot)
   }
 
@@ -159,11 +179,11 @@ async function capture(subject: ScreenshotSubject, options: ScreenshotOptions): 
       const bottom = Math.ceil(Math.max(...rects.map(rect => rect.bottom)))
       return { height: bottom - top, width: right - left, x: left, y: top }
     })
-    return await page.screenshot({
+    return await screenshotWithRetry(() => page.screenshot({
       animations: 'disabled',
       caret: 'hide',
       ...(clip ? { clip } : { fullPage: true }),
-    })
+    }))
   })
 }
 
