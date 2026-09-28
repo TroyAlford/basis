@@ -248,10 +248,19 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
     this.setActiveIndex(next)
   }
 
-  /** Activate the currently active option, if any. */
+  /**
+   * Activate the currently active option, if any.
+   *
+   * A disabled option may become active, but is never activated, matching the
+   * disabled guard that `Menu.Item` applies to pointer/menu-item activation.
+   */
   private activateActiveOption = (): void => {
-    const option = this.state.options[this.state.activeIndex]
-    if (option !== undefined) this.handleSelect(option)
+    const { activeIndex, options } = this.state
+    const option = options[activeIndex]
+    if (option === undefined) return
+    if (this.props.getOptionDisabled?.(option) ?? false) return
+
+    this.handleSelect(option)
   }
 
   /**

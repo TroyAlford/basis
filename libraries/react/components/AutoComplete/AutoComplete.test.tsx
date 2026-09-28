@@ -178,13 +178,18 @@ describe('AutoComplete', () => {
     /**
      * Render an uncontrolled AutoComplete and drive it open through a search.
      * @param results - The search results to return.
+     * @param getOptionDisabled - Optional per-option disabled predicate.
      * @returns The rendered node, the focused input, and the select spy.
      */
-    const renderOpen = async (results: string[]) => {
+    const renderOpen = async (
+      results: string[],
+      getOptionDisabled?: (option: string) => boolean,
+    ) => {
       const onSearch = mock(() => Promise.resolve(results))
       const onSelect = mock()
       const view = await render(
         <AutoComplete
+          getOptionDisabled={getOptionDisabled}
           getOptionLabel={option => String(option)}
           getOptionValue={option => String(option)}
           onSearch={onSearch}
@@ -289,6 +294,30 @@ describe('AutoComplete', () => {
       await waitFor(() => node.querySelector('[role="listbox"]') === null)
 
       expect(document.activeElement).toBe(input)
+    })
+
+    test('does not activate a disabled option with Enter', async () => {
+      const { input, node, onSelect } = await renderOpen(
+        ['alpha', 'beta'],
+        option => option === 'alpha',
+      )
+      const options = optionElements(node)
+
+      // A disabled option can become active, but Enter must not select it.
+      await Simulate.pressKey(input, Keyboard.ArrowDown)
+      await waitFor(() => input.getAttribute('aria-activedescendant') === options[0]?.id)
+      expect(options[0]?.getAttribute('aria-disabled')).toBe('true')
+
+      await Simulate.pressKey(input, Keyboard.Enter)
+      expect(onSelect).not.toHaveBeenCalled()
+      expect(node.querySelector('[role="listbox"]')).not.toBeNull()
+
+      // Moving on to the enabled option allows Enter to activate it.
+      await Simulate.pressKey(input, Keyboard.ArrowDown)
+      await waitFor(() => input.getAttribute('aria-activedescendant') === options[1]?.id)
+      await Simulate.pressKey(input, Keyboard.Enter)
+      await waitFor(() => onSelect.mock.calls.length > 0)
+      expect(onSelect).toHaveBeenCalledWith('beta', 'beta')
     })
   })
 })
