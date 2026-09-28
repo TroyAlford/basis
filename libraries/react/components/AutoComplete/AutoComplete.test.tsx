@@ -172,4 +172,80 @@ describe('AutoComplete', () => {
       }
     })
   })
+
+  describe('combobox semantics', () => {
+    test('exposes a combobox input that controls a listbox of options', async () => {
+      const onSearch = mock(() => Promise.resolve(['alpha', 'beta']))
+      const { node } = await render(
+        <AutoComplete
+          open
+          getOptionLabel={option => String(option)}
+          getOptionValue={option => String(option)}
+          onSearch={onSearch}
+        />,
+      )
+
+      const input = node.querySelector('input') as HTMLInputElement
+      await Simulate.change(input, 'a')
+      await waitFor(() => node.querySelectorAll('[role="option"]').length === 2, { timeout: 1_000 })
+
+      expect(input.getAttribute('role')).toBe('combobox')
+      expect(input.getAttribute('aria-expanded')).toBe('true')
+      expect(input.getAttribute('aria-autocomplete')).toBe('list')
+
+      const listbox = node.querySelector('[role="listbox"]')
+      expect(listbox).not.toBeNull()
+      expect(input.getAttribute('aria-controls')).toBe(listbox?.id)
+
+      const options = node.querySelectorAll('[role="option"]')
+      expect(options).toHaveLength(2)
+      for (const option of options) {
+        expect(option.getAttribute('aria-selected')).not.toBeNull()
+      }
+    })
+
+    test('reports a collapsed combobox while closed', async () => {
+      const onSearch = mock(() => Promise.resolve([]))
+      const { node } = await render(
+        <AutoComplete
+          getOptionLabel={option => String(option)}
+          getOptionValue={option => String(option)}
+          onSearch={onSearch}
+        />,
+      )
+
+      const input = node.querySelector('input') as HTMLInputElement
+      expect(input.getAttribute('role')).toBe('combobox')
+      expect(input.getAttribute('aria-expanded')).toBe('false')
+      expect(node.querySelector('[role="listbox"]')).toBeNull()
+    })
+
+    test('tracks the active option with aria-activedescendant', async () => {
+      const onSearch = mock(() => Promise.resolve(['alpha', 'beta']))
+      const { node } = await render(
+        <AutoComplete
+          open
+          getOptionLabel={option => String(option)}
+          getOptionValue={option => String(option)}
+          onSearch={onSearch}
+        />,
+      )
+
+      const input = node.querySelector('input') as HTMLInputElement
+      await Simulate.change(input, 'a')
+      await waitFor(() => node.querySelectorAll('[role="option"]').length === 2, { timeout: 1_000 })
+
+      expect(input.getAttribute('aria-activedescendant')).toBeNull()
+
+      input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowDown' }))
+      await waitFor(
+        () => input.getAttribute('aria-activedescendant') !== null,
+        { timeout: 1_000 },
+      )
+
+      const [first] = Array.from(node.querySelectorAll('[role="option"]'))
+      expect(input.getAttribute('aria-activedescendant')).toBe(first?.id)
+      expect(first?.getAttribute('aria-selected')).toBe('true')
+    })
+  })
 })

@@ -121,6 +121,19 @@ describe('testing/docs', () => {
       expect(wrapped.height).toBeGreaterThan(wrapped.lineHeight * 1.8)
 
       /*
+       * Combobox semantics: the input owns the combobox role and controls a
+       * listbox whose children are options. The active-descendant transition is
+       * asserted after the snapshots so moving focus cannot change the captured
+       * pixels.
+       */
+      expect(await input.getAttribute('role')).toBe('combobox')
+      expect(await input.getAttribute('aria-expanded')).toBe('true')
+      expect(await input.getAttribute('aria-autocomplete')).toBe('list')
+      expect(await menu.getAttribute('role')).toBe('listbox')
+      expect(await input.getAttribute('aria-controls')).toBe(await menu.getAttribute('id'))
+      expect(await menu.locator('[role="option"]').count()).toBeGreaterThan(0)
+
+      /*
        * Deterministic visual contract for the open dropdown (light). Text
        * anti-aliasing differs across machines, so allow the same budget the
        * other docs snapshots use.
@@ -144,6 +157,17 @@ describe('testing/docs', () => {
       const background = await menu.evaluate(el => getComputedStyle(el).backgroundColor)
       expect(background).toBe('rgb(0, 0, 0)')
       await expect(menu).toMatchScreenshot('open dropdown dark', { maxDiffPixelRatio: 0.02 })
+
+      // ArrowDown tracks the active option on the combobox input.
+      await input.press('ArrowDown')
+      await page.waitForFunction(() => (
+        document.querySelector('.auto-complete input')?.getAttribute('aria-activedescendant') !== null
+      ))
+      const activeId = await input.getAttribute('aria-activedescendant')
+      const optionIds = await menu.locator('[role="option"]').evaluateAll(
+        elements => elements.map(element => element.id),
+      )
+      expect(optionIds).toContain(activeId)
     })
   }, 60_000)
 })

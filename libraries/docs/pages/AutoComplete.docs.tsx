@@ -318,6 +318,18 @@ export class AutoCompleteDocs extends Documentation<State> {
           </p>
         </section>
         <section>
+          <h2>Accessibility</h2>
+          <p>
+            AutoComplete follows the ARIA combobox pattern. The inner input owns{' '}
+            <code>role="combobox"</code> with <code>aria-expanded</code>,{' '}
+            <code>aria-controls</code> pointing at the dropdown, and{' '}
+            <code>aria-autocomplete="list"</code>. The dropdown is a{' '}
+            <code>role="listbox"</code> whose children are <code>role="option"</code> items, and the
+            input's <code>aria-activedescendant</code> tracks the active option during keyboard
+            navigation.
+          </p>
+        </section>
+        <section>
           <h2>Async Search and Performance</h2>
           <p>
             AutoComplete is designed for async operations with built-in performance optimizations:
