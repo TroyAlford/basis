@@ -28,7 +28,69 @@ interface TProps<E extends Element = HTMLDivElement> {
   theme?: string,
 }
 
-type P<E extends Element, T> = TProps<E> & T
+/** Native element attributes appropriate to a component's root element. */
+type NativeAttributes<E extends Element> =
+  E extends SVGElement ? React.SVGAttributes<E> : React.HTMLAttributes<E>
+
+/**
+ * Public props: base props, the native element surface, and the component's own
+ * props. A native name the component reuses for its own semantics is overridden
+ * by the component's declaration, so collisions stay local to that component.
+ */
+type P<E extends Element, T> = TProps<E> & Omit<NativeAttributes<E>, keyof TProps<E> | keyof T> & T
+
+/**
+ * The public props of a `Component` rooted at `E` with the component's own
+ * props `T`.
+ */
+export type ComponentProps<E extends Element, T> = P<E, T>
+
+/**
+ * Standard native attributes and event handlers the base `Component` forwards
+ * to its root element. Only names in this set are considered, so
+ * component-specific props are never spread onto the DOM.
+ */
+const NATIVE_ATTRIBUTES: ReadonlySet<string> = new Set([
+  // Global attributes
+  'accessKey', 'autoCapitalize', 'autoCorrect', 'color', 'content', 'contentEditable', 'dir',
+  'draggable', 'enterKeyHint', 'hidden', 'id', 'inputMode', 'lang', 'nonce', 'part', 'popover',
+  'role', 'slot', 'spellCheck', 'tabIndex', 'title', 'translate',
+  // Event handlers
+  'onAnimationEnd', 'onAnimationIteration', 'onAnimationStart', 'onAuxClick', 'onBlur',
+  'onChange', 'onClick', 'onClose', 'onCompositionEnd', 'onCompositionStart',
+  'onCompositionUpdate', 'onContextMenu', 'onCopy', 'onCut', 'onDoubleClick', 'onDrag',
+  'onDragEnd', 'onDragEnter', 'onDragExit', 'onDragLeave', 'onDragOver', 'onDragStart', 'onDrop',
+  'onFocus', 'onGotPointerCapture', 'onInput', 'onInvalid', 'onKeyDown', 'onKeyPress', 'onKeyUp',
+  'onLostPointerCapture', 'onMouseDown', 'onMouseEnter', 'onMouseLeave', 'onMouseMove',
+  'onMouseOut', 'onMouseOver', 'onMouseUp', 'onPaste', 'onPointerCancel', 'onPointerDown',
+  'onPointerEnter', 'onPointerLeave', 'onPointerMove', 'onPointerOut', 'onPointerOver',
+  'onPointerUp', 'onReset', 'onScroll', 'onSelect', 'onSubmit', 'onTouchCancel', 'onTouchEnd',
+  'onTouchMove', 'onTouchStart', 'onTransitionEnd', 'onWheel',
+  // Common SVG presentation attributes
+  'clipPath', 'clipRule', 'cx', 'cy', 'd', 'dominantBaseline', 'fill', 'fillOpacity',
+  'fillRule', 'filter', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'height',
+  'letterSpacing', 'markerEnd', 'markerMid', 'markerStart', 'mask', 'offset', 'opacity',
+  'paintOrder', 'points', 'preserveAspectRatio', 'r', 'rx', 'ry', 'stopColor', 'stopOpacity',
+  'stroke', 'strokeDasharray', 'strokeDashoffset', 'strokeLinecap', 'strokeLinejoin',
+  'strokeMiterlimit', 'strokeOpacity', 'strokeWidth', 'textAnchor', 'transform',
+  'vectorEffect', 'viewBox', 'width', 'x', 'x1', 'x2', 'xmlns', 'xmlnsXlink', 'y', 'y1', 'y2',
+])
+
+/**
+ * Filter component props down to the native attributes the base class forwards.
+ * @param props - The component props.
+ * @param owned - Native prop names the component or a mixin declares it owns.
+ * @returns The native attributes to emit on the root element.
+ */
+const nativeAttributes = (props: object, owned: ReadonlySet<string>): Record<string, unknown> => {
+  const attributes: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(props)) {
+    if (value === undefined) continue
+    if (!NATIVE_ATTRIBUTES.has(key) || owned.has(key)) continue
+    attributes[key] = value
+  }
+  return attributes
+}
 
 /**
  * The abstract base class for all components in the `@basis/react` package.
@@ -45,7 +107,14 @@ export abstract class Component<
   State = object,
 > extends React.Component<P<Element, Props>, State> {
   static get mixins(): Set<Mixin> { return new Set() }
-  static get defaultProps(): P<HTMLElement, TProps> {
+
+  /**
+   * Native prop names this component owns, suppressing native forwarding for
+   * them. Subclasses compose with `...super.ownedNativeProps`.
+   */
+  static ownedNativeProps: readonly string[] = []
+
+  static get defaultProps(): Partial<TProps> {
     return {
       onKeyDown: () => undefined,
       theme: undefined,
@@ -53,6 +122,31 @@ export abstract class Component<
         ...props, ...mixin.defaultProps,
       }), {}),
     }
+  }
+
+  /**
+   * Native prop names the component or its mixins own, composed through the
+   * static inheritance chain.
+   *
+   * Ownership is declared explicitly and never inferred from `defaultProps`, so
+   * a component can intentionally reuse a native name for its own semantics.
+   * @returns The owned native prop names.
+   */
+  get ownedNativePropNames(): ReadonlySet<string> {
+    const owned = new Set<string>()
+
+    for (const mixin of this.mixins) {
+      for (const name of mixin.ownedNativeProps ?? []) owned.add(name)
+    }
+
+    let ctor: unknown = this.constructor
+    while (typeof ctor === 'function') {
+      const declared = (ctor as { ownedNativeProps?: readonly string[] }).ownedNativeProps
+      for (const name of declared ?? []) owned.add(name)
+      ctor = Object.getPrototypeOf(ctor)
+    }
+
+    return owned
   }
 
   /**
@@ -64,6 +158,7 @@ export abstract class Component<
     return {
       'data-theme': this.props.theme,
       'style': this.props.style,
+      ...nativeAttributes(this.props, this.ownedNativePropNames),
       ...prefixObject('aria-', filterByPrefix('aria-', this.props)),
       ...prefixObject('data-', filterByPrefix('data-', this.props)),
       ...this.mixins.reduce((attributes, mixin) => ({

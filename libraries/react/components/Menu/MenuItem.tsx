@@ -8,6 +8,8 @@ interface ItemProps<P = unknown> {
   disabled?: boolean,
   /** The handler for when the item is activated. */
   onActivate?: (event: React.SyntheticEvent, item: MenuItem<P>) => void,
+  /** Whether the item is selected (meaningful for `role="option"`). */
+  selected?: boolean,
 }
 
 export class MenuItem<P = unknown> extends Component<ItemProps<P> & P> {
@@ -19,16 +21,19 @@ export class MenuItem<P = unknown> extends Component<ItemProps<P> & P> {
   }
 
   get attributes() {
-    const { disabled } = this.props
+    const { disabled, selected } = this.props
+    const inherited = super.attributes
+    const forward = inherited as Record<string, unknown>
+
     return {
-      ...super.attributes,
+      ...inherited,
       'aria-disabled': disabled,
-      'aria-selected': false,
+      'aria-selected': selected === undefined ? undefined : String(selected),
       'disabled': disabled ? 'disabled' : undefined,
       'onClick': this.handleActivate,
       'onKeyDown': this.handleActivate,
-      'role': 'menuitem',
-      'tabIndex': disabled ? -1 : 0,
+      'role': forward.role ?? 'menuitem',
+      'tabIndex': disabled ? -1 : (forward.tabIndex ?? 0),
     }
   }
   get tag(): keyof React.JSX.IntrinsicElements { return 'li' }

@@ -6,6 +6,7 @@ import type { IPlaceholder } from '../../mixins/Placeholder'
 import type { IPopup } from '../../mixins/Popup'
 import type { IPrefixSuffix } from '../../mixins/PrefixSuffix'
 import { Keyboard } from '../../types/Keyboard'
+import { createId } from '../../utilities/createId'
 import { Event, events } from '../../utilities/EventManager'
 import { Component } from '../Component/Component'
 import { Menu } from '../Menu/Menu'
@@ -51,6 +52,8 @@ interface Props<T = unknown>
 }
 
 interface State<T = unknown> {
+  /** Index of the active option, or -1 when none is active. */
+  activeIndex: number,
   /** Current error, if any. */
   error: Error | null,
   /** Whether a search is currently in progress. */
@@ -69,6 +72,9 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
 
   static displayName = 'AutoComplete'
 
+  /** `onClose` and `onSelect` are AutoComplete callbacks, not native root events. */
+  static ownedNativeProps = ['onClose', 'onSelect']
+
   static get defaultProps() {
     return {
       ...super.defaultProps,
@@ -80,6 +86,8 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
     }
   }
 
+  readonly #id = `basis:auto-complete:${createId()}`
+
   private input = React.createRef<TextEditor>()
   private debounceTimeout?: ReturnType<typeof setTimeout>
   private searchCounter = 0
@@ -88,8 +96,6 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
   get attributes() {
     return {
       ...super.attributes,
-      'aria-expanded': this.isOpen,
-      'aria-haspopup': 'listbox',
       'data-loading': this.state.loading,
       'data-open': this.isOpen,
     }
@@ -98,6 +104,7 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
   get defaultState(): State<T> {
     return {
       ...super.defaultState,
+      activeIndex: -1,
       error: null,
       loading: false,
       open: this.props.open ?? false,
@@ -112,7 +119,32 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
       : !!this.props.open
   }
 
+  /**
+   * Unique id for this component's listbox.
+   * @returns The listbox id.
+   */
+  get listboxId(): string { return `${this.#id}:listbox` }
+
+  /**
+   * The id of the active option, for the combobox input's
+   * `aria-activedescendant`.
+   * @returns The active option id, or undefined when no option is active.
+   */
+  get activeDescendantId(): string | undefined {
+    const { activeIndex, options } = this.state
+    return this.isOpen && activeIndex >= 0 && options.length > 0
+      ? this.optionId(activeIndex)
+      : undefined
+  }
+
   get tag(): keyof React.JSX.IntrinsicElements { return 'div' }
+
+  /**
+   * The unique id for an option at an index.
+   * @param index - The option index.
+   * @returns The option id.
+   */
+  optionId(index: number): string { return `${this.#id}:option:${index}` }
 
   override componentDidMount(): void {
     super.componentDidMount()
@@ -126,11 +158,11 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
   }
 
   private handleClose = (): void => {
-    this.setState({ open: false }, () => this.props.onClose())
+    this.setState({ activeIndex: -1, open: false }, () => this.props.onClose())
   }
 
   private handleInputChange = async (search: string): Promise<void> => {
-    await this.setState({ search })
+    await this.setState({ activeIndex: -1, search })
 
     if (search.length >= (this.props.minimumQueryLength ?? 0)) {
       clearTimeout(this.debounceTimeout)
@@ -143,22 +175,22 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
 
           // Only update if this is still the most recent search
           if (this.searchCounter === searchId) {
-            await this.setState({ loading: false, open: true, options })
+            await this.setState({ activeIndex: -1, loading: false, open: true, options })
             this.props.onOpen()
           }
         } catch (error) {
           // Only update if this is still the most recent search
           if (this.searchCounter === searchId) {
             if (error instanceof Error) {
-              await this.setState({ error, loading: false })
+              await this.setState({ activeIndex: -1, error, loading: false })
             } else {
-              await this.setState({ loading: false })
+              await this.setState({ activeIndex: -1, loading: false })
             }
           }
         }
       }, 250)
     } else {
-      await this.setState({ open: false, options: [] })
+      await this.setState({ activeIndex: -1, open: false, options: [] })
     }
   }
 
@@ -175,11 +207,16 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
     match(event.key)
       .when(Keyboard.ArrowDown).then(() => {
         event.preventDefault()
-        this.focusFirstMenuItem()
+        this.moveActiveOption(1)
       })
       .when(Keyboard.ArrowUp).then(() => {
         event.preventDefault()
-        this.focusLastMenuItem()
+        this.moveActiveOption(-1)
+      })
+      .when(Keyboard.Enter).then(() => {
+        if (this.state.activeIndex < 0) return
+        event.preventDefault()
+        this.activateActiveOption()
       })
       .when(Keyboard.Escape).then(() => {
         event.preventDefault()
@@ -190,27 +227,50 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
   protected handleMenuKeyDown = (event: React.KeyboardEvent<HTMLElement>): boolean => (
     match(event.key)
       .when(Keyboard.Escape).then(() => {
-        const input = this.input.current?.input.current
-        input?.focus()
-        input?.select()
+        event.preventDefault()
+        this.handleClose()
         return true
       })
       .else(false)
   )
 
-  get menuItems(): HTMLLIElement[] {
-    const menuItems = this.rootNode.querySelectorAll<HTMLLIElement>('.menu-item.component')
-    return Array.from<HTMLLIElement>(menuItems) ?? []
+  /**
+   * Move the active option, keeping DOM focus on the combobox input.
+   * @param delta - `1` for the next option, `-1` for the previous.
+   */
+  private moveActiveOption = (delta: number): void => {
+    const count = this.state.options.length
+    if (count === 0) return
+
+    const current = this.state.activeIndex
+    const next = current < 0
+      ? (delta > 0 ? 0 : count - 1)
+      : (current + delta + count) % count
+
+    this.setActiveIndex(next)
   }
 
-  private focusFirstMenuItem = (): void => {
-    const menuItems = this.menuItems
-    menuItems[0]?.focus()
+  /**
+   * Activate the currently active option, if any.
+   *
+   * A disabled option may become active, but is never activated, matching the
+   * disabled guard that `Menu.Item` applies to pointer/menu-item activation.
+   */
+  private activateActiveOption = (): void => {
+    const { activeIndex, options } = this.state
+    const option = options[activeIndex]
+    if (option === undefined) return
+    if (this.props.getOptionDisabled?.(option) ?? false) return
+
+    this.handleSelect(option)
   }
 
-  private focusLastMenuItem = (): void => {
-    const menuItems = this.menuItems
-    menuItems[menuItems.length - 1]?.focus()
+  /**
+   * Track the active option for `aria-activedescendant`.
+   * @param index - The option index, or -1 when none is active.
+   */
+  private setActiveIndex = (index: number): void => {
+    void this.setState({ activeIndex: index })
   }
 
   private handleSelect = (option: T): void => {
@@ -244,6 +304,7 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
     } = this.props
 
     const { error, loading, options } = this.state
+    const hasOptions = (options ?? []).length > 0
 
     const menuItems = (options ?? []).map((option, index) => {
       const key = getOptionKey?.(option) ?? String(index)
@@ -253,7 +314,12 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
         <Menu.Item
           key={key}
           disabled={optionDisabled}
+          id={this.optionId(index)}
+          role="option"
+          selected={index === this.state.activeIndex}
+          tabIndex={-1}
           onActivate={() => this.handleSelect(option)}
+          onFocus={() => this.setActiveIndex(index)}
         >
           {optionRender?.(option) ?? getOptionLabel(option)}
         </Menu.Item>
@@ -266,7 +332,7 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
       content = loadingContent ?? <div data-state={AutoCompleteStatus.Loading}>Loading...</div>
     } else if (error) {
       content = <div data-state={AutoCompleteStatus.Error}>Error: {error.message}</div>
-    } else if ((options ?? []).length === 0) {
+    } else if (!hasOptions) {
       content = notFoundContent ?? <div data-state={AutoCompleteStatus.NotFound}>No results found</div>
     } else {
       content = menuItems
@@ -287,6 +353,13 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
           readOnly={readOnly}
           suffix={suffix}
           value={this.state.search}
+          inputAttributes={{
+            'aria-activedescendant': this.activeDescendantId,
+            'aria-autocomplete': 'list',
+            'aria-controls': this.isOpen && hasOptions ? this.listboxId : undefined,
+            'aria-expanded': this.isOpen,
+            'role': 'combobox',
+          }}
           onChange={this.handleInputChange}
           onFocus={this.handleFocus}
           onKeyDown={this.handleTextEditorKeyDown}
@@ -298,7 +371,9 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
             anchorPoint={this.props.anchorPoint}
             anchorTo={this.input.current?.rootNode}
             disabled={this.props.disabled}
+            id={hasOptions ? this.listboxId : undefined}
             offset={this.props.offset}
+            role={hasOptions ? 'listbox' : 'presentation'}
             onKeyDown={this.handleMenuKeyDown}
           >
             {content}

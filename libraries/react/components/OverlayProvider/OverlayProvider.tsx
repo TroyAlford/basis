@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { createRef } from 'react'
-import { hash } from '../../../utilities/functions/hash'
 import { Intent } from '../../types/Intent'
+import { createId } from '../../utilities/createId'
 import { Component } from '../Component/Component'
 import type { DialogButton, IDialog } from './Dialog'
 import { Dialog } from './Dialog'
@@ -26,10 +26,7 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
    * @returns A short hash string (stable length) for React keys and DOM ids.
    */
   static createId(): string {
-    const raw = typeof globalThis.crypto?.randomUUID === 'function'
-      ? globalThis.crypto.randomUUID()
-      : `${Date.now()}-${Math.random()}-${Math.random()}`
-    return hash(raw, { length: 12 })
+    return createId()
   }
 
   #notificationTimeouts = new Map<string, ReturnType<typeof setTimeout>>()

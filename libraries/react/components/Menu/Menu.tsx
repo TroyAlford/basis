@@ -48,7 +48,7 @@ export class Menu extends Component<Props, HTMLUListElement> {
       'data-orientation': this.props.orientation,
       'disabled': this.props.disabled ? 'disabled' : undefined,
       'onKeyDown': this.handleKeyDown,
-      'role': 'menu',
+      'role': this.props.role ?? 'menu',
     }
   }
   get tag(): keyof React.JSX.IntrinsicElements { return 'ul' }

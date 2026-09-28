@@ -13,6 +13,9 @@ interface Props {
 export class Section extends Component<Props> {
   static displayName = 'Section'
 
+  /** `title` is the Section heading, not a native `title` tooltip. */
+  static ownedNativeProps = ['title']
+
   get id(): string | undefined {
     return this.props.title ? kebabCase(this.props.title) : undefined
   }

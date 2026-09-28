@@ -32,6 +32,9 @@ interface Props extends INotification {
 export class Notification extends Component<Props, HTMLElement> {
   static displayName = 'Notification'
 
+  /** `title`/`content` are Notification semantics, not native root attributes. */
+  static ownedNativeProps = ['content', 'title']
+
   static readonly Intent = Intent
 
   /**

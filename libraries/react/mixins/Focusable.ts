@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { noop } from '../../utilities'
 import type { Mixin } from '../types/Mixin'
 
 /** Interface for elements that can receive focus. */
@@ -55,7 +56,12 @@ export const Focusable: Mixin<IFocusable> = {
   /** Default props for focusable elements. */
   defaultProps: {
     disabled: false,
+    onBlur: noop,
+    onFocus: noop,
     readOnly: false,
     tabIndex: 0,
   },
+
+  /** Native props applied to the inner element, not the component root. */
+  ownedNativeProps: ['onBlur', 'onFocus', 'tabIndex'],
 }

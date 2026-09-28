@@ -43,7 +43,7 @@ export class PopupMenu extends Component<Props, HTMLUListElement> {
       'data-visible': this.props.visible,
       'disabled': this.props.disabled ? 'disabled' : undefined,
       'onKeyDown': this.props.onKeyDown,
-      'role': 'menu',
+      'role': this.props.role ?? 'menu',
     }
   }
 }

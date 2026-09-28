@@ -30,6 +30,11 @@ interface Props extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable {
   /** Whether to automatically focus the input on mount. Defaults to `false`. */
   autoFocus?: boolean,
   /**
+   * Additional attributes applied to the inner `input`/`textarea` element, for
+   * example combobox ARIA semantics owned by a composing component.
+   */
+  inputAttributes?: React.InputHTMLAttributes<HTMLInputElement>,
+  /**
    * Multiline behavior for the text editor.
    *
    * - `false`: Default. Outputs an `input[type="text"]`
@@ -68,6 +73,9 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
     selectOnFocus: true,
     wrap: Wrap.Soft,
   }
+
+  /** `onKeyDown` targets the inner input/textarea, not the component root. */
+  static ownedNativeProps = ['onKeyDown']
 
   input = React.createRef<HTMLInputElement | HTMLTextAreaElement>()
 
@@ -133,8 +141,10 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
    * @returns The component's content.
    */
   content(): React.ReactNode {
+    const { inputAttributes } = this.props
     const input: React.ReactElement<React.HTMLAttributes<HTMLElement>> = this.props.multiline !== false ? (
       <textarea
+        {...inputAttributes as unknown as React.TextareaHTMLAttributes<HTMLTextAreaElement>}
         ref={this.input as React.RefObject<HTMLTextAreaElement>}
         aria-invalid={this.props.invalid ? 'true' : 'false'}
         autoComplete={this.props.autoComplete ? 'on' : 'off'}
@@ -149,6 +159,7 @@ export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaEl
       />
     ) : (
       <input
+        {...inputAttributes}
         ref={this.input as React.RefObject<HTMLInputElement>}
         aria-invalid={this.props.invalid ? 'true' : 'false'}
         autoComplete={this.props.autoComplete ? 'on' : 'off'}

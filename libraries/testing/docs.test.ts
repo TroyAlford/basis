@@ -121,6 +121,19 @@ describe('testing/docs', () => {
       expect(wrapped.height).toBeGreaterThan(wrapped.lineHeight * 1.8)
 
       /*
+       * Combobox semantics: the input owns the combobox role and controls a
+       * listbox whose children are options. The active-descendant transition is
+       * asserted after the snapshots so moving focus cannot change the captured
+       * pixels.
+       */
+      expect(await input.getAttribute('role')).toBe('combobox')
+      expect(await input.getAttribute('aria-expanded')).toBe('true')
+      expect(await input.getAttribute('aria-autocomplete')).toBe('list')
+      expect(await menu.getAttribute('role')).toBe('listbox')
+      expect(await input.getAttribute('aria-controls')).toBe(await menu.getAttribute('id'))
+      expect(await menu.locator('[role="option"]').count()).toBeGreaterThan(0)
+
+      /*
        * Deterministic visual contract for the open dropdown (light). Text
        * anti-aliasing differs across machines, so allow the same budget the
        * other docs snapshots use.
@@ -144,6 +157,47 @@ describe('testing/docs', () => {
       const background = await menu.evaluate(el => getComputedStyle(el).backgroundColor)
       expect(background).toBe('rgb(0, 0, 0)')
       await expect(menu).toMatchScreenshot('open dropdown dark', { maxDiffPixelRatio: 0.02 })
+
+      /*
+       * Active-descendant focus model: options leave the Tab sequence and DOM
+       * focus stays on the combobox while ArrowDown/ArrowUp move the active
+       * option.
+       */
+      const optionTabIndexes = await menu.locator('[role="option"]').evaluateAll(
+        elements => elements.map(element => element.getAttribute('tabindex')),
+      )
+      expect(optionTabIndexes.every(value => value === '-1')).toBe(true)
+
+      await input.press('ArrowDown')
+      await page.waitForFunction(() => (
+        document.querySelector('.auto-complete input')?.getAttribute('aria-activedescendant') !== null
+      ))
+      const activeId = await input.getAttribute('aria-activedescendant')
+      const optionIds = await menu.locator('[role="option"]').evaluateAll(
+        elements => elements.map(element => element.id),
+      )
+      expect(optionIds).toContain(activeId)
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+
+      await input.press('ArrowDown')
+      expect(await input.getAttribute('aria-activedescendant')).not.toBe(activeId)
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+
+      await input.press('ArrowUp')
+      expect(await input.getAttribute('aria-activedescendant')).toBe(activeId)
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+
+      // Escape closes the listbox and keeps focus on the combobox.
+      await input.press('Escape')
+      await page.waitForFunction(() => document.querySelector('.auto-complete [role="listbox"]') === null)
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+
+      // Enter activates the active option and keeps focus on the combobox.
+      await input.click()
+      await input.press('ArrowDown')
+      await input.press('Enter')
+      await page.waitForFunction(() => document.querySelector('.auto-complete [role="listbox"]') === null)
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
     })
   }, 60_000)
 })
