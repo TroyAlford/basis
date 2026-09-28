@@ -3,9 +3,9 @@ import { css, style } from '../../utilities/style'
 
 style('basis:table-cell', css`
   :root {
-    --basis-table-cell-padding: 0 .5em;
     --basis-table-cell-background: var(--basis-color-background);
     --basis-table-cell-foreground: var(--basis-color-foreground);
+    --basis-table-cell-padding: 0 .5em;
   }
 
   .table-cell.component {

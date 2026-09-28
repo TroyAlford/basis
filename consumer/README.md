@@ -11,10 +11,14 @@ bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
 ```
 
 `--trust` records `basis` in the consumer's `trustedDependencies` so Basis's
-install hook can apply the transitive patches Basis owns. The hook is
-deterministic, idempotent, exact-version validated, and only touches packages
-Basis declares. Consumers never copy patch files or `patchedDependencies`
-entries.
+install hook can apply the transitive patches Basis owns and provision the
+browser runtime `basis/testing` needs. The hook is deterministic, idempotent,
+exact-version validated, and only touches packages Basis declares. Consumers
+never copy patch files or `patchedDependencies` entries, and never add their own
+Playwright provisioning: `bun install` downloads the pinned Chromium and installs
+the operating-system dependencies it needs to launch. Set
+`BASIS_SKIP_BROWSER_INSTALL=1` to opt out; a provisioning failure fails the
+install.
 
 Basis requires Bun `>=1.4.0`. Bun only honors root-level `patchedDependencies`,
 which is why the trusted hook exists.
@@ -40,6 +44,65 @@ export default createConfig({
 
 Every ESLint plugin the config imports is declared by Basis itself, so consumers
 do not enumerate or install the plugin stack.
+
+## CSS linting
+
+Component CSS lives in `*.styles.ts` as `css` tagged template literals. Basis
+lints it with Stylelint through the `postcss-styled-syntax` custom syntax, so the
+embedded stylesheet is parsed as real CSS (including nesting and `${...}`
+interpolations) rather than matched as text.
+
+The supported zero-config route is the CLI, which runs the ESLint and CSS
+policies together:
+
+```bash
+bunx basis lint
+```
+
+To run Stylelint directly, point it at the Basis config:
+
+```bash
+bunx stylelint "**/*.styles.ts" --config ./node_modules/basis/stylelint.config.mjs --allow-empty-input
+```
+
+A consumer can also adopt the shared config from their own Stylelint
+configuration:
+
+```js
+// stylelint.config.mjs
+export { default } from 'basis/stylelint'
+```
+
+`basis/stylelint` exports the ready configuration as its default export and a
+`createConfig` factory for appending repository-specific rule settings or
+overrides:
+
+```js
+import { createConfig } from 'basis/stylelint'
+
+export default createConfig({
+  rules: { 'basis/no-state-classes': [true, { ignore: ['open'] }] },
+})
+```
+
+The policy enforces correctness (parse validity, unknown properties, malformed
+selectors, accidental duplicates, lowercase type selectors), deterministic
+ordering (custom properties, then ordinary declarations, then nested selector
+blocks; safely autofixable), nesting guardrails, and Basis selector semantics.
+The deterministic state rule owns one claim — a state class name is transient
+state and should not be a class — and never prescribes ARIA or a role, because
+CSS cannot know an element's real accessibility semantics. It recommends
+genuinely CSS-native state (`:hover`, `:focus`, `:focus-visible`, `[hidden]`),
+neutral `data-*` for application state (for example `.active` → `[data-active]`,
+`.selected` → `[data-selected]`), and, for `disabled`/`checked`/`invalid`/
+`read-only`, the native semantic when the element supports it, otherwise
+`data-*`. Structural, component, and mixin classes (`.button.component`,
+`.table.editor.component`, `.value`, `.prefix`, `.suffix`) remain valid.
+Choosing an existing genuine native/ARIA semantic as the better selector is the
+`component-style-semantics` reviewer's job.
+
+Stylelint, the custom syntax, and every plugin are declared by Basis, so
+consumers never enumerate the CSS lint dependency or configuration graph.
 
 ## TypeScript
 
@@ -115,11 +178,21 @@ snapshots. Add the preload to `bunfig.toml`:
 preload = ["basis/testing/bun"]
 ```
 
-`bun test` then runs the whole suite. Chromium for snapshot tests is downloaded
-by Basis's install hook during `bun install`; set `BASIS_SKIP_BROWSER_INSTALL=1`
-to skip the download. On a bare Linux runner, install the browser's system
-libraries with
-`bun ./node_modules/playwright/cli.js install --with-deps chromium`.
+It registers happy-dom, the shared matchers, and the browser lifecycle, so a
+plain `bun test` runs the complete suite — DOM tests and browser-backed snapshot
+tests alike.
+
+Basis's trusted install hook provisions the complete browser runtime during
+`bun install`: the pinned Chromium binary and the operating-system dependencies
+it needs to launch (Playwright's `install --with-deps chromium`). No separate
+Playwright command, host bootstrap, or CI-only setup is required. Set
+`BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook then reports
+the skip. If provisioning fails, `bun install` fails loudly, because a successful
+Basis install is expected to leave browser-backed tests ready to run.
+
+`toMatchScreenshot` never modifies or deletes a committed baseline unless the run
+explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A capture or
+comparison failure leaves baselines untouched.
 
 ## Server runtime
 

@@ -2,9 +2,9 @@ import { css, style } from '../../utilities/style'
 
 style('basis:section', css`
   :root {
+    --basis-section-gap: 1rem;
     --basis-section-margin: 1em 0;
     --basis-section-padding: 0;
-    --basis-section-gap: 1rem;
   }
 
   .section.component {

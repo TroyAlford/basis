@@ -35,6 +35,7 @@ const REQUIRED_EXPORTS = [
   './react',
   './review',
   './server',
+  './stylelint',
   './tsconfig/base.json',
   './tsconfig/bun.json',
   './tsconfig/react.json',
@@ -91,6 +92,32 @@ const runBin = (packageName: string, binName: string, args: string[]): number =>
     stdout: 'inherit',
   })
   return result.exitCode
+}
+
+/**
+ * Runs the TypeScript/JSX ESLint policy.
+ * @returns The child process exit code.
+ */
+const runEslint = (): number => runBin('eslint', 'eslint', ['.'])
+
+/**
+ * Runs the Basis CSS policy over every `*.styles.ts` file.
+ * @returns The child process exit code.
+ */
+const runStylelint = (): number => runBin('stylelint', 'stylelint', [
+  '**/*.styles.ts',
+  '--allow-empty-input',
+  '--config',
+  join(basisDir(), 'stylelint.config.mjs'),
+])
+
+/**
+ * Runs every Basis lint surface.
+ * @returns The first non-zero child process exit code, or `0`.
+ */
+const runLint = (): number => {
+  const eslintCode = runEslint()
+  return eslintCode === 0 ? runStylelint() : eslintCode
 }
 
 /**
@@ -163,10 +190,10 @@ const main = (): void => {
   const [command] = process.argv.slice(2)
 
   if (command === 'doctor') process.exit(doctor())
-  if (command === 'lint') process.exit(runBin('eslint', 'eslint', ['.']))
+  if (command === 'lint') process.exit(runLint())
   if (command === 'typecheck') process.exit(runBin('@typescript/native', 'tsc', ['--noEmit']))
   if (command === 'check') {
-    const lintCode = runBin('eslint', 'eslint', ['.'])
+    const lintCode = runLint()
     const typeCode = lintCode === 0 ? runBin('@typescript/native', 'tsc', ['--noEmit']) : lintCode
     process.exit(typeCode)
   }

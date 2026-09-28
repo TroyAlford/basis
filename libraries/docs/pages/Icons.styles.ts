@@ -61,8 +61,8 @@ style('basis:docs:icons', css`
       }
 
       &:hover {
-        transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        transform: translateY(-2px);
       }
     }
 
@@ -107,7 +107,7 @@ style('basis:docs:icons', css`
       border-radius: 8px;
       display: grid;
       gap: 16px;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      grid-template-columns: 1fr;
       margin-bottom: 24px;
       padding: 16px;
     }
@@ -132,12 +132,6 @@ style('basis:docs:icons', css`
         margin-bottom: 16px;
         margin-top: 0;
       }
-    }
-
-    .moon-controls-grid {
-      display: grid;
-      gap: 16px;
-      grid-template-columns: 1fr;
     }
 
     .moon-display {

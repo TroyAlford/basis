@@ -22,15 +22,18 @@ jobs:
       - uses: ./.github/actions/asdf-setup
       - name: Run ESLint
         run: NODE_NO_WARNINGS=1 bun ./node_modules/eslint/bin/eslint.js
+      - name: Run Stylelint
+        run: bun ./node_modules/stylelint/bin/stylelint.mjs "**/*.styles.ts" --config ./stylelint.config.mjs --allow-empty-input
 
   run-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
-      - name: Install Chromium
-        run: bun ./node_modules/playwright/cli.js install --with-deps chromium
-      - run: bun test
+      # `bun install` (via the trusted Basis install hook) provisions Chromium and
+      # its system dependencies, so no separate browser setup step is needed.
+      - name: Run tests
+        run: bun run test
       - name: Upload snapshot artifacts
         if: always()
         uses: actions/upload-artifact@v4

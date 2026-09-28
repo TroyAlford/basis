@@ -6,13 +6,15 @@ import { resolveInstallRoot } from './patches/root'
 
 /**
  * Trusted install hook that makes Basis-owned transitive patches effective in a
- * consuming project, and downloads the Chromium browser that visual snapshot
- * tests use.
+ * consuming project and provisions the complete browser runtime `basis/testing`
+ * uses (the pinned Chromium build plus the operating-system dependencies it
+ * needs to launch).
  *
  * Bun applies `patchedDependencies` during install and only from the install
  * root, so a dependency cannot declare patches transitively. The hook instead
  * applies Basis's exact patch files with `git apply` once the dependencies are
- * on disk, matched by exact `name@version`.
+ * on disk, matched by exact `name@version`. Browser provisioning failure is
+ * fatal unless `BASIS_SKIP_BROWSER_INSTALL` opts out.
  */
 const main = (): void => {
   const basisDir = join(import.meta.dir, '..')
@@ -33,8 +35,12 @@ const main = (): void => {
     process.exit(1)
   }
 
-  if (!installChromium(basisDir)) {
-    process.stderr.write('[basis] visual snapshot tests need Chromium; install it to run them\n')
+  try {
+    installChromium(basisDir)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    process.stderr.write(`${message}\n`)
+    process.exit(1)
   }
 }
 

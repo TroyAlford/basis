@@ -1,44 +1,82 @@
 import { dirname, join } from 'node:path'
 
-/** Environment variable that opts out of the implicit Chromium download. */
+/** Environment variable that opts out of the implicit browser provisioning. */
 export const SKIP_BROWSER_INSTALL_ENV = 'BASIS_SKIP_BROWSER_INSTALL'
 
+/** Runs a command and returns its exit code. */
+export type BrowserCommandRunner = (command: string[]) => number
+
+/** Options accepted by {@link installChromium}. */
+export interface InstallChromiumOptions {
+  /** Command runner. Defaults to `Bun.spawnSync`; injectable for tests. */
+  run?: BrowserCommandRunner,
+}
+
 /**
- * Download the Chromium browser used by visual snapshot tests.
+ * Resolve the pinned Playwright CLI that Basis owns.
  *
- * Runs the pinned Playwright CLI through Bun (its own shebang targets Node) and
- * is idempotent: Playwright skips a browser that is already installed. A failure
- * is reported but never aborts the install, so the hook cannot wedge a consumer
- * whose browser download is temporarily unavailable.
+ * Basis declares `playwright`, so the CLI is resolved from the installed Basis
+ * dependency graph rather than from a global or consumer-installed Playwright.
  * @param basisDir - Absolute path to the installed Basis package root.
- * @returns True when Chromium is installed or was already present.
+ * @returns Absolute path to the pinned Playwright CLI.
  */
-export const installChromium = (basisDir: string): boolean => {
+export const resolvePlaywrightCli = (basisDir: string): string => {
+  const manifestPath = Bun.resolveSync('playwright/package.json', basisDir)
+  return join(dirname(manifestPath), 'cli.js')
+}
+
+/**
+ * Build the command that provisions the complete browser runtime.
+ *
+ * `--with-deps` installs the operating-system dependencies Chromium needs to
+ * launch, using Playwright's supported dependency-installation path for the
+ * platform, so a successful install leaves browser-backed tests ready to run.
+ * @param basisDir - Absolute path to the installed Basis package root.
+ * @returns The argv to run.
+ */
+export const chromiumInstallCommand = (basisDir: string): string[] => ([
+  process.execPath,
+  resolvePlaywrightCli(basisDir),
+  'install',
+  '--with-deps',
+  'chromium',
+])
+
+/**
+ * Provision the complete browser runtime used by `basis/testing`.
+ *
+ * Downloads the pinned Chromium build and the operating-system libraries it
+ * needs. The operation is idempotent, and failure is fatal: a successful Basis
+ * install is expected to leave browser-backed tests ready to run. Set
+ * {@link SKIP_BROWSER_INSTALL_ENV} to opt out intentionally.
+ * @param basisDir - Absolute path to the installed Basis package root.
+ * @param options - Injectable command runner. Tests only.
+ */
+export const installChromium = (basisDir: string, options: InstallChromiumOptions = {}): void => {
   if (process.env[SKIP_BROWSER_INSTALL_ENV]) {
-    process.stdout.write(`[basis] skipping Chromium install (${SKIP_BROWSER_INSTALL_ENV})\n`)
-    return true
+    process.stdout.write(`[basis] skipped browser install (${SKIP_BROWSER_INSTALL_ENV})\n`)
+    return
   }
 
+  const command = chromiumInstallCommand(basisDir)
+  const run = options.run ?? ((argv: string[]): number => Bun.spawnSync(argv, {
+    stderr: 'inherit',
+    stdin: 'inherit',
+    stdout: 'inherit',
+  }).exitCode)
+
+  let exitCode: number
   try {
-    const manifestPath = Bun.resolveSync('playwright/package.json', basisDir)
-    const cli = join(dirname(manifestPath), 'cli.js')
-    const result = Bun.spawnSync([process.execPath, cli, 'install', 'chromium'], {
-      stderr: 'inherit',
-      stdin: 'inherit',
-      stdout: 'inherit',
-    })
-
-    if (result.exitCode !== 0) {
-      process.stderr.write(
-        '[basis] Chromium install failed; run `bunx playwright install chromium`\n',
-      )
-      return false
-    }
-
-    return true
+    exitCode = run(command)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    process.stderr.write(`[basis] Chromium install skipped: ${message}\n`)
-    return false
+    throw new Error(`[basis] browser install failed: ${message}`, { cause: error })
+  }
+
+  if (exitCode !== 0) {
+    throw new Error(
+      `[basis] browser install failed (exit ${exitCode}); ` +
+      'run `bunx playwright install --with-deps chromium` to inspect the failure',
+    )
   }
 }

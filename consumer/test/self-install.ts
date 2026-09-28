@@ -1,6 +1,6 @@
 import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { assert, assertDoctorOk, assertEslintSurface, assertNodeFree, assertPatchesActive, initApp, makeTempDir, makeToolPath, run } from './harness'
+import { assert, assertDoctorOk, assertEslintSurface, assertNodeFree, assertPatchesActive, assertStylelintSurface, initApp, makeTempDir, makeToolPath, run } from './harness'
 
 /**
  * A minimal package manifest, used for assertions.
@@ -32,13 +32,18 @@ const main = (): void => {
     run(['git', '-c', 'tag.gpgsign=false', 'tag', tag], source, env)
     const spec = `git+file://${source}#${tag}`
 
-    // Trusted install into a fresh host via the documented command.
+    /*
+     * Trusted install into a fresh host via the documented command. Installs use
+     * the ambient environment because Basis's install hook may invoke the
+     * platform package manager to provision Chromium's system dependencies.
+     */
     const app = join(workspace, 'app')
     initApp(app, spec, { includeBasis: false })
-    run(['bun', 'add', '--dev', '--trust', spec], app, env)
+    run(['bun', 'add', '--dev', '--trust', spec], app)
 
     assertNodeFree(app, env)
     assertEslintSurface(app, env)
+    assertStylelintSurface(app, env)
     assertPatchesActive(app)
     assertDoctorOk(app, env)
 
@@ -56,16 +61,17 @@ const main = (): void => {
     // True clean reinstall: drop node_modules and the lockfile, install again.
     rmSync(join(app, 'node_modules'), { force: true, recursive: true })
     rmSync(join(app, 'bun.lock'), { force: true })
-    run(['bun', 'install'], app, env)
+    run(['bun', 'install'], app)
     assertPatchesActive(app)
     assertDoctorOk(app, env)
 
     // Strict isolated linking must be patched as well.
     const isolated = join(workspace, 'isolated')
     initApp(isolated, spec)
-    run(['bun', 'install', '--linker=isolated'], isolated, env)
+    run(['bun', 'install', '--linker=isolated'], isolated)
     assertNodeFree(isolated, env)
     assertEslintSurface(isolated, env)
+    assertStylelintSurface(isolated, env)
     assertPatchesActive(isolated)
     assertDoctorOk(isolated, env)
 

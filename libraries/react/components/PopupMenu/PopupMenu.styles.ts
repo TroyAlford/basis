@@ -2,10 +2,10 @@ import { css, style } from '../../utilities/style'
 
 style('basis:popup-menu', css`
   :root {
+    --popup-menu-animation-duration: .125s;
     --popup-menu-color-background: var(--basis-color-background);
     --popup-menu-color-border: var(--basis-color-foreground);
     --popup-menu-color-foreground: var(--basis-color-foreground);
-    --popup-menu-animation-duration: .125s;
   }
 
   .popup-menu.component {

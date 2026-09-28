@@ -51,12 +51,19 @@ it mirrors `toMatchSnapshot`:
   `<name>.actual.png` / `<name>.diff.png` artefacts;
 - `--update-snapshots` (or `UPDATE_SNAPSHOTS=1`) rewrites the snapshot.
 
-Obsolete snapshots are pruned automatically. After the run, any committed
-snapshot in a test file's `__screenshots__` directory that no test referenced is
-removed, so a renamed or deleted capture cannot linger. Pruning is scoped to
-files whose entire suite executed: a file filtered with `-t`, or one containing a
-skipped test, keeps its snapshots. A passing comparison also clears any
-`*.actual.png` / `*.diff.png` left behind by an earlier failure.
+A committed baseline is **never** modified or deleted unless the run explicitly
+updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A browser-launch failure,
+missing Playwright system dependency, timeout, rendering failure, comparison
+failure, or ordinary test failure leaves every baseline byte-for-byte unchanged;
+a comparison failure writes only the `.actual`/`.diff` artefacts, and a capture
+failure writes nothing at all.
+
+Obsolete snapshots are pruned only when updating. After an updating run, any
+committed snapshot in a test file's `__screenshots__` directory that no test
+referenced is removed, so a renamed or deleted capture cannot linger. Pruning is
+scoped to files whose entire suite executed: a file filtered with `-t`, or one
+containing a skipped test, keeps its snapshots. A passing comparison also clears
+any `*.actual.png` / `*.diff.png` left behind by an earlier failure.
 
 ### Naming
 
@@ -125,7 +132,13 @@ loosen it per call with `maxDiffPixels` / `maxDiffPixelRatio`.
 
 ## Browsers
 
-Chromium is downloaded by Basis's install hook during `bun install`, so nothing
-extra is required to run snapshot tests. Set `BASIS_SKIP_BROWSER_INSTALL=1` to
-skip it. On a bare Linux runner, install the browser's system libraries with
-`bun ./node_modules/playwright/cli.js install --with-deps chromium`.
+Basis's trusted install hook provisions the complete browser runtime during
+`bun install`: the pinned Chromium binary and the operating-system dependencies
+it needs to launch (Playwright's `install --with-deps chromium`). There is no
+separate Playwright command, host bootstrap, or CI-only setup. Set
+`BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook reports the
+skip. A provisioning failure fails `bun install`, because a successful Basis
+install is expected to leave browser-backed tests ready to run.
+
+The pre-commit hook runs the fast, deterministic checks (lint, typecheck, and
+build); run `bun test` for the complete suite.

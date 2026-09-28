@@ -1,10 +1,11 @@
 import { css, style } from '../../utilities/style'
+import { AutoCompleteStatus } from './AutoCompleteStatus'
 
 style('basis:auto-complete', css`
   :root {
     --basis-auto-complete-background: var(--basis-color-background);
-    --basis-auto-complete-border-radius: var(--basis-radius-sm);
     --basis-auto-complete-border: 1px solid var(--basis-color-foreground);
+    --basis-auto-complete-border-radius: var(--basis-radius-sm);
     --basis-auto-complete-foreground: var(--basis-color-foreground);
     --basis-auto-complete-padding: var(--basis-unit-sm);
   }
@@ -35,11 +36,6 @@ style('basis:auto-complete', css`
           color: var(--basis-color-primary-contrast);
         }
 
-        &.selected {
-          background-color: var(--basis-color-primary);
-          color: var(--basis-color-contrast);
-        }
-
         &[disabled], &[disabled]:hover {
           background-color: var(--basis-color-disabled);
           color: var(--basis-color-disabled-text);
@@ -47,24 +43,24 @@ style('basis:auto-complete', css`
         }
       }
 
-      > .error,
-      > .loading,
-      > .not-found {
+      > [data-state="${AutoCompleteStatus.Error}"],
+      > [data-state="${AutoCompleteStatus.Loading}"],
+      > [data-state="${AutoCompleteStatus.NotFound}"] {
         color: var(--basis-color-foreground);
         font-style: italic;
         padding: var(--basis-auto-complete-padding);
         text-align: center;
       }
 
-      > .loading {
+      > [data-state="${AutoCompleteStatus.Loading}"] {
         font-style: italic;
       }
 
-      > .error {
+      > [data-state="${AutoCompleteStatus.Error}"] {
         color: var(--basis-color-error);
       }
 
-      > .not-found {
+      > [data-state="${AutoCompleteStatus.NotFound}"] {
         color: var(--basis-color-foreground);
         opacity: 0.7;
       }

@@ -115,7 +115,7 @@ const main = async (): Promise<void> => {
 
     const app = join(workspace, 'app')
     initReactApp(app, spec)
-    run(['bun', 'install'], app, env)
+    run(['bun', 'install'], app)
 
     assertNodeFree(app, env)
     assertDoctorOk(app, env)

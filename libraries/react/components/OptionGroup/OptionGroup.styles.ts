@@ -2,11 +2,11 @@ import { css, style } from '../../utilities/style'
 
 style('basis:option-group', css`
   .option-group.editor {
-    display: inline-flex;
     border-radius: var(--basis-radius-sm);
+    display: inline-flex;
     gap: 0.25em;
-    padding: .25em;
     margin: 0;
+    padding: .25em;
     
     &[data-orientation="horizontal"] {
       align-items: center;

@@ -5,6 +5,7 @@ import { ButtonDocs } from './pages/Button.docs.tsx'
 import { CarouselDocs } from './pages/Carousel.docs.tsx'
 import { CheckboxEditorDocs } from './pages/CheckboxEditor.docs.tsx'
 import { ComponentDocs } from './pages/Component.docs.tsx'
+import { CssLintingDocs } from './pages/CssLinting.docs.tsx'
 import { DialogDocs } from './pages/Dialog.docs.tsx'
 import { DropdownMenuDocs } from './pages/DropdownMenu.docs.tsx'
 import { EditorDocs } from './pages/Editor.docs.tsx'
@@ -70,6 +71,7 @@ export const routes = ([
   docs({ component: CarouselDocs, path: '/components/carousel', title: 'Carousel' }),
   docs({ component: CheckboxEditorDocs, path: '/components/checkbox-editor', title: 'CheckboxEditor' }),
   docs({ component: ComponentDocs, path: '/components/component', title: 'Component' }),
+  docs({ component: CssLintingDocs, path: '/css-linting', title: 'CSS Linting' }),
   docs({ component: DialogDocs, path: '/components/dialog', title: 'Dialog' }),
   docs({ component: DropdownMenuDocs, path: '/components/dropdown-menu', title: 'DropdownMenu' }),
   docs({ component: EditorDocs, path: '/components/editor', title: 'Editor' }),

@@ -9,9 +9,9 @@ style('basis:tag', css`
     display: inline-flex;
     font-size: .8em;
     gap: .1em;
+    height: min-content;
     line-height: 1;
     padding: .1em .25em;
-    height: min-content;
     white-space: nowrap;
 
     &[data-theme] {
@@ -31,8 +31,8 @@ style('basis:tag', css`
       font-weight: bold;
       height: 1em;
       justify-content: center;
-      text-decoration: none;
       padding: 0;
+      text-decoration: none;
       width: 1em;
 
       &:focus {
