@@ -128,4 +128,32 @@ describe('Component', () => {
       expect(node.textContent).toBe('children')
     })
   })
+
+  describe('native props', () => {
+    test('forwards standard native attributes and events to the root element', async () => {
+      const onFocus = mock()
+      const { node } = await render(
+        <TestComponent id="thing" role="region" tabIndex={3} onFocus={onFocus} />,
+      )
+
+      expect(node).toHaveAttribute('id', 'thing')
+      expect(node).toHaveAttribute('role', 'region')
+      expect(node).toHaveAttribute('tabindex', '3')
+
+      node.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+      expect(onFocus).toHaveBeenCalledTimes(1)
+    })
+
+    test('does not forward component-specific props to the root element', async () => {
+      class OwnedComponent extends Component<{ content?: React.ReactNode, orientation?: string }> {
+        static displayName = 'OwnedComponent'
+        static defaultProps = { ...Component.defaultProps, orientation: 'horizontal' }
+      }
+
+      const { node } = await render(<OwnedComponent content="owned" orientation="vertical" />)
+
+      expect(node.hasAttribute('content')).toBe(false)
+      expect(node.hasAttribute('orientation')).toBe(false)
+    })
+  })
 })

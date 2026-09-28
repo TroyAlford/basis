@@ -11,16 +11,12 @@ import './Menu.styles.ts'
 interface Props {
   /** Whether the menu is disabled. */
   disabled?: boolean,
-  /** Optional id for the menu element (for example referenced by `aria-controls`). */
-  id?: string,
   /** Callback function called when a key is pressed while the menu has focus. */
   onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void,
   /** The orientation of the menu. */
   orientation?: Orientation,
   /** Whether the menu is in read-only mode. */
   readOnly?: boolean,
-  /** ARIA role for the menu element. Defaults to `menu`. */
-  role?: string,
 }
 
 /**
@@ -51,7 +47,6 @@ export class Menu extends Component<Props, HTMLUListElement> {
       'aria-disabled': this.props.disabled ? 'true' : undefined,
       'data-orientation': this.props.orientation,
       'disabled': this.props.disabled ? 'disabled' : undefined,
-      'id': this.props.id,
       'onKeyDown': this.handleKeyDown,
       'role': this.props.role ?? 'menu',
     }

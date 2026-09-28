@@ -319,5 +319,17 @@ describe('AutoComplete', () => {
       await waitFor(() => onSelect.mock.calls.length > 0)
       expect(onSelect).toHaveBeenCalledWith('beta', 'beta')
     })
+
+    test('gives each instance distinct, non-sequential listbox ids', async () => {
+      const first = await renderOpen(['alpha'])
+      const second = await renderOpen(['beta'])
+
+      const firstId = first.node.querySelector('[role="listbox"]')?.id ?? ''
+      const secondId = second.node.querySelector('[role="listbox"]')?.id ?? ''
+
+      expect(firstId).not.toBe('')
+      expect(firstId).not.toBe(secondId)
+      expect(firstId).not.toMatch(/^basis:auto-complete:\d+:listbox$/)
+    })
   })
 })

@@ -6,6 +6,7 @@ import type { IPlaceholder } from '../../mixins/Placeholder'
 import type { IPopup } from '../../mixins/Popup'
 import type { IPrefixSuffix } from '../../mixins/PrefixSuffix'
 import { Keyboard } from '../../types/Keyboard'
+import { createId } from '../../utilities/createId'
 import { Event, events } from '../../utilities/EventManager'
 import { Component } from '../Component/Component'
 import { Menu } from '../Menu/Menu'
@@ -71,8 +72,6 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
 
   static displayName = 'AutoComplete'
 
-  static #nextId = 0
-
   static get defaultProps() {
     return {
       ...super.defaultProps,
@@ -84,7 +83,7 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
     }
   }
 
-  readonly #id = `basis:auto-complete:${AutoComplete.#nextId++}`
+  readonly #id = `basis:auto-complete:${createId()}`
 
   private input = React.createRef<TextEditor>()
   private debounceTimeout?: ReturnType<typeof setTimeout>

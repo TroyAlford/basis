@@ -42,7 +42,6 @@ export class PopupMenu extends Component<Props, HTMLUListElement> {
       'aria-disabled': this.props.disabled ? 'true' : undefined,
       'data-visible': this.props.visible,
       'disabled': this.props.disabled ? 'disabled' : undefined,
-      'id': this.props.id,
       'onKeyDown': this.props.onKeyDown,
       'role': this.props.role ?? 'menu',
     }
