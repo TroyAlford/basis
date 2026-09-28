@@ -27,8 +27,11 @@ const VARIANTS = [
   { filled: true, label: 'Filled' },
 ] as const
 
-/** Snapshot tolerance for anti-aliasing across machines. */
-const TOLERANCE = { maxDiffPixelRatio: 0.01 }
+/*
+ * Wide enough for anti-aliasing at the large (192px) size across machines; a
+ * real shape change moves far more than this.
+ */
+const TOLERANCE = { maxDiffPixelRatio: 0.03 }
 
 /** Column and row labels. */
 const LABEL_STYLE: React.CSSProperties = {

@@ -72,8 +72,12 @@ describe('testing/docs', () => {
           }
         `,
       })
+      /*
+       * The tall page includes prose whose line wrapping shifts a little across
+       * machines (the docs' web font is blocked), so allow a wider budget.
+       */
       await expect(page).toMatchScreenshot('full page', {
-        maxDiffPixelRatio: 0.01,
+        maxDiffPixelRatio: 0.02,
       })
     })
   }, 60_000)
