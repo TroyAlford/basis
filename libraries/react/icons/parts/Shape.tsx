@@ -22,12 +22,20 @@ export abstract class Shape<P extends Props = Props> extends Component<P, SVGEle
   }
 
   get attributes() {
+    const { color, fill, mask, stroke, style } = this.props
     return {
       ...super.attributes,
-      fill: this.props.fill ? this.props.color : 'transparent',
-      mask: this.props.mask,
-      stroke: this.props.color,
-      strokeWidth: this.props.stroke,
+      fill: fill ? color : 'transparent',
+      mask,
+      stroke: color,
+      strokeWidth: stroke,
+      /*
+       * A stroked part reads its width through a token so an icon set can be
+       * made heavier at a given size without editing every icon. Cutout details
+       * (`stroke: 0`) keep their zero width. The fallback preserves the icon's
+       * own width when the token is unset.
+       */
+      ...(stroke ? { style: { ...style, strokeWidth: `var(--basis-icon-stroke-width, ${stroke})` } } : {}),
     }
   }
 }
