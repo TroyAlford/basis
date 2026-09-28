@@ -2,10 +2,19 @@ import type { AnchorPoint } from '../types/AnchorPoint'
 
 interface Options {
   anchorPoint: AnchorPoint,
+  boundary?: HTMLElement,
   offset?: number,
 }
 
-const OPTIONS = new Map<HTMLElement, Options>()
+interface Rect {
+  height: number,
+  width: number,
+  x: number,
+  y: number,
+}
+
+const ANCHORS = new Map<HTMLElement, HTMLElement>()
+const OPTIONS = new Map<HTMLElement, Options | undefined>()
 const UPDATERS = new Map<HTMLElement, () => void>()
 
 /**
@@ -19,10 +28,58 @@ export async function repositionPopup(
   anchorTo: HTMLElement,
   options?: Options,
 ): Promise<void> {
+  OPTIONS.set(popup, options)
+  bindAutoUpdate(popup, anchorTo)
+  await updatePosition(popup, anchorTo, options)
+}
+
+/**
+ * Cleanup the repositioning of the popup.
+ * @param popup The popup element to cleanup.
+ */
+export function cleanupRepositioning(popup: HTMLElement) {
+  UPDATERS.get(popup)?.()
+  ANCHORS.delete(popup)
+  OPTIONS.delete(popup)
+  UPDATERS.delete(popup)
+}
+
+/**
+ * Binds Floating UI auto-update to the current anchor, replacing any previous binding.
+ * @param popup The popup element.
+ * @param anchorTo The current anchor element.
+ */
+function bindAutoUpdate(popup: HTMLElement, anchorTo: HTMLElement): void {
+  if (ANCHORS.get(popup) === anchorTo && UPDATERS.has(popup)) return
+
+  UPDATERS.get(popup)?.()
+  ANCHORS.set(popup, anchorTo)
+  UPDATERS.set(popup, () => undefined)
+
+  void import('@floating-ui/dom').then(({ autoUpdate }) => {
+    if (ANCHORS.get(popup) !== anchorTo) return
+    const stop = autoUpdate(anchorTo, popup, () => {
+      const anchor = ANCHORS.get(popup)
+      if (!anchor) return
+      void updatePosition(popup, anchor, OPTIONS.get(popup))
+    })
+    UPDATERS.set(popup, stop)
+  })
+}
+
+/**
+ * Computes and applies the popup's coordinates for the current anchor and options.
+ * @param popup The popup element.
+ * @param anchorTo The reference element.
+ * @param options Positioning options.
+ */
+async function updatePosition(
+  popup: HTMLElement,
+  anchorTo: HTMLElement,
+  options?: Options,
+): Promise<void> {
   const {
-    arrow,
     autoPlacement,
-    autoUpdate,
     computePosition,
     flip,
     limitShift,
@@ -30,18 +87,15 @@ export async function repositionPopup(
     shift,
   } = await import('@floating-ui/dom')
 
-  OPTIONS.set(popup, options)
-  if (!UPDATERS.has(popup)) {
-    UPDATERS.set(popup, autoUpdate(anchorTo, popup, async () => {
-      await repositionPopup(popup, anchorTo, OPTIONS.get(popup))
-    }))
-  }
+  const overflow = overflowOptions(options?.boundary)
 
   const middleware = [
-    arrow({ element: anchorTo }),
-    flip(),
     offset(options?.offset ?? -8),
-    shift({ limiter: limitShift() }),
+    flip(overflow),
+    shift({
+      limiter: limitShift(),
+      ...overflow,
+    }),
   ]
 
   // Add auto-placement if no specific placement is provided
@@ -65,10 +119,27 @@ export async function repositionPopup(
 }
 
 /**
- * Cleanup the repositioning of the popup.
- * @param popup The popup element to cleanup.
+ * Overflow options that clip only to the boundary's visible box.
+ * @param boundary The clipping element.
+ * @returns Flip/shift overflow options, or undefined.
  */
-export function cleanupRepositioning(popup: HTMLElement) {
-  UPDATERS.get(popup)?.()
-  UPDATERS.delete(popup)
+function overflowOptions(boundary: HTMLElement | undefined) {
+  if (!boundary) return undefined
+  const clip = visibleRect(boundary)
+  return { boundary: clip, rootBoundary: clip }
+}
+
+/**
+ * Builds a visible clipping rect from a boundary element.
+ * @param element The clipping element.
+ * @returns The element's visible client box.
+ */
+function visibleRect(element: HTMLElement): Rect {
+  const box = element.getBoundingClientRect()
+  return {
+    height: element.clientHeight,
+    width: element.clientWidth,
+    x: box.left + element.clientLeft,
+    y: box.top + element.clientTop,
+  }
 }

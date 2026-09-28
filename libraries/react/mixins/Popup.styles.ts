@@ -8,8 +8,10 @@ style('basis:popup', css`
   }
 
   [data-popup='true'] {
-    position: absolute;
+    inset: unset;
     isolation: isolate;
+    margin: 0;
+    position: absolute;
 
     &[data-popup-arrow='true'] {
       overflow: visible;
