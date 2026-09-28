@@ -137,6 +137,27 @@ async function screenshotWithRetry<T>(action: () => Promise<T>, attempts = 3): P
 }
 
 /**
+ * Wait until the page has loaded its fonts.
+ *
+ * A capture would otherwise race a webfont that applies after first paint,
+ * committing the fallback (for example, blank glyphs). `fonts.ready` resolves
+ * once in-flight loads settle, and a failed load counts, so a blocked font
+ * cannot hang the matcher.
+ * @param target - The page or locator whose page to wait on.
+ */
+async function waitForFonts(target: Page | Locator): Promise<void> {
+  const ready = async () => {
+    await document.fonts.ready
+  }
+
+  if (isPage(target)) {
+    await target.evaluate(ready)
+  } else {
+    await target.evaluate(ready)
+  }
+}
+
+/**
  * Capture a subject to a PNG buffer.
  *
  * A Playwright page or locator is screenshotted directly (a locator is cropped
@@ -148,6 +169,7 @@ async function screenshotWithRetry<T>(action: () => Promise<T>, attempts = 3): P
  */
 async function capture(subject: ScreenshotSubject, options: ScreenshotOptions): Promise<Buffer> {
   if (isScreenshotTarget(subject)) {
+    await waitForFonts(subject)
     const shot = await screenshotWithRetry(() => subject.screenshot({
       animations: 'disabled',
       caret: 'hide',
@@ -159,6 +181,7 @@ async function capture(subject: ScreenshotSubject, options: ScreenshotOptions): 
   const html = renderHtml(subject)
   return await withPage(async page => {
     await page.setContent(html, { waitUntil: 'load' })
+    await waitForFonts(page)
     const clip = await page.evaluate(() => {
       const rects = Array.from(document.body.children, element => element.getBoundingClientRect())
       if (rects.length === 0) return null
