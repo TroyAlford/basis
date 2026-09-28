@@ -1,13 +1,15 @@
-import { existsSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { existsSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Locator, Page } from 'playwright'
 import { PNG } from 'pngjs'
 import type * as React from 'react'
 import { withPage } from '../browser'
+import { callerFile } from '../caller'
+import { trackSnapshot } from '../cleanup'
 import { renderHtml } from '../document'
 import { formatSnapshotKey, slug } from '../naming'
 import type { ScreenshotOptions } from '../snapshots'
-import { comparePng, readPng, writePng } from '../snapshots'
+import { comparePng, readPng, snapshotDirectory, writePng } from '../snapshots'
 import { currentTestName, nextSnapshotIndex } from '../test'
 
 /** Result returned by the {@link toMatchScreenshot} matcher. */
@@ -51,23 +53,10 @@ interface SnapshotPaths {
 
 /**
  * Resolve the test file that invoked the matcher.
- *
- * Bun exposes no test-path API to custom matchers (there is no
- * `expect.getState()`), so the calling frame is read from the stack; frames from
- * `node_modules` and non-test files are skipped.
  * @returns The caller's file path, or a synthetic path when it cannot be found.
  */
-function callerFile(): string {
-  const stack = new Error().stack ?? ''
-  for (const line of stack.split('\n')) {
-    const match = line.match(/\(?((?:\/|file:\/\/)[^()\s]+?):\d+:\d+\)?$/)
-    if (!match) continue
-    const file = match[1].replace(/^file:\/\//, '')
-    if (file.includes('node_modules')) continue
-    if (!/\.(test|spec)\.(ts|tsx|js|jsx)$/.test(file)) continue
-    return file
-  }
-  return join(process.cwd(), 'snapshot.test.ts')
+function resolvedCallerFile(): string {
+  return callerFile() ?? join(process.cwd(), 'snapshot.test.ts')
 }
 
 /**
@@ -80,7 +69,7 @@ function callerFile(): string {
  * @returns The snapshot and artifact paths.
  */
 function snapshotPaths(file: string, key: string): SnapshotPaths {
-  const dir = join(dirname(file), '__screenshots__', basename(file))
+  const dir = snapshotDirectory(file)
   const stem = slug(key)
   return {
     actual: join(dir, `${stem}.actual.png`),
@@ -215,10 +204,11 @@ export async function toMatchScreenshot(
     }
   }
 
-  const file = callerFile()
+  const file = resolvedCallerFile()
   const key = snapshotKey(file, hint)
   const actual = PNG.sync.read(await capture(received, options))
   const { actual: actualPath, baseline, diff: diffPath } = snapshotPaths(file, key)
+  trackSnapshot(baseline)
 
   if (!existsSync(baseline) || updating()) {
     writePng(baseline, actual)
@@ -227,6 +217,12 @@ export async function toMatchScreenshot(
 
   const comparison = comparePng(readPng(baseline), actual, options)
   if (comparison.pass) {
+    /*
+     * A passing comparison supersedes any artifacts a previous failing run
+     * left beside the snapshot.
+     */
+    rmSync(actualPath, { force: true })
+    rmSync(diffPath, { force: true })
     return { message: () => `toMatchScreenshot: matches ${baseline}`, pass: true }
   }
 

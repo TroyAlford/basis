@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import pixelmatch from 'pixelmatch'
 import { PNG } from 'pngjs'
 
@@ -28,6 +28,18 @@ export interface ScreenshotOptions {
   maxDiffPixels?: number,
   /** Colour-distance threshold forwarded to pixelmatch. Defaults to `0.2`. */
   threshold?: number,
+}
+
+/**
+ * Resolve the snapshot directory for a test file.
+ *
+ * Mirrors Bun's snapshot layout: one directory per test file, here
+ * `__screenshots__/<test file>/`.
+ * @param file - The test file.
+ * @returns The directory holding its committed snapshots.
+ */
+export function snapshotDirectory(file: string): string {
+  return join(dirname(file), '__screenshots__', basename(file))
 }
 
 /**
