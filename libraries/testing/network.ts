@@ -24,3 +24,33 @@ export async function blockExternalRequests(
     return allowed.has(hostname) ? route.continue() : route.abort()
   })
 }
+
+/** Response served by {@link stubRequest}. */
+export interface StubOptions {
+  /** Response body. */
+  body: string,
+  /** Response content type. Defaults to `text/javascript`. */
+  contentType?: string,
+}
+
+/**
+ * Fulfil matching requests with a fixed response.
+ *
+ * Use for an external dependency that would otherwise hit the network, so the
+ * capture is deterministic. Register after {@link blockExternalRequests}: a
+ * later route takes precedence for the URLs it matches.
+ * @param page - The page to stub for.
+ * @param url - URL glob or pattern to match.
+ * @param options - Response body and content type.
+ */
+export async function stubRequest(
+  page: Page,
+  url: string | RegExp,
+  options: StubOptions,
+): Promise<void> {
+  await page.route(url, route => route.fulfill({
+    body: options.body,
+    contentType: options.contentType ?? 'text/javascript',
+    status: 200,
+  }))
+}

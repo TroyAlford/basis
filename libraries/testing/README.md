@@ -95,11 +95,17 @@ test('renders the application', async () => {
 ```
 
 - `startApplication` spawns `entry` on a free loopback port and waits for
-  readiness; `stop()` is idempotent.
+  readiness on `/health`; `stop()` is idempotent.
 - `withPage` opens a deterministically configured page and tears it down.
 - `blockExternalRequests` aborts non-loopback requests, so snapshots do not
   depend on a CDN.
+- `stubRequest(page, url, { body })` fulfils a specific request locally, for an
+  external dependency that the app genuinely needs (register it after the
+  blocker; later routes win).
 - `seedLocalStorage` seeds state before any application script runs.
+
+Basis's own docs site is captured this way in `libraries/testing/docs.test.ts`
+(a Button example and the icon grid), which keeps the fixture honest.
 
 Text and Skia rasterisation are pinned (grayscale anti-aliasing, no hinting,
 portable Skia), and the default comparison budget tolerates the greater of 10

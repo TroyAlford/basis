@@ -8,7 +8,7 @@ export interface StartApplicationOptions {
   entry: string,
   /** Extra environment for the server process. */
   env?: Record<string, string>,
-  /** HTTP path polled for readiness. Defaults to `/`. */
+  /** HTTP path polled for readiness. Defaults to `/health`. */
   readyPath?: string,
   /** Readiness timeout in milliseconds. Defaults to `30000`. */
   timeoutMs?: number,
@@ -94,7 +94,7 @@ async function waitForReady(url: string, timeoutMs: number, output: () => string
 export async function startApplication(
   options: StartApplicationOptions,
 ): Promise<ApplicationHandle> {
-  const { cwd = process.cwd(), entry, env = {}, readyPath = '/', timeoutMs = 30_000 } = options
+  const { cwd = process.cwd(), entry, env = {}, readyPath = '/health', timeoutMs = 30_000 } = options
   const port = await freePort()
   const proc = Bun.spawn([process.execPath, entry], {
     cwd,
@@ -117,7 +117,7 @@ export async function startApplication(
   void drain(proc.stdout)
   void drain(proc.stderr)
 
-  const url = `http://127.0.0.1:${port}${readyPath}`
+  const url = `http://127.0.0.1:${port}`
   let stopped = false
   const stop = async (): Promise<void> => {
     if (stopped) return
@@ -127,7 +127,7 @@ export async function startApplication(
   }
 
   try {
-    await waitForReady(url, timeoutMs, () => output)
+    await waitForReady(`${url}${readyPath}`, timeoutMs, () => output)
   } catch (error) {
     await stop()
     throw error
