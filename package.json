@@ -80,7 +80,6 @@
     "postinstall": "bun ./consumer/install.ts",
     "prepare": "bun ./scripts/prepare.ts",
     "test": "bun test",
-    "test:browser": "bun test --path-ignore-patterns= browser.test",
     "test:consumer": "bun ./consumer/test/self-install.ts && bun ./consumer/test/cache-isolation.ts && bun ./consumer/test/react-runtime.ts",
     "test:develop": "bun test --watch",
     "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces",

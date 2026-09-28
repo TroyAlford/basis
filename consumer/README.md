@@ -174,16 +174,13 @@ snapshots. Add the preload to `bunfig.toml`:
 preload = ["basis/testing/bun"]
 ```
 
-It registers happy-dom, the shared matchers, and the browser lifecycle. The
-ordinary `bun test` suite is browser-free; name browser-backed snapshot tests
-`*.browser.test.ts` / `*.browser.test.tsx` and keep them out of the default run
-(for example with `[test] pathIgnorePatterns`) so `bun test` and pre-commit work
-without Chromium system dependencies.
+It registers happy-dom, the shared matchers, and the browser lifecycle, so a
+plain `bun test` runs the complete suite — DOM tests and browser-backed snapshot
+tests alike.
 
 Chromium for snapshot tests is downloaded by Basis's install hook during
 `bun install`; set `BASIS_SKIP_BROWSER_INSTALL=1` to skip the download. The
-browser suite additionally needs the browser's system libraries on a bare Linux
-runner:
+snapshot suite also needs the browser's system libraries on a bare Linux runner:
 
 ```bash
 bun ./node_modules/playwright/cli.js install --with-deps chromium

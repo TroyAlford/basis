@@ -7,13 +7,6 @@ preload = [
 coverage = true
 coverageReporter = ["lcov"]
 coverageSkipTestFiles = true
-# Browser-backed visual tests need Chromium and its system libraries. They run
-# through the explicit `test:browser` suite so the normal suite, pre-commit
-# hook, and browser-less developer machines never load them.
-pathIgnorePatterns = [
-  "**/*.browser.test.ts",
-  "**/*.browser.test.tsx",
-]
 preload = [
 	"./libraries/testing/bun"
 ]

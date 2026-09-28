@@ -13,10 +13,8 @@ Add the preload to the consumer's `bunfig.toml`:
 preload = ["basis/testing/bun"]
 ```
 
-It registers happy-dom, every matcher, and the shared browser lifecycle. The
-ordinary `bun test` suite is browser-free: browser-backed tests are named
-`*.browser.test.ts` / `*.browser.test.tsx` and run only through the explicit
-browser suite (`bun run test:browser`).
+It registers happy-dom, every matcher, and the shared browser lifecycle, so a
+plain `bun test` runs the whole suite — DOM tests and snapshots alike.
 
 ## DOM testing
 
@@ -40,9 +38,7 @@ test('renders a button', async () => {
 })
 ```
 
-Snapshot tests are named `*.browser.test.ts` / `*.browser.test.tsx`, so the
-explicit browser suite discovers them while the ordinary `bun test` suite
-ignores them.
+Snapshot tests are ordinary `*.test.*` files, so `bun test` discovers them.
 
 `toMatchScreenshot` accepts a React element, a Playwright `Page`, or a
 `Locator`. A React element is rendered to HTML, the component styles and the
@@ -126,29 +122,23 @@ await app.visit('/deck', {
 })
 ```
 
-Basis's own docs site is captured this way in
-`libraries/testing/docs.browser.test.ts` (a Button example and the icon grid),
-which keeps the fixture honest.
+Basis's own docs site is captured this way in `libraries/testing/docs.test.ts`
+(a Button example and the icon grid), which keeps the fixture honest.
 
 Text and Skia rasterisation are pinned (grayscale anti-aliasing, no hinting,
 portable Skia), and the default comparison budget tolerates the greater of 10
 pixels or 0.1%, so one committed snapshot holds across machines. Tighten or
 loosen it per call with `maxDiffPixels` / `maxDiffPixelRatio`.
 
-## Browser suite
+## Browsers
 
-Chromium is downloaded by Basis's install hook during `bun install`, so the
-browser suite has a browser to drive. Set `BASIS_SKIP_BROWSER_INSTALL=1` to skip
-that download. On a bare Linux runner, also install the browser's system
-libraries with
-`bun ./node_modules/playwright/cli.js install --with-deps chromium`.
+Chromium is downloaded by Basis's install hook during `bun install`. Set
+`BASIS_SKIP_BROWSER_INSTALL=1` to skip that download. The complete `bun test`
+suite also needs the browser's system libraries; on a bare Linux runner install
+them with `bun ./node_modules/playwright/cli.js install --with-deps chromium`.
+CI provisions those dependencies and runs the complete suite, which is
+authoritative for the browser-backed snapshots.
 
-The browser suite runs the `*.browser.test.*` files:
-
-```bash
-bun run test:browser
-```
-
-It is a required CI job. The ordinary `bun test` suite, and the pre-commit hook
-that runs it, never launch a browser and therefore work on a development machine
-without those system libraries.
+The pre-commit hook runs the fast, deterministic checks (lint, typecheck, and
+build) so that committing does not require a browser-capable machine; run
+`bun test` locally or rely on CI for the full suite.
