@@ -10,8 +10,8 @@ import { basisPlugins } from './rules/index'
  */
 export const BASE_RULES: Config['rules'] = {
   'at-rule-no-unknown': true,
+  'basis/no-avoidable-nesting': true,
   'basis/no-state-classes': true,
-  'basis/no-top-level-nesting': true,
   'block-no-empty': true,
   'color-no-invalid-hex': true,
   'declaration-block-no-duplicate-properties': [true, {
