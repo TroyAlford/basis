@@ -64,7 +64,7 @@ export class Notification extends Component<Props, HTMLElement> {
         ? createElement(this.props.icon, {})
         : this.props.icon as ReactNode
     }
-    return <IntentIcon is={intent} />
+    return <IntentIcon intent={intent} />
   }
 
   content(): ReactNode {

@@ -51,6 +51,13 @@ it mirrors `toMatchSnapshot`:
   `<name>.actual.png` / `<name>.diff.png` artefacts;
 - `--update-snapshots` (or `UPDATE_SNAPSHOTS=1`) rewrites the snapshot.
 
+Obsolete snapshots are pruned automatically. After the run, any committed
+snapshot in a test file's `__screenshots__` directory that no test referenced is
+removed, so a renamed or deleted capture cannot linger. Pruning is scoped to
+files whose entire suite executed: a file filtered with `-t`, or one containing a
+skipped test, keeps its snapshots. A passing comparison also clears any
+`*.actual.png` / `*.diff.png` left behind by an earlier failure.
+
 ### Naming
 
 Snapshots are keyed the same way Bun keys text snapshots — by the test name plus

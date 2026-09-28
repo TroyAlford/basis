@@ -52,4 +52,33 @@ describe('testing/docs', () => {
       })
     })
   }, 60_000)
+
+  test('captures the whole icons page', async () => {
+    await app.visit('/icons', { stubs: STUBS }, async page => {
+      await page.waitForSelector('.icon-grid')
+      /*
+       * The docs shell is `100vh` with an inner scroll region, so a full-page
+       * capture would otherwise be the viewport. Release the shell height so the
+       * snapshot is the whole page.
+       */
+      await page.addStyleTag({
+        content: `
+          html, body, #root, .layout.component {
+            height: auto !important;
+            overflow: visible !important;
+          }
+          .layout.component > main, .layout.component > nav.links {
+            overflow: visible !important;
+          }
+        `,
+      })
+      /*
+       * The tall page includes prose whose line wrapping shifts a little across
+       * machines (the docs' web font is blocked), so allow a wider budget.
+       */
+      await expect(page).toMatchScreenshot('full page', {
+        maxDiffPixelRatio: 0.02,
+      })
+    })
+  }, 60_000)
 })

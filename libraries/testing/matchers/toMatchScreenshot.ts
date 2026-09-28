@@ -1,13 +1,15 @@
-import { existsSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { existsSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Locator, Page } from 'playwright'
 import { PNG } from 'pngjs'
 import type * as React from 'react'
 import { withPage } from '../browser'
+import { callerFile } from '../caller'
+import { trackSnapshot } from '../cleanup'
 import { renderHtml } from '../document'
 import { formatSnapshotKey, slug } from '../naming'
 import type { ScreenshotOptions } from '../snapshots'
-import { comparePng, readPng, writePng } from '../snapshots'
+import { comparePng, readPng, snapshotDirectory, writePng } from '../snapshots'
 import { currentTestName, nextSnapshotIndex } from '../test'
 
 /** Result returned by the {@link toMatchScreenshot} matcher. */
@@ -30,6 +32,15 @@ function isScreenshotTarget(value: ScreenshotSubject): value is Page | Locator {
   return typeof (value as { screenshot?: unknown }).screenshot === 'function'
 }
 
+/**
+ * Whether a Playwright target is a page (as opposed to a locator).
+ * @param value - The target.
+ * @returns True for a page.
+ */
+function isPage(value: Page | Locator): value is Page {
+  return typeof (value as Page).goto === 'function'
+}
+
 /** Paths a snapshot and its failure artifacts resolve to. */
 interface SnapshotPaths {
   /** Captured image, written on a mismatch. */
@@ -42,23 +53,10 @@ interface SnapshotPaths {
 
 /**
  * Resolve the test file that invoked the matcher.
- *
- * Bun exposes no test-path API to custom matchers (there is no
- * `expect.getState()`), so the calling frame is read from the stack; frames from
- * `node_modules` and non-test files are skipped.
  * @returns The caller's file path, or a synthetic path when it cannot be found.
  */
-function callerFile(): string {
-  const stack = new Error().stack ?? ''
-  for (const line of stack.split('\n')) {
-    const match = line.match(/\(?((?:\/|file:\/\/)[^()\s]+?):\d+:\d+\)?$/)
-    if (!match) continue
-    const file = match[1].replace(/^file:\/\//, '')
-    if (file.includes('node_modules')) continue
-    if (!/\.(test|spec)\.(ts|tsx|js|jsx)$/.test(file)) continue
-    return file
-  }
-  return join(process.cwd(), 'snapshot.test.ts')
+function resolvedCallerFile(): string {
+  return callerFile() ?? join(process.cwd(), 'snapshot.test.ts')
 }
 
 /**
@@ -71,7 +69,7 @@ function callerFile(): string {
  * @returns The snapshot and artifact paths.
  */
 function snapshotPaths(file: string, key: string): SnapshotPaths {
-  const dir = join(dirname(file), '__screenshots__', basename(file))
+  const dir = snapshotDirectory(file)
   const stem = slug(key)
   return {
     actual: join(dir, `${stem}.actual.png`),
@@ -119,17 +117,42 @@ function snapshotKey(file: string, hint?: string): string {
 }
 
 /**
+ * Run a screenshot action, retrying the transient capture failures Chromium
+ * occasionally reports in headless runs.
+ * @param action - The screenshot action.
+ * @param attempts - Maximum attempts. Defaults to 3.
+ * @returns The action's result.
+ */
+async function screenshotWithRetry<T>(action: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await action()
+    } catch (error) {
+      lastError = error
+      await Bun.sleep(100 * (attempt + 1))
+    }
+  }
+  throw lastError
+}
+
+/**
  * Capture a subject to a PNG buffer.
  *
  * A Playwright page or locator is screenshotted directly (a locator is cropped
  * to its element); a React element is rendered to a standalone document and
  * cropped to its content.
  * @param subject - What to capture.
+ * @param options - Capture options.
  * @returns The PNG bytes.
  */
-async function capture(subject: ScreenshotSubject): Promise<Buffer> {
+async function capture(subject: ScreenshotSubject, options: ScreenshotOptions): Promise<Buffer> {
   if (isScreenshotTarget(subject)) {
-    const shot = await subject.screenshot({ animations: 'disabled', caret: 'hide' })
+    const shot = await screenshotWithRetry(() => subject.screenshot({
+      animations: 'disabled',
+      caret: 'hide',
+      ...(isPage(subject) ? { fullPage: options.fullPage ?? true } : {}),
+    }))
     return Buffer.isBuffer(shot) ? shot : Buffer.from(shot)
   }
 
@@ -145,11 +168,11 @@ async function capture(subject: ScreenshotSubject): Promise<Buffer> {
       const bottom = Math.ceil(Math.max(...rects.map(rect => rect.bottom)))
       return { height: bottom - top, width: right - left, x: left, y: top }
     })
-    return await page.screenshot({
+    return await screenshotWithRetry(() => page.screenshot({
       animations: 'disabled',
       caret: 'hide',
       ...(clip ? { clip } : { fullPage: true }),
-    })
+    }))
   })
 }
 
@@ -181,10 +204,11 @@ export async function toMatchScreenshot(
     }
   }
 
-  const file = callerFile()
+  const file = resolvedCallerFile()
   const key = snapshotKey(file, hint)
-  const actual = PNG.sync.read(await capture(received))
+  const actual = PNG.sync.read(await capture(received, options))
   const { actual: actualPath, baseline, diff: diffPath } = snapshotPaths(file, key)
+  trackSnapshot(baseline)
 
   if (!existsSync(baseline) || updating()) {
     writePng(baseline, actual)
@@ -193,6 +217,12 @@ export async function toMatchScreenshot(
 
   const comparison = comparePng(readPng(baseline), actual, options)
   if (comparison.pass) {
+    /*
+     * A passing comparison supersedes any artifacts a previous failing run
+     * left beside the snapshot.
+     */
+    rmSync(actualPath, { force: true })
+    rmSync(diffPath, { force: true })
     return { message: () => `toMatchScreenshot: matches ${baseline}`, pass: true }
   }
 

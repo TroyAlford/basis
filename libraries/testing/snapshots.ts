@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import pixelmatch from 'pixelmatch'
 import { PNG } from 'pngjs'
 
@@ -14,14 +14,32 @@ export const DEFAULT_MAX_DIFF_PIXEL_RATIO = 0.001
 /** Absolute number of differing pixels tolerated when no explicit budget is given. */
 export const DEFAULT_MAX_DIFF_PIXELS = 10
 
-/** Options controlling how a screenshot is compared with its snapshot. */
+/** Options controlling how a screenshot is captured and compared. */
 export interface ScreenshotOptions {
+  /**
+   * Capture the entire scrollable page rather than just the viewport. Applies
+   * to a Playwright page and defaults to `true`; set `false` for the viewport.
+   * A locator is already its element's full box.
+   */
+  fullPage?: boolean,
   /** Maximum fraction of differing pixels allowed. Overrides the default tolerance. */
   maxDiffPixelRatio?: number,
   /** Maximum number of differing pixels allowed. When omitted, only the ratio budget applies. */
   maxDiffPixels?: number,
   /** Colour-distance threshold forwarded to pixelmatch. Defaults to `0.2`. */
   threshold?: number,
+}
+
+/**
+ * Resolve the snapshot directory for a test file.
+ *
+ * Mirrors Bun's snapshot layout: one directory per test file, here
+ * `__screenshots__/<test file>/`.
+ * @param file - The test file.
+ * @returns The directory holding its committed snapshots.
+ */
+export function snapshotDirectory(file: string): string {
+  return join(dirname(file), '__screenshots__', basename(file))
 }
 
 /**
@@ -67,7 +85,11 @@ export interface ScreenshotComparison {
 function pad(source: PNG, width: number, height: number): PNG {
   if (source.width === width && source.height === height) return source
   const canvas = new PNG({ height, width })
-  source.bitblt(canvas, 0, 0, source.width, source.height, 0, 0)
+  const rowBytes = source.width * 4
+  for (let y = 0; y < source.height; y += 1) {
+    const from = y * rowBytes
+    source.data.copy(canvas.data, y * width * 4, from, from + rowBytes)
+  }
   return canvas
 }
 

@@ -366,7 +366,7 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
         ? createElement(this.props.icon, {})
         : this.props.icon as ReactNode
     }
-    return <IntentIcon is={intent} />
+    return <IntentIcon intent={intent} />
   }
 
   content(): ReactNode {

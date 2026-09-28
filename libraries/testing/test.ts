@@ -1,4 +1,5 @@
 import { describe as bunDescribe, it as bunIt, test as bunTest } from 'bun:test'
+import { callerFile } from './caller'
 
 /*
  * Bun does not expose the current test name to custom matchers (there is no
@@ -14,6 +15,27 @@ import { describe as bunDescribe, it as bunIt, test as bunTest } from 'bun:test'
 let currentName: string | null = null
 const describeStack: string[] = []
 const counts = new Map<string, number>()
+
+/** Number of wrapped tests declared per test file. */
+const declared = new Map<string, number>()
+/** Number of wrapped test bodies that actually ran per test file. */
+const executed = new Map<string, number>()
+
+/**
+ * Test files whose entire declared suite executed.
+ *
+ * `toMatchScreenshot`'s cleanup only prunes snapshots for these, so a file
+ * filtered with `-t` — or one containing a skipped test — is never mistaken for
+ * a file whose snapshots are stale.
+ * @returns The fully executed test file paths.
+ */
+export function fullyRunFiles(): string[] {
+  const files: string[] = []
+  for (const [file, total] of declared) {
+    if (total > 0 && executed.get(file) === total) files.push(file)
+  }
+  return files
+}
 
 /**
  * The full name of the test currently executing.
@@ -42,12 +64,14 @@ export function nextSnapshotIndex(key: string): number {
  * Wrap a test body so it records the current test name while it runs.
  * @param name - The test name.
  * @param body - The test body.
+ * @param file - The test file that declared the test, when known.
  * @returns The wrapped body, or the original value when it is not a function.
  */
-const track = (name: string, body: unknown): unknown => {
+const track = (name: string, body: unknown, file: string | null): unknown => {
   if (typeof body !== 'function') return body
   const fullName = [...describeStack, name].filter(Boolean).join(' ')
   return function tracked(this: unknown, ...args: unknown[]): unknown {
+    if (file) executed.set(file, (executed.get(file) ?? 0) + 1)
     const previous = currentName
     currentName = fullName
     const restore = () => {
@@ -83,9 +107,11 @@ const track = (name: string, body: unknown): unknown => {
 const wrapTest = (target: unknown): unknown => new Proxy(target as object, {
   apply(fn, thisArg, args) {
     const [name, body, ...rest] = args as [string, unknown, ...unknown[]]
+    const file = callerFile()
+    if (typeof body === 'function' && file) declared.set(file, (declared.get(file) ?? 0) + 1)
     return Reflect.apply(fn as (...inner: unknown[]) => unknown, thisArg, [
       name,
-      track(String(name), body),
+      track(String(name), body, file),
       ...rest,
     ])
   },

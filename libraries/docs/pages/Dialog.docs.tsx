@@ -51,7 +51,7 @@ export class DialogDocs extends Documentation<State> {
 
   openConfirmPrimary = async () => {
     const confirmed = await Dialog.confirm({
-      content: 'This dialog uses Intent.Primary on the shell (no header icon).',
+      content: 'This dialog uses Intent.Is.Primary on the shell (no header icon).',
       title: 'Continue?',
     })
     void this.setState({
@@ -78,7 +78,7 @@ export class DialogDocs extends Documentation<State> {
         { label: 'Cancel', value: 'cancel' },
       ],
       content: 'Success intent shows the SquareCheck icon and success-tinted header.',
-      intent: Intent.Success,
+      intent: Intent.Is.Success,
       title: 'Saved',
     })
     void this.setState({ current: { ...this.current, lastChoice: String(choice) } })
@@ -92,7 +92,7 @@ export class DialogDocs extends Documentation<State> {
         <Button key="cancel" data-value="cancel">Cancel</Button>,
       ],
       content: 'Each button carries an arbitrary value; the promise resolves with the chosen value.',
-      intent: Intent.Default,
+      intent: Intent.Is.Default,
       title: 'Choose mode',
     })
     void this.setState({ current: { ...this.current, lastChoice: String(value) } })
@@ -178,8 +178,8 @@ export class DialogDocs extends Documentation<State> {
             renders <strong>Cancel</strong> and <strong>OK</strong>. Cancel and Escape resolve{' '}
             <code>false</code>; OK resolves <code>true</code>. Custom button dialogs can use{' '}
             <code>{'{'} label, value {'}'}</code>, <code>&lt;Button data-value="..."&gt;</code>, or a mix of
-            both. Button intent defaults to <code>Intent.Default</code>, while the dialog shell intent defaults
-            to <code>Intent.Primary</code>.
+            both. Button intent defaults to <code>Intent.Is.Default</code>, while the dialog shell intent defaults
+            to <code>Intent.Is.Primary</code>.
           </p>
           {Code.format(`
             import { Button, Dialog, Intent } from '@basis/react'
@@ -196,7 +196,7 @@ export class DialogDocs extends Documentation<State> {
                 <Button key="cancel" data-value="cancel">Cancel</Button>,
               ],
               content: 'Pick how to open this item.',
-              intent: Intent.Success,
+              intent: Intent.Is.Success,
               title: 'Open as…',
             })
           `)}
