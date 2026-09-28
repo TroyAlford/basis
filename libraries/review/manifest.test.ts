@@ -27,4 +27,21 @@ describe('standard review manifest', () => {
     const reviewer = STANDARD_REVIEW_MANIFEST.reviewers.find(candidate => candidate.id === 'dead-code')
     expect(reviewer?.verification).toEqual({ detector: 'knip' })
   })
+
+  test('ships the component style semantics semantic reviewer', () => {
+    const reviewer = STANDARD_REVIEW_MANIFEST.reviewers
+      .find(candidate => candidate.id === 'component-style-semantics')
+
+    expect(reviewer?.executionProfile).toBe('local-semantic')
+    expect(reviewer?.detectors).toEqual([])
+    expect(reviewer?.outcomes.map(outcome => outcome.category)).toEqual([
+      'state-semantics',
+      'synthetic-accessibility',
+      'shared-typed-state',
+      'nesting-ownership',
+      'cross-component-coupling',
+      'clear',
+      'abstain',
+    ])
+  })
 })

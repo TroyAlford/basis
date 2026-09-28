@@ -1,4 +1,5 @@
 import { css, style } from '../../utilities/style'
+import { AutoCompleteStatus } from './AutoCompleteStatus'
 
 style('basis:auto-complete', css`
   :root {
@@ -35,11 +36,6 @@ style('basis:auto-complete', css`
           color: var(--basis-color-primary-contrast);
         }
 
-        &[aria-selected="true"] {
-          background-color: var(--basis-color-primary);
-          color: var(--basis-color-contrast);
-        }
-
         &[disabled], &[disabled]:hover {
           background-color: var(--basis-color-disabled);
           color: var(--basis-color-disabled-text);
@@ -47,24 +43,24 @@ style('basis:auto-complete', css`
         }
       }
 
-      > [data-state="error"],
-      > [data-state="loading"],
-      > [data-state="not-found"] {
+      > [data-state="${AutoCompleteStatus.Error}"],
+      > [data-state="${AutoCompleteStatus.Loading}"],
+      > [data-state="${AutoCompleteStatus.NotFound}"] {
         color: var(--basis-color-foreground);
         font-style: italic;
         padding: var(--basis-auto-complete-padding);
         text-align: center;
       }
 
-      > [data-state="loading"] {
+      > [data-state="${AutoCompleteStatus.Loading}"] {
         font-style: italic;
       }
 
-      > [data-state="error"] {
+      > [data-state="${AutoCompleteStatus.Error}"] {
         color: var(--basis-color-error);
       }
 
-      > [data-state="not-found"] {
+      > [data-state="${AutoCompleteStatus.NotFound}"] {
         color: var(--basis-color-foreground);
         opacity: 0.7;
       }

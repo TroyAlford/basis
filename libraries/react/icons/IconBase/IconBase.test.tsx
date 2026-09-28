@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
 import { Lightning } from '../Lightning'
@@ -54,5 +54,28 @@ describe('IconBase overlay', () => {
     expect(maskOverlay).not.toBeNull()
     expect(maskOverlay?.getAttribute('stroke-width')).toBe('40')
     expect(maskOverlay?.querySelector('path')?.getAttribute('fill')).not.toBe('transparent')
+  })
+})
+
+describe('IconBase interactivity semantics', () => {
+  test('a genuinely clickable icon is a focusable button', async () => {
+    const { node } = await render(<Plus onClick={mock()} />)
+
+    expect(node.getAttribute('role')).toBe('button')
+    expect(node.getAttribute('tabindex')).toBe('0')
+  })
+
+  test('a non-clickable icon is an image', async () => {
+    const { node } = await render(<Plus />)
+
+    expect(node.getAttribute('role')).toBe('img')
+    expect(node.getAttribute('tabindex')).toBeNull()
+  })
+
+  test('a disabled icon with an onClick is not exposed as clickable', async () => {
+    const { node } = await render(<Plus disabled onClick={mock()} />)
+
+    expect(node.getAttribute('role')).toBe('img')
+    expect(node.getAttribute('tabindex')).toBeNull()
   })
 })

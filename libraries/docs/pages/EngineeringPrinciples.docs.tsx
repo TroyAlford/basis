@@ -333,6 +333,10 @@ export class EngineeringPrinciplesDocs extends Documentation<Record<string, neve
             <li>
               <code>composition-vs-inheritance</code> — match the mechanism to the relationship.
             </li>
+            <li>
+              <code>component-style-semantics</code> — scoped component CSS; state uses native,
+              genuine accessibility, or <code>data-*</code> semantics rather than ad-hoc classes.
+            </li>
           </ul>
           <p>The dispositions are deliberately few:</p>
           <ul>
@@ -362,8 +366,8 @@ export class EngineeringPrinciplesDocs extends Documentation<Record<string, neve
               <strong>Reviewer policies</strong> — one focused, executable review question each.
             </li>
             <li>
-              <strong>Deterministic tooling</strong> — ESLint, TypeScript, Knip, and tests for
-              what can be enforced mechanically.
+              <strong>Deterministic tooling</strong> — ESLint, TypeScript, Stylelint, Knip, and
+              tests for what can be enforced mechanically.
             </li>
             <li>
               <strong>ai-dispatcher evaluation</strong> — whether the semantic reviewers actually

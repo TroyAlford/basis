@@ -3,7 +3,9 @@ import * as React from 'react'
 import { render } from '../../testing/render'
 import { Simulate } from '../../testing/Simulate'
 import { waitFor } from '../../testing/waitFor'
+import { styles } from '../../utilities/style'
 import { AutoComplete } from './AutoComplete'
+import { AutoCompleteStatus } from './AutoCompleteStatus'
 
 describe('AutoComplete', () => {
   describe('search counter behavior', () => {
@@ -115,6 +117,60 @@ describe('AutoComplete', () => {
       // Now should call onSearch
       expect(onSearch).toHaveBeenCalledTimes(1)
       expect(onSearch).toHaveBeenCalledWith('test')
+    })
+  })
+
+  describe('popup content state', () => {
+    test('emits the shared error status and styles it by the same value', async () => {
+      const onSearch = mock(() => Promise.reject(new Error('Search failed')))
+      const { node } = await render(
+        <AutoComplete
+          open
+          getOptionLabel={option => String(option)}
+          getOptionValue={option => String(option)}
+          onSearch={onSearch}
+        />,
+      )
+
+      const input = node.querySelector('input') as HTMLInputElement
+      await Simulate.change(input, 'test')
+
+      const content = await waitFor(
+        () => node.querySelector(`[data-state="${AutoCompleteStatus.Error}"]`),
+        { timeout: 1_000 },
+      )
+
+      expect(content).not.toBeNull()
+      expect(styles()).toContain(`[data-state="${AutoCompleteStatus.Error}"]`)
+    })
+
+    test('emits the shared not-found status and styles it by the same value', async () => {
+      const onSearch = mock(() => Promise.resolve([]))
+      const { node } = await render(
+        <AutoComplete
+          open
+          getOptionLabel={option => String(option)}
+          getOptionValue={option => String(option)}
+          onSearch={onSearch}
+        />,
+      )
+
+      const input = node.querySelector('input') as HTMLInputElement
+      await Simulate.change(input, 'test')
+
+      const content = await waitFor(
+        () => node.querySelector(`[data-state="${AutoCompleteStatus.NotFound}"]`),
+        { timeout: 1_000 },
+      )
+
+      expect(content).not.toBeNull()
+      expect(styles()).toContain(`[data-state="${AutoCompleteStatus.NotFound}"]`)
+    })
+
+    test('styles every declared status value', () => {
+      for (const status of Object.values(AutoCompleteStatus)) {
+        expect(styles()).toContain(`[data-state="${status}"]`)
+      }
     })
   })
 })
