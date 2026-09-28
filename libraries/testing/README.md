@@ -132,13 +132,13 @@ loosen it per call with `maxDiffPixels` / `maxDiffPixelRatio`.
 
 ## Browsers
 
-Chromium is downloaded by Basis's install hook during `bun install`. Set
-`BASIS_SKIP_BROWSER_INSTALL=1` to skip that download. The complete `bun test`
-suite also needs the browser's system libraries; on a bare Linux runner install
-them with `bun ./node_modules/playwright/cli.js install --with-deps chromium`.
-CI provisions those dependencies and runs the complete suite, which is
-authoritative for the browser-backed snapshots.
+Basis's trusted install hook provisions the complete browser runtime during
+`bun install`: the pinned Chromium binary and the operating-system dependencies
+it needs to launch (Playwright's `install --with-deps chromium`). There is no
+separate Playwright command, host bootstrap, or CI-only setup. Set
+`BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook reports the
+skip. A provisioning failure fails `bun install`, because a successful Basis
+install is expected to leave browser-backed tests ready to run.
 
 The pre-commit hook runs the fast, deterministic checks (lint, typecheck, and
-build) so that committing does not require a browser-capable machine; run
-`bun test` locally or rely on CI for the full suite.
+build); run `bun test` for the complete suite.

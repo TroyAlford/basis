@@ -11,10 +11,14 @@ bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
 ```
 
 `--trust` records `basis` in the consumer's `trustedDependencies` so Basis's
-install hook can apply the transitive patches Basis owns. The hook is
-deterministic, idempotent, exact-version validated, and only touches packages
-Basis declares. Consumers never copy patch files or `patchedDependencies`
-entries.
+install hook can apply the transitive patches Basis owns and provision the
+browser runtime `basis/testing` needs. The hook is deterministic, idempotent,
+exact-version validated, and only touches packages Basis declares. Consumers
+never copy patch files or `patchedDependencies` entries, and never add their own
+Playwright provisioning: `bun install` downloads the pinned Chromium and installs
+the operating-system dependencies it needs to launch. Set
+`BASIS_SKIP_BROWSER_INSTALL=1` to opt out; a provisioning failure fails the
+install.
 
 Basis requires Bun `>=1.4.0`. Bun only honors root-level `patchedDependencies`,
 which is why the trusted hook exists.
@@ -178,13 +182,13 @@ It registers happy-dom, the shared matchers, and the browser lifecycle, so a
 plain `bun test` runs the complete suite — DOM tests and browser-backed snapshot
 tests alike.
 
-Chromium for snapshot tests is downloaded by Basis's install hook during
-`bun install`; set `BASIS_SKIP_BROWSER_INSTALL=1` to skip the download. The
-snapshot suite also needs the browser's system libraries on a bare Linux runner:
-
-```bash
-bun ./node_modules/playwright/cli.js install --with-deps chromium
-```
+Basis's trusted install hook provisions the complete browser runtime during
+`bun install`: the pinned Chromium binary and the operating-system dependencies
+it needs to launch (Playwright's `install --with-deps chromium`). No separate
+Playwright command, host bootstrap, or CI-only setup is required. Set
+`BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook then reports
+the skip. If provisioning fails, `bun install` fails loudly, because a successful
+Basis install is expected to leave browser-backed tests ready to run.
 
 `toMatchScreenshot` never modifies or deletes a committed baseline unless the run
 explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A capture or

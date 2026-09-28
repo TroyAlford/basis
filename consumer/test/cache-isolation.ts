@@ -27,7 +27,7 @@ const main = (): void => {
 
     const hostA = join(workspace, 'host-a')
     initApp(hostA, spec)
-    run(['bun', 'install', '--cache-dir', cache], hostA, env)
+    run(['bun', 'install', '--cache-dir', cache], hostA)
     assertPatchesActive(hostA)
 
     /*
@@ -49,7 +49,7 @@ const main = (): void => {
 
     const hostB = join(workspace, 'host-b')
     initApp(hostB, spec)
-    run(['bun', 'install', '--cache-dir', cache], hostB, env)
+    run(['bun', 'install', '--cache-dir', cache], hostB)
     assertPatchesActive(hostB)
     assertPatchesActive(hostA)
 
