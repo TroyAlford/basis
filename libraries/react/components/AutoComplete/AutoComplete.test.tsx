@@ -3,6 +3,7 @@ import * as React from 'react'
 import { render } from '../../testing/render'
 import { Simulate } from '../../testing/Simulate'
 import { waitFor } from '../../testing/waitFor'
+import { Keyboard } from '../../types/Keyboard'
 import { styles } from '../../utilities/style'
 import { AutoComplete } from './AutoComplete'
 
@@ -174,20 +175,47 @@ describe('AutoComplete', () => {
   })
 
   describe('combobox semantics', () => {
-    test('exposes a combobox input that controls a listbox of options', async () => {
-      const onSearch = mock(() => Promise.resolve(['alpha', 'beta']))
-      const { node } = await render(
+    /**
+     * Render an uncontrolled AutoComplete and drive it open through a search.
+     * @param results - The search results to return.
+     * @returns The rendered node, the focused input, and the select spy.
+     */
+    const renderOpen = async (results: string[]) => {
+      const onSearch = mock(() => Promise.resolve(results))
+      const onSelect = mock()
+      const view = await render(
         <AutoComplete
-          open
           getOptionLabel={option => String(option)}
           getOptionValue={option => String(option)}
           onSearch={onSearch}
+          onSelect={onSelect}
         />,
       )
+      // The render helper mounts detached; attach so focus/activeElement behave.
+      document.body.appendChild(view.root)
 
-      const input = node.querySelector('input') as HTMLInputElement
+      const input = view.node.querySelector('input') as HTMLInputElement
       await Simulate.change(input, 'a')
-      await waitFor(() => node.querySelectorAll('[role="option"]').length === 2, { timeout: 1_000 })
+      await waitFor(
+        () => view.node.querySelectorAll('[role="option"]').length === results.length,
+        { timeout: 1_000 },
+      )
+      input.focus()
+
+      return { ...view, input, onSearch, onSelect }
+    }
+
+    /**
+     * The rendered option elements.
+     * @param node - The component root node.
+     * @returns The option elements.
+     */
+    const optionElements = (node: HTMLElement): HTMLElement[] => (
+      Array.from(node.querySelectorAll<HTMLElement>('[role="option"]'))
+    )
+
+    test('exposes a combobox input that controls a listbox of options', async () => {
+      const { input, node } = await renderOpen(['alpha', 'beta'])
 
       expect(input.getAttribute('role')).toBe('combobox')
       expect(input.getAttribute('aria-expanded')).toBe('true')
@@ -197,10 +225,11 @@ describe('AutoComplete', () => {
       expect(listbox).not.toBeNull()
       expect(input.getAttribute('aria-controls')).toBe(listbox?.id)
 
-      const options = node.querySelectorAll('[role="option"]')
+      const options = optionElements(node)
       expect(options).toHaveLength(2)
       for (const option of options) {
         expect(option.getAttribute('aria-selected')).not.toBeNull()
+        expect(option.getAttribute('tabindex')).toBe('-1')
       }
     })
 
@@ -220,32 +249,46 @@ describe('AutoComplete', () => {
       expect(node.querySelector('[role="listbox"]')).toBeNull()
     })
 
-    test('tracks the active option with aria-activedescendant', async () => {
-      const onSearch = mock(() => Promise.resolve(['alpha', 'beta']))
-      const { node } = await render(
-        <AutoComplete
-          open
-          getOptionLabel={option => String(option)}
-          getOptionValue={option => String(option)}
-          onSearch={onSearch}
-        />,
-      )
+    test('moves aria-activedescendant while DOM focus stays on the combobox', async () => {
+      const { input, node } = await renderOpen(['alpha', 'beta'])
+      const options = optionElements(node)
 
-      const input = node.querySelector('input') as HTMLInputElement
-      await Simulate.change(input, 'a')
-      await waitFor(() => node.querySelectorAll('[role="option"]').length === 2, { timeout: 1_000 })
-
+      expect(document.activeElement).toBe(input)
       expect(input.getAttribute('aria-activedescendant')).toBeNull()
 
-      input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowDown' }))
-      await waitFor(
-        () => input.getAttribute('aria-activedescendant') !== null,
-        { timeout: 1_000 },
-      )
+      await Simulate.pressKey(input, Keyboard.ArrowDown)
+      await waitFor(() => input.getAttribute('aria-activedescendant') === options[0]?.id)
+      expect(document.activeElement).toBe(input)
+      expect(options[0]?.getAttribute('aria-selected')).toBe('true')
 
-      const [first] = Array.from(node.querySelectorAll('[role="option"]'))
-      expect(input.getAttribute('aria-activedescendant')).toBe(first?.id)
-      expect(first?.getAttribute('aria-selected')).toBe('true')
+      await Simulate.pressKey(input, Keyboard.ArrowDown)
+      await waitFor(() => input.getAttribute('aria-activedescendant') === options[1]?.id)
+      expect(document.activeElement).toBe(input)
+
+      await Simulate.pressKey(input, Keyboard.ArrowUp)
+      await waitFor(() => input.getAttribute('aria-activedescendant') === options[0]?.id)
+      expect(document.activeElement).toBe(input)
+    })
+
+    test('activates the active option with Enter and keeps focus on the combobox', async () => {
+      const { input, node, onSelect } = await renderOpen(['alpha', 'beta'])
+
+      await Simulate.pressKey(input, Keyboard.ArrowDown)
+      await Simulate.pressKey(input, Keyboard.Enter)
+      await waitFor(() => onSelect.mock.calls.length > 0)
+
+      expect(onSelect).toHaveBeenCalledWith('alpha', 'alpha')
+      expect(document.activeElement).toBe(input)
+      expect(node.querySelector('[role="listbox"]')).toBeNull()
+    })
+
+    test('closes on Escape and keeps focus on the combobox', async () => {
+      const { input, node } = await renderOpen(['alpha'])
+
+      await Simulate.pressKey(input, Keyboard.Escape)
+      await waitFor(() => node.querySelector('[role="listbox"]') === null)
+
+      expect(document.activeElement).toBe(input)
     })
   })
 })

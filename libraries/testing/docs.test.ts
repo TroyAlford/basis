@@ -158,7 +158,16 @@ describe('testing/docs', () => {
       expect(background).toBe('rgb(0, 0, 0)')
       await expect(menu).toMatchScreenshot('open dropdown dark', { maxDiffPixelRatio: 0.02 })
 
-      // ArrowDown tracks the active option on the combobox input.
+      /*
+       * Active-descendant focus model: options leave the Tab sequence and DOM
+       * focus stays on the combobox while ArrowDown/ArrowUp move the active
+       * option.
+       */
+      const optionTabIndexes = await menu.locator('[role="option"]').evaluateAll(
+        elements => elements.map(element => element.getAttribute('tabindex')),
+      )
+      expect(optionTabIndexes.every(value => value === '-1')).toBe(true)
+
       await input.press('ArrowDown')
       await page.waitForFunction(() => (
         document.querySelector('.auto-complete input')?.getAttribute('aria-activedescendant') !== null
@@ -168,6 +177,27 @@ describe('testing/docs', () => {
         elements => elements.map(element => element.id),
       )
       expect(optionIds).toContain(activeId)
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+
+      await input.press('ArrowDown')
+      expect(await input.getAttribute('aria-activedescendant')).not.toBe(activeId)
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+
+      await input.press('ArrowUp')
+      expect(await input.getAttribute('aria-activedescendant')).toBe(activeId)
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+
+      // Escape closes the listbox and keeps focus on the combobox.
+      await input.press('Escape')
+      await page.waitForFunction(() => document.querySelector('.auto-complete [role="listbox"]') === null)
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+
+      // Enter activates the active option and keeps focus on the combobox.
+      await input.click()
+      await input.press('ArrowDown')
+      await input.press('Enter')
+      await page.waitForFunction(() => document.querySelector('.auto-complete [role="listbox"]') === null)
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
     })
   }, 60_000)
 })

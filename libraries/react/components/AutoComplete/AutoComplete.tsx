@@ -205,11 +205,16 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
     match(event.key)
       .when(Keyboard.ArrowDown).then(() => {
         event.preventDefault()
-        this.focusFirstMenuItem()
+        this.moveActiveOption(1)
       })
       .when(Keyboard.ArrowUp).then(() => {
         event.preventDefault()
-        this.focusLastMenuItem()
+        this.moveActiveOption(-1)
+      })
+      .when(Keyboard.Enter).then(() => {
+        if (this.state.activeIndex < 0) return
+        event.preventDefault()
+        this.activateActiveOption()
       })
       .when(Keyboard.Escape).then(() => {
         event.preventDefault()
@@ -220,29 +225,33 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
   protected handleMenuKeyDown = (event: React.KeyboardEvent<HTMLElement>): boolean => (
     match(event.key)
       .when(Keyboard.Escape).then(() => {
-        const input = this.input.current?.input.current
-        input?.focus()
-        input?.select()
+        event.preventDefault()
+        this.handleClose()
         return true
       })
       .else(false)
   )
 
-  get menuItems(): HTMLLIElement[] {
-    const menuItems = this.rootNode.querySelectorAll<HTMLLIElement>('.menu-item.component')
-    return Array.from<HTMLLIElement>(menuItems) ?? []
+  /**
+   * Move the active option, keeping DOM focus on the combobox input.
+   * @param delta - `1` for the next option, `-1` for the previous.
+   */
+  private moveActiveOption = (delta: number): void => {
+    const count = this.state.options.length
+    if (count === 0) return
+
+    const current = this.state.activeIndex
+    const next = current < 0
+      ? (delta > 0 ? 0 : count - 1)
+      : (current + delta + count) % count
+
+    this.setActiveIndex(next)
   }
 
-  private focusFirstMenuItem = (): void => {
-    const menuItems = this.menuItems
-    this.setActiveIndex(0)
-    menuItems[0]?.focus()
-  }
-
-  private focusLastMenuItem = (): void => {
-    const menuItems = this.menuItems
-    this.setActiveIndex(menuItems.length - 1)
-    menuItems[menuItems.length - 1]?.focus()
+  /** Activate the currently active option, if any. */
+  private activateActiveOption = (): void => {
+    const option = this.state.options[this.state.activeIndex]
+    if (option !== undefined) this.handleSelect(option)
   }
 
   /**
@@ -297,6 +306,7 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
           id={this.optionId(index)}
           role="option"
           selected={index === this.state.activeIndex}
+          tabIndex={-1}
           onActivate={() => this.handleSelect(option)}
           onFocus={() => this.setActiveIndex(index)}
         >

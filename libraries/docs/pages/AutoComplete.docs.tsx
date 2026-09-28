@@ -324,9 +324,10 @@ export class AutoCompleteDocs extends Documentation<State> {
             <code>role="combobox"</code> with <code>aria-expanded</code>,{' '}
             <code>aria-controls</code> pointing at the dropdown, and{' '}
             <code>aria-autocomplete="list"</code>. The dropdown is a{' '}
-            <code>role="listbox"</code> whose children are <code>role="option"</code> items, and the
-            input's <code>aria-activedescendant</code> tracks the active option during keyboard
-            navigation.
+            <code>role="listbox"</code> whose children are <code>role="option"</code> items. DOM
+            focus stays on the input while ArrowUp/ArrowDown move the active option, which the
+            input's <code>aria-activedescendant</code> tracks; options are excluded from the Tab
+            sequence.
           </p>
         </section>
         <section>

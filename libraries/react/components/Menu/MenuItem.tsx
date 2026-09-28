@@ -16,6 +16,8 @@ interface ItemProps<P = unknown> {
   role?: string,
   /** Whether the item is selected (meaningful for `role="option"`). */
   selected?: boolean,
+  /** Tab index for the item. Defaults to `0` when enabled (use `-1` to keep it out of the Tab sequence). */
+  tabIndex?: number,
 }
 
 export class MenuItem<P = unknown> extends Component<ItemProps<P> & P> {
@@ -27,7 +29,7 @@ export class MenuItem<P = unknown> extends Component<ItemProps<P> & P> {
   }
 
   get attributes() {
-    const { disabled, id, onFocus, role, selected } = this.props
+    const { disabled, id, onFocus, role, selected, tabIndex } = this.props
     return {
       ...super.attributes,
       'aria-disabled': disabled,
@@ -38,7 +40,7 @@ export class MenuItem<P = unknown> extends Component<ItemProps<P> & P> {
       'onFocus': onFocus,
       'onKeyDown': this.handleActivate,
       'role': role ?? 'menuitem',
-      'tabIndex': disabled ? -1 : 0,
+      'tabIndex': disabled ? -1 : (tabIndex ?? 0),
     }
   }
   get tag(): keyof React.JSX.IntrinsicElements { return 'li' }
