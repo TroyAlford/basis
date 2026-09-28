@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import type { Locator, Page } from 'playwright'
 import { PNG } from 'pngjs'
 import type * as React from 'react'
 import { withPage } from '../browser'
@@ -15,6 +16,18 @@ export interface MatcherResult {
   message: () => string,
   /** Whether the assertion passed. */
   pass: boolean,
+}
+
+/** Anything the matcher can capture: a React element or a Playwright target. */
+export type ScreenshotSubject = React.ReactElement | Page | Locator
+
+/**
+ * Whether a value is a Playwright screenshot target (a `Page` or `Locator`).
+ * @param value - The candidate subject.
+ * @returns True when the value exposes Playwright's `screenshot`.
+ */
+function isScreenshotTarget(value: ScreenshotSubject): value is Page | Locator {
+  return typeof (value as { screenshot?: unknown }).screenshot === 'function'
 }
 
 /** Paths a snapshot and its failure artifacts resolve to. */
@@ -106,30 +119,22 @@ function snapshotKey(file: string, hint?: string): string {
 }
 
 /**
- * Assert that a rendered React element matches a committed PNG snapshot.
+ * Capture a subject to a PNG buffer.
  *
- * Mirrors `toMatchSnapshot`: when no snapshot exists (or `--update-snapshots` /
- * `UPDATE_SNAPSHOTS=1` is set) the capture is written and the assertion passes;
- * otherwise the capture is compared and a mismatch fails, writing
- * `*.actual.png` / `*.diff.png` artifacts beside the snapshot.
- * @param received - The React element to render and capture.
- * @param hint - Optional hint; the snapshot is keyed by test name and hint.
- * @param options - Comparison options.
- * @returns The matcher result.
+ * A Playwright page or locator is screenshotted directly (a locator is cropped
+ * to its element); a React element is rendered to a standalone document and
+ * cropped to its content.
+ * @param subject - What to capture.
+ * @returns The PNG bytes.
  */
-export async function toMatchScreenshot(
-  received: React.ReactElement,
-  hint?: string,
-  options: ScreenshotOptions = {},
-): Promise<MatcherResult> {
-  if (!received || typeof received !== 'object' || !('type' in received)) {
-    return { message: () => 'toMatchScreenshot: expected a React element', pass: false }
+async function capture(subject: ScreenshotSubject): Promise<Buffer> {
+  if (isScreenshotTarget(subject)) {
+    const shot = await subject.screenshot({ animations: 'disabled', caret: 'hide' })
+    return Buffer.isBuffer(shot) ? shot : Buffer.from(shot)
   }
 
-  const file = callerFile()
-  const key = snapshotKey(file, hint)
-  const html = renderHtml(received)
-  const buffer = await withPage(async page => {
+  const html = renderHtml(subject)
+  return await withPage(async page => {
     await page.setContent(html, { waitUntil: 'load' })
     const clip = await page.evaluate(() => {
       const rects = Array.from(document.body.children, element => element.getBoundingClientRect())
@@ -146,7 +151,39 @@ export async function toMatchScreenshot(
       ...(clip ? { clip } : { fullPage: true }),
     })
   })
-  const actual = PNG.sync.read(buffer)
+}
+
+/**
+ * Assert that a subject matches a committed PNG snapshot.
+ *
+ * Mirrors `toMatchSnapshot`: when no snapshot exists (or `--update-snapshots` /
+ * `UPDATE_SNAPSHOTS=1` is set) the capture is written and the assertion passes;
+ * otherwise the capture is compared and a mismatch fails, writing
+ * `*.actual.png` / `*.diff.png` artifacts beside the snapshot.
+ * @param received - The subject to capture: a React element, Playwright page, or locator.
+ * @param hint - Optional hint; the snapshot is keyed by test name and hint.
+ * @param options - Comparison options.
+ * @returns The matcher result.
+ */
+export async function toMatchScreenshot(
+  received: ScreenshotSubject,
+  hint?: string,
+  options: ScreenshotOptions = {},
+): Promise<MatcherResult> {
+  if (
+    !received
+    || typeof received !== 'object'
+    || (!('type' in received) && !isScreenshotTarget(received))
+  ) {
+    return {
+      message: () => 'toMatchScreenshot: expected a React element, Playwright page, or locator',
+      pass: false,
+    }
+  }
+
+  const file = callerFile()
+  const key = snapshotKey(file, hint)
+  const actual = PNG.sync.read(await capture(received))
   const { actual: actualPath, baseline, diff: diffPath } = snapshotPaths(file, key)
 
   if (!existsSync(baseline) || updating()) {

@@ -16,6 +16,8 @@ export class Application extends ApplicationBase {
           </nav>
         </header>
         <main>
+          {/* A deterministic, text-free target for application-level snapshots. */}
+          <div data-testid="swatch" style={{ background: '#137cbd', height: 32, width: 32 }} />
           {content}
         </main>
       </>

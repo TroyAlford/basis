@@ -50,11 +50,28 @@ const track = (name: string, body: unknown): unknown => {
   return function tracked(this: unknown, ...args: unknown[]): unknown {
     const previous = currentName
     currentName = fullName
-    try {
-      return (body as (...inner: unknown[]) => unknown).apply(this, args)
-    } finally {
+    const restore = () => {
       currentName = previous
     }
+
+    let result: unknown
+    try {
+      result = (body as (...inner: unknown[]) => unknown).apply(this, args)
+    } catch (error) {
+      restore()
+      throw error
+    }
+
+    /*
+     * An async body records its name until the returned promise settles; a
+     * synchronous `finally` would clear it before the awaited assertions run.
+     */
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      return (result as Promise<unknown>).finally(restore)
+    }
+
+    restore()
+    return result
   }
 }
 
