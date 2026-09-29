@@ -3,17 +3,17 @@ import { join } from 'node:path'
 import type { Locator, Page } from 'playwright'
 import { PNG } from 'pngjs'
 import type * as React from 'react'
-import { withCapturePage } from '../browser'
-import { callerFile } from '../caller'
-import { trackSnapshot } from '../cleanup'
-import { renderHtml } from '../document'
-import { formatSnapshotKey, slug } from '../naming'
-import type { ScreenshotOptions } from '../snapshots'
-import { comparePng, readPng, snapshotDirectory, writePng } from '../snapshots'
-import { currentTestName, nextSnapshotIndex } from '../test'
-import { updating } from '../update'
+import { withCapturePage } from './browser'
+import { callerFile } from './caller'
+import { trackSnapshot } from './cleanup'
+import { renderHtml } from './document'
+import { formatSnapshotKey, slug } from './naming'
+import type { ScreenshotOptions } from './snapshots'
+import { comparePng, readPng, snapshotDirectory, writePng } from './snapshots'
+import { currentTestName, nextSnapshotIndex } from './test'
+import { updating } from './update'
 
-/** Result returned by the {@link toMatchScreenshot} matcher. */
+/** Result returned by {@link runScreenshot} and {@link commitScreenshot}. */
 export interface MatcherResult {
   /** Human-readable success or failure message. */
   message: () => string,
@@ -89,7 +89,7 @@ function warnMissingTestName(): void {
   if (warnedMissingTestName) return
   warnedMissingTestName = true
   process.stderr.write(
-    '[basis/testing] toMatchScreenshot was used outside a test registered via ' +
+    '[basis/testing] matchScreenshot was used outside a test registered via ' +
       "basis/testing's test/describe; the snapshot key will omit the test name\n",
   )
 }
@@ -225,7 +225,7 @@ export function commitScreenshot(
 
   if (update || !existsSync(baseline)) {
     writePng(baseline, actual)
-    return { message: () => `toMatchScreenshot: wrote ${baseline}`, pass: true }
+    return { message: () => `matchScreenshot: wrote ${baseline}`, pass: true }
   }
 
   const comparison = comparePng(readPng(baseline), actual, options)
@@ -236,7 +236,7 @@ export function commitScreenshot(
      */
     rmSync(actualPath, { force: true })
     rmSync(diffPath, { force: true })
-    return { message: () => `toMatchScreenshot: matches ${baseline}`, pass: true }
+    return { message: () => `matchScreenshot: matches ${baseline}`, pass: true }
   }
 
   writePng(actualPath, actual)
@@ -244,7 +244,7 @@ export function commitScreenshot(
 
   return {
     message: () => [
-      `toMatchScreenshot: "${key}" differs from ${baseline}`,
+      `matchScreenshot: "${key}" differs from ${baseline}`,
       `${comparison.diffPixels}/${comparison.total} pixels ` +
         `(${(comparison.ratio * 100).toFixed(2)}%) differ`,
       `actual: ${actualPath}`,
@@ -291,7 +291,7 @@ export async function runScreenshot(
     || (!('type' in received) && !isScreenshotTarget(received))
   ) {
     return {
-      message: () => 'toMatchScreenshot: expected a React element, Playwright page, or locator',
+      message: () => 'matchScreenshot: expected a React element, Playwright page, or locator',
       pass: false,
     }
   }
@@ -309,23 +309,54 @@ export async function runScreenshot(
 }
 
 /**
- * Assert that a subject matches a committed PNG snapshot.
+ * Run the screenshot assertion with injectable seams.
+ *
+ * Internal: the public {@link matchScreenshot} is exactly three arguments, and
+ * the behavior tests inject their capture here. Not re-exported from
+ * `basis/testing`.
+ * @param subject - The subject to capture.
+ * @param hint - Optional hint; the snapshot is keyed by test name and hint.
+ * @param options - Comparison options.
+ * @param run - Injectable seams. Tests only.
+ * @returns Resolves on a match or a written baseline; throws otherwise.
+ */
+export async function runMatchScreenshot(
+  subject: ScreenshotSubject,
+  hint?: string,
+  options: ScreenshotOptions = {},
+  run: ScreenshotRun = {},
+): Promise<void> {
+  const result = await runScreenshot(subject, hint, options, run)
+  if (result.pass) return
+
+  const error = new Error(result.message())
+  error.name = 'AssertionError'
+  throw error
+}
+
+/**
+ * Assert that a subject matches its committed screenshot.
  *
  * Mirrors `toMatchSnapshot`: when no snapshot exists (or `--update-snapshots` /
- * `UPDATE_SNAPSHOTS=1` is set) the capture is written and the assertion passes;
- * otherwise the capture is compared and a mismatch fails, writing
+ * `UPDATE_SNAPSHOTS=1` is set) the capture is written and the call resolves;
+ * otherwise the capture is compared and a mismatch throws, writing
  * `*.actual.png` / `*.diff.png` artifacts beside the snapshot. An existing
  * baseline is never written unless updating, and a capture failure (for example
  * a missing browser) leaves every baseline untouched.
- * @param received - The subject to capture: a React element, Playwright page, or locator.
+ *
+ * This is an ordinary async function rather than an `expect.extend` matcher on
+ * purpose: Bun drives async matchers synchronously on its event loop, which
+ * makes the Playwright calls inside them dramatically slower than the identical
+ * calls awaited normally.
+ * @param subject - The subject to capture: a React element, Playwright page, or locator.
  * @param hint - Optional hint; the snapshot is keyed by test name and hint.
  * @param options - Comparison options.
- * @returns The matcher result.
+ * @returns Resolves on a match or a written baseline; throws otherwise.
  */
-export async function toMatchScreenshot(
-  received: ScreenshotSubject,
+export async function matchScreenshot(
+  subject: ScreenshotSubject,
   hint?: string,
   options: ScreenshotOptions = {},
-): Promise<MatcherResult> {
-  return runScreenshot(received, hint, options)
+): Promise<void> {
+  await runMatchScreenshot(subject, hint, options)
 }

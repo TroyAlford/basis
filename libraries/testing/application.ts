@@ -1,4 +1,5 @@
 import { get } from 'node:http'
+import { resolve as resolvePath } from 'node:path'
 import type { Page } from 'playwright'
 import type { Viewport } from './browser'
 import { withPage } from './browser'
@@ -200,9 +201,9 @@ const REGISTRY_PROPERTY = '__basisTestingApplications'
 
 /** The process-wide run-scoped application registry. */
 interface ApplicationRegistry {
-  /** Handles being booted or already running, keyed by working directory and entry. */
+  /** Handles being booted or already running, keyed by resolved working directory and entry. */
   handles: Map<string, Promise<ApplicationHandle>>,
-  /** Whether teardown has run; guards the idempotent stop. */
+  /** Whether teardown has run; guards the idempotent stop and post-stop boots. */
   stopped: boolean,
 }
 
@@ -228,14 +229,27 @@ function registry(): ApplicationRegistry {
  * shares one server, which the testing preload stops once when the run ends.
  * {@link startApplication} remains available when a test needs a dedicated
  * server of its own.
+ *
+ * The identity is the **resolved** `(cwd, entry)`, so `entry: './serve.ts'`,
+ * `cwd: '.', entry: 'serve.ts'`, and an absolute entry all address one app.
  * @param options - Startup options; `cwd` and `entry` identify the application.
  * @returns The shared application handle.
+ * @throws {Error} When called after the run-scoped applications have been
+ *   stopped, so a post-teardown caller can never create a server the preload
+ *   will not own.
  */
 export async function useApplication(
   options: StartApplicationOptions,
 ): Promise<ApplicationHandle> {
-  const { handles } = registry()
-  const key = `${options.cwd ?? process.cwd()}\u0000${options.entry}`
+  const { handles, stopped } = registry()
+  if (stopped) {
+    throw new Error(
+      'useApplication cannot boot after the run-scoped applications were stopped',
+    )
+  }
+
+  const cwd = resolvePath(options.cwd ?? process.cwd())
+  const key = `${cwd}\u0000${resolvePath(cwd, options.entry)}`
   const existing = handles.get(key)
   if (existing) return await existing
 
@@ -253,6 +267,12 @@ export async function useApplication(
 /**
  * Stop every run-scoped application. Idempotent, so a normal end-of-run
  * teardown and an interruption handler cannot double-stop.
+ *
+ * Internal lifecycle primitive: the testing preload owns teardown, and the
+ * lifecycle tests drive it directly. It is deliberately **not** re-exported from
+ * `basis/testing`, so the only documented consumer path is
+ * {@link useApplication}. Once stopped, {@link useApplication} rejects rather
+ * than boot a server the preload would never own.
  */
 export async function stopApplications(): Promise<void> {
   const { handles, stopped } = registry()

@@ -1,6 +1,5 @@
-import { expect } from 'bun:test'
 import type * as React from 'react'
-import { describe, test } from '../../testing'
+import { describe, matchScreenshot, test } from '../../testing'
 import * as Icons from '../icons'
 import { IconBase } from './IconBase/IconBase'
 
@@ -88,7 +87,7 @@ describe('icons', () => {
   for (const [name, Icon] of entries) {
     test(name, async () => {
       const Component = Icon as unknown as React.ComponentType<{ filled?: boolean }>
-      await expect(<IconMatrix Icon={Component} />).toMatchScreenshot('sizes', TOLERANCE)
+      await matchScreenshot(<IconMatrix Icon={Component} />, 'sizes', TOLERANCE)
     })
   }
 })

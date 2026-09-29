@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Page } from 'playwright'
 import { PNG } from 'pngjs'
-import { slug } from '../naming'
-import { snapshotDirectory } from '../snapshots'
-import { updating } from '../update'
-import { commitScreenshot, runScreenshot } from './toMatchScreenshot'
+import { commitScreenshot, runMatchScreenshot, runScreenshot } from './matchScreenshot'
+import { slug } from './naming'
+import { snapshotDirectory } from './snapshots'
+import { updating } from './update'
 
 const root = mkdtempSync(join(tmpdir(), 'basis-baseline-'))
 
@@ -131,5 +131,102 @@ describe('baseline protection', () => {
 
     if (previous === undefined) delete process.env.UPDATE_SNAPSHOTS
     else process.env.UPDATE_SNAPSHOTS = previous
+  })
+})
+
+/** A subject that passes the screenshot target check without a browser. */
+const SUBJECT = { screenshot: async () => Buffer.alloc(0) } as unknown as Page
+
+describe('matchScreenshot', () => {
+  test('writes a missing baseline and resolves', async () => {
+    const file = join(root, 'missing-baseline.test.ts')
+    const key = 'renders 1'
+    const { baseline } = paths(file, key)
+
+    await runMatchScreenshot(SUBJECT, undefined, {}, {
+      capture: async () => pixel([10, 20, 30, 255]),
+      file,
+      key,
+    })
+
+    expect(existsSync(baseline)).toBe(true)
+  })
+
+  test('resolves when the capture matches the committed baseline', async () => {
+    const file = join(root, 'matching.test.ts')
+    const key = 'renders 1'
+    const { actual, baseline, diff } = paths(file, key)
+    const bytes = pixel([1, 2, 3, 255])
+    writeBaseline(baseline, bytes)
+    writeFileSync(actual, bytes)
+    writeFileSync(diff, bytes)
+
+    await runMatchScreenshot(SUBJECT, undefined, {}, { capture: async () => bytes, file, key })
+
+    expect(existsSync(actual)).toBe(false)
+    expect(existsSync(diff)).toBe(false)
+  })
+
+  test('throws an AssertionError on mismatch and writes artifacts without mutating the baseline', async () => {
+    const file = join(root, 'mismatch.test.ts')
+    const key = 'renders 1'
+    const { actual, baseline, diff } = paths(file, key)
+    const original = pixel([255, 0, 0, 255])
+    writeBaseline(baseline, original)
+
+    const error = await runMatchScreenshot(SUBJECT, undefined, { maxDiffPixels: 0 }, {
+      capture: async () => pixel([0, 255, 0, 255]),
+      file,
+      key,
+    }).then(() => null, (thrown: unknown) => thrown as Error)
+
+    expect(error).toBeInstanceOf(Error)
+    expect(error?.name).toBe('AssertionError')
+    expect(Buffer.compare(readFileSync(baseline), original)).toBe(0)
+    expect(existsSync(actual)).toBe(true)
+    expect(existsSync(diff)).toBe(true)
+  })
+
+  test('rewrites the baseline in update mode', async () => {
+    const file = join(root, 'match-update.test.ts')
+    const key = 'renders 1'
+    const { baseline } = paths(file, key)
+    const original = pixel([255, 0, 0, 255])
+    const next = pixel([0, 0, 255, 255])
+    writeBaseline(baseline, original)
+
+    const previous = process.env.UPDATE_SNAPSHOTS
+    process.env.UPDATE_SNAPSHOTS = '1'
+    try {
+      await runMatchScreenshot(SUBJECT, undefined, {}, { capture: async () => next, file, key })
+    } finally {
+      if (previous === undefined) delete process.env.UPDATE_SNAPSHOTS
+      else process.env.UPDATE_SNAPSHOTS = previous
+    }
+
+    expect(Buffer.compare(readFileSync(baseline), next)).toBe(0)
+  })
+
+  test('rejects with the capture error and leaves the baseline untouched', async () => {
+    const file = join(root, 'capture-failure.test.ts')
+    const key = 'renders 1'
+    const { baseline } = paths(file, key)
+    const original = pixel([255, 0, 0, 255])
+    writeBaseline(baseline, original)
+
+    await expect(runMatchScreenshot(SUBJECT, undefined, {}, {
+      capture: async () => { throw new Error('browser unavailable') },
+      file,
+      key,
+    })).rejects.toThrow('browser unavailable')
+
+    expect(Buffer.compare(readFileSync(baseline), original)).toBe(0)
+  })
+
+  test('throws for an unsupported subject', async () => {
+    await expect(runMatchScreenshot(undefined as never, undefined, {}, {
+      file: join(root, 'invalid.test.ts'),
+      key: 'renders 1',
+    })).rejects.toThrow('expected a React element')
   })
 })

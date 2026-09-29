@@ -2,6 +2,7 @@ import { beforeAll, expect } from 'bun:test'
 import { join } from 'node:path'
 import type { ApplicationHandle, StartApplicationOptions } from './application'
 import { useApplication } from './application'
+import { matchScreenshot } from './matchScreenshot'
 import { describe, test } from './test'
 
 const root = join(import.meta.dir, '..', '..')
@@ -45,7 +46,7 @@ describe('testing/application', () => {
 
   test('captures a deterministic element from the page', async () => {
     await app.visit('/', async page => {
-      await expect(page.locator('[data-testid="swatch"]')).toMatchScreenshot()
+      await matchScreenshot(page.locator('[data-testid="swatch"]'))
     })
   }, 30_000)
 })
