@@ -3,7 +3,7 @@ import { callerFile } from './caller'
 
 /*
  * Bun does not expose the current test name to custom matchers (there is no
- * `expect.getState()`), so `toMatchScreenshot` cannot key snapshots the way
+ * `expect.getState()`), so `matchScreenshot` cannot key snapshots the way
  * `toMatchSnapshot` does. This module wraps `test`, `it`, and `describe` to
  * record the name while a body runs and to compose `describe` ancestors.
  *
@@ -24,7 +24,7 @@ const executed = new Map<string, number>()
 /**
  * Test files whose entire declared suite executed.
  *
- * `toMatchScreenshot`'s cleanup only prunes snapshots for these, so a file
+ * `matchScreenshot`'s cleanup only prunes snapshots for these, so a file
  * filtered with `-t` — or one containing a skipped test — is never mistaken for
  * a file whose snapshots are stale.
  * @returns The fully executed test file paths.
@@ -40,7 +40,7 @@ export function fullyRunFiles(): string[] {
 /**
  * The full name of the test currently executing.
  *
- * `toMatchScreenshot` uses this to mirror Bun's snapshot keys (`<test name> <n>`
+ * `matchScreenshot` uses this to mirror Bun's snapshot keys (`<test name> <n>`
  * or `<test name>: <hint> <n>`). It is `null` outside a test registered through
  * this module's wrapped `test`/`it`.
  * @returns The current test name, or null.

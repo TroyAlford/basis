@@ -1,4 +1,5 @@
 import { get } from 'node:http'
+import { resolve as resolvePath } from 'node:path'
 import type { Page } from 'playwright'
 import type { Viewport } from './browser'
 import { withPage } from './browser'
@@ -176,4 +177,109 @@ export async function startApplication(
   }
 
   return { stop, url, visit }
+}
+
+/*
+ * Run-scoped fixture.
+ *
+ * `startApplication` is the low-level primitive: every call boots a server.
+ * `useApplication` is the supported test entry point. It memoises one handle per
+ * (cwd, entry) for the whole Bun test process — the registry lives on
+ * `globalThis`, which survives Bun's per-file module registry — so the first
+ * caller boots and every later caller, concurrent or not, awaits the same
+ * promise. Teardown is registered once by the testing preload
+ * (`libraries/testing/bun.ts`), so no test file needs `afterAll` or `finally`.
+ *
+ * Isolation contract: the browser side stays deterministic (`visit` opens a
+ * fresh context with stubbed network and a per-visit `init`), but server-side
+ * state is shared across the run. A test that needs a clean server must boot its
+ * own through {@link startApplication}.
+ */
+
+/** The `globalThis` property that holds the process-wide application registry. */
+const REGISTRY_PROPERTY = '__basisTestingApplications'
+
+/** The process-wide run-scoped application registry. */
+interface ApplicationRegistry {
+  /** Handles being booted or already running, keyed by resolved working directory and entry. */
+  handles: Map<string, Promise<ApplicationHandle>>,
+  /** Whether teardown has run; guards the idempotent stop and post-stop boots. */
+  stopped: boolean,
+}
+
+/**
+ * The process-wide registry, created on first use.
+ * @returns The shared registry.
+ */
+function registry(): ApplicationRegistry {
+  const scope = globalThis as unknown as Record<string, unknown>
+  const existing = scope[REGISTRY_PROPERTY] as ApplicationRegistry | undefined
+  if (existing) return existing
+
+  const created: ApplicationRegistry = { handles: new Map(), stopped: false }
+  scope[REGISTRY_PROPERTY] = created
+  return created
+}
+
+/**
+ * Boot the application once for the whole test run, or return the handle the
+ * first caller booted.
+ *
+ * Use this in tests instead of {@link startApplication}: every file in the run
+ * shares one server, which the testing preload stops once when the run ends.
+ * {@link startApplication} remains available when a test needs a dedicated
+ * server of its own.
+ *
+ * The identity is the **resolved** `(cwd, entry)`, so `entry: './serve.ts'`,
+ * `cwd: '.', entry: 'serve.ts'`, and an absolute entry all address one app.
+ * @param options - Startup options; `cwd` and `entry` identify the application.
+ * @returns The shared application handle.
+ * @throws {Error} When called after the run-scoped applications have been
+ *   stopped, so a post-teardown caller can never create a server the preload
+ *   will not own.
+ */
+export async function useApplication(
+  options: StartApplicationOptions,
+): Promise<ApplicationHandle> {
+  const { handles, stopped } = registry()
+  if (stopped) {
+    throw new Error(
+      'useApplication cannot boot after the run-scoped applications were stopped',
+    )
+  }
+
+  const cwd = resolvePath(options.cwd ?? process.cwd())
+  const key = `${cwd}\u0000${resolvePath(cwd, options.entry)}`
+  const existing = handles.get(key)
+  if (existing) return await existing
+
+  const booting = startApplication(options)
+  handles.set(key, booting)
+
+  try {
+    return await booting
+  } catch (error) {
+    handles.delete(key)
+    throw error
+  }
+}
+
+/**
+ * Stop every run-scoped application. Idempotent, so a normal end-of-run
+ * teardown and an interruption handler cannot double-stop.
+ *
+ * Internal lifecycle primitive: the testing preload owns teardown, and the
+ * lifecycle tests drive it directly. It is deliberately **not** re-exported from
+ * `basis/testing`, so the only documented consumer path is
+ * {@link useApplication}. Once stopped, {@link useApplication} rejects rather
+ * than boot a server the preload would never own.
+ */
+export async function stopApplications(): Promise<void> {
+  const { handles, stopped } = registry()
+  if (stopped) return
+  registry().stopped = true
+
+  const pending = [...handles.values()]
+  handles.clear()
+  await Promise.allSettled(pending.map(handle => handle.then(app => app.stop(), () => undefined)))
 }

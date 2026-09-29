@@ -170,17 +170,32 @@ resolver plugin, or `node_modules/basis/libraries/*` imports.
 
 `basis/testing` is the single test surface: the shared `render`, `Simulate`, and
 `waitFor` helpers, the shared `test`/`it`/`describe` (which track the current
-test name for snapshot keys), the shared matchers, and browser-backed visual
-snapshots. Add the preload to `bunfig.toml`:
+test name for snapshot keys), the `matchScreenshot` visual helper, and
+browser-backed snapshots. Add the preload to `bunfig.toml`:
 
 ```toml
 [test]
 preload = ["basis/testing/bun"]
 ```
 
-It registers happy-dom, the shared matchers, and the browser lifecycle, so a
-plain `bun test` runs the complete suite — DOM tests and browser-backed snapshot
-tests alike.
+It registers happy-dom and the browser lifecycle, so a plain `bun test` runs the
+complete suite — DOM tests and browser-backed snapshot tests alike.
+
+`matchScreenshot(subject, hint?, options?)` is an ordinary async function, not a
+custom matcher: Bun drives async matchers synchronously, which makes the
+Playwright calls inside them far slower than the same calls awaited normally.
+
+```tsx
+import { Button } from 'basis/react'
+import { matchScreenshot, test } from 'basis/testing'
+
+test('renders a button', async () => {
+  await matchScreenshot(<Button>Save</Button>)
+})
+```
+
+It accepts a React element, a Playwright `Page`, or a `Locator`, and throws with
+the diff details on a mismatch.
 
 Basis's trusted install hook provisions the complete browser runtime during
 `bun install`: the pinned Chromium binary and the operating-system dependencies
@@ -190,9 +205,36 @@ Playwright command, host bootstrap, or CI-only setup is required. Set
 the skip. If provisioning fails, `bun install` fails loudly, because a successful
 Basis install is expected to leave browser-backed tests ready to run.
 
-`toMatchScreenshot` never modifies or deletes a committed baseline unless the run
+`matchScreenshot` never modifies or deletes a committed baseline unless the run
 explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A capture or
 comparison failure leaves baselines untouched.
+
+### Application tests
+
+Boot the app **once for the whole run** with `useApplication`. The preload stops
+it when the run ends, so no test file needs its own `beforeAll`/`afterAll`:
+
+```tsx
+import { matchScreenshot, test, useApplication } from 'basis/testing'
+
+test('renders the deck builder', async () => {
+  const app = await useApplication({ entry: './src/serve.ts' })
+
+  await app.visit('/deck', async page => {
+    await matchScreenshot(page.locator('.deck-builder'))
+  })
+})
+```
+
+Every file shares one server per `(cwd, entry)`; the first caller boots it and
+concurrent callers await the same boot. `visit` still gives a deterministic page
+(fresh browser context, stubbed network, per-visit `init`), but **server-side
+state is shared across the run** — a test that needs a clean server boots its own
+with the low-level `startApplication`.
+
+`useApplication` is lazy by default. To boot before the suite and fail fast on a
+broken server, add a second preload that calls it (`await useApplication(...)`)
+through the same registry — see the testing README for the eager pattern.
 
 ## Server runtime
 

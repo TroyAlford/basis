@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, expect } from 'bun:test'
+import { beforeAll, expect } from 'bun:test'
 import { join } from 'node:path'
 import type { ApplicationHandle } from './application'
-import { startApplication } from './application'
+import { useApplication } from './application'
+import { matchScreenshot } from './matchScreenshot'
 import { describe, test } from './test'
 
 const root = join(import.meta.dir, '..', '..')
@@ -24,21 +25,17 @@ describe('testing/docs', () => {
   let app: ApplicationHandle
 
   beforeAll(async () => {
-    app = await startApplication({
+    app = await useApplication({
       cwd: root,
       entry: './testing/docs/index.ts',
       timeoutMs: 120_000,
     })
   }, 120_000)
 
-  afterAll(async () => {
-    await app.stop()
-  })
-
   test('captures the Button examples', async () => {
     await app.visit('/components/button', { stubs: STUBS }, async page => {
       await page.waitForSelector('.button-examples')
-      await expect(page.locator('.button-examples').first()).toMatchScreenshot('button examples', {
+      await matchScreenshot(page.locator('.button-examples').first(), 'button examples', {
         maxDiffPixelRatio: 0.01,
       })
     })
@@ -47,7 +44,7 @@ describe('testing/docs', () => {
   test('captures the icon grid', async () => {
     await app.visit('/icons', { stubs: STUBS }, async page => {
       await page.waitForSelector('.icon-grid')
-      await expect(page.locator('.icon-grid')).toMatchScreenshot('icon grid', {
+      await matchScreenshot(page.locator('.icon-grid'), 'icon grid', {
         maxDiffPixelRatio: 0.01,
       })
     })
@@ -76,7 +73,7 @@ describe('testing/docs', () => {
        * The tall page includes prose whose line wrapping shifts a little across
        * machines (the docs' web font is blocked), so allow a wider budget.
        */
-      await expect(page).toMatchScreenshot('full page', {
+      await matchScreenshot(page, 'full page', {
         maxDiffPixelRatio: 0.02,
       })
     })
@@ -138,7 +135,7 @@ describe('testing/docs', () => {
        * anti-aliasing differs across machines, so allow the same budget the
        * other docs snapshots use.
        */
-      await expect(menu).toMatchScreenshot('open dropdown', { maxDiffPixelRatio: 0.02 })
+      await matchScreenshot(menu, 'open dropdown', { maxDiffPixelRatio: 0.02 })
 
       /*
        * The surface follows a named theme applied to a descendant. The theme is
@@ -156,7 +153,7 @@ describe('testing/docs', () => {
       await page.evaluate(() => document.querySelector('.auto-complete')?.setAttribute('data-theme', 'verify'))
       const background = await menu.evaluate(el => getComputedStyle(el).backgroundColor)
       expect(background).toBe('rgb(0, 0, 0)')
-      await expect(menu).toMatchScreenshot('open dropdown dark', { maxDiffPixelRatio: 0.02 })
+      await matchScreenshot(menu, 'open dropdown dark', { maxDiffPixelRatio: 0.02 })
 
       /*
        * Active-descendant focus model: options leave the Tab sequence and DOM

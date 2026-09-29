@@ -1,6 +1,9 @@
-import type { Browser, BrowserContextOptions, Page } from 'playwright'
+import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright'
 
 let browser: Browser | null = null
+let captureContext: BrowserContext | null = null
+let capturePage: Page | null = null
+let captureQueue: Promise<unknown> = Promise.resolve()
 
 /**
  * Lazily launch (and cache) the shared Chromium instance.
@@ -32,11 +35,50 @@ export async function getBrowser(): Promise<Browser> {
 }
 
 /**
- * Close the shared browser, if one is running.
+ * Close the shared browser and the capture page, if running.
  */
 export async function closeBrowser(): Promise<void> {
+  await captureContext?.close()
+  captureContext = null
+  capturePage = null
+  captureQueue = Promise.resolve()
   await browser?.close()
   browser = null
+}
+
+/**
+ * The one deterministically configured page reused for React-element captures.
+ * @returns The shared capture page.
+ */
+async function getCapturePage(): Promise<Page> {
+  if (capturePage && !capturePage.isClosed()) return capturePage
+
+  const instance = await getBrowser()
+  captureContext ??= await instance.newContext({
+    colorScheme: 'light',
+    deviceScaleFactor: 1,
+    reducedMotion: 'reduce',
+    viewport: { height: 800, width: 1280 },
+  })
+  capturePage = await captureContext.newPage()
+  return capturePage
+}
+
+/**
+ * Run a React-element capture on the shared page, one at a time.
+ *
+ * Element captures are standalone documents, so re-creating a context and page
+ * per capture is pure overhead — the dominant cost of a large icon matrix.
+ * Reusing one page and replacing its document is deterministic, and the queue
+ * keeps concurrent test files from interleaving on it. Application `visit`s
+ * still open a fresh context, so server/browser state cannot leak between them.
+ * @param fn - Callback receiving the shared page.
+ * @returns The callback's result.
+ */
+export async function withCapturePage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
+  const run = captureQueue.then(async () => await fn(await getCapturePage()))
+  captureQueue = run.catch(() => undefined)
+  return await run
 }
 
 /** A viewport size. */
