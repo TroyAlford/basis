@@ -177,3 +177,89 @@ export async function startApplication(
 
   return { stop, url, visit }
 }
+
+/*
+ * Run-scoped fixture.
+ *
+ * `startApplication` is the low-level primitive: every call boots a server.
+ * `useApplication` is the supported test entry point. It memoises one handle per
+ * (cwd, entry) for the whole Bun test process — the registry lives on
+ * `globalThis`, which survives Bun's per-file module registry — so the first
+ * caller boots and every later caller, concurrent or not, awaits the same
+ * promise. Teardown is registered once by the testing preload
+ * (`libraries/testing/bun.ts`), so no test file needs `afterAll` or `finally`.
+ *
+ * Isolation contract: the browser side stays deterministic (`visit` opens a
+ * fresh context with stubbed network and a per-visit `init`), but server-side
+ * state is shared across the run. A test that needs a clean server must boot its
+ * own through {@link startApplication}.
+ */
+
+/** The `globalThis` property that holds the process-wide application registry. */
+const REGISTRY_PROPERTY = '__basisTestingApplications'
+
+/** The process-wide run-scoped application registry. */
+interface ApplicationRegistry {
+  /** Handles being booted or already running, keyed by working directory and entry. */
+  handles: Map<string, Promise<ApplicationHandle>>,
+  /** Whether teardown has run; guards the idempotent stop. */
+  stopped: boolean,
+}
+
+/**
+ * The process-wide registry, created on first use.
+ * @returns The shared registry.
+ */
+function registry(): ApplicationRegistry {
+  const scope = globalThis as unknown as Record<string, unknown>
+  const existing = scope[REGISTRY_PROPERTY] as ApplicationRegistry | undefined
+  if (existing) return existing
+
+  const created: ApplicationRegistry = { handles: new Map(), stopped: false }
+  scope[REGISTRY_PROPERTY] = created
+  return created
+}
+
+/**
+ * Boot the application once for the whole test run, or return the handle the
+ * first caller booted.
+ *
+ * Use this in tests instead of {@link startApplication}: every file in the run
+ * shares one server, which the testing preload stops once when the run ends.
+ * {@link startApplication} remains available when a test needs a dedicated
+ * server of its own.
+ * @param options - Startup options; `cwd` and `entry` identify the application.
+ * @returns The shared application handle.
+ */
+export async function useApplication(
+  options: StartApplicationOptions,
+): Promise<ApplicationHandle> {
+  const { handles } = registry()
+  const key = `${options.cwd ?? process.cwd()}\u0000${options.entry}`
+  const existing = handles.get(key)
+  if (existing) return await existing
+
+  const booting = startApplication(options)
+  handles.set(key, booting)
+
+  try {
+    return await booting
+  } catch (error) {
+    handles.delete(key)
+    throw error
+  }
+}
+
+/**
+ * Stop every run-scoped application. Idempotent, so a normal end-of-run
+ * teardown and an interruption handler cannot double-stop.
+ */
+export async function stopApplications(): Promise<void> {
+  const { handles, stopped } = registry()
+  if (stopped) return
+  registry().stopped = true
+
+  const pending = [...handles.values()]
+  handles.clear()
+  await Promise.allSettled(pending.map(handle => handle.then(app => app.stop(), () => undefined)))
+}

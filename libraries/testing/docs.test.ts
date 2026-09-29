@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, expect } from 'bun:test'
+import { beforeAll, expect } from 'bun:test'
 import { join } from 'node:path'
 import type { ApplicationHandle } from './application'
-import { startApplication } from './application'
+import { useApplication } from './application'
 import { describe, test } from './test'
 
 const root = join(import.meta.dir, '..', '..')
@@ -24,16 +24,12 @@ describe('testing/docs', () => {
   let app: ApplicationHandle
 
   beforeAll(async () => {
-    app = await startApplication({
+    app = await useApplication({
       cwd: root,
       entry: './testing/docs/index.ts',
       timeoutMs: 120_000,
     })
   }, 120_000)
-
-  afterAll(async () => {
-    await app.stop()
-  })
 
   test('captures the Button examples', async () => {
     await app.visit('/components/button', { stubs: STUBS }, async page => {

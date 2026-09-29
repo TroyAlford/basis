@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { Locator, Page } from 'playwright'
 import { PNG } from 'pngjs'
 import type * as React from 'react'
-import { withPage } from '../browser'
+import { withCapturePage } from '../browser'
 import { callerFile } from '../caller'
 import { trackSnapshot } from '../cleanup'
 import { renderHtml } from '../document'
@@ -172,10 +172,15 @@ async function capture(subject: ScreenshotSubject, options: ScreenshotOptions): 
   }
 
   const html = renderHtml(subject)
-  return await withPage(async page => {
+  return await withCapturePage(async page => {
     await page.setContent(html, { waitUntil: 'load' })
-    await waitForFonts(page)
-    const clip = await page.evaluate(() => {
+    /*
+     * Await fonts and measure in one round-trip. Playwright calls made from
+     * inside a Bun matcher are comparatively expensive, so the element capture
+     * keeps them to the minimum: one evaluate, then one screenshot.
+     */
+    const clip = await page.evaluate(async () => {
+      await document.fonts.ready
       const rects = Array.from(document.body.children, element => element.getBoundingClientRect())
       if (rects.length === 0) return null
       const left = Math.floor(Math.min(...rects.map(rect => rect.left)))

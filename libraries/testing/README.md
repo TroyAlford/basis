@@ -43,8 +43,15 @@ Snapshot tests are ordinary `*.test.*` files, so `bun test` discovers them.
 `toMatchScreenshot` accepts a React element, a Playwright `Page`, or a
 `Locator`. A React element is rendered to HTML, the component styles and the
 default theme are inlined, and the capture is cropped to the rendered content;
-a page is captured at its viewport and a locator at its element box. Either way
-it mirrors `toMatchSnapshot`:
+a page is captured at its viewport and a locator at its element box.
+
+Element captures share one deterministically configured page — each capture
+replaces the document — and each capture keeps its Playwright round-trips to the
+minimum (measure and wait for fonts in one `evaluate`, then screenshot), because
+Playwright calls made from inside a Bun matcher are comparatively expensive.
+Application `visit`s still open a fresh browser context per visit, so app and
+element captures stay isolated where it matters without paying for a new context
+per screenshot. Either way it mirrors `toMatchSnapshot`:
 
 - no snapshot exists → the capture is written and the assertion passes;
 - a snapshot exists → a new capture is compared; a mismatch fails and writes
@@ -81,28 +88,39 @@ exactly like `toMatchSnapshot('hint')`.
 
 ## Application tests
 
-Boot the real server and drive it in Chromium:
+Boot the real server **once for the run** and drive it in Chromium:
 
 ```tsx
 import { expect } from 'bun:test'
-import { startApplication, test } from 'basis/testing'
+import { test, useApplication } from 'basis/testing'
 
 test('renders the application', async () => {
-  const app = await startApplication({ entry: './src/serve.ts' })
-  try {
-    await app.visit('/deck', async page => {
-      await expect(page.locator('.deck-builder')).toMatchScreenshot()
-    })
-  } finally {
-    await app.stop()
-  }
+  const app = await useApplication({ entry: './src/serve.ts' })
+
+  await app.visit('/deck', async page => {
+    await expect(page.locator('.deck-builder')).toMatchScreenshot()
+  })
 })
 ```
 
-`startApplication({ entry })` spawns the entry on a free loopback port and waits
-for readiness on `/health`; `stop()` is idempotent. `app.visit(path, options?, fn)`
-opens a deterministic page, applies the network policy, navigates to `url + path`,
-runs `fn`, then disposes the page.
+`useApplication({ entry })` spawns the entry on a free loopback port and waits
+for readiness on `/health`. It is **run-scoped**: memoised per `(cwd, entry)` on
+`globalThis`, so every test file in the run shares one server (concurrent callers
+await the same boot instead of racing), and the testing preload stops it exactly
+once when the run ends — success, failure, thrown error, or `SIGINT`/`SIGTERM`.
+No test file needs `afterAll` or `finally`, and the server boots once per run
+rather than once per file.
+
+`startApplication({ entry })` is the low-level primitive behind it, with the same
+shape but a per-call lifecycle (`stop()` is idempotent). Use it only when a test
+needs a dedicated server of its own.
+
+### Isolation
+
+The browser side stays deterministic: `visit(path, options?, fn)` opens a fresh
+context with the network policy applied, navigates to `url + path`, runs `fn`,
+then disposes the page. **Server-side state is shared across the run**, so a test
+that needs a clean server must boot its own with `startApplication`.
 
 Network is deterministic by default — non-loopback requests are blocked, so a
 snapshot cannot silently depend on a CDN:

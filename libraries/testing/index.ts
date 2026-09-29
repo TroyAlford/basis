@@ -1,6 +1,6 @@
 import type { ScreenshotOptions } from './snapshots'
 
-export { startApplication } from './application'
+export { startApplication, stopApplications, useApplication } from './application'
 export type {
   ApplicationHandle,
   StartApplicationOptions,

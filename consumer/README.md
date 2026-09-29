@@ -194,6 +194,30 @@ Basis install is expected to leave browser-backed tests ready to run.
 explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A capture or
 comparison failure leaves baselines untouched.
 
+### Application tests
+
+Boot the app **once for the whole run** with `useApplication`. The preload stops
+it when the run ends, so no test file needs its own `beforeAll`/`afterAll`:
+
+```tsx
+import { expect } from 'bun:test'
+import { test, useApplication } from 'basis/testing'
+
+test('renders the deck builder', async () => {
+  const app = await useApplication({ entry: './src/serve.ts' })
+
+  await app.visit('/deck', async page => {
+    await expect(page.locator('.deck-builder')).toMatchScreenshot()
+  })
+})
+```
+
+Every file shares one server per `(cwd, entry)`; the first caller boots it and
+concurrent callers await the same boot. `visit` still gives a deterministic page
+(fresh browser context, stubbed network, per-visit `init`), but **server-side
+state is shared across the run** — a test that needs a clean server boots its own
+with the low-level `startApplication`.
+
 ## Server runtime
 
 `basis/server` exposes the Bun application server:

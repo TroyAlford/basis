@@ -127,11 +127,10 @@ export function priceFor(order: Order): Money {
 ```ts
 // pricing.e2e.test.ts
 test('member discount', async () => {
-  const app = await startApplication()
+  const app = await useApplication()
   await app.database.seedMemberWithTotal('10000')
   const response = await app.request('/orders/1/receipt')
   expect(await response.text()).toContain('95.00')
-  await app.stop()
 })
 ```
 
