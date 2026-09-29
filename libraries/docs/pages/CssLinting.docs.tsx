@@ -68,8 +68,10 @@ export class CssLintingDocs extends Documentation<Record<string, never>> {
               declarations in alphabetical order, then nested selector blocks.
             </li>
             <li>
-              <strong>Nesting guardrails</strong> — descendants, states, and pseudo-selectors stay
-              nested inside their owning selector rather than repeating top-level selector chains.
+              <strong>Nesting guardrails</strong> — stylesheets are normalized to their
+              canonical ownership tree: redundant unary branches are flattened, repeated owners
+              are factored, identical siblings are coalesced, and the component root is
+              preserved. The rule autofixes wherever the transform is selector-equivalent.
             </li>
             <li>
               <strong>Basis semantics</strong> — component state and variants are expressed with

@@ -19,12 +19,10 @@ style('basis:docs:icons', css`
       padding: 16px;
     }
 
-    .control-group {
-      label {
-        display: block;
-        font-weight: 500;
-        margin-bottom: 4px;
-      }
+    .control-group label {
+      display: block;
+      font-weight: 500;
+      margin-bottom: 4px;
     }
 
     .color-input {
@@ -127,11 +125,9 @@ style('basis:docs:icons', css`
       }
     }
 
-    .moon-controls {
-      h3 {
-        margin-bottom: 16px;
-        margin-top: 0;
-      }
+    .moon-controls h3 {
+      margin-bottom: 16px;
+      margin-top: 0;
     }
 
     .moon-display {

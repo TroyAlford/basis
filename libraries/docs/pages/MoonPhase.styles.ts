@@ -19,11 +19,9 @@ style('basis:docs:moonphase', css`
       }
     }
 
-    .moon-controls {
-      h3 {
-        margin-bottom: 16px;
-        margin-top: 0;
-      }
+    .moon-controls h3 {
+      margin-bottom: 16px;
+      margin-top: 0;
     }
 
     .moon-controls-grid {
@@ -32,12 +30,10 @@ style('basis:docs:moonphase', css`
       grid-template-columns: 1fr;
     }
 
-    .control-group {
-      label {
-        display: block;
-        font-weight: 500;
-        margin-bottom: 4px;
-      }
+    .control-group label {
+      display: block;
+      font-weight: 500;
+      margin-bottom: 4px;
     }
 
     .moon-display {

@@ -10,7 +10,7 @@ describe('createConfig', () => {
     expect(config.customSyntax).toBeDefined()
     expect(Array.isArray(config.plugins)).toBe(true)
     expect(config.rules?.['basis/no-state-classes']).toBe(true)
-    expect(config.rules?.['basis/no-top-level-nesting']).toBe(true)
+    expect(config.rules?.['basis/no-avoidable-nesting']).toBe(true)
     expect(config.rules?.['order/properties-alphabetical-order']).toBe(true)
   })
 
@@ -29,9 +29,7 @@ describe('Basis CSS policy over *.styles.ts fixtures', () => {
       .foo.component {
         color: \${Color.Primary};
 
-        > .value {
-          &:hover { color: \${Color.Hover}; }
-        }
+        > .value:hover { color: \${Color.Hover}; }
 
         &[data-state="\${State.Selected}"] { color: red; }
       }
@@ -48,8 +46,7 @@ describe('Basis CSS policy over *.styles.ts fixtures', () => {
         > .value, > .prefix, > .suffix { color: blue; }
 
         &:disabled { color: gray; }
-        &[aria-expanded='true'] { color: green; }
-        &[data-open='true'] { color: green; }
+        &[aria-expanded='true'], &[data-open='true'] { color: green; }
       }
     `, { config: createConfig() })
 

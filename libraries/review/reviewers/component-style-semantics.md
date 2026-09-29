@@ -58,8 +58,8 @@ must not restate it. In particular, do **not** report:
 - declaration, custom-property, or ordering violations;
 - duplicate declarations, duplicate selectors, or shorthand overrides;
 - element/type-selector casing;
-- class-rooted top-level selector chains or state/pseudo attachments that the
-  deterministic nesting rule rejects;
+- non-canonical nesting that the deterministic ownership rule already reports
+  (redundant unary branches, or repeated owners that should be factored);
 - state class names that the deterministic forbidden-vocabulary rule already
   rejects.
 

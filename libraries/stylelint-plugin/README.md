@@ -72,13 +72,35 @@ Secondary options:
 Structural, component, and mixin classes are unaffected; only the vocabulary
 above is rejected.
 
-### `basis/no-top-level-nesting`
+### `basis/no-avoidable-nesting`
 
-Requires descendant, state, and pseudo-selectors to be nested inside their
-owning selector. A top-level selector containing a combinator (descendant,
-child, or sibling) is reported; the same selector nested inside its owner is
-fine. This keeps component styles scoped and avoids repeated top-level selector
-chains.
+Requires `*.styles.ts` stylesheets to be in **canonical ownership form**, and
+autofixes them when they are not. The selector tree is normalized so nesting
+exists only where an owner carries declarations or branches.
+
+- **Flatten redundant unary branches.** A declaration-less rule with a single
+  child is merged into that child, concatenating the selectors:
+  `> ul { > li { ... } }` becomes `> ul > li { ... }`, and
+  `&:hover { > .link { ... } }` becomes `&:hover > .link { ... }`.
+- **Factor repeated owners.** Sibling rules that share a leading owner are
+  grouped under it — `.header > .title { ... }` with
+  `.header > .title:hover { ... }` becomes
+  `.header { > .title { ... &:hover { ... } } }` — and a shared owner in a
+  selector list is factored:
+  `p:first-child, p:last-child` becomes `p { &:first-child, &:last-child { ... } }`.
+- **Coalesce identical siblings.** Sibling rules whose complete bodies are
+  identical are merged into one selector list rather than duplicating the body:
+  `&, > .editor { ... }` with `> .editor > .value { ... }` becomes
+  `&, > .editor, > .editor > .value { ... }`.
+- **Protect the component root.** A top-level `.{kebab-case}.component` rule is
+  the component stylesheet's non-compressible anchor: it survives even with a
+  single child (`.button.component { &:hover { ... } }`, never
+  `.button.component:hover { ... }`), and other top-level `.button.component…`
+  selectors factor into it. Non-component stylesheets have no such anchor, so a
+  lone flat `.foo.component:hover` stays flat.
+- **Leave owner-relative and reverse selectors intact** (`&:hover`, `> .child`,
+  `[disabled] &`, `.theme &`, `*:has(> &)`), and skip scopes that contain
+  `${...}` interpolations.
 
 ## Tests
 

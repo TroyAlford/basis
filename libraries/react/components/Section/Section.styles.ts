@@ -24,8 +24,8 @@ style('basis:section', css`
         opacity: .5;
       }
 
-      &:hover {
-        > .link { display: inline-block; }
+      &:hover > .link {
+        display: inline-block;
       }
     }
   }

@@ -26,14 +26,7 @@ style('basis:tooltip', css`
     visibility: hidden;
     white-space: nowrap;
 
-    *:has(> &) {
-      &:is(:hover, :focus-within) > .tooltip.component {
-        opacity: 1;
-        visibility: visible;
-      }
-    }
-
-    &[data-visible="true"] {
+    *:has(> &):is(:hover, :focus-within) > .tooltip.component, &[data-visible="true"] {
       opacity: 1;
       visibility: visible;
     }

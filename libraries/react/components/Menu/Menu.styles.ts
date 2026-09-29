@@ -46,22 +46,19 @@ style('basis:menu', css`
       border: none;
       opacity: 0.2;
 
-      + .menu-divider.component { display: none; }
-      &:first-child, &:last-child { display: none; }
-    }
-
-    &[data-orientation='${Orientation.Vertical}'] {
-      > .menu-divider.component {
-        height: 1px;
-        margin: 0.25em 0;
+      + .menu-divider.component, &:first-child, &:last-child {
+        display: none;
       }
     }
 
-    &[data-orientation='${Orientation.Horizontal}'] {
-      > .menu-divider.component {
-        margin: 0 0.25em;
-        width: 1px;
-      }
+    &[data-orientation='${Orientation.Vertical}'] > .menu-divider.component {
+      height: 1px;
+      margin: 0.25em 0;
+    }
+
+    &[data-orientation='${Orientation.Horizontal}'] > .menu-divider.component {
+      margin: 0 0.25em;
+      width: 1px;
     }
   }
 `)
