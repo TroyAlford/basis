@@ -147,11 +147,13 @@ context with the network policy applied, navigates to `url + path`, runs `fn`,
 then disposes the page. **Server-side state is shared across the run**, so a test
 that needs a clean server must boot its own with `startApplication`.
 
-Network is deterministic by default — non-loopback requests are blocked, so a
-snapshot cannot silently depend on a CDN:
+Network is deterministic by default — requests are blocked unless they target
+loopback or Google Fonts (allowed so text renders the real web type instead of a
+host-dependent fallback), so a snapshot cannot silently depend on an arbitrary
+CDN:
 
 - `stubs` fulfils specific external URLs locally (for example a CDN module);
-- `allow` lets specific hosts through.
+- `allow` lets specific extra hosts through.
 
 `init(page)` runs before navigation for page setup, such as seeding storage with
 Playwright's own API:

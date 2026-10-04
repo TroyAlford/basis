@@ -70,8 +70,8 @@ describe('testing/docs', () => {
         `,
       })
       /*
-       * The tall page includes prose whose line wrapping shifts a little across
-       * machines (the docs' web font is blocked), so allow a wider budget.
+       * The tall page is mostly prose, so give it a slightly wider budget to
+       * absorb small cross-machine rasterisation differences.
        */
       await matchScreenshot(page, 'full page', {
         maxDiffPixelRatio: 0.02,
