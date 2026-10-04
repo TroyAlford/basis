@@ -368,6 +368,12 @@ const factorSiblings = (container: Container): boolean => {
 
     const parent = postcss.rule({ selector: unit })
     parent.raws.before = first.raws.before
+    /*
+     * Synthesized nodes must carry the source of the rule they factor out:
+     * Stylelint re-lints the fixed tree, and rules that contextualize nodes by
+     * source (e.g. no-duplicate-selectors, stylelint-order) throw without it.
+     */
+    parent.source = first.source
     container.insertBefore(first, parent)
 
     for (const rule of group) {
@@ -412,6 +418,11 @@ const factorLists = (container: Container): boolean => {
 
     const parent = postcss.rule({ selector: first.unit })
     parent.raws.before = rule.raws.before
+    /*
+     * See `factorSiblings`: the synthesized owner needs the factored rule's
+     * source so downstream rules can contextualize it after the fix.
+     */
+    parent.source = rule.source
     container.insertBefore(rule, parent)
 
     rule.selector = units.map(unit => unit.remainder).join(', ')
