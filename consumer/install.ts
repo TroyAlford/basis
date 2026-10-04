@@ -6,15 +6,16 @@ import { resolveInstallRoot } from './patches/root'
 
 /**
  * Trusted install hook that makes Basis-owned transitive patches effective in a
- * consuming project and provisions the complete browser runtime `basis/testing`
- * uses (the pinned Chromium build plus the operating-system dependencies it
- * needs to launch).
+ * consuming project and downloads the pinned Chromium browser `basis/testing`
+ * uses. The operating-system libraries Chromium needs to launch are the
+ * environment's responsibility (a CI image or a one-time host bootstrap); this
+ * hook never escalates privileges or invokes a system package manager.
  *
  * Bun applies `patchedDependencies` during install and only from the install
  * root, so a dependency cannot declare patches transitively. The hook instead
  * applies Basis's exact patch files with `git apply` once the dependencies are
- * on disk, matched by exact `name@version`. Browser provisioning failure is
- * fatal unless `BASIS_SKIP_BROWSER_INSTALL` opts out.
+ * on disk, matched by exact `name@version`. Browser download failure is fatal
+ * unless `BASIS_SKIP_BROWSER_INSTALL` opts out.
  */
 const main = (): void => {
   const basisDir = join(import.meta.dir, '..')

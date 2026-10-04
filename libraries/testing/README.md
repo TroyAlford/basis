@@ -175,13 +175,15 @@ loosen it per call with `maxDiffPixels` / `maxDiffPixelRatio`.
 
 ## Browsers
 
-Basis's trusted install hook provisions the complete browser runtime during
-`bun install`: the pinned Chromium binary and the operating-system dependencies
-it needs to launch (Playwright's `install --with-deps chromium`). There is no
-separate Playwright command, host bootstrap, or CI-only setup. Set
-`BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook reports the
-skip. A provisioning failure fails `bun install`, because a successful Basis
-install is expected to leave browser-backed tests ready to run.
+Basis's trusted install hook downloads the pinned Chromium browser during
+`bun install`. It never escalates privileges or invokes a system package manager.
+The operating-system libraries Chromium needs to launch are the environment's
+responsibility: CI images provide them, and a dev host provisions them once with
+`bunx playwright install-deps chromium` (an admin step, outside the install
+hook). Set `BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook
+reports the skip. A download failure fails `bun install`. If Chromium cannot
+launch because those libraries are absent, the error names the exact
+`install-deps` command to run.
 
 The pre-commit hook runs the fast, deterministic checks (lint, typecheck, and
 build); run `bun test` for the complete suite.

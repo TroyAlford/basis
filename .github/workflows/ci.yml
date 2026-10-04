@@ -50,8 +50,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
-      # `bun install` (via the trusted Basis install hook) provisions Chromium and
-      # its system dependencies, so no separate browser setup step is needed.
+      # The trusted install hook downloads the pinned Chromium browser but never
+      # escalates privileges; CI provisions the OS libraries it needs explicitly.
+      - name: Install Chromium system dependencies
+        run: bunx playwright install-deps chromium
       - name: Run tests
         run: bun run test
       - name: Upload snapshot artifacts

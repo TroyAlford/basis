@@ -1,5 +1,29 @@
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright'
 
+/**
+ * Remediation shown when Chromium cannot launch.
+ *
+ * Basis's install hook downloads the pinned browser but never installs system
+ * packages and never escalates privileges, so the operating-system libraries are
+ * the environment's responsibility. This is the exact next step for a host or
+ * image that is missing them.
+ */
+export const CHROMIUM_SYSTEM_LIBRARIES_HELP =
+  'Chromium could not launch. The host is most likely missing the operating-system ' +
+  'libraries Chromium needs. Install them with `bunx playwright install-deps chromium` ' +
+  '(as root/administrator), or use a CI image that provides them. Basis does not install ' +
+  'system packages from its install hook and never requires sudo.'
+
+/**
+ * Wrap a Chromium launch failure with actionable remediation and the cause.
+ * @param cause - The error thrown by Playwright's `chromium.launch`.
+ * @returns The augmented error.
+ */
+export const browserLaunchError = (cause: unknown): Error => {
+  const detail = cause instanceof Error ? cause.message : String(cause)
+  return new Error(`${CHROMIUM_SYSTEM_LIBRARIES_HELP}\n\nUnderlying error: ${detail}`, { cause })
+}
+
 let browser: Browser | null = null
 let captureContext: BrowserContext | null = null
 let capturePage: Page | null = null
@@ -16,20 +40,28 @@ let captureQueue: Promise<unknown> = Promise.resolve()
 export async function getBrowser(): Promise<Browser> {
   if (!browser || !browser.isConnected()) {
     const { chromium } = await import('playwright')
-    browser = await chromium.launch({
+    try {
+      browser = await chromium.launch({
+        /*
+         * Deterministic rasterisation: grayscale anti-aliasing, no font hinting
+         * or subpixel positioning, and portable Skia paths, so the same markup
+         * renders identically across machines and architectures.
+         */
+        args: [
+          '--disable-lcd-text',
+          '--disable-font-subpixel-positioning',
+          '--disable-skia-runtime-opts',
+          '--font-render-hinting=none',
+          '--force-color-profile=srgb',
+        ],
+      })
+    } catch (error) {
       /*
-       * Deterministic rasterisation: grayscale anti-aliasing, no font hinting
-       * or subpixel positioning, and portable Skia paths, so the same markup
-       * renders identically across machines and architectures.
+       * The browser binary downloads without its OS libraries; tell the host
+       * exactly how to close that gap instead of surfacing Playwright's raw text.
        */
-      args: [
-        '--disable-lcd-text',
-        '--disable-font-subpixel-positioning',
-        '--disable-skia-runtime-opts',
-        '--font-render-hinting=none',
-        '--force-color-profile=srgb',
-      ],
-    })
+      throw browserLaunchError(error)
+    }
   }
   return browser
 }

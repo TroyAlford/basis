@@ -33,9 +33,9 @@ const main = (): void => {
     const spec = `git+file://${source}#${tag}`
 
     /*
-     * Trusted install into a fresh host via the documented command. Installs use
-     * the ambient environment because Basis's install hook may invoke the
-     * platform package manager to provision Chromium's system dependencies.
+     * Trusted install into a fresh host via the documented command. The install
+     * hook only downloads the pinned Chromium browser; it never invokes the
+     * platform package manager or escalates privileges.
      */
     const app = join(workspace, 'app')
     initApp(app, spec, { includeBasis: false })
