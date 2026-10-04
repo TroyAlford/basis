@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import * as postcssStyledSyntax from 'postcss-styled-syntax'
 import type { Config } from 'stylelint'
+import orderPlugins from 'stylelint-order'
 import { lintStyles } from '../testUtils'
 import { noAvoidableNesting, ruleName } from './noAvoidableNesting'
 
@@ -315,5 +316,44 @@ describe('basis/no-avoidable-nesting canonical tree', () => {
 
     expect(warnings).toBe(0)
     expect(body).toBe(squash(input))
+  })
+})
+
+describe('basis/no-avoidable-nesting fix and downstream rules', () => {
+  test('factoring a selector-list owner keeps a source for no-duplicate-selectors', async () => {
+    const downstream: Config = {
+      customSyntax: postcssStyledSyntax,
+      plugins: [noAvoidableNesting],
+      rules: { 'no-duplicate-selectors': true, [ruleName]: true },
+    }
+
+    const result = await lintStyles('p:first-child, p:last-child { margin: 0; }', {
+      config: downstream,
+      fix: true,
+    })
+
+    expect(result.fixed).toBeDefined()
+    expect(squash(extractBody(result.fixed ?? ''))).toBe(squash(`
+      p {
+        &:first-child,
+        &:last-child { margin: 0; }
+      }
+    `))
+  })
+
+  test('factoring sibling owners keeps a source for stylelint-order', async () => {
+    const downstream: Config = {
+      customSyntax: postcssStyledSyntax,
+      plugins: [noAvoidableNesting, ...orderPlugins],
+      rules: { 'order/properties-alphabetical-order': true, [ruleName]: true },
+    }
+
+    const result = await lintStyles(`
+      .row { color: #c00; }
+      .row { color: #080; }
+    `, { config: downstream, fix: true })
+
+    expect(result.fixed).toBeDefined()
+    expect(squash(extractBody(result.fixed ?? ''))).toContain('.row {')
   })
 })
