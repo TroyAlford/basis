@@ -2,20 +2,35 @@ name: CI
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, edited]
     branches: [main]
 
 permissions:
+  checks: read
   contents: write
   issues: write
   pull-requests: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # `edited` runs must not cancel in-flight code runs (and vice versa), so the
+  # action is part of the group.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.action }}
   cancel-in-progress: true
 
 jobs:
+  check-pr-title:
+    # Check runs attach to a commit SHA, so a new commit needs its own title
+    # check; the code gates below are what a title/body edit reuses instead.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/enforce-convco
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
   eslint:
+    # A title/body edit never reruns the code gates.
+    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,8 +39,13 @@ jobs:
         run: NODE_NO_WARNINGS=1 bun ./node_modules/eslint/bin/eslint.js
       - name: Run Stylelint
         run: bun ./node_modules/stylelint/bin/stylelint.mjs "**/*.styles.ts" --config ./stylelint.config.mjs --allow-empty-input
+      # `basis lint --fix` must apply every autofixable finding in one run; this
+      # is the required gate that keeps the CLI's fix forwarding honest.
+      - name: Verify lint autofix
+        run: bun test consumer/cli.test.ts
 
   run-tests:
+    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +63,7 @@ jobs:
           if-no-files-found: ignore
 
   type-check:
+    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +75,7 @@ jobs:
         run: bun run lint:ts
 
   consumer-install:
+    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +84,7 @@ jobs:
         run: bun run test:consumer
 
   knip:
+    if: github.event.action != 'edited'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,50 +99,49 @@ jobs:
         with:
           fail-on-findings: 'false'
 
-  # publish-dry-run:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #       with: { fetch-depth: 0 }
-  #     - uses: ./.github/actions/asdf-setup
-
-  #     - name: Identify Changed Workspaces
-  #       id: changes
-  #       run: |
-  #         changed=$(bun workspace changed)
-  #         echo "Changed workspaces: $changed"
-  #         echo "workspaces=$changed" >> $GITHUB_OUTPUT
-
-  #     - name: Dry Run Publish Changed Workspaces
-  #       if: steps.changes.outputs.workspaces != '[]'
-  #       run: |
-  #         workspaces='${{ steps.changes.outputs.workspaces }}'
-  #         version='0.0.${{ github.run_number }}-alpha'
-
-  #         for workspace in $(echo "$workspaces" | jq -r '.[]'); do
-  #           echo "Dry run publishing $workspace@$version"
-  #           bun ws publish --only "$workspace" --version "$version" --dryRun || {
-  #             echo "::error::Failed to dry run publish $workspace"
-  #             exit 1
-  #           }
-  #         done
-
+  # The single required status context. Every event posts it, so a title-only
+  # edit cannot leave a stale red (or a stale green) behind: jobs that did not
+  # run in this pass are resolved from their most recent completed check run on
+  # the head SHA.
   required:
     if: always()
     needs:
+      - check-pr-title
       - eslint
       - run-tests
       - type-check
       - knip
       - consumer-install
-      # - publish-dry-run
     runs-on: ubuntu-latest
     steps:
-      - name: Check if required jobs passed or were skipped
+      - name: Fail if any job in this run did not pass
+        env:
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
-            echo "One or more required jobs failed"
+          failed=$(jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key' <<<"$NEEDS")
+          if [[ -n "$failed" ]]; then
+            echo "Required jobs did not pass: ${failed//$'\n'/, }"
             exit 1
-          else
-            echo "All required jobs have passed or were skipped!"
           fi
+          echo "All jobs in this run passed or were intentionally skipped."
+
+      - name: Reuse completed results for jobs this event skipped
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          skipped=$(jq -r 'to_entries[] | select(.value.result == "skipped") | .key' <<<"$NEEDS")
+          for job in $skipped; do
+            conclusion=$(gh api \
+              "repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs?per_page=100" \
+              --jq "[.check_runs[]
+                | select(.name == \"${job}\")
+                | select(.status == \"completed\")
+                | select((((.details_url // \"\") | contains(\"/runs/${{ github.run_id }}/\")) | not))]
+                | sort_by(.completed_at) | last | .conclusion // \"missing\"")
+            case "$conclusion" in
+              success|skipped|neutral) echo "${job}: reusing ${conclusion}" ;;
+              *) echo "${job}: no current pass (${conclusion})"; exit 1 ;;
+            esac
+          done

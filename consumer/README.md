@@ -308,10 +308,18 @@ running detectors, calling models, and publishing reviews belong to the consumer
 
 ```bash
 bunx basis doctor     # validate the surface and that owned patches are active
-bunx basis lint
+bunx basis lint       # report the TypeScript/JSX and CSS policies
+bunx basis lint --fix # apply every autofixable finding in one run
 bunx basis typecheck
 bunx basis check
 ```
+
+`basis lint --fix` forwards `--fix` to both surfaces (ESLint and Stylelint)
+and applies the fixes they support in a single pass. A follow-up `basis lint`
+reports nothing fixable that the first run did not already resolve; rulings
+without a safe transformation (for example JSDoc contracts and `max-len`)
+still require a manual edit. `basis check --fix` applies the same lint fixes
+before it typechecks.
 
 ## Patches
 

@@ -26,6 +26,10 @@ export class CssLintingDocs extends Documentation<Record<string, never>> {
           </p>
           {Code.format('bunx basis lint', 'bash')}
           <p>
+            Add <code>--fix</code> to apply every autofixable finding from both policies in one run:
+          </p>
+          {Code.format('bunx basis lint --fix', 'bash')}
+          <p>
             To run Stylelint directly, point it at the Basis config and the template-literal files.
             Add <code>--allow-empty-input</code> when a project may have no{' '}
             <code>*.styles.ts</code> files:
