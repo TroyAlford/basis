@@ -19,9 +19,8 @@ concurrency:
 
 jobs:
   check-pr-title:
-    # Cheap. Skipped on a code push, where the aggregate reuses the previous
-    # title check instead of re-running it.
-    if: github.event.action != 'synchronize'
+    # Check runs attach to a commit SHA, so a new commit needs its own title
+    # check; the code gates below are what a title/body edit reuses instead.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
