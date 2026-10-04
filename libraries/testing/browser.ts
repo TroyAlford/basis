@@ -1,5 +1,52 @@
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright'
 
+/**
+ * Remediation shown when Chromium cannot launch.
+ *
+ * Basis's install hook downloads the pinned browser but never installs system
+ * packages and never escalates privileges, so the operating-system libraries are
+ * the environment's responsibility. This is the exact next step for a host or
+ * image that is missing them.
+ */
+export const CHROMIUM_SYSTEM_LIBRARIES_HELP =
+  'Chromium could not launch. The host is most likely missing the operating-system ' +
+  'libraries Chromium needs. Install them with `bunx playwright install-deps chromium` ' +
+  '(as root/administrator), or use a CI image that provides them. Basis does not install ' +
+  'system packages from its install hook and never requires sudo.'
+
+/**
+ * Name the shared library Chromium failed to load, when the failure says so.
+ *
+ * A missing OS library makes the Chromium process exit before Playwright can
+ * connect, and the library name is buried in the browser log Playwright
+ * attaches. Pulling it out lets the error lead with the specific fix.
+ * @param cause - The error thrown by Playwright's `chromium.launch`.
+ * @returns The library name, or null when the failure does not report one.
+ */
+export const missingSystemLibrary = (cause: unknown): string | null => {
+  const text = cause instanceof Error ? cause.message : String(cause)
+  const match = /error while loading shared libraries:\s*([^\s:]+)/i.exec(text)
+  return match?.[1] ?? null
+}
+
+/**
+ * Wrap a Chromium launch failure with actionable remediation and the cause.
+ *
+ * The missing library is surfaced on its own line, ahead of Playwright's log
+ * dump, so the reader does not have to dig for it.
+ * @param cause - The error thrown by Playwright's `chromium.launch`.
+ * @returns The augmented error.
+ */
+export const browserLaunchError = (cause: unknown): Error => {
+  const detail = cause instanceof Error ? cause.message : String(cause)
+  const library = missingSystemLibrary(cause)
+  const detected = library ? `\n\nDetected missing system library: ${library}` : ''
+  return new Error(
+    `${CHROMIUM_SYSTEM_LIBRARIES_HELP}${detected}\n\nUnderlying error: ${detail}`,
+    { cause },
+  )
+}
+
 let browser: Browser | null = null
 let captureContext: BrowserContext | null = null
 let capturePage: Page | null = null
@@ -16,20 +63,28 @@ let captureQueue: Promise<unknown> = Promise.resolve()
 export async function getBrowser(): Promise<Browser> {
   if (!browser || !browser.isConnected()) {
     const { chromium } = await import('playwright')
-    browser = await chromium.launch({
+    try {
+      browser = await chromium.launch({
+        /*
+         * Deterministic rasterisation: grayscale anti-aliasing, no font hinting
+         * or subpixel positioning, and portable Skia paths, so the same markup
+         * renders identically across machines and architectures.
+         */
+        args: [
+          '--disable-lcd-text',
+          '--disable-font-subpixel-positioning',
+          '--disable-skia-runtime-opts',
+          '--font-render-hinting=none',
+          '--force-color-profile=srgb',
+        ],
+      })
+    } catch (error) {
       /*
-       * Deterministic rasterisation: grayscale anti-aliasing, no font hinting
-       * or subpixel positioning, and portable Skia paths, so the same markup
-       * renders identically across machines and architectures.
+       * The browser binary downloads without its OS libraries; tell the host
+       * exactly how to close that gap instead of surfacing Playwright's raw text.
        */
-      args: [
-        '--disable-lcd-text',
-        '--disable-font-subpixel-positioning',
-        '--disable-skia-runtime-opts',
-        '--font-render-hinting=none',
-        '--force-color-profile=srgb',
-      ],
-    })
+      throw browserLaunchError(error)
+    }
   }
   return browser
 }

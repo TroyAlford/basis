@@ -15,10 +15,11 @@ install hook can apply the transitive patches Basis owns and provision the
 browser runtime `basis/testing` needs. The hook is deterministic, idempotent,
 exact-version validated, and only touches packages Basis declares. Consumers
 never copy patch files or `patchedDependencies` entries, and never add their own
-Playwright provisioning: `bun install` downloads the pinned Chromium and installs
-the operating-system dependencies it needs to launch. Set
-`BASIS_SKIP_BROWSER_INSTALL=1` to opt out; a provisioning failure fails the
-install.
+browser provisioning: `bun install` downloads the pinned Chromium browser. It
+never escalates privileges or invokes a system package manager; the
+operating-system libraries Chromium needs to launch are the environment's
+responsibility (a CI image or a one-time host bootstrap). Set
+`BASIS_SKIP_BROWSER_INSTALL=1` to opt out; a download failure fails the install.
 
 Basis requires Bun `>=1.4.0`. Bun only honors root-level `patchedDependencies`,
 which is why the trusted hook exists.
@@ -197,13 +198,16 @@ test('renders a button', async () => {
 It accepts a React element, a Playwright `Page`, or a `Locator`, and throws with
 the diff details on a mismatch.
 
-Basis's trusted install hook provisions the complete browser runtime during
-`bun install`: the pinned Chromium binary and the operating-system dependencies
-it needs to launch (Playwright's `install --with-deps chromium`). No separate
-Playwright command, host bootstrap, or CI-only setup is required. Set
-`BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook then reports
-the skip. If provisioning fails, `bun install` fails loudly, because a successful
-Basis install is expected to leave browser-backed tests ready to run.
+Basis's trusted install hook downloads the pinned Chromium browser during
+`bun install`. It never escalates privileges or invokes a system package manager,
+so no `sudo` is ever required. The operating-system libraries Chromium needs to
+launch are the environment's responsibility: CI images provide them, and a dev
+host provisions them once with `bunx playwright install-deps chromium` (an admin
+step, outside the install hook). Set `BASIS_SKIP_BROWSER_INSTALL=1` to opt out
+intentionally; the hook then reports the skip. If the download fails, `bun
+install` fails loudly and names the command to retry; if Chromium later fails to
+launch, the error names the same `install-deps` command and reports the missing
+library when it can identify it.
 
 `matchScreenshot` never modifies or deletes a committed baseline unless the run
 explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A capture or

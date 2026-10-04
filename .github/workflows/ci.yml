@@ -50,8 +50,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
-      # `bun install` (via the trusted Basis install hook) provisions Chromium and
-      # its system dependencies, so no separate browser setup step is needed.
+      # The trusted install hook downloads the pinned Chromium browser but never
+      # escalates privileges; CI provisions the OS libraries it needs explicitly.
+      - name: Install Chromium system dependencies
+        run: bunx playwright install-deps chromium
       - name: Run tests
         run: bun run test
       - name: Upload snapshot artifacts
@@ -125,21 +127,53 @@ jobs:
           fi
           echo "All jobs in this run passed or were intentionally skipped."
 
-      - name: Reuse completed results for jobs this event skipped
+      - name: Wait for and reuse completed results for jobs this event skipped
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEEDS: ${{ toJSON(needs) }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
+          # A title/body edit can land while a code run for the same commit is
+          # still in flight. Wait for it instead of failing on an empty result
+          # set; a genuinely absent pass still fails once the wait elapses.
+          REUSE_TIMEOUT_SECONDS: '2400'
+          REUSE_POLL_SECONDS: '15'
         run: |
           set -euo pipefail
+
+          # Latest conclusion of `job` from completed check runs on the head SHA
+          # that do not belong to this run.
+          latest_conclusion() {
+            gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+              --jq "[.check_runs[]
+                | select(.name == \"$1\")
+                | select((((.details_url // \"\") | contains(\"/runs/${RUN_ID}/\")) | not))
+                | select(.status == \"completed\")]
+                | sort_by(.completed_at) | last | .conclusion // \"missing\""
+          }
+
+          # Number of check runs for `job` on the head SHA still in flight.
+          pending_count() {
+            gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+              --jq "[.check_runs[]
+                | select(.name == \"$1\")
+                | select((((.details_url // \"\") | contains(\"/runs/${RUN_ID}/\")) | not))
+                | select(.status != \"completed\")] | length"
+          }
+
+          deadline=$(( SECONDS + REUSE_TIMEOUT_SECONDS ))
           skipped=$(jq -r 'to_entries[] | select(.value.result == "skipped") | .key' <<<"$NEEDS")
           for job in $skipped; do
-            conclusion=$(gh api \
-              "repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs?per_page=100" \
-              --jq "[.check_runs[]
-                | select(.name == \"${job}\")
-                | select(.status == \"completed\")
-                | select((((.details_url // \"\") | contains(\"/runs/${{ github.run_id }}/\")) | not))]
-                | sort_by(.completed_at) | last | .conclusion // \"missing\"")
+            while [[ "$(pending_count "$job")" -gt 0 ]]; do
+              if (( SECONDS >= deadline )); then
+                echo "${job}: still in flight after ${REUSE_TIMEOUT_SECONDS}s; no result to reuse"
+                exit 1
+              fi
+              echo "${job}: waiting for an in-flight run to finish"
+              sleep "$REUSE_POLL_SECONDS"
+            done
+            conclusion=$(latest_conclusion "$job")
             case "$conclusion" in
               success|skipped|neutral) echo "${job}: reusing ${conclusion}" ;;
               *) echo "${job}: no current pass (${conclusion})"; exit 1 ;;
