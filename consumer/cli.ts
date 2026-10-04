@@ -96,28 +96,32 @@ const runBin = (packageName: string, binName: string, args: string[]): number =>
 
 /**
  * Runs the TypeScript/JSX ESLint policy.
+ * @param fix Whether to let ESLint apply the fixes it supports.
  * @returns The child process exit code.
  */
-const runEslint = (): number => runBin('eslint', 'eslint', ['.'])
+const runEslint = (fix: boolean): number => runBin('eslint', 'eslint', fix ? ['.', '--fix'] : ['.'])
 
 /**
  * Runs the Basis CSS policy over every `*.styles.ts` file.
+ * @param fix Whether to let Stylelint apply the fixes it supports.
  * @returns The child process exit code.
  */
-const runStylelint = (): number => runBin('stylelint', 'stylelint', [
+const runStylelint = (fix: boolean): number => runBin('stylelint', 'stylelint', [
   '**/*.styles.ts',
   '--allow-empty-input',
   '--config',
   join(basisDir(), 'stylelint.config.mjs'),
+  ...(fix ? ['--fix'] : []),
 ])
 
 /**
  * Runs every Basis lint surface.
+ * @param fix Whether to apply the autofixes each surface supports.
  * @returns The first non-zero child process exit code, or `0`.
  */
-const runLint = (): number => {
-  const eslintCode = runEslint()
-  return eslintCode === 0 ? runStylelint() : eslintCode
+const runLint = (fix: boolean): number => {
+  const eslintCode = runEslint(fix)
+  return eslintCode === 0 ? runStylelint(fix) : eslintCode
 }
 
 /**
@@ -180,20 +184,21 @@ const doctor = (): number => {
  * Prints usage information for the CLI.
  */
 const usage = (): void => {
-  write('usage: basis <doctor|lint|typecheck|check>')
+  write('usage: basis <doctor|lint [--fix]|typecheck|check>')
 }
 
 /**
  * Dispatches the requested CLI command.
  */
 const main = (): void => {
-  const [command] = process.argv.slice(2)
+  const [command, ...args] = process.argv.slice(2)
+  const fix = args.includes('--fix')
 
   if (command === 'doctor') process.exit(doctor())
-  if (command === 'lint') process.exit(runLint())
+  if (command === 'lint') process.exit(runLint(fix))
   if (command === 'typecheck') process.exit(runBin('@typescript/native', 'tsc', ['--noEmit']))
   if (command === 'check') {
-    const lintCode = runLint()
+    const lintCode = runLint(fix)
     const typeCode = lintCode === 0 ? runBin('@typescript/native', 'tsc', ['--noEmit']) : lintCode
     process.exit(typeCode)
   }
@@ -202,4 +207,4 @@ const main = (): void => {
   process.exit(1)
 }
 
-main()
+if (import.meta.main) main()
