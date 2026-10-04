@@ -206,7 +206,8 @@ host provisions them once with `bunx playwright install-deps chromium` (an admin
 step, outside the install hook). Set `BASIS_SKIP_BROWSER_INSTALL=1` to opt out
 intentionally; the hook then reports the skip. If the download fails, `bun
 install` fails loudly and names the command to retry; if Chromium later fails to
-launch, the error names the same `install-deps` command to run.
+launch, the error names the same `install-deps` command and reports the missing
+library when it can identify it.
 
 `matchScreenshot` never modifies or deletes a committed baseline unless the run
 explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A capture or

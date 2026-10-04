@@ -183,7 +183,8 @@ responsibility: CI images provide them, and a dev host provisions them once with
 hook). Set `BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook
 reports the skip. A download failure fails `bun install`. If Chromium cannot
 launch because those libraries are absent, the error names the exact
-`install-deps` command to run.
+`install-deps` command to run and reports the missing library when it can
+identify it.
 
 The pre-commit hook runs the fast, deterministic checks (lint, typecheck, and
 build); run `bun test` for the complete suite.

@@ -15,13 +15,36 @@ export const CHROMIUM_SYSTEM_LIBRARIES_HELP =
   'system packages from its install hook and never requires sudo.'
 
 /**
+ * Name the shared library Chromium failed to load, when the failure says so.
+ *
+ * A missing OS library makes the Chromium process exit before Playwright can
+ * connect, and the library name is buried in the browser log Playwright
+ * attaches. Pulling it out lets the error lead with the specific fix.
+ * @param cause - The error thrown by Playwright's `chromium.launch`.
+ * @returns The library name, or null when the failure does not report one.
+ */
+export const missingSystemLibrary = (cause: unknown): string | null => {
+  const text = cause instanceof Error ? cause.message : String(cause)
+  const match = /error while loading shared libraries:\s*([^\s:]+)/i.exec(text)
+  return match?.[1] ?? null
+}
+
+/**
  * Wrap a Chromium launch failure with actionable remediation and the cause.
+ *
+ * The missing library is surfaced on its own line, ahead of Playwright's log
+ * dump, so the reader does not have to dig for it.
  * @param cause - The error thrown by Playwright's `chromium.launch`.
  * @returns The augmented error.
  */
 export const browserLaunchError = (cause: unknown): Error => {
   const detail = cause instanceof Error ? cause.message : String(cause)
-  return new Error(`${CHROMIUM_SYSTEM_LIBRARIES_HELP}\n\nUnderlying error: ${detail}`, { cause })
+  const library = missingSystemLibrary(cause)
+  const detected = library ? `\n\nDetected missing system library: ${library}` : ''
+  return new Error(
+    `${CHROMIUM_SYSTEM_LIBRARIES_HELP}${detected}\n\nUnderlying error: ${detail}`,
+    { cause },
+  )
 }
 
 let browser: Browser | null = null
