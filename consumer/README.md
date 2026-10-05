@@ -194,6 +194,36 @@ Internal factories and loading seams — `createSecretReader`, `loadDotenv`, and
 their types — are not part of the package surface. Non-npm host capabilities are
 declared as `basis.hostDependencies` (see [Install](#install)), not called.
 
+## Auth
+
+`basis/auth` owns the shared cross-subdomain identity cookie:
+
+```ts
+import {
+  clearIdentityCookie,
+  encryptIdentity,
+  readIdentity,
+  registrableDomain,
+  setIdentityCookie,
+} from 'basis/auth'
+```
+
+- `encryptIdentity(userId, secret)` seals the user id into a versioned,
+  base64url AES-256-GCM value; `readIdentity(value, secret)` returns the id, or
+  `null` on a tampered value, a wrong secret, or an unknown version. Neither the
+  id nor the secret is ever logged.
+- `setIdentityCookie(headers, name, userId, { secret, domain?, maxAgeSeconds? })`
+  and `clearIdentityCookie(headers, name, { domain? })` append `Set-Cookie`
+  headers — `Path=/`, `HttpOnly`, `Secure`, `SameSite=Lax`, with a 30-day
+  `Max-Age` by default. Omit `domain` for a host-only cookie; pass it to share
+  identity across subdomains.
+- `registrableDomain(host)` derives that domain from a request `Host` using the
+  documented last-two-labels rule (`cc.troyalford.com` → `troyalford.com`).
+
+The package is transport-shaped: it writes the header but does not read the
+request or decide who is allowed in. Key derivation and blob layout stay out of
+the surface. See `libraries/auth/README.md`.
+
 ## React runtime
 
 `basis/react` exposes the supported React component library:
