@@ -194,35 +194,39 @@ Internal factories and loading seams — `createSecretReader`, `loadDotenv`, and
 their types — are not part of the package surface. Non-npm host capabilities are
 declared as `basis.hostDependencies` (see [Install](#install)), not called.
 
-## Auth
+## OAuth and identity
 
-`basis/auth` owns the shared cross-subdomain identity cookie:
+`basis/oauth` owns the shared cross-subdomain identity cookie as one capability,
+`Identity`:
 
 ```ts
-import {
-  clearIdentityCookie,
-  encryptIdentity,
-  readIdentity,
-  registrableDomain,
-  setIdentityCookie,
-} from 'basis/auth'
+import { Identity } from 'basis/oauth'
+
+const identity = new Identity({
+  public: 'op://Vault/OAuth/client-id',
+  secret: 'op://Vault/OAuth/client-secret',
+  scope: Identity.Scope.Domain, // optional; default Identity.Scope.Subdomain
+})
 ```
 
-- `encryptIdentity(userId, secret)` seals the user id into a versioned,
-  base64url AES-256-GCM value; `readIdentity(value, secret)` returns the id, or
-  `null` on a tampered value, a wrong secret, or an unknown version. Neither the
-  id nor the secret is ever logged.
-- `setIdentityCookie(headers, name, userId, { secret, domain?, maxAgeSeconds? })`
-  and `clearIdentityCookie(headers, name, { domain? })` append `Set-Cookie`
-  headers — `Path=/`, `HttpOnly`, `Secure`, `SameSite=Lax`, with a 30-day
-  `Max-Age` by default. Omit `domain` for a host-only cookie; pass it to share
-  identity across subdomains.
-- `registrableDomain(host)` derives that domain from a request `Host` using the
-  documented last-two-labels rule (`cc.troyalford.com` → `troyalford.com`).
+- `identity.set(request, headers, userId)` signs a user in; `set(..., null)`
+  signs out, clearing the cookie at the same scope. `identity.get(request)`
+  returns the verified user id, or `null`.
+- The cookie is `HttpOnly`, `Secure`, `SameSite=Lax`, and host-only by default
+  with a 30-day lifetime. `Identity.Scope.Domain` shares it with the parent
+  domain and its descendants by removing the request's current subdomain
+  (`auth.example.co.uk` → `example.co.uk`); a two-label host degrades to
+  host-only. There is no public-suffix list.
+- The value is the user id sealed with AES-256-GCM (versioned, base64url).
+  Credentials may be `op://` references, resolved lazily through
+  `basis/configuration`. A user id and a secret are never logged.
 
-The package is transport-shaped: it writes the header but does not read the
-request or decide who is allowed in. Key derivation and blob layout stay out of
-the surface. See `libraries/auth/README.md`.
+`basis/server` builds on it: `server.oauth(options)` mounts a provider-agnostic
+authorization-code flow at `/api/oauth/login`, `/api/oauth/callback`, and
+`/api/oauth/logout`. Configuring it (or `server.identity(identity)`) embeds the
+verified user id as `runtime.identity` in the SPA shell, so a consumer frontend
+reads it from its standard runtime context without a fetch of its own. See
+`libraries/oauth/README.md`.
 
 ## React runtime
 

@@ -15,6 +15,8 @@ import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
+import type { OAuthOptions } from './OAuth'
+import { OAuth } from './OAuth'
 import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
@@ -475,6 +477,25 @@ export class Server {
    */
   identity(identity: Identity): Server {
     this.#identity = identity
+    return this
+  }
+
+  /**
+   * Mounts a provider-agnostic OAuth sign-in flow.
+   *
+   * Registers `/api/oauth/login`, `/api/oauth/callback`, and
+   * `/api/oauth/logout`, and wires the flow's session capability into the
+   * server so the signed-in identity is embedded into the SPA runtime context
+   * automatically.
+   * @param options - Provider seams, the session capability, and policy.
+   * @returns The server.
+   */
+  oauth(options: OAuthOptions): Server {
+    const flow = new OAuth(options)
+    this.identity(options.session)
+    this.api([HttpVerb.Get], 'oauth/login', () => flow.login())
+    this.api([HttpVerb.Get], 'oauth/callback', (_params, { request }) => flow.callback(request))
+    this.api([HttpVerb.Get], 'oauth/logout', (_params, { request }) => flow.logout(request))
     return this
   }
 

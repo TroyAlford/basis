@@ -150,6 +150,36 @@ Templates match the route under `/api` (`/api/hello/world`) and, for root-level
 paths, the first path segment (so built-in `/health` and `/ping` resolve). Every
 handler receives the request and the server's logger.
 
+## OAuth
+
+`server.oauth(options)` mounts a provider-agnostic authorization-code flow and
+wires the session capability into the server:
+
+```ts
+import { Identity } from 'basis/oauth'
+
+const identity = new Identity({
+  public: Bun.env.OAUTH_CLIENT_ID,
+  secret: Bun.env.OAUTH_CLIENT_SECRET,
+  scope: Identity.Scope.Domain,
+})
+
+server.oauth({
+  session: identity,
+  redirectUri: 'https://example.com/api/oauth/callback',
+  authorize: (state, credentials) => provider.authorizeUrl(state, credentials, redirectUri),
+  exchange: (code, credentials) => provider.exchange(code, credentials, redirectUri),
+  identity: accessToken => provider.userId(accessToken),
+})
+```
+
+It registers `/api/oauth/login`, `/api/oauth/callback`, and
+`/api/oauth/logout`, owns the CSRF state cookie and the redirects, and calls
+`identity.set(...)` on a successful callback. Provider specifics stay with the
+caller — Discord, GitHub, Google, and any other OAuth provider work the same
+way. The client credentials come from the `Identity`, so they are configured in
+one place.
+
 ## Embedding
 
 `server.handle(request)` dispatches one request through the same routing the
@@ -209,4 +239,10 @@ The server embeds immutable platform facts (`SERVICE_NAME`, `VERSION`,
 `GIT_SHA`) into the SPA shell it serves, so the browser boots the application
 runtime context without an extra fetch. On the client, `ApplicationBase` reads
 them via `readBasisRuntime()`; see the `@basis/react` runtime surface.
+
+When the server is given an identity capability — through `server.identity(...)`
+or `server.oauth(...)` — it also verifies the bootstrapping request and embeds
+the signed-in user id as `runtime.identity` (`null` when anonymous). A consumer
+frontend therefore reads the signed-in identity from its standard runtime
+context without implementing a session fetch of its own.
 
