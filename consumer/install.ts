@@ -14,8 +14,10 @@ import { resolveInstallRoot } from './patches/root'
  * escalates privileges or invokes a system package manager.
  *
  * A consumer declares non-npm host capabilities as static metadata in its own
- * root `package.json` (`basis.hostDependencies`); a declared capability that is
- * missing or malformed fails the install loudly, before any slower work.
+ * root `package.json` (`basis.hostDependencies`); Basis resolves each on `PATH`
+ * and, for known capabilities, proves it is runnable with its version command.
+ * Anything missing, present-but-broken, or malformed fails the install loudly,
+ * before any slower work.
  *
  * Bun applies `patchedDependencies` during install and only from the install
  * root, so a dependency cannot declare patches transitively. The hook instead

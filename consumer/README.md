@@ -31,11 +31,14 @@ your application needs as static deployment metadata in the root `package.json`:
 { "basis": { "hostDependencies": ["docker", "nginx", "op", "lego"] } }
 ```
 
-The install hook resolves each declared capability on `PATH` and fails
-`bun install` loudly, naming every one that is missing or malformed, so a host
+The install hook resolves each declared capability on `PATH` and, for the known
+capabilities (`docker`, `nginx`, `pm2`, `op`, `lego`, `opencode`), runs its
+version command to prove it is runnable, not merely present. Anything missing,
+present-but-broken, or malformed fails `bun install` loudly, naming it, so a host
 that cannot run the application never completes an install that looks
-successful. Basis mandates no specific binary; omit the field when there are
-none. This is package metadata, not an API — application source never calls it.
+successful. An unknown name falls back to `PATH` presence. Basis mandates no
+specific binary; omit the field when there are none. This is package metadata,
+not an API — application source never calls it.
 
 ## ESLint
 

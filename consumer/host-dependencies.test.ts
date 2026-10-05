@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { HostProbe } from './host-dependencies'
 import { checkHostDependencies, readHostDependencies, requireHostDependencies } from './host-dependencies'
 
 /** Temporary directories to remove after each test. */
@@ -17,6 +18,20 @@ function fixture(manifest: unknown): string {
   directories.push(directory)
   writeFileSync(join(directory, 'package.json'), JSON.stringify(manifest))
   return directory
+}
+
+/**
+ * Build a probe that records calls and returns a scripted exit code per command.
+ * @param exitCodes - Exit code by command name; an unlisted command exits zero.
+ * @returns The prober and its recorded calls.
+ */
+function fakeProbe(exitCodes: Record<string, number> = {}) {
+  const calls: { readonly args: readonly string[], readonly command: string }[] = []
+  const probe: HostProbe = (command, args) => {
+    calls.push({ args, command })
+    return { exitCode: exitCodes[command] ?? 0 }
+  }
+  return { calls, probe }
 }
 
 afterEach(() => {
@@ -51,39 +66,86 @@ describe('readHostDependencies', () => {
 })
 
 describe('checkHostDependencies', () => {
-  test('splits resolved, missing, and malformed declarations', () => {
-    const resolve = (command: string): string | null => (command === 'docker' ? '/usr/bin/docker' : null)
-    const check = checkHostDependencies(['docker', 'op', '', 42], resolve)
+  test('probes known capabilities with their version command', () => {
+    const { calls, probe } = fakeProbe()
+    const check = checkHostDependencies(['docker', 'nginx', 'opencode'], {
+      probe,
+      resolve: () => '/usr/bin/x',
+    })
 
-    expect(check.resolved).toEqual(['docker'])
-    expect(check.missing).toEqual(['op'])
-    expect(check.broken).toEqual(['""', '42'])
+    expect(check.resolved).toEqual(['docker', 'nginx', 'opencode'])
+    expect(calls).toEqual([
+      { args: ['--version'], command: 'docker' },
+      { args: ['-v'], command: 'nginx' },
+      { args: ['--version'], command: 'opencode' },
+    ])
   })
 
-  test('never throws', () => {
-    expect(() => checkHostDependencies(['op'], () => null)).not.toThrow()
+  test('reports a present but not runnable capability as broken', () => {
+    const { probe } = fakeProbe({ nginx: 1 })
+    const check = checkHostDependencies(['nginx'], { probe, resolve: () => '/usr/sbin/nginx' })
+
+    expect(check.broken).toEqual(['nginx'])
+    expect(check.resolved).toEqual([])
+    expect(check.missing).toEqual([])
+  })
+
+  test('does not probe a capability that is not on PATH', () => {
+    const { calls, probe } = fakeProbe()
+    const check = checkHostDependencies(['docker'], { probe, resolve: () => null })
+
+    expect(check.missing).toEqual(['docker'])
+    expect(calls).toEqual([])
+  })
+
+  test('leaves unknown capabilities to PATH presence without probing', () => {
+    const { calls, probe } = fakeProbe()
+    const check = checkHostDependencies(['some-tool'], { probe, resolve: () => '/usr/bin/some-tool' })
+
+    expect(check.resolved).toEqual(['some-tool'])
+    expect(calls).toEqual([])
+  })
+
+  test('splits invalid declarations from valid ones', () => {
+    const check = checkHostDependencies(['', 42, null], { resolve: () => null })
+
+    expect(check.invalid).toEqual(['""', '42', 'null'])
   })
 })
 
 describe('requireHostDependencies', () => {
   test('returns the resolved capabilities when every declaration is satisfied', () => {
-    const directory = fixture({ basis: { hostDependencies: ['docker', 'op'] }, name: 'app' })
-    const check = requireHostDependencies(directory, { resolve: () => '/usr/bin/x' })
+    const directory = fixture({ basis: { hostDependencies: ['docker', 'some-tool'] }, name: 'app' })
+    const check = requireHostDependencies(directory, {
+      probe: () => ({ exitCode: 0 }),
+      resolve: () => '/usr/bin/x',
+    })
 
-    expect(check.resolved).toEqual(['docker', 'op'])
+    expect(check.resolved).toEqual(['docker', 'some-tool'])
   })
 
   test('fails loudly naming every missing capability', () => {
     const directory = fixture({ basis: { hostDependencies: ['docker', 'op', 'lego'] }, name: 'app' })
     const resolve = (command: string): string | null => (command === 'docker' ? '/usr/bin/docker' : null)
 
-    expect(() => requireHostDependencies(directory, { resolve })).toThrow(/op, lego/)
+    expect(() => requireHostDependencies(directory, { probe: () => ({ exitCode: 0 }), resolve }))
+      .toThrow(/not found on PATH: op, lego/)
+  })
+
+  test('fails loudly naming every present but broken capability', () => {
+    const directory = fixture({ basis: { hostDependencies: ['docker', 'op'] }, name: 'app' })
+    const probe = (command: string): { exitCode: number } => ({ exitCode: command === 'op' ? 1 : 0 })
+
+    expect(() => requireHostDependencies(directory, { probe, resolve: () => '/usr/bin/x' }))
+      .toThrow(/present but not runnable: op/)
   })
 
   test('fails loudly naming every malformed declaration', () => {
     const directory = fixture({ basis: { hostDependencies: ['docker', null] }, name: 'app' })
 
-    expect(() => requireHostDependencies(directory, { resolve: () => '/usr/bin/docker' }))
-      .toThrow(/invalid declaration\(s\): null/)
+    expect(() => requireHostDependencies(directory, {
+      probe: () => ({ exitCode: 0 }),
+      resolve: () => '/usr/bin/docker',
+    })).toThrow(/invalid declaration\(s\): null/)
   })
 })

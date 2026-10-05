@@ -53,7 +53,19 @@ export function loadDotenv(options: { directory?: string, mode?: string } = {}):
   })
 }
 
-loadDotenv()
+/** Whether the standard dotenv files have already been loaded in this process. */
+let loaded = false
+
+/**
+ * Load the standard dotenv files once, the first time an {@link Environment} is
+ * constructed. Importing the package (or using only {@link run} or `secret`)
+ * deliberately touches no files and mutates no environment.
+ */
+function ensureLoaded(): void {
+  if (loaded) return
+  loaded = true
+  loadDotenv()
+}
 
 /**
  * A typed reader over the process environment. Values are trimmed, and a blank
@@ -62,6 +74,13 @@ loadDotenv()
  * mistaken for an intended default.
  */
 export class Environment {
+  /**
+   * Ensure the standard dotenv files are loaded once, then read values.
+   */
+  constructor() {
+    ensureLoaded()
+  }
+
   /**
    * A string value, or the fallback when unset or blank.
    * @param key - Variable name.

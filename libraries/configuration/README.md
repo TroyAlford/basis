@@ -29,7 +29,10 @@ On import, the standard dotenv files load most-specific first —
 `.env.<mode>.local`, `.env.local`, `.env.<mode>`, then `.env` — where `<mode>`
 is `NODE_ENV`, defaulting to `development`. dotenv's ordered `path` gives the
 precedence, and a value already present in the process environment always wins,
-so real environment variables override files. There is no loading control plane.
+so real environment variables override files. Loading is lazy: the files are
+read the first time an `Environment` is constructed, so importing the package —
+or using only `secret`/`run` — never mutates the process environment. There is
+no loading control plane.
 
 `Environment` reads values; a blank value counts as unset. Unset values fall
 back, while a present-but-invalid value throws naming the key, so a typo in

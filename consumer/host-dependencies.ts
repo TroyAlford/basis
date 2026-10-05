@@ -2,23 +2,27 @@
  * Install-time validation of a consumer's declared non-npm host dependencies.
  *
  * Some capabilities the host must provide are not npm packages — `docker`,
- * `nginx`, `op`, `lego` — and cannot be installed by `bun install`. A consumer
- * declares the ones it needs as static deployment metadata in its own root
- * `package.json`:
+ * `nginx`, `pm2`, `op`, `lego`, `opencode` — and cannot be installed by
+ * `bun install`. A consumer declares the ones it needs as static deployment
+ * metadata in its own root `package.json`:
  *
  * ```json
  * { "basis": { "hostDependencies": ["docker", "nginx", "op", "lego"] } }
  * ```
  *
- * Basis's trusted install hook reads that declaration and fails `bun install`
- * loudly, naming every capability that does not resolve on `PATH` or is
- * declared incorrectly, so a host that cannot run the application never
- * completes an install that looks successful. This is package metadata, not an
- * imperative API: application source never calls it.
+ * Basis owns the verification policy. A declared capability must resolve on
+ * `PATH`, and for the known capabilities Basis also runs the boring version
+ * command to prove the binary is runnable, not merely present. A capability
+ * that is missing, present-but-broken, or declared incorrectly fails
+ * `bun install` loudly, naming it. This is package metadata, not an imperative
+ * API: application source never calls it, and optional capabilities are simply
+ * left out of the declaration rather than configured.
  */
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { run } from '../libraries/configuration/run'
+import { Logger } from '../libraries/utilities'
 
 /** Error prefix shared by host-dependency failures. */
 const PREFIX = '[basis]'
@@ -26,18 +30,67 @@ const PREFIX = '[basis]'
 /** Top-level manifest field carrying Basis's static deployment metadata. */
 const BASIS_FIELD = 'basis'
 
+/** How long a capability's version probe may run before it is killed. */
+const PROBE_TIMEOUT_MS = 10_000
+
+/** Logger that stays quiet; probe output is not install output. */
+const silent = new Logger({ silent: true })
+
+/**
+ * The version command Basis runs to prove a known capability is runnable. An
+ * unknown declared name falls back to presence on `PATH` alone.
+ */
+const PROBES: Readonly<Record<string, readonly string[]>> = {
+  docker: ['--version'],
+  lego: ['--version'],
+  nginx: ['-v'],
+  op: ['--version'],
+  opencode: ['--version'],
+  pm2: ['--version'],
+}
+
 /** Resolve a command name to an absolute path, or `null` when it is absent. */
 export type HostCommandResolver = (command: string) => string | null
 
+/** Outcome of running a capability's version command. */
+export interface HostProbeResult {
+  /** Process exit code; zero means runnable. */
+  readonly exitCode: number,
+}
+
+/** Run a capability's version command; injectable for tests. */
+export type HostProbe = (command: string, args: readonly string[]) => HostProbeResult
+
+/** Injectable resolution and probing, used by tests. */
+export interface HostDependencyOptions {
+  /** Prober used for known capabilities. Defaults to the shared runner. */
+  readonly probe?: HostProbe,
+  /** Resolver used to locate capabilities. Defaults to `Bun.which`. */
+  readonly resolve?: HostCommandResolver,
+}
+
 /** Outcome of validating a consumer's declared host dependencies. */
 export interface HostDependencyCheck {
-  /** Declarations that are not non-empty strings. */
+  /** Declared capabilities that resolve on `PATH` but are not runnable. */
   readonly broken: readonly string[],
+  /** Declarations that are not non-empty strings. */
+  readonly invalid: readonly string[],
   /** Declared capabilities that do not resolve on `PATH`. */
   readonly missing: readonly string[],
-  /** Declared capabilities that resolve on `PATH`. */
+  /** Declared capabilities that pass verification. */
   readonly resolved: readonly string[],
 }
+
+/**
+ * The default prober, using the shared bounded runner.
+ * @param command - Capability to run.
+ * @param args - Version arguments.
+ * @returns The exit code.
+ */
+const defaultProbe: HostProbe = (command, args) => run(command, args, {
+  logger: silent,
+  timeoutMs: PROBE_TIMEOUT_MS,
+})
 
 /**
  * A declaration rendered for a failure message.
@@ -81,52 +134,62 @@ export function readHostDependencies(rootDir: string): unknown[] {
 }
 
 /**
- * Resolve every declared host capability on `PATH`, splitting the resolved from
- * the missing and the malformed. Never throws, so a caller can report all
- * problems at once.
+ * Verify every declared host capability, splitting the invalid declarations,
+ * the missing commands, the present-but-broken known capabilities, and the
+ * resolved ones. Never throws, so a caller can report every problem at once.
  * @param declared - Declared entries, typically from {@link readHostDependencies}.
- * @param resolve - Resolver used to locate a capability. Defaults to `Bun.which`.
- * @returns The broken, missing, and resolved declarations.
+ * @param options - Resolution and probing overrides.
+ * @returns The broken, invalid, missing, and resolved declarations.
  */
 export function checkHostDependencies(
   declared: readonly unknown[],
-  resolve: HostCommandResolver = Bun.which,
+  options: HostDependencyOptions = {},
 ): HostDependencyCheck {
+  const probe = options.probe ?? defaultProbe
+  const resolve = options.resolve ?? Bun.which
   const broken: string[] = []
+  const invalid: string[] = []
   const missing: string[] = []
   const resolved: string[] = []
 
   for (const entry of declared) {
     if (typeof entry !== 'string' || entry.trim().length === 0) {
-      broken.push(describe(entry))
+      invalid.push(describe(entry))
       continue
     }
+
     const name = entry.trim()
-    if (resolve(name) === null) missing.push(name)
-    else resolved.push(name)
+    if (resolve(name) === null) {
+      missing.push(name)
+      continue
+    }
+
+    const args = PROBES[name]
+    if (args === undefined || probe(name, args).exitCode === 0) resolved.push(name)
+    else broken.push(name)
   }
 
-  return { broken, missing, resolved }
+  return { broken, invalid, missing, resolved }
 }
 
 /**
- * Fail loudly unless every declared host dependency resolves on `PATH`.
+ * Fail loudly unless every declared host dependency passes verification.
  * @param rootDir - Absolute path to the consumer project root.
- * @param options - Resolver override, used by tests.
- * @param options.resolve - Resolver used to locate a capability. Defaults to `Bun.which`.
+ * @param options - Resolution and probing overrides, used by tests.
  * @returns The check outcome when every declaration is satisfied.
- * @throws {Error} Naming every missing and malformed declaration.
+ * @throws {Error} Naming every missing, broken, and invalid declaration.
  */
 export function requireHostDependencies(
   rootDir: string,
-  options: { resolve?: HostCommandResolver } = {},
+  options: HostDependencyOptions = {},
 ): HostDependencyCheck {
-  const check = checkHostDependencies(readHostDependencies(rootDir), options.resolve ?? Bun.which)
-  if (check.missing.length === 0 && check.broken.length === 0) return check
+  const check = checkHostDependencies(readHostDependencies(rootDir), options)
 
   const problems: string[] = []
   if (check.missing.length > 0) problems.push(`not found on PATH: ${check.missing.join(', ')}`)
-  if (check.broken.length > 0) problems.push(`invalid declaration(s): ${check.broken.join(', ')}`)
+  if (check.broken.length > 0) problems.push(`present but not runnable: ${check.broken.join(', ')}`)
+  if (check.invalid.length > 0) problems.push(`invalid declaration(s): ${check.invalid.join(', ')}`)
+  if (problems.length === 0) return check
 
   throw new Error(
     `${PREFIX} declared host dependencies are unsatisfied — ${problems.join('; ')}.\n` +
