@@ -1,17 +1,21 @@
 /**
- * Configuration and host-integration primitives for first-party applications.
+ * Public surface of `basis/configuration`.
  *
- * This module collects the pieces every app otherwise reimplements: typed,
- * topic-grouped configuration over the process environment (with the standard
- * dotenv precedence), a 1Password secret reader, non-npm peer-dependency checks,
- * and the shared bounded subprocess runner.
+ * Three primitives, and only the types a consumer must name to call them:
+ *
+ * - `run` — the shared bounded subprocess runner.
+ * - `Environment` / `loadEnvironment` — typed configuration over the process
+ *   environment, including the host peer-dependency check (`requireCommands`).
+ * - `secret` — 1Password secret reads.
+ *
+ * Everything else in the workspace is internal implementation and is
+ * deliberately not re-exported: factories and test seams (`createSecretReader`,
+ * `createConfiguration`), per-module helpers (`environmentFiles`,
+ * `checkCommands`), and internal types.
  */
 
-export { checkCommands, requireCommands } from './commands'
-export type { CommandCheck, CommandOptions, CommandResolver, RequiredCommand } from './commands'
-export { createConfiguration, Environment, environmentFiles, loadEnvironment } from './environment'
-export type { EnvironmentTopic, LoadEnvironmentOptions } from './environment'
+export { Environment, loadEnvironment, requireCommands } from './environment'
+export type { LoadEnvironmentOptions, RequiredCommand } from './environment'
 export { run } from './run'
 export type { CommandResult, RunOptions } from './run'
-export { createSecretReader, secret, SecretReadError } from './secret'
-export type { CreateSecretReaderOptions, SecretCommandRunner, SecretReader } from './secret'
+export { SecretReadError, secret } from './secret'

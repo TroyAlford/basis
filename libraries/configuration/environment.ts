@@ -14,6 +14,15 @@ import { parse } from 'dotenv'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+/*
+ * Host peer-dependency checks belong to the environment surface: external
+ * binaries are part of the host this configuration describes. `commands.ts`
+ * remains the implementation; consumers reach the check through the
+ * environment module rather than a second public entrypoint.
+ */
+export { requireCommands } from './commands'
+export type { RequiredCommand } from './commands'
+
 /** Error prefix shared by every configuration failure. */
 const PREFIX = '[basis/configuration]'
 
