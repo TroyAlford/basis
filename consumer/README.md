@@ -24,6 +24,22 @@ responsibility (a CI image or a one-time host bootstrap). Set
 Basis requires Bun `>=1.4.0`. Bun only honors root-level `patchedDependencies`,
 which is why the trusted hook exists.
 
+Some capabilities the host must provide are not npm packages. Declare the ones
+your application needs as static deployment metadata in the root `package.json`:
+
+```json
+{ "basis": { "hostDependencies": ["docker", "nginx", "op", "lego"] } }
+```
+
+The install hook resolves each declared capability on `PATH` and, for the known
+capabilities (`docker`, `nginx`, `pm2`, `op`, `lego`, `opencode`), runs its
+version command to prove it is runnable, not merely present. Anything missing,
+present-but-broken, or malformed fails `bun install` loudly, naming it, so a host
+that cannot run the application never completes an install that looks
+successful. An unknown name falls back to `PATH` presence. Basis mandates no
+specific binary; omit the field when there are none. This is package metadata,
+not an API — application source never calls it.
+
 ## ESLint
 
 ```js
@@ -147,6 +163,36 @@ logger.stopwatchStop(stopwatch, 'request handled')
 `LoggerOptions` supports `prefix`, `silent`, `logFilePath`, and `maxLogLines`.
 Use `withPrefix` to derive a scoped view, and the `stopwatchStart` /
 `stopwatchSplit` / `stopwatchStop` helpers to measure durations.
+
+## Configuration
+
+`basis/configuration` exposes three primitives:
+
+```ts
+import { Environment, run, secret } from 'basis/configuration'
+```
+
+- `Environment` reads typed values from the process environment, which loads the
+  standard dotenv files most-specific first — `.env.<mode>.local`, `.env.local`,
+  `.env.<mode>`, `.env`, where `<mode>` is `NODE_ENV` (default `development`) —
+  with real environment variables winning. `string(key, fallback?)`,
+  `number(key, fallback?)`, and `boolean(key, fallback?)` fall back when unset
+  and throw, naming the key, when a present value is malformed; `required(key)`
+  fails loudly when unset; `enabled(...keys)` computes a topic's `ENABLED` flag.
+  Consumers own their own config policy (defaults, required keys, enabling
+  conditions).
+- `secret(reference)` reads an `op://` reference through the 1Password CLI and
+  returns the value as a string (`JSON.parse` it for structure). The Service
+  Account token comes from `OP_SERVICE_ACCOUNT_TOKEN` and is handed to the `op`
+  child under that name; a missing token fails closed and neither the token nor
+  the value is ever logged or echoed.
+- `run(command, args, options)` is the shared synchronous, shell-free, bounded
+  (`timeoutMs`) subprocess runner, returning captured `{ exitCode, stdout,
+  stderr }` (typed by `RunOptions` and `CommandResult`).
+
+Internal factories and loading seams — `createSecretReader`, `loadDotenv`, and
+their types — are not part of the package surface. Non-npm host capabilities are
+declared as `basis.hostDependencies` (see [Install](#install)), not called.
 
 ## React runtime
 

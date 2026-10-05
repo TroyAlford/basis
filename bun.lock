@@ -20,6 +20,7 @@
         "@typescript/native": "npm:typescript@^7.0.2",
         "chalk": "^6.0.0",
         "chokidar": "^5.0.0",
+        "dotenv": "^18.0.5",
         "eslint": "^10.11.0",
         "eslint-plugin-import-newlines": "^2.0.0",
         "eslint-plugin-jsdoc": "^64.5.4",
@@ -58,6 +59,15 @@
       },
       "devDependencies": {
         "@types/less": "^3.0.8",
+      },
+    },
+    "libraries/configuration": {
+      "name": "@basis/configuration",
+      "dependencies": {
+        "dotenv": "^18.0.5",
+      },
+      "peerDependencies": {
+        "@basis/utilities": "workspace:*",
       },
     },
     "libraries/docs": {
@@ -233,6 +243,8 @@
     "@babel/types": ["@babel/types@7.29.0", "", { "dependencies": { "@babel/helper-string-parser": "^7.27.1", "@babel/helper-validator-identifier": "^7.28.5" } }, "sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A=="],
 
     "@basis/bun-plugins": ["@basis/bun-plugins@workspace:libraries/bun-plugins"],
+
+    "@basis/configuration": ["@basis/configuration@workspace:libraries/configuration"],
 
     "@basis/docs": ["@basis/docs@workspace:libraries/docs"],
 
@@ -513,6 +525,8 @@
     "deep-is": ["deep-is@0.1.4", "", {}, "sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ=="],
 
     "detect-libc": ["detect-libc@1.0.3", "", { "bin": { "detect-libc": "./bin/detect-libc.js" } }, "sha512-pGjwhsmsp4kL2RTz08wcOlGN83otlqHeD/Z5T8GXZB+/YcpQ/dgo+lbU8ZsGxV0HIvqqxo9l7mqYwyYMD9bKDg=="],
+
+    "dotenv": ["dotenv@18.0.5", "", { "bin": { "dotenv": "dist/index.cjs" } }, "sha512-aBrGvt6KhjxbEnatqMWOMidftwsrCiCvqh1yNIGB9QyF0J+VcWkKDMsvYOEm7ZS82oiV+BT1sTOtIlAmUlTpwQ=="],
 
     "emoji-regex": ["emoji-regex@8.0.0", "", {}, "sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A=="],
 
