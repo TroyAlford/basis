@@ -1,0 +1,10 @@
+{
+  "name": "@basis/oauth",
+  "description": "Shared cross-subdomain identity cookie and provider-agnostic OAuth flow for first-party applications.",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "peerDependencies": {
+    "@basis/configuration": "workspace:*"
+  }
+}

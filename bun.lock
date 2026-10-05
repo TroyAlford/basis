@@ -105,6 +105,12 @@
         "typescript": "^6",
       },
     },
+    "libraries/oauth": {
+      "name": "@basis/oauth",
+      "peerDependencies": {
+        "@basis/configuration": "workspace:*",
+      },
+    },
     "libraries/react": {
       "name": "@basis/react",
       "dependencies": {
@@ -133,6 +139,7 @@
       },
       "peerDependencies": {
         "@basis/bun-plugins": "workspace:*",
+        "@basis/oauth": "workspace:*",
         "@basis/react": "workspace:*",
         "@basis/utilities": "workspace:*",
         "react": "^19.3.0",
@@ -249,6 +256,8 @@
     "@basis/docs": ["@basis/docs@workspace:libraries/docs"],
 
     "@basis/eslint-plugin": ["@basis/eslint-plugin@workspace:libraries/eslint-plugin"],
+
+    "@basis/oauth": ["@basis/oauth@workspace:libraries/oauth"],
 
     "@basis/react": ["@basis/react@workspace:libraries/react"],
 

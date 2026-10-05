@@ -194,6 +194,40 @@ Internal factories and loading seams — `createSecretReader`, `loadDotenv`, and
 their types — are not part of the package surface. Non-npm host capabilities are
 declared as `basis.hostDependencies` (see [Install](#install)), not called.
 
+## OAuth and identity
+
+`basis/oauth` owns the shared cross-subdomain identity cookie as one capability,
+`Identity`:
+
+```ts
+import { Identity } from 'basis/oauth'
+
+const identity = new Identity({
+  public: 'op://Vault/OAuth/client-id',
+  secret: 'op://Vault/OAuth/client-secret',
+  scope: Identity.Scope.Domain, // optional; default Identity.Scope.Subdomain
+})
+```
+
+- `identity.set(request, headers, userId)` signs a user in; `set(..., null)`
+  signs out, clearing the cookie at the same scope. `identity.get(request)`
+  returns the verified user id, or `null`.
+- The cookie is `HttpOnly`, `Secure`, `SameSite=Lax`, and host-only by default
+  with a 30-day lifetime. `Identity.Scope.Domain` shares it with the parent
+  domain and its descendants by removing the request's current subdomain
+  (`auth.example.co.uk` → `example.co.uk`); a two-label host degrades to
+  host-only. There is no public-suffix list.
+- The value is the user id sealed with AES-256-GCM (versioned, base64url).
+  Credentials may be `op://` references, resolved lazily through
+  `basis/configuration`. A user id and a secret are never logged.
+
+`basis/server` builds on it: `server.oauth(options)` mounts a provider-agnostic
+authorization-code flow at `/api/oauth/login`, `/api/oauth/callback`, and
+`/api/oauth/logout`. Configuring it (or `server.identity(identity)`) embeds the
+verified user id as `runtime.identity` in the SPA shell, so a consumer frontend
+reads it from its standard runtime context without a fetch of its own. See
+`libraries/oauth/README.md`.
+
 ## React runtime
 
 `basis/react` exposes the supported React component library:

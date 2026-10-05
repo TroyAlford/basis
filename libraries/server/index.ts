@@ -1,5 +1,7 @@
 export type { APIRoute } from './types/APIRoute'
 export type { HealthOptions, HealthStatus } from './apis/health'
+export { OAuth } from './source/OAuth'
+export type { OAuthOptions } from './source/OAuth'
 export type { RouteContext } from './types/RouteContext'
 export { sseResponse } from './source/Sse'
 export type { SseChannel, SseHandler } from './types/SseChannel'

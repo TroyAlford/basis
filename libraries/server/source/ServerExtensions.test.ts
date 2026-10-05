@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Identity } from '../../oauth'
 import { HttpVerb, Logger, parseURI } from '../../utilities'
 import { Server } from './Server'
 import { sseResponse } from './Sse'
@@ -188,12 +189,38 @@ describe('Server runtime context', () => {
       expect(html).toContain('mtg-proxifier')
       expect(html).toContain('1.2.3')
       expect(html).toContain('abc123')
-      expect(server.runtime).toEqual({ gitSha: 'abc123', serviceName: 'mtg-proxifier', version: '1.2.3' })
+      expect(server.runtime).toEqual({
+        gitSha: 'abc123',
+        identity: null,
+        serviceName: 'mtg-proxifier',
+        version: '1.2.3',
+      })
     } finally {
       for (const [key, value] of Object.entries(previous)) {
         if (value === undefined) Reflect.deleteProperty(process.env, key)
         else process.env[key] = value
       }
     }
+  })
+
+  test('embeds the verified identity from the configured capability', async () => {
+    const capability = new Identity({ provider: 'test', public: 'client-id', secret: 'client-secret' })
+    const headers = new Headers()
+    capability.set(new Request('https://app.example.com/'), headers, 'user-42')
+    const pair = (headers.getSetCookie()[0] ?? '').split(';')[0] ?? ''
+
+    const request = new Request('https://app.example.com/')
+    request.headers.set('cookie', pair)
+
+    const server = new Server().identity(capability)
+    const html = await (await server.handleUI(request)).text()
+    expect(html).toContain('user-42')
+  })
+
+  test('embeds a null identity for an anonymous request', async () => {
+    const capability = new Identity({ provider: 'test', public: 'client-id', secret: 'client-secret' })
+    const server = new Server().identity(capability)
+    const html = await (await server.handleUI(new Request('https://app.example.com/'))).text()
+    expect(html).toContain('"identity":null')
   })
 })

@@ -15,6 +15,7 @@
   },
   "peerDependencies": {
     "@basis/bun-plugins": "workspace:*",
+    "@basis/oauth": "workspace:*",
     "@basis/react": "workspace:*",
     "@basis/utilities": "workspace:*",
     "react": "^19.3.0",

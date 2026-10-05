@@ -143,8 +143,11 @@ const main = async (): Promise<void> => {
     const output = run(['bun', 'src/runtime.tsx'], app, env)
     assert(output.includes('runtime-ok'), 'react/server runtime executed')
 
-    // Bundling proves the source resolves through Bun's bundler too.
-    run(['bun', 'build', 'src/runtime.tsx', '--outdir', 'dist'], app, env)
+    /*
+     * Bundling proves the source resolves through Bun's bundler too. The runtime
+     * entry imports `basis/server`, which is server-only, so target Bun.
+     */
+    run(['bun', 'build', 'src/runtime.tsx', '--outdir', 'dist', '--target', 'bun'], app, env)
 
     // Starting the managed server proves the production surface end to end.
     const server = await startManagedServer(app, env)

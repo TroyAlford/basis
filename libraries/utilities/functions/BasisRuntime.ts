@@ -5,11 +5,15 @@
  * bootstrap the application's standard runtime context without an extra startup
  * fetch. `SERVICE_NAME` is the platform service identity (the repository name);
  * `VERSION` is the authoritative release version and `GIT_SHA` the observed
- * deployed revision. Any value the platform did not supply is `null`.
+ * deployed revision. `identity` is the verified signed-in user id for the
+ * request that bootstrapped the shell, or `null` when the request is anonymous.
+ * Any value the platform did not supply is `null`.
  */
 export interface BasisRuntime {
   /** Observed deployed checkout revision (`GIT_SHA`). */
   gitSha: string | null,
+  /** Verified signed-in user id for this bootstrap request, or `null`. */
+  identity: string | null,
   /** Service identity, conventionally the repository name (`SERVICE_NAME`). */
   serviceName: string | null,
   /** Authoritative release version (`VERSION`). */
@@ -19,6 +23,7 @@ export interface BasisRuntime {
 /** The runtime context used when the platform supplied no facts. */
 export const EMPTY_BASIS_RUNTIME: BasisRuntime = Object.freeze({
   gitSha: null,
+  identity: null,
   serviceName: null,
   version: null,
 })
@@ -55,6 +60,7 @@ export function parseBasisRuntime(value: string | null | undefined): BasisRuntim
     const record = parsed as Record<string, unknown>
     return {
       gitSha: typeof record.gitSha === 'string' ? record.gitSha : null,
+      identity: typeof record.identity === 'string' ? record.identity : null,
       serviceName: typeof record.serviceName === 'string' ? record.serviceName : null,
       version: typeof record.version === 'string' ? record.version : null,
     }
