@@ -1,0 +1,13 @@
+{
+  "name": "@basis/configuration",
+  "description": "Typed configuration, secret reads, peer-dependency checks, and subprocess execution for first-party applications.",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.5"
+  },
+  "peerDependencies": {
+    "@basis/utilities": "workspace:*"
+  }
+}

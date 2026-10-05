@@ -8,6 +8,7 @@
   },
   "exports": {
     "./cli": "./consumer/cli.ts",
+    "./configuration": "./consumer/configuration.ts",
     "./eslint": "./consumer/eslint.ts",
     "./eslint.config.mjs": "./eslint.config.mjs",
     "./logger": "./consumer/logger.ts",
@@ -41,6 +42,7 @@
     "@typescript/native": "npm:typescript@^7.0.2",
     "chalk": "^6.0.0",
     "chokidar": "^5.0.0",
+    "dotenv": "^18.0.5",
     "eslint": "^10.11.0",
     "eslint-plugin-import-newlines": "^2.0.0",
     "eslint-plugin-jsdoc": "^64.5.4",

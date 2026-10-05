@@ -148,6 +148,42 @@ logger.stopwatchStop(stopwatch, 'request handled')
 Use `withPrefix` to derive a scoped view, and the `stopwatchStart` /
 `stopwatchSplit` / `stopwatchStop` helpers to measure durations.
 
+## Configuration
+
+`basis/configuration` collects the host-integration primitives applications
+otherwise reimplement:
+
+```ts
+import {
+  checkCommands,
+  createConfiguration,
+  createSecretReader,
+  Environment,
+  requireCommands,
+  run,
+  secret,
+} from 'basis/configuration'
+```
+
+- `Environment` (with `Environment.load()` and `loadEnvironment()`) loads the
+  standard dotenv files most-specific first — `.env.<mode>.local`, `.env.local`,
+  `.env.<mode>`, `.env`, where `<mode>` defaults to `NODE_ENV` then
+  `development` — and exposes typed getters (`string`, `number`, `boolean`,
+  `required`, `enabled`). `createConfiguration` groups getters by topic, and
+  `Environment.enabled(...keys)` computes a topic's `ENABLED` flag.
+- `secret<T>(reference)` reads an `op://` reference through the 1Password CLI,
+  returning the value typed by its JSON shape. It sets
+  `OP_SERVICE_ACCOUNT_TOKEN` and `PATH` on the `op` child, never logs or echoes a
+  value, and fails closed when the token is unset. `createSecretReader` injects
+  a runner and an explicit token.
+- `requireCommands([...])` fails loudly, naming every external binary missing
+  from `PATH`, so a host's non-npm peer dependencies (`docker`, `op`, …) are
+  validated at install or launch. Basis mandates no specific binary;
+  `checkCommands` presence-gates an optional one without throwing.
+- `run(command, args, options)` is the shared synchronous, shell-free,
+  bounded (`timeoutMs`) subprocess runner, returning captured
+  `{ exitCode, stdout, stderr }`.
+
 ## React runtime
 
 `basis/react` exposes the supported React component library:
