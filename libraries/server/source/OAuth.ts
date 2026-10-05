@@ -12,7 +12,6 @@
  * error.
  */
 
-import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { readCookie, serializeCookie } from '../../oauth/cookies'
 import type { Identity, IdentityCredentials } from '../../oauth/identity'
 import { IDENTITY_CREDENTIALS } from '../../oauth/identity'
@@ -74,7 +73,10 @@ export class OAuth {
    * @returns A redirect to the provider authorize URL.
    */
   login(): Response {
-    const state = randomBytes(16).toString('hex')
+    const state = Array.from(
+      crypto.getRandomValues(new Uint8Array(16)),
+      byte => byte.toString(16).padStart(2, '0'),
+    ).join('')
     const headers = new Headers({ Location: this.#options.authorize(state, this.#credentials()) })
     headers.append('Set-Cookie', serializeCookie(STATE_COOKIE, state, { maxAgeSeconds: this.#stateMaxAge() }))
     return new Response(null, { headers, status: 302 })
@@ -179,7 +181,10 @@ export class OAuth {
  * @returns True when they are equal.
  */
 function sameState(a: string, b: string): boolean {
-  const left = Buffer.from(a)
-  const right = Buffer.from(b)
-  return left.length === right.length && timingSafeEqual(left, right)
+  const left = new TextEncoder().encode(a)
+  const right = new TextEncoder().encode(b)
+  if (left.length !== right.length) return false
+  let diff = 0
+  for (let index = 0; index < left.length; index++) diff |= (left[index] ?? 0) ^ (right[index] ?? 0)
+  return diff === 0
 }
