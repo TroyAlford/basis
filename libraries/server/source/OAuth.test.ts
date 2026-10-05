@@ -6,7 +6,7 @@ import { OAuth } from './OAuth'
 import { Server } from './Server'
 
 /** Client credentials the session capability holds. */
-const CREDENTIALS = { public: 'client-id', secret: 'client-secret' }
+const CREDENTIALS = { provider: 'test', public: 'client-id', secret: 'client-secret' }
 
 /** Public origin the flow answers on. */
 const ORIGIN = 'https://app.example.com'
@@ -133,7 +133,7 @@ describe('OAuth callback', () => {
       expect(response.headers.get('location')).toBe('/')
       expect(capture.cookies.some(cookie => cookie.startsWith('basis_oauth_state=;'))).toBe(true)
 
-      const identityCookie = capture.cookies.find(cookie => cookie.startsWith('basis_identity=')) ?? ''
+      const identityCookie = capture.cookies.find(cookie => cookie.startsWith('auth.test=')) ?? ''
       expect(identityCookie).not.toBe('')
       expect(subject.session(requestFor(ORIGIN, identityCookie.split(';')[0]))).toBe('user-42')
     } finally {
@@ -200,7 +200,7 @@ describe('OAuth logout', () => {
       const response = flow().logout(requestFor(`${ORIGIN}/api/oauth/logout`))
       expect(response.status).toBe(302)
 
-      const identityCookie = capture.cookies.find(cookie => cookie.startsWith('basis_identity=')) ?? ''
+      const identityCookie = capture.cookies.find(cookie => cookie.startsWith('auth.test=')) ?? ''
       expect(identityCookie).toContain('Max-Age=0')
     } finally {
       capture.restore()

@@ -204,7 +204,7 @@ describe('Server runtime context', () => {
   })
 
   test('embeds the verified identity from the configured capability', async () => {
-    const capability = new Identity({ public: 'client-id', secret: 'client-secret' })
+    const capability = new Identity({ provider: 'test', public: 'client-id', secret: 'client-secret' })
     const headers = new Headers()
     capability.set(new Request('https://app.example.com/'), headers, 'user-42')
     const pair = (headers.getSetCookie()[0] ?? '').split(';')[0] ?? ''
@@ -218,7 +218,7 @@ describe('Server runtime context', () => {
   })
 
   test('embeds a null identity for an anonymous request', async () => {
-    const capability = new Identity({ public: 'client-id', secret: 'client-secret' })
+    const capability = new Identity({ provider: 'test', public: 'client-id', secret: 'client-secret' })
     const server = new Server().identity(capability)
     const html = await (await server.handleUI(new Request('https://app.example.com/'))).text()
     expect(html).toContain('"identity":null')

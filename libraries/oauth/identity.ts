@@ -27,9 +27,6 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { secret as readSecret } from '../configuration'
 import { readCookie, serializeCookie } from './cookies'
 
-/** Cookie name Identity owns; consumers never name it. */
-const COOKIE_NAME = 'basis_identity'
-
 /** Version prefix for the current scheme. */
 const VERSION = 'v1'
 
@@ -74,6 +71,12 @@ export enum Scope {
 interface IdentityOptions {
   /** Lifetime in seconds. Defaults to 30 days. */
   readonly maxAgeSeconds?: number,
+  /**
+   * OAuth provider slug. The identity cookie is named `auth.<provider>`
+   * (`auth.github`, `auth.discord`), so a host-only cookie for one provider
+   * cannot collide with a sibling's domain-scoped one.
+   */
+  readonly provider: string,
   /** OAuth client id; may be an `op://` reference. */
   readonly public: string,
   /** Cookie scope. Defaults to {@link Scope.Subdomain}. */
@@ -110,6 +113,7 @@ export class Identity {
   static readonly Scope = Scope
 
   #maxAgeSeconds: number
+  #name: string
   #options: IdentityOptions
   #resolved: IdentityCredentials | null = null
 
@@ -120,6 +124,7 @@ export class Identity {
   constructor(options: IdentityOptions) {
     this.#options = options
     this.#maxAgeSeconds = options.maxAgeSeconds ?? DEFAULT_MAX_AGE_SECONDS
+    this.#name = `auth.${options.provider}`
   }
 
   /**
@@ -144,7 +149,7 @@ export class Identity {
    * cookie is absent, or the value does not authenticate.
    */
   get(request: Request): string | null {
-    const value = readCookie(request.headers.get('cookie'), COOKIE_NAME)
+    const value = readCookie(request.headers.get('cookie'), this.#name)
     if (value === null) return null
     return readIdentity(value, this[IDENTITY_CREDENTIALS]().secret)
   }
@@ -163,7 +168,7 @@ export class Identity {
     const domain = this.#domainFor(request)
 
     if (userId === null) {
-      headers.append('Set-Cookie', serializeCookie(COOKIE_NAME, '', {
+      headers.append('Set-Cookie', serializeCookie(this.#name, '', {
         ...(domain === null ? {} : { domain }),
         maxAgeSeconds: 0,
       }))
@@ -171,7 +176,7 @@ export class Identity {
     }
 
     const sealed = encryptIdentity(userId, this[IDENTITY_CREDENTIALS]().secret)
-    headers.append('Set-Cookie', serializeCookie(COOKIE_NAME, sealed, {
+    headers.append('Set-Cookie', serializeCookie(this.#name, sealed, {
       ...(domain === null ? {} : { domain }),
       maxAgeSeconds: this.#maxAgeSeconds,
     }))

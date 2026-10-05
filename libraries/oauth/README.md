@@ -30,6 +30,7 @@ hostname parsing.
 import { Identity } from 'basis/oauth'
 
 const identity = new Identity({
+  provider: 'github',
   public: 'op://Vault/OAuth/client-id', // client id; may be an op:// reference
   secret: 'op://Vault/OAuth/client-secret', // sealing secret; may be an op:// reference
   scope: Identity.Scope.Domain, // optional; default Identity.Scope.Subdomain

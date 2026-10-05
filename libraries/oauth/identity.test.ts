@@ -9,7 +9,7 @@ const CLIENT_ID = 'client-id'
 const CLIENT_SECRET = 'client-secret'
 
 /** The cookie name the capability owns. */
-const COOKIE = 'basis_identity'
+const COOKIE = 'auth.test'
 
 /** Host used for a plain app origin. */
 const APP = 'https://app.example.com/'
@@ -55,7 +55,7 @@ function tamper(value: string): string {
  * @returns The capability.
  */
 function identity(options: { maxAgeSeconds?: number, scope?: Scope } = {}): Identity {
-  return new Identity({ public: CLIENT_ID, secret: CLIENT_SECRET, ...options })
+  return new Identity({ provider: 'test', public: CLIENT_ID, secret: CLIENT_SECRET, ...options })
 }
 
 describe('Identity sign-in', () => {
@@ -93,7 +93,7 @@ describe('Identity sign-in', () => {
     const headers = new Headers()
     subject.set(requestFor(APP), headers, '42')
 
-    const stranger = new Identity({ public: CLIENT_ID, secret: 'a-different-secret' })
+    const stranger = new Identity({ provider: 'test', public: CLIENT_ID, secret: 'a-different-secret' })
     expect(stranger.get(requestFor(APP, cookiePair(headers)))).toBeNull()
   })
 
@@ -195,7 +195,7 @@ describe('Identity secret handling', () => {
     Reflect.deleteProperty(Bun.env, 'OP_SERVICE_ACCOUNT_TOKEN')
     try {
       // Constructing does not resolve, so the capability can exist without 1Password.
-      const subject = new Identity({ public: CLIENT_ID, secret: 'op://Vault/item/field' })
+      const subject = new Identity({ provider: 'test', public: CLIENT_ID, secret: 'op://Vault/item/field' })
       // Using it resolves, and a missing Service Account token fails closed.
       expect(() => subject.set(requestFor(APP), new Headers(), '42')).toThrow()
     } finally {
