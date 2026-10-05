@@ -28,6 +28,22 @@ describe('standard review manifest', () => {
     expect(reviewer?.verification).toEqual({ detector: 'knip' })
   })
 
+  test('ships the accidental complexity semantic reviewer', () => {
+    const reviewer = STANDARD_REVIEW_MANIFEST.reviewers
+      .find(candidate => candidate.id === 'accidental-complexity')
+
+    expect(reviewer?.executionProfile).toBe('local-semantic')
+    expect(reviewer?.detectors).toEqual([])
+    expect(reviewer?.outcomes.map(outcome => outcome.category)).toEqual([
+      'simplify-mechanism',
+      'use-existing-primitive',
+      'remove-unnecessary-configuration',
+      'question-complexity',
+      'proportionate',
+      'abstain',
+    ])
+  })
+
   test('ships the component style semantics semantic reviewer', () => {
     const reviewer = STANDARD_REVIEW_MANIFEST.reviewers
       .find(candidate => candidate.id === 'component-style-semantics')
