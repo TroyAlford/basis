@@ -122,7 +122,12 @@ describe('Application', () => {
       const script = document.createElement('script')
       script.id = 'basis-runtime'
       script.type = 'application/json'
-      script.textContent = JSON.stringify({ gitSha: 'abc123', serviceName: 'command-center', version: '1.0.0' })
+      script.textContent = JSON.stringify({
+        gitSha: 'abc123',
+        identity: 'user-42',
+        serviceName: 'command-center',
+        version: '1.0.0',
+      })
       document.body.appendChild(script)
 
       try {
@@ -130,6 +135,7 @@ describe('Application', () => {
 
         expect(instance.state.runtime.runtime).toEqual({
           gitSha: 'abc123',
+          identity: 'user-42',
           serviceName: 'command-center',
           version: '1.0.0',
         })

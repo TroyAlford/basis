@@ -3,6 +3,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as React from 'react'
 import { renderToString } from 'react-dom/server'
+import type { Identity } from '../../oauth'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
 import { HttpVerb, Logger, parseTemplateURI, parseURI } from '../../utilities'
@@ -81,6 +82,7 @@ export class Server {
   #development = true
   #entrypoints: [string, string][] = []
   #hmrClients = new Set<Socket>()
+  #identity: Identity | null = null
   #logger: ILogger = new Logger()
   #modules = new Map<string, string>()
   #mounts: StaticMount[] = []
@@ -156,6 +158,7 @@ export class Server {
   get runtime(): BasisRuntime {
     return {
       gitSha: nonEmpty(Bun.env.GIT_SHA),
+      identity: null,
       serviceName: nonEmpty(Bun.env.SERVICE_NAME),
       version: this.#version === 'development' ? nonEmpty(Bun.env.VERSION) : this.#version,
     }
@@ -326,11 +329,17 @@ export class Server {
 
   /**
    * Handles a UI request.
+   *
+   * When an {@link Server.identity} capability is configured, the request is
+   * verified through it and the signed-in user id is embedded into the runtime
+   * facts the SPA shell boots from.
+   * @param request - The request being answered, when available.
    * @returns The UI response.
    */
-  async handleUI(): Promise<Response> {
+  async handleUI(request?: Request): Promise<Response> {
+    const identity = request && this.#identity ? this.#identity.get(request) : null
     const html = await renderToString(React.createElement(IndexHTML, {
-      runtime: this.runtime,
+      runtime: { ...this.runtime, identity },
       scripts: this.#scriptNames(),
       title: this.#title,
     }))
@@ -451,6 +460,21 @@ export class Server {
     this.#server?.stop()
     this.#server = null
 
+    return this
+  }
+
+  /**
+   * Shares the identity capability the server uses to verify requests.
+   *
+   * Once set, every UI request is verified through the capability and the
+   * resulting user id (or `null`) is embedded as `runtime.identity`, so a
+   * consumer's frontend reads the signed-in identity from its standard runtime
+   * context without a fetch of its own.
+   * @param identity - The shared identity capability.
+   * @returns The server.
+   */
+  identity(identity: Identity): Server {
+    this.#identity = identity
     return this
   }
 
@@ -660,7 +684,7 @@ export class Server {
       case 'assets': return this.handleAsset(uri)
       case 'modules': return this.handleModule(uri)
       case 'scripts': return this.handleScripts(uri)
-      default: return this.handleUI()
+      default: return this.handleUI(request)
     }
   }
 

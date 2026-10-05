@@ -3,7 +3,12 @@ import { EMPTY_BASIS_RUNTIME, parseBasisRuntime, serializeBasisRuntime } from '.
 
 describe('serializeBasisRuntime', () => {
   test('round-trips runtime facts', () => {
-    const runtime = { gitSha: 'abc123', serviceName: 'mtg-proxifier', version: '1.2.3' }
+    const runtime = {
+      gitSha: 'abc123',
+      identity: 'user-42',
+      serviceName: 'mtg-proxifier',
+      version: '1.2.3',
+    }
 
     expect(parseBasisRuntime(serializeBasisRuntime(runtime))).toEqual(runtime)
   })
@@ -11,6 +16,7 @@ describe('serializeBasisRuntime', () => {
   test('escapes characters that could terminate the embedding script element', () => {
     const serialized = serializeBasisRuntime({
       gitSha: '</script><b>',
+      identity: null,
       serviceName: 'a&b',
       version: '1<2>3',
     })
@@ -20,6 +26,7 @@ describe('serializeBasisRuntime', () => {
     expect(serialized).not.toContain('&')
     expect(parseBasisRuntime(serialized)).toEqual({
       gitSha: '</script><b>',
+      identity: null,
       serviceName: 'a&b',
       version: '1<2>3',
     })
@@ -35,8 +42,9 @@ describe('parseBasisRuntime', () => {
   })
 
   test('coerces non-string fields to null', () => {
-    expect(parseBasisRuntime('{"gitSha":42,"serviceName":"svc","version":null}')).toEqual({
+    expect(parseBasisRuntime('{"gitSha":42,"identity":9,"serviceName":"svc","version":null}')).toEqual({
       gitSha: null,
+      identity: null,
       serviceName: 'svc',
       version: null,
     })
