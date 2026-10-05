@@ -51,9 +51,6 @@
         "svg-path-commander": "^2.3.3",
       },
     },
-    "libraries/auth": {
-      "name": "@basis/auth",
-    },
     "libraries/bun-plugins": {
       "name": "@basis/bun-plugins",
       "dependencies": {
@@ -108,6 +105,12 @@
         "typescript": "^6",
       },
     },
+    "libraries/oauth": {
+      "name": "@basis/oauth",
+      "peerDependencies": {
+        "@basis/configuration": "workspace:*",
+      },
+    },
     "libraries/react": {
       "name": "@basis/react",
       "dependencies": {
@@ -136,6 +139,7 @@
       },
       "peerDependencies": {
         "@basis/bun-plugins": "workspace:*",
+        "@basis/oauth": "workspace:*",
         "@basis/react": "workspace:*",
         "@basis/utilities": "workspace:*",
         "react": "^19.3.0",
@@ -245,8 +249,6 @@
 
     "@babel/types": ["@babel/types@7.29.0", "", { "dependencies": { "@babel/helper-string-parser": "^7.27.1", "@babel/helper-validator-identifier": "^7.28.5" } }, "sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A=="],
 
-    "@basis/auth": ["@basis/auth@workspace:libraries/auth"],
-
     "@basis/bun-plugins": ["@basis/bun-plugins@workspace:libraries/bun-plugins"],
 
     "@basis/configuration": ["@basis/configuration@workspace:libraries/configuration"],
@@ -254,6 +256,8 @@
     "@basis/docs": ["@basis/docs@workspace:libraries/docs"],
 
     "@basis/eslint-plugin": ["@basis/eslint-plugin@workspace:libraries/eslint-plugin"],
+
+    "@basis/oauth": ["@basis/oauth@workspace:libraries/oauth"],
 
     "@basis/react": ["@basis/react@workspace:libraries/react"],
 

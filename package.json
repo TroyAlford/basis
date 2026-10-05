@@ -7,12 +7,12 @@
     "basis": "./consumer/cli.ts"
   },
   "exports": {
-    "./auth": "./consumer/auth.ts",
     "./cli": "./consumer/cli.ts",
     "./configuration": "./consumer/configuration.ts",
     "./eslint": "./consumer/eslint.ts",
     "./eslint.config.mjs": "./eslint.config.mjs",
     "./logger": "./consumer/logger.ts",
+    "./oauth": "./consumer/oauth.ts",
     "./package.json": "./package.json",
     "./react": "./consumer/react.ts",
     "./review": "./consumer/review.ts",

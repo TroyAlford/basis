@@ -1,7 +1,0 @@
-{
-  "name": "@basis/auth",
-  "description": "Shared cross-subdomain identity-cookie mechanics for first-party applications.",
-  "exports": {
-    ".": "./index.ts"
-  }
-}
