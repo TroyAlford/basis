@@ -3,19 +3,18 @@
  *
  * Three primitives, and only the types a consumer must name to call them:
  *
- * - `run` — the shared bounded subprocess runner.
- * - `Environment` / `loadEnvironment` — typed configuration over the process
- *   environment, including the host peer-dependency check (`requireCommands`).
+ * - `Environment` — typed reads over the process environment.
  * - `secret` — 1Password secret reads.
+ * - `run` — the shared bounded subprocess runner (`RunOptions`, `CommandResult`).
  *
  * Everything else in the workspace is internal implementation and is
- * deliberately not re-exported: factories and test seams (`createSecretReader`,
- * `createConfiguration`), per-module helpers (`environmentFiles`,
- * `checkCommands`), and internal types.
+ * deliberately not re-exported: the loading seam (`loadDotenv`), the secret
+ * factory and its seams (`createSecretReader`), and their types. Host
+ * peer-dependencies are package facts declared as `basis.hostDependencies` and
+ * validated by Basis's install hook, not an imperative API.
  */
 
-export { Environment, loadEnvironment, requireCommands } from './environment'
-export type { LoadEnvironmentOptions, RequiredCommand } from './environment'
+export { Environment } from './environment'
 export { run } from './run'
 export type { CommandResult, RunOptions } from './run'
-export { SecretReadError, secret } from './secret'
+export { secret } from './secret'

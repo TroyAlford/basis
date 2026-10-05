@@ -1,27 +1,18 @@
 /**
  * Typed configuration over the process environment.
  *
- * dotenv files are the source of deployment configuration. The standard
- * variants are loaded most-specific first — `.env.<mode>.local`, `.env.local`,
- * `.env.<mode>`, then `.env` — and a value already present in the process
- * environment always wins, so real environment variables override files. Code
- * reads values through an {@link Environment} rather than touching `Bun.env`
- * directly; settings are grouped by the topic that owns them, and computed
- * flags such as `ENABLED` keep enabling conditions in one place.
+ * dotenv files are the source of deployment configuration. On import the
+ * standard variants load most-specific first — `.env.<mode>.local`, `.env.local`,
+ * `.env.<mode>`, then `.env` — where `<mode>` is `NODE_ENV`, defaulting to
+ * `development`. dotenv's own ordered `path` gives the precedence and never
+ * overrides a value already present in the process environment, so real
+ * environment variables win over files. There is no loading control plane:
+ * consumers read values through an {@link Environment} and own the policy
+ * (defaults, required keys, and enabling conditions) themselves.
  */
 
-import { parse } from 'dotenv'
-import { readFileSync } from 'node:fs'
+import { config } from 'dotenv'
 import { join } from 'node:path'
-
-/*
- * Host peer-dependency checks belong to the environment surface: external
- * binaries are part of the host this configuration describes. `commands.ts`
- * remains the implementation; consumers reach the check through the
- * environment module rather than a second public entrypoint.
- */
-export { requireCommands } from './commands'
-export type { RequiredCommand } from './commands'
 
 /** Error prefix shared by every configuration failure. */
 const PREFIX = '[basis/configuration]'
@@ -33,120 +24,85 @@ const TRUTHY = new Set(['1', 'on', 'true', 'yes'])
 const FALSY = new Set(['0', 'off', 'false', 'no'])
 
 /**
- * The dotenv filenames for a mode, highest precedence first. `dotenv` never
- * overrides a value that is already set, so the first file that defines a key
- * wins.
- * @param mode - Runtime mode selecting the `.env.<mode>` variants.
- * @returns The ordered filenames.
+ * The mode selecting the `.env.<mode>` files, following the standard process
+ * convention: `NODE_ENV`, then `development`.
+ * @returns The selected mode.
  */
-export function environmentFiles(mode: string): readonly string[] {
-  return [`.env.${mode}.local`, '.env.local', `.env.${mode}`, '.env']
-}
-
-/** Options accepted by {@link loadEnvironment}. */
-export interface LoadEnvironmentOptions {
-  /** Directory holding the dotenv files. Defaults to the current working directory. */
-  directory?: string,
-  /** Mode selecting the `.env.<mode>` files. Defaults to `NODE_ENV`, then `development`. */
-  mode?: string,
-  /** Overwrite variables already present in the process environment. Defaults to false. */
-  override?: boolean,
+const currentMode = (): string => {
+  const raw = Bun.env.NODE_ENV?.trim()
+  return raw === undefined || raw.length === 0 ? 'development' : raw
 }
 
 /**
- * Load the standard dotenv files into the process environment, most-specific
- * first. A file that is absent is skipped, and — unless `override` is set — a
- * variable already present is never replaced.
- * @param options - Directory, mode, and override behavior.
- * @returns The dotenv files that were read, in precedence order.
+ * Load the standard dotenv files into the process environment using dotenv's
+ * ordered `path`. Exposed to the workspace only as a private test seam for
+ * selecting an alternate directory or mode; it is not part of the package
+ * surface.
+ * @param options - Directory and mode overrides for tests.
+ * @param options.directory - Directory holding the dotenv files. Defaults to the current working directory.
+ * @param options.mode - Mode selecting the `.env.<mode>` files. Defaults to `NODE_ENV`, then `development`.
  */
-export function loadEnvironment(options: LoadEnvironmentOptions = {}): readonly string[] {
+export function loadDotenv(options: { directory?: string, mode?: string } = {}): void {
   const directory = options.directory ?? process.cwd()
-  const mode = options.mode ?? process.env.NODE_ENV ?? 'development'
-  const override = options.override ?? false
+  const mode = options.mode ?? currentMode()
 
-  const loaded: string[] = []
-  for (const name of environmentFiles(mode)) {
-    const path = join(directory, name)
-    let source: string
-    try {
-      source = readFileSync(path, 'utf8')
-    } catch {
-      continue
-    }
-    loaded.push(path)
-    for (const [key, value] of Object.entries(parse(source))) {
-      if (!override && process.env[key] !== undefined) continue
-      process.env[key] = value
-    }
-  }
-  return loaded
+  config({
+    path: [`.env.${mode}.local`, '.env.local', `.env.${mode}`, '.env']
+      .map(name => join(directory, name)),
+    quiet: true,
+  })
 }
 
+loadDotenv()
+
 /**
- * A typed reader over the process environment, grouped by the topic that calls
- * it. Construct one after {@link loadEnvironment}; {@link Environment.load}
- * performs both steps.
+ * A typed reader over the process environment. Values are trimmed, and a blank
+ * value is treated as unset. Present-but-invalid values fail loudly rather than
+ * silently falling back, so a typo in deployment configuration is never
+ * mistaken for an intended default.
  */
 export class Environment {
   /**
-   * Load the dotenv files and return a reader over the resulting environment.
-   * @param options - Directory, mode, and override behavior.
-   * @returns The environment reader.
-   */
-  static load(options: LoadEnvironmentOptions = {}): Environment {
-    loadEnvironment(options)
-    return new Environment()
-  }
-
-  /**
-   * A trimmed, non-empty value, or `undefined` when the variable is unset or
-   * blank.
+   * A string value, or the fallback when unset or blank.
    * @param key - Variable name.
-   * @returns The value, or `undefined`.
-   */
-  value(key: string): string | undefined {
-    const raw = Bun.env[key]?.trim()
-    return raw === undefined || raw.length === 0 ? undefined : raw
-  }
-
-  /**
-   * A string value, or the fallback when unset.
-   * @param key - Variable name.
-   * @param fallback - Value returned when the variable is unset.
+   * @param fallback - Value returned when the variable is unset or blank.
    * @returns The value or the fallback.
    */
   string(key: string, fallback?: string): string | undefined {
-    return this.value(key) ?? fallback
+    return read(key) ?? fallback
   }
 
   /**
-   * A finite number parsed from the value, or the fallback when it is unset or
-   * not numeric.
+   * A finite number, or the fallback when unset. A value that is present but
+   * not numeric throws.
    * @param key - Variable name.
-   * @param fallback - Value returned when the variable is unset or invalid.
+   * @param fallback - Value returned when the variable is unset.
    * @returns The parsed number or the fallback.
+   * @throws {Error} When the variable is set but not a number.
    */
   number(key: string, fallback?: number): number | undefined {
-    const raw = this.value(key)
+    const raw = read(key)
     if (raw === undefined) return fallback
     const parsed = Number(raw)
-    return Number.isFinite(parsed) ? parsed : fallback
+    if (!Number.isFinite(parsed)) throw new Error(`${PREFIX} environment variable "${key}" is not a number`)
+    return parsed
   }
 
   /**
    * A boolean parsed from the common tokens (`true`/`false`, `1`/`0`,
-   * `yes`/`no`, `on`/`off`), or the fallback when unset or unrecognized.
+   * `yes`/`no`, `on`/`off`), or the fallback when unset. A value that is present
+   * but unrecognized throws.
    * @param key - Variable name.
-   * @param fallback - Value returned when the variable is unset or unrecognized.
+   * @param fallback - Value returned when the variable is unset.
    * @returns The parsed boolean or the fallback.
+   * @throws {Error} When the variable is set but not a recognized boolean.
    */
   boolean(key: string, fallback = false): boolean {
-    const raw = this.value(key)?.toLowerCase()
+    const raw = read(key)?.toLowerCase()
     if (raw === undefined) return fallback
     if (TRUTHY.has(raw)) return true
     if (FALSY.has(raw)) return false
-    return fallback
+    throw new Error(`${PREFIX} environment variable "${key}" is not a boolean`)
   }
 
   /**
@@ -156,65 +112,29 @@ export class Environment {
    * @throws {Error} When the variable is unset or blank.
    */
   required(key: string): string {
-    const value = this.value(key)
+    const value = read(key)
     if (value === undefined) throw new Error(`${PREFIX} missing required environment variable "${key}"`)
     return value
   }
 
   /**
-   * Whether every named variable is set — the computed `ENABLED` flag for a
-   * topic. An empty list is enabled.
+   * Whether every named variable is set — the computed `ENABLED` flag a
+   * consumer uses for a topic. An empty list is enabled.
    * @param keys - Variable names required for the topic to be enabled.
    * @returns True when all of the variables are set.
    */
   enabled(...keys: string[]): boolean {
-    return keys.every(key => this.value(key) !== undefined)
-  }
-
-  /**
-   * The runtime mode. Defaults to `NODE_ENV`, then `development`.
-   * @returns The runtime mode.
-   */
-  get mode(): string {
-    return this.value('NODE_ENV') ?? 'development'
-  }
-
-  /**
-   * Whether this is a non-production run.
-   * @returns True outside production.
-   */
-  get development(): boolean {
-    return this.mode !== 'production'
-  }
-
-  /**
-   * Whether this is a production run.
-   * @returns True in production.
-   */
-  get production(): boolean {
-    return this.mode === 'production'
+    return keys.every(key => read(key) !== undefined)
   }
 }
 
-/** A function that builds one topic's typed getters from an {@link Environment}. */
-export type EnvironmentTopic = (env: Environment) => Record<string, unknown>
-
 /**
- * Build a topic-grouped configuration from the environment. Each topic is a
- * named function that reads the variables it owns; computed `ENABLED` flags are
- * expressed with {@link Environment.enabled}.
- * @param topics - Map of topic name to getter builder.
- * @param options - dotenv loading options.
- * @returns The grouped configuration, keyed by topic.
+ * A trimmed, non-empty value, or `undefined` when the variable is unset or
+ * blank.
+ * @param key - Variable name.
+ * @returns The value, or `undefined`.
  */
-export function createConfiguration<const T extends Record<string, EnvironmentTopic>>(
-  topics: T,
-  options: LoadEnvironmentOptions = {},
-): { [K in keyof T]: ReturnType<T[K]> } {
-  const env = Environment.load(options)
-  const configuration = {} as { [K in keyof T]: ReturnType<T[K]> }
-  for (const [name, topic] of Object.entries(topics)) {
-    configuration[name as keyof T] = topic(env) as ReturnType<T[keyof T]>
-  }
-  return configuration
+function read(key: string): string | undefined {
+  const raw = Bun.env[key]?.trim()
+  return raw === undefined || raw.length === 0 ? undefined : raw
 }

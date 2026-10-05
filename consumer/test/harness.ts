@@ -183,38 +183,62 @@ export const run = (command: string[], cwd: string, env: Record<string, string> 
 }
 
 /**
+ * Runs a command and returns its captured output, without throwing on failure.
+ * @param command The executable and arguments.
+ * @param cwd Working directory for the command.
+ * @param env Environment overrides merged over the parent process environment.
+ * @returns The exit code and captured output.
+ */
+export const runAllowFailure = (
+  command: string[],
+  cwd: string,
+  env: Record<string, string> = {},
+): { exitCode: number, stderr: string, stdout: string } => {
+  const result = Bun.spawnSync({
+    cmd: command,
+    cwd,
+    env: { ...process.env, ...env },
+    stderr: 'pipe',
+    stdout: 'pipe',
+  })
+
+  return {
+    exitCode: result.exitCode ?? 1,
+    stderr: result.stderr.toString(),
+    stdout: result.stdout.toString(),
+  }
+}
+
+/**
  * Creates a fixture application with TypeScript and ESLint wired up.
  * @param app Absolute path to the application directory.
  * @param basisSpec The Basis dependency specifier.
  * @param options Whether to seed Basis and trust it up front.
+ * @param options.hostDependencies Declared `basis.hostDependencies`, when any.
  * @param options.includeBasis Whether to include the Basis dependency. Defaults to `true`.
  * @param options.trust Whether to list Basis in trustedDependencies. Defaults to `true`.
  */
 export const initApp = (
   app: string,
   basisSpec: string,
-  options: { includeBasis?: boolean, trust?: boolean } = {},
+  options: { hostDependencies?: string[], includeBasis?: boolean, trust?: boolean } = {},
 ): void => {
-  const { includeBasis = true, trust = true } = options
+  const { hostDependencies, includeBasis = true, trust = true } = options
   const devDependencies: Record<string, string> = {
     '@types/bun': '^1.3.11',
   }
   if (includeBasis) devDependencies.basis = basisSpec
 
-  write(
-    join(app, 'package.json'),
-    JSON.stringify(
-      {
-        devDependencies,
-        name: 'basis-consumer-fixture',
-        private: true,
-        type: 'module',
-        ...(trust ? { trustedDependencies: ['basis'] } : {}),
-      },
-      null,
-      2,
-    ),
-  )
+  const manifest: Record<string, unknown> = {
+    devDependencies,
+    name: 'basis-consumer-fixture',
+    private: true,
+    type: 'module',
+    ...(trust ? { trustedDependencies: ['basis'] } : {}),
+  }
+  if (hostDependencies !== undefined) manifest.basis = { hostDependencies }
+
+  write(join(app, 'package.json'), JSON.stringify(manifest, null, 2))
   write(join(app, 'tsconfig.json'), APP_TSCONFIG)
   write(join(app, 'eslint.config.mjs'), APP_ESLINT_CONFIG)
   write(join(app, 'src', 'greeter.ts'), APP_SOURCE)

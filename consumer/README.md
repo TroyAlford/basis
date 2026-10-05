@@ -24,6 +24,19 @@ responsibility (a CI image or a one-time host bootstrap). Set
 Basis requires Bun `>=1.4.0`. Bun only honors root-level `patchedDependencies`,
 which is why the trusted hook exists.
 
+Some capabilities the host must provide are not npm packages. Declare the ones
+your application needs as static deployment metadata in the root `package.json`:
+
+```json
+{ "basis": { "hostDependencies": ["docker", "nginx", "op", "lego"] } }
+```
+
+The install hook resolves each declared capability on `PATH` and fails
+`bun install` loudly, naming every one that is missing or malformed, so a host
+that cannot run the application never completes an install that looks
+successful. Basis mandates no specific binary; omit the field when there are
+none. This is package metadata, not an API — application source never calls it.
+
 ## ESLint
 
 ```js
@@ -153,29 +166,30 @@ Use `withPrefix` to derive a scoped view, and the `stopwatchStart` /
 `basis/configuration` exposes three primitives:
 
 ```ts
-import { Environment, loadEnvironment, requireCommands, run, secret } from 'basis/configuration'
+import { Environment, run, secret } from 'basis/configuration'
 ```
 
-- `run(command, args, options)` is the shared synchronous, shell-free,
-  bounded (`timeoutMs`) subprocess runner, returning captured
-  `{ exitCode, stdout, stderr }` (typed by `RunOptions` and `CommandResult`).
-- `loadEnvironment()` (and `new Environment()`) loads the standard dotenv files
-  most-specific first — `.env.<mode>.local`, `.env.local`, `.env.<mode>`, `.env`,
-  where `<mode>` defaults to `NODE_ENV` then `development` — and exposes typed
-  getters (`string`, `number`, `boolean`, `required`, `enabled`), plus `mode`,
-  `production`, and `development`. The environment surface also carries
-  `requireCommands([...])` (`RequiredCommand`), which fails loudly, naming every
-  external binary missing from `PATH`, so a host's non-npm peer dependencies
-  (`docker`, `op`, …) can be validated at install or launch. Basis mandates no
-  specific binary.
-- `secret<T>(reference)` reads an `op://` reference through the 1Password CLI,
-  returning the value typed by its JSON shape. It sets
-  `OP_SERVICE_ACCOUNT_TOKEN` and `PATH` on the `op` child, never logs or echoes a
-  value, fails closed when the token is unset, and throws `SecretReadError`.
+- `Environment` reads typed values from the process environment, which loads the
+  standard dotenv files most-specific first — `.env.<mode>.local`, `.env.local`,
+  `.env.<mode>`, `.env`, where `<mode>` is `NODE_ENV` (default `development`) —
+  with real environment variables winning. `string(key, fallback?)`,
+  `number(key, fallback?)`, and `boolean(key, fallback?)` fall back when unset
+  and throw, naming the key, when a present value is malformed; `required(key)`
+  fails loudly when unset; `enabled(...keys)` computes a topic's `ENABLED` flag.
+  Consumers own their own config policy (defaults, required keys, enabling
+  conditions).
+- `secret(reference)` reads an `op://` reference through the 1Password CLI and
+  returns the value as a string (`JSON.parse` it for structure). The Service
+  Account token comes from `OP_SERVICE_ACCOUNT_TOKEN` and is handed to the `op`
+  child under that name; a missing token fails closed and neither the token nor
+  the value is ever logged or echoed.
+- `run(command, args, options)` is the shared synchronous, shell-free, bounded
+  (`timeoutMs`) subprocess runner, returning captured `{ exitCode, stdout,
+  stderr }` (typed by `RunOptions` and `CommandResult`).
 
-Internal factories (`createSecretReader`, `createConfiguration`), the
-non-throwing `checkCommands` helper, and their types are not part of the
-package surface.
+Internal factories and loading seams — `createSecretReader`, `loadDotenv`, and
+their types — are not part of the package surface. Non-npm host capabilities are
+declared as `basis.hostDependencies` (see [Install](#install)), not called.
 
 ## React runtime
 

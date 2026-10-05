@@ -39,53 +39,50 @@ function fakeRunner(handler: (args: readonly string[]) => Partial<CommandResult>
 }
 
 describe('createSecretReader', () => {
-  test('reads a string secret with the reference as the only argument', () => {
+  test('returns the value as a string, with the reference as the only argument', () => {
     const { calls, runner } = fakeRunner(() => ({ stdout: 'plain-secret-value\n' }))
     const reader = createSecretReader({ runner, token: TOKEN })
 
-    expect(reader.secret<string>('op://Vault/item/field')).toBe('plain-secret-value')
+    expect(reader.secret('op://Vault/item/field')).toBe('plain-secret-value')
     expect(calls[0]?.args).toEqual(['read', 'op://Vault/item/field'])
     // The reference is the only argument; no value ever becomes an argument.
     expect(calls[0]?.args.join(' ')).not.toContain('plain-secret-value')
   })
 
-  test('sets the variable op actually reads, plus PATH, on the child', () => {
+  test('returns raw strings and never parses their shape', () => {
+    const { runner } = fakeRunner(args => {
+      const reference = args[1]
+      if (reference === 'op://V/i/number') return { stdout: '42\n' }
+      if (reference === 'op://V/i/boolean') return { stdout: 'true' }
+      if (reference === 'op://V/i/json') return { stdout: '{"a":1}\n' }
+      return { stdout: 'unused' }
+    })
+    const reader = createSecretReader({ runner, token: TOKEN })
+
+    expect(reader.secret('op://V/i/number')).toBe('42')
+    expect(reader.secret('op://V/i/boolean')).toBe('true')
+    expect(reader.secret('op://V/i/json')).toBe('{"a":1}')
+  })
+
+  test('sets the variable op actually reads on the child', () => {
     const { calls, runner } = fakeRunner(() => ({ stdout: 'x\n' }))
     createSecretReader({ runner, token: TOKEN }).secret('op://V/item/field')
 
     const env = calls[0]?.options?.env
     expect(env?.OP_SERVICE_ACCOUNT_TOKEN).toBe(TOKEN)
-    expect(typeof env?.PATH).toBe('string')
     // The token is not duplicated under a second name.
     expect(env?.CC_ONEPASSWORD_ACCOUNT_TOKEN).toBeUndefined()
   })
 
-  test('parses JSON objects, arrays, numbers, and booleans by shape', () => {
-    const { runner } = fakeRunner(args => {
-      const reference = args[1]
-      if (reference === 'op://V/i/object') return { stdout: '{"a":1,"b":["x"]}\n' }
-      if (reference === 'op://V/i/array') return { stdout: '[1,2,3]' }
-      if (reference === 'op://V/i/number') return { stdout: '42\n' }
-      if (reference === 'op://V/i/boolean') return { stdout: 'true' }
-      return { stdout: 'unused' }
-    })
-    const reader = createSecretReader({ runner, token: TOKEN })
-
-    expect(reader.secret<{ a: number, b: string[] }>('op://V/i/object')).toEqual({ a: 1, b: ['x'] })
-    expect(reader.secret<number[]>('op://V/i/array')).toEqual([1, 2, 3])
-    expect(reader.secret<number>('op://V/i/number')).toBe(42)
-    expect(reader.secret<boolean>('op://V/i/boolean')).toBe(true)
-  })
-
-  test('uses a configured op binary', () => {
-    const calls: string[] = []
+  test('invokes the configured executable by default as `op`', () => {
+    const commands: string[] = []
     const runner = (command: string): CommandResult => {
-      calls.push(command)
+      commands.push(command)
       return { exitCode: 0, stderr: '', stdout: 'x' }
     }
 
-    createSecretReader({ opBin: '/opt/1password/op', runner, token: TOKEN }).secret('op://V/i/f')
-    expect(calls).toEqual(['/opt/1password/op'])
+    createSecretReader({ runner, token: TOKEN }).secret('op://V/i/f')
+    expect(commands).toEqual(['op'])
   })
 
   test('fails closed without a token, before any subprocess runs', () => {
@@ -95,7 +92,7 @@ describe('createSecretReader', () => {
     expect(calls).toHaveLength(0)
   })
 
-  test('names the reference but never the value on failure', () => {
+  test('names the reference but never the value or token on failure', () => {
     const { runner } = fakeRunner(() => ({
       exitCode: 1,
       stderr: 'the value is super-secret-value',
@@ -114,7 +111,7 @@ describe('createSecretReader', () => {
 })
 
 describe('secret', () => {
-  test('reads the ambient OP_SERVICE_ACCOUNT_TOKEN', () => {
+  test('fails closed when the ambient OP_SERVICE_ACCOUNT_TOKEN is unset', () => {
     withEnv('OP_SERVICE_ACCOUNT_TOKEN', undefined, () => {
       expect(() => secret('op://V/a/b')).toThrow(SecretReadError)
     })

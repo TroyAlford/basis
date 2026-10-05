@@ -5,9 +5,6 @@ describe('basis/configuration public surface', () => {
   test('exposes only the supported primitives', () => {
     expect(Object.keys(configuration).sort()).toEqual([
       'Environment',
-      'SecretReadError',
-      'loadEnvironment',
-      'requireCommands',
       'run',
       'secret',
     ])

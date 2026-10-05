@@ -1,6 +1,6 @@
 import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { assert, assertDoctorOk, assertEslintSurface, assertNodeFree, assertPatchesActive, assertStylelintSurface, initApp, makeTempDir, makeToolPath, run } from './harness'
+import { assert, assertDoctorOk, assertEslintSurface, assertNodeFree, assertPatchesActive, assertStylelintSurface, initApp, makeTempDir, makeToolPath, run, runAllowFailure } from './harness'
 
 /**
  * A minimal package manifest, used for assertions.
@@ -74,6 +74,18 @@ const main = (): void => {
     assertStylelintSurface(isolated, env)
     assertPatchesActive(isolated)
     assertDoctorOk(isolated, env)
+
+    /*
+     * A consumer that declares a host capability the machine cannot provide
+     * must fail the install loudly, naming the capability, rather than settling
+     * into a state that looks installed but cannot run.
+     */
+    const rejected = join(workspace, 'rejected')
+    initApp(rejected, spec, { hostDependencies: ['basis-missing-host-command'] })
+    const failure = runAllowFailure(['bun', 'install'], rejected, env)
+    assert(failure.exitCode !== 0, 'install fails when a declared host dependency is missing')
+    const output = `${failure.stdout}\n${failure.stderr}`
+    assert(output.includes('basis-missing-host-command'), 'install names the missing host dependency')
 
     process.stdout.write(`[basis] consumer self-install: ok (${workspace})\n`)
   } finally {
