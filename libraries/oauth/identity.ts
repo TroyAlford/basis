@@ -24,7 +24,7 @@
  */
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
-import { secret as readSecret } from '../configuration'
+import { secret as readSecret } from '../configuration/secret'
 import { readCookie, serializeCookie } from './cookies'
 
 /** Version prefix for the current scheme. */
