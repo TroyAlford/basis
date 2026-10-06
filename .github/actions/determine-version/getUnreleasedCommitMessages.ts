@@ -116,6 +116,7 @@ export function isPatchChange(type: ChangeType): boolean {
     ChangeType.Refactor,
     ChangeType.Revert,
     ChangeType.Style,
+    ChangeType.Test,
   ].includes(type)
 }
 
@@ -141,7 +142,6 @@ export function isNoChange(type: ChangeType): boolean {
     ChangeType.Build,
     ChangeType.CI,
     ChangeType.Docs,
-    ChangeType.Test,
     ChangeType.Unknown,
   ].includes(type)
 }
