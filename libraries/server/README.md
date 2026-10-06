@@ -137,7 +137,7 @@ crashing, so command-center can observe and act on it.
 ## API routes
 
 ```ts
-import { HttpVerb } from '@basis/utilities'
+import { HttpVerb, Server } from 'basis/server'
 
 const server = new Server()
 server.api([HttpVerb.Get], 'hello/:name', ({ name }, { logger, request }) => {
