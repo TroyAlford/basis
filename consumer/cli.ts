@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { runDocs } from './docs'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
 
@@ -184,7 +185,7 @@ const doctor = (): number => {
  * Prints usage information for the CLI.
  */
 const usage = (): void => {
-  write('usage: basis <doctor|lint [--fix]|typecheck|check>')
+  write('usage: basis <docs check [--source <dir>]|doctor|lint [--fix]|typecheck|check>')
 }
 
 /**
@@ -202,6 +203,8 @@ const main = (): void => {
     const typeCode = lintCode === 0 ? runBin('@typescript/native', 'tsc', ['--noEmit']) : lintCode
     process.exit(typeCode)
   }
+
+  if (command === 'docs') process.exit(runDocs(args))
 
   usage()
   process.exit(1)

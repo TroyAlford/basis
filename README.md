@@ -57,3 +57,7 @@ bun ws build-all
 # Run tests
 bun test
 ```
+
+## Documentation
+
+Start with this README, then read the durable documentation under [`docs/`](./docs/index.md). [`AGENTS.md`](./AGENTS.md) directs coding agents to read both before planning or changing code. Component behavior is showcased in the docs app under [`libraries/docs`](./libraries/docs). The docs tree is validated with `bun run docs:check`.
