@@ -1,6 +1,7 @@
 import { NumberEditor, Section } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
+import { PopupBoundaryExample } from '../components/PopupBoundaryExample'
 
 export class MixinsDocs extends Documentation<Record<string, never>> {
   content() {
@@ -177,6 +178,23 @@ export class MixinsDocs extends Documentation<Record<string, never>> {
             is provided, the popup positions relative to that element. When omitted, it falls back to parent-based
             positioning.
           </p>
+          <h5>Clipping Boundary</h5>
+          <p>
+            By default, Floating UI keeps the popup inside the window. Pass <code>boundary</code> with an
+            element, a ref, or a CSS selector to clip against that container’s visible box — for example a
+            scrolling article pane. A selector is resolved with <code>closest</code> from the component’s root
+            element, so it names the nearest matching ancestor; when nothing matches, no boundary is applied.
+            {' '}
+            <code>flip</code> and <code>shift</code> both honor that box, so the popup can flip when the anchor
+            reaches a visible edge instead of sliding out of view.
+          </p>
+          <p>
+            Both panes below anchor an always-visible tooltip near their top edge. The pane on the left clips
+            to the window only, so the tooltip escapes above it; the pane on the right names the pane as its
+            {' '}
+            <code>boundary</code>, so the tooltip flips below the anchor and stays inside the pane.
+          </p>
+          <PopupBoundaryExample />
         </Section>
         <Section title="Creating Custom Mixins">
           <p>

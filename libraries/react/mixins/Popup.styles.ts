@@ -8,7 +8,9 @@ style('basis:popup', css`
   }
 
   [data-popup='true'] {
+    inset: unset;
     isolation: isolate;
+    margin: 0;
     position: absolute;
 
     &[data-popup-arrow='true'] {
