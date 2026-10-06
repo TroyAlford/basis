@@ -226,6 +226,20 @@ test('binds auto-update once per anchor, rebinds on change, and stops on cleanup
   expect(autoUpdateBindings).toHaveLength(3)
 })
 
+test('ignores a stale auto-update binding when the anchor changes before it resolves', async () => {
+  const popup = popupElement()
+  const anchor = document.createElement('div')
+  const other = document.createElement('div')
+
+  await Promise.all([
+    repositionPopup(popup, anchor, { anchorPoint: AnchorPoint.Top }),
+    repositionPopup(popup, other, { anchorPoint: AnchorPoint.Top }),
+  ])
+
+  expect(autoUpdateBindings).toHaveLength(1)
+  expect(autoUpdateBindings[0].anchor).toBe(other)
+})
+
 test('repositions when auto-update fires, and no-ops after cleanup', async () => {
   const popup = popupElement()
   const anchor = document.createElement('div')
