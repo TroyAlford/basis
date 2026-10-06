@@ -72,11 +72,21 @@ export const component = (
  */
 export const REACT_APP_RUNTIME = `import { renderToString } from 'react-dom/server'
 import { Button } from 'basis/react'
-import { Server } from 'basis/server'
+import { HttpVerb, Server } from 'basis/server'
 
 const html = renderToString(<Button data-x="1">Hello</Button>)
 if (!html.includes('Hello')) throw new Error(\`render failed: \${JSON.stringify(html)}\`)
 if (typeof Server !== 'function') throw new Error('basis/server did not export Server')
+
+/*
+ * A normal external consumer names the HTTP verb through the public surface and
+ * registers a route with it, rather than deriving the type from
+ * Parameters<Server['api']>.
+ */
+const verbs: HttpVerb[] = [HttpVerb.Get]
+const server = new Server().api(verbs, 'runtime/health', () => new Response('ok'))
+if (String(HttpVerb.Get) !== 'GET') throw new Error('basis/server did not export HttpVerb')
+if (!(server instanceof Server)) throw new Error('Server.api is not chainable')
 
 process.stdout.write('runtime-ok')
 `

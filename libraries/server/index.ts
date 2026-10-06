@@ -1,5 +1,6 @@
 export type { APIRoute } from './types/APIRoute'
 export type { HealthOptions, HealthStatus } from './apis/health'
+export { HttpVerb } from '../utilities'
 export { OAuth } from './source/OAuth'
 export type { OAuthOptions } from './source/OAuth'
 export type { RouteContext } from './types/RouteContext'
