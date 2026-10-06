@@ -45,6 +45,7 @@ export { SortBy } from './types/SortBy'
 export { SortDirection } from './types/SortDirection'
 export { TextAlign } from './types/TextAlign'
 
+export { resolveElement } from './utilities/resolveElement'
 export { css, style } from './utilities/style'
 
 export type {

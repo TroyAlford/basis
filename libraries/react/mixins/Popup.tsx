@@ -1,8 +1,8 @@
 import type * as React from 'react'
-import { resolveElement } from '../../utilities'
 import { AnchorPoint } from '../types/AnchorPoint'
 import type { Mixin } from '../types/Mixin'
 import { cleanupRepositioning, repositionPopup } from '../utilities/repositionPopup'
+import { resolveElement } from '../utilities/resolveElement'
 
 import './Popup.styles.ts'
 

@@ -52,3 +52,20 @@ In this example, `MyComponent` extends the base `Component` class, inheriting it
 
 By leveraging the `@basis/react` package, developers can create robust and maintainable React applications with minimal setup.
 
+## Utilities
+
+### `resolveElement`
+
+`resolveElement(value, fallback?, closestFrom?)` normalizes an element, a React ref, or a CSS selector into an `HTMLElement`. A selector is matched with `Element.closest` starting at `closestFrom`, so it names an ancestor of that element. Anything that resolves to nothing — an empty value, an unattached ref, or a selector with no match — yields the fallback (`null` when none is given).
+
+```ts
+import { resolveElement } from '@basis/react'
+
+resolveElement(pane)                             // the element itself
+resolveElement(paneRef)                          // paneRef.current
+resolveElement('.scrolling-pane', null, anchor)  // nearest matching ancestor
+resolveElement('.missing', null, anchor)         // null
+```
+
+The Popup mixin uses it to resolve an anchor and, for a selector `boundary`, the clipping container.
+

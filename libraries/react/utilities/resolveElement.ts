@@ -1,6 +1,6 @@
 import type { RefObject } from 'react'
-import { isRefObject } from './isRefObject'
-import { match } from './match'
+import { isRefObject } from '../../utilities/functions/isRefObject'
+import { match } from '../../utilities/functions/match'
 
 /**
  * Normalizes an element, a ref, or a CSS selector into an `HTMLElement`.

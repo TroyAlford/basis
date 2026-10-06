@@ -9,7 +9,6 @@ The `@basis/utilities` package offers a collection of utility functions designed
 - **Type Handling**: Functions to check for null or undefined values and to perform deep equality checks.
 - **URI Parsing**: Tools for parsing and manipulating URIs and template URIs.
 - **Mathematical Operations**: Functions for formatting bytes and handling time durations.
-- **DOM Resolution**: Helpers for normalizing elements, refs, and selectors into DOM nodes.
 
 ## Installation
 
@@ -62,23 +61,6 @@ const result = match(5)
   .else('something else');
 
 console.log(result); // Output: "five"
-```
-
-### Resolving Elements with `resolveElement`
-
-`resolveElement` normalizes an element, a React ref, or a CSS selector into an
-`HTMLElement`. A selector is matched with `Element.closest` starting at an
-optional anchor, so it names that anchor's nearest matching ancestor. Anything
-that resolves to nothing — an empty value, an unattached ref, or a selector with
-no match — yields the fallback, or `null` when none is given.
-
-```ts
-import { resolveElement } from '@basis/utilities'
-
-resolveElement(pane)                             // the element itself
-resolveElement(paneRef)                          // paneRef.current
-resolveElement('.scrolling-pane', null, anchor)  // nearest matching ancestor
-resolveElement('.missing', null, anchor)         // null
 ```
 
 ### Logging
