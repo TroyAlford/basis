@@ -47,11 +47,18 @@ mock.module('@floating-ui/dom', () => ({
   },
   computePosition: async (_reference: unknown, _floating: unknown, options: ComputeOptions) => {
     computeCalls.push(options)
-    applySize?.({
-      availableHeight: 120,
-      elements: { floating },
-      rects: { reference: { width: 250 } },
-    })
+    /*
+     * Guard against a null floating element: this mock can leak process-wide
+     * (module mocks are not isolated), and production `size.apply` asserts a
+     * real element. Skipping the sizing keeps a leaked mock harmless.
+     */
+    if (floating) {
+      applySize?.({
+        availableHeight: 120,
+        elements: { floating },
+        rects: { reference: { width: 250 } },
+      })
+    }
     return computeResult
   },
   flip: (options: unknown) => {
