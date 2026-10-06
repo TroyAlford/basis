@@ -1,6 +1,7 @@
 import { NumberEditor, Section } from '@basis/react'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
+import { PopupBoundaryExample } from '../components/PopupBoundaryExample'
 
 export class MixinsDocs extends Documentation<Record<string, never>> {
   content() {
@@ -185,6 +186,13 @@ export class MixinsDocs extends Documentation<Record<string, never>> {
             <code>flip</code> and <code>shift</code> both honor that box, so the popup can flip when the anchor
             reaches a visible edge instead of sliding out of view.
           </p>
+          <p>
+            Both panes below anchor an always-visible tooltip near their top edge. The pane on the left clips
+            to the window only, so the tooltip escapes above it; the pane on the right names the pane as its
+            {' '}
+            <code>boundary</code>, so the tooltip flips below the anchor and stays inside the pane.
+          </p>
+          <PopupBoundaryExample />
         </Section>
         <Section title="Creating Custom Mixins">
           <p>
