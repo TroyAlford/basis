@@ -1,5 +1,5 @@
 import type * as React from 'react'
-import { isRefObject, match } from '../../utilities'
+import { resolveElement } from '../../utilities'
 import { AnchorPoint } from '../types/AnchorPoint'
 import type { Mixin } from '../types/Mixin'
 import { cleanupRepositioning, repositionPopup } from '../utilities/repositionPopup'
@@ -14,30 +14,17 @@ export interface IPopup {
   anchorTo?: HTMLElement | React.RefObject<HTMLElement>,
   /** Whether to show an arrow pointing to the reference element. */
   arrow?: boolean,
-  /** Optional element that clips the popup, intersected with the viewport. */
-  boundary?: HTMLElement | React.RefObject<HTMLElement>,
+  /**
+   * Optional element, ref, or CSS selector that clips the popup, intersected
+   * with the viewport. A selector is resolved with `closest` from the anchor.
+   */
+  boundary?: HTMLElement | React.RefObject<HTMLElement> | string,
   /** Bound the popup's height to the available viewport space (long content scrolls). */
   constrainHeight?: boolean,
   /** The offset distance between the popup and reference element. */
   offset?: number,
   /** Match the popup's width to its anchor's. */
   sameWidth?: boolean,
-}
-
-/**
- * Resolves a popup target from an element, ref, or fallback.
- * @param value The element or ref to resolve.
- * @param fallback The element to use when value is empty.
- * @returns The resolved element, or null.
- */
-function resolveElement(
-  value: HTMLElement | React.RefObject<HTMLElement> | undefined,
-  fallback: HTMLElement | null = null,
-): HTMLElement | null {
-  return match(value)
-    .when(isRefObject).then(ref => ref.current)
-    .when(el => el instanceof HTMLElement).then(el => el as HTMLElement)
-    .else(fallback)
 }
 
 const reposition = (
@@ -53,7 +40,7 @@ const reposition = (
 
   repositionPopup(popup, anchor, {
     anchorPoint: anchorPoint ?? AnchorPoint.Top,
-    boundary: resolveElement(boundary) ?? undefined,
+    boundary: resolveElement(boundary, null, anchor) ?? undefined,
     constrainHeight,
     offset: offset ?? 0,
     sameWidth,

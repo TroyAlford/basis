@@ -19,10 +19,6 @@ interface ScenarioProps {
   vertical: Vertical,
 }
 
-interface ScenarioState {
-  boundary: HTMLDivElement | null,
-}
-
 const grid: CSSProperties = {
   display: 'grid',
   gap: '1rem',
@@ -85,39 +81,26 @@ function anchorStyle(align: Align, vertical: Vertical): CSSProperties {
 /**
  * One bounded pane with an always-visible tooltip anchored near an edge.
  *
- * The pane is handed to the tooltip as its `boundary`, so Floating UI clips the
+ * The pane is named as the tooltip's `boundary` by CSS class, which the Popup
+ * mixin resolves with `closest` from the anchor. Floating UI then clips the
  * flip and shift middleware to the pane's visible box: the tooltip repositions
  * (and its arrow slides off-center) rather than escaping the container.
  */
-export class TooltipBoundaryScenario extends Component<ScenarioProps, HTMLDivElement, ScenarioState> {
+export class TooltipBoundaryScenario extends Component<ScenarioProps, HTMLDivElement> {
   static displayName = 'TooltipBoundaryScenario'
-
-  get defaultState(): ScenarioState {
-    return { boundary: null }
-  }
-
-  /*
-   * The boundary is rendered by this component, so its ref is not attached when
-   * the child tooltip first mounts. Capturing it with a callback ref and
-   * promoting it to state hands the element to the Popup mixin on the re-render.
-   */
-  private readonly captureBoundary = (node: HTMLDivElement | null) => {
-    if (this.state.boundary === node) return
-    this.setState({ boundary: node })
-  }
 
   content() {
     const { align, anchorPoint, content, label, scenario, vertical } = this.props
     return (
       <figure data-tooltip-scenario={scenario} style={{ margin: 0 }}>
         <figcaption style={caption}>{label}</figcaption>
-        <div ref={this.captureBoundary} style={pane}>
+        <div className="tooltip-boundary-pane" style={pane}>
           <span style={anchorStyle(align, vertical)}>
             <button type="button">
               Anchor
               <Tooltip
                 anchorPoint={anchorPoint}
-                boundary={this.state.boundary ?? undefined}
+                boundary=".tooltip-boundary-pane"
                 offset={8}
                 visible={true}
               >
