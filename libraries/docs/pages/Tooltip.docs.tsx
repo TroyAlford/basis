@@ -4,6 +4,7 @@ import { Link } from '../../react/components/Router/Link'
 import { Tooltip } from '../../react/components/Tooltip/Tooltip'
 import { Code } from '../components/Code'
 import { Documentation } from '../components/Documentation'
+import { TooltipBoundaryExample } from '../components/TooltipBoundaryExample'
 
 interface State {
   anchorPoint: AnchorPoint,
@@ -164,6 +165,28 @@ export class TooltipDocs extends Documentation<State> {
             The Popup mixin provides 12 anchor point options that directly map to Floating UI placement values,
             supporting both anchor-based and parent-based positioning with automatic repositioning.
           </p>
+        </section>
+        <section>
+          <h2>Boundary Constraint</h2>
+          <p>
+            By default Floating UI constrains the tooltip to the viewport. Pass <code>boundary</code> with an
+            element or ref to constrain it to that element's visible box instead — for example a scrolling
+            pane. Flip and shift both honor the boundary, so the tooltip repositions in every direction and its
+            arrow slides off-center to keep pointing at the anchor:
+          </p>
+          <TooltipBoundaryExample />
+          {Code.format(`
+            const paneRef = React.createRef<HTMLDivElement>()
+
+            <div ref={paneRef} className="scrolling-pane">
+              <button>
+                Anchor
+                <Tooltip anchorPoint="top" boundary={paneRef}>
+                  A wide tooltip near an edge of the pane.
+                </Tooltip>
+              </button>
+            </div>
+          `)}
         </section>
         <section>
           <h2>Animation and Timing</h2>

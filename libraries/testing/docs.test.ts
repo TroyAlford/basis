@@ -94,6 +94,30 @@ describe('testing/docs', () => {
   }, 60_000)
 
   /*
+   * Each Tooltip boundary scenario anchors an always-visible tooltip near a
+   * different edge of a pane named as its boundary, so the snapshots cover flip
+   * in every direction plus shift with an off-center arrow.
+   */
+  test('constrains tooltips to a boundary in every direction', async () => {
+    await app.visit('/components/tooltip', { stubs: STUBS }, async page => {
+      await page.waitForSelector('.tooltip-boundary-examples')
+      const scenarios = [
+        ['top', 'top edge'],
+        ['bottom', 'bottom edge'],
+        ['left', 'left edge'],
+        ['right', 'right edge'],
+        ['top-right', 'top right shift'],
+        ['bottom-left', 'bottom left shift'],
+      ] as const
+      for (const [scenario, hint] of scenarios) {
+        await matchScreenshot(page.locator(`[data-tooltip-scenario="${scenario}"]`), hint, {
+          maxDiffPixelRatio: 0.02,
+        })
+      }
+    })
+  }, 90_000)
+
+  /*
    * The AutoComplete dropdown is promoted to the browser top layer, so these
    * assert the sizing contract Basis owns: it matches its editor, stays within
    * the viewport, wraps rich option content, and follows a named theme.
