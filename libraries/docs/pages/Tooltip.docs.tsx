@@ -171,10 +171,11 @@ export class TooltipDocs extends Documentation<State> {
           <p>
             By default Floating UI constrains the tooltip to the viewport. Pass <code>boundary</code> with an
             element, a ref, or a CSS selector to constrain it to that element's visible box instead — for
-            example a scrolling pane. A selector is resolved with <code>closest</code> from the anchor, so it
-            names the nearest matching ancestor; when nothing matches, the tooltip falls back to the viewport
-            as if no boundary were set. Flip and shift both honor the boundary, so the tooltip repositions in
-            every direction and its arrow slides off-center to keep pointing at the anchor:
+            example a scrolling pane. A selector is resolved with <code>closest</code> from the tooltip's root
+            element, so it names the nearest matching ancestor; when nothing matches, the tooltip falls back
+            to the viewport as if no boundary were set. Flip and shift both honor the boundary, so the
+            tooltip repositions in every direction and its arrow slides off-center to keep pointing at the
+            anchor:
           </p>
           <TooltipBoundaryExample />
           {Code.format(`

@@ -16,7 +16,8 @@ export interface IPopup {
   arrow?: boolean,
   /**
    * Optional element, ref, or CSS selector that clips the popup, intersected
-   * with the viewport. A selector is resolved with `closest` from the anchor.
+   * with the viewport. A selector is resolved with `closest` from the popup's
+   * root element, so it names the nearest matching ancestor of the popup.
    */
   boundary?: HTMLElement | React.RefObject<HTMLElement> | string,
   /** Bound the popup's height to the available viewport space (long content scrolls). */
@@ -40,7 +41,12 @@ const reposition = (
 
   repositionPopup(popup, anchor, {
     anchorPoint: anchorPoint ?? AnchorPoint.Top,
-    boundary: resolveElement(boundary, null, anchor) ?? undefined,
+    /*
+     * A selector boundary is searched from the popup's own root: the mixin is
+     * always applied to a Component, and the popup lives inside the container
+     * that clips it, even when the anchor is supplied from elsewhere.
+     */
+    boundary: resolveElement(boundary, null, popup) ?? undefined,
     constrainHeight,
     offset: offset ?? 0,
     sameWidth,

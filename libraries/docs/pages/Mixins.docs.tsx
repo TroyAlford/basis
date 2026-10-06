@@ -182,8 +182,8 @@ export class MixinsDocs extends Documentation<Record<string, never>> {
           <p>
             By default, Floating UI keeps the popup inside the window. Pass <code>boundary</code> with an
             element, a ref, or a CSS selector to clip against that container’s visible box — for example a
-            scrolling article pane. A selector is resolved with <code>closest</code> from the anchor, so it
-            names the nearest matching ancestor; when nothing matches, no boundary is applied.
+            scrolling article pane. A selector is resolved with <code>closest</code> from the component’s root
+            element, so it names the nearest matching ancestor; when nothing matches, no boundary is applied.
             {' '}
             <code>flip</code> and <code>shift</code> both honor that box, so the popup can flip when the anchor
             reaches a visible edge instead of sliding out of view.
