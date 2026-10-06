@@ -15,3 +15,18 @@ Basis is a Bun-first monorepo distributed as a pinned Git dependency. The root `
 ## Where the detail lives
 
 Workspace `README.md` files remain the precise per-package reference — for example [consumer/README.md](../../consumer/README.md) for the runtime and install contract, and [libraries/review/README.md](../../libraries/review/README.md) for review policy. This tree carries the durable, cross-cutting architecture prose and the invariants above.
+
+## System shape
+
+```mermaid
+flowchart TD
+    Docs["docs/**/*.md(x)<br/>Canonical documentation"]
+    Pipeline["Basis docs pipeline<br/>discover - render"]
+    Server["Basis Server<br/>/docs/*"]
+    Static["Static docs build"]
+    Pages["GitHub Pages"]
+    Docs --> Pipeline
+    Pipeline --> Server
+    Pipeline --> Static
+    Static --> Pages
+```

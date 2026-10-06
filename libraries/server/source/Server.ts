@@ -15,6 +15,8 @@ import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
+import type { DocsOptions, DocsSite } from './Docs'
+import { discoverDocs, serveDocs } from './Docs'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import type { SocketData } from './Sockets'
@@ -87,6 +89,7 @@ export class Server {
   #identity: Identity | null = null
   #logger: ILogger = new Logger()
   #modules = new Map<string, string>()
+  #docs: DocsSite | null = null
   #mounts: StaticMount[] = []
   #ready: Promise<void> = Promise.resolve()
   #readyError: Error | null = null
@@ -543,6 +546,16 @@ export class Server {
   }
 
   /**
+   * Serves a Markdown documentation tree under a route.
+   * @param options - The documentation root, route, and title.
+   * @returns The server.
+   */
+  docs(options: DocsOptions): Server {
+    this.#docs = discoverDocs(options)
+    return this
+  }
+
+  /**
    * Adds an API route to the server.
    * @param verbs - The HTTP methods to handle.
    * @param template - The template URI to handle.
@@ -699,6 +712,11 @@ export class Server {
 
     const mounted = await this.handleMount(uri)
     if (mounted) return mounted
+
+    if (this.#docs) {
+      const docs = serveDocs(this.#docs, uri, request)
+      if (docs) return docs
+    }
 
     switch (uri.type) {
       case 'api': return Server.BadRequest
