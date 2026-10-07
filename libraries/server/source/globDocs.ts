@@ -168,7 +168,7 @@ function titleOf(body: string, frontMatterTitle: string | null, relativeFile: st
 }
 
 /**
- * Scan a docs tree into its source documents.
+ * Discover and read every document under a docs tree.
  *
  * This is the single source of truth for docs discovery and front-matter
  * parsing: the validator (`basis docs check`) and the static build
@@ -177,7 +177,7 @@ function titleOf(body: string, frontMatterTitle: string | null, relativeFile: st
  * @param root - Absolute docs root.
  * @returns The documents, ordered by repository-relative path.
  */
-export function scanDocs(root: string): DocsDocument[] {
+export function globDocs(root: string): DocsDocument[] {
   if (!existsSync(root) || !statSync(root).isDirectory()) return []
 
   return collect(root).map(file => {

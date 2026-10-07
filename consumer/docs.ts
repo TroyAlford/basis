@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import type { DocsIssue } from '../libraries/server/source/DocsSource'
-import { scanDocs } from '../libraries/server/source/DocsSource'
+import type { DocsIssue } from '../libraries/server/source/globDocs'
+import { globDocs } from '../libraries/server/source/globDocs'
 
 /** A validated documentation page. */
 export interface DocsPage {
@@ -54,7 +54,7 @@ export function checkDocs(root: string, source = 'docs'): DocsReport {
   const directory = resolve(base, source)
   if (!statSync(directory, { throwIfNoEntry: false })?.isDirectory()) return { issues: [], pages: [] }
 
-  const documents = scanDocs(directory)
+  const documents = globDocs(directory)
   const issues: DocsIssue[] = []
   const pages: DocsPage[] = []
   const relative = (file: string): string => join(source, file)
@@ -143,7 +143,7 @@ export async function runDocsBuild(args: string[]): Promise<number> {
   const base = value('--base', '')
   const title = value('--title', 'Documentation')
 
-  const { buildDocs, discoverDocs } = await import('../libraries/server/source/Docs')
+  const { buildDocs, discoverDocs } = await import('../libraries/server/source/mdxToHTML')
   const site = discoverDocs({ root: join(root, source), route: '/', title })
   if (site.pages.size === 0 && site.modules.size === 0) {
     process.stdout.write(`[basis] docs: no ${source}/ directory; nothing to build\n`)

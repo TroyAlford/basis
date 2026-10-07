@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type * as React from 'react'
-import { buildDocs, discoverDocs, renderDocsModule, renderDocsNotFound, renderDocsPage } from './Docs'
+import { buildDocs, discoverDocs, mdxToHTML, moduleToHTML } from './mdxToHTML'
 
 /** Temporary docs trees to remove after each test. */
 const directories: string[] = []
@@ -55,14 +55,14 @@ describe('discoverDocs', () => {
   })
 })
 
-describe('renderDocsPage', () => {
+describe('mdxToHTML', () => {
   test('renders Markdown/MDX, strips front-matter, and builds navigation', async () => {
     const root = fixture({
       'docs/architecture/index.mdx': '---\ntitle: Architecture\n---\n\n# Architecture\n\nSee [home](../index.mdx).\n',
       'docs/index.mdx': '# Home\n',
     })
     const site = discoverDocs({ root: join(root, 'docs') })
-    const html = await renderDocsPage(site, page(site, 'architecture'))
+    const html = await mdxToHTML(site, page(site, 'architecture'))
     expect(html).toContain('<h1>Architecture</h1>')
     expect(html).not.toContain('title: Architecture')
     expect(html).toContain('href="/docs"')
@@ -71,18 +71,10 @@ describe('renderDocsPage', () => {
   test('emits Mermaid fences as a mermaid block and loads the runtime', async () => {
     const root = fixture({ 'docs/index.mdx': '# Home\n\n```mermaid\nflowchart TD\n  A-->B\n```\n' })
     const site = discoverDocs({ root: join(root, 'docs') })
-    const html = await renderDocsPage(site, page(site, ''))
+    const html = await mdxToHTML(site, page(site, ''))
     expect(html).toContain('<pre class="mermaid">')
     expect(html).toContain('flowchart TD')
     expect(html).toContain('esm.sh/mermaid')
-  })
-
-  test('renders a not-found document', () => {
-    const root = fixture({ 'docs/index.mdx': '# Home\n' })
-    const site = discoverDocs({ root: join(root, 'docs') })
-    const html = renderDocsNotFound(site, 'missing')
-    expect(html).toContain('<h1>Not found</h1>')
-    expect(html).toContain('missing')
   })
 })
 
@@ -112,7 +104,7 @@ describe('navigation', () => {
     })
     const iconsModule = site.modules.get('/icons')
     if (!iconsModule) throw new Error('missing /icons module')
-    const html = renderDocsModule(site, iconsModule, '/icons')
+    const html = moduleToHTML(site, iconsModule, '/icons')
     expect(html).toMatch(/href="\/icons"[^>]*>Icons<\/a><ul><li><a href="\/icons\/moon"/)
   })
 })

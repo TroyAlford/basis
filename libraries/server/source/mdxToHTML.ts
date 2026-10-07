@@ -11,8 +11,8 @@ import { DOCUMENTATION_FONTS_URL } from '../../react/components/Documentation/ty
 import { Mermaid, MERMAID_SOURCE } from '../../react/components/Mermaid/Mermaid'
 import { themeStyles } from '../../react/components/Theme/Theme'
 import { styles } from '../../react/utilities/style'
-import type { DocsDocument } from './DocsSource'
-import { routePath, scanDocs } from './DocsSource'
+import type { DocsDocument } from './globDocs'
+import { globDocs, routePath } from './globDocs'
 
 /** A React documentation page module, rendered alongside the Markdown tree. */
 export interface DocsPageModule {
@@ -177,7 +177,7 @@ export function discoverDocs(options: DocsOptions): DocsSite {
   const pages = new Map<string, DocsPage>()
   const modules = new Map<string, DocsPageModule>()
 
-  for (const document of scanDocs(source)) pages.set(document.path, document)
+  for (const document of globDocs(source)) pages.set(document.path, document)
   for (const page of options.pages ?? []) {
     modules.set(pageHref(route, page.path.replace(/^\/+|\/+$/g, '')), page)
   }
@@ -250,7 +250,7 @@ function layout(site: DocsSite, active: string, content: React.ReactNode, title:
  * @param page - The page to render.
  * @returns A complete HTML document.
  */
-export async function renderDocsPage(site: DocsSite, page: DocsPage): Promise<string> {
+export async function mdxToHTML(site: DocsSite, page: DocsPage): Promise<string> {
   const Content = await compileDocument(rewriteLinks(page.body, page, site), page.source)
   const content = React.createElement(Content, { components: { pre: DocumentationPre }, key: 'content' })
   return layout(site, pageHref(site.route, page.path), content, page.title)
@@ -263,24 +263,9 @@ export async function renderDocsPage(site: DocsSite, page: DocsPage): Promise<st
  * @param path - The module's served path.
  * @returns A complete HTML document.
  */
-export function renderDocsModule(site: DocsSite, page: DocsPageModule, path: string): string {
+export function moduleToHTML(site: DocsSite, page: DocsPageModule, path: string): string {
   const content = React.createElement(page.component as React.ComponentType, { key: 'content' })
   return layout(site, path, content, page.title)
-}
-
-/**
- * Render the not-found document for an unmatched docs path.
- * @param site - The resolved site.
- * @param path - The requested route path.
- * @returns A complete HTML document.
- */
-export function renderDocsNotFound(site: DocsSite, path: string): string {
-  const message = `<h1>Not found</h1><p>No documentation page matches <code>${escapeHtml(path)}</code>.</p>`
-  const content = React.createElement('div', {
-    dangerouslySetInnerHTML: { __html: message },
-    key: 'content',
-  })
-  return layout(site, '', content, 'Not found')
 }
 
 /**
@@ -306,9 +291,9 @@ export async function buildDocs(site: DocsSite, outDir: string, base = ''): Prom
   }
 
   for (const page of site.pages.values()) {
-    write(pageHref(site.route, page.path), await renderDocsPage(site, page))
+    write(pageHref(site.route, page.path), await mdxToHTML(site, page))
   }
-  for (const [path, page] of site.modules) write(path, renderDocsModule(site, page, path))
+  for (const [path, page] of site.modules) write(path, moduleToHTML(site, page, path))
 
   return written
 }
