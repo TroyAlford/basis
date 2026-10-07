@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { discoverDocs, renderDocsNotFound, renderDocsPage } from './Docs'
+import { discoverDocs, renderDocsNotFound, renderDocsPage, serveDocs } from './Docs'
 
 /** Temporary docs trees to remove after each test. */
 const directories: string[] = []
@@ -74,6 +74,12 @@ describe('renderDocsPage', () => {
     expect(html).toContain('<pre class="mermaid">')
     expect(html).toContain('flowchart TD')
     expect(html).toContain('esm.sh/mermaid')
+  })
+  test('includes the live-reload client in development', async () => {
+    const root = fixture({ 'docs/index.mdx': '# Home\n' })
+    const site = discoverDocs({ root: join(root, 'docs'), route: '/' })
+    const response = await serveDocs(site, { path: '/' } as never, new Request('http://localhost/'), true)
+    expect(await response?.text()).toContain('/hmr')
   })
 
   test('renders a not-found document', () => {

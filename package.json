@@ -81,7 +81,7 @@
   },
   "scripts": {
     "build": "bun run --filter='*' build",
-    "docs": "bun ./libraries/docs/index.html",
+    "docs": "bun ./server.ts",
     "docs:check": "bun ./consumer/cli.ts docs check",
     "lint": "bun run lint:es && bun run lint:ts && bun run lint:css",
     "lint:css": "bun ./node_modules/stylelint/bin/stylelint.mjs \"**/*.styles.ts\" --config ./stylelint.config.mjs --allow-empty-input",

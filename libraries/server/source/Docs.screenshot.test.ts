@@ -12,21 +12,21 @@ const MERMAID_STUB = [
 ].join('\n')
 
 /**
- * Proof that a running Basis Server renders the repository documentation: the
- * index and the architecture page, including its Mermaid diagram.
+ * Proof that Basis's own docs server renders the documentation at the site
+ * root: the index and the architecture page, including its Mermaid diagram.
  */
-test('serves the repository documentation', async () => {
+test('serves Basis documentation at the root', async () => {
   const app = await startApplication({
     cwd: join(import.meta.dir, '..', '..', '..'),
-    entry: './testing/e2e/docs.ts',
-    readyPath: '/docs',
+    entry: './server.ts',
+    readyPath: '/',
     timeoutMs: 60_000,
   })
 
   try {
-    await app.visit('/docs', page => matchScreenshot(page))
+    await app.visit('/', page => matchScreenshot(page))
     await app.visit(
-      '/docs/architecture',
+      '/architecture',
       { stubs: { 'https://esm.sh/mermaid@11': MERMAID_STUB } },
       page => matchScreenshot(page),
     )
