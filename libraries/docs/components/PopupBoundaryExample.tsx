@@ -1,5 +1,5 @@
+import { AnchorPoint, Component, Tooltip } from 'basis/react'
 import type { CSSProperties } from 'react'
-import { AnchorPoint, Component, Tooltip } from '@basis/react'
 
 const examples: CSSProperties = {
   display: 'grid',

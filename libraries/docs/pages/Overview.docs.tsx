@@ -1,4 +1,4 @@
-import { Router } from '@basis/react'
+import { Router } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
@@ -22,7 +22,7 @@ export class OverviewDocs extends DocumentationPage<Record<string, never>> {
           <h3>Your First Component</h3>
           <p>Use Basis components from any React app. Here's a minimal class-based example:</p>
           {Code.format(`
-            import { Button, Component, Dialog } from '@basis/react'
+            import { Button, Component, Dialog } from 'basis/react'
 
             interface Props {
               name: string,
@@ -53,7 +53,7 @@ export class OverviewDocs extends DocumentationPage<Record<string, never>> {
           <h3>Styling & Theming</h3>
           <p>All components are lightly styled with modern CSS via the lightweight lightweight <Router.Link to="/utilities/style">style</Router.Link> utility. Why? So that when you pull in basis components, you don't have to install or manage any CSS-preprocessors like SCSS/LESS. We keep selectors tight, drive visuals from <code>data-*</code> state, and expose CSS variables at the base and component level for customization.</p>
           {Code.format(`
-            import { css, style } from '@basis/react'
+            import { css, style } from 'basis/react'
 
             style('your:component', css\`
               .your.component {

@@ -1,4 +1,4 @@
-import { OptionGroup, Section, ToggleEditor } from '@basis/react'
+import { OptionGroup, Section, ToggleEditor } from 'basis/react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Orientation } from '../../react/types/Orientation'
 import { Code } from '../components/Code'

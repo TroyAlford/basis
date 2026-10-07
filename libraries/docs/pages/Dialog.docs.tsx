@@ -1,4 +1,4 @@
-import { Button, Dialog, Intent, Router } from '@basis/react'
+import { Button, Dialog, Intent, Router } from 'basis/react'
 import { Code } from '../components/Code'
 import { DialogEditorExample } from '../components/DialogEditorExample'
 import { DocumentationPage } from '../components/DocumentationPage'
@@ -137,7 +137,7 @@ export class DialogDocs extends DocumentationPage<State> {
           <p>With custom buttons, returns <code>Promise&lt;T | false&gt;</code> that resolves with the clicked button&apos;s <code>value</code>, a definition <code>resolve</code> callback evaluated at activation time, or a JSX button <code>data-value</code>. Escape, native cancel, and other dismiss paths resolve <code>false</code>. With no custom buttons, <code>Dialog.open()</code> returns <code>Promise&lt;boolean&gt;</code>.</p>
           <p>With no request, or with only <code>title</code> / <code>content</code>, <code>Dialog.open()</code> renders <strong>Cancel</strong> and <strong>OK</strong>. Cancel and Escape resolve <code>false</code>; OK resolves <code>true</code>. Custom button dialogs can use <code>{'{'} label, value {'}'}</code>, <code>&lt;Button data-value="..."&gt;</code>, or a mix of both. Button intent defaults to <code>Intent.Is.Default</code>, while the dialog shell intent defaults to <code>Intent.Is.Primary</code>.</p>
           {Code.format(`
-            import { Button, Dialog, Intent } from '@basis/react'
+            import { Button, Dialog, Intent } from 'basis/react'
 
             const defaultResult = await Dialog.open({
               content: 'Cancel resolves false; OK resolves true.',
@@ -161,7 +161,7 @@ export class DialogDocs extends DocumentationPage<State> {
           <p>For route or form flows built with an <code>Editor</code> subclass, <code>Dialog.editor</code> mounts that editor as the dialog body and resolves <code>Promise&lt;Value | false&gt;</code>. It records a variable initialized from the <code>initialValue</code> argument, assigns on each editor <code>onChange</code>, and returns that variable when the user confirms; cancel, Escape, and dismiss resolve <code>false</code>. <code>Value</code> is inferred from <code>initialValue</code>.</p>
           <p>The editor dialog currently uses the standard <strong>OK</strong> and <strong>Cancel</strong> buttons (JSX <code>&lt;Button data-value=...&gt;</code> under the hood). For fully custom button labels and values, use <code>Dialog.open</code> directly.</p>
           {Code.format(`
-            import { Dialog, Editor } from '@basis/react'
+            import { Dialog, Editor } from 'basis/react'
 
             interface NameAndSlug {
               name: string
@@ -203,7 +203,7 @@ export class DialogDocs extends DocumentationPage<State> {
           <h2><code>Dialog.confirm</code></h2>
           <p>Convenience wrapper around <code>Dialog.open&lt;boolean&gt;</code> with cancel and confirm buttons. OK resolves <code>true</code>; Cancel and Escape resolve <code>false</code>. Pass <code>intent: Dialog.Intent.Danger</code> for destructive confirmations (danger chrome and confirm button intent).</p>
           {Code.format(`
-            import { Dialog } from '@basis/react'
+            import { Dialog } from 'basis/react'
 
             const ok = await Dialog.confirm({
               content: 'This cannot be undone.',

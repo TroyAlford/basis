@@ -1,5 +1,5 @@
+import { AnchorPoint, Component, Tooltip } from 'basis/react'
 import type { CSSProperties, ReactNode } from 'react'
-import { AnchorPoint, Component, Tooltip } from '@basis/react'
 
 type Align = 'center' | 'end' | 'start'
 type Vertical = 'center' | 'end' | 'start'

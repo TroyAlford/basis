@@ -8,7 +8,10 @@
  *    the nearest `package.json` in any of `dependencies`, `devDependencies`,
  *    `optionalDependencies`, `peerDependencies`, or `bundledDependencies`;
  *  - type-only imports/exports, relative/absolute specifiers, Node and Bun
- *    builtins, and self-references are always ignored.
+ *    builtins, and self-references are always ignored;
+ *  - a workspace may import the monorepo's own root package by name (for
+ *    example `basis/react` inside `libraries/docs`), which is a self-reference
+ *    at the monorepo level rather than an extraneous dependency.
  *
  * The declared package name is matched against `package.json` directly rather
  * than resolving the module on disk, and bundler/`tsconfig` alias resolution is
@@ -75,6 +78,45 @@ const readDependencyFields = (packageJsonPath: string): DependencyFields | null 
   }
   dependencyCache.set(packageJsonPath, fields)
   return fields
+}
+
+/** The subset of a `package.json` needed to locate the monorepo root. */
+interface Manifest {
+  /** Declared package name. */
+  name?: string,
+  /** Workspace globs, present only on a monorepo root. */
+  workspaces?: unknown,
+}
+
+const manifestCache = new Map<string, Manifest | null>()
+
+const readManifest = (packageJsonPath: string): Manifest | null => {
+  const cached = manifestCache.get(packageJsonPath)
+  if (cached !== undefined) return cached
+  let manifest: Manifest | null
+  try {
+    manifest = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as Manifest
+  } catch {
+    manifest = null
+  }
+  manifestCache.set(packageJsonPath, manifest)
+  return manifest
+}
+
+/**
+ * The name of the monorepo root package that contains a file, if any.
+ * @param filename - The file being linted.
+ * @returns The nearest enclosing `workspaces` root package name, or `null`.
+ */
+const findMonorepoRootName = (filename: string): string | null => {
+  let directory = dirname(resolve(filename))
+  while (true) {
+    const manifest = readManifest(join(directory, 'package.json'))
+    if (manifest && manifest.workspaces !== undefined && typeof manifest.name === 'string') return manifest.name
+    const parent = dirname(directory)
+    if (parent === directory) return null
+    directory = parent
+  }
 }
 
 const findNearestPackageJson = (filename: string): string | null => {
@@ -150,6 +192,7 @@ const isDeclared = (deps: DependencyFields, packageName: string): boolean => {
 export const noExtraneousDependencies: Rule.RuleModule = {
   create(context: Rule.RuleContext): Rule.RuleListener {
     const deps = collectDependencies(context.physicalFilename) ?? emptyDependencyFields()
+    const rootName = findMonorepoRootName(context.physicalFilename)
 
     const report = (node: ESTree.Node, specifier: string | null | undefined): void => {
       if (!specifier || isBuiltInModule(specifier) || !isBareSpecifier(specifier)) return
@@ -159,10 +202,12 @@ export const noExtraneousDependencies: Rule.RuleModule = {
       if (!packageName) return
 
       /*
-       * The nearest package importing itself by name (`@basis/react` inside
-       * `@basis/react`) resolves internally; the original skips it as internal.
+       * A package importing itself by name (`@basis/react` inside
+       * `@basis/react`), or a workspace importing the monorepo root package
+       * (`basis/react` inside `@basis/docs`), resolves internally; the original
+       * skips self-references as internal.
        */
-      if (packageName === deps.name) return
+      if (packageName === deps.name || packageName === rootName) return
       if (isDeclared(deps, packageName)) return
 
       context.report({ data: { packageName }, messageId: 'missingDependency', node })
@@ -193,6 +238,7 @@ export const noExtraneousDependencies: Rule.RuleModule = {
 
       'Program:exit'() {
         dependencyCache.clear()
+        manifestCache.clear()
       },
     }
   },

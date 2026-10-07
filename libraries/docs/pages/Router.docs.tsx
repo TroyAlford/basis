@@ -1,4 +1,4 @@
-import { Router } from '@basis/react'
+import { Router } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 

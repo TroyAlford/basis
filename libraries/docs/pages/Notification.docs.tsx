@@ -1,4 +1,4 @@
-import { Button, Notification, Router } from '@basis/react'
+import { Button, Notification, Router } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
@@ -105,7 +105,7 @@ export class NotificationDocs extends DocumentationPage<State> {
         <section>
           <h2>Usage</h2>
           {Code.format(`
-            import { Notification } from '@basis/react'
+            import { Notification } from 'basis/react'
 
             const note = Notification.create({
               title: 'Uploading',

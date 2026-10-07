@@ -180,6 +180,12 @@ const identity = new Identity({
 import { AutoComplete, Button, Theme } from 'basis/react'
 ```
 
+`basis/react` also re-exports the icon set, but a few icon names collide with component names (the `Table` icon and the `Table` component, for example). Import those from the dedicated subpath:
+
+```tsx
+import { Table } from 'basis/react/icons'
+```
+
 Basis owns the React runtime contract. React and ReactDOM are pinned at `^19.3.0` in Basis's manifest, and Basis also declares the React type packages (`@types/react`, `@types/react-dom`) and its other runtime dependencies (`@floating-ui/dom`). A consumer that pins the same React range resolves one deduplicated React runtime rather than a copy per package.
 
 Components are consumed directly from source — there is no Basis build step. The surface is self-contained: internal imports resolve through package-relative paths, so `basis/react` never needs Basis-workspace path aliases, a consumer resolver plugin, or `node_modules/basis/libraries/*` imports.

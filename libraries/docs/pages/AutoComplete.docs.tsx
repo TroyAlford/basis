@@ -1,4 +1,4 @@
-import { AnchorPoint, AutoComplete, Link } from '@basis/react'
+import { AnchorPoint, AutoComplete, Link } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 

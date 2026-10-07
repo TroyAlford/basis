@@ -1,4 +1,4 @@
-import { EnumEditor, Section, ToggleEditor } from '@basis/react'
+import { EnumEditor, Section, ToggleEditor } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 

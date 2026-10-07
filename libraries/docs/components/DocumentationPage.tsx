@@ -1,4 +1,4 @@
-import { Editor } from '@basis/react'
+import { Editor } from 'basis/react'
 
 /**
  * Base class for the gallery pages in this docs app. It extends {@link Editor}

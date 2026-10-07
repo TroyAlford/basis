@@ -1,4 +1,4 @@
-import { Padlock, Section, ToggleEditor } from '@basis/react'
+import { Padlock, Section, ToggleEditor } from 'basis/react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'

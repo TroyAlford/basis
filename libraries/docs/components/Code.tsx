@@ -1,4 +1,4 @@
-import { Await, Component } from '@basis/react'
+import { Await, Component } from 'basis/react'
 
 import './Code.styles.ts'
 

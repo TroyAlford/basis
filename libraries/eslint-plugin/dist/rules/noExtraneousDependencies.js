@@ -44,6 +44,38 @@ const readDependencyFields = (packageJsonPath) => {
     dependencyCache.set(packageJsonPath, fields);
     return fields;
 };
+const manifestCache = new Map();
+const readManifest = (packageJsonPath) => {
+    const cached = manifestCache.get(packageJsonPath);
+    if (cached !== undefined)
+        return cached;
+    let manifest;
+    try {
+        manifest = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+    }
+    catch {
+        manifest = null;
+    }
+    manifestCache.set(packageJsonPath, manifest);
+    return manifest;
+};
+/**
+ * The name of the monorepo root package that contains a file, if any.
+ * @param filename - The file being linted.
+ * @returns The nearest enclosing `workspaces` root package name, or `null`.
+ */
+const findMonorepoRootName = (filename) => {
+    let directory = dirname(resolve(filename));
+    while (true) {
+        const manifest = readManifest(join(directory, 'package.json'));
+        if (manifest && manifest.workspaces !== undefined && typeof manifest.name === 'string')
+            return manifest.name;
+        const parent = dirname(directory);
+        if (parent === directory)
+            return null;
+        directory = parent;
+    }
+};
 const findNearestPackageJson = (filename) => {
     let directory = dirname(resolve(filename));
     while (true) {
@@ -130,6 +162,7 @@ const isDeclared = (deps, packageName) => {
 export const noExtraneousDependencies = {
     create(context) {
         const deps = collectDependencies(context.physicalFilename) ?? emptyDependencyFields();
+        const rootName = findMonorepoRootName(context.physicalFilename);
         const report = (node, specifier) => {
             if (!specifier || isBuiltInModule(specifier) || !isBareSpecifier(specifier))
                 return;
@@ -139,10 +172,12 @@ export const noExtraneousDependencies = {
             if (!packageName)
                 return;
             /*
-             * The nearest package importing itself by name (`@basis/react` inside
-             * `@basis/react`) resolves internally; the original skips it as internal.
+             * A package importing itself by name (`@basis/react` inside
+             * `@basis/react`), or a workspace importing the monorepo root package
+             * (`basis/react` inside `@basis/docs`), resolves internally; the original
+             * skips self-references as internal.
              */
-            if (packageName === deps.name)
+            if (packageName === deps.name || packageName === rootName)
                 return;
             if (isDeclared(deps, packageName))
                 return;
@@ -170,6 +205,7 @@ export const noExtraneousDependencies = {
             },
             'Program:exit'() {
                 dependencyCache.clear();
+                manifestCache.clear();
             },
         };
     },

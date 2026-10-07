@@ -1,4 +1,4 @@
-import { AnchorPoint } from '@basis/react'
+import { AnchorPoint } from 'basis/react'
 import { Button } from '../../react/components/Button/Button'
 import { Link } from '../../react/components/Router/Link'
 import { Tooltip } from '../../react/components/Tooltip/Tooltip'

@@ -1,4 +1,4 @@
-import { CheckboxEditor, Section, TextEditor } from '@basis/react'
+import { CheckboxEditor, Section, TextEditor } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
@@ -76,7 +76,7 @@ export class CheckboxEditorDocs extends DocumentationPage<State> {
         <Section title="Basic Usage">
           <p>The simplest way to use CheckboxEditor is with a boolean value:</p>
           {Code.format(`
-            import { CheckboxEditor } from '@basis/react'
+            import { CheckboxEditor } from 'basis/react'
 
             function MyComponent() {
               const [checked, setChecked] = React.useState(false)
@@ -104,7 +104,7 @@ export class CheckboxEditorDocs extends DocumentationPage<State> {
         <Section title="Three-State Checkboxes">
           <p>Enable indeterminate state support for three-state checkboxes:</p>
           {Code.format(`
-            import { CheckboxEditor } from '@basis/react'
+            import { CheckboxEditor } from 'basis/react'
 
             function MyComponent() {
               const [state, setState] = React.useState<boolean | null>(null)

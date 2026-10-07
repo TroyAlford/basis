@@ -1,6 +1,6 @@
+import { Button, css, NumberEditor, style } from 'basis/react'
+import * as Icons from 'basis/react/icons'
 import type { CSSProperties } from 'react'
-import { Button, css, NumberEditor, style } from '@basis/react'
-import * as Icons from '@basis/react/icons'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
@@ -130,7 +130,7 @@ export class MoonPhaseDocs extends DocumentationPage<State> {
         <h2>Usage Examples</h2>
         <h3>Basic Usage</h3>
         {Code.format(`
-          import { MoonPhase } from '@basis/react'
+          import { MoonPhase } from 'basis/react'
 
           // Show different moon phases
           <MoonPhase day={0} period={28} tilt={0} />      // New moon
@@ -140,7 +140,7 @@ export class MoonPhaseDocs extends DocumentationPage<State> {
         `)}
         <h3>With Custom Tilt</h3>
         {Code.format(`
-          import { MoonPhase } from '@basis/react'
+          import { MoonPhase } from 'basis/react'
 
           // With custom tilt for different orientations
           <MoonPhase day={14} period={28} tilt={0.3} />
@@ -148,7 +148,7 @@ export class MoonPhaseDocs extends DocumentationPage<State> {
         `)}
         <h3>Different Periods</h3>
         {Code.format(`
-          import { MoonPhase } from '@basis/react'
+          import { MoonPhase } from 'basis/react'
 
           // Custom lunar periods
           <MoonPhase day={10} period={30} tilt={0} />    // 30-day cycle

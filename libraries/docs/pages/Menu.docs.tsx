@@ -99,7 +99,7 @@ export class MenuDocs extends DocumentationPage<State> {
           `)}
           <h3>Horizontal Navigation Menu</h3>
           {Code.format(`
-            import { Router } from '@basis/react'
+            import { Router } from 'basis/react'
 
             <Menu orientation={Menu.Orientation.Horizontal}>
               <Menu.Item onActivate={() => Router.navigate('/')}>

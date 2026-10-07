@@ -1,6 +1,6 @@
+import { AnchorPoint, Await, Mermaid, Theme, Tooltip } from 'basis/react'
 import * as React from 'react'
 import { createRoot } from 'react-dom/client'
-import { AnchorPoint, Await, Mermaid, Theme, Tooltip } from '@basis/react'
 
 /*
  * A tiny live stage for components whose meaningful state only exists after

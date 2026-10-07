@@ -1,4 +1,4 @@
-import { NumberEditor, Section } from '@basis/react'
+import { NumberEditor, Section } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 import { PopupBoundaryExample } from '../components/PopupBoundaryExample'
