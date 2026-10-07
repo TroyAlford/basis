@@ -40,6 +40,8 @@ export default createConfig({
 
 Every ESLint plugin the config imports is declared by Basis itself, so consumers do not enumerate or install the plugin stack.
 
+The config also adds Basis rules of its own. `@basis/no-jsx-line-breaks` keeps inline JSX — text, embedded expressions, and inlined elements — on one line, opening and closing tags included, because the renderer word-wraps; block content and whitespace-sensitive elements stay structured. It autofixes, so `basis format` applies it and `basis lint` reports it. JSX lines are exempt from `max-len`, which is a code-length rule, not a prose one.
+
 ## CSS linting
 
 Component CSS lives in `*.styles.ts` as `css` tagged template literals. Basis lints it with Stylelint through the `postcss-styled-syntax` custom syntax, so the embedded stylesheet is parsed as real CSS (including nesting and `${...}` interpolations) rather than matched as text.

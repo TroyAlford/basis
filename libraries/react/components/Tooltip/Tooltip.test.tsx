@@ -49,9 +49,7 @@ describe('Tooltip', () => {
 
     test('renders with popup data attributes', async () => {
       await expectDataAttributes(
-        <Tooltip anchorPoint={AnchorPoint.Bottom} arrow={true}>
-          Content
-        </Tooltip>,
+        <Tooltip anchorPoint={AnchorPoint.Bottom} arrow={true}>Content</Tooltip>,
         {
           'data-popup': 'true',
           'data-popup-anchor-point': 'bottom',
@@ -104,9 +102,7 @@ describe('Tooltip', () => {
   describe('basic rendering', () => {
     test('renders tooltip content', async () => {
       const div = await render(
-        <Tooltip>
-          Test tooltip content
-        </Tooltip>,
+        <Tooltip>Test tooltip content</Tooltip>,
       )
 
       expect(div.node.textContent).toContain('Test tooltip content')

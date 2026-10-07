@@ -52,20 +52,13 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
       <>
         <h1>Table</h1>
         <Section title="Interactive Demo">
-          <p>
-            The Table component provides a flexible, type-safe way to display tabular data. Built on the Component
-            base class, it offers excellent TypeScript ergonomics with strongly-typed columns and automatic
-            field validation.
-          </p>
+          <p>The Table component provides a flexible, type-safe way to display tabular data. Built on the Component base class, it offers excellent TypeScript ergonomics with strongly-typed columns and automatic field validation.</p>
           <div style={{ border: '1px solid #ddd', borderRadius: '4px', overflow: 'hidden' }}>
             <UserTable data={this.users} />
           </div>
         </Section>
         <Section title="Basic Usage">
-          <p>
-            The simplest way to use the Table component is with the <code>TypedTable.of()</code> factory function,
-            which provides type-safe column creation methods:
-          </p>
+          <p>The simplest way to use the Table component is with the <code>TypedTable.of()</code> factory function, which provides type-safe column creation methods:</p>
           {Code.format(`
             import { TypedTable } from '@basis/react'
 
@@ -91,23 +84,16 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
           `)}
         </Section>
         <Section title="Column Types">
-          <p>
-            The Table component supports six built-in column types, each optimized for different data types:
-          </p>
+          <p>The Table component supports six built-in column types, each optimized for different data types:</p>
           <ul>
             <li><strong>Text</strong> - For string data, renders as TextEditor</li>
             <li><strong>Number</strong> - For numeric data, renders as NumberEditor</li>
             <li><strong>Boolean</strong> - For boolean data, renders as CheckboxEditor</li>
             <li><strong>Date</strong> - For date-only values, displays a formatted date</li>
-            <li>
-              <strong>DateTime</strong> - For date-and-time values, displays a medium date and short time via{' '}
-              <code>toLocaleString</code>
-            </li>
+            <li><strong>DateTime</strong> - For date-and-time values, displays a medium date and short time via{' '}<code>toLocaleString</code></li>
             <li><strong>Enum</strong> - For enumerated values, renders as EnumEditor with dropdown</li>
           </ul>
-          <p>
-            Each column type automatically configures appropriate sorting behavior and alignment:
-          </p>
+          <p>Each column type automatically configures appropriate sorting behavior and alignment:</p>
           <ul>
             <li>Text and Enum columns sort by name/label and are left-aligned</li>
             <li>Number, Boolean, Date, and DateTime columns sort by value</li>
@@ -115,9 +101,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
           </ul>
         </Section>
         <Section title="Nested Data Access">
-          <p>
-            The Table component supports nested object properties using dot notation in the field path:
-          </p>
+          <p>The Table component supports nested object properties using dot notation in the field path:</p>
           {Code.format(`
             interface User {
               id: number
@@ -135,9 +119,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
         </Section>
         <Section title="Advanced Features">
           <h4>Column Pinning</h4>
-          <p>
-            Tables support pinning columns to the left or right side for better navigation of wide datasets:
-          </p>
+          <p>Tables support pinning columns to the left or right side for better navigation of wide datasets:</p>
           {Code.format(`
             {Column.Text({ 
               field: 'name', 
@@ -150,15 +132,9 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
               pin: Pin.Right  // Pin to right side
             })}
           `)}
-          <p>
-            Pinned columns remain visible when scrolling horizontally, making them perfect for
-            identifiers (like names or IDs) or important action columns.
-          </p>
+          <p>Pinned columns remain visible when scrolling horizontally, making them perfect for identifiers (like names or IDs) or important action columns.</p>
           <h4>Column Alignment</h4>
-          <p>
-            Control text alignment for each column type. Each column type has sensible defaults,
-            but you can override them:
-          </p>
+          <p>Control text alignment for each column type. Each column type has sensible defaults, but you can override them:</p>
           {Code.format(`
             {Column.Number({ 
               field: 'price', 
@@ -180,9 +156,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             <li><strong>Boolean/Date/DateTime</strong>: Center-aligned</li>
           </ul>
           <h4>Row Interactions</h4>
-          <p>
-            Tables support click and double-click handlers for rows:
-          </p>
+          <p>Tables support click and double-click handlers for rows:</p>
           {Code.format(`
             <Table
               value={data}
@@ -193,9 +167,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             </Table>
           `)}
           <h4>Custom Sorting</h4>
-          <p>
-            You can disable sorting on specific columns or customize the sorting behavior:
-          </p>
+          <p>You can disable sorting on specific columns or customize the sorting behavior:</p>
           {Code.format(`
             {Column.Text({ 
               field: 'name', 
@@ -204,9 +176,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             })}
           `)}
           <h4>Custom Key Fields</h4>
-          <p>
-            By default, tables use the 'id' field as the row key. You can specify a different field:
-          </p>
+          <p>By default, tables use the 'id' field as the row key. You can specify a different field:</p>
           {Code.format(`
             <Table
               value={data}

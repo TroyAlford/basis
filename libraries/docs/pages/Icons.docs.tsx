@@ -109,9 +109,7 @@ export class IconsDocs extends DocumentationPage<State> {
         <div className="icon-demo-container">
           <Icons.Triangle orientation={Icons.Triangle.Orientation.Right} />
         </div>
-        <span className="special-icon-name">
-          Triangle (Right)
-        </span>
+        <span className="special-icon-name">Triangle (Right)</span>
       </div>
       {/* Sort Component */}
       <div className="special-icon-item">
@@ -121,27 +119,21 @@ export class IconsDocs extends DocumentationPage<State> {
             sortBy={Icons.Sort.By.Name}
           />
         </div>
-        <span className="special-icon-name">
-          Sort (by name)
-        </span>
+        <span className="special-icon-name">Sort (by name)</span>
       </div>
       {/* Grip Component */}
       <div className="special-icon-item">
         <div className="icon-demo-container">
           <Icons.Grip orientation={Icons.Grip.Orientation.Horizontal} />
         </div>
-        <span className="special-icon-name">
-          Grip (Horizontal)
-        </span>
+        <span className="special-icon-name">Grip (Horizontal)</span>
       </div>
       {/* Zoom Component */}
       <div className="special-icon-item">
         <div className="icon-demo-container">
           <Icons.Zoom direction={Icons.Zoom.Direction.In} />
         </div>
-        <span className="special-icon-name">
-          Zoom (In)
-        </span>
+        <span className="special-icon-name">Zoom (In)</span>
       </div>
     </div>
   )
@@ -167,21 +159,12 @@ export class IconsDocs extends DocumentationPage<State> {
     return (
       <div className="icons-docs">
         <h1>Icons</h1>
-        <p>
-          The icons library provides a comprehensive collection of SVG icons for use throughout the application.
-          All icons are built on the <code>IconBase</code> component and support consistent styling, sizing, and
-          theming. The table glyph is exported as <code>Table</code> from <code>@basis/react/icons</code> so it
-          does not collide with the <code>Table</code> component.
-        </p>
+        <p>The icons library provides a comprehensive collection of SVG icons for use throughout the application. All icons are built on the <code>IconBase</code> component and support consistent styling, sizing, and theming. The table glyph is exported as <code>Table</code> from <code>@basis/react/icons</code> so it does not collide with the <code>Table</code> component.</p>
         <h2>Icon Grid</h2>
-        <p>
-          Browse all available icons in the interactive grid below. Use the controls to customize the display:
-        </p>
+        <p>Browse all available icons in the interactive grid below. Use the controls to customize the display:</p>
         <div className="controls-grid">
           <div className="control-group">
-            <label>
-              Size: {size}px
-            </label>
+            <label>Size: {size}px</label>
             <NumberEditor
               step={4}
               value={size}
@@ -189,9 +172,7 @@ export class IconsDocs extends DocumentationPage<State> {
             />
           </div>
           <div className="control-group">
-            <label>
-              Color
-            </label>
+            <label>Color</label>
             <input
               className="color-input"
               type="color"
@@ -200,9 +181,7 @@ export class IconsDocs extends DocumentationPage<State> {
             />
           </div>
           <div className="control-group">
-            <label>
-              Filter Icons
-            </label>
+            <label>Filter Icons</label>
             <TextEditor
               placeholder="Search icons..."
               value={filterText}
@@ -210,9 +189,7 @@ export class IconsDocs extends DocumentationPage<State> {
             />
           </div>
           <div className="control-group">
-            <label>
-              Filled
-            </label>
+            <label>Filled</label>
             <Button
               className={filled ? 'primary' : 'secondary'}
               onActivate={() => void this.handleField(!filled, 'filled')}
@@ -221,9 +198,7 @@ export class IconsDocs extends DocumentationPage<State> {
             </Button>
           </div>
           <div className="control-group">
-            <label>
-              Show Names
-            </label>
+            <label>Show Names</label>
             <Button
               className={showNames ? 'primary' : 'secondary'}
               onActivate={() => void this.handleField(!showNames, 'showNames')}
@@ -257,10 +232,7 @@ export class IconsDocs extends DocumentationPage<State> {
         `)}
         <h2>Group/Set Icons</h2>
         {this.renderSpecialIcons()}
-        <p>
-          Some icons are more than simple graphics - they're interactive components with their own props and behavior.
-          The following components follow the same pattern of grouping icon variants into a single component:
-        </p>
+        <p>Some icons are more than simple graphics - they're interactive components with their own props and behavior. The following components follow the same pattern of grouping icon variants into a single component:</p>
         <ul>
           <li><strong>Triangle</strong>: Directional triangles with an <code>orientation</code> prop</li>
           <li><strong>Sort</strong>: Sort indicators with <code>sortBy</code> and <code>direction</code> props</li>
@@ -300,39 +272,23 @@ export class IconsDocs extends DocumentationPage<State> {
           <Zoom.In />
           <Zoom.Out />
         `)}
-        <p>
-          For detailed information about the Moon Phase component, see the
-          <Router.Link to="/icons/MoonPhase">MoonPhase documentation</Router.Link>.
-        </p>
+        <p>For detailed information about the Moon Phase component, see the<Router.Link to="/icons/MoonPhase">MoonPhase documentation</Router.Link>.</p>
         <h2>Icon Styling</h2>
-        <p>
-          Icons are styled using CSS custom properties. All icons inherit from <code>IconBase</code> and
-          support the following styling options:
-        </p>
+        <p>Icons are styled using CSS custom properties. All icons inherit from <code>IconBase</code> and support the following styling options:</p>
         <ul>
           <li><strong>--basis-icon-color</strong> - Icon color (default: currentColor, shown as #000000 in picker)</li>
           <li><strong>--basis-icon-overlay-color</strong> - Overlay color (default: currentColor)</li>
           <li><strong>--basis-icon-size</strong> - Icon size (default: 1em)</li>
         </ul>
         <h3>Icon Props</h3>
-        <p>
-          Icons also support these component props:
-        </p>
+        <p>Icons also support these component props:</p>
         <ul>
           <li><strong>disabled</strong> - Whether the icon is disabled (default: false)</li>
           <li><strong>onClick</strong> - Click handler function</li>
-          <li>
-            <strong>overlay</strong> - Component (inherits <code>filled</code>) or element (keeps its own) in the
-            lower-right quadrant
-          </li>
+          <li><strong>overlay</strong> - Component (inherits <code>filled</code>) or element (keeps its own) in the lower-right quadrant</li>
         </ul>
         <h2>Overlays</h2>
-        <p>
-          Pass another icon as <code>overlay</code>. It fills the lower-right quadrant of the viewBox
-          (half the width and height, a quarter of the area). A component overlay inherits
-          {' '}<code>filled</code> from the main icon; pass an element to override. Color the main icon with
-          {' '}<code>--basis-icon-color</code> and the overlay with <code>--basis-icon-overlay-color</code>.
-        </p>
+        <p>Pass another icon as <code>overlay</code>. It fills the lower-right quadrant of the viewBox (half the width and height, a quarter of the area). A component overlay inherits{' '}<code>filled</code> from the main icon; pass an element to override. Color the main icon with{' '}<code>--basis-icon-color</code> and the overlay with <code>--basis-icon-overlay-color</code>.</p>
         <div className="overlay-section">
           <div className="overlay-controls">
             <div className="overlay-row">
@@ -415,9 +371,7 @@ export class IconsDocs extends DocumentationPage<State> {
           <Lightning filled overlay={<Plus />} />
         `)}
         <h2>Accessibility</h2>
-        <p>
-          All icons are built with accessibility in mind:
-        </p>
+        <p>All icons are built with accessibility in mind:</p>
         <ul>
           <li>Icons use semantic SVG elements with proper ARIA attributes</li>
           <li>Color contrast ratios meet WCAG guidelines</li>
@@ -426,9 +380,7 @@ export class IconsDocs extends DocumentationPage<State> {
           <li>Screen readers can access icon content through proper labeling</li>
         </ul>
         <h2>Customization</h2>
-        <p>
-          Icons can be customized through CSS custom properties or by extending the <code>IconBase</code> component:
-        </p>
+        <p>Icons can be customized through CSS custom properties or by extending the <code>IconBase</code> component:</p>
         {Code.format(`
           // CSS custom properties customization
           .my-icon-container {

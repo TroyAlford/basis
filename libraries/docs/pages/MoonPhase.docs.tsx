@@ -64,27 +64,21 @@ export class MoonPhaseDocs extends DocumentationPage<State> {
               </Button>
             </div>
             <div className="control-group">
-              <label>
-                Moon Day: {day}
-              </label>
+              <label>Moon Day: {day}</label>
               <NumberEditor
                 value={day}
                 onChange={value => void this.handleField(value, 'day')}
               />
             </div>
             <div className="control-group">
-              <label>
-                Moon Period: {period}
-              </label>
+              <label>Moon Period: {period}</label>
               <NumberEditor
                 value={period}
                 onChange={value => void this.handleField(value, 'period')}
               />
             </div>
             <div className="control-group">
-              <label>
-                Moon Tilt: {tilt}
-              </label>
+              <label>Moon Tilt: {tilt}</label>
               <NumberEditor
                 step={0.1}
                 value={tilt}
@@ -108,9 +102,7 @@ export class MoonPhaseDocs extends DocumentationPage<State> {
               tilt={tilt}
             />
           </div>
-          <span className="moon-phase-name">
-            Moon Phase
-          </span>
+          <span className="moon-phase-name">Moon Phase</span>
         </div>
       </div>
     )
@@ -126,16 +118,10 @@ export class MoonPhaseDocs extends DocumentationPage<State> {
     return (
       <div className="moon-phase-docs">
         <h1>Moon Phase Component</h1>
-        <p>
-          The Moon Phase component dynamically renders different lunar phases based on day, period, and tilt parameters.
-          This component is perfect for applications that need to display astronomical data, calendar systems, or
-          any interface that benefits from lunar phase visualization.
-        </p>
+        <p>The Moon Phase component dynamically renders different lunar phases based on day, period, and tilt parameters. This component is perfect for applications that need to display astronomical data, calendar systems, or any interface that benefits from lunar phase visualization.</p>
         {this.renderMoonPhaseSection()}
         <h2>Parameters</h2>
-        <p>
-          The Moon Phase component accepts three key parameters that control its appearance:
-        </p>
+        <p>The Moon Phase component accepts three key parameters that control its appearance:</p>
         <ul>
           <li><strong>day</strong> - The current day in the lunar cycle (0-28)</li>
           <li><strong>period</strong> - The total length of the lunar cycle (typically 28 days)</li>
@@ -169,9 +155,7 @@ export class MoonPhaseDocs extends DocumentationPage<State> {
           <MoonPhase day={5} period={14} tilt={0} />     // 14-day cycle
         `)}
         <h2>Phase Calculation</h2>
-        <p>
-          The component automatically calculates the lunar phase based on the day and period parameters:
-        </p>
+        <p>The component automatically calculates the lunar phase based on the day and period parameters:</p>
         <ul>
           <li><strong>New Moon</strong> - day = 0 or day = period</li>
           <li><strong>Waxing Crescent</strong> - 0 &lt; day &lt; period/4</li>
@@ -183,9 +167,7 @@ export class MoonPhaseDocs extends DocumentationPage<State> {
           <li><strong>Waning Crescent</strong> - 3*period/4 &lt; day &lt; period</li>
         </ul>
         <h2>Styling</h2>
-        <p>
-          The Moon Phase component supports all standard icon styling options, plus duotone support:
-        </p>
+        <p>The Moon Phase component supports all standard icon styling options, plus duotone support:</p>
         {Code.format(`
           // CSS custom properties
           .moon-container {

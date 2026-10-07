@@ -43,19 +43,12 @@ export class EnumEditorDocs extends DocumentationPage<State> {
       <>
         <h1>EnumEditor</h1>
         <Section>
-          <p>
-            EnumEditor converts TypeScript enums into user-friendly dropdown menus. It automatically
-            generates formatted options from enum objects, handles both string and numeric enums, and
-            provides consistent keyboard navigation and accessibility.
-          </p>
+          <p>EnumEditor converts TypeScript enums into user-friendly dropdown menus. It automatically generates formatted options from enum objects, handles both string and numeric enums, and provides consistent keyboard navigation and accessibility.</p>
         </Section>
         <Section title="Key Features">
           <ul>
             <li><strong>Automatic Option Generation</strong>: Converts enum objects into formatted dropdown options</li>
-            <li>
-              <strong>TitleCase Formatting</strong>:
-              Converts enum names to readable labels (e.g., "camelCase" → "Camel Case")
-            </li>
+            <li><strong>TitleCase Formatting</strong>: Converts enum names to readable labels (e.g., "camelCase" → "Camel Case")</li>
             <li><strong>Value Sorting</strong>: Options sorted by enum values for consistent ordering</li>
             <li><strong>Type Safety</strong>: Full TypeScript support with proper generic inference</li>
           </ul>
@@ -179,32 +172,21 @@ export class EnumEditorDocs extends DocumentationPage<State> {
           `)}
         </Section>
         <Section title="Props">
-          <p>
-            EnumEditor extends the Editor pattern and uses DropdownMenu for dropdown functionality.
-            For detailed information about controlled/uncontrolled modes and dropdown behavior,
-            see the <a href="/dropdown-menu">DropdownMenu documentation</a>.
-          </p>
+          <p>EnumEditor extends the Editor pattern and uses DropdownMenu for dropdown functionality. For detailed information about controlled/uncontrolled modes and dropdown behavior, see the <a href="/dropdown-menu">DropdownMenu documentation</a>.</p>
           <ul>
             <li><strong><code>enum</code></strong>: The enum object to display options for (required)</li>
             <li><strong><code>value</code></strong>: Current selected enum value</li>
             <li><strong><code>onChange</code></strong>: Handler function called when selection changes</li>
             <li><strong><code>field</code></strong>: Field identifier for form management</li>
             <li><strong><code>readOnly</code></strong>: Whether the component is read-only</li>
-            <li>
-              <strong><code>closeOnActivate</code></strong>:
-              Whether to close dropdown when option is selected (default: true)
-            </li>
+            <li><strong><code>closeOnActivate</code></strong>: Whether to close dropdown when option is selected (default: true)</li>
             <li><strong><code>initialValue</code></strong>: Initial value for uncontrolled mode</li>
           </ul>
         </Section>
         <Section title="How It Works">
-          <p>
-            EnumEditor automatically processes enum objects to create user-friendly options:
-          </p>
+          <p>EnumEditor automatically processes enum objects to create user-friendly options:</p>
           <h3>Title Case Conversion</h3>
-          <p>
-            Enum keys are converted to readable labels:
-          </p>
+          <p>Enum keys are converted to readable labels:</p>
           <ul>
             <li><code>draft</code> → <code>"Draft"</code></li>
             <li><code>camelCase</code> → <code>"Camel Case"</code></li>
@@ -212,9 +194,7 @@ export class EnumEditorDocs extends DocumentationPage<State> {
             <li><code>snake_case</code> → <code>"Snake Case"</code></li>
           </ul>
           <h3>Value Sorting</h3>
-          <p>
-            Options are sorted by their enum values for consistent ordering:
-          </p>
+          <p>Options are sorted by their enum values for consistent ordering:</p>
           {Code.format(`
             enum Priority {
               Critical = 4,  // Appears last
@@ -225,11 +205,7 @@ export class EnumEditorDocs extends DocumentationPage<State> {
           `)}
         </Section>
         <Section title="Accessibility">
-          <p>
-            EnumEditor inherits comprehensive keyboard navigation and accessibility support
-            from <code>DropdownMenu</code>.
-            For detailed information, see the <a href="/dropdown-menu">DropdownMenu</a> documentation.
-          </p>
+          <p>EnumEditor inherits comprehensive keyboard navigation and accessibility support from <code>DropdownMenu</code>. For detailed information, see the <a href="/dropdown-menu">DropdownMenu</a> documentation.</p>
         </Section>
         <Section title="Best Practices">
           <h3>Use Descriptive Enum Names</h3>
@@ -265,9 +241,7 @@ export class EnumEditorDocs extends DocumentationPage<State> {
             <li><strong>Categories</strong>: Any predefined set of options</li>
             <li><strong>Settings</strong>: Theme, Language, Region selection</li>
           </ul>
-          <p>
-            Consider alternatives for complex multi-select, searchable options, or dynamic option lists.
-          </p>
+          <p>Consider alternatives for complex multi-select, searchable options, or dynamic option lists.</p>
         </Section>
       </>
     )

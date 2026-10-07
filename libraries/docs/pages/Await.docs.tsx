@@ -7,24 +7,12 @@ export class AwaitDocs extends DocumentationPage<Record<string, never>> {
       <>
         <h1>Await</h1>
         <section>
-          <p>
-            The Await component provides a declarative way to handle asynchronous content rendering
-            in React components. Built on the Component base class, it automatically manages the
-            loading state and renders content once promises resolve, eliminating the need for
-            manual state management of async operations.
-          </p>
-          <p>
-            Await is particularly useful for components that need to render content from dynamic
-            imports, API calls, or other asynchronous operations while maintaining a clean,
-            declarative API.
-          </p>
+          <p>The Await component provides a declarative way to handle asynchronous content rendering in React components. Built on the Component base class, it automatically manages the loading state and renders content once promises resolve, eliminating the need for manual state management of async operations.</p>
+          <p>Await is particularly useful for components that need to render content from dynamic imports, API calls, or other asynchronous operations while maintaining a clean, declarative API.</p>
         </section>
         <section>
           <h3>Basic Usage</h3>
-          <p>
-            Await accepts a promise as children and renders a fallback while the promise is
-            pending. Once resolved, it renders the resolved content:
-          </p>
+          <p>Await accepts a promise as children and renders a fallback while the promise is pending. Once resolved, it renders the resolved content:</p>
           {Code.format(`
             <Await fallback="Loading...">
               {Promise.resolve("Content loaded!")}
@@ -33,26 +21,17 @@ export class AwaitDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h3>Component Architecture</h3>
-          <p>
-            Await extends the Component base class and provides a simple interface for
-            handling asynchronous rendering:
-          </p>
+          <p>Await extends the Component base class and provides a simple interface for handling asynchronous rendering:</p>
           <ul>
             <li><strong>Promise Children:</strong> Accepts a Promise that resolves to React nodes</li>
             <li><strong>Fallback Rendering:</strong> Shows fallback content while promise is pending</li>
             <li><strong>Automatic State Management:</strong> Handles loading state internally</li>
-            <li>
-              <strong>Lifecycle Integration:</strong>{' '}
-              Resolves on mount and again whenever the child promise reference changes (stale results are ignored)
-            </li>
+            <li><strong>Lifecycle Integration:</strong>{' '}Resolves on mount and again whenever the child promise reference changes (stale results are ignored)</li>
           </ul>
         </section>
         <section>
           <h3>Use Cases</h3>
-          <p>
-            Await is ideal for scenarios where you need to render content that depends on
-            asynchronous operations:
-          </p>
+          <p>Await is ideal for scenarios where you need to render content that depends on asynchronous operations:</p>
           <h4>Dynamic Imports</h4>
           <p>Load components or modules dynamically while showing a loading state:</p>
           {Code.format(`
@@ -61,9 +40,7 @@ export class AwaitDocs extends DocumentationPage<Record<string, never>> {
             </Await>
           `)}
           <h4>API Data Loading</h4>
-          <p>
-            Render content based on API responses with automatic loading states:
-          </p>
+          <p>Render content based on API responses with automatic loading states:</p>
           {Code.format(`
             <Await fallback="Fetching data...">
               {fetch('/api/users')
@@ -72,9 +49,7 @@ export class AwaitDocs extends DocumentationPage<Record<string, never>> {
             </Await>
           `)}
           <h4>Complex Async Operations</h4>
-          <p>
-            Handle multiple async operations or complex promise chains:
-          </p>
+          <p>Handle multiple async operations or complex promise chains:</p>
           {Code.format(`
             <Await fallback={<Loading />}>
               {Promise.all([
@@ -94,9 +69,7 @@ export class AwaitDocs extends DocumentationPage<Record<string, never>> {
         <section>
           <h2>Best Practices</h2>
           <h3>Fallback Design</h3>
-          <p>
-            Design your fallback content to provide a good user experience during loading:
-          </p>
+          <p>Design your fallback content to provide a good user experience during loading:</p>
           {Code.format(`
             // Good: Informative fallback
             <Await fallback="Loading user profile...">
@@ -116,9 +89,7 @@ export class AwaitDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h3>Error Handling</h3>
-          <p>
-            Consider error boundaries or error handling for promises that might reject:
-          </p>
+          <p>Consider error boundaries or error handling for promises that might reject:</p>
           {Code.format(`
             <Await fallback="Loading...">
               {fetch('/api/data')
@@ -134,9 +105,7 @@ export class AwaitDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h3>Performance Considerations</h3>
-          <p>
-            Use Await strategically to avoid unnecessary re-renders and improve performance:
-          </p>
+          <p>Use Await strategically to avoid unnecessary re-renders and improve performance:</p>
           <ul>
             <li><strong>Memoize Promises:</strong> Avoid creating new promises on every render</li>
             <li><strong>Lazy Loading:</strong> Use for components that aren't immediately needed</li>
@@ -162,10 +131,7 @@ export class AwaitDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h3>Component Integration</h3>
-          <p>
-            Await works seamlessly with other components and can be nested for complex
-            async rendering scenarios:
-          </p>
+          <p>Await works seamlessly with other components and can be nested for complex async rendering scenarios:</p>
           {Code.format(`
             <div className="dashboard">
               <Await fallback={<HeaderSkeleton />}>

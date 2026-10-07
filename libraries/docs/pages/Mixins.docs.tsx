@@ -9,21 +9,12 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
       <>
         <h1>Mixins</h1>
         <Section title="Overview">
-          <p>
-            The Component class includes a powerful mixin system that allows you to compose behavior
-            without inheritance. Mixins can modify both content and root elements, providing
-            flexible composition patterns.
-          </p>
-          <p>
-            Mixins are automatically integrated once declared, providing default props, content processing,
-            root modification, and lifecycle method integration.
-          </p>
+          <p>The Component class includes a powerful mixin system that allows you to compose behavior without inheritance. Mixins can modify both content and root elements, providing flexible composition patterns.</p>
+          <p>Mixins are automatically integrated once declared, providing default props, content processing, root modification, and lifecycle method integration.</p>
         </Section>
         <Section title="How to Use Mixins">
           <h2>Declaring Mixins</h2>
-          <p>
-            Components declare their mixins using a static getter:
-          </p>
+          <p>Components declare their mixins using a static getter:</p>
           {Code.format(`
             export class MyComponent extends Component<Props> {
               static get mixins(): Set<Mixin> {
@@ -35,22 +26,15 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
             }
           `)}
           <h2>Automatic Integration</h2>
-          <p>
-            Once declared, mixins are automatically integrated:
-          </p>
+          <p>Once declared, mixins are automatically integrated:</p>
           <ul>
             <li><strong>Default Props</strong>: Mixin default props are automatically merged</li>
-            <li>
-              <strong>Content Processing</strong>:
-              Content mixins are applied in order (respecting the <code>post</code> flag)
-            </li>
+            <li><strong>Content Processing</strong>: Content mixins are applied in order (respecting the <code>post</code> flag)</li>
             <li><strong>Root Modification</strong>: Render mixins modify the final root element</li>
             <li><strong>Lifecycle Methods</strong>: Mixin lifecycle methods are automatically called</li>
           </ul>
           <h2>Mixin Ordering</h2>
-          <p>
-            Mixins with <code>post: true</code> are applied after regular mixins, ensuring proper layering:
-          </p>
+          <p>Mixins with <code>post: true</code> are applied after regular mixins, ensuring proper layering:</p>
           {Code.format(`
             // Mixins are applied in this order:
             // 1. Regular mixins (prefix, suffix, etc.)
@@ -67,28 +51,13 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
           `)}
         </Section>
         <Section title="Content Mixins">
-          <p>
-            Content mixins modify the component's children/content. They are applied in the order
-            they're declared, with post mixins applied last.
-          </p>
+          <p>Content mixins modify the component's children/content. They are applied in the order they're declared, with post mixins applied last.</p>
           <h2>Accessible Mixin</h2>
-          <p>
-            Provides ARIA attributes and accessibility features for components. Automatically
-            adds <code>aria-label</code> and <code>aria-describedby</code> attributes to form inputs
-            and interactive elements.
-          </p>
-          <p>
-            <strong>Usage:</strong> Perfect for form inputs, buttons, and interactive elements
-            that need proper accessibility labeling.
-          </p>
+          <p>Provides ARIA attributes and accessibility features for components. Automatically adds <code>aria-label</code> and <code>aria-describedby</code> attributes to form inputs and interactive elements.</p>
+          <p><strong>Usage:</strong> Perfect for form inputs, buttons, and interactive elements that need proper accessibility labeling.</p>
           <h2>PrefixSuffix Mixin</h2>
-          <p>
-            Adds content before and after the main element, useful for labels, icons, or additional context.
-            Wraps the component with prefix and suffix elements when provided.
-          </p>
-          <p>
-            <strong>Usage:</strong> Perfect for adding currency symbols, units, or labels around inputs.
-          </p>
+          <p>Adds content before and after the main element, useful for labels, icons, or additional context. Wraps the component with prefix and suffix elements when provided.</p>
+          <p><strong>Usage:</strong> Perfect for adding currency symbols, units, or labels around inputs.</p>
           <p>
             <strong>Example:</strong>
             <NumberEditor prefix="$" suffix="USD" value={1000} />
@@ -97,31 +66,14 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
             `)}
           </p>
           <h2>Placeholder Mixin</h2>
-          <p>
-            Provides placeholder text support for input elements. Automatically adds
-            the <code>placeholder</code> attribute to input elements.
-          </p>
-          <p>
-            <strong>Usage:</strong> Essential for form inputs that need placeholder text for better UX.
-          </p>
+          <p>Provides placeholder text support for input elements. Automatically adds the <code>placeholder</code> attribute to input elements.</p>
+          <p><strong>Usage:</strong> Essential for form inputs that need placeholder text for better UX.</p>
           <h2>Focusable Mixin</h2>
-          <p>
-            Provides auto-focus support and focus management for components. Automatically focuses
-            components when <code>autoFocus={true}</code> is set.
-          </p>
-          <p>
-            <strong>Usage:</strong> Useful for form inputs that should receive focus immediately
-            when mounted or when certain conditions are met.
-          </p>
+          <p>Provides auto-focus support and focus management for components. Automatically focuses components when <code>autoFocus={true}</code> is set.</p>
+          <p><strong>Usage:</strong> Useful for form inputs that should receive focus immediately when mounted or when certain conditions are met.</p>
           <h2>Pinnable Mixin</h2>
-          <p>
-            Provides column pinning functionality for table cells. Automatically applies CSS positioning
-            to pin columns to the left or right side of a table, with automatic cleanup when unpinned.
-          </p>
-          <p>
-            <strong>Usage:</strong> Used by Table HeaderCell and Cell components to implement sticky
-            column functionality. Automatically handles CSS positioning and cleanup.
-          </p>
+          <p>Provides column pinning functionality for table cells. Automatically applies CSS positioning to pin columns to the left or right side of a table, with automatic cleanup when unpinned.</p>
+          <p><strong>Usage:</strong> Used by Table HeaderCell and Cell components to implement sticky column functionality. Automatically handles CSS positioning and cleanup.</p>
           <p>
             <strong>Features:</strong>
           </p>
@@ -133,20 +85,10 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
           </ul>
         </Section>
         <Section title="Render Mixins">
-          <p>
-            Render mixins modify the component's root element. They are applied after content mixins
-            to ensure the final element has all necessary attributes and styles.
-          </p>
+          <p>Render mixins modify the component's root element. They are applied after content mixins to ensure the final element has all necessary attributes and styles.</p>
           <h2>Popup Mixin</h2>
-          <p>
-            Provides flexible positioning support using Floating UI primitives for components like tooltips,
-            dropdowns, and popovers. Supports both anchor-based and parent-based positioning with automatic
-            repositioning on updates.
-          </p>
-          <p>
-            <strong>Usage:</strong> Automatically handles positioning using Floating UI with support for
-            all anchor points, automatic repositioning, and arrow positioning.
-          </p>
+          <p>Provides flexible positioning support using Floating UI primitives for components like tooltips, dropdowns, and popovers. Supports both anchor-based and parent-based positioning with automatic repositioning on updates.</p>
+          <p><strong>Usage:</strong> Automatically handles positioning using Floating UI with support for all anchor points, automatic repositioning, and arrow positioning.</p>
           <p>
             <strong>Example:</strong>
             {Code.format(`
@@ -154,9 +96,7 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
             `)}
           </p>
           <h5>Available Anchor Points</h5>
-          <p>
-            The Popup mixin supports 12 anchor point options that directly map to Floating UI placement values:
-          </p>
+          <p>The Popup mixin supports 12 anchor point options that directly map to Floating UI placement values:</p>
           <ul>
             <li><strong>Top</strong>: Above the reference element with center alignment</li>
             <li><strong>Top Start</strong>: Above the reference element with left alignment</li>
@@ -172,34 +112,14 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
             <li><strong>Right End</strong>: To the right of the reference element with bottom alignment</li>
           </ul>
           <h5>Anchor vs Parent Positioning</h5>
-          <p>
-            Components using the Popup mixin can position themselves relative to either a specific anchor element
-            (via the <code>anchorTo</code> prop) or automatically to their parent element. When an anchor ref
-            is provided, the popup positions relative to that element. When omitted, it falls back to parent-based
-            positioning.
-          </p>
+          <p>Components using the Popup mixin can position themselves relative to either a specific anchor element (via the <code>anchorTo</code> prop) or automatically to their parent element. When an anchor ref is provided, the popup positions relative to that element. When omitted, it falls back to parent-based positioning.</p>
           <h5>Clipping Boundary</h5>
-          <p>
-            By default, Floating UI keeps the popup inside the window. Pass <code>boundary</code> with an
-            element, a ref, or a CSS selector to clip against that container’s visible box — for example a
-            scrolling article pane. A selector is resolved with <code>closest</code> from the component’s root
-            element, so it names the nearest matching ancestor; when nothing matches, no boundary is applied.
-            {' '}
-            <code>flip</code> and <code>shift</code> both honor that box, so the popup can flip when the anchor
-            reaches a visible edge instead of sliding out of view.
-          </p>
-          <p>
-            Both panes below anchor an always-visible tooltip near their top edge. The pane on the left clips
-            to the window only, so the tooltip escapes above it; the pane on the right names the pane as its
-            {' '}
-            <code>boundary</code>, so the tooltip flips below the anchor and stays inside the pane.
-          </p>
+          <p>By default, Floating UI keeps the popup inside the window. Pass <code>boundary</code> with an element, a ref, or a CSS selector to clip against that container’s visible box — for example a scrolling article pane. A selector is resolved with <code>closest</code> from the component’s root element, so it names the nearest matching ancestor; when nothing matches, no boundary is applied.{' '}<code>flip</code> and <code>shift</code> both honor that box, so the popup can flip when the anchor reaches a visible edge instead of sliding out of view.</p>
+          <p>Both panes below anchor an always-visible tooltip near their top edge. The pane on the left clips to the window only, so the tooltip escapes above it; the pane on the right names the pane as its{' '}<code>boundary</code>, so the tooltip flips below the anchor and stays inside the pane.</p>
           <PopupBoundaryExample />
         </Section>
         <Section title="Creating Custom Mixins">
-          <p>
-            You can create custom mixins by implementing the <code>Mixin</code> interface:
-          </p>
+          <p>You can create custom mixins by implementing the <code>Mixin</code> interface:</p>
           {Code.format(`
             interface ICustomMixin {
               customProp?: string
@@ -250,9 +170,7 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
             }
           `)}
           <h2>Mixin Interface</h2>
-          <p>
-            The <code>Mixin</code> interface defines what methods a mixin can implement:
-          </p>
+          <p>The <code>Mixin</code> interface defines what methods a mixin can implement:</p>
           {Code.format(`
             export interface Mixin<Props = unknown> {
               // Content modification
@@ -294,10 +212,7 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
           <h2>Mixin Composition</h2>
           <ul>
             <li><strong>Keep Mixins Focused</strong>: Each mixin should handle one specific concern</li>
-            <li>
-              <strong>Use Post Flag Wisely</strong>:
-              Only set <code>post: true</code> when the mixin needs to run after others
-            </li>
+            <li><strong>Use Post Flag Wisely</strong>: Only set <code>post: true</code> when the mixin needs to run after others</li>
             <li><strong>Provide Default Props</strong>: Always provide sensible defaults for mixin props</li>
             <li><strong>Handle Missing Props</strong>: Gracefully handle cases where optional props aren't provided</li>
           </ul>
@@ -310,9 +225,7 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
         </Section>
         <Section title="Real-World Examples">
           <h2>Tooltip Component</h2>
-          <p>
-            The Tooltip component demonstrates effective mixin usage:
-          </p>
+          <p>The Tooltip component demonstrates effective mixin usage:</p>
           {Code.format(`
             export class Tooltip extends Component<Props> {
               static get mixins(): Set<Mixin> {
@@ -337,9 +250,7 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
             }
           `)}
           <h2>NumberEditor Component</h2>
-          <p>
-            The NumberEditor shows how multiple mixins work together:
-          </p>
+          <p>The NumberEditor shows how multiple mixins work together:</p>
           {Code.format(`
             export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
               static get mixins(): Set<Mixin> {
@@ -355,9 +266,7 @@ export class MixinsDocs extends DocumentationPage<Record<string, never>> {
             }
           `)}
           <h2>Table Cell Components</h2>
-          <p>
-            The Table HeaderCell and Cell components demonstrate the Pinnable mixin:
-          </p>
+          <p>The Table HeaderCell and Cell components demonstrate the Pinnable mixin:</p>
           {Code.format(`
             export class HeaderCell<TRow, TField> extends Editor<ColumnProps<TRow, TField>> {
               static get mixins(): Set<Mixin> {

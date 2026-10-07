@@ -32,10 +32,7 @@ export class NumberEditorDocs extends DocumentationPage<State> {
       <>
         <h1>NumberEditor</h1>
         <section>
-          <p>
-            NumberEditor is a specialized number input component that extends the Editor base class to provide
-            intelligent number handling with automatic formatting, parsing, and step-based navigation.
-          </p>
+          <p>NumberEditor is a specialized number input component that extends the Editor base class to provide intelligent number handling with automatic formatting, parsing, and step-based navigation.</p>
         </section>
         <section>
           <h2>Key Features</h2>
@@ -44,10 +41,7 @@ export class NumberEditorDocs extends DocumentationPage<State> {
             <li><strong>Smart Parsing</strong>: Converts formatted strings back to numbers, handling commas</li>
             <li><strong>Step Navigation</strong>: Arrow key navigation with configurable step values</li>
             <li><strong>Zero Handling</strong>: Shows empty input instead of "0" for better UX</li>
-            <li>
-              <strong>Mixin Integration</strong>:
-              Built-in support for accessibility, prefix/suffix, and placeholder features
-            </li>
+            <li><strong>Mixin Integration</strong>: Built-in support for accessibility, prefix/suffix, and placeholder features</li>
           </ul>
         </section>
         <section>
@@ -104,9 +98,7 @@ export class NumberEditorDocs extends DocumentationPage<State> {
             {/* Demo Area */}
             <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '1rem' }}>
               <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem' }}>
-                  NumberEditor with all mixins:
-                </label>
+                <label style={{ display: 'block', marginBottom: '0.5rem' }}>NumberEditor with all mixins:</label>
                 <NumberEditor
                   autoFocus={this.current.autoFocus}
                   field="demo"
@@ -143,20 +135,10 @@ export class NumberEditorDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Key Props</h2>
-          <p>
-            NumberEditor supports both controlled and uncontrolled modes. Use <code>value</code> for controlled
-            mode where you manage the state, or <code>initialValue</code> for uncontrolled mode where the
-            component manages its own state.
-          </p>
-          <p>
-            The <code>field</code> prop is used to identify the input in form management scenarios,
-            while <code>step</code> enables arrow key navigation with configurable increments.
-          </p>
+          <p>NumberEditor supports both controlled and uncontrolled modes. Use <code>value</code> for controlled mode where you manage the state, or <code>initialValue</code> for uncontrolled mode where the component manages its own state.</p>
+          <p>The <code>field</code> prop is used to identify the input in form management scenarios, while <code>step</code> enables arrow key navigation with configurable increments.</p>
           <h3>Mixin System</h3>
-          <p>
-            NumberEditor uses the Component class's mixin system for enhanced functionality. For detailed
-            information about each mixin, see the <Link to="/mixins">Mixins documentation</Link>.
-          </p>
+          <p>NumberEditor uses the Component class's mixin system for enhanced functionality. For detailed information about each mixin, see the <Link to="/mixins">Mixins documentation</Link>.</p>
           {Code.format(`
             export class NumberEditor extends Editor<number, HTMLInputElement, Props> {
               static get mixins(): Set<Mixin> {
@@ -168,26 +150,19 @@ export class NumberEditorDocs extends DocumentationPage<State> {
               }
             }
           `)}
-          <p>
-            These mixins automatically provide accessibility features, auto-focus support, placeholder text,
-            and prefix/suffix content. All mixins are automatically applied once declared.
-          </p>
+          <p>These mixins automatically provide accessibility features, auto-focus support, placeholder text, and prefix/suffix content. All mixins are automatically applied once declared.</p>
         </section>
         <section>
           <h2>Number Formatting & Parsing</h2>
           <h3>Display Formatting</h3>
-          <p>
-            NumberEditor automatically formats numbers for display using comma separators:
-          </p>
+          <p>NumberEditor automatically formats numbers for display using comma separators:</p>
           <ul>
             <li><code>1234</code> → displays as <code>"1,234"</code></li>
             <li><code>1000000</code> → displays as <code>"1,000,000"</code></li>
             <li><code>0</code> → displays as empty string (for better UX)</li>
           </ul>
           <h3>Step Navigation</h3>
-          <p>
-            When a <code>step</code> value is provided, users can navigate numbers using arrow keys:
-          </p>
+          <p>When a <code>step</code> value is provided, users can navigate numbers using arrow keys:</p>
           <ul>
             <li><strong><Tag>↑</Tag> Arrow Up</strong>: Increases value by step amount</li>
             <li><strong><Tag>↓</Tag> Arrow Down</strong>: Decreases value by step amount</li>
@@ -195,11 +170,7 @@ export class NumberEditorDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>When to Use NumberEditor</h2>
-          <p>
-            NumberEditor is ideal for quantity inputs, prices, percentages, measurements, and any scenario
-            requiring numeric input with validation. Consider alternatives when you need complex formatting,
-            scientific notation, or specialized input types.
-          </p>
+          <p>NumberEditor is ideal for quantity inputs, prices, percentages, measurements, and any scenario requiring numeric input with validation. Consider alternatives when you need complex formatting, scientific notation, or specialized input types.</p>
         </section>
       </>
     )

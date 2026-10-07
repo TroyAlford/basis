@@ -77,12 +77,7 @@ export class AutoCompleteDocs extends DocumentationPage<State> {
       <>
         <h1>AutoComplete</h1>
         <section>
-          <p>
-            AutoComplete is a generic component that combines TextEditor with PopupMenu to provide
-            async search functionality with type-safe option handling. It supports any data type
-            through TypeScript generics and provides a clean, accessible interface for search
-            and selection operations.
-          </p>
+          <p>AutoComplete is a generic component that combines TextEditor with PopupMenu to provide async search functionality with type-safe option handling. It supports any data type through TypeScript generics and provides a clean, accessible interface for search and selection operations.</p>
         </section>
         <section>
           <h2>Key Features</h2>
@@ -251,11 +246,7 @@ export class AutoCompleteDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Key Props</h2>
-          <p>
-            AutoComplete is generic over the option data type <code>T</code>, allowing you to work with
-            any data structure while maintaining type safety. The component requires you to specify how
-            to extract values and labels from your data through the required getter functions.
-          </p>
+          <p>AutoComplete is generic over the option data type <code>T</code>, allowing you to work with any data structure while maintaining type safety. The component requires you to specify how to extract values and labels from your data through the required getter functions.</p>
           <h3>Required Props</h3>
           <ul>
             <li><strong>onSearch</strong>: Async function that returns options based on search query</li>
@@ -273,17 +264,11 @@ export class AutoCompleteDocs extends DocumentationPage<State> {
             <li><strong>notFoundContent</strong>: Content to show when no results found</li>
           </ul>
           <h3>Popup Positioning</h3>
-          <p>
-            AutoComplete uses the Popup mixin for positioning, supporting all anchor points and
-            positioning options. See the <Link to="/mixins">Mixins documentation</Link> for details.
-          </p>
+          <p>AutoComplete uses the Popup mixin for positioning, supporting all anchor points and positioning options. See the <Link to="/mixins">Mixins documentation</Link> for details.</p>
         </section>
         <section>
           <h2>Mixin System</h2>
-          <p>
-            AutoComplete uses the Component class's mixin system for enhanced functionality. For detailed
-            information about each mixin, see the <Link to="/mixins">Mixins documentation</Link>.
-          </p>
+          <p>AutoComplete uses the Component class's mixin system for enhanced functionality. For detailed information about each mixin, see the <Link to="/mixins">Mixins documentation</Link>.</p>
           {Code.format(`
             export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElement, State<T>> {
               static get mixins(): Set<Mixin> {
@@ -296,55 +281,33 @@ export class AutoCompleteDocs extends DocumentationPage<State> {
               }
             }
           `)}
-          <p>
-            These mixins automatically provide accessibility features, auto-focus support, placeholder text,
-            prefix/suffix content, and popup positioning. All mixins are automatically applied once declared.
-          </p>
+          <p>These mixins automatically provide accessibility features, auto-focus support, placeholder text, prefix/suffix content, and popup positioning. All mixins are automatically applied once declared.</p>
         </section>
         <section>
           <h2>Keyboard Navigation</h2>
-          <p>
-            AutoComplete provides full keyboard accessibility:
-          </p>
+          <p>AutoComplete provides full keyboard accessibility:</p>
           <ul>
             <li><strong>Arrow Down/Up</strong>: Navigate through options</li>
             <li><strong>Enter</strong>: Select the currently highlighted option</li>
             <li><strong>Escape</strong>: Close the dropdown</li>
             <li><strong>Tab</strong>: Move focus to the next focusable element</li>
           </ul>
-          <p>
-            The component automatically manages focus between the input and options, ensuring
-            a smooth keyboard navigation experience.
-          </p>
+          <p>The component automatically manages focus between the input and options, ensuring a smooth keyboard navigation experience.</p>
         </section>
         <section>
           <h2>Accessibility</h2>
-          <p>
-            AutoComplete follows the ARIA combobox pattern. The inner input owns{' '}
-            <code>role="combobox"</code> with <code>aria-expanded</code>,{' '}
-            <code>aria-controls</code> pointing at the dropdown, and{' '}
-            <code>aria-autocomplete="list"</code>. The dropdown is a{' '}
-            <code>role="listbox"</code> whose children are <code>role="option"</code> items. DOM
-            focus stays on the input while ArrowUp/ArrowDown move the active option, which the
-            input's <code>aria-activedescendant</code> tracks; options are excluded from the Tab
-            sequence.
-          </p>
+          <p>AutoComplete follows the ARIA combobox pattern. The inner input owns{' '}<code>role="combobox"</code> with <code>aria-expanded</code>,{' '}<code>aria-controls</code> pointing at the dropdown, and{' '}<code>aria-autocomplete="list"</code>. The dropdown is a{' '}<code>role="listbox"</code> whose children are <code>role="option"</code> items. DOM focus stays on the input while ArrowUp/ArrowDown move the active option, which the input's <code>aria-activedescendant</code> tracks; options are excluded from the Tab sequence.</p>
         </section>
         <section>
           <h2>Async Search and Performance</h2>
-          <p>
-            AutoComplete is designed for async operations with built-in performance optimizations:
-          </p>
+          <p>AutoComplete is designed for async operations with built-in performance optimizations:</p>
           <ul>
             <li><strong>Debouncing</strong>: Configurable debounce delay prevents excessive API calls</li>
             <li><strong>Abortable</strong>: Automatically cancels in-flight requests when new searches start</li>
             <li><strong>Loading States</strong>: Built-in loading indicators and error handling</li>
             <li><strong>Minimum Length</strong>: Configurable minimum query length to avoid unnecessary searches</li>
           </ul>
-          <p>
-            The component handles all the complexity of managing async state, allowing you to focus
-            on your search logic and data transformation.
-          </p>
+          <p>The component handles all the complexity of managing async state, allowing you to focus on your search logic and data transformation.</p>
         </section>
       </>
     )

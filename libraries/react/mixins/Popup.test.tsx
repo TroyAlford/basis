@@ -303,9 +303,7 @@ describe('Popup mixin boundary targeting', () => {
     const externalAnchor = document.createElement('button')
     const rendered = await render(
       <div className="popup-boundary-wrapper">
-        <Tooltip anchorTo={externalAnchor} boundary=".popup-boundary-wrapper" visible={true}>
-          Content
-        </Tooltip>
+        <Tooltip anchorTo={externalAnchor} boundary=".popup-boundary-wrapper" visible={true}>Content</Tooltip>
       </div>,
     )
     await flush()

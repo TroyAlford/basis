@@ -9,11 +9,7 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
         <h1>Mermaid</h1>
         <section>
           <h2>Overview</h2>
-          <p>
-            The Mermaid component renders a Mermaid diagram. The runtime is imported lazily on mount,
-            so a page without diagrams never fetches it and server rendering never reaches the
-            network.
-          </p>
+          <p>The Mermaid component renders a Mermaid diagram. The runtime is imported lazily on mount, so a page without diagrams never fetches it and server rendering never reaches the network.</p>
         </section>
         <section>
           <h2>Basic Usage</h2>
@@ -35,10 +31,7 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h2>In Markdown and MDX</h2>
-          <p>
-            A <code>mermaid</code> code fence in a <code>.mdx</code> document compiles to this
-            component, so diagram source written as Markdown renders as a diagram.
-          </p>
+          <p>A <code>mermaid</code> code fence in a <code>.mdx</code> document compiles to this component, so diagram source written as Markdown renders as a diagram.</p>
         </section>
       </>
     )

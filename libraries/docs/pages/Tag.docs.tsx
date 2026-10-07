@@ -9,10 +9,7 @@ export class TagDocs extends DocumentationPage<Record<string, never>> {
         <h1>Tag</h1>
         <section>
           <h2>Overview</h2>
-          <p>
-            The Tag component displays a labeled element that can optionally be removed.
-            Tags are commonly used to show categories, labels, or selected items.
-          </p>
+          <p>The Tag component displays a labeled element that can optionally be removed. Tags are commonly used to show categories, labels, or selected items.</p>
         </section>
         <section>
           <h2>Basic Usage</h2>

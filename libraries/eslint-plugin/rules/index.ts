@@ -4,6 +4,7 @@ import { noMixedTypeImports } from './no-mixed-type-imports'
 import { noObjectPadding } from './no-object-padding'
 import { noDefaultExport } from './noDefaultExport'
 import { noExtraneousDependencies } from './noExtraneousDependencies'
+import { noJsxLineBreaks } from './noJsxLineBreaks'
 import { sortInterface } from './sortInterface'
 import { sortKeys } from './sortKeys'
 import { sortStringEnum } from './sortStringEnum'
@@ -13,6 +14,7 @@ export default {
     'import-extensions': importExtensions,
     'no-default-export': noDefaultExport,
     'no-extraneous-dependencies': noExtraneousDependencies,
+    'no-jsx-line-breaks': noJsxLineBreaks,
     'no-mixed-type-imports': noMixedTypeImports,
     'no-object-padding': noObjectPadding,
     'sort-interface': sortInterface,

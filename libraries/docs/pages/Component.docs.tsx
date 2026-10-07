@@ -8,48 +8,24 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
       <>
         <h1>Component</h1>
         <section>
-          <p>
-            The Component class provides a foundation for building React components with consistent
-            patterns and reduced boilerplate. It extends React's base Component class with additional
-            functionality that addresses common development needs.
-          </p>
-          <p>
-            While React's Component class is perfectly adequate for many use cases, this extension
-            offers conveniences that can improve developer productivity and code consistency in larger
-            applications.
-          </p>
+          <p>The Component class provides a foundation for building React components with consistent patterns and reduced boilerplate. It extends React's base Component class with additional functionality that addresses common development needs.</p>
+          <p>While React's Component class is perfectly adequate for many use cases, this extension offers conveniences that can improve developer productivity and code consistency in larger applications.</p>
         </section>
         <section>
           <h2>Key Benefits</h2>
           <ul>
-            <li>
-              <strong>Reduced Boilerplate</strong>:
-              Automatic class naming, ARIA/data attribute handling, and theme integration
-            </li>
-            <li>
-              <strong>Attribute Surface Area</strong>:
-              Consistent expandable surface for applying any <code>aria-*</code> or <code>data-*</code> props
-            </li>
-            <li>
-              <strong>Theme Integration</strong>:
-              Built-in theming system that works with the Theme component
-            </li>
-            <li>
-              <strong>Better TypeScript</strong>:
-              Improved generic support and type inference
-            </li>
+            <li><strong>Reduced Boilerplate</strong>: Automatic class naming, ARIA/data attribute handling, and theme integration</li>
+            <li><strong>Attribute Surface Area</strong>: Consistent expandable surface for applying any <code>aria-*</code> or <code>data-*</code> props</li>
+            <li><strong>Theme Integration</strong>: Built-in theming system that works with the Theme component</li>
+            <li><strong>Better TypeScript</strong>: Improved generic support and type inference</li>
             <li><strong>Enhanced State Management:</strong> Promise-based setState with lifecycle handling</li>
           </ul>
         </section>
         <section>
           <h2>Boilerplate Reduction in Practice</h2>
-          <p>
-            The Component class eliminates repetitive code patterns. Here are real examples from the codebase:
-          </p>
+          <p>The Component class eliminates repetitive code patterns. Here are real examples from the codebase:</p>
           <h3>Simple Component - Tag</h3>
-          <p>
-            The Tag component shows how minimal the boilerplate can be:
-          </p>
+          <p>The Tag component shows how minimal the boilerplate can be:</p>
           {Code.format(`
             export class Tag extends Component<Props, HTMLSpanElement> {
               static displayName = 'Tag'
@@ -72,9 +48,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
               }
             }
           `)}
-          <p>
-            This component automatically gets:
-          </p>
+          <p>This component automatically gets:</p>
           <ul>
             <li>CSS classes: <code>tag component</code></li>
             <li>Theme support via <code>data-theme</code> attribute</li>
@@ -82,9 +56,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
             <li>Proper TypeScript typing with HTMLSpanElement</li>
           </ul>
           <h3>Complex Component - TextEditor</h3>
-          <p>
-            Even complex components benefit from the reduced boilerplate:
-          </p>
+          <p>Even complex components benefit from the reduced boilerplate:</p>
           {Code.format(`
             export class TextEditor extends Editor<string, HTMLInputElement | HTMLTextAreaElement, Props> {
               static displayName = 'TextEditor'
@@ -112,19 +84,10 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h2>Mixin System</h2>
-          <p>
-            The Component class includes a powerful mixin system that allows you to compose behavior
-            without inheritance. Mixins can modify both content and root elements, providing flexible
-            composition patterns.
-          </p>
-          <p>
-            For comprehensive documentation on all available mixins and how to create custom ones,
-            see the <Link to="/mixins">Mixins documentation</Link>.
-          </p>
+          <p>The Component class includes a powerful mixin system that allows you to compose behavior without inheritance. Mixins can modify both content and root elements, providing flexible composition patterns.</p>
+          <p>For comprehensive documentation on all available mixins and how to create custom ones, see the <Link to="/mixins">Mixins documentation</Link>.</p>
           <h3>Quick Start</h3>
-          <p>
-            Components declare their mixins using a static getter:
-          </p>
+          <p>Components declare their mixins using a static getter:</p>
           {Code.format(`
             export class MyComponent extends Component<Props> {
               static get mixins(): Set<Mixin> {
@@ -135,17 +98,12 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
               }
             }
           `)}
-          <p>
-            Once declared, mixins are automatically integrated, providing default props, content processing,
-            root modification, and lifecycle method integration.
-          </p>
+          <p>Once declared, mixins are automatically integrated, providing default props, content processing, root modification, and lifecycle method integration.</p>
         </section>
         <section>
           <h2>Core Features</h2>
           <h3>Automatic Class Naming</h3>
-          <p>
-            Components automatically receive consistent CSS classes based on their name:
-          </p>
+          <p>Components automatically receive consistent CSS classes based on their name:</p>
           {Code.format(`
             // Component class automatically generates:
             // <div class="user-profile component">...</div>
@@ -157,11 +115,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
             <UserProfile className="highlighted" />
             // Results in: <div class="user-profile component highlighted">...</div>
           `)}
-          <p>
-            <strong>Note:</strong> Some build systems munge class names during compilation. As a best practice,
-            set a <code>static displayName</code> which will be used with preference if it exists, instead
-            of the <code>constructor.name</code>:
-          </p>
+          <p><strong>Note:</strong> Some build systems munge class names during compilation. As a best practice, set a <code>static displayName</code> which will be used with preference if it exists, instead of the <code>constructor.name</code>:</p>
           {Code.format(`
             export class UserProfile extends Component<Props> {
               static displayName = 'UserProfile'
@@ -170,9 +124,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
             }
           `)}
           <h3>Attribute Surface Area</h3>
-          <p>
-            Any ARIA or data attributes passed as props are automatically applied to the root element:
-          </p>
+          <p>Any ARIA or data attributes passed as props are automatically applied to the root element:</p>
           {Code.format(`
             // Usage - pass any aria-* or data-* props directly
             <CustomButton 
@@ -185,22 +137,9 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
             // The Component class automatically handles the prefixing and application
             // No need to manually manage these in your component
           `)}
-          <p>
-            Standard native attributes and event handlers for the root element are also forwarded
-            automatically, typed from React's element attributes for the component's tag. A
-            descendant can accept <code>id</code>, <code>role</code>, <code>tabIndex</code>,{' '}
-            <code>title</code>, <code>onFocus</code>, <code>onKeyDown</code>, and the rest of the
-            common HTML/SVG surface without declaring them. Component-specific props are never
-            forwarded. When a component or mixin intentionally reuses a native name for its own
-            semantics, it declares that name explicitly (for example{' '}
-            <code>static ownedNativeProps = ['title']</code>), and ownership composes through
-            inheritance and mixins — for example <code>Notification</code>/<code>Dialog</code> own
-            their React-node <code>title</code>.
-          </p>
+          <p>Standard native attributes and event handlers for the root element are also forwarded automatically, typed from React's element attributes for the component's tag. A descendant can accept <code>id</code>, <code>role</code>, <code>tabIndex</code>,{' '}<code>title</code>, <code>onFocus</code>, <code>onKeyDown</code>, and the rest of the common HTML/SVG surface without declaring them. Component-specific props are never forwarded. When a component or mixin intentionally reuses a native name for its own semantics, it declares that name explicitly (for example{' '}<code>static ownedNativeProps = ['title']</code>), and ownership composes through inheritance and mixins — for example <code>Notification</code>/<code>Dialog</code> own their React-node <code>title</code>.</p>
           <h3>Theme Integration</h3>
-          <p>
-            The theme prop works seamlessly with the Theme component:
-          </p>
+          <p>The theme prop works seamlessly with the Theme component:</p>
           {Code.format(`
             // Set different themes for different sections
             <Theme name="dark" color={{ primary: "#1a1a1a" }} />
@@ -215,9 +154,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
             // CSS can target: [data-theme="light"] .button.component { ... }
           `)}
           <h3>Flexible Element Types</h3>
-          <p>
-            Components can specify their root element type for proper semantic HTML:
-          </p>
+          <p>Components can specify their root element type for proper semantic HTML:</p>
           {Code.format(`
             // Button component with proper HTMLButtonElement typing
             export class Button extends Component<Props, HTMLButtonElement> {
@@ -233,9 +170,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
         <section>
           <h2>Implementation Patterns</h2>
           <h3>Component Structure</h3>
-          <p>
-            These patterns have proven effective for building maintainable components:
-          </p>
+          <p>These patterns have proven effective for building maintainable components:</p>
           {Code.format(`
             export class WellStructuredComponent extends Component<Props, HTMLDivElement, State> {
               // 1. Override tag for semantic HTML
@@ -264,9 +199,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
             }
           `)}
           <h3>State Updates</h3>
-          <p>
-            The Promise-based setState can be useful for complex state management scenarios:
-          </p>
+          <p>The Promise-based setState can be useful for complex state management scenarios:</p>
           {Code.format(`
             export class ReliableComponent extends Component<Props, State> {
               state = { loading: false, data: null, error: null }
@@ -289,9 +222,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h2>Migration from React.Component</h2>
-          <p>
-            Upgrading existing components is straightforward:
-          </p>
+          <p>Upgrading existing components is straightforward:</p>
           {Code.format(`
             // Before: React.Component
             class OldComponent extends React.Component<Props, State> {
@@ -323,9 +254,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h2>When to Use Component</h2>
-          <p>
-            The Component class is well-suited for:
-          </p>
+          <p>The Component class is well-suited for:</p>
           <ul>
             <li><strong>Custom UI Components:</strong> Buttons, inputs, modals, and other interactive elements</li>
             <li><strong>Layout Components:</strong> Containers, grids, and structural elements</li>
@@ -333,9 +262,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
             <li><strong>Data Display:</strong> Tables, lists, and data visualization components</li>
             <li><strong>Navigation:</strong> Menus, breadcrumbs, and navigation elements</li>
           </ul>
-          <p>
-            Consider using React.Component directly when:
-          </p>
+          <p>Consider using React.Component directly when:</p>
           <ul>
             <li>Building utility components that don't need the full feature set</li>
             <li>Creating components that must remain lightweight for performance reasons</li>

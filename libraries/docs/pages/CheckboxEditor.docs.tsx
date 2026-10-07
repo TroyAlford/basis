@@ -25,11 +25,7 @@ export class CheckboxEditorDocs extends DocumentationPage<State> {
       <>
         <h1>CheckboxEditor</h1>
         <Section title="Interactive Demo">
-          <p>
-            The CheckboxEditor component provides a flexible, accessible checkbox input that extends the Editor
-            base class. It uses custom square icons for visual representation while maintaining full accessibility
-            with a hidden native checkbox.
-          </p>
+          <p>The CheckboxEditor component provides a flexible, accessible checkbox input that extends the Editor base class. It uses custom square icons for visual representation while maintaining full accessibility with a hidden native checkbox.</p>
           <div style={{ display: 'grid', gap: '2rem', gridTemplateColumns: '300px 1fr' }}>
             {/* Configuration Menu */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -78,9 +74,7 @@ export class CheckboxEditorDocs extends DocumentationPage<State> {
           </div>
         </Section>
         <Section title="Basic Usage">
-          <p>
-            The simplest way to use CheckboxEditor is with a boolean value:
-          </p>
+          <p>The simplest way to use CheckboxEditor is with a boolean value:</p>
           {Code.format(`
             import { CheckboxEditor } from '@basis/react'
 
@@ -99,22 +93,16 @@ export class CheckboxEditorDocs extends DocumentationPage<State> {
           `)}
         </Section>
         <Section title="Checkbox States">
-          <p>
-            The CheckboxEditor supports three different states, each with its own visual representation:
-          </p>
+          <p>The CheckboxEditor supports three different states, each with its own visual representation:</p>
           <ul>
             <li><strong>Checked (<code>true</code>)</strong> - Shows <code>Square.Check</code> icon</li>
             <li><strong>Unchecked (<code>false</code>)</strong> - Shows <code>Square.X</code> icon</li>
             <li><strong>Indeterminate (<code>null</code>)</strong> - Shows <code>Square.Dash</code> icon</li>
           </ul>
-          <p>
-            The native checkbox is hidden but remains functional for accessibility and form submission.
-          </p>
+          <p>The native checkbox is hidden but remains functional for accessibility and form submission.</p>
         </Section>
         <Section title="Three-State Checkboxes">
-          <p>
-            Enable indeterminate state support for three-state checkboxes:
-          </p>
+          <p>Enable indeterminate state support for three-state checkboxes:</p>
           {Code.format(`
             import { CheckboxEditor } from '@basis/react'
 
@@ -137,17 +125,12 @@ export class CheckboxEditorDocs extends DocumentationPage<State> {
           </p>
           <ul>
             <li><strong>Without <code>allowIndeterminate</code></strong>: Simple <code>true ↔ false</code> toggle</li>
-            <li>
-              <strong>With <code>allowIndeterminate</code></strong>:
-              Three-state cycle <code>true → false → null → true</code>
-            </li>
+            <li><strong>With <code>allowIndeterminate</code></strong>: Three-state cycle <code>true → false → null → true</code></li>
           </ul>
         </Section>
         <Section title="Advanced Features">
           <h4>Form Integration</h4>
-          <p>
-            CheckboxEditor integrates seamlessly with HTML forms:
-          </p>
+          <p>CheckboxEditor integrates seamlessly with HTML forms:</p>
           {Code.format(`
             <form onSubmit={handleSubmit}>
               <CheckboxEditor
@@ -161,17 +144,12 @@ export class CheckboxEditorDocs extends DocumentationPage<State> {
             </form>
           `)}
           <h4>Accessibility</h4>
-          <p>
-            CheckboxEditor provides comprehensive accessibility support:
-          </p>
+          <p>CheckboxEditor provides comprehensive accessibility support:</p>
           <ul>
             <li>Uses semantic <code>&lt;label&gt;</code> element for proper labeling</li>
             <li>Hidden checkbox maintains keyboard navigation and screen reader support</li>
             <li>Supports <code>aria-label</code>, <code>aria-describedby</code>, and other ARIA attributes</li>
-            <li>
-              Proper <code>aria-checked</code> states:{' '}
-              <code>true</code>, <code>false</code>, or <code>mixed</code> for indeterminate
-            </li>
+            <li>Proper <code>aria-checked</code> states:{' '}<code>true</code>, <code>false</code>, or <code>mixed</code> for indeterminate</li>
             <li>Focus management with visible focus indicators</li>
             <li>Proper indeterminate state handling for screen readers</li>
             <li>Form integration with <code>name</code> attribute for form submission</li>

@@ -6,10 +6,7 @@ import { ApplicationBase } from '@basis/react'
 export class Application extends ApplicationBase {
   layout(content: React.ReactNode): React.ReactNode {
     return (
-      <main data-testid="application">
-        Basis managed server
-        {content}
-      </main>
+      <main data-testid="application">Basis managed server{content}</main>
     )
   }
 }

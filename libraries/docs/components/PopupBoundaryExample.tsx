@@ -58,12 +58,7 @@ export class PopupBoundaryExample extends Component<Record<string, never>, HTMLD
         <div>
           <strong>No boundary</strong>
           <div style={pane}>
-            <button type="button">
-              Anchor near the top
-              <Tooltip anchorPoint={AnchorPoint.Top} offset={8} visible={true}>
-                Slips above the pane.
-              </Tooltip>
-            </button>
+            <button type="button">Anchor near the top<Tooltip anchorPoint={AnchorPoint.Top} offset={8} visible={true}>Slips above the pane.</Tooltip></button>
           </div>
         </div>
         <div>
