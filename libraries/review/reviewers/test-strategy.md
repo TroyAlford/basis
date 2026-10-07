@@ -72,6 +72,8 @@ Comprehensive confidence does not mean proving the same behavior at every layer.
 - integration tests -> real boundaries and components actually cooperate;
 - smoke and end-to-end tests -> the assembled, deployed system actually functions.
 
+When the failure is at a real boundary, tests must prove the **observable behavior**, not merely that an attribute, mock, or intermediate variable has the expected value. For UI focus behavior, assert actual DOM focus after keyboard interactions; for event streams, check a real listener receives the event; for commit pinning, assert the executed checkout SHA matches the resolved SHA. Add negative cases that would distinguish the intended contract from a plausible broken implementation.
+
 Coverage is evidence, not the goal. Confidence is the goal; do not turn a coverage percentage into the reviewer.
 
 Use `appropriate-test-level` when coverage is proportionate, and `abstain` only when the available evidence cannot support a review at all.
