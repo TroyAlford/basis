@@ -7,7 +7,7 @@ export class MarkdownLintingDocs extends DocumentationPage<Record<string, never>
       <>
         <section>
           <h1>Markdown linting</h1>
-          <p>Basis lints Markdown and MDX with the shared <code>remark</code> / <code>unified</code>{' '}stack and the <code>remark-lint</code> rules (all MIT). The policy is Basis-owned, so consumers enable it through the shared surface instead of installing the parser, the rules, and the serialization settings themselves.</p>
+          <p>Basis lints Markdown and MDX with the shared <code>remark</code> / <code>unified</code> stack and the <code>remark-lint</code> rules (all MIT). The policy is Basis-owned, so consumers enable it through the shared surface instead of installing the parser, the rules, and the serialization settings themselves.</p>
         </section>
         <section>
           <h2>Enabling it</h2>
@@ -23,7 +23,7 @@ export class MarkdownLintingDocs extends DocumentationPage<Record<string, never>
           <ul>
             <li><strong>One line per paragraph</strong> — a renderer word-wraps paragraphs, so a soft line break in source is only diff and re-wrap churn. The autofix joins the wrapped lines and preserves hard breaks.</li>
             <li><strong>Single blank lines</strong> — no more than one blank line between blocks.</li>
-            <li><strong>Sequential ordered lists</strong> — ordered lists are numbered <code>1.</code>,{' '}<code>2.</code>, <code>3.</code>, never every item sharing <code>1.</code>.</li>
+            <li><strong>Sequential ordered lists</strong> — ordered lists are numbered <code>1.</code>, <code>2.</code>, <code>3.</code>, never every item sharing <code>1.</code>.</li>
           </ul>
           <p>The formatter serializes with Basis conventions (<code>-</code> bullets and thematic breaks, <code>*</code> emphasis and strong, backtick fences) and preserves YAML front-matter and MDX.</p>
         </section>

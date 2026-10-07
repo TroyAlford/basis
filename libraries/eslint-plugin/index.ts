@@ -67,6 +67,7 @@ export default pluginTypescript.config(
       '@basis/no-default-export': 'error',
       '@basis/no-extraneous-dependencies': 'error',
       '@basis/no-jsx-line-breaks': 'error',
+      '@basis/no-jsx-space-injection': 'error',
       '@basis/no-mixed-type-imports': 'error',
       '@basis/no-object-padding': 'error',
       '@basis/sort-interface': 'error',

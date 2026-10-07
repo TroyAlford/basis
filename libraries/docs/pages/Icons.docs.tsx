@@ -288,7 +288,7 @@ export class IconsDocs extends DocumentationPage<State> {
           <li><strong>overlay</strong> - Component (inherits <code>filled</code>) or element (keeps its own) in the lower-right quadrant</li>
         </ul>
         <h2>Overlays</h2>
-        <p>Pass another icon as <code>overlay</code>. It fills the lower-right quadrant of the viewBox (half the width and height, a quarter of the area). A component overlay inherits{' '}<code>filled</code> from the main icon; pass an element to override. Color the main icon with{' '}<code>--basis-icon-color</code> and the overlay with <code>--basis-icon-overlay-color</code>.</p>
+        <p>Pass another icon as <code>overlay</code>. It fills the lower-right quadrant of the viewBox (half the width and height, a quarter of the area). A component overlay inherits <code>filled</code> from the main icon; pass an element to override. Color the main icon with <code>--basis-icon-color</code> and the overlay with <code>--basis-icon-overlay-color</code>.</p>
         <div className="overlay-section">
           <div className="overlay-controls">
             <div className="overlay-row">

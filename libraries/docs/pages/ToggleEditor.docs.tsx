@@ -200,7 +200,7 @@ export class ToggleEditorDocs extends DocumentationPage<State> {
           </ul>
         </Section>
         <Section title="Styling & Theming">
-          <p>ToggleEditor uses CSS custom properties for theming. All styles are prefixed with{' '}<code>--basis-toggle-*</code> and can be customized:</p>
+          <p>ToggleEditor uses CSS custom properties for theming. All styles are prefixed with <code>--basis-toggle-*</code> and can be customized:</p>
           {Code.format(`
             :root {
               --basis-toggle-background: transparent;

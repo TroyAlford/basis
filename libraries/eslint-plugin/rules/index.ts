@@ -5,6 +5,7 @@ import { noObjectPadding } from './no-object-padding'
 import { noDefaultExport } from './noDefaultExport'
 import { noExtraneousDependencies } from './noExtraneousDependencies'
 import { noJsxLineBreaks } from './noJsxLineBreaks'
+import { noJsxSpaceInjection } from './noJsxSpaceInjection'
 import { sortInterface } from './sortInterface'
 import { sortKeys } from './sortKeys'
 import { sortStringEnum } from './sortStringEnum'
@@ -15,6 +16,7 @@ export default {
     'no-default-export': noDefaultExport,
     'no-extraneous-dependencies': noExtraneousDependencies,
     'no-jsx-line-breaks': noJsxLineBreaks,
+    'no-jsx-space-injection': noJsxSpaceInjection,
     'no-mixed-type-imports': noMixedTypeImports,
     'no-object-padding': noObjectPadding,
     'sort-interface': sortInterface,

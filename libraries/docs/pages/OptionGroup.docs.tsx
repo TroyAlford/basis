@@ -262,7 +262,7 @@ export class OptionGroupDocs extends DocumentationPage<State> {
           </ul>
         </Section>
         <Section title="Styling & Theming">
-          <p>OptionGroup uses CSS custom properties for theming. All styles are prefixed with{' '}<code>--basis-option-*</code> and can be customized:</p>
+          <p>OptionGroup uses CSS custom properties for theming. All styles are prefixed with <code>--basis-option-*</code> and can be customized:</p>
           {Code.format(`
             :root {
               --basis-option-group-gap: 0.5rem;

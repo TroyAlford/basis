@@ -316,7 +316,7 @@ export class ThemeDocs extends DocumentationPage<State> {
           <p>The theme name used for namespacing CSS variables. When provided, variables are scoped to <code>[data-theme="name"]</code> selectors. When omitted, variables are applied globally.</p>
           <h3><code>color</code></h3>
           <p>Color palette for your theme. All colors are automatically processed and converted to consistent formats. Supports hex, rgb, hsl, and named colors.</p>
-          <p><strong>Auto-Computed Contrast</strong>: When you set a primary color, Theme automatically computes an appropriate contrast color using luminance analysis. Light primary colors get dark contrast colors, and dark primary colors get light contrast colors. This ensures optimal readability and accessibility. The semantic <code>color.danger</code> and{' '}<code>color.success</code> values similarly receive <code>--basis-color-danger-contrast</code>{' '}and <code>--basis-color-success-contrast</code> for overlays (for example dialog and notification chrome).</p>
+          <p><strong>Auto-Computed Contrast</strong>: When you set a primary color, Theme automatically computes an appropriate contrast color using luminance analysis. Light primary colors get dark contrast colors, and dark primary colors get light contrast colors. This ensures optimal readability and accessibility. The semantic <code>color.danger</code> and <code>color.success</code> values similarly receive <code>--basis-color-danger-contrast</code> and <code>--basis-color-success-contrast</code> for overlays (for example dialog and notification chrome).</p>
           <h3><code>fontSize</code></h3>
           <p>Typography scale defined as percentages relative to the base font size (16px). Values are automatically converted to percentage units in CSS.</p>
           <h3><code>radius</code></h3>
@@ -331,7 +331,7 @@ export class ThemeDocs extends DocumentationPage<State> {
         <section>
           <h2>CSS Variable Generation</h2>
           <p>Theme automatically generates CSS custom properties for all design tokens. Variables are namespaced under <code>--basis-</code> and follow a consistent naming pattern.</p>
-          <p>The block below is filled from <code>getComputedStyle(document.documentElement)</code> on each paint, so it always matches the unnamed <code>&lt;Theme /&gt;</code> in <code>Layout</code>{' '}(defaults merged into <code>:root</code>).</p>
+          <p>The block below is filled from <code>getComputedStyle(document.documentElement)</code> on each paint, so it always matches the unnamed <code>&lt;Theme /&gt;</code> in <code>Layout</code> (defaults merged into <code>:root</code>).</p>
           {Code.format(this.current.rootThemeCss, 'scss')}
           <h3>Namespaced Themes</h3>
           <p>When <code>name</code> is set, Theme emits <code>:root [data-theme="…"]</code> with the same variable names. Put <code>data-theme</code> on a subtree to apply that token set.</p>
@@ -344,7 +344,7 @@ export class ThemeDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Default Values</h2>
-          <p>JavaScript defaults are defined once in <code>libraries/react/components/Theme/Theme.tsx</code> as{' '}<code>DEFAULT_THEME</code>. Use the live CSS block above for resolved values in this app.</p>
+          <p>JavaScript defaults are defined once in <code>libraries/react/components/Theme/Theme.tsx</code> as <code>DEFAULT_THEME</code>. Use the live CSS block above for resolved values in this app.</p>
         </section>
         <section>
           <h2>Using Theme Variables in CSS</h2>

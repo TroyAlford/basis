@@ -90,7 +90,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             <li><strong>Number</strong> - For numeric data, renders as NumberEditor</li>
             <li><strong>Boolean</strong> - For boolean data, renders as CheckboxEditor</li>
             <li><strong>Date</strong> - For date-only values, displays a formatted date</li>
-            <li><strong>DateTime</strong> - For date-and-time values, displays a medium date and short time via{' '}<code>toLocaleString</code></li>
+            <li><strong>DateTime</strong> - For date-and-time values, displays a medium date and short time via <code>toLocaleString</code></li>
             <li><strong>Enum</strong> - For enumerated values, renders as EnumEditor with dropdown</li>
           </ul>
           <p>Each column type automatically configures appropriate sorting behavior and alignment:</p>

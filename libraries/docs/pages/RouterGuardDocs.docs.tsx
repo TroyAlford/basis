@@ -25,7 +25,7 @@ export class RouterGuardDocs extends Component<unknown, HTMLDivElement, State> {
           value={this.state.value}
           onChange={value => this.setState({ value })}
         />
-        <p>Dirty:{' '}{String(this.dirty)}</p>
+        <p>Dirty: {String(this.dirty)}</p>
         <p>
           <Button
             onActivate={() => this.setState({ value: 'clean' })}

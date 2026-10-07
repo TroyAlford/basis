@@ -73,12 +73,12 @@ export class NotificationDocs extends DocumentationPage<State> {
       <>
         <h1>Notification</h1>
         <section>
-          <p><code>Notification.create</code> enqueues a dismissible row on the{' '}<Router.Link to="/components/overlay-provider">OverlayProvider</Router.Link>. The returned handle exposes <code>id</code>, <code>update</code>, and <code>dismiss</code> so you can refresh copy or remove the note programmatically.</p>
-          <p>Import <code>type {'{'} INotification {'}'}</code> from the same module as <code>Notification</code>{' '}for typing partial payloads; it is not re-exported from <code>@basis/react</code>.</p>
+          <p><code>Notification.create</code> enqueues a dismissible row on the <Router.Link to="/components/overlay-provider">OverlayProvider</Router.Link>. The returned handle exposes <code>id</code>, <code>update</code>, and <code>dismiss</code> so you can refresh copy or remove the note programmatically.</p>
+          <p>Import <code>type {'{'} INotification {'}'}</code> from the same module as <code>Notification</code> for typing partial payloads; it is not re-exported from <code>@basis/react</code>.</p>
         </section>
         <section>
           <h2>Intent</h2>
-          <p>Optional <code>intent</code> on <code>INotification</code> tints the shell and selects a header icon where applicable. Omitting <code>intent</code> defaults to <code>Default</code>; omitting{' '}<code>icon</code> lets the notification choose the icon from the intent. Values mirror{' '}<code>Dialog</code>:</p>
+          <p>Optional <code>intent</code> on <code>INotification</code> tints the shell and selects a header icon where applicable. Omitting <code>intent</code> defaults to <code>Default</code>; omitting <code>icon</code> lets the notification choose the icon from the intent. Values mirror <code>Dialog</code>:</p>
           <ul>
             <li><strong>Default</strong>: neutral shell and header.</li>
             <li><strong>Primary</strong>: primary colors; no icon.</li>
@@ -127,7 +127,7 @@ export class NotificationDocs extends DocumentationPage<State> {
         <section>
           <h2>Related</h2>
           <ul>
-            <li><Router.Link to="/components/dialog">Dialog</Router.Link> — modal confirmations with the same{' '}<code>Intent</code> enum.</li>
+            <li><Router.Link to="/components/dialog">Dialog</Router.Link> — modal confirmations with the same <code>Intent</code> enum.</li>
             <li><Router.Link to="/components/overlay-provider">OverlayProvider</Router.Link> — host component and mounting notes.</li>
           </ul>
         </section>

@@ -26,7 +26,7 @@ export class AwaitDocs extends DocumentationPage<Record<string, never>> {
             <li><strong>Promise Children:</strong> Accepts a Promise that resolves to React nodes</li>
             <li><strong>Fallback Rendering:</strong> Shows fallback content while promise is pending</li>
             <li><strong>Automatic State Management:</strong> Handles loading state internally</li>
-            <li><strong>Lifecycle Integration:</strong>{' '}Resolves on mount and again whenever the child promise reference changes (stale results are ignored)</li>
+            <li><strong>Lifecycle Integration:</strong> Resolves on mount and again whenever the child promise reference changes (stale results are ignored)</li>
           </ul>
         </section>
         <section>

@@ -149,7 +149,7 @@ export class CheckboxEditorDocs extends DocumentationPage<State> {
             <li>Uses semantic <code>&lt;label&gt;</code> element for proper labeling</li>
             <li>Hidden checkbox maintains keyboard navigation and screen reader support</li>
             <li>Supports <code>aria-label</code>, <code>aria-describedby</code>, and other ARIA attributes</li>
-            <li>Proper <code>aria-checked</code> states:{' '}<code>true</code>, <code>false</code>, or <code>mixed</code> for indeterminate</li>
+            <li>Proper <code>aria-checked</code> states: <code>true</code>, <code>false</code>, or <code>mixed</code> for indeterminate</li>
             <li>Focus management with visible focus indicators</li>
             <li>Proper indeterminate state handling for screen readers</li>
             <li>Form integration with <code>name</code> attribute for form submission</li>

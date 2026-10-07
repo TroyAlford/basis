@@ -296,7 +296,7 @@ export class AutoCompleteDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Accessibility</h2>
-          <p>AutoComplete follows the ARIA combobox pattern. The inner input owns{' '}<code>role="combobox"</code> with <code>aria-expanded</code>,{' '}<code>aria-controls</code> pointing at the dropdown, and{' '}<code>aria-autocomplete="list"</code>. The dropdown is a{' '}<code>role="listbox"</code> whose children are <code>role="option"</code> items. DOM focus stays on the input while ArrowUp/ArrowDown move the active option, which the input's <code>aria-activedescendant</code> tracks; options are excluded from the Tab sequence.</p>
+          <p>AutoComplete follows the ARIA combobox pattern. The inner input owns <code>role="combobox"</code> with <code>aria-expanded</code>, <code>aria-controls</code> pointing at the dropdown, and <code>aria-autocomplete="list"</code>. The dropdown is a <code>role="listbox"</code> whose children are <code>role="option"</code> items. DOM focus stays on the input while ArrowUp/ArrowDown move the active option, which the input's <code>aria-activedescendant</code> tracks; options are excluded from the Tab sequence.</p>
         </section>
         <section>
           <h2>Async Search and Performance</h2>
