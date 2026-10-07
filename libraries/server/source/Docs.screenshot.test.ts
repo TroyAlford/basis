@@ -10,6 +10,20 @@ const FULL_LENGTH = [
   '.documentation-shell.component > main, .documentation-shell.component > nav.links { overflow: visible !important; }',
 ].join('\n')
 
+/*
+ * The code component loads Shiki from esm.sh on mount. Serve a tiny local Shiki
+ * so page height and highlighting settle deterministically and offline; the
+ * Mermaid runtime is left to load for real, because the diagram is the point.
+ */
+const STUBS = {
+  'https://esm.sh/shiki@3.0.0': [
+    'export async function codeToHtml(code) {',
+    "  const escape = value => value.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))",
+    "  return '<pre class=\"shiki\"><code>' + escape(code) + '</code></pre>'",
+    '}',
+  ].join('\n'),
+}
+
 /** A representative page set: the docs home, component pages, and the new prose. */
 const PAGES: [string, string][] = [
   ['/', 'overview'],
@@ -38,10 +52,10 @@ test('captures the docs pages full length', async () => {
 
   try {
     for (const [path, hint] of PAGES) {
-      await app.visit(path, { allow: ['esm.sh'] }, async page => {
+      await app.visit(path, { allow: ['esm.sh'], stubs: STUBS }, async page => {
         await page.addStyleTag({ content: FULL_LENGTH })
-        if (await page.locator('.mermaid').count() > 0) {
-          await page.waitForSelector('.mermaid svg', { timeout: 30_000 })
+        if (await page.locator('.mermaid-diagram, .mermaid').count() > 0) {
+          await page.waitForSelector('.diagram svg, .mermaid svg', { timeout: 30_000 })
         }
         await page.waitForTimeout(800)
         await matchScreenshot(page.locator('.documentation-shell.component'), `page ${hint}`)

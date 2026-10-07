@@ -8,10 +8,6 @@ interface Props {
   theme: string,
 }
 
-// @ts-expect-error - this is a valid dynamic import
-// eslint-disable-next-line @basis/import-extensions
-const shiki = await import('https://esm.sh/shiki@3.0.0')
-
 export class Code extends Component<Props> {
   static displayName = 'Code'
   static defaultProps: Props = {
@@ -62,7 +58,9 @@ export class Code extends Component<Props> {
 
   async renderCode() {
     if (typeof globalThis.document === 'undefined') return <code>{this.code}</code>
-    const { codeToHtml } = await shiki
+    // @ts-expect-error - the runtime is loaded from a URL, not a package.
+    // eslint-disable-next-line @basis/import-extensions
+    const { codeToHtml } = await import('https://esm.sh/shiki@3.0.0')
     const html = await codeToHtml(this.code, {
       lang: this.props.language,
       theme: this.props.theme,

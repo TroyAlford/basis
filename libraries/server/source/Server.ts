@@ -1,5 +1,4 @@
 import type { Server as BunServer, ServerWebSocket } from 'bun'
-import type { FSWatcher } from 'chokidar'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as React from 'react'
@@ -16,8 +15,6 @@ import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
-import type { DocsOptions, DocsSite } from './Docs'
-import { clearDocsCache, discoverDocs, serveDocs, watchDocs } from './Docs'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import type { SocketData } from './Sockets'
@@ -90,8 +87,6 @@ export class Server {
   #identity: Identity | null = null
   #logger: ILogger = new Logger()
   #modules = new Map<string, string>()
-  #docs: DocsSite | null = null
-  #docsWatcher: FSWatcher | null = null
   #mounts: StaticMount[] = []
   #ready: Promise<void> = Promise.resolve()
   #readyError: Error | null = null
@@ -384,7 +379,6 @@ export class Server {
     if (logger) this.#logger = logger
     this.#development = development
     this.#version = version
-    if (this.#docs && development) void this.#watchDocs()
 
     const builder = new Builder({
       development,
@@ -410,7 +404,7 @@ export class Server {
     this.#readyError = null
     this.#status = 'starting'
     this.#ready = builder.initialBuild()
-      .then(() => { this.#status = 'ok' })
+      .then(() => undefined)
       .catch((error: unknown) => {
         const failure = error instanceof Error ? error : new Error(String(error))
         this.#readyError = failure
@@ -465,8 +459,6 @@ export class Server {
     void this.#builder?.stop()
     this.#builder = null
 
-    void this.#docsWatcher?.close()
-    this.#docsWatcher = null
     this.#server?.stop()
     this.#server = null
 
@@ -551,16 +543,6 @@ export class Server {
   }
 
   /**
-   * Serves a Markdown documentation tree under a route.
-   * @param options - The documentation root, route, and title.
-   * @returns The server.
-   */
-  docs(options: DocsOptions): Server {
-    this.#docs = discoverDocs(options)
-    return this
-  }
-
-  /**
    * Adds an API route to the server.
    * @param verbs - The HTTP methods to handle.
    * @param template - The template URI to handle.
@@ -574,20 +556,6 @@ export class Server {
   ): Server {
     this.#apis.set(template, { handler, verbs: new Set(verbs) })
     return this
-  }
-
-  /**
-   * Watch the documentation tree and broadcast a live-reload on change.
-   * @returns A promise resolved once the watcher is set up.
-   */
-  async #watchDocs(): Promise<void> {
-    const site = this.#docs
-    if (!site) return
-    await this.#docsWatcher?.close()
-    this.#docsWatcher = await watchDocs(site.source, () => {
-      clearDocsCache()
-      this.#broadcast()
-    })
   }
 
   /**
@@ -731,11 +699,6 @@ export class Server {
 
     const mounted = await this.handleMount(uri)
     if (mounted) return mounted
-
-    if (this.#docs) {
-      const docs = await serveDocs(this.#docs, uri, request, this.#development)
-      if (docs) return docs
-    }
 
     switch (uri.type) {
       case 'api': return Server.BadRequest

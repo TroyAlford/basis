@@ -22,7 +22,7 @@ let sequence = 0
  * Renders a Mermaid diagram. The runtime is imported lazily on mount, so a page
  * that does not use diagrams never fetches it and server rendering never
  * reaches the network: SSR emits the source as the runtime's `<pre
- * class="mermaid">` block, which the documentation bootstrap then renders.
+ * class="mermaid">` block, and the client replaces it with the rendered SVG.
  */
 export class Mermaid extends Component<Props, HTMLDivElement, State> {
   static displayName = 'MermaidDiagram'

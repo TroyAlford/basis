@@ -1,6 +1,7 @@
+import { join } from 'node:path'
 import { Server } from './consumer/server'
-import { routes } from './libraries/docs/routes.ts'
 
 new Server()
-  .docs({ pages: routes, root: './docs', route: '/', title: 'Basis' })
+  .root(join(import.meta.dir, 'libraries/docs'))
+  .main('./index.tsx')
   .start()

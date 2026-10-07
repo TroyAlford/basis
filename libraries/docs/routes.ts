@@ -1,4 +1,8 @@
 import type { ComponentType } from 'react'
+import ArchitectureDoc from '../../docs/architecture.mdx'
+import ContributingDoc from '../../docs/contributing.mdx'
+import GuidesDoc from '../../docs/guides.mdx'
+import ReferenceDoc from '../../docs/reference.mdx'
 import { AutoCompleteDocs } from './pages/AutoComplete.docs.tsx'
 import { AwaitDocs } from './pages/Await.docs.tsx'
 import { ButtonDocs } from './pages/Button.docs.tsx'
@@ -101,6 +105,10 @@ export const routes = ([
   docs({ component: ThemeDocs, path: '/components/theme', title: 'Theme' }),
   docs({ component: ToggleEditorDocs, path: '/components/toggle-editor', title: 'ToggleEditor' }),
   docs({ component: TooltipDocs, path: '/components/tooltip', title: 'Tooltip' }),
+  docs({ component: ArchitectureDoc, path: '/architecture', title: 'Architecture' }),
+  docs({ component: ContributingDoc, path: '/contributing', title: 'Contributing' }),
+  docs({ component: GuidesDoc, path: '/guides', title: 'Guides' }),
+  docs({ component: ReferenceDoc, path: '/reference', title: 'Reference' }),
 ]).sort((a, b) => {
   if (a.default) return -1
   if (b.default) return 1
