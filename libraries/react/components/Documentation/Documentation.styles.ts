@@ -32,6 +32,7 @@ style('basis:documentation', css`
       }
       li {
         > a {
+          color: var(--basis-color-foreground);
           display: block;
           padding: var(--basis-unit-sm) var(--basis-unit-md);
           text-decoration: none;
