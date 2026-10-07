@@ -60,8 +60,9 @@ Versions are calculated based on conventional commits since the last release:
 - Patch version bump:
   - `fix`: Bug fixes
   - `refactor`: Code refactoring
+  - `test`: Test changes (which often ship alongside production code)
   - `style`: Style changes
   - `revert`: Reverted changes
   - `chore`: Maintenance tasks
 
-Other commit types (`docs`, `test`, `ci`, `build`) don't trigger version bumps. 
+`build`, `ci`, `docs`, and unparseable (`unknown`) commits are deliberately no-change: they do not alter the shipped runtime surface, so on their own they never bump the version. The full type -> bump matrix is covered by `getUnreleasedCommitMessages.test.ts`.

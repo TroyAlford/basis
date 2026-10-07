@@ -91,7 +91,7 @@
     "lint:ts": "bun ./node_modules/@typescript/native/bin/tsc --noEmit",
     "postinstall": "bun ./consumer/install.ts",
     "prepare": "bun ./scripts/prepare.ts",
-    "test": "bun test",
+    "test": "bun test . ./.github",
     "test:consumer": "bun ./consumer/test/self-install.ts && bun ./consumer/test/cache-isolation.ts && bun ./consumer/test/react-runtime.ts",
     "test:develop": "bun test --watch",
     "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces",
