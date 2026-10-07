@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { runDocs } from './docs'
+import { runDocs, runDocsBuild } from './docs'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
 
@@ -185,7 +185,7 @@ const doctor = (): number => {
  * Prints usage information for the CLI.
  */
 const usage = (): void => {
-  write('usage: basis <docs check [--source <dir>]|doctor|lint [--fix]|typecheck|check>')
+  write('usage: basis <docs build [--out <dir>] [--base <path>]|docs check|doctor|lint [--fix]|typecheck|check>')
 }
 
 /**
@@ -204,7 +204,14 @@ const main = (): void => {
     process.exit(typeCode)
   }
 
-  if (command === 'docs') process.exit(runDocs(args))
+  if (command === 'docs') {
+    const [subcommand, ...rest] = args
+    if (subcommand === 'build') {
+      void runDocsBuild(rest).then(code => process.exit(code))
+      return
+    }
+    process.exit(runDocs(args))
+  }
 
   usage()
   process.exit(1)

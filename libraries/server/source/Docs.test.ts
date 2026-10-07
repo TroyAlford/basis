@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { discoverDocs, renderDocsNotFound, renderDocsPage, serveDocs } from './Docs'
+import { buildDocs, discoverDocs, renderDocsNotFound, renderDocsPage, serveDocs } from './Docs'
 
 /** Temporary docs trees to remove after each test. */
 const directories: string[] = []
@@ -88,5 +88,17 @@ describe('renderDocsPage', () => {
     const html = renderDocsNotFound(site, 'missing')
     expect(html).toContain('<h1>Not found</h1>')
     expect(html).toContain('missing')
+  })
+})
+
+describe('buildDocs', () => {
+  test('writes each page as <route>/index.html', async () => {
+    const root = fixture({ 'docs/architecture/index.mdx': '# Architecture\n', 'docs/index.mdx': '# Home\n' })
+    const site = discoverDocs({ root: join(root, 'docs'), route: '/' })
+    const out = join(root, 'out')
+    const written = await buildDocs(site, out)
+    expect(written.length).toBe(2)
+    expect(existsSync(join(out, 'index.html'))).toBe(true)
+    expect(existsSync(join(out, 'architecture', 'index.html'))).toBe(true)
   })
 })

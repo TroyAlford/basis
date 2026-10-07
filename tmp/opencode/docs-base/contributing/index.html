@@ -1,0 +1,149 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Contributing · Basis</title><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,100..900;1,100..900&family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500;1,700&display=swap"><style>:root { --basis-color-background: #ffffffff;
+--basis-color-danger: #c00000ff;
+--basis-color-disabled: #e5e5e5ff;
+--basis-color-disabled-text: #a3a3a3ff;
+--basis-color-foreground: #171717ff;
+--basis-color-overlay-dark: #00000080;
+--basis-color-overlay-light: #ffffff80;
+--basis-color-primary: #0070f3ff;
+--basis-color-success: #008000ff;
+--basis-font-size-lg: 112.5%;
+--basis-font-size-md: 100%;
+--basis-font-size-sm: 87.5%;
+--basis-font-size-xl: 125%;
+--basis-font-size-xs: 75%;
+--basis-font-size-xxl: 150%;
+--basis-font-size-xxs: 62.5%;
+--basis-radius-lg: 16px;
+--basis-radius-md: 8px;
+--basis-radius-round: 50px;
+--basis-radius-sm: 4px;
+--basis-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+--basis-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+--basis-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+--basis-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+--basis-transition-medium: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+--basis-transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
+--basis-unit-lg: 24px;
+--basis-unit-md: 16px;
+--basis-unit-sm: 8px;
+--basis-unit-xl: 32px;
+--basis-unit-xs: 4px;
+--basis-unit-xxl: 48px;
+--basis-unit-xxs: 2px;
+--basis-color-contrast: #ffffffff;
+--basis-color-danger-contrast: #ffffffff;
+--basis-color-success-contrast: #ffffffff; }</style><style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,100..900;1,100..900&family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500;1,700&display=swap');
+
+  html, body { margin: 0; }
+
+  .documentation-shell.component {
+    background-color: var(--basis-color-background);
+    color: var(--basis-color-foreground);
+    display: grid;
+    font-family: 'Ubuntu', sans-serif;
+    font-size: var(--basis-font-size-md);
+    grid-template-areas: 'nav main';
+    grid-template-columns: 200px 1fr;
+    height: 100vh;
+    overflow: hidden;
+    width: 100vw;
+    > nav.links {
+      background: #eee;
+      border-right: 1px solid #e9ecef;
+      grid-area: nav;
+      overflow-y: auto;
+      width: 200px;
+      > h1 {
+        background-color: var(--basis-color-foreground);
+        color: var(--basis-color-background);
+        font-size: var(--basis-font-size-xxl);
+        margin: 0;
+        padding: var(--basis-unit-md);
+      }
+      li {
+        > a {
+          display: block;
+          padding: var(--basis-unit-sm) var(--basis-unit-md);
+          text-decoration: none;
+          &[data-active='true'] {
+            background-color: var(--basis-color-background);
+            color: var(--basis-color-primary);
+          }
+        }
+        > ul > li {
+          padding-left: var(--basis-unit-md);
+        }
+      }
+      ul, li {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+    }
+    > main {
+      grid-area: main;
+      overflow: auto;
+      padding: var(--basis-unit-md);
+    }
+    main {
+      h1 {
+        border-bottom: 2px solid var(--basis-color-primary);
+      }
+      code {
+        color: green;
+        font-family: 'Fira Code', monospace;
+        font-variant-ligatures: contextual;
+        font-weight: 500;
+      }
+      p {
+        margin: 0;
+        &:first-child {
+          margin-top: 0;
+        }
+        &:last-child {
+          margin-bottom: 0;
+        }
+      }
+      select {
+        padding: 0.5rem;
+        width: 100%;
+      }
+      ul {
+        list-style: disc;
+        margin: 0;
+        padding-left: 0;
+        > li {
+          margin: 0.25em 0 0 2em;
+        }
+      }
+      b, strong {
+        font-weight: 600;
+      }
+      i, em {
+        font-style: italic;
+      }
+    }
+  }
+
+
+  .mermaid-diagram.component {
+    .diagram svg {
+      max-width: 100%;
+    }
+    pre.mermaid {
+      background: none;
+      text-align: center;
+    }
+  }
+</style></head><body><div title="Basis" class="documentation-shell component"><nav class="links"><h1>Basis</h1><ul><li><a href="/basis/architecture">Architecture</a></li><li><a href="/basis/">Basis documentation</a></li><li><a data-active="true" href="/basis/contributing">Contributing</a></li><li><a href="/basis/guides">Guides</a></li><li><a href="/basis/reference">Reference</a></li></ul></nav><main><div><h1>Contributing</h1>
+<p>Work on a branch created from <code>main</code>; never commit to <code>main</code> directly. Open a pull request and let CI pass: ESLint, tests, TypeScript, and the consumer self-install contract.</p>
+<h2>Checks</h2>
+<pre><code class="language-bash">bun install
+bun run lint
+bun test
+</code></pre>
+<p>Run <code>bun run test:consumer</code> when changing <code>exports</code>, dependencies, presets, or patch handling.</p>
+<h2>Documentation</h2>
+<p>Keep documentation in the same change as the code. Component behavior is showcased in the docs app under <code>libraries/docs/pages/*.docs.tsx</code>; durable architecture, operational, and consumer knowledge belongs here under <code>docs/</code>. Run <code>basis docs check</code> (or <code>bun run docs:check</code>) to validate this tree.</p></div></main></div></body></html>

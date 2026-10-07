@@ -1,0 +1,165 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Architecture · Basis</title><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,100..900;1,100..900&family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500;1,700&display=swap"><style>:root { --basis-color-background: #ffffffff;
+--basis-color-danger: #c00000ff;
+--basis-color-disabled: #e5e5e5ff;
+--basis-color-disabled-text: #a3a3a3ff;
+--basis-color-foreground: #171717ff;
+--basis-color-overlay-dark: #00000080;
+--basis-color-overlay-light: #ffffff80;
+--basis-color-primary: #0070f3ff;
+--basis-color-success: #008000ff;
+--basis-font-size-lg: 112.5%;
+--basis-font-size-md: 100%;
+--basis-font-size-sm: 87.5%;
+--basis-font-size-xl: 125%;
+--basis-font-size-xs: 75%;
+--basis-font-size-xxl: 150%;
+--basis-font-size-xxs: 62.5%;
+--basis-radius-lg: 16px;
+--basis-radius-md: 8px;
+--basis-radius-round: 50px;
+--basis-radius-sm: 4px;
+--basis-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+--basis-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+--basis-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+--basis-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+--basis-transition-medium: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+--basis-transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
+--basis-unit-lg: 24px;
+--basis-unit-md: 16px;
+--basis-unit-sm: 8px;
+--basis-unit-xl: 32px;
+--basis-unit-xs: 4px;
+--basis-unit-xxl: 48px;
+--basis-unit-xxs: 2px;
+--basis-color-contrast: #ffffffff;
+--basis-color-danger-contrast: #ffffffff;
+--basis-color-success-contrast: #ffffffff; }</style><style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,100..900;1,100..900&family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500;1,700&display=swap');
+
+  html, body { margin: 0; }
+
+  .documentation-shell.component {
+    background-color: var(--basis-color-background);
+    color: var(--basis-color-foreground);
+    display: grid;
+    font-family: 'Ubuntu', sans-serif;
+    font-size: var(--basis-font-size-md);
+    grid-template-areas: 'nav main';
+    grid-template-columns: 200px 1fr;
+    height: 100vh;
+    overflow: hidden;
+    width: 100vw;
+    > nav.links {
+      background: #eee;
+      border-right: 1px solid #e9ecef;
+      grid-area: nav;
+      overflow-y: auto;
+      width: 200px;
+      > h1 {
+        background-color: var(--basis-color-foreground);
+        color: var(--basis-color-background);
+        font-size: var(--basis-font-size-xxl);
+        margin: 0;
+        padding: var(--basis-unit-md);
+      }
+      li {
+        > a {
+          display: block;
+          padding: var(--basis-unit-sm) var(--basis-unit-md);
+          text-decoration: none;
+          &[data-active='true'] {
+            background-color: var(--basis-color-background);
+            color: var(--basis-color-primary);
+          }
+        }
+        > ul > li {
+          padding-left: var(--basis-unit-md);
+        }
+      }
+      ul, li {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+    }
+    > main {
+      grid-area: main;
+      overflow: auto;
+      padding: var(--basis-unit-md);
+    }
+    main {
+      h1 {
+        border-bottom: 2px solid var(--basis-color-primary);
+      }
+      code {
+        color: green;
+        font-family: 'Fira Code', monospace;
+        font-variant-ligatures: contextual;
+        font-weight: 500;
+      }
+      p {
+        margin: 0;
+        &:first-child {
+          margin-top: 0;
+        }
+        &:last-child {
+          margin-bottom: 0;
+        }
+      }
+      select {
+        padding: 0.5rem;
+        width: 100%;
+      }
+      ul {
+        list-style: disc;
+        margin: 0;
+        padding-left: 0;
+        > li {
+          margin: 0.25em 0 0 2em;
+        }
+      }
+      b, strong {
+        font-weight: 600;
+      }
+      i, em {
+        font-style: italic;
+      }
+    }
+  }
+
+
+  .mermaid-diagram.component {
+    .diagram svg {
+      max-width: 100%;
+    }
+    pre.mermaid {
+      background: none;
+      text-align: center;
+    }
+  }
+</style></head><body><div title="Basis" class="documentation-shell component"><nav class="links"><h1>Basis</h1><ul><li><a data-active="true" href="/basis/architecture">Architecture</a></li><li><a href="/basis/">Basis documentation</a></li><li><a href="/basis/contributing">Contributing</a></li><li><a href="/basis/guides">Guides</a></li><li><a href="/basis/reference">Reference</a></li></ul></nav><main><div><h1>Architecture</h1>
+<p>Basis is a Bun-first monorepo distributed as a pinned Git dependency. The root <code>package.json</code> is the public facade: consumers import stable source surfaces (<code>basis/react</code>, <code>basis/server</code>, <code>basis/logger</code>, <code>basis/review</code>, <code>basis/configuration</code>, <code>basis/eslint</code>, <code>basis/stylelint</code>, <code>basis/tsconfig/*</code>) and never reach into workspace paths.</p>
+<h2>Invariants</h2>
+<ul>
+<li>The consumer surface resolves without Basis-monorepo path aliases or <code>node_modules/basis/libraries/*</code> imports.</li>
+<li>Runtime dependencies are declared in the root <code>dependencies</code>; host capabilities are declared as <code>basis.hostDependencies</code> metadata and validated by the install hook rather than exposed as an imperative API.</li>
+<li>Cross-workspace imports are package-relative.</li>
+</ul>
+<h2>Where the detail lives</h2>
+<p>Workspace <code>README.md</code> files remain the precise per-package reference — for example <a href="../../consumer/README.md">consumer/README.md</a> for the runtime and install contract, and <a href="../../libraries/review/README.md">libraries/review/README.md</a> for review policy. This tree carries the durable, cross-cutting architecture prose and the invariants above.</p>
+<h2>System shape</h2>
+<pre class="mermaid">flowchart TD
+    Docs[&quot;docs/**/*.md(x)&lt;br/&gt;Canonical documentation&quot;]
+    Pipeline[&quot;Basis docs pipeline&lt;br/&gt;discover - render&quot;]
+    Server[&quot;Basis Server&lt;br/&gt;/docs/*&quot;]
+    Static[&quot;Static docs build&quot;]
+    Pages[&quot;GitHub Pages&quot;]
+    Docs --&gt; Pipeline
+    Pipeline --&gt; Server
+    Pipeline --&gt; Static
+    Static --&gt; Pages
+</pre></div></main></div><script type="module">
+  import mermaid from 'https://esm.sh/mermaid@11'
+  mermaid.initialize({ startOnLoad: false })
+  await mermaid.run({ nodes: document.querySelectorAll('.mermaid') })
+</script></body></html>

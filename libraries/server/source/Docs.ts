@@ -1,6 +1,6 @@
 import { evaluate } from '@mdx-js/mdx'
 import type { Dirent } from 'node:fs'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, extname, join, relative, resolve } from 'node:path'
 import * as React from 'react'
 import * as runtime from 'react/jsx-runtime'
@@ -419,4 +419,34 @@ export async function serveDocs(
     ? await renderDocsPage(site, page, development)
     : renderDocsNotFound(site, path, development)
   return respond(rendered, page ? 200 : 404)
+}
+
+/**
+ * Build the resolved site to a static directory, suitable for GitHub Pages.
+ *
+ * Each page is written as `<outDir>/<route>/index.html`; root-relative links
+ * are prefixed with `base` so a project Pages site served under a subpath
+ * resolves. Mermaid and the documentation fonts load from their configured
+ * sources, so the output needs no build step of its own.
+ * @param site - The resolved site.
+ * @param outDir - Absolute output directory.
+ * @param base - Optional base path prefixed to root-relative links.
+ * @returns The written file paths.
+ */
+export async function buildDocs(site: DocsSite, outDir: string, base = ''): Promise<string[]> {
+  const written: string[] = []
+  const write = (route: string, html: string): void => {
+    const output = base === '' ? html : html.replace(/href="\//g, `href="${base}/`)
+    const target = join(outDir, route === '/' ? '' : route.replace(/^\/+/, ''), 'index.html')
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, output)
+    written.push(target)
+  }
+
+  for (const page of site.pages.values()) {
+    write(pageHref(site.route, page.path), await renderDocsPage(site, page, false))
+  }
+  for (const [path, page] of site.modules) write(path, renderDocsModule(site, page, path, false))
+
+  return written
 }

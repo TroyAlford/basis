@@ -252,3 +252,32 @@ export function runDocs(args: string[]): number {
   process.stdout.write(`[basis] docs: ok (${report.pages.length} page(s))\n`)
   return 0
 }
+
+/**
+ * Build the documentation tree to a static site (for example GitHub Pages).
+ * @param args - Arguments after the `docs build` subcommand.
+ * @returns Process exit code.
+ */
+export async function runDocsBuild(args: string[]): Promise<number> {
+  const root = process.cwd()
+  const source = resolveSource(root, args)
+  const value = (flag: string, fallback: string): string => {
+    const index = args.indexOf(flag)
+    const found = args[index + 1]
+    return index !== -1 && found !== undefined && !found.startsWith('-') ? found : fallback
+  }
+  const out = value('--out', 'docs-dist')
+  const base = value('--base', '')
+  const title = value('--title', 'Documentation')
+
+  const { buildDocs, discoverDocs } = await import('../libraries/server/source/Docs')
+  const site = discoverDocs({ root: join(root, source), route: '/', title })
+  if (site.pages.size === 0 && site.modules.size === 0) {
+    process.stdout.write(`[basis] docs: no ${source}/ directory; nothing to build\n`)
+    return 0
+  }
+
+  const written = await buildDocs(site, resolve(root, out), base)
+  process.stdout.write(`[basis] docs: built ${written.length} page(s) to ${out}\n`)
+  return 0
+}
