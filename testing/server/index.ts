@@ -1,4 +1,4 @@
-import { Server } from '@basis/server'
+import { Server } from 'basis/server'
 
 /*
  * Managed-application fixture. `MODE=production` selects the managed runtime;

@@ -7,8 +7,14 @@
     "moduleResolution": "Bundler",
     "noEmit": true,
     "paths": {
-      "@basis/*": [
-        "./libraries/*"
+      "basis/*": [
+        "./consumer/*.ts"
+      ],
+      "basis/react/icons": [
+        "./consumer/react-icons.ts"
+      ],
+      "basis/testing/bun": [
+        "./consumer/testing-bun.ts"
       ]
     },
     "rootDir": ".",

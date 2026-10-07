@@ -1,4 +1,4 @@
-import { Router } from '@basis/react'
+import { Router } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
@@ -26,7 +26,7 @@ export class OverlayProviderDocs extends DocumentationPage<Record<string, never>
           <h2>Mount</h2>
           <p><code>ApplicationBase</code> appends <code>OverlayProvider</code> after <code>layout()</code> inside its root content, so dialogs and notifications stay above routed pages. Outside <code>ApplicationBase</code>, render it once next to your router tree:</p>
           {Code.format(`
-            import { OverlayProvider } from '@basis/react'
+            import { OverlayProvider } from 'basis/react'
 
             export function Root() {
               return (

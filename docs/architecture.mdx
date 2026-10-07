@@ -9,8 +9,8 @@ Basis is a Bun-first monorepo distributed as a pinned Git dependency. The root `
 ## Invariants
 
 - The consumer surface resolves without Basis-monorepo path aliases or `node_modules/basis/libraries/*` imports.
+- Basis has one import vocabulary. Internal code imports the public surfaces by their consumer names (`basis/react`, `basis/server`, …), resolved locally by the root `tsconfig.json` `paths` remap, and imports internal-only workspaces package-relatively. The published surface still resolves through `exports` alone, without aliases.
 - Runtime dependencies are declared in the root `dependencies`; host capabilities are declared as `basis.hostDependencies` metadata and validated by the install hook rather than exposed as an imperative API.
-- Cross-workspace imports are package-relative.
 
 ## Where the detail lives
 

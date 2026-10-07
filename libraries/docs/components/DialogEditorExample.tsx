@@ -1,4 +1,4 @@
-import { Editor, TextEditor } from '@basis/react'
+import { Editor, TextEditor } from 'basis/react'
 
 interface Value {
   name: string,

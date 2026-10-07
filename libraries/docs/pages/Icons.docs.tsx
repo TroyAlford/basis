@@ -1,7 +1,7 @@
+import type { IconProps } from 'basis/react'
+import { Button, css, EnumEditor, NumberEditor, Router, style, TextEditor } from 'basis/react'
+import * as Icons from 'basis/react/icons'
 import type { ComponentType, ReactNode } from 'react'
-import type { IconProps } from '@basis/react'
-import { Button, css, EnumEditor, NumberEditor, Router, style, TextEditor } from '@basis/react'
-import * as Icons from '@basis/react/icons'
 import { IconBase } from '../../react/icons/IconBase/IconBase'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
@@ -214,8 +214,8 @@ export class IconsDocs extends DocumentationPage<State> {
         <h2>Usage Examples</h2>
         <h3>Basic Icon Usage</h3>
         {Code.format(`
-          import { AlignLeft, ListBulleted, Plus, Search } from '@basis/react'
-          import { Table } from '@basis/react/icons'
+          import { AlignLeft, ListBulleted, Plus, Search } from 'basis/react'
+          import { Table } from 'basis/react/icons'
 
           // Use individual icons
           <Plus />
@@ -242,7 +242,7 @@ export class IconsDocs extends DocumentationPage<State> {
         <p>This reduces the number of individual icon components while providing type-safe access to all variants.</p>
         <h3>Usage</h3>
         {Code.format(`
-          import { Triangle, Sort, Grip, Zoom } from '@basis/react'
+          import { Triangle, Sort, Grip, Zoom } from 'basis/react'
 
           // Triangle - directional arrows
           <Triangle orientation={Triangle.Orientation.Right} />
@@ -363,7 +363,7 @@ export class IconsDocs extends DocumentationPage<State> {
           </div>
         </div>
         {Code.format(`
-          import { Lightning, Plus } from '@basis/react'
+          import { Lightning, Plus } from 'basis/react'
 
           <Lightning overlay={Plus} />
           <Lightning filled overlay={Plus} />

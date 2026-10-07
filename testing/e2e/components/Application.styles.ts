@@ -1,4 +1,4 @@
-import { css, style } from '@basis/react'
+import { css, style } from 'basis/react'
 
 style('basis:application', css`
   .application.component {

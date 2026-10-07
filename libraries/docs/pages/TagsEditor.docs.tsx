@@ -1,4 +1,4 @@
-import { Tag } from '@basis/react'
+import { Tag } from 'basis/react'
 import { TagsEditor } from '../../react/components/TagsEditor/TagsEditor'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
@@ -16,7 +16,7 @@ export class TagsEditorDocs extends DocumentationPage<Record<string, never>> {
           <h2>Basic Usage</h2>
           <p>Simple tag management:</p>
           {Code.format(`
-        import { TagsEditor } from '@basis/react'
+        import { TagsEditor } from 'basis/react'
 
         const [tags, setTags] = useState(['react', 'typescript'])
 

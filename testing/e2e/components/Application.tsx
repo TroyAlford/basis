@@ -1,5 +1,5 @@
+import { ApplicationBase, Link } from 'basis/react'
 import * as React from 'react'
-import { ApplicationBase, Link } from '@basis/react'
 
 import './Application.styles.ts'
 

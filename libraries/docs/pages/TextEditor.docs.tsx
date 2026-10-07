@@ -1,6 +1,6 @@
-import { match } from '@basis/utilities'
 import { Link } from '../../react/components/Router/Link'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
+import { match } from '../../utilities'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 

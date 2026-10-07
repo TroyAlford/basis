@@ -35,6 +35,7 @@ const REQUIRED_EXPORTS = [
   './logger',
   './markdown',
   './react',
+  './react/icons',
   './review',
   './server',
   './stylelint',

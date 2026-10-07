@@ -36,6 +36,17 @@ writeFixture('nested/package.json', JSON.stringify({
   version: '1.0.0',
 }))
 
+writeFixture('monorepo/package.json', JSON.stringify({
+  name: 'monorepo-root',
+  version: '1.0.0',
+  workspaces: ['packages/*'],
+}))
+
+writeFixture('monorepo/packages/app/package.json', JSON.stringify({
+  name: '@monorepo/app',
+  version: '1.0.0',
+}))
+
 const filenameFor = (path: string): string => relative(process.cwd(), join(fixtureRoot, path))
 
 const lint = (code: string, filename = filenameFor('index.ts')) => {
@@ -128,5 +139,12 @@ describe('noExtraneousDependencies', () => {
 
     expect(messageIds("import value from 'nested-dep'", nested)).toEqual([])
     expect(messageIds("import value from 'declared-dep'", nested)).toEqual(['missingDependency'])
+  })
+
+  test('ignores a workspace importing the monorepo root package by name', () => {
+    const app = filenameFor('monorepo/packages/app/index.ts')
+
+    expect(messageIds("import value from 'monorepo-root/react'", app)).toEqual([])
+    expect(messageIds("import value from 'undeclared-dep'", app)).toEqual(['missingDependency'])
   })
 })

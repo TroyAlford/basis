@@ -1,4 +1,4 @@
-import { AnchorPoint } from '@basis/react'
+import { AnchorPoint } from 'basis/react'
 import { Button } from '../../react/components/Button/Button'
 import { DropdownMenu } from '../../react/components/DropdownMenu/DropdownMenu'
 import { Link } from '../../react/components/Router/Link'

@@ -15,7 +15,7 @@ export class TagDocs extends DocumentationPage<Record<string, never>> {
           <h2>Basic Usage</h2>
           <p>Simple tag display:</p>
           {Code.format(`
-        import { Tag } from '@basis/react'
+        import { Tag } from 'basis/react'
 
         <Tag>JavaScript</Tag>
         <Tag>React</Tag>

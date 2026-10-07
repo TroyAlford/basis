@@ -1,4 +1,4 @@
-import { Tag } from '@basis/react'
+import { Tag } from 'basis/react'
 import { NumberEditor } from '../../react/components/NumberEditor/NumberEditor'
 import { Link } from '../../react/components/Router/Link'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'

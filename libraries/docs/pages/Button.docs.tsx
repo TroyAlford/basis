@@ -1,5 +1,5 @@
+import { Button } from 'basis/react'
 import type { SyntheticEvent } from 'react'
-import { Button } from '@basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
@@ -70,7 +70,7 @@ export class ButtonDocs extends DocumentationPage<State> {
           </div>
           <p>Current type: <strong>{buttonType}</strong></p>
           {Code.format(`
-            import { Button } from '@basis/react'
+            import { Button } from 'basis/react'
 
             // Available types
             Button.Type.Button   // Default button behavior

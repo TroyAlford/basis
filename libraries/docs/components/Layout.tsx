@@ -1,6 +1,6 @@
+import type { DocumentationEntry } from 'basis/react'
+import { ApplicationBase, buildDocumentationNavigation, Documentation, Theme } from 'basis/react'
 import type { ComponentType, ReactNode } from 'react'
-import type { DocumentationEntry } from '@basis/react'
-import { ApplicationBase, buildDocumentationNavigation, Documentation, Theme } from '@basis/react'
 import { routes } from '../routes.ts'
 
 /**

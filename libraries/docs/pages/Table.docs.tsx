@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { Pin, Section, SortDirection, TextAlign, TypedTable } from '@basis/react'
+import { Pin, Section, SortDirection, TextAlign, TypedTable } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
@@ -60,7 +60,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
         <Section title="Basic Usage">
           <p>The simplest way to use the Table component is with the <code>TypedTable.of()</code> factory function, which provides type-safe column creation methods:</p>
           {Code.format(`
-            import { TypedTable } from '@basis/react'
+            import { TypedTable } from 'basis/react'
 
             interface User {
               id: number

@@ -1,5 +1,5 @@
+import { Button, TypedTable } from 'basis/react'
 import type * as React from 'react'
-import { Button, TypedTable } from '@basis/react'
 import { matchScreenshot, test } from '../../../testing'
 
 interface Row {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /* eslint-disable no-console */
 import { parseArgs } from 'node:util'
-import { isNil, match } from '@basis/utilities'
+import { isNil, match } from '../../../utilities'
 import { buildPackage } from '../functions/buildPackage'
 import { filterByPatterns } from '../functions/filterByPatterns'
 import { findWorkspace } from '../functions/findWorkspace'

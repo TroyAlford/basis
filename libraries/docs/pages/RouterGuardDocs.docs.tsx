@@ -1,4 +1,4 @@
-import { Button, Component, Router, TextEditor } from '@basis/react'
+import { Button, Component, Router, TextEditor } from 'basis/react'
 
 interface State {
   value: string,

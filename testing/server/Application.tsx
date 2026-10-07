@@ -1,6 +1,6 @@
+import { ApplicationBase } from 'basis/react'
 import * as React from 'react'
 import { createRoot } from 'react-dom/client'
-import { ApplicationBase } from '@basis/react'
 
 /** A minimal managed application used to exercise the server modes. */
 export class Application extends ApplicationBase {
