@@ -1,6 +1,6 @@
 import { EnumEditor, Section, ToggleEditor } from '@basis/react'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 // Sample enum for demonstration
 enum SampleStatus {
@@ -24,9 +24,9 @@ interface State {
   statusValue: SampleStatus,
 }
 
-export class EnumEditorDocs extends Documentation<State> {
+export class EnumEditorDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       closeOnActivate: true,
       enumType: 'status' as const,

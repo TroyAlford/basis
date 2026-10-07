@@ -1,72 +1,40 @@
 import type { ComponentType, ReactNode } from 'react'
-import { createRef } from 'react'
-import { ApplicationBase, Router, Theme } from '@basis/react'
+import type { DocumentationEntry } from '@basis/react'
+import { ApplicationBase, buildDocumentationNavigation, Documentation, Theme } from '@basis/react'
 import { routes } from '../routes.ts'
 
-import './Layout.styles.ts'
-
+/**
+ * The docs application shell. It composes the shared {@link Documentation}
+ * surface — the same one the static documentation build renders — so the
+ * gallery and the published documentation have one presentation.
+ */
 export class Layout extends ApplicationBase {
   static displayName = 'Layout'
-
-  main = createRef<HTMLElement>()
 
   protected get routes(): Record<string, { component: ComponentType<unknown> }> {
     return Object.fromEntries(routes.map(route => [route.path, { component: route.component }]))
   }
 
+  /**
+   * The navigation tree, nested by each route's declared parent.
+   * @returns The navigation entries.
+   */
+  protected get navigation(): DocumentationEntry[] {
+    return buildDocumentationNavigation(routes.map(route => ({
+      href: route.path,
+      parent: route.parent,
+      title: route.title.split('/').pop() ?? route.title,
+    })))
+  }
+
   protected layout(content: ReactNode): ReactNode {
-    const routeTree = routes.reduce((tree, route) => {
-      if (route.parent) {
-        const parentRoute = routes.find(r => r.path === route.parent)
-        if (parentRoute) {
-          if (!tree[parentRoute.path]) {
-            tree[parentRoute.path] = { children: [], route: parentRoute }
-          }
-          tree[parentRoute.path].children.push(route)
-        } else {
-          tree[route.path] = { children: [], route }
-        }
-      } else {
-        tree[route.path] = { children: [], route }
-      }
-      return tree
-    }, {} as Record<string, { children: typeof routes, route: typeof routes[0] }>)
-
-    const sortedRoutes = Object.values(routeTree).sort((a, b) => (
-      a.route.title.localeCompare(b.route.title)
-    ))
-
-    const renderRouteTree = (routeNodes: typeof sortedRoutes): ReactNode => (
-      <ul>
-        {routeNodes.map(({ children, route }) => (
-          <li key={route.path}>
-            <Router.Link to={route.path}>
-              {route.title}
-            </Router.Link>
-            {children.length > 0 && (
-              <ul>
-                {children.map(childRoute => (
-                  <li key={childRoute.path}>
-                    <Router.Link to={childRoute.path}>
-                      {childRoute.title.split('/').pop()}
-                    </Router.Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        ))}
-      </ul>
-    )
-
+    const active = typeof window === 'undefined' ? undefined : window.location.pathname
     return (
       <>
         <Theme />
-        <nav className="links">
-          <h1>Basis Docs</h1>
-          {renderRouteTree(sortedRoutes)}
-        </nav>
-        <main ref={this.main}>{content}</main>
+        <Documentation active={active} navigation={this.navigation} title="Basis Docs">
+          {content}
+        </Documentation>
       </>
     )
   }

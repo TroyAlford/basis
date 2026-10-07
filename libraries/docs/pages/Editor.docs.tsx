@@ -1,8 +1,8 @@
 import { Router } from '@basis/react'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
-export class EditorDocs extends Documentation<Record<string, never>> {
+export class EditorDocs extends DocumentationPage<Record<string, never>> {
   content() {
     return (
       <>

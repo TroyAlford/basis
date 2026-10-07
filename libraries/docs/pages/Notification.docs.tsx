@@ -1,6 +1,6 @@
 import { Button, Notification, Router } from '@basis/react'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface State {
   lastHandle: string | null,
@@ -10,9 +10,9 @@ interface State {
  * Documentation for {@link Notification}: static {@link Notification.create}, handle API, and
  * {@link Notification.Intent}.
  */
-export class NotificationDocs extends Documentation<State> {
+export class NotificationDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       lastHandle: null as string | null,
     },

@@ -1,7 +1,7 @@
 import { Button, Dialog, Intent, Router } from '@basis/react'
 import { Code } from '../components/Code'
 import { DialogEditorExample } from '../components/DialogEditorExample'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface State {
   lastChoice: string | null,
@@ -11,9 +11,9 @@ interface State {
  * Documentation for {@link Dialog}: native modal API, {@link Dialog.open}, {@link Dialog.confirm},{' '}
  * {@link Dialog.editor}, and {@link Intent} chrome.
  */
-export class DialogDocs extends Documentation<State> {
+export class DialogDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       lastChoice: null as string | null,
     },

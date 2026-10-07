@@ -1,4 +1,8 @@
 import type { ComponentType } from 'react'
+import ArchitectureDoc from '../../docs/architecture.mdx'
+import ContributingDoc from '../../docs/contributing.mdx'
+import GuidesDoc from '../../docs/guides.mdx'
+import ReferenceDoc from '../../docs/reference.mdx'
 import { AutoCompleteDocs } from './pages/AutoComplete.docs.tsx'
 import { AwaitDocs } from './pages/Await.docs.tsx'
 import { ButtonDocs } from './pages/Button.docs.tsx'
@@ -14,6 +18,7 @@ import { EnumEditorDocs } from './pages/EnumEditor.docs.tsx'
 import { IconsDocs } from './pages/Icons.docs.tsx'
 import { ImageDocs } from './pages/Image.docs.tsx'
 import { MenuDocs } from './pages/Menu.docs.tsx'
+import { MermaidDocs } from './pages/Mermaid.docs.tsx'
 import { MixinsDocs } from './pages/Mixins.docs.tsx'
 import { MoonPhaseDocs } from './pages/MoonPhase.docs.tsx'
 import { NotificationDocs } from './pages/Notification.docs.tsx'
@@ -80,6 +85,7 @@ export const routes = ([
   docs({ component: IconsDocs, path: '/icons', title: 'Icons' }),
   docs({ component: ImageDocs, path: '/components/image', title: 'Image' }),
   docs({ component: MenuDocs, path: '/components/menu', title: 'Menu' }),
+  docs({ component: MermaidDocs, path: '/components/mermaid', title: 'Mermaid' }),
   docs({ component: MixinsDocs, path: '/mixins', title: 'Mixins' }),
   docs({ component: MoonPhaseDocs, parent: '/icons', path: '/icons/MoonPhase', title: 'Icons/MoonPhase' }),
   docs({ component: NumberEditorDocs, path: '/components/number-editor', title: 'NumberEditor' }),
@@ -101,6 +107,10 @@ export const routes = ([
   docs({ component: ThemeDocs, path: '/components/theme', title: 'Theme' }),
   docs({ component: ToggleEditorDocs, path: '/components/toggle-editor', title: 'ToggleEditor' }),
   docs({ component: TooltipDocs, path: '/components/tooltip', title: 'Tooltip' }),
+  docs({ component: ArchitectureDoc, path: '/architecture', title: 'Architecture' }),
+  docs({ component: ContributingDoc, path: '/contributing', title: 'Contributing' }),
+  docs({ component: GuidesDoc, path: '/guides', title: 'Guides' }),
+  docs({ component: ReferenceDoc, path: '/reference', title: 'Reference' }),
 ]).sort((a, b) => {
   if (a.default) return -1
   if (b.default) return 1

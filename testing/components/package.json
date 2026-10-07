@@ -1,0 +1,11 @@
+{
+  "name": "@/components-fixture",
+  "dependencies": {
+    "@basis/react": "workspace:*",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "scripts": {
+    "publish": "SKIP"
+  }
+}

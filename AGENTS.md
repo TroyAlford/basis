@@ -33,3 +33,10 @@ Guidance for humans and coding agents working in this repository.
 - Public source must declare every dependency it imports in the root `dependencies`; consumers must not enumerate the ESLint plugin stack themselves.
 - Patch files stay in `patches/` and are declared in the root `patchedDependencies` map. The trusted `postinstall` hook (`consumer/install.ts`) applies them to exact `name@version` installs with `git apply` (Bun cannot apply a dependency's patches transitively and exposes no standalone apply command). Do not reintroduce a hand-rolled diff applier; keep it deterministic, idempotent, and loud on drift. The same hook reads the consumer's `basis.hostDependencies`, resolves each declared non-npm capability on `PATH`, and probes the known ones with their version command; anything missing, present-but-broken, or malformed fails `bun install` loudly. Host dependencies are package metadata, never an imperative API.
 - `bun run test:consumer` performs a real Git-dependency install into a temporary host app. Run it when changing `exports`, dependencies, presets, or patch handling.
+
+## Repository documentation
+
+- **Read before you change.** Read `README.md` and the durable documentation under `docs/` before planning or modifying code.
+- **Invariants are constraints.** Treat documented architectural invariants as constraints. Current implementation may be transitional, legacy, or incorrect and does not override explicitly documented architectural intent.
+- **Surface conflicts.** If a local change would move an ownership, security, lifecycle, deployment, or orchestration boundary, surface the conflict instead of silently changing it.
+- **Canonical source.** Durable architecture, operational, developer, and consumer knowledge belongs under `docs/` as Markdown/MDX. Validate it with `basis docs check` (`bun run docs:check`). Directory names describe content, not publication mechanism.

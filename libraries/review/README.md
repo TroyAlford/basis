@@ -8,7 +8,7 @@ The model is a strict separation of layers:
 reviewer Markdown                 canonical policy and documentation
 Basis parser/validator            safety and type boundary
 typed TS objects                  derived runtime representation
-ai-dispatcher                     execution
+Alforge                           execution
 ```
 
 Basis owns the durable opinion. Consumers own execution: running detectors,
@@ -142,4 +142,4 @@ before they are applied. Every effective reviewer carries `sources`
 ## Scope
 
 Basis owns policy only: it ships no evaluation corpus, model runtime, or review
-publication. Evaluation-corpus modeling belongs to the consumer (`ai-dispatcher`).
+publication. Evaluation-corpus modeling belongs to the consumer (`Alforge`).

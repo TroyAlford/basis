@@ -1,16 +1,16 @@
 import type { SyntheticEvent } from 'react'
 import { Button } from '@basis/react'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface State {
   buttonType: string,
   selectedValue: string | null,
 }
 
-export class ButtonDocs extends Documentation<State> {
+export class ButtonDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       buttonType: 'button',
       selectedValue: null as string | null,

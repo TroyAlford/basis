@@ -1,6 +1,6 @@
 import { AnchorPoint, AutoComplete, Link } from '@basis/react'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface SearchResult {
   headline: string,
@@ -21,9 +21,9 @@ interface State {
   minimumQueryLength: number,
 }
 
-export class AutoCompleteDocs extends Documentation<State> {
+export class AutoCompleteDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       anchorPoint: AnchorPoint.BottomStart,
       minimumQueryLength: 0,

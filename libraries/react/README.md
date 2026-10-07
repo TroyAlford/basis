@@ -69,3 +69,34 @@ resolveElement('.missing', null, anchor)         // null
 
 The Popup mixin uses it to resolve an anchor and, for a selector `boundary`, the clipping container.
 
+## Documentation surface
+
+`Documentation` is the shared documentation shell — a navigation sidebar beside the page content, typed by the active theme. The docs app and the static documentation build both render through it, so a published site looks the same as the app.
+
+```tsx
+import { Documentation } from '@basis/react'
+import type { DocumentationEntry } from '@basis/react'
+
+const navigation: DocumentationEntry[] = [{ href: '/', title: 'Home' }]
+
+<Documentation active="/" navigation={navigation} title="My docs">
+  <h1>Home</h1>
+</Documentation>
+```
+
+`buildDocumentationNavigation(routes)` nests a flat `{ href, title, parent? }` list by `parent`, with the roots sorted by title. The docs app and the static build both use it so navigation nests the same way everywhere.
+
+`Mermaid` renders a Mermaid diagram, importing the runtime on mount only, so a page without diagrams never fetches it:
+
+```tsx
+import { Mermaid } from '@basis/react'
+
+<Mermaid>{'flowchart TD\n  A[Start] --> B[Ship]'}</Mermaid>
+```
+
+A `mermaid` code fence in a `.mdx` document compiles to this component through the Markdown build plugin (`@basis/bun-plugins`).
+
+## Default typography
+
+Importing `@basis/react` registers a root stylesheet that applies Basis's default type — Ubuntu for UI and Fira Code for code — from Google Fonts, so components render in Basis's type without configuration. The stylesheet URL is exported as `BASIS_FONTS_URL`; `basis/testing`'s HTML renderer loads the same fonts, so component screenshots get Basis type by default.
+

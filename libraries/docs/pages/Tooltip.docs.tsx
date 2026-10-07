@@ -3,7 +3,7 @@ import { Button } from '../../react/components/Button/Button'
 import { Link } from '../../react/components/Router/Link'
 import { Tooltip } from '../../react/components/Tooltip/Tooltip'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 import { TooltipBoundaryExample } from '../components/TooltipBoundaryExample'
 
 interface State {
@@ -11,9 +11,9 @@ interface State {
   visible: Tooltip['props']['visible'],
 }
 
-export class TooltipDocs extends Documentation<State> {
+export class TooltipDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       anchorPoint: AnchorPoint.Top,
       visible: true as Tooltip['props']['visible'],

@@ -4,7 +4,7 @@ import { Button, css, EnumEditor, NumberEditor, Router, style, TextEditor } from
 import * as Icons from '@basis/react/icons'
 import { IconBase } from '../../react/icons/IconBase/IconBase'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 import './Icons.styles.ts'
 
@@ -23,9 +23,9 @@ interface State {
   size: number,
 }
 
-export class IconsDocs extends Documentation<State> {
+export class IconsDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       color: '#000000',
       filled: false,

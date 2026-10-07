@@ -1,0 +1,21 @@
+---
+title: Contributing
+---
+
+# Contributing
+
+Work on a branch created from `main`; never commit to `main` directly. Open a pull request and let CI pass: ESLint, tests, TypeScript, and the consumer self-install contract.
+
+## Checks
+
+```bash
+bun install
+bun run lint
+bun test
+```
+
+Run `bun run test:consumer` when changing `exports`, dependencies, presets, or patch handling.
+
+## Documentation
+
+Keep documentation in the same change as the code. Component behavior is showcased in the docs app under `libraries/docs/pages/*.docs.tsx`; durable architecture, operational, and consumer knowledge belongs here under `docs/`. Validate this tree with `basis docs check` (or `bun run docs:check`) and build the static site with `basis docs build` (or `bun run docs:build`).

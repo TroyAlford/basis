@@ -3,7 +3,7 @@ import { NumberEditor } from '../../react/components/NumberEditor/NumberEditor'
 import { Link } from '../../react/components/Router/Link'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface State {
   autoFocus: boolean,
@@ -14,9 +14,9 @@ interface State {
   value: number,
 }
 
-export class NumberEditorDocs extends Documentation<State> {
+export class NumberEditorDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       autoFocus: false,
       placeholder: 'Enter a number...',

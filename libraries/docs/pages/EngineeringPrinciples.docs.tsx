@@ -1,6 +1,6 @@
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
-export class EngineeringPrinciplesDocs extends Documentation<Record<string, never>> {
+export class EngineeringPrinciplesDocs extends DocumentationPage<Record<string, never>> {
   content() {
     return (
       <>
@@ -370,7 +370,7 @@ export class EngineeringPrinciplesDocs extends Documentation<Record<string, neve
               tests for what can be enforced mechanically.
             </li>
             <li>
-              <strong>ai-dispatcher evaluation</strong> — whether the semantic reviewers actually
+              <strong>Alforge evaluation</strong> — whether the semantic reviewers actually
               make the intended judgments.
             </li>
           </ul>

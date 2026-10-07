@@ -20,6 +20,17 @@ export function registerNavigateHandler(handler: NavigateHandler): void {
 }
 
 /**
+ * Whether a handler is registered to perform client-side navigation.
+ *
+ * A {@link Link} only intercepts a click when a Router is present; with no
+ * handler (for example a statically built page), the browser navigates normally.
+ * @returns True when a navigate handler is registered.
+ */
+export function hasNavigateHandler(): boolean {
+  return navigateHandler !== null
+}
+
+/**
  * Routes a navigate-request event to the registered handler.
  * @param event The navigate request event
  */

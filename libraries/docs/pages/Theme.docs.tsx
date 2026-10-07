@@ -2,7 +2,7 @@ import { createRef } from 'react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Theme } from '../../react/components/Theme/Theme'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 /** Variable groups read from `:root` (Layout’s unnamed `<Theme />`). */
 const ROOT_THEME_CSS_SNAPSHOT_SECTIONS: readonly { readonly title: string, readonly vars: readonly string[] }[] = [
@@ -71,11 +71,11 @@ interface State {
   themeName: string,
 }
 
-export class ThemeDocs extends Documentation<State> {
+export class ThemeDocs extends DocumentationPage<State> {
   previewThemeTargetRef = createRef<HTMLDivElement>()
 
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       borderRadius: 8,
       fontSize: 100,

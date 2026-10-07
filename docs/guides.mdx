@@ -1,0 +1,23 @@
+---
+title: Guides
+---
+
+# Guides
+
+Task-oriented guidance lives here. Start with the consumer contract in [consumer/README.md](https://github.com/TroyAlford/basis/blob/main/consumer/README.md): installing Basis as a pinned Git dependency and importing its runtime surfaces.
+
+## Writing documentation
+
+Durable documentation lives in this `docs/` tree as flat `<section>.mdx` files, each with an optional front-matter `title`:
+
+```mdx
+---
+title: Runtime architecture
+---
+
+# Runtime architecture
+```
+
+- `basis docs check` (or `bun run docs:check`) validates front-matter, code fences, and repository-relative links.
+- `basis docs build` (or `bun run docs:build`) projects the tree to a static site for GitHub Pages.
+- Use `.mdx` when a page needs interactivity: a `mermaid` fence renders as a diagram, and component behavior is showcased in the docs app under `libraries/docs/pages/*.docs.tsx`.

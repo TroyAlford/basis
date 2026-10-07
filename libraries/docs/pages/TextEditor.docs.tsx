@@ -2,7 +2,7 @@ import { match } from '@basis/utilities'
 import { Link } from '../../react/components/Router/Link'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface State {
   multiline: TextEditor['props']['multiline'],
@@ -13,9 +13,9 @@ interface State {
   wrap: TextEditor['props']['wrap'],
 }
 
-export class TextEditorDocs extends Documentation<State> {
+export class TextEditorDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       multiline: 3,
       placeholder: 'Type here to see the TextEditor in action...',

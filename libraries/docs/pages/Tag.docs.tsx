@@ -1,8 +1,8 @@
 import { Tag } from '../../react/components/Tag/Tag'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
-export class TagDocs extends Documentation<Record<string, never>> {
+export class TagDocs extends DocumentationPage<Record<string, never>> {
   content() {
     return (
       <>

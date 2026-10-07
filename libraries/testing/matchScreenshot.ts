@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Locator, Page } from 'playwright'
 import { PNG } from 'pngjs'
@@ -9,7 +9,7 @@ import { trackSnapshot } from './cleanup'
 import { renderHtml } from './document'
 import { formatSnapshotKey, slug } from './naming'
 import type { ScreenshotOptions } from './snapshots'
-import { comparePng, readPng, snapshotDirectory, writePng } from './snapshots'
+import { comparePng, readPng, snapshotDirectory, writePng, writePngBytes } from './snapshots'
 import { currentTestName, nextSnapshotIndex } from './test'
 import { updating } from './update'
 
@@ -220,14 +220,21 @@ export function commitScreenshot(
   options: ScreenshotOptions = {},
   update = updating(),
 ): MatcherResult {
-  const actual = PNG.sync.read(bytes)
   const { actual: actualPath, baseline, diff: diffPath } = snapshotPaths(file, key)
 
   if (update || !existsSync(baseline)) {
-    writePng(baseline, actual)
+    writePngBytes(baseline, bytes)
     return { message: () => `matchScreenshot: wrote ${baseline}`, pass: true }
   }
 
+  // Identical bytes are identical pixels; skip the decode and the pixel diff.
+  if (readFileSync(baseline).equals(bytes)) {
+    rmSync(actualPath, { force: true })
+    rmSync(diffPath, { force: true })
+    return { message: () => `matchScreenshot: matches ${baseline}`, pass: true }
+  }
+
+  const actual = PNG.sync.read(bytes)
   const comparison = comparePng(readPng(baseline), actual, options)
   if (comparison.pass) {
     /*

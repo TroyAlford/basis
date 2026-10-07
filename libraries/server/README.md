@@ -246,3 +246,8 @@ the signed-in user id as `runtime.identity` (`null` when anonymous). A consumer
 frontend therefore reads the signed-in identity from its standard runtime
 context without implementing a session fetch of its own.
 
+## Documentation
+
+Durable documentation lives under `docs/` as Markdown/MDX. `basis docs check` validates the tree (front-matter, code fences, and repository-relative links), and `basis docs build` projects the same source to a static site (for example GitHub Pages) through this package's renderer.
+
+A documentation site is an app, not a separate server surface: the `Documentation` component from `basis/react` renders the shell, and the `docs/` tree is served by running the docs app through the Basis Server. See `docs/` and `server.ts` in this repository for the reference setup.

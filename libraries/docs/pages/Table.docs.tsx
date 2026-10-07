@@ -1,7 +1,7 @@
 import { faker } from '@faker-js/faker'
 import { Pin, Section, SortDirection, TextAlign, TypedTable } from '@basis/react'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 faker.seed(42)
 
@@ -22,7 +22,7 @@ interface User {
   role: string,
 }
 
-export class TableDocs extends Documentation<Record<string, never>> {
+export class TableDocs extends DocumentationPage<Record<string, never>> {
   // Generate sample data with faker
   private generateUsers(count = 8): User[] {
     return Array.from({ length: count }, (_, i) => {

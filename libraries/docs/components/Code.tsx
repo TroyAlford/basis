@@ -8,9 +8,25 @@ interface Props {
   theme: string,
 }
 
-// @ts-expect-error - this is a valid dynamic import
-// eslint-disable-next-line @basis/import-extensions
-const shiki = await import('https://esm.sh/shiki@3.0.0')
+/** The Shiki runtime surface this component uses. */
+interface Shiki {
+  /** Highlight `code` to Shiki HTML. */
+  codeToHtml: (code: string, options: { lang: string, theme: string }) => Promise<string>,
+}
+
+/** The Shiki runtime, loaded at most once per document. */
+let runtime: Promise<Shiki> | null = null
+
+/**
+ * Load the Shiki runtime, once per document.
+ * @returns The runtime.
+ */
+function loadShiki(): Promise<Shiki> {
+  // @ts-expect-error - the runtime is loaded from a URL, not a package.
+  // eslint-disable-next-line @basis/import-extensions
+  runtime ??= import('https://esm.sh/shiki@3.0.0')
+  return runtime
+}
 
 export class Code extends Component<Props> {
   static displayName = 'Code'
@@ -35,7 +51,7 @@ export class Code extends Component<Props> {
 
   override content() {
     return super.content(
-      <Await fallback="Loading...">
+      <Await fallback={<code>{this.code}</code>}>
         {this.renderCode()}
       </Await>,
     )
@@ -61,7 +77,8 @@ export class Code extends Component<Props> {
   }
 
   async renderCode() {
-    const { codeToHtml } = await shiki
+    if (typeof globalThis.document === 'undefined') return <code>{this.code}</code>
+    const { codeToHtml } = await loadShiki()
     const html = await codeToHtml(this.code, {
       lang: this.props.language,
       theme: this.props.theme,

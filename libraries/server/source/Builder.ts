@@ -1,7 +1,7 @@
 import type { BuildArtifact, BunPlugin } from 'bun'
 import type { FSWatcher } from 'chokidar'
 import * as path from 'node:path'
-import { pluginSASS } from '../../bun-plugins'
+import { pluginMarkdown, pluginSASS } from '../../bun-plugins'
 import type { ILogger } from '../../utilities'
 import { Logger } from '../../utilities'
 
@@ -171,7 +171,7 @@ export class Builder {
     if (!this.#entrypoints.length) return []
 
     const development = this.#development
-    const plugins: BunPlugin[] = [pluginSASS()]
+    const plugins: BunPlugin[] = [pluginSASS(), pluginMarkdown()]
 
     const config: BrowserBuildConfig = {
       define: {
