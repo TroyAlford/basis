@@ -67,18 +67,22 @@ interface Fixture {
 }
 
 /**
- * Creates a throwaway consumer whose ESLint config is the Basis preset. The
- * fixture deliberately breaks every fixable rule the report named.
+ * Creates a throwaway consumer. The fixture deliberately breaks every fixable
+ * rule the report named. By default it carries its own ESLint config; pass
+ * `config: false` to exercise the zero-config CLI path.
+ * @param options Fixture options.
+ * @param options.config Whether to write the repository's own ESLint config.
  * @returns The fixture directory and its lint targets.
  */
-const makeFixture = (): Fixture => {
+const makeFixture = (options: { config?: boolean } = {}): Fixture => {
+  const { config = true } = options
   const dir = mkdtempSync(join(tmpdir(), 'basis-cli-'))
   /*
    * ESLint resolves its default formatter (and the plugin stack) through a
    * consumer node_modules; reuse the workspace install rather than a copy.
    */
   symlinkSync(join(import.meta.dir, '..', 'node_modules'), join(dir, 'node_modules'), 'dir')
-  writeFileSync(join(dir, 'eslint.config.mjs'), `export { default } from '${ESLINT_PLUGIN}'\n`)
+  if (config) writeFileSync(join(dir, 'eslint.config.mjs'), `export { default } from '${ESLINT_PLUGIN}'\n`)
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fixture', type: 'module' }))
   const target = join(dir, 'fixture.ts')
   writeFileSync(target, DIRTY)
@@ -123,6 +127,21 @@ describe('basis lint and format', () => {
       expect(readFileSync(markdown, 'utf8')).toBe(FIXED_MD)
 
       // A second, report-only run proves the first pass fully converged.
+      expect(run(['lint'], dir)).toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test('lints and formats with no repository ESLint config', () => {
+    const { dir, markdown, target } = makeFixture({ config: false })
+    try {
+      expect(run(['lint'], dir)).not.toBe(0)
+      expect(run(['format'], dir)).toBe(0)
+      expect(readFileSync(target, 'utf8')).toBe(FIXED)
+      expect(readFileSync(markdown, 'utf8')).toBe(FIXED_MD)
+
+      // A second, report-only run proves the fallback config fully converged.
       expect(run(['lint'], dir)).toBe(0)
     } finally {
       rmSync(dir, { force: true, recursive: true })

@@ -32,8 +32,8 @@ interface BinaryManifest {
 const REQUIRED_EXPORTS = [
   './cli',
   './eslint',
-  './lint',
   './logger',
+  './markdown',
   './react',
   './review',
   './server',
@@ -96,12 +96,35 @@ const runBin = (packageName: string, binName: string, args: string[]): number =>
   return result.exitCode
 }
 
+/** Flat ESLint config filenames ESLint discovers automatically. */
+const ESLINT_CONFIG_FILES = [
+  'eslint.config.cjs',
+  'eslint.config.cts',
+  'eslint.config.js',
+  'eslint.config.mjs',
+  'eslint.config.mts',
+  'eslint.config.ts',
+]
+
+/**
+ * Whether the working directory provides its own ESLint config, in which case
+ * the repository's policy wins over the Basis fallback.
+ * @returns Whether a flat ESLint config file exists in the working directory.
+ */
+const hasEslintConfig = (): boolean => ESLINT_CONFIG_FILES.some(name => existsSync(join(process.cwd(), name)))
+
 /**
  * Runs the TypeScript/JSX ESLint policy.
+ *
+ * A repository's own `eslint.config.*` wins when present; otherwise Basis
+ * supplies its own config, so `basis lint` / `basis format` need no setup.
  * @param fix Whether to let ESLint apply the fixes it supports.
  * @returns The child process exit code.
  */
-const runEslint = (fix: boolean): number => runBin('eslint', 'eslint', fix ? ['.', '--fix'] : ['.'])
+const runEslint = (fix: boolean): number => {
+  const config = hasEslintConfig() ? [] : ['--config', join(basisDir(), 'eslint.config.mjs')]
+  return runBin('eslint', 'eslint', ['.', ...config, ...(fix ? ['--fix'] : [])])
+}
 
 /**
  * Runs the Basis CSS policy over every `*.styles.ts` file.

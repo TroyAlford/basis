@@ -2,7 +2,7 @@
 
 The Basis-owned Markdown/MDX lint surface. It bundles the shared remark/unified configuration and the Basis-specific rules so consumers do not copy the parser, the off-the-shelf rules, or the serialization settings.
 
-Basis consumes this surface through `basis/lint`; external consumers should do the same rather than importing this workspace directly.
+`@basis/markdown-plugin` is an internal workspace. Consumers import its public surface, `basis/markdown`.
 
 ## Engine
 
@@ -29,7 +29,7 @@ The off-the-shelf [`remark-lint-ordered-list-marker-value`](https://github.com/r
 `createMarkdownConfig` returns the plugin list and the canonical `remark-stringify` settings. The settings match Basis's existing conventions — `-` bullets and thematic breaks, `*` emphasis and strong, backtick fences — so a format pass only rewrites what a rule or canonical block spacing requires.
 
 ```ts
-import { createMarkdownConfig } from 'basis/lint'
+import { createMarkdownConfig } from 'basis/markdown'
 
 const config = createMarkdownConfig({
   settings: { bullet: '+' },

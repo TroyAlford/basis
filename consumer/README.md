@@ -22,6 +22,8 @@ The install hook resolves each declared capability on `PATH` and, for the known 
 
 ## ESLint
 
+`basis lint` supplies the Basis ESLint config when a repository has no `eslint.config.*` of its own, so the command works with no setup. Create the config only to adopt Basis's policy explicitly or to extend it:
+
 ```js
 // eslint.config.mjs
 export { default } from 'basis/eslint'
@@ -96,10 +98,10 @@ bunx basis format # apply the canonical serialization and autofixes
 A consumer can also adopt the shared configuration from their own unified pipeline:
 
 ```ts
-import { createMarkdownConfig } from 'basis/lint'
+import { createMarkdownConfig } from 'basis/markdown'
 ```
 
-`basis/lint` exposes the Markdown policy today. The ESLint and Stylelint policies remain available through `basis/eslint` and `basis/stylelint`, and move under `basis/lint` in a later major release. Basis owns the parser, the off-the-shelf rules, and the serialization settings, so consumers never enumerate them.
+`basis/markdown` exposes the Markdown policy. The ESLint and Stylelint policies stay available through `basis/eslint` and `basis/stylelint`. Basis owns the parser, the off-the-shelf rules, and the serialization settings, so consumers never enumerate them.
 
 ## TypeScript
 
@@ -289,7 +291,7 @@ bunx basis docs check # validate the docs/ tree (front-matter, fences, links)
 bunx basis docs build # project the docs/ tree to a static site
 ```
 
-`basis lint` reports every surface; `basis format` applies the fixes each surface supports in a single pass, including the Markdown serialization that resolves blank-line spacing. A follow-up `basis lint` reports nothing fixable that the first run did not already resolve; rulings without a safe transformation (for example JSDoc contracts and `max-len`) still require a manual edit. `basis check` runs `basis lint` before it typechecks.
+`basis lint` and `basis format` need no setup: Stylelint and Markdown are always configured by Basis, and when a repository has no `eslint.config.*` Basis supplies its own. A repository's own ESLint config wins when present. `basis lint` reports every surface; `basis format` applies the fixes each surface supports in a single pass, including the Markdown serialization that resolves blank-line spacing. A follow-up `basis lint` reports nothing fixable that the first run did not already resolve; rulings without a safe transformation (for example JSDoc contracts and `max-len`) still require a manual edit. `basis check` runs `basis lint` before it typechecks.
 
 `basis docs check` validates the canonical `docs/` tree — front-matter, code fences, and repository-relative links — and `basis docs build` projects it to a static site suitable for GitHub Pages (`--out` defaults to `docs-dist`, `--base` prefixes links for a project Pages site, and `--title` sets the shell heading). Both read an optional `basis.docs.source` from `package.json`, defaulting to `docs`.
 
