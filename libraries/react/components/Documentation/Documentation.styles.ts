@@ -1,10 +1,7 @@
 import { css, style } from '../../utilities/style'
-import { DOCUMENTATION_FONTS_URL } from './typography'
 
 style('basis:documentation', css`
-  @import url('${DOCUMENTATION_FONTS_URL}');
 
-  html, body { margin: 0; }
 
   .documentation-shell.component {
     background-color: var(--basis-color-background);

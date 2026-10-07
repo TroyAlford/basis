@@ -1,3 +1,4 @@
+import './global.styles.ts'
 import './types/global'
 export { ApplicationBase } from './components/ApplicationBase/ApplicationBase'
 export { AutoComplete } from './components/AutoComplete/AutoComplete'
@@ -30,7 +31,7 @@ export { TextEditor } from './components/TextEditor/TextEditor'
 export { ToggleEditor } from './components/ToggleEditor/ToggleEditor'
 export { Documentation } from './components/Documentation/Documentation'
 export type { DocumentationEntry } from './components/Documentation/Documentation'
-export { DOCUMENTATION_FONTS_URL } from './components/Documentation/typography'
+export { BASIS_FONTS_URL } from './utilities/fonts'
 export { Theme } from './components/Theme/Theme'
 export { Tooltip } from './components/Tooltip/Tooltip'
 

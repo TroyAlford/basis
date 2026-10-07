@@ -1,7 +1,10 @@
 import type * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { themeStyles } from '../react/components/Theme/Theme'
+import { BASIS_FONTS_URL } from '../react/utilities/fonts'
 import { style, styles } from '../react/utilities/style'
+
+import '../react/global.styles.ts'
 
 /**
  * Render a React element to a standalone HTML document.
@@ -21,7 +24,10 @@ export function renderHtml(element: React.ReactElement): string {
   style('basis:theme:default', themeStyles())
   const body = renderToStaticMarkup(element)
   return [
-    '<!doctype html><html lang="en"><head><meta charset="utf-8"><style>',
+    '<!doctype html><html lang="en"><head><meta charset="utf-8">',
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
+    `<link rel="stylesheet" href="${BASIS_FONTS_URL}">`,
+    '<style>',
     styles(),
     'html,body{margin:0;padding:0;background:#fff}',
     '</style></head><body>',
