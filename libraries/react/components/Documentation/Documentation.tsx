@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { Component } from '../Component/Component'
+import { Link } from '../Router/Link'
 
 import '../../global.styles.ts'
 import './Documentation.styles.ts'
@@ -76,13 +77,19 @@ export class Documentation extends Component<Props> {
   }
 
   #renderEntries(entries: DocumentationEntry[]): React.ReactNode {
+    /*
+     * A static render cannot derive the active route from the location, so the
+     * shell's `active` prop is forced there; on the client the Link derives it
+     * and updates as the route changes.
+     */
+    const active = typeof window === 'undefined' ? this.props.active : undefined
     return (
       <ul>
         {entries.map(entry => (
           <li key={entry.href}>
-            <a data-active={entry.href === this.props.active ? 'true' : undefined} href={entry.href}>
+            <Link active={active === undefined ? undefined : entry.href === active} to={entry.href}>
               {entry.title}
-            </a>
+            </Link>
             {entry.children && entry.children.length > 0 ? this.#renderEntries(entry.children) : null}
           </li>
         ))}

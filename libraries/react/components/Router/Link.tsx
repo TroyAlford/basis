@@ -1,12 +1,14 @@
 import type * as React from 'react'
 import { NavigateEvent } from '../../events/NavigateEvent'
-import { ensureNavigateRequestListener, NavigateRequestEvent } from '../../events/NavigateRequestEvent'
+import { ensureNavigateRequestListener, hasNavigateHandler, NavigateRequestEvent } from '../../events/NavigateRequestEvent'
 import { Component } from '../Component/Component'
 
 import './Link.styles.ts'
 
 /** Props for the Link component */
 interface Props {
+  /** Force the active state; when omitted, it is derived from the current location. */
+  active?: boolean,
   /** The content to render inside the link */
   children: React.ReactNode,
   /** The URL to navigate to */
@@ -41,16 +43,22 @@ export class Link extends Component<Props> {
   #handleUpdate = (): void => this.forceUpdate()
 
   get isActive(): boolean {
+    if (this.props.active !== undefined) return this.props.active
     return typeof window !== 'undefined'
       ? window.location.pathname === this.props.to
       : false
   }
 
   handleClick: React.MouseEventHandler<HTMLAnchorElement> = event => {
+    if (this.isActive) {
+      event.preventDefault() // already the current route; do not add a history entry
+      return
+    }
+
+    // With no Router (for example a statically built page), let the anchor navigate natively.
+    if (!hasNavigateHandler()) return
+
     event.preventDefault()
-
-    if (this.isActive) return // do not navigate if this is already the route
-
     ensureNavigateRequestListener()
     window.dispatchEvent(new NavigateRequestEvent(this.props.to))
   }
