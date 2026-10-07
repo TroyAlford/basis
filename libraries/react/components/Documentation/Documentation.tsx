@@ -31,7 +31,7 @@ interface Props {
  * served page looks the same as the app.
  */
 export class Documentation extends Component<Props> {
-  static displayName = 'Documentation'
+  static displayName = 'DocumentationShell'
   static defaultProps = {
     ...Component.defaultProps,
     navigation: [] as DocumentationEntry[],

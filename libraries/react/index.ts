@@ -29,7 +29,7 @@ export { TextEditor } from './components/TextEditor/TextEditor'
 export { ToggleEditor } from './components/ToggleEditor/ToggleEditor'
 export { Documentation } from './components/Documentation/Documentation'
 export type { DocumentationEntry } from './components/Documentation/Documentation'
-export { DOCUMENTATION_FONTS_URL, documentationStyles } from './components/Documentation/typography'
+export { DOCUMENTATION_FONTS_URL } from './components/Documentation/typography'
 export { Theme } from './components/Theme/Theme'
 export { Tooltip } from './components/Tooltip/Tooltip'
 
