@@ -28,8 +28,8 @@ interface Props {
 /**
  * Basis's documentation shell: a navigation sidebar beside the page content,
  * typed by the active theme. This is the single documentation presentation,
- * shared by the docs app (client) and `Server.docs()` (server-rendered), so a
- * served page looks the same as the app.
+ * shared by the docs app (client) and the static documentation build, so a
+ * published page looks the same as the app.
  */
 export class Documentation extends Component<Props> {
   static displayName = 'DocumentationShell'

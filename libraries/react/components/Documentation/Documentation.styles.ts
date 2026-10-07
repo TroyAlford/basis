@@ -1,8 +1,6 @@
 import { css, style } from '../../utilities/style'
 
 style('basis:documentation', css`
-
-
   .documentation-shell.component {
     background-color: var(--basis-color-background);
     color: var(--basis-color-foreground);

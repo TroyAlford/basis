@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type * as React from 'react'
-import { buildDocs, discoverDocs, renderDocsModule, renderDocsNotFound, renderDocsPage, serveDocs, watchDocs } from './Docs'
+import { buildDocs, discoverDocs, renderDocsModule, renderDocsNotFound, renderDocsPage } from './Docs'
 
 /** Temporary docs trees to remove after each test. */
 const directories: string[] = []
@@ -76,12 +76,6 @@ describe('renderDocsPage', () => {
     expect(html).toContain('flowchart TD')
     expect(html).toContain('esm.sh/mermaid')
   })
-  test('includes the live-reload client in development', async () => {
-    const root = fixture({ 'docs/index.mdx': '# Home\n' })
-    const site = discoverDocs({ root: join(root, 'docs'), route: '/' })
-    const response = await serveDocs(site, { path: '/' } as never, new Request('http://localhost/'), true)
-    expect(await response?.text()).toContain('/hmr')
-  })
 
   test('renders a not-found document', () => {
     const root = fixture({ 'docs/index.mdx': '# Home\n' })
@@ -104,24 +98,6 @@ describe('buildDocs', () => {
   })
 })
 
-describe('serveDocs', () => {
-  test('does not claim reserved server paths at the site root', async () => {
-    const root = fixture({ 'docs/index.mdx': '# Home\n' })
-    const site = discoverDocs({ root: join(root, 'docs'), route: '/' })
-    for (const path of ['/scripts/index.js', '/assets/app.css', '/modules/react', '/api/health']) {
-      const response = await serveDocs(site, { path } as never, new Request(`http://localhost${path}`))
-      expect(response).toBeNull()
-    }
-  })
-
-  test('serves pages at the site root', async () => {
-    const root = fixture({ 'docs/architecture/index.mdx': '# Architecture\n', 'docs/index.mdx': '# Home\n' })
-    const site = discoverDocs({ root: join(root, 'docs'), route: '/' })
-    const response = await serveDocs(site, { path: '/architecture' } as never, new Request('http://localhost/architecture'))
-    expect(response?.status).toBe(200)
-  })
-})
-
 describe('navigation', () => {
   test('nests a page module under its declared parent', () => {
     const Component = (): React.ReactNode => null
@@ -138,22 +114,5 @@ describe('navigation', () => {
     if (!iconsModule) throw new Error('missing /icons module')
     const html = renderDocsModule(site, iconsModule, '/icons')
     expect(html).toMatch(/href="\/icons"[^>]*>Icons<\/a><ul><li><a href="\/icons\/moon"/)
-  })
-})
-
-describe('watchDocs', () => {
-  test('fires on a docs change', async () => {
-    const root = fixture({ 'docs/index.mdx': '# Home\n' })
-    const directory = join(root, 'docs')
-    let fired = 0
-    const watcher = await watchDocs(directory, () => { fired += 1 })
-    try {
-      writeFileSync(join(directory, 'index.mdx'), '# Changed\n')
-      const deadline = Date.now() + 5000
-      while (fired === 0 && Date.now() < deadline) await Bun.sleep(50)
-      expect(fired).toBeGreaterThan(0)
-    } finally {
-      await watcher.close()
-    }
   })
 })

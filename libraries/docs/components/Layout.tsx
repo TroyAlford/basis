@@ -5,8 +5,8 @@ import { routes } from '../routes.ts'
 
 /**
  * The docs application shell. It composes the shared {@link Documentation}
- * surface — the same one `Server.docs()` renders — so the gallery and the
- * served documentation have one presentation.
+ * surface — the same one the static documentation build renders — so the
+ * gallery and the published documentation have one presentation.
  */
 export class Layout extends ApplicationBase {
   static displayName = 'Layout'

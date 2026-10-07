@@ -246,17 +246,8 @@ the signed-in user id as `runtime.identity` (`null` when anonymous). A consumer
 frontend therefore reads the signed-in identity from its standard runtime
 context without implementing a session fetch of its own.
 
+## Documentation
 
-## Documentation route
+Durable documentation lives under `docs/` as Markdown/MDX. `basis docs check` validates the tree (front-matter, code fences, and repository-relative links), and `basis docs build` projects the same source to a static site (for example GitHub Pages) through this package's renderer.
 
-`server.docs(options)` serves a repository's Markdown/MDX documentation tree under a URL prefix. It renders with Bun's built-in Markdown engine, derives navigation from the tree, and emits Mermaid fenced blocks as `<pre class="mermaid">` for a client-side Mermaid runtime.
-
-```ts
-import { Server } from 'basis/server'
-
-new Server()
-  .docs({ root: './docs', route: '/docs', title: 'My Project' })
-  .start({ development: false, hostname: '127.0.0.1', port: 8080, version: '1.0.0' })
-```
-
-Front-matter `title` sets the page title; a missing tree simply leaves the route unserved.
+A documentation site is an app, not a separate server surface: the `Documentation` component from `basis/react` renders the shell, and the `docs/` tree is served by running the docs app through the Basis Server. See `docs/` and `server.ts` in this repository for the reference setup.

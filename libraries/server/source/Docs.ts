@@ -1,5 +1,4 @@
 import { evaluate } from '@mdx-js/mdx'
-import type { FSWatcher } from 'chokidar'
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import * as React from 'react'
@@ -12,11 +11,10 @@ import { DOCUMENTATION_FONTS_URL } from '../../react/components/Documentation/ty
 import { Mermaid, MERMAID_SOURCE } from '../../react/components/Mermaid/Mermaid'
 import { themeStyles } from '../../react/components/Theme/Theme'
 import { styles } from '../../react/utilities/style'
-import type { URI } from '../../utilities'
 import type { DocsDocument } from './DocsSource'
 import { routePath, scanDocs } from './DocsSource'
 
-/** A React documentation page module, served alongside the Markdown tree. */
+/** A React documentation page module, rendered alongside the Markdown tree. */
 export interface DocsPageModule {
   /** React component rendered at the page. */
   component: React.ComponentType,
@@ -28,7 +26,7 @@ export interface DocsPageModule {
   title: string,
 }
 
-/** Options for the built-in documentation route. */
+/** Options for the documentation site. */
 export interface DocsOptions {
   /** React page modules served alongside the Markdown/MDX tree. */
   pages?: DocsPageModule[],
@@ -56,13 +54,6 @@ export interface DocsSite {
   /** Navigation heading. */
   title: string,
 }
-
-/**
- * Server surfaces the docs route must never claim, even when it owns the site
- * root (`route: '/'`). Without this, a root-mounted docs route would intercept
- * the server's own assets, scripts, and module proxy.
- */
-const RESERVED_PREFIXES = ['/api', '/assets', '/health', '/modules', '/ping', '/scripts']
 
 /** A Markdown inline link to a document. */
 const DOC_LINK = /\]\(([^)\s]+\.mdx?)(#[^)]*)?\)/g
@@ -94,15 +85,6 @@ function normalizeRoute(route?: string): string {
 function pageHref(route: string, path: string): string {
   if (route === '/') return path === '' ? '/' : `/${path}`
   return path === '' ? route : `${route}/${path}`
-}
-
-/**
- * Whether a path is reserved by the server and must not be claimed by docs.
- * @param path - The request pathname.
- * @returns Whether the path is a reserved server surface.
- */
-function isReserved(path: string): boolean {
-  return RESERVED_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`))
 }
 
 /**
@@ -152,30 +134,9 @@ async function compileDocument(source: string, file: string): Promise<MdxContent
 }
 
 /**
- * Clear the compiled-document cache so the next request recompiles every page.
- */
-export function clearDocsCache(): void {
-  compiled.clear()
-}
-
-/**
- * The client bootstrap that reloads the page when the server broadcasts an HMR
- * update, wired to the server's existing `hmr` socket.
- * @returns The module script.
- */
-function hmrClient(): string {
-  return [
-    '<script type="module">',
-    "  const protocol = location.protocol === 'https:' ? 'wss' : 'ws'",
-    '  const socket = new WebSocket(protocol + "://" + location.host + "/hmr")',
-    "  socket.addEventListener('message', () => location.reload())",
-    '</script>',
-  ].join('\n')
-}
-
-/**
- * The client bootstrap that renders Mermaid diagrams in the browser, loading
- * the runtime from the shared source only when a page contains a diagram.
+ * The client bootstrap that renders Mermaid diagrams in a statically built
+ * page, loading the runtime from the shared source only when a diagram is
+ * present. Served pages render Mermaid through the component instead.
  * @returns The module script.
  */
 function mermaidBootstrap(): string {
@@ -190,7 +151,7 @@ function mermaidBootstrap(): string {
 
 /**
  * MDX `pre` mapping: a Mermaid fence renders through the {@link Mermaid}
- * component (whose server render emits the runtime's `<pre class="mermaid">`
+ * component (whose static render emits the runtime's `<pre class="mermaid">`
  * block); every other code block is left as-is. This keeps Mermaid rendering in
  * the component tree instead of string-surgery on generated HTML.
  * @param props - The MDX `pre` element props.
@@ -255,27 +216,22 @@ function navigation(site: DocsSite): DocumentationEntry[] {
 /**
  * Wrap rendered content in the shared documentation shell and an HTML document.
  *
- * Inlines Basis's theme variables and every registered stylesheet, so a served
+ * Inlines Basis's theme variables and every registered stylesheet, so a built
  * page carries the same presentation as the docs app without caller CSS, and
- * injects the Mermaid and live-reload bootstraps only when they apply.
+ * injects the Mermaid bootstrap only when a diagram is present.
  * @param site - The resolved site.
  * @param active - The active route path.
  * @param content - The page content.
  * @param title - The page title.
- * @param development - Whether to include the live-reload client.
  * @returns A complete HTML document.
  */
-function layout(site: DocsSite, active: string, content: React.ReactNode, title: string, development = false): string {
+function layout(site: DocsSite, active: string, content: React.ReactNode, title: string): string {
   const page = React.createElement(
     Documentation,
     { active, navigation: navigation(site), title: site.title },
     content,
   )
   const body = renderToString(page)
-  const scripts = [
-    body.includes('class="mermaid"') ? mermaidBootstrap() : '',
-    development ? hmrClient() : '',
-  ].join('')
 
   return [
     '<!doctype html><html lang="en"><head><meta charset="utf-8">',
@@ -287,7 +243,7 @@ function layout(site: DocsSite, active: string, content: React.ReactNode, title:
     `<style>${styles()}</style>`,
     '</head><body>',
     body,
-    scripts,
+    body.includes('class="mermaid"') ? mermaidBootstrap() : '',
     '</body></html>',
   ].join('')
 }
@@ -296,13 +252,12 @@ function layout(site: DocsSite, active: string, content: React.ReactNode, title:
  * Render a Markdown/MDX page to a full HTML document.
  * @param site - The resolved site.
  * @param page - The page to render.
- * @param development - Whether to include the live-reload client.
  * @returns A complete HTML document.
  */
-export async function renderDocsPage(site: DocsSite, page: DocsPage, development = false): Promise<string> {
+export async function renderDocsPage(site: DocsSite, page: DocsPage): Promise<string> {
   const Content = await compileDocument(rewriteLinks(page.body, page, site), page.source)
   const content = React.createElement(Content, { components: { pre: DocumentationPre }, key: 'content' })
-  return layout(site, pageHref(site.route, page.path), content, page.title, development)
+  return layout(site, pageHref(site.route, page.path), content, page.title)
 }
 
 /**
@@ -310,71 +265,26 @@ export async function renderDocsPage(site: DocsSite, page: DocsPage, development
  * @param site - The resolved site.
  * @param page - The page module to render.
  * @param path - The module's served path.
- * @param development - Whether to include the live-reload client.
  * @returns A complete HTML document.
  */
-export function renderDocsModule(site: DocsSite, page: DocsPageModule, path: string, development = false): string {
+export function renderDocsModule(site: DocsSite, page: DocsPageModule, path: string): string {
   const content = React.createElement(page.component as React.ComponentType, { key: 'content' })
-  return layout(site, path, content, page.title, development)
+  return layout(site, path, content, page.title)
 }
 
 /**
  * Render the not-found document for an unmatched docs path.
  * @param site - The resolved site.
  * @param path - The requested route path.
- * @param development - Whether to include the live-reload client.
  * @returns A complete HTML document.
  */
-export function renderDocsNotFound(site: DocsSite, path: string, development = false): string {
+export function renderDocsNotFound(site: DocsSite, path: string): string {
   const message = `<h1>Not found</h1><p>No documentation page matches <code>${escapeHtml(path)}</code>.</p>`
   const content = React.createElement('div', {
     dangerouslySetInnerHTML: { __html: message },
     key: 'content',
   })
-  return layout(site, '', content, 'Not found', development)
-}
-
-/**
- * Serve a documentation request, or `null` when the path is outside the route.
- * When the docs are the whole site (`route: '/'`), every non-reserved path is a
- * docs path.
- * @param site - The resolved docs site.
- * @param uri - The parsed request URI.
- * @param request - The incoming request.
- * @param development - Whether to include the live-reload client.
- * @returns The docs response, or `null` when the path is not a docs path.
- */
-export async function serveDocs(
-  site: DocsSite,
-  uri: URI,
-  request: Request,
-  development = false,
-): Promise<Response | null> {
-  if (isReserved(uri.path)) return null
-  const module = site.modules.get(uri.path)
-  const underRoute = site.route === '/'
-    ? uri.path.startsWith('/')
-    : uri.path === site.route || uri.path.startsWith(`${site.route}/`)
-  if (!module && !underRoute) return null
-  if (request.method !== 'GET') {
-    return new Response(null, {
-      headers: { allow: 'GET' },
-      status: 405,
-      statusText: 'Method Not Allowed',
-    })
-  }
-  const respond = (html: string, status: number): Response => (
-    new Response(html, { headers: { 'Content-Type': 'text/html' }, status })
-  )
-  if (module) return respond(renderDocsModule(site, module, uri.path, development), 200)
-  const path = site.route === '/'
-    ? uri.path.replace(/^\/+|\/+$/g, '')
-    : uri.path.slice(site.route.length).replace(/^\/+|\/+$/g, '')
-  const page = site.pages.get(path)
-  const rendered = page
-    ? await renderDocsPage(site, page, development)
-    : renderDocsNotFound(site, path, development)
-  return respond(rendered, page ? 200 : 404)
+  return layout(site, '', content, 'Not found')
 }
 
 /**
@@ -400,23 +310,9 @@ export async function buildDocs(site: DocsSite, outDir: string, base = ''): Prom
   }
 
   for (const page of site.pages.values()) {
-    write(pageHref(site.route, page.path), await renderDocsPage(site, page, false))
+    write(pageHref(site.route, page.path), await renderDocsPage(site, page))
   }
-  for (const [path, page] of site.modules) write(path, renderDocsModule(site, page, path, false))
+  for (const [path, page] of site.modules) write(path, renderDocsModule(site, page, path))
 
   return written
-}
-
-/**
- * Watch a docs tree and invoke `onChange` after any change.
- * @param source - Absolute docs root.
- * @param onChange - Called after a change.
- * @returns The watcher, for teardown.
- */
-export async function watchDocs(source: string, onChange: () => void): Promise<FSWatcher> {
-  const { watch } = await import('chokidar')
-  const watcher = watch(source, { ignoreInitial: true })
-  watcher.on('all', () => onChange())
-  await new Promise<void>(ready => watcher.once('ready', () => ready()))
-  return watcher
 }

@@ -60,11 +60,11 @@ describe('testing/docs', () => {
        */
       await page.addStyleTag({
         content: `
-          html, body, #root,  .documentation-shell.component {
+          html, body, #root, .documentation-shell.component {
             height: auto !important;
             overflow: visible !important;
           }
-           .documentation-shell.component > main,  .documentation-shell.component > nav.links {
+          .documentation-shell.component > main, .documentation-shell.component > nav.links {
             overflow: visible !important;
           }
         `,

@@ -169,8 +169,9 @@ function titleOf(body: string, frontMatterTitle: string | null, relativeFile: st
  * Scan a docs tree into its source documents.
  *
  * This is the single source of truth for docs discovery and front-matter
- * parsing: the validator (`basis docs check`) and the renderer (`Server.docs`)
- * both consume it, so the tree that is checked is exactly the tree served.
+ * parsing: the validator (`basis docs check`) and the static build
+ * (`basis docs build`) both consume it, so the tree that is checked is exactly
+ * the tree that is published.
  * @param root - Absolute docs root.
  * @returns The documents, ordered by repository-relative path.
  */
