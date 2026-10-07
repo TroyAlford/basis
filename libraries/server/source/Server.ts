@@ -17,7 +17,7 @@ import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
 import type { DocsOptions, DocsSite } from './Docs'
-import { clearDocsCache, discoverDocs, serveDocs } from './Docs'
+import { clearDocsCache, discoverDocs, serveDocs, watchDocs } from './Docs'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import type { SocketData } from './Sockets'
@@ -567,22 +567,6 @@ export class Server {
    * @param handler - The handler for the API route.
    * @returns The server.
    */
-  /**
-   * Watch the documentation tree and broadcast a live-reload on change.
-   * @returns A promise resolved once the watcher is set up.
-   */
-  async #watchDocs(): Promise<void> {
-    const site = this.#docs
-    if (!site) return
-    const { watch } = await import('chokidar')
-    await this.#docsWatcher?.close()
-    this.#docsWatcher = watch(site.source, { ignoreInitial: true })
-    this.#docsWatcher.on('all', () => {
-      clearDocsCache()
-      this.#broadcast()
-    })
-  }
-
   api<Params extends object = object>(
     verbs: HttpVerb[],
     template: string,
@@ -590,6 +574,20 @@ export class Server {
   ): Server {
     this.#apis.set(template, { handler, verbs: new Set(verbs) })
     return this
+  }
+
+  /**
+   * Watch the documentation tree and broadcast a live-reload on change.
+   * @returns A promise resolved once the watcher is set up.
+   */
+  async #watchDocs(): Promise<void> {
+    const site = this.#docs
+    if (!site) return
+    await this.#docsWatcher?.close()
+    this.#docsWatcher = await watchDocs(site.source, () => {
+      clearDocsCache()
+      this.#broadcast()
+    })
   }
 
   /**

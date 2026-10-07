@@ -1,7 +1,7 @@
 import { evaluate } from '@mdx-js/mdx'
-import type { Dirent } from 'node:fs'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, extname, join, relative, resolve } from 'node:path'
+import type { FSWatcher } from 'chokidar'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
 import * as React from 'react'
 import * as runtime from 'react/jsx-runtime'
 import { renderToString } from 'react-dom/server'
@@ -9,10 +9,12 @@ import remarkGfm from 'remark-gfm'
 import type { DocumentationEntry } from '../../react/components/Documentation/Documentation'
 import { Documentation } from '../../react/components/Documentation/Documentation'
 import { DOCUMENTATION_FONTS_URL } from '../../react/components/Documentation/typography'
-import { MERMAID_SOURCE } from '../../react/components/Mermaid/Mermaid'
+import { Mermaid, MERMAID_SOURCE } from '../../react/components/Mermaid/Mermaid'
 import { themeStyles } from '../../react/components/Theme/Theme'
 import { styles } from '../../react/utilities/style'
 import type { URI } from '../../utilities'
+import type { DocsDocument } from './DocsSource'
+import { routePath, scanDocs } from './DocsSource'
 
 /** A React documentation page module, served alongside the Markdown tree. */
 export interface DocsPageModule {
@@ -39,14 +41,7 @@ export interface DocsOptions {
 }
 
 /** A discovered Markdown/MDX documentation page. */
-export interface DocsPage {
-  /** Route path relative to the docs prefix, empty for the index. */
-  path: string,
-  /** Absolute path to the source. */
-  source: string,
-  /** Page title from front-matter, the first heading, or the filename. */
-  title: string,
-}
+export type DocsPage = DocsDocument
 
 /** A resolved documentation site. */
 export interface DocsSite {
@@ -62,26 +57,21 @@ export interface DocsSite {
   title: string,
 }
 
-/** Markdown/MDX extensions the docs route recognizes. */
-const EXTENSIONS = ['.md', '.mdx']
-
-/** A leading YAML front-matter block. */
-const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
-
-/** A level-one Markdown heading. */
-const HEADING = /^#\s+(.+)$/m
-
-/** A front-matter `title:` entry. */
-const TITLE = /^title:\s*(.+)$/m
-
-/** A Mermaid fenced code block, as rendered by the MDX pipeline. */
-const MERMAID = /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g
+/**
+ * Server surfaces the docs route must never claim, even when it owns the site
+ * root (`route: '/'`). Without this, a root-mounted docs route would intercept
+ * the server's own assets, scripts, and module proxy.
+ */
+const RESERVED_PREFIXES = ['/api', '/assets', '/health', '/modules', '/ping', '/scripts']
 
 /** A Markdown inline link to a document. */
 const DOC_LINK = /\]\(([^)\s]+\.mdx?)(#[^)]*)?\)/g
+type MdxContent = React.ComponentType<{
+  components?: { pre?: React.ComponentType<React.HTMLAttributes<HTMLPreElement>> },
+}>
 
 /** Compiled MDX components, keyed by source path and modification time. */
-const compiled = new Map<string, React.ComponentType>()
+const compiled = new Map<string, MdxContent>()
 
 /**
  * Normalize a docs URL prefix. An explicit `/` means the docs are the whole
@@ -107,64 +97,12 @@ function pageHref(route: string, path: string): string {
 }
 
 /**
- * Whether a path is a recognized documentation source document.
- * @param path - Path to test.
- * @returns Whether the path ends in a docs extension.
+ * Whether a path is reserved by the server and must not be claimed by docs.
+ * @param path - The request pathname.
+ * @returns Whether the path is a reserved server surface.
  */
-function isDocument(path: string): boolean {
-  return EXTENSIONS.includes(extname(path).toLowerCase())
-}
-
-/**
- * Recursively collect documentation documents under a directory.
- * @param directory - Absolute directory to walk.
- * @returns Absolute document paths, sorted for stable output.
- */
-function collect(directory: string): string[] {
-  const found: string[] = []
-  for (const entry of readdirSync(directory, { withFileTypes: true }) as Dirent[]) {
-    const path = join(directory, entry.name)
-    if (entry.isDirectory()) found.push(...collect(path))
-    else if (entry.isFile() && isDocument(path)) found.push(path)
-  }
-  return found.sort()
-}
-
-/**
- * Convert a docs-relative source path to a route path.
- * @param relativeFile - Source path relative to the docs root.
- * @returns The route path (empty for an index document).
- */
-function routePath(relativeFile: string): string {
-  const segments = relativeFile.replace(/\.mdx?$/i, '').split(/[\\/]/)
-  if (segments[segments.length - 1] === 'index') segments.pop()
-  return segments.join('/')
-}
-
-/**
- * Split front-matter from a document and read its title.
- * @param contents - Full document text.
- * @returns The body without front-matter and the title, when present.
- */
-function parse(contents: string): { body: string, title: string | null } {
-  const fence = FRONT_MATTER.exec(contents)
-  const body = fence ? contents.slice(fence[0].length) : contents
-  const raw = (fence ? TITLE.exec(fence[1])?.[1] : undefined) ?? HEADING.exec(body)?.[1]
-  return { body, title: raw ? raw.replace(/^["']|["']$/g, '').trim() : null }
-}
-
-/**
- * Derive a display title for a document.
- * @param contents - Full document text.
- * @param relativeFile - Source path relative to the docs root.
- * @returns The front-matter title, first heading, or a filename fallback.
- */
-function titleOf(contents: string, relativeFile: string): string {
-  const parsed = parse(contents)
-  if (parsed.title) return parsed.title
-  const filename = relativeFile.split(/[\\/]/).pop() ?? ''
-  const fallback = filename.replace(/\.mdx?$/i, '').replace(/[-_]+/g, ' ')
-  return fallback.charAt(0).toUpperCase() + fallback.slice(1)
+function isReserved(path: string): boolean {
+  return RESERVED_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`))
 }
 
 /**
@@ -203,11 +141,12 @@ function rewriteLinks(markdown: string, page: DocsPage, site: DocsSite): string 
  * @param file - Absolute source path.
  * @returns The compiled component.
  */
-async function compileDocument(source: string, file: string): Promise<React.ComponentType> {
+async function compileDocument(source: string, file: string): Promise<MdxContent> {
   const version = `${file}:${statSync(file).mtimeMs}`
   const cached = compiled.get(version)
   if (cached) return cached
-  const { default: Content } = await evaluate(source, { ...runtime, remarkPlugins: [remarkGfm] })
+  const evaluated = await evaluate(source, { ...runtime, remarkPlugins: [remarkGfm] })
+  const { default: Content } = evaluated as { default: MdxContent }
   compiled.set(version, Content)
   return Content
 }
@@ -250,6 +189,23 @@ function mermaidBootstrap(): string {
 }
 
 /**
+ * MDX `pre` mapping: a Mermaid fence renders through the {@link Mermaid}
+ * component (whose server render emits the runtime's `<pre class="mermaid">`
+ * block); every other code block is left as-is. This keeps Mermaid rendering in
+ * the component tree instead of string-surgery on generated HTML.
+ * @param props - The MDX `pre` element props.
+ * @returns The Mermaid component or a plain `pre`.
+ */
+function DocumentationPre(props: React.HTMLAttributes<HTMLPreElement>): React.ReactElement {
+  const child = React.Children.toArray(props.children)[0]
+  if (React.isValidElement(child)) {
+    const { children, className } = child.props as { children?: React.ReactNode, className?: string }
+    if (className?.includes('language-mermaid')) return React.createElement(Mermaid, null, String(children ?? ''))
+  }
+  return React.createElement('pre', props)
+}
+
+/**
  * Discover a documentation site: the Markdown/MDX tree plus any React modules.
  * @param options - The docs root, route, title, and React pages.
  * @returns The resolved site.
@@ -260,14 +216,7 @@ export function discoverDocs(options: DocsOptions): DocsSite {
   const pages = new Map<string, DocsPage>()
   const modules = new Map<string, DocsPageModule>()
 
-  if (existsSync(source) && statSync(source).isDirectory()) {
-    for (const file of collect(source)) {
-      const relativeFile = relative(source, file)
-      const path = routePath(relativeFile)
-      pages.set(path, { path, source: file, title: titleOf(readFileSync(file, 'utf8'), relativeFile) })
-    }
-  }
-
+  for (const document of scanDocs(source)) pages.set(document.path, document)
   for (const page of options.pages ?? []) {
     modules.set(pageHref(route, page.path.replace(/^\/+|\/+$/g, '')), page)
   }
@@ -276,14 +225,25 @@ export function discoverDocs(options: DocsOptions): DocsSite {
 }
 
 /**
- * Build the navigation tree from the Markdown/MDX pages and React modules.
+ * Build the navigation tree from the Markdown/MDX pages and React modules,
+ * nesting modules under the parent named by their declared `parent` path.
  * @param site - The resolved site.
  * @returns Sorted navigation entries.
  */
 function navigation(site: DocsSite): DocumentationEntry[] {
   const entries: DocumentationEntry[] = []
   for (const page of site.pages.values()) entries.push({ href: pageHref(site.route, page.path), title: page.title })
-  for (const [path, page] of site.modules) entries.push({ href: path, title: page.title })
+
+  const modules = new Map<string, DocumentationEntry>()
+  for (const [path, page] of site.modules) modules.set(path, { children: [], href: path, title: page.title })
+  for (const [path, page] of site.modules) {
+    const entry = modules.get(path)
+    if (!entry) continue
+    const parent = page.parent ? modules.get(pageHref(site.route, page.parent.replace(/^\/+|\/+$/g, ''))) : undefined
+    if (parent) parent.children = [...(parent.children ?? []), entry]
+    else entries.push(entry)
+  }
+
   return entries.sort((a, b) => a.title.localeCompare(b.title))
 }
 
@@ -291,29 +251,27 @@ function navigation(site: DocsSite): DocumentationEntry[] {
  * Wrap rendered content in the shared documentation shell and an HTML document.
  *
  * Inlines Basis's theme variables and every registered stylesheet, so a served
- * page carries the same presentation as the docs app without caller CSS.
+ * page carries the same presentation as the docs app without caller CSS, and
+ * injects the Mermaid and live-reload bootstraps only when they apply.
  * @param site - The resolved site.
  * @param active - The active route path.
  * @param content - The page content.
  * @param title - The page title.
- * @param diagrams - Whether the page contains Mermaid diagrams.
  * @param development - Whether to include the live-reload client.
  * @returns A complete HTML document.
  */
-function layout(
-  site: DocsSite,
-  active: string,
-  content: React.ReactNode,
-  title: string,
-  diagrams = false,
-  development = false,
-): string {
+function layout(site: DocsSite, active: string, content: React.ReactNode, title: string, development = false): string {
   const page = React.createElement(
     Documentation,
     { active, navigation: navigation(site), title: site.title },
     content,
   )
   const body = renderToString(page)
+  const scripts = [
+    body.includes('class="mermaid"') ? mermaidBootstrap() : '',
+    development ? hmrClient() : '',
+  ].join('')
+
   return [
     '<!doctype html><html lang="en"><head><meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
@@ -324,8 +282,7 @@ function layout(
     `<style>${styles()}</style>`,
     '</head><body>',
     body,
-    diagrams ? mermaidBootstrap() : '',
-    development ? hmrClient() : '',
+    scripts,
     '</body></html>',
   ].join('')
 }
@@ -338,17 +295,9 @@ function layout(
  * @returns A complete HTML document.
  */
 export async function renderDocsPage(site: DocsSite, page: DocsPage, development = false): Promise<string> {
-  const source = readFileSync(page.source, 'utf8')
-  const { body } = parse(source)
-  const Content = await compileDocument(rewriteLinks(body, page, site), page.source)
-  const html = renderToString(React.createElement(Content))
-    .replace(MERMAID, (_match, code: string) => `<pre class="mermaid">${code}</pre>`)
-  const content = React.createElement('div', {
-    dangerouslySetInnerHTML: { __html: html },
-    key: 'content',
-  })
-  const diagrams = html.includes('class="mermaid"')
-  return layout(site, pageHref(site.route, page.path), content, page.title, diagrams, development)
+  const Content = await compileDocument(rewriteLinks(page.body, page, site), page.source)
+  const content = React.createElement(Content, { components: { pre: DocumentationPre }, key: 'content' })
+  return layout(site, pageHref(site.route, page.path), content, page.title, development)
 }
 
 /**
@@ -361,7 +310,7 @@ export async function renderDocsPage(site: DocsSite, page: DocsPage, development
  */
 export function renderDocsModule(site: DocsSite, page: DocsPageModule, path: string, development = false): string {
   const content = React.createElement(page.component as React.ComponentType, { key: 'content' })
-  return layout(site, path, content, page.title, false, development)
+  return layout(site, path, content, page.title, development)
 }
 
 /**
@@ -377,12 +326,13 @@ export function renderDocsNotFound(site: DocsSite, path: string, development = f
     dangerouslySetInnerHTML: { __html: message },
     key: 'content',
   })
-  return layout(site, '', content, 'Not found', false, development)
+  return layout(site, '', content, 'Not found', development)
 }
 
 /**
  * Serve a documentation request, or `null` when the path is outside the route.
- * When the docs are the whole site (`route: '/'`), every path is a docs path.
+ * When the docs are the whole site (`route: '/'`), every non-reserved path is a
+ * docs path.
  * @param site - The resolved docs site.
  * @param uri - The parsed request URI.
  * @param request - The incoming request.
@@ -395,6 +345,7 @@ export async function serveDocs(
   request: Request,
   development = false,
 ): Promise<Response | null> {
+  if (isReserved(uri.path)) return null
   const module = site.modules.get(uri.path)
   const underRoute = site.route === '/'
     ? uri.path.startsWith('/')
@@ -449,4 +400,18 @@ export async function buildDocs(site: DocsSite, outDir: string, base = ''): Prom
   for (const [path, page] of site.modules) write(path, renderDocsModule(site, page, path, false))
 
   return written
+}
+
+/**
+ * Watch a docs tree and invoke `onChange` after any change.
+ * @param source - Absolute docs root.
+ * @param onChange - Called after a change.
+ * @returns The watcher, for teardown.
+ */
+export async function watchDocs(source: string, onChange: () => void): Promise<FSWatcher> {
+  const { watch } = await import('chokidar')
+  const watcher = watch(source, { ignoreInitial: true })
+  watcher.on('all', () => onChange())
+  await new Promise<void>(ready => watcher.once('ready', () => ready()))
+  return watcher
 }

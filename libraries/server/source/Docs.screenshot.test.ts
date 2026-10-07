@@ -1,21 +1,31 @@
 import { join } from 'node:path'
 import { matchScreenshot, startApplication, test } from '../../testing'
 
-/** Deterministic stand-in for the Mermaid runtime loaded from esm.sh. */
-const MERMAID_STUB = [
-  'export default {',
-  '  initialize() {},',
-  '  async run({ nodes }) {',
-  "    for (const node of nodes) node.innerHTML = '<svg width=\"240\" height=\"72\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"240\" height=\"72\" rx=\"8\" fill=\"#eef6ff\" stroke=\"#0070f3\"/><text x=\"16\" y=\"42\" fill=\"#0070f3\" font-family=\"Ubuntu, sans-serif\" font-size=\"16\">flowchart stub</text></svg>'",
-  '  },',
-  '}',
+/**
+ * Release the documentation shell's fixed height so a full-page capture is the
+ * whole page rather than the viewport, mirroring how the docs app releases its
+ * shell for whole-page snapshots.
+ */
+const FULL_LENGTH = [
+  'html, body, .documentation-shell.component { height: auto !important; overflow: visible !important; }',
+  '.documentation-shell.component > main, .documentation-shell.component > nav.links { overflow: visible !important; }',
 ].join('\n')
 
+/** Every documentation page Basis ships, with a snapshot hint. */
+const PAGES: [string, string][] = [
+  ['/', 'index'],
+  ['/architecture', 'architecture'],
+  ['/contributing', 'contributing'],
+  ['/guides', 'guides'],
+  ['/reference', 'reference'],
+]
+
 /**
- * Proof that Basis's own docs server renders the documentation at the site
- * root: the index and the architecture page, including its Mermaid diagram.
+ * Proof that Basis's docs server renders every page to a styled, full-length
+ * document at the site root, including its Mermaid diagram. `esm.sh` is allowed
+ * so the diagram renders through the real Mermaid runtime rather than a stub.
  */
-test('serves Basis documentation at the root', async () => {
+test('captures every docs page full length', async () => {
   const app = await startApplication({
     cwd: join(import.meta.dir, '..', '..', '..'),
     entry: './server.ts',
@@ -24,13 +34,17 @@ test('serves Basis documentation at the root', async () => {
   })
 
   try {
-    await app.visit('/', page => matchScreenshot(page))
-    await app.visit(
-      '/architecture',
-      { stubs: { 'https://esm.sh/mermaid@11': MERMAID_STUB } },
-      page => matchScreenshot(page),
-    )
+    for (const [path, hint] of PAGES) {
+      await app.visit(path, { allow: ['esm.sh'] }, async page => {
+        await page.addStyleTag({ content: FULL_LENGTH })
+        if (await page.locator('.mermaid').count() > 0) {
+          await page.waitForSelector('.mermaid svg', { timeout: 30_000 })
+        }
+        await page.waitForTimeout(1000)
+        await matchScreenshot(page.locator('.documentation-shell.component'), `page ${hint}`)
+      })
+    }
   } finally {
     await app.stop()
   }
-}, 90_000)
+}, 180_000)

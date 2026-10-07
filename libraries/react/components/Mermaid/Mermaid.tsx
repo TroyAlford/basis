@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { Await } from '../Await/Await'
 import { Component } from '../Component/Component'
 
 import './Mermaid.styles.ts'
@@ -12,16 +11,26 @@ interface Props {
   children?: React.ReactNode,
 }
 
+interface State {
+  /** The rendered SVG, once the runtime has run. */
+  svg: string | null,
+}
+
 let sequence = 0
 
 /**
- * Renders a Mermaid diagram, loading the Mermaid runtime only when a diagram is
- * present, so pages that do not use diagrams never fetch it. Server rendering
- * emits the source as a `<pre class="mermaid">` fallback until the runtime runs.
+ * Renders a Mermaid diagram. The runtime is imported lazily on mount, so a page
+ * that does not use diagrams never fetches it and server rendering never
+ * reaches the network: SSR emits the source as the runtime's `<pre
+ * class="mermaid">` block, which the documentation bootstrap then renders.
  */
-export class Mermaid extends Component<Props> {
+export class Mermaid extends Component<Props, HTMLDivElement, State> {
   static displayName = 'MermaidDiagram'
   #id = `basis-mermaid-${(sequence += 1)}`
+
+  get defaultState(): State {
+    return { svg: null }
+  }
 
   /**
    * The diagram source, from the element's text children.
@@ -31,23 +40,17 @@ export class Mermaid extends Component<Props> {
     return React.Children.toArray(this.props.children).join('').trim()
   }
 
-  /**
-   * Load Mermaid and render the diagram to SVG.
-   * @returns The rendered diagram.
-   */
-  async renderDiagram(): Promise<React.ReactNode> {
+  async componentDidMount(): Promise<void> {
 
     const { default: mermaid } = await import(MERMAID_SOURCE)
     mermaid.initialize({ startOnLoad: false })
     const { svg } = await mermaid.render(this.#id, this.source)
-    return <div className="diagram" dangerouslySetInnerHTML={{ __html: svg }} />
+    await this.setState({ svg })
   }
 
   content(): React.ReactNode {
-    return super.content(
-      <Await fallback={<pre className="mermaid">{this.source}</pre>}>
-        {this.renderDiagram()}
-      </Await>,
-    )
+    const { svg } = this.state
+    if (svg) return <div className="diagram" dangerouslySetInnerHTML={{ __html: svg }} />
+    return <pre className="mermaid">{this.source}</pre>
   }
 }
