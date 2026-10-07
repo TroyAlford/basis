@@ -42,9 +42,9 @@ afterEach(() => {
 describe('discoverDocs', () => {
   test('keys index documents by directory and others by name', () => {
     const root = fixture({
-      'docs/architecture/index.md': '---\ntitle: Architecture\n---\n',
+      'docs/architecture/index.mdx': '---\ntitle: Architecture\n---\n',
       'docs/guides/setup.md': '# Setup\n',
-      'docs/index.md': '# Home\n',
+      'docs/index.mdx': '# Home\n',
     })
     const site = discoverDocs({ root: join(root, 'docs'), title: 'Basis' })
     expect([...site.pages.keys()].sort()).toEqual(['', 'architecture', 'guides/setup'])
@@ -55,28 +55,29 @@ describe('discoverDocs', () => {
 })
 
 describe('renderDocsPage', () => {
-  test('renders Markdown, strips front-matter, and builds navigation', () => {
+  test('renders Markdown/MDX, strips front-matter, and builds navigation', async () => {
     const root = fixture({
-      'docs/architecture/index.md': '---\ntitle: Architecture\n---\n\n# Architecture\n\nSee [home](../index.md).\n',
-      'docs/index.md': '# Home\n',
+      'docs/architecture/index.mdx': '---\ntitle: Architecture\n---\n\n# Architecture\n\nSee [home](../index.mdx).\n',
+      'docs/index.mdx': '# Home\n',
     })
     const site = discoverDocs({ root: join(root, 'docs') })
-    const html = renderDocsPage(site, page(site, 'architecture'))
+    const html = await renderDocsPage(site, page(site, 'architecture'))
     expect(html).toContain('<h1>Architecture</h1>')
     expect(html).not.toContain('title: Architecture')
     expect(html).toContain('href="/docs"')
   })
 
-  test('emits Mermaid fences as a mermaid block', () => {
-    const root = fixture({ 'docs/index.md': '# Home\n\n```mermaid\nflowchart TD\n  A-->B\n```\n' })
+  test('emits Mermaid fences as a mermaid block and loads the runtime', async () => {
+    const root = fixture({ 'docs/index.mdx': '# Home\n\n```mermaid\nflowchart TD\n  A-->B\n```\n' })
     const site = discoverDocs({ root: join(root, 'docs') })
-    const html = renderDocsPage(site, page(site, ''))
+    const html = await renderDocsPage(site, page(site, ''))
     expect(html).toContain('<pre class="mermaid">')
     expect(html).toContain('flowchart TD')
+    expect(html).toContain('esm.sh/mermaid')
   })
 
   test('renders a not-found document', () => {
-    const root = fixture({ 'docs/index.md': '# Home\n' })
+    const root = fixture({ 'docs/index.mdx': '# Home\n' })
     const site = discoverDocs({ root: join(root, 'docs') })
     const html = renderDocsNotFound(site, 'missing')
     expect(html).toContain('<h1>Not found</h1>')

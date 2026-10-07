@@ -714,7 +714,7 @@ export class Server {
     if (mounted) return mounted
 
     if (this.#docs) {
-      const docs = serveDocs(this.#docs, uri, request)
+      const docs = await serveDocs(this.#docs, uri, request)
       if (docs) return docs
     }
 

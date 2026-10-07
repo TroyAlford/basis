@@ -1,11 +1,15 @@
+import { evaluate } from '@mdx-js/mdx'
 import type { Dirent } from 'node:fs'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, extname, join, relative, resolve } from 'node:path'
 import * as React from 'react'
+import * as runtime from 'react/jsx-runtime'
 import { renderToString } from 'react-dom/server'
+import remarkGfm from 'remark-gfm'
 import type { DocumentationEntry } from '../../react/components/Documentation/Documentation'
 import { Documentation } from '../../react/components/Documentation/Documentation'
 import { DOCUMENTATION_FONTS_URL } from '../../react/components/Documentation/typography'
+import { MERMAID_SOURCE } from '../../react/components/Mermaid/Mermaid'
 import { themeStyles } from '../../react/components/Theme/Theme'
 import { styles } from '../../react/utilities/style'
 import type { URI } from '../../utilities'
@@ -24,9 +28,9 @@ export interface DocsPageModule {
 
 /** Options for the built-in documentation route. */
 export interface DocsOptions {
-  /** React page modules served alongside the Markdown tree. */
+  /** React page modules served alongside the Markdown/MDX tree. */
   pages?: DocsPageModule[],
-  /** Absolute path to the Markdown documentation source tree. */
+  /** Absolute path to the documentation source tree. */
   root: string,
   /** URL prefix the documentation is served under. Defaults to `/docs`. */
   route?: string,
@@ -34,11 +38,11 @@ export interface DocsOptions {
   title?: string,
 }
 
-/** A discovered Markdown documentation page. */
+/** A discovered Markdown/MDX documentation page. */
 export interface DocsPage {
   /** Route path relative to the docs prefix, empty for the index. */
   path: string,
-  /** Absolute path to the Markdown/MDX source. */
+  /** Absolute path to the source. */
   source: string,
   /** Page title from front-matter, the first heading, or the filename. */
   title: string,
@@ -48,11 +52,11 @@ export interface DocsPage {
 export interface DocsSite {
   /** React page modules keyed by their served path. */
   modules: Map<string, DocsPageModule>,
-  /** Markdown pages keyed by route path relative to the prefix. */
+  /** Markdown/MDX pages keyed by route path relative to the prefix. */
   pages: Map<string, DocsPage>,
   /** URL prefix without a trailing slash. */
   route: string,
-  /** Absolute Markdown root. */
+  /** Absolute documentation root. */
   source: string,
   /** Navigation heading. */
   title: string,
@@ -70,11 +74,14 @@ const HEADING = /^#\s+(.+)$/m
 /** A front-matter `title:` entry. */
 const TITLE = /^title:\s*(.+)$/m
 
-/** A Mermaid fenced code block, as rendered by the Markdown engine. */
+/** A Mermaid fenced code block, as rendered by the MDX pipeline. */
 const MERMAID = /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g
 
 /** A Markdown inline link to a document. */
 const DOC_LINK = /\]\(([^)\s]+\.mdx?)(#[^)]*)?\)/g
+
+/** Compiled MDX components, keyed by source path and modification time. */
+const compiled = new Map<string, React.ComponentType>()
 
 /**
  * Whether a path is a recognized documentation source document.
@@ -152,10 +159,10 @@ function escapeHtml(value: string): string {
 
 /**
  * Rewrite repository-relative Markdown document links to their served routes.
- * @param markdown - Markdown source.
+ * @param markdown - Markdown/MDX source.
  * @param page - The page the source belongs to.
  * @param site - The resolved site.
- * @returns Markdown with in-tree document links rewritten.
+ * @returns Source with in-tree document links rewritten.
  */
 function rewriteLinks(markdown: string, page: DocsPage, site: DocsSite): string {
   return markdown.replace(DOC_LINK, (match, target: string, anchor = '') => {
@@ -169,6 +176,22 @@ function rewriteLinks(markdown: string, page: DocsPage, site: DocsSite): string 
 }
 
 /**
+ * Compile a Markdown/MDX document to a React component, cached by modification
+ * time so a hot rebuild only recompiles changed pages.
+ * @param source - The document body.
+ * @param file - Absolute source path.
+ * @returns The compiled component.
+ */
+async function compileDocument(source: string, file: string): Promise<React.ComponentType> {
+  const version = `${file}:${statSync(file).mtimeMs}`
+  const cached = compiled.get(version)
+  if (cached) return cached
+  const { default: Content } = await evaluate(source, { ...runtime, remarkPlugins: [remarkGfm] })
+  compiled.set(version, Content)
+  return Content
+}
+
+/**
  * The served path of a React page module under the docs prefix.
  * @param route - The docs URL prefix.
  * @param page - The page module.
@@ -179,7 +202,7 @@ function modulePath(route: string, page: DocsPageModule): string {
 }
 
 /**
- * Discover a documentation site: the Markdown tree plus any React page modules.
+ * Discover a documentation site: the Markdown/MDX tree plus any React modules.
  * @param options - The docs root, route, title, and React pages.
  * @returns The resolved site.
  */
@@ -203,7 +226,7 @@ export function discoverDocs(options: DocsOptions): DocsSite {
 }
 
 /**
- * Build the navigation tree from the Markdown pages and React page modules.
+ * Build the navigation tree from the Markdown/MDX pages and React modules.
  * @param site - The resolved site.
  * @returns Sorted navigation entries.
  */
@@ -217,6 +240,21 @@ function navigation(site: DocsSite): DocumentationEntry[] {
 }
 
 /**
+ * The client bootstrap that renders Mermaid diagrams in the browser, loading
+ * the runtime from the shared source only when a page contains a diagram.
+ * @returns The module script.
+ */
+function mermaidBootstrap(): string {
+  return [
+    '<script type="module">',
+    `  import mermaid from '${MERMAID_SOURCE}'`,
+    '  mermaid.initialize({ startOnLoad: false })',
+    "  await mermaid.run({ nodes: document.querySelectorAll('.mermaid') })",
+    '</script>',
+  ].join('\n')
+}
+
+/**
  * Wrap rendered content in the shared documentation shell and an HTML document.
  *
  * Inlines Basis's theme variables and every registered stylesheet, so a served
@@ -225,9 +263,10 @@ function navigation(site: DocsSite): DocumentationEntry[] {
  * @param active - The active route path.
  * @param content - The page content.
  * @param title - The page title.
+ * @param diagrams - Whether the page contains Mermaid diagrams.
  * @returns A complete HTML document.
  */
-function layout(site: DocsSite, active: string, content: React.ReactNode, title: string): string {
+function layout(site: DocsSite, active: string, content: React.ReactNode, title: string, diagrams = false): string {
   const page = React.createElement(
     Documentation,
     { active, navigation: navigation(site), title: site.title },
@@ -244,28 +283,29 @@ function layout(site: DocsSite, active: string, content: React.ReactNode, title:
     `<style>${styles()}</style>`,
     '</head><body>',
     body,
+    diagrams ? mermaidBootstrap() : '',
     '</body></html>',
   ].join('')
 }
 
 /**
- * Render a Markdown page to a full HTML document.
+ * Render a Markdown/MDX page to a full HTML document.
  * @param site - The resolved site.
  * @param page - The page to render.
  * @returns A complete HTML document.
  */
-export function renderDocsPage(site: DocsSite, page: DocsPage): string {
-  const { body } = parse(readFileSync(page.source, 'utf8'))
-  const rendered = Bun
-    .markdown
-    .html(rewriteLinks(body, page, site))
+export async function renderDocsPage(site: DocsSite, page: DocsPage): Promise<string> {
+  const source = readFileSync(page.source, 'utf8')
+  const { body } = parse(source)
+  const Content = await compileDocument(rewriteLinks(body, page, site), page.source)
+  const html = renderToString(React.createElement(Content))
     .replace(MERMAID, (_match, code: string) => `<pre class="mermaid">${code}</pre>`)
   const content = React.createElement('div', {
-    dangerouslySetInnerHTML: { __html: rendered },
+    dangerouslySetInnerHTML: { __html: html },
     key: 'content',
   })
   const active = page.path === '' ? site.route : `${site.route}/${page.path}`
-  return layout(site, active, content, page.title)
+  return layout(site, active, content, page.title, html.includes('class="mermaid"'))
 }
 
 /**
@@ -301,7 +341,7 @@ export function renderDocsNotFound(site: DocsSite, path: string): string {
  * @param request - The incoming request.
  * @returns The docs response, or `null` when the path is not a docs path.
  */
-export function serveDocs(site: DocsSite, uri: URI, request: Request): Response | null {
+export async function serveDocs(site: DocsSite, uri: URI, request: Request): Promise<Response | null> {
   const module = site.modules.get(uri.path)
   const underRoute = uri.path === site.route || uri.path.startsWith(`${site.route}/`)
   if (!module && !underRoute) return null
@@ -318,5 +358,5 @@ export function serveDocs(site: DocsSite, uri: URI, request: Request): Response 
   if (module) return respond(renderDocsModule(site, module), 200)
   const path = uri.path.slice(site.route.length).replace(/^\/+|\/+$/g, '')
   const page = site.pages.get(path)
-  return respond(page ? renderDocsPage(site, page) : renderDocsNotFound(site, path), page ? 200 : 404)
+  return respond(page ? await renderDocsPage(site, page) : renderDocsNotFound(site, path), page ? 200 : 404)
 }
