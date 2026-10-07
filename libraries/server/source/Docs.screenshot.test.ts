@@ -3,29 +3,32 @@ import { matchScreenshot, startApplication, test } from '../../testing'
 
 /**
  * Release the documentation shell's fixed height so a full-page capture is the
- * whole page rather than the viewport, mirroring how the docs app releases its
- * shell for whole-page snapshots.
+ * whole page rather than the viewport.
  */
 const FULL_LENGTH = [
   'html, body, .documentation-shell.component { height: auto !important; overflow: visible !important; }',
   '.documentation-shell.component > main, .documentation-shell.component > nav.links { overflow: visible !important; }',
 ].join('\n')
 
-/** Every documentation page Basis ships, with a snapshot hint. */
+/** A representative page set: the docs home, component pages, and the new prose. */
 const PAGES: [string, string][] = [
-  ['/', 'index'],
+  ['/', 'overview'],
   ['/architecture', 'architecture'],
+  ['/components/button', 'button'],
+  ['/components/component', 'component'],
+  ['/components/table', 'table'],
+  ['/mixins', 'mixins'],
   ['/contributing', 'contributing'],
   ['/guides', 'guides'],
   ['/reference', 'reference'],
 ]
 
 /**
- * Proof that Basis's docs server renders every page to a styled, full-length
- * document at the site root, including its Mermaid diagram. `esm.sh` is allowed
- * so the diagram renders through the real Mermaid runtime rather than a stub.
+ * Proof that Basis's docs server renders its documentation — the existing
+ * component/idea pages plus the new prose — full length and styled, with the
+ * Mermaid diagram rendered through the real runtime.
  */
-test('captures every docs page full length', async () => {
+test('captures the docs pages full length', async () => {
   const app = await startApplication({
     cwd: join(import.meta.dir, '..', '..', '..'),
     entry: './server.ts',
@@ -40,11 +43,11 @@ test('captures every docs page full length', async () => {
         if (await page.locator('.mermaid').count() > 0) {
           await page.waitForSelector('.mermaid svg', { timeout: 30_000 })
         }
-        await page.waitForTimeout(1000)
+        await page.waitForTimeout(800)
         await matchScreenshot(page.locator('.documentation-shell.component'), `page ${hint}`)
       })
     }
   } finally {
     await app.stop()
   }
-}, 180_000)
+}, 240_000)

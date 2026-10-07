@@ -35,7 +35,7 @@ export class Code extends Component<Props> {
 
   override content() {
     return super.content(
-      <Await fallback="Loading...">
+      <Await fallback={<code>{this.code}</code>}>
         {this.renderCode()}
       </Await>,
     )
@@ -61,6 +61,7 @@ export class Code extends Component<Props> {
   }
 
   async renderCode() {
+    if (typeof globalThis.document === 'undefined') return <code>{this.code}</code>
     const { codeToHtml } = await shiki
     const html = await codeToHtml(this.code, {
       lang: this.props.language,

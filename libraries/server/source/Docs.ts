@@ -232,7 +232,12 @@ export function discoverDocs(options: DocsOptions): DocsSite {
  */
 function navigation(site: DocsSite): DocumentationEntry[] {
   const entries: DocumentationEntry[] = []
-  for (const page of site.pages.values()) entries.push({ href: pageHref(site.route, page.path), title: page.title })
+  const modulePaths = new Set(site.modules.keys())
+  for (const page of site.pages.values()) {
+    const href = pageHref(site.route, page.path)
+    if (modulePaths.has(href)) continue
+    entries.push({ href, title: page.title })
+  }
 
   const modules = new Map<string, DocumentationEntry>()
   for (const [path, page] of site.modules) modules.set(path, { children: [], href: path, title: page.title })

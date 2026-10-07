@@ -1,5 +1,6 @@
 import { Server } from './consumer/server'
+import { routes } from './libraries/docs/routes.ts'
 
 new Server()
-  .docs({ root: './docs', route: '/', title: 'Basis' })
+  .docs({ pages: routes, root: './docs', route: '/', title: 'Basis' })
   .start()
