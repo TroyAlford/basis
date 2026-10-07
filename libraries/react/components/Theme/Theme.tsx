@@ -100,7 +100,12 @@ interface Props {
   },
 }
 
-const DEFAULT_THEME = {
+/**
+ * The theme applied when no overrides are supplied. Exported so tooling that
+ * cannot read CSS variables (for example the static documentation build) can
+ * resolve the same tokens a mounted `Theme` would emit.
+ */
+export const DEFAULT_THEME = {
   color: {
     background: '#ffffff',
     danger: '#C00000',

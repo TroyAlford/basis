@@ -94,7 +94,13 @@ import { Mermaid } from '@basis/react'
 <Mermaid>{'flowchart TD\n  A[Start] --> B[Ship]'}</Mermaid>
 ```
 
-A `mermaid` code fence in a `.mdx` document compiles to this component through the Markdown build plugin (`@basis/bun-plugins`).
+Diagrams are themed from the surrounding Basis design tokens — the primary color, background, foreground, radius, and font — so they follow the active `Theme` instead of Mermaid's stock palette. Pass `variant` (`"basis"`, `"neutral"`, or `"dark"`) to pick one of the named looks; `"basis"` is the default:
+
+```tsx
+<Mermaid variant="dark">{'flowchart TD\n  A[Start] --> B[Ship]'}</Mermaid>
+```
+
+A `mermaid` code fence in a `.mdx` document compiles to this component through the Markdown build plugin (`@basis/bun-plugins`), and the static docs build inlines the same default theme so built pages match served ones.
 
 ## Default typography
 

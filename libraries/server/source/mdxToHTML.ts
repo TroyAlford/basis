@@ -9,6 +9,8 @@ import type { DocumentationEntry, DocumentationRoute } from '../../react/compone
 import { buildDocumentationNavigation, Documentation } from '../../react/components/Documentation/Documentation'
 import { DOCUMENTATION_FONTS_URL } from '../../react/components/Documentation/typography'
 import { Mermaid, MERMAID_SOURCE } from '../../react/components/Mermaid/Mermaid'
+import type { MermaidConfig } from '../../react/components/Mermaid/theme'
+import { defaultMermaidTokens, mermaidConfig } from '../../react/components/Mermaid/theme'
 import { themeStyles } from '../../react/components/Theme/Theme'
 import { styles } from '../../react/utilities/style'
 import type { DocsDocument } from './globDocs'
@@ -136,14 +138,16 @@ async function compileDocument(source: string, file: string): Promise<MdxContent
 /**
  * The client bootstrap that renders Mermaid diagrams in a statically built
  * page, loading the runtime from the shared source only when a diagram is
- * present. Served pages render Mermaid through the component instead.
+ * present. The configuration is resolved server-side from the same defaults the
+ * docs app's `Theme` emits, so a built page is themed like a served one.
+ * @param config - The Mermaid configuration to initialize with.
  * @returns The module script.
  */
-function mermaidBootstrap(): string {
+function mermaidBootstrap(config: MermaidConfig): string {
   return [
     '<script type="module">',
     `  import mermaid from '${MERMAID_SOURCE}'`,
-    '  mermaid.initialize({ startOnLoad: false })',
+    `  mermaid.initialize(${JSON.stringify({ startOnLoad: false, ...config })})`,
     "  await mermaid.run({ nodes: document.querySelectorAll('.mermaid') })",
     '</script>',
   ].join('\n')
@@ -239,7 +243,7 @@ function layout(site: DocsSite, active: string, content: React.ReactNode, title:
     `<style>${styles()}</style>`,
     '</head><body>',
     body,
-    body.includes('class="mermaid"') ? mermaidBootstrap() : '',
+    body.includes('class="mermaid"') ? mermaidBootstrap(mermaidConfig(defaultMermaidTokens())) : '',
     '</body></html>',
   ].join('')
 }

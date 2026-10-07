@@ -1,5 +1,6 @@
 import { beforeAll, expect } from 'bun:test'
 import { join } from 'node:path'
+import type { Page } from 'playwright'
 import type { ApplicationHandle } from './application'
 import { useApplication } from './application'
 import { matchScreenshot } from './matchScreenshot'
@@ -232,4 +233,89 @@ describe('testing/docs', () => {
       expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
     })
   }, 60_000)
+
+  /**
+   * Release the fixed documentation shell so a full-page capture is the whole
+   * page rather than the viewport. Shared by the Mermaid captures.
+   * @param page - The page whose shell to release.
+   */
+  async function releaseShell(page: Page): Promise<void> {
+    await page.addStyleTag({
+      content: `
+        html, body, #root, .documentation-shell.component {
+          height: auto !important;
+          overflow: visible !important;
+        }
+        .documentation-shell.component > main, .documentation-shell.component > nav.links {
+          overflow: visible !important;
+        }
+      `,
+    })
+  }
+
+  /*
+   * The Mermaid gallery renders every supported diagram type in the default
+   * on-brand look; the capture is the visual contract for the themed output.
+   */
+  test('captures the Mermaid gallery', async () => {
+    await app.visit('/components/mermaid', { ...NETWORK }, async page => {
+      // 1 basic usage + 3 variants + 12 gallery diagrams.
+      await page.waitForFunction(
+        () => document.querySelectorAll('.mermaid-diagram .diagram svg').length >= 16,
+        undefined,
+        { timeout: 60_000 },
+      )
+      if (await page.locator('.code.component').count() > 0) {
+        await page.waitForSelector('.code.component pre.shiki', { timeout: 30_000 })
+      }
+      await releaseShell(page)
+      await matchScreenshot(page, 'mermaid gallery', { maxDiffPixelRatio: 0.02 })
+    })
+  }, 120_000)
+
+  /*
+   * One section per named look, so a change to a variant's palette is visible
+   * in isolation rather than only inside the full gallery.
+   */
+  test('captures the Mermaid variants', async () => {
+    await app.visit('/components/mermaid', { ...NETWORK }, async page => {
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-variant-section] .diagram svg').length >= 3,
+        undefined,
+        { timeout: 60_000 },
+      )
+      for (const variant of ['basis', 'neutral', 'dark']) {
+        await matchScreenshot(
+          page.locator(`[data-variant-section="${variant}"]`),
+          variant,
+          { maxDiffPixelRatio: 0.02 },
+        )
+      }
+    })
+  }, 120_000)
+
+  /*
+   * Each diagram type on its own, so a reviewer can read the themed output
+   * without the full-page capture's scale.
+   */
+  test('captures the Mermaid diagram types', async () => {
+    await app.visit('/components/mermaid', { ...NETWORK }, async page => {
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-diagram] .diagram svg').length >= 12,
+        undefined,
+        { timeout: 60_000 },
+      )
+      const diagrams = page.locator('[data-diagram]')
+      const total = await diagrams.count()
+      for (let index = 0; index < total; index += 1) {
+        const diagram = diagrams.nth(index)
+        const name = await diagram.getAttribute('data-diagram')
+        await matchScreenshot(
+          diagram.locator('.mermaid-diagram'),
+          name ?? `diagram-${index}`,
+          { maxDiffPixelRatio: 0.02 },
+        )
+      }
+    })
+  }, 120_000)
 })
