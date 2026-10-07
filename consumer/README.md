@@ -82,7 +82,7 @@ Stylelint, the custom syntax, and every plugin are declared by Basis, so consume
 
 ## Markdown linting
 
-Basis lints Markdown and MDX with the shared remark/unified stack (`remark-lint` rules, all MIT). The policy keeps each paragraph on one source line — the renderer word-wraps — and forbids more than one blank line between blocks. YAML front-matter and MDX are preserved, and `basis format` applies the canonical serialization in addition to the rules' autofixes.
+Basis lints Markdown and MDX with the shared remark/unified stack (`remark-lint` rules, all MIT). The policy keeps each paragraph on one source line — the renderer word-wraps — forbids more than one blank line between blocks, and numbers ordered lists sequentially. YAML front-matter and MDX are preserved, and `basis format` applies the canonical serialization in addition to the rules' autofixes.
 
 The supported zero-config route is the CLI:
 

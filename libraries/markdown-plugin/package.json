@@ -4,7 +4,6 @@
   "type": "module",
   "exports": {
     ".": "./index.ts",
-    "./rules": "./rules/index.ts",
     "./run": "./run.ts"
   },
   "dependencies": {
@@ -12,6 +11,7 @@
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1",
     "remark-lint-no-consecutive-blank-lines": "^5.0.1",
+    "remark-lint-ordered-list-marker-value": "^4.0.1",
     "remark-mdx": "^3.1.1",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",

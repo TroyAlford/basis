@@ -20,6 +20,10 @@ Forbids breaking a paragraph across multiple source lines. A renderer treats a s
 
 The off-the-shelf [`remark-lint-no-consecutive-blank-lines`](https://github.com/remarkjs/remark-lint/tree/main/packages/remark-lint-no-consecutive-blank-lines) rule forbids more than one blank line between blocks. `remark-stringify` resolves it by emitting exactly one blank line between blocks.
 
+### `remark-lint/ordered-list-marker-value`
+
+The off-the-shelf [`remark-lint-ordered-list-marker-value`](https://github.com/remarkjs/remark-lint/tree/main/packages/remark-lint-ordered-list-marker-value) rule is configured with `'ordered'`, so an ordered list is numbered sequentially (`1.`, `2.`, `3.`) instead of every item sharing `1.`. `remark-stringify` renumbers the list.
+
 ## Configuration
 
 `createMarkdownConfig` returns the plugin list and the canonical `remark-stringify` settings. The settings match Basis's existing conventions — `-` bullets and thematic breaks, `*` emphasis and strong, backtick fences — so a format pass only rewrites what a rule or canonical block spacing requires.

@@ -1,8 +1,9 @@
 import remarkFrontmatter from 'remark-frontmatter'
 import remarkLintNoConsecutiveBlankLines from 'remark-lint-no-consecutive-blank-lines'
+import remarkLintOrderedListMarkerValue from 'remark-lint-ordered-list-marker-value'
 import type { Options as StringifyOptions } from 'remark-stringify'
 import type { PluggableList } from 'unified'
-import { basisRules } from './rules/index'
+import { noParagraphLineBreaks } from './rules/noParagraphLineBreaks'
 
 /**
  * The canonical Markdown serialization the Basis formatter emits, passed to
@@ -30,7 +31,8 @@ export const BASE_SETTINGS: StringifyOptions = {
 export const BASE_PLUGINS: PluggableList = [
   [remarkFrontmatter, ['yaml']],
   remarkLintNoConsecutiveBlankLines,
-  ...basisRules,
+  [remarkLintOrderedListMarkerValue, 'ordered'],
+  noParagraphLineBreaks,
 ]
 
 /** A resolved Basis Markdown configuration: its plugins and serialization settings. */

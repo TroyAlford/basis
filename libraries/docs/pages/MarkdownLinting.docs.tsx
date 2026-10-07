@@ -42,6 +42,10 @@ export class MarkdownLintingDocs extends DocumentationPage<Record<string, never>
             <li>
               <strong>Single blank lines</strong> — no more than one blank line between blocks.
             </li>
+            <li>
+              <strong>Sequential ordered lists</strong> — ordered lists are numbered <code>1.</code>,{' '}
+              <code>2.</code>, <code>3.</code>, never every item sharing <code>1.</code>.
+            </li>
           </ul>
           <p>
             The formatter serializes with Basis conventions (<code>-</code> bullets and thematic
