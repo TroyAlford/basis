@@ -5,3 +5,5 @@
 **/node_modules
 **/temp
 **/test-results/**
+docs-dist/
+tmp/
