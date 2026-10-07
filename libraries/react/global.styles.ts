@@ -15,6 +15,14 @@ style('basis:global', css`
     padding: 0;
   }
 
+  /*
+   * Form controls default to the platform UI font, not the inherited one, which
+   * makes their text render differently per host. Inherit Basis's type instead.
+   */
+  button, input, optgroup, select, textarea {
+    font: inherit;
+  }
+
   code, pre, kbd, samp {
     font-family: 'Fira Code', monospace;
   }
