@@ -31,6 +31,7 @@ const PAGES: [string, string][] = [
   ['/components/button', 'button'],
   ['/components/component', 'component'],
   ['/components/table', 'table'],
+  ['/components/mermaid', 'mermaid'],
   ['/mixins', 'mixins'],
   ['/contributing', 'contributing'],
   ['/guides', 'guides'],

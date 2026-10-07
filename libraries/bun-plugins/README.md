@@ -16,6 +16,11 @@ Build plugins for the Bun runtime, providing enhanced build capabilities.
 - Type-safe variable injection
 - Development/production modes
 
+### Markdown/MDX Plugin
+- Compile `.md` and `.mdx` imports into React components (`@mdx-js/mdx` + `remark-gfm`)
+- Strip a leading YAML front-matter block, so it is metadata rather than page content
+- Rewrite `mermaid` code fences to the `Mermaid` component from `basis/react`
+
 ## Installation
 
 <code>
@@ -25,7 +30,7 @@ bun add -d @basis/bun-plugins
 ## Usage
 
 ```typescript
-import { pluginGlobals, pluginSASS } from '@basis/bun-plugins'
+import { pluginGlobals, pluginMarkdown, pluginSASS } from '@basis/bun-plugins'
 
 // SASS Plugin
 const buildConfig = {
@@ -33,6 +38,12 @@ const buildConfig = {
     pluginSASS({
       // SASS plugin options
     })
+  ]
+}
+// Markdown/MDX Plugin
+const markdownBuildConfig = {
+  plugins: [
+    pluginMarkdown()
   ]
 }
 // Globals Plugin

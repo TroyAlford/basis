@@ -396,6 +396,8 @@ bunx basis lint       # report the TypeScript/JSX and CSS policies
 bunx basis lint --fix # apply every autofixable finding in one run
 bunx basis typecheck
 bunx basis check
+bunx basis docs check # validate the docs/ tree (front-matter, fences, links)
+bunx basis docs build # project the docs/ tree to a static site
 ```
 
 `basis lint --fix` forwards `--fix` to both surfaces (ESLint and Stylelint)
@@ -404,6 +406,13 @@ reports nothing fixable that the first run did not already resolve; rulings
 without a safe transformation (for example JSDoc contracts and `max-len`)
 still require a manual edit. `basis check --fix` applies the same lint fixes
 before it typechecks.
+
+`basis docs check` validates the canonical `docs/` tree — front-matter, code
+fences, and repository-relative links — and `basis docs build` projects it to a
+static site suitable for GitHub Pages (`--out` defaults to `docs-dist`, `--base`
+prefixes links for a project Pages site, and `--title` sets the shell heading).
+Both read an optional `basis.docs.source` from `package.json`, defaulting to
+`docs`.
 
 ## Patches
 

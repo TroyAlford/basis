@@ -21,12 +21,14 @@ Workspace `README.md` files remain the precise per-package reference — for exa
 ```mermaid
 flowchart TD
     Docs["docs/**/*.md(x)<br/>Canonical documentation"]
-    Pipeline["Basis docs pipeline<br/>discover - render"]
-    Server["Basis Server<br/>/docs/*"]
-    Static["Static docs build"]
+    Plugin["Markdown build plugin<br/>.md(x) to React"]
+    App["Documentation app<br/>shared shell"]
+    Server["Basis Server<br/>serves the app"]
+    Build["basis docs build<br/>static HTML"]
     Pages["GitHub Pages"]
-    Docs --> Pipeline
-    Pipeline --> Server
-    Pipeline --> Static
-    Static --> Pages
+    Docs --> Plugin
+    Plugin --> App
+    App --> Server
+    Docs --> Build
+    Build --> Pages
 ```
