@@ -32,6 +32,7 @@ interface BinaryManifest {
 const REQUIRED_EXPORTS = [
   './cli',
   './eslint',
+  './lint',
   './logger',
   './react',
   './review',
@@ -116,13 +117,37 @@ const runStylelint = (fix: boolean): number => runBin('stylelint', 'stylelint', 
 ])
 
 /**
- * Runs every Basis lint surface.
+ * Runs the Basis Markdown/MDX policy through the plugin's CLI entrypoint.
+ * @param fix Whether to rewrite documents with the fixes the policy supports.
+ * @returns The child process exit code.
+ */
+const runMarkdown = (fix: boolean): number => {
+  const result = Bun.spawnSync([
+    process.execPath,
+    join(basisDir(), 'libraries', 'markdown-plugin', 'bin.ts'),
+    ...(fix ? ['--fix'] : []),
+  ], {
+    stderr: 'inherit',
+    stdin: 'inherit',
+    stdout: 'inherit',
+  })
+  return result.exitCode
+}
+
+/**
+ * Runs every Basis lint surface with the same engine, so `lint` reports and
+ * `format` applies every autofix each surface supports.
  * @param fix Whether to apply the autofixes each surface supports.
  * @returns The first non-zero child process exit code, or `0`.
  */
 const runLint = (fix: boolean): number => {
   const eslintCode = runEslint(fix)
-  return eslintCode === 0 ? runStylelint(fix) : eslintCode
+  if (eslintCode !== 0) return eslintCode
+
+  const stylelintCode = runStylelint(fix)
+  if (stylelintCode !== 0) return stylelintCode
+
+  return runMarkdown(fix)
 }
 
 /**
@@ -185,7 +210,7 @@ const doctor = (): number => {
  * Prints usage information for the CLI.
  */
 const usage = (): void => {
-  write('usage: basis <docs build [--out <dir>] [--base <path>]|docs check|doctor|lint [--fix]|typecheck|check>')
+  write('usage: basis <docs build [--out <dir>] [--base <path>]|docs check|doctor|format|lint|typecheck|check>')
 }
 
 /**
@@ -193,13 +218,13 @@ const usage = (): void => {
  */
 const main = (): void => {
   const [command, ...args] = process.argv.slice(2)
-  const fix = args.includes('--fix')
 
   if (command === 'doctor') process.exit(doctor())
-  if (command === 'lint') process.exit(runLint(fix))
+  if (command === 'lint') process.exit(runLint(false))
+  if (command === 'format') process.exit(runLint(true))
   if (command === 'typecheck') process.exit(runBin('@typescript/native', 'tsc', ['--noEmit']))
   if (command === 'check') {
-    const lintCode = runLint(fix)
+    const lintCode = runLint(false)
     const typeCode = lintCode === 0 ? runBin('@typescript/native', 'tsc', ['--noEmit']) : lintCode
     process.exit(typeCode)
   }

@@ -5,21 +5,18 @@ This directory contains a collection of reusable GitHub Actions designed to auto
 These actions are provided to create reusable pieces of a standard GitHub repository setup. They assume the following:
 
 - **ASDF for Tooling Management**: You are using ASDF to manage core tooling versions such as npm, yarn, bun, python, etc. This allows for consistent environment setups across different development and CI environments.
-  
+
 - **Conventional Commits with Squash-and-Merge Strategy**: You are using the Conventional Commits specification, with a squash-and-merge strategy for pull requests. This means each merged PR results in a single squashed commit, with the PR title forming part of the commit message. This approach helps maintain a clean and understandable commit history. If you're not familiar with setting up this strategy in GitHub, you may want to configure your repository settings to enforce squash merging and ensure PR titles are formatted according to Conventional Commits.
 
 ## Available Actions
 
-Every action here is **self-contained**: none references a sibling action with a
-local `./` path (which would resolve against the *caller's* checkout). They can
-therefore be referenced by full path from any repository:
+Every action here is **self-contained**: none references a sibling action with a local `./` path (which would resolve against the *caller's* checkout). They can therefore be referenced by full path from any repository:
 
 ```yaml
 uses: TroyAlford/basis/.github/actions/<name>@<ref>
 ```
 
-Actions that need a toolchain (for example `bun`) say so in their own README and
-leave setup to the calling workflow.
+Actions that need a toolchain (for example `bun`) say so in their own README and leave setup to the calling workflow.
 
 1. **ASDF Setup & Install**
    - Description: Sets up the ASDF version manager and installs necessary plugins and tools specified in the `.tool-versions` file. It also determines the package manager used in the project and caches dependencies.

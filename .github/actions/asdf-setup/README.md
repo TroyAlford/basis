@@ -9,6 +9,7 @@ This action sets up the ASDF version manager and installs the necessary plugins 
 ASDF is a version manager that allows you to manage multiple runtime versions of various tools in a single place. It supports a wide range of plugins, enabling you to manage versions of programming languages, package managers, and other tools.
 
 ## Usage
+
 ```yaml
 name: Setup and Install
 

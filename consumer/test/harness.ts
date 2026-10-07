@@ -123,6 +123,14 @@ const STYLELINT_SURFACE_CHECK = [
   "process.stdout.write('ok')",
 ].join('; ')
 
+const MARKDOWN_SURFACE_CHECK = [
+  "import { createMarkdownConfig } from 'basis/lint'",
+  'const config = createMarkdownConfig()',
+  "if (!Array.isArray(config.plugins) || config.plugins.length === 0) throw new Error('bad surface')",
+  "if (config.settings.bullet !== '-') throw new Error('bad settings')",
+  "process.stdout.write('ok')",
+].join('; ')
+
 /**
  * Throws when a required condition is not met.
  * @param condition The condition expected to hold.
@@ -386,6 +394,17 @@ export const assertEslintSurface = (app: string, env: Record<string, string>): v
 export const assertStylelintSurface = (app: string, env: Record<string, string>): void => {
   const output = run(['bun', '-e', STYLELINT_SURFACE_CHECK], app, env)
   assert(output.includes('ok'), 'basis/stylelint resolves to a Stylelint config')
+}
+
+/**
+ * Asserts that `basis/lint` resolves to the Basis Markdown config inside a
+ * fixture.
+ * @param app Absolute path to the fixture application.
+ * @param env The restricted environment.
+ */
+export const assertMarkdownSurface = (app: string, env: Record<string, string>): void => {
+  const output = run(['bun', '-e', MARKDOWN_SURFACE_CHECK], app, env)
+  assert(output.includes('ok'), 'basis/lint resolves to a Markdown config')
 }
 
 /**

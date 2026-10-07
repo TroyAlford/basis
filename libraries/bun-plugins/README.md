@@ -5,18 +5,21 @@ Build plugins for the Bun runtime, providing enhanced build capabilities.
 ## Features
 
 ### SASS/SCSS Plugin
+
 - Full SASS/SCSS compilation support
 - Source map generation
 - Import resolution
 - Nested imports handling
 
 ### Globals Plugin
+
 - Inject global variables during build
 - Environment-specific configuration
 - Type-safe variable injection
 - Development/production modes
 
 ### Markdown/MDX Plugin
+
 - Compile `.md` and `.mdx` imports into React components (`@mdx-js/mdx` + `remark-gfm`)
 - Strip a leading YAML front-matter block, so it is metadata rather than page content
 - Rewrite `mermaid` code fences to the `Mermaid` component from `basis/react`

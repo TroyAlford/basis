@@ -1,6 +1,6 @@
 import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { assert, assertDoctorOk, assertEslintSurface, assertNodeFree, assertPatchesActive, assertStylelintSurface, initApp, makeTempDir, makeToolPath, run, runAllowFailure } from './harness'
+import { assert, assertDoctorOk, assertEslintSurface, assertMarkdownSurface, assertNodeFree, assertPatchesActive, assertStylelintSurface, initApp, makeTempDir, makeToolPath, run, runAllowFailure } from './harness'
 
 /**
  * A minimal package manifest, used for assertions.
@@ -44,6 +44,7 @@ const main = (): void => {
     assertNodeFree(app, env)
     assertEslintSurface(app, env)
     assertStylelintSurface(app, env)
+    assertMarkdownSurface(app, env)
     assertPatchesActive(app)
     assertDoctorOk(app, env)
 

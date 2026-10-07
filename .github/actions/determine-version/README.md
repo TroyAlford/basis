@@ -12,12 +12,10 @@ This action analyzes conventional commits to determine if a new version is neede
 
 ## Requirements
 
-The action is self-contained: it does **not** install a toolchain. Ensure `bun`
-(>= 1.4) and `git` are on `PATH` first, and check out full history **and tags**
-(`actions/checkout` with `fetch-depth: 0`). It only runs the copied TypeScript
-with `bun`, so no `node_modules` are required.
+The action is self-contained: it does **not** install a toolchain. Ensure `bun` (>= 1.4) and `git` are on `PATH` first, and check out full history **and tags** (`actions/checkout` with `fetch-depth: 0`). It only runs the copied TypeScript with `bun`, so no `node_modules` are required.
 
 ## Usage Example
+
 ```yaml
 jobs:
   check_version:
@@ -43,14 +41,12 @@ jobs:
           echo "Next version: ${{ steps.version.outputs.next-version }}"
 ```
 
-> **Self-reference vs. consumers.** The example above lives in Basis and uses
-> `@main`, so it never lags the latest action. Repositories *consuming* Basis
-> should pin a released tag (or a commit SHA) instead — or call the reusable
-> [`release.yml`](../../workflows/release.yml) workflow, which the caller pins.
+> **Self-reference vs. consumers.** The example above lives in Basis and uses `@main`, so it never lags the latest action. Repositories *consuming* Basis should pin a released tag (or a commit SHA) instead — or call the reusable [`release.yml`](../../workflows/release.yml) workflow, which the caller pins.
 
 ## Version Calculation Rules
 
 Versions are calculated based on conventional commits since the last release:
+
 - Major version bump (breaking changes):
   - Commits with `!` after the type
   - Commits containing "BREAKING CHANGE" in title or body

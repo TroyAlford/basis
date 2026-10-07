@@ -1,14 +1,10 @@
 # @basis/server
 
-A Bun application server for Basis React applications. One `Server` supports two
-explicit modes: a live-development server and a deterministic managed-production
-runtime.
+A Bun application server for Basis React applications. One `Server` supports two explicit modes: a live-development server and a deterministic managed-production runtime.
 
 ## Installation
 
-`@basis/server` is consumed from the Basis repository over a pinned Git tag (see
-[`consumer/README.md`](../../consumer/README.md)). There is no npm/JSR publish
-step.
+`@basis/server` is consumed from the Basis repository over a pinned Git tag (see [`consumer/README.md`](../../consumer/README.md)). There is no npm/JSR publish step.
 
 ## Usage
 
@@ -28,27 +24,21 @@ new Server()
   })
 ```
 
-`root` resolves relative entrypoint and asset paths, `assets` serves a static
-asset directory, `main` registers the browser entrypoint compiled from source,
-and `title` sets the SPA document title.
+`root` resolves relative entrypoint and asset paths, `assets` serves a static asset directory, `main` registers the browser entrypoint compiled from source, and `title` sets the SPA document title.
 
 `start` options:
 
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `development` | `NODE_ENV !== 'production'` | Select the live-development or managed-production workflow. |
-| `hostname` | `HOST`, then `127.0.0.1` | Interface to bind. |
-| `logger` | a standard Basis `Logger` | Sink for server/HMR lifecycle output. |
-| `port` | `PORT`, then `80` | Port to bind. `0` binds an ephemeral port. |
-| `version` | `VERSION`, then `development` | Release version reported by `/health`. |
+| Option        | Default                       | Purpose                                                     |
+| ------------- | ----------------------------- | ----------------------------------------------------------- |
+| `development` | `NODE_ENV !== 'production'`   | Select the live-development or managed-production workflow. |
+| `hostname`    | `HOST`, then `127.0.0.1`      | Interface to bind.                                          |
+| `logger`      | a standard Basis `Logger`     | Sink for server/HMR lifecycle output.                       |
+| `port`        | `PORT`, then `80`             | Port to bind. `0` binds an ephemeral port.                  |
+| `version`     | `VERSION`, then `development` | Release version reported by `/health`.                      |
 
 ## Logging
 
-`Server` owns a standard Basis `Logger` and writes its lifecycle output through
-it: the `listening http://<host>:<port>` startup line, `stopping` on shutdown,
-build failures, and the development/HMR watcher messages. Applications do not
-need to construct or configure a logger; use the server's logger for
-application-specific messages:
+`Server` owns a standard Basis `Logger` and writes its lifecycle output through it: the `listening http://<host>:<port>` startup line, `stopping` on shutdown, build failures, and the development/HMR watcher messages. Applications do not need to construct or configure a logger; use the server's logger for application-specific messages:
 
 ```ts
 const server = new Server().root(import.meta.dir).main('./Application.tsx')
@@ -56,48 +46,31 @@ server.start()
 server.logger.info('background worker ready')
 ```
 
-Records carry a UTC ISO-8601 timestamp (date and timezone), a level, and any
-automatic runtime context. The platform context (`SERVICE_NAME`, `VERSION`,
-`GIT_SHA`) is read from the environment, so a managed app is identified without
-per-app setup. Output stays colorized — including under PM2, whose ANSI styling
-command-center renders — and only the conventional `NO_COLOR` opt-out (or an
-explicit `logger: new Logger({ colors: false })`) disables it. Inject a custom
-`logger` to redirect or silence lifecycle output.
-
+Records carry a UTC ISO-8601 timestamp (date and timezone), a level, and any automatic runtime context. The platform context (`SERVICE_NAME`, `VERSION`, `GIT_SHA`) is read from the environment, so a managed app is identified without per-app setup. Output stays colorized — including under PM2, whose ANSI styling command-center renders — and only the conventional `NO_COLOR` opt-out (or an explicit `logger: new Logger({ colors: false })`) disables it. Inject a custom `logger` to redirect or silence lifecycle output.
 
 ## Development mode
 
 Development preserves the live workflow:
 
 - entrypoints are compiled from source and rebuilt on change;
-- a Chokidar watcher drives rebuilds for source, style, and bundled asset
-  (image/font) changes;
+- a Chokidar watcher drives rebuilds for source, style, and bundled asset (image/font) changes;
 - a WebSocket (served through the general `socket` facility) broadcasts HMR notifications;
-- dependencies (including React) are bundled, so no CDN is required; the
-  `/modules` proxy route remains available for explicit module requests but is
-  not used by the default build.
+- dependencies (including React) are bundled, so no CDN is required; the `/modules` proxy route remains available for explicit module requests but is not used by the default build.
 
 ## Production mode
 
 Production is deterministic and self-contained:
 
-- the application builds once at startup, bundling the installed dependency
-  graph, so no third-party CDN is required;
-- file watching, HMR, and the development module proxy are not started
-  (production bundles every dependency, including React);
+- the application builds once at startup, bundling the installed dependency graph, so no third-party CDN is required;
+- file watching, HMR, and the development module proxy are not started (production bundles every dependency, including React);
 - the SPA shell is served for unmatched paths, alongside configured assets;
 - `SIGINT`/`SIGTERM` stop the server and exit cleanly, suitable for PM2.
 
 ### Bundled assets
 
-The SPA shell loads entrypoints as classic `<script defer>` tags, so they are
-compiled as IIFEs (`format: 'iife'`). An entrypoint may export bindings without
-leaving an `export{…}` statement in the served bundle — which would be a syntax
-error — and module-local names never leak onto `window`.
+The SPA shell loads entrypoints as classic `<script defer>` tags, so they are compiled as IIFEs (`format: 'iife'`). An entrypoint may export bindings without leaving an `export{…}` statement in the served bundle — which would be a syntax error — and module-local names never leak onto `window`.
 
-Imported non-JS assets (images, fonts, …) are emitted as separate build outputs
-and served under the same `/scripts/<file>` route as the entrypoints. The bundle
-references them by an absolute `/scripts/...` URL, so `import icon from
+Imported non-JS assets (images, fonts, …) are emitted as separate build outputs and served under the same `/scripts/<file>` route as the entrypoints. The bundle references them by an absolute `/scripts/...` URL, so `import icon from
 './icon.png'` works with no extra configuration:
 
 ```ts
@@ -107,32 +80,21 @@ new Server().root(import.meta.dir).main('./Application.tsx').start()
 // the bundle references /scripts/icon-<hash>.png; the server serves it
 ```
 
-`server.assets(...)` remains the way to serve a fixed directory of runtime assets
-outside the bundler; `server.mount(...)` does the same with an allow-list.
+`server.assets(...)` remains the way to serve a fixed directory of runtime assets outside the bundler; `server.mount(...)` does the same with an allow-list.
 
 ## Readiness and health
 
-`/health` (also `/api/health`) is the managed-application readiness contract. It
-only responds `200` once the initial build has succeeded:
+`/health` (also `/api/health`) is the managed-application readiness contract. It only responds `200` once the initial build has succeeded:
 
 ```json
 { "status": "ok", "version": "0.6.1" }
 ```
 
-`version` is the authoritative release version from the strict semver release
-tag, injected by command-center as `VERSION`; the exact deployed checkout is a
-separate `GIT_SHA`, and `package.json.version` is never the source.
+`version` is the authoritative release version from the strict semver release tag, injected by command-center as `VERSION`; the exact deployed checkout is a separate `GIT_SHA`, and `package.json.version` is never the source.
 
-While the build is pending it responds `503 { "status": "starting", ... }`, and
-after a failed build `503 { "status": "error", "error": "...", ... }`. A
-deployment verifier therefore never sees a healthy process for an application
-that did not build. Bun version and uptime are additive diagnostics on the ready
-response.
+While the build is pending it responds `503 { "status": "starting", ... }`, and after a failed build `503 { "status": "error", "error": "...", ... }`. A deployment verifier therefore never sees a healthy process for an application that did not build. Bun version and uptime are additive diagnostics on the ready response.
 
-`server.ready()` resolves when the initial build succeeds and rejects when it
-fails, for processes that prefer to signal readiness directly. In production the
-process stays up and keeps reporting the failure on `/health` rather than
-crashing, so command-center can observe and act on it.
+`server.ready()` resolves when the initial build succeeds and rejects when it fails, for processes that prefer to signal readiness directly. In production the process stays up and keeps reporting the failure on `/health` rather than crashing, so command-center can observe and act on it.
 
 ## API routes
 
@@ -146,14 +108,11 @@ server.api([HttpVerb.Get], 'hello/:name', ({ name }, { logger, request }) => {
 })
 ```
 
-Templates match the route under `/api` (`/api/hello/world`) and, for root-level
-paths, the first path segment (so built-in `/health` and `/ping` resolve). Every
-handler receives the request and the server's logger.
+Templates match the route under `/api` (`/api/hello/world`) and, for root-level paths, the first path segment (so built-in `/health` and `/ping` resolve). Every handler receives the request and the server's logger.
 
 ## OAuth
 
-`server.oauth(options)` mounts a provider-agnostic authorization-code flow and
-wires the session capability into the server:
+`server.oauth(options)` mounts a provider-agnostic authorization-code flow and wires the session capability into the server:
 
 ```ts
 import { Identity } from 'basis/oauth'
@@ -173,24 +132,15 @@ server.oauth({
 })
 ```
 
-It registers `/api/oauth/login`, `/api/oauth/callback`, and
-`/api/oauth/logout`, owns the CSRF state cookie and the redirects, and calls
-`identity.set(...)` on a successful callback. Provider specifics stay with the
-caller — Discord, GitHub, Google, and any other OAuth provider work the same
-way. The client credentials come from the `Identity`, so they are configured in
-one place.
+It registers `/api/oauth/login`, `/api/oauth/callback`, and `/api/oauth/logout`, owns the CSRF state cookie and the redirects, and calls `identity.set(...)` on a successful callback. Provider specifics stay with the caller — Discord, GitHub, Google, and any other OAuth provider work the same way. The client credentials come from the `Identity`, so they are configured in one place.
 
 ## Embedding
 
-`server.handle(request)` dispatches one request through the same routing the
-server uses internally, for hosts that mount Basis Server inside another fetch
-handler. SSE responses are opted out of the HTTP idle timeout automatically, so
-idle streams stay open without changing the global timeout.
+`server.handle(request)` dispatches one request through the same routing the server uses internally, for hosts that mount Basis Server inside another fetch handler. SSE responses are opted out of the HTTP idle timeout automatically, so idle streams stay open without changing the global timeout.
 
 ## Server-sent events
 
-`sse` registers a GET-only event stream. Handlers publish named events and
-register teardown for client disconnect:
+`sse` registers a GET-only event stream. Handlers publish named events and register teardown for client disconnect:
 
 ```ts
 server.sse('events', (params, { logger }, channel) => {
@@ -199,16 +149,11 @@ server.sse('events', (params, { logger }, channel) => {
 })
 ```
 
-The server owns the `text/event-stream` framing, proxy-friendly headers
-(`x-accel-buffering: no`), disconnect cleanup, and a bounded per-connection
-buffer: if a client stops reading, frames are dropped rather than queued without
-limit. `channel.send` returns `false` when a frame was dropped.
+The server owns the `text/event-stream` framing, proxy-friendly headers (`x-accel-buffering: no`), disconnect cleanup, and a bounded per-connection buffer: if a client stops reading, frames are dropped rather than queued without limit. `channel.send` returns `false` when a frame was dropped.
 
 ## WebSockets
 
-`socket` registers a first-class WebSocket route. The server owns routing,
-upgrade negotiation, and lifecycle dispatch; HMR is implemented as an internal
-consumer of this same facility rather than a separate mechanism.
+`socket` registers a first-class WebSocket route. The server owns routing, upgrade negotiation, and lifecycle dispatch; HMR is implemented as an internal consumer of this same facility rather than a separate mechanism.
 
 ```ts
 server.socket('room/:id', {
@@ -218,14 +163,11 @@ server.socket('room/:id', {
 })
 ```
 
-`Socket.publish(event, data)` writes the `{ event, data }` envelope that the
-`ServerSocket` client transport consumes; `send` writes a raw frame.
+`Socket.publish(event, data)` writes the `{ event, data }` envelope that the `ServerSocket` client transport consumes; `send` writes a raw frame.
 
 ## Static mounts
 
-`mount` serves an allow-listed folder under a URL prefix, with the server owning
-traversal protection, content type, and missing-file handling. This is the
-supported way to expose assets that must not pass through the bundler:
+`mount` serves an allow-listed folder under a URL prefix, with the server owning traversal protection, content type, and missing-file handling. This is the supported way to expose assets that must not pass through the bundler:
 
 ```ts
 server.mount('/vendor', './node_modules', {
@@ -235,16 +177,9 @@ server.mount('/vendor', './node_modules', {
 
 ## Runtime context
 
-The server embeds immutable platform facts (`SERVICE_NAME`, `VERSION`,
-`GIT_SHA`) into the SPA shell it serves, so the browser boots the application
-runtime context without an extra fetch. On the client, `ApplicationBase` reads
-them via `readBasisRuntime()`; see the `@basis/react` runtime surface.
+The server embeds immutable platform facts (`SERVICE_NAME`, `VERSION`, `GIT_SHA`) into the SPA shell it serves, so the browser boots the application runtime context without an extra fetch. On the client, `ApplicationBase` reads them via `readBasisRuntime()`; see the `@basis/react` runtime surface.
 
-When the server is given an identity capability — through `server.identity(...)`
-or `server.oauth(...)` — it also verifies the bootstrapping request and embeds
-the signed-in user id as `runtime.identity` (`null` when anonymous). A consumer
-frontend therefore reads the signed-in identity from its standard runtime
-context without implementing a session fetch of its own.
+When the server is given an identity capability — through `server.identity(...)` or `server.oauth(...)` — it also verifies the bootstrapping request and embeds the signed-in user id as `runtime.identity` (`null` when anonymous). A consumer frontend therefore reads the signed-in identity from its standard runtime context without implementing a session fetch of its own.
 
 ## Documentation
 

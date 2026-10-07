@@ -4,7 +4,7 @@ title: Contributing
 
 # Contributing
 
-Work on a branch created from `main`; never commit to `main` directly. Open a pull request and let CI pass: ESLint, tests, TypeScript, and the consumer self-install contract.
+Work on a branch created from `main`; never commit to `main` directly. Open a pull request and let CI pass: lint, tests, TypeScript, and the consumer self-install contract.
 
 ## Checks
 
@@ -14,7 +14,7 @@ bun run lint
 bun test
 ```
 
-Run `bun run test:consumer` when changing `exports`, dependencies, presets, or patch handling.
+`bun run lint` reports the ESLint, CSS, and Markdown policies; `bun run format` applies every autofix they support. Run `bun run test:consumer` when changing `exports`, dependencies, presets, or patch handling.
 
 ## Documentation
 

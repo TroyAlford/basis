@@ -35,30 +35,15 @@ threshold:
 
 # Test strategy
 
-The purpose of tests is confidence: prove that important code does what we
-expect, and does not do what we expect it not to do. Optimize for the cheapest
-deterministic signal that provides the required confidence.
+The purpose of tests is confidence: prove that important code does what we expect, and does not do what we expect it not to do. Optimize for the cheapest deterministic signal that provides the required confidence.
 
-Test important behavior at the lowest-cost level that meaningfully proves it.
-Use more expensive integration and end-to-end tests only for properties that
-cannot be established lower in the stack. This is not "unit tests good,
-integration tests bad."
+Test important behavior at the lowest-cost level that meaningfully proves it. Use more expensive integration and end-to-end tests only for properties that cannot be established lower in the stack. This is not "unit tests good, integration tests bad."
 
-For code fully under our control with little or no dependency surface, direct
-unit tests should exercise meaningful paths comprehensively. A small utility
-with branches can reasonably have complete meaningful path coverage because the
-signal is cheap. Test both positive and negative behavior: what the code should
-do and what it should not do.
+For code fully under our control with little or no dependency surface, direct unit tests should exercise meaningful paths comprehensively. A small utility with branches can reasonably have complete meaningful path coverage because the signal is cheap. Test both positive and negative behavior: what the code should do and what it should not do.
 
-As dependencies accumulate, mocking is appropriate when the thing being proven
-is the unit's behavior against an expected collaborator contract. Elaborate
-mocks can cross a line: if the test mostly proves that a fake universe was
-recreated correctly, it no longer gives strong confidence about the real
-behavior. When the claim is that two real components work together, test those
-real components together.
+As dependencies accumulate, mocking is appropriate when the thing being proven is the unit's behavior against an expected collaborator contract. Elaborate mocks can cross a line: if the test mostly proves that a fake universe was recreated correctly, it no longer gives strong confidence about the real behavior. When the claim is that two real components work together, test those real components together.
 
-True end-to-end tests remain necessary for system properties that lower-level
-tests cannot establish:
+True end-to-end tests remain necessary for system properties that lower-level tests cannot establish:
 
 - the deployed application starts;
 - configuration is valid;
@@ -66,53 +51,34 @@ tests cannot establish:
 - real infrastructure wiring is reachable;
 - critical user flows operate in the assembled system.
 
-These tests should generally be the smallest part of the suite because they are
-the most expensive, stateful, slow, and difficult to make deterministic. A large
-mocked test suite does not prove that production can actually boot.
+These tests should generally be the smallest part of the suite because they are the most expensive, stateful, slow, and difficult to make deterministic. A large mocked test suite does not prove that production can actually boot.
 
-Important behavior that can only be tested by booting the entire application,
-talking to a real external system, or running a prohibitively expensive
-environment is a design signal. It may be worth introducing a small seam,
-dependency-injection point, extraction, or other architecture change if that
-lets important behavior be tested cheaply and frequently. Do not prescribe a
-seam automatically; the abstraction must make the system simpler overall. When a
-structural change is the real fix, name the smell here but leave the structural
-recommendation to the reviewer that owns it.
+Important behavior that can only be tested by booting the entire application, talking to a real external system, or running a prohibitively expensive environment is a design signal. It may be worth introducing a small seam, dependency-injection point, extraction, or other architecture change if that lets important behavior be tested cheaply and frequently. Do not prescribe a seam automatically; the abstraction must make the system simpler overall. When a structural change is the real fix, name the smell here but leave the structural recommendation to the reviewer that owns it.
 
 Strong smells:
 
 - important business logic whose primary proof is only a full end-to-end path;
-- high-value logic whose tests are so slow, expensive, or flaky that they are
-  not routinely run;
+- high-value logic whose tests are so slow, expensive, or flaky that they are not routinely run;
 - enormous mock graphs required to exercise otherwise ordinary behavior;
-- mocks reproducing meaningful implementation logic rather than replacing a
-  boundary;
-- integration or end-to-end tests repeatedly proving detailed business rules
-  that could be proven much more cheaply at a lower level;
-- unit tests claiming to prove that real components interoperate while every
-  collaborator is mocked;
-- no real smoke or integration check where the actual risk is deployment,
-  configuration, or wiring;
+- mocks reproducing meaningful implementation logic rather than replacing a boundary;
+- integration or end-to-end tests repeatedly proving detailed business rules that could be proven much more cheaply at a lower level;
+- unit tests claiming to prove that real components interoperate while every collaborator is mocked;
+- no real smoke or integration check where the actual risk is deployment, configuration, or wiring;
 - important branches with no affordable deterministic coverage.
 
-Comprehensive confidence does not mean proving the same behavior at every layer.
-Each higher layer should add signal the lower layer cannot provide:
+Comprehensive confidence does not mean proving the same behavior at every layer. Each higher layer should add signal the lower layer cannot provide:
 
 - unit tests -> detailed business and algorithmic behavior;
 - integration tests -> real boundaries and components actually cooperate;
-- smoke and end-to-end tests -> the assembled, deployed system actually
-  functions.
+- smoke and end-to-end tests -> the assembled, deployed system actually functions.
 
-Coverage is evidence, not the goal. Confidence is the goal; do not turn a
-coverage percentage into the reviewer.
+Coverage is evidence, not the goal. Confidence is the goal; do not turn a coverage percentage into the reviewer.
 
-Use `appropriate-test-level` when coverage is proportionate, and `abstain` only
-when the available evidence cannot support a review at all.
+Use `appropriate-test-level` when coverage is proportionate, and `abstain` only when the available evidence cannot support a review at all.
 
 ## Canonical examples
 
-Concrete examples of the code this reviewer should notice and the feedback it
-should give. These examples are part of the reviewer instructions.
+Concrete examples of the code this reviewer should notice and the feedback it should give. These examples are part of the reviewer instructions.
 
 ### Important rules proven only end-to-end
 
@@ -140,9 +106,7 @@ Expected: `finding / expensive-critical-coverage`
 
 Expected review feedback:
 
-> The discount rules are important business logic, but their only proof boots the
-> application and a database. Test `priceFor` directly across the branches and
-> edge cases, and keep the end-to-end flow for wiring rather than the rules.
+> The discount rules are important business logic, but their only proof boots the application and a database. Test `priceFor` directly across the branches and edge cases, and keep the end-to-end flow for wiring rather than the rules.
 
 ### A fake that reproduces the real collaborator's semantics
 
@@ -171,18 +135,13 @@ test('service returns active users in order', async () => {
 })
 ```
 
-The fake reimplements the repository's filtering and sorting, and the test is
-offered as proof that the service and repository work together.
+The fake reimplements the repository's filtering and sorting, and the test is offered as proof that the service and repository work together.
 
 Expected: `finding / mocked-integration`
 
 Expected review feedback:
 
-> This test duplicates the repository's filtering and sorting in a fake, then
-> treats the result as evidence that the service and repository integrate. It
-> only proves the fake. Test the real repository against a real store, and prove
-> the service against a contract-level fake that does not reimplement query
-> behavior.
+> This test duplicates the repository's filtering and sorting in a fake, then treats the result as evidence that the service and repository integrate. It only proves the fake. Test the real repository against a real store, and prove the service against a contract-level fake that does not reimplement query behavior.
 
 ### Proportionate direct coverage
 
@@ -216,13 +175,10 @@ test('formats a user', () => { /* ... */ })
 test('saves and loads a user', async () => { /* real store integration */ })
 ```
 
-Unit and integration coverage is good, but nothing starts the deployed
-application, validates its configuration, or exercises real wiring.
+Unit and integration coverage is good, but nothing starts the deployed application, validates its configuration, or exercises real wiring.
 
 Expected: `finding / missing-system-proof`
 
 Expected review feedback:
 
-> Unit and integration coverage look solid, but there is no smoke test that the
-> assembled application starts with valid configuration and working wiring. That
-> is the risk this change carries; add the smallest real check for it.
+> Unit and integration coverage look solid, but there is no smoke test that the assembled application starts with valid configuration and working wiring. That is the risk this change carries; add the smallest real check for it.

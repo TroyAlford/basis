@@ -14,7 +14,7 @@ The `render` function is a key utility for testing React components. It allows y
 
 To use the `render` function, import it into your test file and call it with the component you want to test:
 
-```ts
+````ts
 import { render } from '../../testing/render'
 
 class Hello extends React.Component {
@@ -79,9 +79,8 @@ preload = [
   "./node_modules/TroyAlford/basis/config/happydom.ts",
   "./node_modules/TroyAlford/basis/libraries/react/testing/bun"
 ]
-```
+````
 
 ## Conclusion
 
 The utilities provided in this directory are designed to streamline the process of testing React components, making it easier to write robust and maintainable tests. By using the `render` function and custom matchers, you can focus on testing the behavior and output of your components with minimal setup.
-

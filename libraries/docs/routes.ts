@@ -17,6 +17,7 @@ import { EngineeringPrinciplesDocs } from './pages/EngineeringPrinciples.docs.ts
 import { EnumEditorDocs } from './pages/EnumEditor.docs.tsx'
 import { IconsDocs } from './pages/Icons.docs.tsx'
 import { ImageDocs } from './pages/Image.docs.tsx'
+import { MarkdownLintingDocs } from './pages/MarkdownLinting.docs.tsx'
 import { MenuDocs } from './pages/Menu.docs.tsx'
 import { MermaidDocs } from './pages/Mermaid.docs.tsx'
 import { MixinsDocs } from './pages/Mixins.docs.tsx'
@@ -84,6 +85,7 @@ export const routes = ([
   docs({ component: EngineeringPrinciplesDocs, path: '/engineering-principles', title: 'Engineering Principles' }),
   docs({ component: IconsDocs, path: '/icons', title: 'Icons' }),
   docs({ component: ImageDocs, path: '/components/image', title: 'Image' }),
+  docs({ component: MarkdownLintingDocs, path: '/markdown-linting', title: 'Markdown Linting' }),
   docs({ component: MenuDocs, path: '/components/menu', title: 'Menu' }),
   docs({ component: MermaidDocs, path: '/components/mermaid', title: 'Mermaid' }),
   docs({ component: MixinsDocs, path: '/mixins', title: 'Mixins' }),

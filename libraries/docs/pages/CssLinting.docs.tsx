@@ -21,14 +21,15 @@ export class CssLintingDocs extends DocumentationPage<Record<string, never>> {
         <section>
           <h2>Enabling it</h2>
           <p>
-            The supported zero-config route is the Basis CLI, which runs the TypeScript/JSX and CSS
-            policies together:
+            The supported zero-config route is the Basis CLI, which runs the TypeScript/JSX, CSS, and
+            Markdown policies together:
           </p>
           {Code.format('bunx basis lint', 'bash')}
           <p>
-            Add <code>--fix</code> to apply every autofixable finding from both policies in one run:
+            <code>basis lint</code> reports; <code>basis format</code> applies every autofix in one
+            pass:
           </p>
-          {Code.format('bunx basis lint --fix', 'bash')}
+          {Code.format('bunx basis format', 'bash')}
           <p>
             To run Stylelint directly, point it at the Basis config and the template-literal files.
             Add <code>--allow-empty-input</code> when a project may have no{' '}
@@ -85,8 +86,8 @@ export class CssLintingDocs extends DocumentationPage<Record<string, never>> {
             </li>
           </ul>
           <p>
-            Ordering and style rules are safely autofixable. Run Stylelint with <code>--fix</code>{' '}
-            (or let the Basis lint workflow report them) to apply the deterministic order.
+            Ordering and style rules are safely autofixable. Run <code>basis format</code>, or
+            Stylelint directly with <code>--fix</code>, to apply the deterministic order.
           </p>
         </section>
         <section>

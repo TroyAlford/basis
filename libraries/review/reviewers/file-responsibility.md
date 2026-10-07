@@ -31,47 +31,30 @@ threshold:
 
 # File responsibility
 
-Organize code around understandable units of responsibility, not arbitrary line
-counts.
+Organize code around understandable units of responsibility, not arbitrary line counts.
 
-A file should have an obvious reason to exist. A reusable class, interface, type,
-substantial function, or other independently meaningful unit should generally
-have an obvious home of its own rather than being buried among unrelated units.
+A file should have an obvious reason to exist. A reusable class, interface, type, substantial function, or other independently meaningful unit should generally have an obvious home of its own rather than being buried among unrelated units.
 
-Do not use "the file is too long" as the review rule. A long implementation of
-one coherent unit may be easier to understand than several artificially split
-files. Conversely, a short file containing several unrelated exported concepts
-may already have poor boundaries.
+Do not use "the file is too long" as the review rule. A long implementation of one coherent unit may be easier to understand than several artificially split files. Conversely, a short file containing several unrelated exported concepts may already have poor boundaries.
 
 Look for changes that:
 
-- add another independently meaningful exported unit to a file that already
-  represents a different unit;
-- accumulate a grab-bag of helpers, types, interfaces, classes, or constants
-  whose only relationship is that they were convenient to place together;
+- add another independently meaningful exported unit to a file that already represents a different unit;
+- accumulate a grab-bag of helpers, types, interfaces, classes, or constants whose only relationship is that they were convenient to place together;
 - bury a reusable concept inside the implementation file of a different concept;
-- make ownership ambiguous: a reader cannot tell which file should be opened to
-  understand or change a particular responsibility.
+- make ownership ambiguous: a reader cannot tell which file should be opened to understand or change a particular responsibility.
 
 Prefer explicit filenames that reveal what they contain.
 
-Do not introduce nested `index.ts` barrel files as an organizational shortcut.
-Barrels are acceptable only at a repository or monorepo-module root where they
-define that module's public surface. Below that boundary, explicit files and
-imports are easier to discover and reason about.
+Do not introduce nested `index.ts` barrel files as an organizational shortcut. Barrels are acceptable only at a repository or monorepo-module root where they define that module's public surface. Below that boundary, explicit files and imports are easier to discover and reason about.
 
-Do not split tightly coupled implementation details solely to satisfy this rule.
-If several declarations exist only to implement one coherent unit and have no
-independent meaning, keeping them together can be clearer.
+Do not split tightly coupled implementation details solely to satisfy this rule. If several declarations exist only to implement one coherent unit and have no independent meaning, keeping them together can be clearer.
 
-When the conceptual boundary is ambiguous, ask what independently changes,
-reuses, or owns the candidate unit. The answer should determine the file
-boundary.
+When the conceptual boundary is ambiguous, ask what independently changes, reuses, or owns the candidate unit. The answer should determine the file boundary.
 
 ## Canonical examples
 
-Concrete examples of the code this reviewer should notice and the feedback it
-should give. These examples are part of the reviewer instructions.
+Concrete examples of the code this reviewer should notice and the feedback it should give. These examples are part of the reviewer instructions.
 
 ### A grab bag of unrelated helpers
 
@@ -87,9 +70,7 @@ Expected: `finding / split-unit`
 
 Expected review feedback:
 
-> `utils.ts` holds unrelated date, string, HTTP, and numeric helpers whose only
-> relationship is convenience. Split them into files named for what they
-> contain.
+> `utils.ts` holds unrelated date, string, HTTP, and numeric helpers whose only relationship is convenience. Split them into files named for what they contain.
 
 ### A reusable unit buried in an unrelated file
 
@@ -109,8 +90,7 @@ Expected: `finding / move-unit`
 
 Expected review feedback:
 
-> `Money` is a reusable concept defined inside the report renderer. Give it its
-> own file so it can be found and reused without importing the renderer.
+> `Money` is a reusable concept defined inside the report renderer. Give it its own file so it can be found and reused without importing the renderer.
 
 ### One coherent unit in a long file
 

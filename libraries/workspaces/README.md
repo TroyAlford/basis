@@ -20,13 +20,16 @@ bun add -d @basis/workspaces
 ## CLI Usage
 
 The package provides two CLI commands that can be used interchangeably:
+
 - `workspace` (full name)
 - `ws` (shorthand)
 
 ### Commands
 
 #### List Workspaces
+
 Lists all workspaces in the monorepo:
+
 ```bash
 # List all workspaces
 bun ws list
@@ -42,7 +45,9 @@ bun ws list --only '^@basis/' --not 'internal'
 ```
 
 #### Find Workspace Path
+
 Get the filesystem path of a workspace:
+
 ```bash
 # Find a specific workspace
 bun ws find @basis/utilities
@@ -52,7 +57,9 @@ cd "$(bun ws find @basis/utilities)"
 ```
 
 #### List Changed Files
+
 Show files that have changed since the last tag:
+
 ```bash
 # Show all changed files
 bun ws changed-files
@@ -65,7 +72,9 @@ bun ws changed-files --not '\.test\.'
 ```
 
 #### List Changed Workspaces
+
 Show workspaces that have changes (including dependency changes):
+
 ```bash
 # Show all changed workspaces
 bun ws changed
@@ -75,7 +84,9 @@ bun ws changed --only '^@basis/'
 ```
 
 #### Build Package
+
 Build a specific package:
+
 ```bash
 # Build with default options
 bun ws build @basis/utilities
@@ -97,11 +108,13 @@ bun ws build-all -v 1.0.0          # Build all with specific version
 ### Filtering
 
 Both `--only` and `--not` options:
+
 - Accept multiple values
 - Use regular expressions for matching
 - Can be combined
 
 Examples:
+
 ```bash
 # Multiple inclusion patterns
 bun ws list --only '^@basis/' --only '^@app/'
@@ -144,6 +157,7 @@ console.log(info.paths)    // Map of filesystem paths
 ## Types
 
 The package exports these TypeScript types:
+
 - `PackageJSON`: Extended package.json type
 - `Workspace`: Single workspace information
 - `WorkspaceInfo`: Project-wide workspace information

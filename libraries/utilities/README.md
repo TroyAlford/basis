@@ -15,6 +15,7 @@ The `@basis/utilities` package offers a collection of utility functions designed
 ```sh
 bunx jsr add @basis/utilities
 ```
+
 > **Note:** All `@basis` packages, including this one, are published via `jsr` instead of `npm`. This approach ensures a streamlined and efficient package management experience tailored for Bun.
 
 ## Usage Example
@@ -65,9 +66,7 @@ console.log(result); // Output: "five"
 
 ### Logging
 
-The `Logger` provides timestamped, severity-formatted console output with an
-optional bounded file sink and stopwatch helpers. It is also exposed through the
-Basis package facade as `basis/logger`.
+The `Logger` provides timestamped, severity-formatted console output with an optional bounded file sink and stopwatch helpers. It is also exposed through the Basis package facade as `basis/logger`.
 
 ```ts
 import { Logger } from '@basis/utilities'
@@ -79,5 +78,4 @@ const stopwatch = logger.stopwatchStart()
 logger.stopwatchStop(stopwatch, 'iteration complete')
 ```
 
-`LoggerOptions` supports `prefix`, `silent`, `logFilePath`, and `maxLogLines`.
-Use `withPrefix` to derive a scoped view that shares the same destination.
+`LoggerOptions` supports `prefix`, `silent`, `logFilePath`, and `maxLogLines`. Use `withPrefix` to derive a scoped view that shares the same destination.

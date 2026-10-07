@@ -11,9 +11,10 @@
 4. Count how many digits are in the formatted string in total (`totalDigits_new`).
 
 5. Compute the target number of digits *before* the cursor in the new string:
-  ```
-  targetDigitsBefore = totalDigits_new − digitsAfter_old
-  ```
+
+```
+targetDigitsBefore = totalDigits_new − digitsAfter_old
+```
 
 This ensures the same count of digits remain “after” the cursor as before.
 
@@ -66,20 +67,22 @@ This ensures the same count of digits remain “after” the cursor as before.
 
 ## Example Walkthroughs
 
-### Example A:  
+### Example A:
+
 `123|,456` → paste `8.88` → formatted `1,238.88`
 
-- Original raw: digitsBefore = 3, digitsAfter = 3  
-- After formatting: totalDigits_new = 6 (digits = `123888`)  
-- targetDigitsBefore = 6 − 3 = 3  
+- Original raw: digitsBefore = 3, digitsAfter = 3
+- After formatting: totalDigits_new = 6 (digits = `123888`)
+- targetDigitsBefore = 6 − 3 = 3
 - In `"1,238.88"`, skip non-digits and position after the first 3 digits (`1`, `2`, `3`) → result: `1,238.88|456`
 
-### Example B:  
+### Example B:
+
 `12|3,45|6` → paste `8.88` → formatted `128.88`
 
-- Original raw: digitsBefore = 2, digitsAfter = 4  
-- totalDigits_new = 5 (digits = `12888`)  
-- targetDigitsBefore = 5 − 4 = 1  
+- Original raw: digitsBefore = 2, digitsAfter = 4
+- totalDigits_new = 5 (digits = `12888`)
+- targetDigitsBefore = 5 − 4 = 1
 - In `"128.88"`, the first digit is `1`, so cursor goes just after → `1|28.88` + suffix → `128.88|6`
 
 # NumberEditor Cursor & Formatting Algorithm
@@ -146,16 +149,18 @@ The `NumberEditor` ensures that, after any user edit (typing, pasting, deleting)
 ## Disambiguating `onKeyDown` vs `onChange`
 
 ### - **Backspace/Delete (`onKeyDown`):**
-  - The browser mutates the input value and updates the cursor.
-  - After the DOM change, re-sanitize and re-format the value.
-  - Recompute the cursor position using the digit-counting algorithm above.
-  - **Do not** prevent default for Backspace/Delete; let the browser handle the mutation, then correct formatting/cursor as needed.
+
+- The browser mutates the input value and updates the cursor.
+- After the DOM change, re-sanitize and re-format the value.
+- Recompute the cursor position using the digit-counting algorithm above.
+- **Do not** prevent default for Backspace/Delete; let the browser handle the mutation, then correct formatting/cursor as needed.
 
 ### - **Typing/Paste (`onChange`):**
-  - The new value is available in the event.
-  - Before formatting, record the number of digits after the new cursor position.
-  - Format and update the value.
-  - Set the cursor so the same number of digits are after the cursor as before.
+
+- The new value is available in the event.
+- Before formatting, record the number of digits after the new cursor position.
+- Format and update the value.
+- Set the cursor so the same number of digits are after the cursor as before.
 
 ---
 
@@ -189,11 +194,12 @@ The `NumberEditor` ensures that, after any user edit (typing, pasting, deleting)
 
 ### Example 1: Paste in the Middle
 
-**Initial:**  
-`123|,456` (cursor after `3`)  
+**Initial:**\
+`123|,456` (cursor after `3`)\
 **User pastes:** `8.88`
 
 **Steps:**
+
 - Digits before: 3 (`123`)
 - Digits after: 3 (`456`)
 - After paste and format: `1,238.88`
@@ -203,11 +209,11 @@ The `NumberEditor` ensures that, after any user edit (typing, pasting, deleting)
 
 ### Example 2: Selection Replace
 
-**Initial:**  
-`12|3,45|6` (selection from after `2` to after `5`)
-**User pastes:** `8.88`
+**Initial:**\
+`12|3,45|6` (selection from after `2` to after `5`) **User pastes:** `8.88`
 
 **Steps:**
+
 - Digits before: 2 (`12`)
 - Digits after: 1 (`6`)
 - After paste and format: `128.88`
@@ -219,11 +225,11 @@ The `NumberEditor` ensures that, after any user edit (typing, pasting, deleting)
 
 ## Summary Table: Event Handling
 
-| Event Type         | Input Handler | What Happens?                                       |
-|--------------------|--------------|-----------------------------------------------------|
-| Typing/Paste       | `onChange`   | Sanitize, format, reposition cursor by digit index. |
-| Backspace/Delete   | `onKeyDown`  | Let browser mutate, then sanitize/format/cursor.    |
-| Arrow Up/Down      | `onKeyDown`  | Step value, format, set cursor at end.              |
+| Event Type       | Input Handler | What Happens?                                       |
+| ---------------- | ------------- | --------------------------------------------------- |
+| Typing/Paste     | `onChange`    | Sanitize, format, reposition cursor by digit index. |
+| Backspace/Delete | `onKeyDown`   | Let browser mutate, then sanitize/format/cursor.    |
+| Arrow Up/Down    | `onKeyDown`   | Step value, format, set cursor at end.              |
 
 ---
 

@@ -99,4 +99,3 @@ A `mermaid` code fence in a `.mdx` document compiles to this component through t
 ## Default typography
 
 Importing `@basis/react` registers a root stylesheet that applies Basis's default type — Ubuntu for UI and Fira Code for code — from Google Fonts, so components render in Basis's type without configuration. The stylesheet URL is exported as `BASIS_FONTS_URL`; `basis/testing`'s HTML renderer loads the same fonts, so component screenshots get Basis type by default.
-

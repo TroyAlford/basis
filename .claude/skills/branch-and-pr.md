@@ -4,22 +4,23 @@ Use this skill when asked to create a branch, commit, or pull request.
 
 ## Convco Commit Types
 
-| Type | Use for |
-|---|---|
-| `feat` | New feature |
-| `fix` | Bug fix |
+| Type       | Use for                                         |
+| ---------- | ----------------------------------------------- |
+| `feat`     | New feature                                     |
+| `fix`      | Bug fix                                         |
 | `refactor` | Code change that is neither a fix nor a feature |
-| `test` | Adding or correcting tests |
-| `docs` | Documentation only |
-| `chore` | Build process, dependencies, tooling |
-| `perf` | Performance improvement |
-| `ci` | CI/CD changes |
+| `test`     | Adding or correcting tests                      |
+| `docs`     | Documentation only                              |
+| `chore`    | Build process, dependencies, tooling            |
+| `perf`     | Performance improvement                         |
+| `ci`       | CI/CD changes                                   |
 
 ## Branch Names
 
 Format: `{type}/{short-kebab-description}`
 
 Examples:
+
 - `feat/db-backup-and-restore`
 - `fix/backup-dir-permissions`
 - `refactor/schema-bootstrap-phases`
@@ -33,6 +34,7 @@ Format: `{type}({scope}): {short description}`
 - Body is optional; use it only for non-obvious context
 
 Examples:
+
 - `feat(db): add pg_dump backup and restore via docker exec`
 - `fix(backup): use relative path for BACKUP_DIR default`
 - `refactor(schema): split bootstrap into extensions/tables/views phases`
@@ -49,6 +51,7 @@ Same format as commit messages: `{type}({scope}): {short description}`
 - Include a test plan checklist
 
 Template:
+
 ```
 ## Summary
 - {what changed, one line per logical unit}
