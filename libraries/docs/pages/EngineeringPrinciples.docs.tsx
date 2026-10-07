@@ -1,6 +1,6 @@
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
-export class EngineeringPrinciplesDocs extends Documentation<Record<string, never>> {
+export class EngineeringPrinciplesDocs extends DocumentationPage<Record<string, never>> {
   content() {
     return (
       <>

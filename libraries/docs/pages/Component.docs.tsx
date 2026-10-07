@@ -1,8 +1,8 @@
 import { Link } from '../../react/components/Router/Link'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
-export class ComponentDocs extends Documentation<Record<string, never>> {
+export class ComponentDocs extends DocumentationPage<Record<string, never>> {
   content() {
     return (
       <>

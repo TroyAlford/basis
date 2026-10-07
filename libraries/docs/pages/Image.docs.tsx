@@ -2,7 +2,7 @@ import { Image } from '../../react/components/Image/Image'
 import type { Align } from '../../react/types/Align'
 import type { Size } from '../../react/types/Size'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 import { imageURL } from '../utilities/imageURL'
 
 interface State {
@@ -10,9 +10,9 @@ interface State {
   size: Size,
 }
 
-export class ImageDocs extends Documentation<State> {
+export class ImageDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       align: Image.Align.Center,
       size: Image.Size.Natural,

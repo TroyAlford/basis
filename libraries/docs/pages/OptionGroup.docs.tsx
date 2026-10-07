@@ -2,7 +2,7 @@ import { OptionGroup, Section, ToggleEditor } from '@basis/react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Orientation } from '../../react/types/Orientation'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface State {
   customOptions: string,
@@ -12,9 +12,9 @@ interface State {
   selectedValue: string | string[],
 }
 
-export class OptionGroupDocs extends Documentation<State> {
+export class OptionGroupDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       customOptions: 'option1,option2,option3',
       optionType: 'option' as const,

@@ -1,11 +1,11 @@
 import { Router } from '@basis/react'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 /**
  * Documentation for {@link OverlayProvider}: global host for {@link Dialog} and {@link Notification}.
  */
-export class OverlayProviderDocs extends Documentation<Record<string, never>> {
+export class OverlayProviderDocs extends DocumentationPage<Record<string, never>> {
   content() {
     return (
       <>

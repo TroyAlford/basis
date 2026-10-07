@@ -1,9 +1,9 @@
 import { Carousel } from '../../react/components/Carousel/Carousel'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 import { imageURL } from '../utilities/imageURL'
 
-export class CarouselDocs extends Documentation {
+export class CarouselDocs extends DocumentationPage {
   content() {
     return (
       <>

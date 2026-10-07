@@ -1,7 +1,7 @@
 import { Padlock, Section, ToggleEditor } from '@basis/react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface State {
   customText: string,
@@ -11,9 +11,9 @@ interface State {
   width: string,
 }
 
-export class ToggleEditorDocs extends Documentation<State> {
+export class ToggleEditorDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       customText: 'Enable notifications',
       height: '1em',

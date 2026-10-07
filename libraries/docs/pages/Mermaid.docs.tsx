@@ -1,8 +1,8 @@
 import { Mermaid } from '../../react/components/Mermaid/Mermaid'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
-export class MermaidDocs extends Documentation<Record<string, never>> {
+export class MermaidDocs extends DocumentationPage<Record<string, never>> {
   content() {
     return (
       <>

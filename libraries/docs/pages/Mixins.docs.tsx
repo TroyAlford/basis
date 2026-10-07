@@ -1,9 +1,9 @@
 import { NumberEditor, Section } from '@basis/react'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 import { PopupBoundaryExample } from '../components/PopupBoundaryExample'
 
-export class MixinsDocs extends Documentation<Record<string, never>> {
+export class MixinsDocs extends DocumentationPage<Record<string, never>> {
   content() {
     return (
       <>

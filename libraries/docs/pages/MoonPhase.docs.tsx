@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react'
 import { Button, css, NumberEditor, style } from '@basis/react'
 import * as Icons from '@basis/react/icons'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 import './MoonPhase.styles.ts'
 
@@ -15,9 +15,9 @@ interface State {
   tilt: number,
 }
 
-export class MoonPhaseDocs extends Documentation<State> {
+export class MoonPhaseDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       color: '#336699',
       day: 3.5,

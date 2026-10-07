@@ -1,15 +1,15 @@
 import { Menu } from '../../react/components/Menu/Menu'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface State {
   disabled: boolean,
   orientation: Menu['props']['orientation'],
 }
 
-export class MenuDocs extends Documentation<State> {
+export class MenuDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       disabled: false,
       orientation: Menu.Orientation.Vertical,

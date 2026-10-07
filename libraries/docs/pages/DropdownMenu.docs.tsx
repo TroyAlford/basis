@@ -3,16 +3,16 @@ import { Button } from '../../react/components/Button/Button'
 import { DropdownMenu } from '../../react/components/DropdownMenu/DropdownMenu'
 import { Link } from '../../react/components/Router/Link'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface State {
   anchorPoint: AnchorPoint,
   open: boolean,
 }
 
-export class DropdownMenuDocs extends Documentation<State> {
+export class DropdownMenuDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       anchorPoint: AnchorPoint.BottomStart,
       open: true,

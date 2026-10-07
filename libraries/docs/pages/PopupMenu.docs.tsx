@@ -4,16 +4,16 @@ import { Menu } from '../../react/components/Menu/Menu'
 import { PopupMenu } from '../../react/components/PopupMenu/PopupMenu'
 import { Link } from '../../react/components/Router/Link'
 import { Code } from '../components/Code'
-import { Documentation } from '../components/Documentation'
+import { DocumentationPage } from '../components/DocumentationPage'
 
 interface State {
   anchorPoint: AnchorPoint,
   visible: boolean,
 }
 
-export class PopupMenuDocs extends Documentation<State> {
+export class PopupMenuDocs extends DocumentationPage<State> {
   static override defaultProps = {
-    ...Documentation.defaultProps,
+    ...DocumentationPage.defaultProps,
     initialValue: {
       anchorPoint: AnchorPoint.Top,
       visible: true,
