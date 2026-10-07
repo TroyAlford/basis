@@ -163,8 +163,15 @@ const optionItems = (
   </>
 )
 
-/** One labelled gallery per component. */
-const COMPONENTS: [string, React.ReactElement][] = [
+/**
+ * One labelled gallery per component, with an optional wider pixel budget.
+ *
+ * `OptionGroup` and `TagsEditor` size native form controls to their content, so
+ * their layout tracks the host's font metrics and shifts slightly between the
+ * machines that generate a baseline and the one that compares it. Their budget
+ * is wider; everything else matches tightly.
+ */
+const COMPONENTS: [string, React.ReactElement, number?][] = [
   ['AutoComplete', gallery([
     ['closed', (
       <AutoComplete
@@ -246,7 +253,7 @@ const COMPONENTS: [string, React.ReactElement][] = [
     ['horizontal', (
       <OptionGroup initialValue="a" orientation={Orientation.Horizontal}>{optionItems}</OptionGroup>
     )],
-  ])],
+  ]), 0.05],
   ['Section', gallery([
     ['titled', <Section title="Section title"><p>Section content.</p></Section>],
     ['untitled', <Section><p>Section content.</p></Section>],
@@ -259,7 +266,7 @@ const COMPONENTS: [string, React.ReactElement][] = [
   ['TagsEditor', gallery([
     ['values', <TagsEditor initialValue={['alpha', 'beta']} />],
     ['empty', <TagsEditor />],
-  ])],
+  ]), 0.05],
   ['TextEditor', gallery([
     ['placeholder', <TextEditor placeholder="Placeholder" />],
     ['value', <TextEditor initialValue="Some text" />],
@@ -272,9 +279,11 @@ const COMPONENTS: [string, React.ReactElement][] = [
 ]
 
 describe('components', () => {
-  for (const [name, element] of COMPONENTS) {
+  for (const [name, element, tolerance] of COMPONENTS) {
     test(name, async () => {
-      await matchScreenshot(element, 'default', TOLERANCE)
+      await matchScreenshot(element, 'default', {
+        maxDiffPixelRatio: tolerance ?? TOLERANCE.maxDiffPixelRatio,
+      })
     })
   }
 })
