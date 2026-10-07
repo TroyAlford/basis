@@ -15,8 +15,13 @@ interface MarkdownNode {
 /** Whether the document contains a Mermaid fence. */
 const MERMAID_FENCE = /^`{3,}\s*mermaid\b/m
 
-/** The import that makes `<Mermaid>` resolve to the component, not a missing reference. */
-const MERMAID_IMPORT = "import { Mermaid } from '@basis/react'\n\n"
+/**
+ * The import that makes `<Mermaid>` resolve to the component, not a missing
+ * reference. This uses the consumer-facing `basis/react` specifier — the same
+ * one every Basis consumer imports — which resolves in this repository and in a
+ * consuming install alike, so the plugin never guesses at the package name.
+ */
+const MERMAID_IMPORT = "import { Mermaid } from 'basis/react'\n\n"
 
 /**
  * Rewrite Mermaid code fences as the Mermaid component, so diagrams render
