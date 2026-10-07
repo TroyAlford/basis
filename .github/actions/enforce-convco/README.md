@@ -9,6 +9,7 @@ This action checks if the PR title follows the Conventional Commits specificatio
 - **github-token**: GitHub token with permissions to comment on PRs. (Required)
 
 ## Usage Example
+
 ```yml
 name: Check PR Title
 
@@ -29,4 +30,3 @@ jobs:
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
-

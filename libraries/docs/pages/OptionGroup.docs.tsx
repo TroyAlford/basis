@@ -43,34 +43,15 @@ export class OptionGroupDocs extends DocumentationPage<State> {
       <>
         <h1>OptionGroup</h1>
         <Section title="Overview">
-          <p>
-            <code>OptionGroup</code> is a flexible option selection component that extends the Editor base class to
-            provide either radio button groups (single selection) or checkbox groups (multiple selection). It
-            automatically handles keyboard navigation, accessibility, and provides a consistent API for both selection
-            modes.
-          </p>
-          <p>
-            Built on the Editor pattern, <code>OptionGroup</code> supports both controlled and uncontrolled modes,
-            making it perfect for forms, settings panels, and any interface requiring option selection with proper
-            accessibility and keyboard navigation.
-          </p>
+          <p><code>OptionGroup</code> is a flexible option selection component that extends the Editor base class to provide either radio button groups (single selection) or checkbox groups (multiple selection). It automatically handles keyboard navigation, accessibility, and provides a consistent API for both selection modes.</p>
+          <p>Built on the Editor pattern, <code>OptionGroup</code> supports both controlled and uncontrolled modes, making it perfect for forms, settings panels, and any interface requiring option selection with proper accessibility and keyboard navigation.</p>
         </Section>
         <Section title="Key Features">
           <ul>
             <li><strong>Dual Selection Modes</strong>: Toggle between radio buttons and checkboxes</li>
-            <li>
-              <strong>Generic Type Support</strong>: Works with any value type
-              (<code>string</code>, <code>number</code>, <code>enum</code>, objects, etc.)
-            </li>
-            <li>
-              <strong>Editor&lt;boolean&gt; Integration</strong>:
-              Accepts any mix of <code>Editor&lt;boolean&gt;</code> components as children. The <code>data</code> prop
-              determines the value returned when that editor is selected.
-            </li>
-            <li>
-              <strong>Mixed Component Support</strong>:
-              Combine <code>OptionGroup.Option</code> and <code>ToggleEditor</code> components in the same group
-            </li>
+            <li><strong>Generic Type Support</strong>: Works with any value type (<code>string</code>, <code>number</code>, <code>enum</code>, objects, etc.)</li>
+            <li><strong>Editor&lt;boolean&gt; Integration</strong>: Accepts any mix of <code>Editor&lt;boolean&gt;</code> components as children. The <code>data</code> prop determines the value returned when that editor is selected.</li>
+            <li><strong>Mixed Component Support</strong>: Combine <code>OptionGroup.Option</code> and <code>ToggleEditor</code> components in the same group</li>
             <li><strong>Keyboard Navigation</strong>: Arrow keys, Space, Home/End for full keyboard accessibility</li>
             <li><strong>Orientation Control</strong>: Horizontal or vertical layout options</li>
             <li><strong>Individual Disabling</strong>: Disable specific options while keeping others active</li>
@@ -197,26 +178,12 @@ export class OptionGroupDocs extends DocumentationPage<State> {
           `)}
         </Section>
         <Section title="Editor&lt;boolean&gt; Integration">
-          <p>
-            <code>OptionGroup</code> accepts any <code>Editor&lt;boolean&gt;</code> component as children, not
-            just <code>OptionGroup.Option</code>. This includes <code>ToggleEditor</code> and any other
-            boolean editor you create.
-          </p>
+          <p><code>OptionGroup</code> accepts any <code>Editor&lt;boolean&gt;</code> component as children, not just <code>OptionGroup.Option</code>. This includes <code>ToggleEditor</code> and any other boolean editor you create.</p>
           <h3>How It Works</h3>
           <ul>
-            <li>
-              <strong>Data Prop</strong>: Each <code>Editor&lt;boolean&gt;</code> child must have
-              a <code>data</code> prop that specifies the value to be returned when that editor is selected/checked.
-            </li>
-            <li>
-              <strong>Selection State</strong>: <code>OptionGroup</code> manages which editors are "on" (true) or
-              "off" (false) based on the current <code>value</code> prop.
-            </li>
-            <li>
-              <strong>Return Values</strong>: When editors are selected, their <code>data</code> values are
-              collected into a <code>Set</code> internally, then returned as either a single value (single selection)
-              or an array (multiple selection).
-            </li>
+            <li><strong>Data Prop</strong>: Each <code>Editor&lt;boolean&gt;</code> child must have a <code>data</code> prop that specifies the value to be returned when that editor is selected/checked.</li>
+            <li><strong>Selection State</strong>: <code>OptionGroup</code> manages which editors are "on" (true) or "off" (false) based on the current <code>value</code> prop.</li>
+            <li><strong>Return Values</strong>: When editors are selected, their <code>data</code> values are collected into a <code>Set</code> internally, then returned as either a single value (single selection) or an array (multiple selection).</li>
           </ul>
           <h3>Example</h3>
           {Code.format(`
@@ -228,17 +195,10 @@ export class OptionGroupDocs extends DocumentationPage<State> {
               <ToggleEditor data="toggle2" off="Option 2" on="Option 2" />
             </OptionGroup>
           `)}
-          <p>
-            In this example, when the first ToggleEditor is selected, the <code>data="toggle1"</code> value
-            is returned to the <code>onChange</code> handler.
-          </p>
+          <p>In this example, when the first ToggleEditor is selected, the <code>data="toggle1"</code> value is returned to the <code>onChange</code> handler.</p>
         </Section>
         <Section title="Object Value Support">
-          <p>
-            The <code>data</code> prop can contain any value type, including complex objects. When an option
-            is selected, the exact object reference is returned, allowing you to work with full objects
-            rather than just scalar values.
-          </p>
+          <p>The <code>data</code> prop can contain any value type, including complex objects. When an option is selected, the exact object reference is returned, allowing you to work with full objects rather than just scalar values.</p>
           <h3>Example with Objects</h3>
           {Code.format(`
             const userOptions = [
@@ -262,29 +222,16 @@ export class OptionGroupDocs extends DocumentationPage<State> {
               ))}
             </OptionGroup>
           `)}
-          <p>
-            This pattern is particularly useful for forms where you need to select from a list of complex
-            objects and want to work with the full object data rather than just an ID or name.
-          </p>
+          <p>This pattern is particularly useful for forms where you need to select from a list of complex objects and want to work with the full object data rather than just an ID or name.</p>
         </Section>
         <Section title="Key Props">
-          <p>
-            OptionGroup supports both controlled and uncontrolled modes. Use <code>value</code> for controlled
-            mode where you manage the state, or <code>initialValue</code> for uncontrolled mode where the
-            component manages its own state.
-          </p>
+          <p>OptionGroup supports both controlled and uncontrolled modes. Use <code>value</code> for controlled mode where you manage the state, or <code>initialValue</code> for uncontrolled mode where the component manages its own state.</p>
           <h3>Core Props</h3>
           <ul>
             <li><strong><code>multiple</code></strong>: Boolean to toggle between radio buttons and checkboxes</li>
-            <li>
-              <strong><code>onChange</code></strong>: Handler function called when selection changes.
-              Returns the <code>data</code> values from selected editors.
-            </li>
+            <li><strong><code>onChange</code></strong>: Handler function called when selection changes. Returns the <code>data</code> values from selected editors.</li>
             <li><strong><code>orientation</code></strong>: 'horizontal' or 'vertical' layout</li>
-            <li>
-              <strong><code>value</code></strong>: Current selection (single value for single selection,
-              array for multiple)
-            </li>
+            <li><strong><code>value</code></strong>: Current selection (single value for single selection, array for multiple)</li>
           </ul>
           <h3>OptionGroup.Option Props</h3>
           <ul>
@@ -302,10 +249,7 @@ export class OptionGroupDocs extends DocumentationPage<State> {
             <li><strong>Space</strong>: Toggle checkbox selection (multiple mode)</li>
             <li><strong>Tab</strong>: Focus the component</li>
           </ul>
-          <p>
-            The component automatically handles focus management and ensures that keyboard navigation
-            works seamlessly with screen readers and other assistive technologies.
-          </p>
+          <p>The component automatically handles focus management and ensures that keyboard navigation works seamlessly with screen readers and other assistive technologies.</p>
         </Section>
         <Section title="Accessibility Features">
           <p>OptionGroup includes comprehensive accessibility support:</p>
@@ -318,10 +262,7 @@ export class OptionGroupDocs extends DocumentationPage<State> {
           </ul>
         </Section>
         <Section title="Styling & Theming">
-          <p>
-            OptionGroup uses CSS custom properties for theming. All styles are prefixed with{' '}
-            <code>--basis-option-*</code> and can be customized:
-          </p>
+          <p>OptionGroup uses CSS custom properties for theming. All styles are prefixed with <code>--basis-option-*</code> and can be customized:</p>
           {Code.format(`
             :root {
               --basis-option-group-gap: 0.5rem;
@@ -333,9 +274,7 @@ export class OptionGroupDocs extends DocumentationPage<State> {
               /* ... and many more */
             }
           `)}
-          <p>
-            This allows for easy customization while maintaining consistency with your design system.
-          </p>
+          <p>This allows for easy customization while maintaining consistency with your design system.</p>
         </Section>
       </>
     )

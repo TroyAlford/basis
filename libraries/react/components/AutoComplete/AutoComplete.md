@@ -3,9 +3,11 @@
 ## Current Usage Analysis
 
 ### SearchBox Component Usage
+
 The current `SearchBox` component uses Ant Design's `AutoComplete` with these key features:
 
 **Props Used:**
+
 - `className` - Custom CSS classes
 - `notFoundContent` - Custom "No Results Found" message
 - `onSearch` - Debounced search callback (100ms delay)
@@ -15,6 +17,7 @@ The current `SearchBox` component uses Ant Design's `AutoComplete` with these ke
 - `value` - Controlled input value
 
 **Options Structure:**
+
 ```typescript
 interface AutoCompleteOption {
   key: string,        // result.slug
@@ -25,6 +28,7 @@ interface AutoCompleteOption {
 ```
 
 **SearchResult Data:**
+
 ```typescript
 interface SearchResult {
   headline: string,   // Article title
@@ -36,16 +40,18 @@ interface SearchResult {
 ```
 
 **Key Behaviors:**
+
 1. Debounced search (100ms) with abort controller for cancellation
 2. Minimum length requirement (configurable, default 0)
 3. Custom "No Results Found" message when search term exists but no results
 4. Custom option rendering with HTML content (dangerouslySetInnerHTML)
-5. Navigation on selection (window.location.assign)
+5. Navigation on selection (window\.location.assign)
 6. Input with prefix icon (Search icon)
 
 ## Component Architecture Analysis
 
 ### TextEditor (Input Base)
+
 - Extends `Editor<string>` base class
 - Supports both `input[type="text"]` and `textarea` elements
 - Has mixins: `Accessible`, `PrefixSuffix`, `Placeholder`, `Focusable`
@@ -53,12 +59,14 @@ interface SearchResult {
 - Controlled/uncontrolled value management via Editor base
 
 ### PopupMenu (Dropdown Base)
+
 - Extends `Component` with `Popup` mixin
 - Uses `Menu` component as the actual content
 - Key features: positioning, arrow support, offset, anchor points
 - Auto-shows/hides based on visibility prop
 
 ### DropdownMenu (Composite Pattern)
+
 - Combines `Button` (trigger) + `PopupMenu` (dropdown)
 - Manages open/close state internally
 - Handles keyboard navigation (Escape to close)
@@ -66,6 +74,7 @@ interface SearchResult {
 - Focus management (focuses first menu item on open)
 
 ### Menu (Content Structure)
+
 - Provides keyboard navigation (arrow keys)
 - Supports vertical/horizontal orientation
 - MenuItem components with activation handling
@@ -74,6 +83,7 @@ interface SearchResult {
 ## Implementation Plan
 
 ### Generic AutoComplete Component Structure
+
 ```typescript
 class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElement, State<T>> {
   // Combines TextEditor + PopupMenu pattern
@@ -115,6 +125,7 @@ class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElement, Stat
    - Focus management
 
 ### Generic Props Interface
+
 ```typescript
 interface Props<T = unknown> extends IAccessible, IPrefixSuffix, IPlaceholder, IFocusable {
   // Async search behavior
@@ -148,6 +159,7 @@ interface Props<T = unknown> extends IAccessible, IPrefixSuffix, IPlaceholder, I
 ```
 
 ### State Management
+
 ```typescript
 interface State<T = unknown> {
   open: boolean,
@@ -162,6 +174,7 @@ interface State<T = unknown> {
 ### Usage Examples
 
 **Basic Usage:**
+
 ```typescript
 <AutoComplete<SearchResult>
   onSearch={async (query) => {
@@ -183,6 +196,7 @@ interface State<T = unknown> {
 ```
 
 **Simple String Array:**
+
 ```typescript
 <AutoComplete<string>
   onSearch={async (query) => {
@@ -197,6 +211,7 @@ interface State<T = unknown> {
 ```
 
 **Complex Object:**
+
 ```typescript
 interface User {
   id: string

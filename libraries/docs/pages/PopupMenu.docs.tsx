@@ -25,11 +25,7 @@ export class PopupMenuDocs extends DocumentationPage<State> {
       <>
         <h1>PopupMenu</h1>
         <section>
-          <p>
-            PopupMenu is a positioned menu component that combines the Menu component with the Popup mixin
-            for flexible positioning. It provides a menu that can be anchored to specific elements or positioned
-            relative to its parent, with full Floating UI integration for robust positioning.
-          </p>
+          <p>PopupMenu is a positioned menu component that combines the Menu component with the Popup mixin for flexible positioning. It provides a menu that can be anchored to specific elements or positioned relative to its parent, with full Floating UI integration for robust positioning.</p>
           <h2>Key Features</h2>
           <ul>
             <li><strong>Menu Integration</strong>: Built on top of the Menu component with all its functionality</li>
@@ -138,23 +134,12 @@ export class PopupMenuDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Key Props</h2>
-          <p>
-            PopupMenu extends both the Menu component and the IPopup interface, providing all menu functionality
-            with flexible positioning capabilities. The <code>anchorPoint</code> prop controls positioning relative
-            to the reference element, while <code>anchorTo</code> allows you to target specific elements instead
-            of the default parent-based positioning.
-          </p>
-          <p>
-            The <code>visible</code> prop accepts boolean values or 'auto' for automatic visibility management.
-            When set to 'auto', the menu will show/hide based on hover state or other interaction patterns.
-          </p>
+          <p>PopupMenu extends both the Menu component and the IPopup interface, providing all menu functionality with flexible positioning capabilities. The <code>anchorPoint</code> prop controls positioning relative to the reference element, while <code>anchorTo</code> allows you to target specific elements instead of the default parent-based positioning.</p>
+          <p>The <code>visible</code> prop accepts boolean values or 'auto' for automatic visibility management. When set to 'auto', the menu will show/hide based on hover state or other interaction patterns.</p>
         </section>
         <section>
           <h2>Mixin System</h2>
-          <p>
-            PopupMenu uses the Component class's mixin system for enhanced functionality. For detailed
-            information about each mixin, see the <Link to="/mixins">Mixins documentation</Link>.
-          </p>
+          <p>PopupMenu uses the Component class's mixin system for enhanced functionality. For detailed information about each mixin, see the <Link to="/mixins">Mixins documentation</Link>.</p>
           {Code.format(`
             export class PopupMenu extends Component<Props, HTMLUListElement> {
               static get mixins(): Set<Mixin> {
@@ -162,37 +147,23 @@ export class PopupMenuDocs extends DocumentationPage<State> {
               }
             }
           `)}
-          <p>
-            The Popup mixin automatically provides positioning support using Floating UI primitives,
-            handling both anchor-based and parent-based positioning with automatic repositioning on updates.
-          </p>
+          <p>The Popup mixin automatically provides positioning support using Floating UI primitives, handling both anchor-based and parent-based positioning with automatic repositioning on updates.</p>
         </section>
         <section>
           <h2>Positioning and Anchor Points</h2>
-          <p>
-            PopupMenu uses the Popup mixin for flexible positioning. For detailed information about
-            available anchor points and positioning options, see the <Link to="/mixins">Mixins documentation</Link>.
-          </p>
-          <p>
-            The Popup mixin provides 12 anchor point options that directly map to Floating UI placement values,
-            supporting both anchor-based and parent-based positioning with automatic repositioning.
-          </p>
+          <p>PopupMenu uses the Popup mixin for flexible positioning. For detailed information about available anchor points and positioning options, see the <Link to="/mixins">Mixins documentation</Link>.</p>
+          <p>The Popup mixin provides 12 anchor point options that directly map to Floating UI placement values, supporting both anchor-based and parent-based positioning with automatic repositioning.</p>
         </section>
         <section>
           <h2>Menu Items and Structure</h2>
-          <p>
-            PopupMenu inherits all menu functionality from the Menu component, including:
-          </p>
+          <p>PopupMenu inherits all menu functionality from the Menu component, including:</p>
           <ul>
             <li><strong>Menu.Item</strong>: Individual menu options with activation handlers</li>
             <li><strong>Menu.Divider</strong>: Visual separation between menu groups</li>
             <li><strong>Keyboard Navigation</strong>: Full arrow key navigation support</li>
             <li><strong>Disabled State</strong>: Support for disabled menu items</li>
           </ul>
-          <p>
-            All menu items support the <code>onActivate</code> prop for handling user interactions,
-            and the <code>disabled</code> prop for disabling individual items.
-          </p>
+          <p>All menu items support the <code>onActivate</code> prop for handling user interactions, and the <code>disabled</code> prop for disabling individual items.</p>
         </section>
       </>
     )

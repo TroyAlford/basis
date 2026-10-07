@@ -2,13 +2,14 @@
 
 ## Overview
 
-The `@basis/eslint-plugin` workspace provides a comprehensive set of ESLint rules designed to enforce a consistent coding style across your projects. This plugin is intended to be used as a base configuration that can be easily integrated into your projects by installing the `@basis/eslint-plugin` package via JSR. The rules focus on maintaining code quality, readability, and consistency, with an emphasis on modern JavaScript and TypeScript practices. This is a flat-config ESLint@9+ configuration that is highly opinionated.
+The `@basis/eslint-plugin` workspace provides a comprehensive set of ESLint rules designed to enforce a consistent coding style across your projects. This plugin is intended to be used as a base configuration that can be easily integrated into your projects by installing the `@basis/eslint-plugin` package via JSR. The rules focus on maintaining code quality, readability, and consistency, with an emphasis on modern JavaScript and TypeScript practices. This is a flat-config ESLint\@9+ configuration that is highly opinionated.
 
 ## Installation
 
 ```sh
 bunx jsr add @basis/eslint-plugin
 ```
+
 > **Note:** All `@basis` packages, including this one, are published via `jsr` instead of `npm`. This approach ensures a streamlined and efficient package management experience tailored for Bun.
 
 ## Usage

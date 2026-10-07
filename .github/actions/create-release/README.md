@@ -11,12 +11,10 @@ This action creates a GitHub release with automatically generated release notes.
 
 ## Requirements
 
-The action is self-contained: it does **not** install a toolchain. `gh` is
-preinstalled on GitHub-hosted runners, and the action runs in the checked-out
-repository, so check the repository out first. The tag is created by
-`gh release create` if it does not already exist.
+The action is self-contained: it does **not** install a toolchain. `gh` is preinstalled on GitHub-hosted runners, and the action runs in the checked-out repository, so check the repository out first. The tag is created by `gh release create` if it does not already exist.
 
 ## Usage Example
+
 ```yaml
 jobs:
   release:
@@ -44,10 +42,7 @@ jobs:
           version: ${{ steps.version.outputs.next-version }}
 ```
 
-> **Self-reference vs. consumers.** The example above lives in Basis and uses
-> `@main`, so it never lags the latest action. Repositories *consuming* Basis
-> should pin a released tag (or a commit SHA) instead — or call the reusable
-> [`release.yml`](../../workflows/release.yml) workflow, which the caller pins.
+> **Self-reference vs. consumers.** The example above lives in Basis and uses `@main`, so it never lags the latest action. Repositories *consuming* Basis should pin a released tag (or a commit SHA) instead — or call the reusable [`release.yml`](../../workflows/release.yml) workflow, which the caller pins.
 
 ## Release Notes
 
@@ -56,5 +51,6 @@ Release notes are automatically generated using GitHub's built-in release notes 
 ## Integration
 
 This action is typically used as part of a release workflow, alongside:
+
 - determine-version: To decide if a release is needed
 - Package publishing actions: To publish updated packages after release

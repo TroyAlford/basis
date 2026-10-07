@@ -22,22 +22,12 @@ export class CarouselDocs extends DocumentationPage {
           />
         </section>
         <section>
-          <p>
-            The Carousel component provides a responsive, accessible image carousel with built-in
-            navigation, lightbox functionality, and touch support. Built on the Component base
-            class, it automatically manages image preloading, navigation state, and accessibility
-            features.
-          </p>
-          <p>
-            Carousel is particularly useful for displaying image galleries, product showcases,
-            and any collection of images that benefits from sequential navigation.
-          </p>
+          <p>The Carousel component provides a responsive, accessible image carousel with built-in navigation, lightbox functionality, and touch support. Built on the Component base class, it automatically manages image preloading, navigation state, and accessibility features.</p>
+          <p>Carousel is particularly useful for displaying image galleries, product showcases, and any collection of images that benefits from sequential navigation.</p>
         </section>
         <section>
           <h3>Basic Usage</h3>
-          <p>
-            Create a simple carousel with an array of image URLs:
-          </p>
+          <p>Create a simple carousel with an array of image URLs:</p>
           {Code.format(`
             <Carousel
               images={[
@@ -51,9 +41,7 @@ export class CarouselDocs extends DocumentationPage {
         </section>
         <section>
           <h3>Component Architecture</h3>
-          <p>
-            Carousel extends the Component base class and provides comprehensive image navigation:
-          </p>
+          <p>Carousel extends the Component base class and provides comprehensive image navigation:</p>
           <ul>
             <li><strong>Image Management:</strong> Handles both URL arrays and child Image components</li>
             <li><strong>Navigation Controls:</strong> Built-in previous/next buttons with keyboard support</li>
@@ -65,13 +53,9 @@ export class CarouselDocs extends DocumentationPage {
         </section>
         <section>
           <h3>Image Sources</h3>
-          <p>
-            Carousel accepts images in multiple formats for maximum flexibility:
-          </p>
+          <p>Carousel accepts images in multiple formats for maximum flexibility:</p>
           <h4>URL Arrays</h4>
-          <p>
-            Simple array of image URLs with default settings:
-          </p>
+          <p>Simple array of image URLs with default settings:</p>
           {Code.format(`
             <Carousel
               images={[
@@ -83,9 +67,7 @@ export class CarouselDocs extends DocumentationPage {
             />
           `)}
           <h4>Image Configuration Objects</h4>
-          <p>
-            Detailed configuration for each image with custom alignment and sizing:
-          </p>
+          <p>Detailed configuration for each image with custom alignment and sizing:</p>
           {Code.format(`
             <Carousel
               images={[{
@@ -102,9 +84,7 @@ export class CarouselDocs extends DocumentationPage {
             />
           `)}
           <h4>Child Components</h4>
-          <p>
-            Use Image components as children for maximum control:
-          </p>
+          <p>Use Image components as children for maximum control:</p>
           {Code.format(`
             <Carousel>
               <Image src="/slide1.jpg" alt="First slide" />
@@ -115,18 +95,14 @@ export class CarouselDocs extends DocumentationPage {
         </section>
         <section>
           <h3>Navigation Controls</h3>
-          <p>
-            Carousel provides multiple ways to navigate between images:
-          </p>
+          <p>Carousel provides multiple ways to navigate between images:</p>
           {Code.format(`
             <Carousel
               images={['/img1.jpg', '/img2.jpg', '/img3.jpg']}
               onImageChange={(index) => console.log(\`Switched to image \${index}\`)}
             />
           `)}
-          <p>
-            Navigation methods:
-          </p>
+          <p>Navigation methods:</p>
           <ul>
             <li><strong>Arrow Buttons:</strong> Previous/Next buttons with accessible labels</li>
             <li><strong>Keyboard:</strong> Left/Right arrow keys when carousel has focus</li>
@@ -137,18 +113,14 @@ export class CarouselDocs extends DocumentationPage {
         </section>
         <section>
           <h3>Lightbox Functionality</h3>
-          <p>
-            Click any image to open it in a full-screen lightbox with enhanced navigation:
-          </p>
+          <p>Click any image to open it in a full-screen lightbox with enhanced navigation:</p>
           {Code.format(`
             <Carousel
               images={['/img1.jpg', '/img2.jpg', '/img3.jpg']}
               altText="Gallery images"
             />
           `)}
-          <p>
-            Lightbox features:
-          </p>
+          <p>Lightbox features:</p>
           <ul>
             <li><strong>Full-Screen View:</strong> Images open in a modal overlay</li>
             <li><strong>Enhanced Navigation:</strong> All navigation methods work in lightbox</li>
@@ -160,9 +132,7 @@ export class CarouselDocs extends DocumentationPage {
         </section>
         <section>
           <h3>Customization Options</h3>
-          <p>
-            Control the appearance and behavior with various props:
-          </p>
+          <p>Control the appearance and behavior with various props:</p>
           {Code.format(`
             <Carousel
               align={Carousel.Align.Center}        // Default alignment for all images
@@ -178,9 +148,7 @@ export class CarouselDocs extends DocumentationPage {
         <section>
           <h2>Best Practices</h2>
           <h3>Image Organization</h3>
-          <p>
-            Structure your images for optimal user experience:
-          </p>
+          <p>Structure your images for optimal user experience:</p>
           {Code.format(`
             // Good: Consistent sizing and alignment
             <Carousel
@@ -211,9 +179,7 @@ export class CarouselDocs extends DocumentationPage {
         </section>
         <section>
           <h3>Accessibility</h3>
-          <p>
-            Ensure your carousel is accessible to all users:
-          </p>
+          <p>Ensure your carousel is accessible to all users:</p>
           <ul>
             <li><strong>Alt Text:</strong> Provide descriptive alt text for each image</li>
             <li><strong>Keyboard Navigation:</strong> Test navigation with keyboard only</li>
@@ -235,9 +201,7 @@ export class CarouselDocs extends DocumentationPage {
         </section>
         <section>
           <h3>Performance Optimization</h3>
-          <p>
-            Leverage built-in performance features:
-          </p>
+          <p>Leverage built-in performance features:</p>
           <ul>
             <li><strong>Image Preloading:</strong> All images are automatically preloaded</li>
             <li><strong>Caching:</strong> Images use the shared Image.Cache system</li>
@@ -258,9 +222,7 @@ export class CarouselDocs extends DocumentationPage {
         </section>
         <section>
           <h3>Mobile Experience</h3>
-          <p>
-            Optimize for touch devices and mobile users:
-          </p>
+          <p>Optimize for touch devices and mobile users:</p>
           {Code.format(`
             // Mobile-optimized carousel
             <Carousel
@@ -270,9 +232,7 @@ export class CarouselDocs extends DocumentationPage {
               // Swipe gestures work out of the box
             />
           `)}
-          <p>
-            Mobile features:
-          </p>
+          <p>Mobile features:</p>
           <ul>
             <li><strong>Touch Navigation:</strong> Swipe left/right to navigate</li>
             <li><strong>Responsive Design:</strong> Adapts to different screen sizes</li>
@@ -282,9 +242,7 @@ export class CarouselDocs extends DocumentationPage {
         </section>
         <section>
           <h3>Integration Patterns</h3>
-          <p>
-            Combine Carousel with other components for rich experiences:
-          </p>
+          <p>Combine Carousel with other components for rich experiences:</p>
           {Code.format(`
             // Product gallery with carousel
             <div className="product-page">

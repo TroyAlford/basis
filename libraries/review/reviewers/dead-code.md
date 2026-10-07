@@ -51,38 +51,23 @@ verification:
 
 # Dead code
 
-Do not ship dead code. Keep the codebase clean rather than leaving abandoned
-implementations, obsolete helpers, unused exports, or dependencies behind.
+Do not ship dead code. Keep the codebase clean rather than leaving abandoned implementations, obsolete helpers, unused exports, or dependencies behind.
 
-Knip is evidence, not an instruction to delete. An "unused" result can mean very
-different things, so inspect the purpose of this PR and enough of the surrounding
-repository to decide which it is:
+Knip is evidence, not an instruction to delete. An "unused" result can mean very different things, so inspect the purpose of this PR and enough of the surrounding repository to decide which it is:
 
-- **genuinely orphaned code** — an abandoned implementation or obsolete helper
-  that nothing references and nothing should;
-- **newly-created code that should have been wired up** — the author added a
-  helper, export, or dependency but forgot to connect it;
-- **preparatory work** — code added ahead of the feature that will use it, and
-  that may not belong in this PR;
-- **a missing reference/entrypoint/registration** — the symbol is unused only
-  because a barrel, entrypoint, plugin registry, or configuration was not updated;
-- **intentional dynamic or framework use** — reached by reflection, a framework
-  convention, a generated entrypoint, or a test-only export.
+- **genuinely orphaned code** — an abandoned implementation or obsolete helper that nothing references and nothing should;
+- **newly-created code that should have been wired up** — the author added a helper, export, or dependency but forgot to connect it;
+- **preparatory work** — code added ahead of the feature that will use it, and that may not belong in this PR;
+- **a missing reference/entrypoint/registration** — the symbol is unused only because a barrel, entrypoint, plugin registry, or configuration was not updated;
+- **intentional dynamic or framework use** — reached by reflection, a framework convention, a generated entrypoint, or a test-only export.
 
-Do not invent a definitive answer when intent is unclear. If the candidate looks
-half-wired, preparatory, or otherwise ambiguous about the intended correction,
-ask the author the right question rather than deleting it or abstaining.
-Silently dropping an ambiguous candidate is a failure of review; deleting one
-that the author intended to wire up is worse.
+Do not invent a definitive answer when intent is unclear. If the candidate looks half-wired, preparatory, or otherwise ambiguous about the intended correction, ask the author the right question rather than deleting it or abstaining. Silently dropping an ambiguous candidate is a failure of review; deleting one that the author intended to wire up is worse.
 
-Report a `finding` only when the evidence shows what should change. Treat
-intentional dynamic use as `no_finding`. Use `abstain` only when the available
-evidence cannot support a review at all.
+Report a `finding` only when the evidence shows what should change. Treat intentional dynamic use as `no_finding`. Use `abstain` only when the available evidence cannot support a review at all.
 
 ## Canonical examples
 
-Concrete examples of the code this reviewer should notice and the feedback it
-should give. These examples are part of the reviewer instructions.
+Concrete examples of the code this reviewer should notice and the feedback it should give. These examples are part of the reviewer instructions.
 
 ### Created but never wired up
 
@@ -99,8 +84,7 @@ Expected: `finding / wire-up`
 
 Expected review feedback:
 
-> `parseAmount` is exported but nothing imports it. Wire it into the code that
-> needs it, or drop it from this change.
+> `parseAmount` is exported but nothing imports it. Wire it into the code that needs it, or drop it from this change.
 
 ### Genuinely orphaned
 
@@ -151,5 +135,4 @@ Expected: `question / clarify-intent`
 
 Expected review feedback:
 
-> This module is unused so far, but it looks like groundwork for an in-progress
-> feature. Is it meant to be wired up in this PR, or should it wait?
+> This module is unused so far, but it looks like groundwork for an in-progress feature. Is it meant to be wired up in this PR, or should it wait?

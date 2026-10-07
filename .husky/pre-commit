@@ -1,4 +1,5 @@
 bun lint:es
 bun lint:ts
 bun lint:css
+bun lint:md
 bun run build

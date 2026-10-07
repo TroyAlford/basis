@@ -32,46 +32,28 @@ threshold:
 
 # DRYness
 
-Do not create a second implementation of a concept the repository already knows
-how to express.
+Do not create a second implementation of a concept the repository already knows how to express.
 
-Before accepting a new helper, abstraction, utility, dependency, type, service,
-adapter, or implementation pattern, search the repository and its already-adopted
-dependency surface for the same responsibility. Review the repository, not only
-the diff.
+Before accepting a new helper, abstraction, utility, dependency, type, service, adapter, or implementation pattern, search the repository and its already-adopted dependency surface for the same responsibility. Review the repository, not only the diff.
 
 Prefer, in order:
 
 1. using an existing local implementation as-is;
-2. extending an existing local implementation when the new behavior naturally
-   belongs to the same concept;
-3. using an already-adopted dependency when it already provides the required
-   behavior cleanly;
-4. introducing a genuinely new implementation when the responsibility is
-   meaningfully different.
+2. extending an existing local implementation when the new behavior naturally belongs to the same concept;
+3. using an already-adopted dependency when it already provides the required behavior cleanly;
+4. introducing a genuinely new implementation when the responsibility is meaningfully different.
 
-DRY does **not** mean forcing superficially similar code through one abstraction.
-Two pieces of code may look alike while representing different concepts,
-lifecycles, ownership, or reasons to change. Do not create a worse abstraction
-merely to eliminate repeated syntax.
+DRY does **not** mean forcing superficially similar code through one abstraction. Two pieces of code may look alike while representing different concepts, lifecycles, ownership, or reasons to change. Do not create a worse abstraction merely to eliminate repeated syntax.
 
-The question is semantic duplication: are there now two places that represent
-the same idea or responsibility?
+The question is semantic duplication: are there now two places that represent the same idea or responsibility?
 
-When an existing implementation appears to overlap substantially but intent is
-unclear, ask why the new implementation should remain separate. A useful review
-question identifies the existing candidate and the specific overlap; do not
-simply say "this is not DRY."
+When an existing implementation appears to overlap substantially but intent is unclear, ask why the new implementation should remain separate. A useful review question identifies the existing candidate and the specific overlap; do not simply say "this is not DRY."
 
-Do not recommend replacing repository conventions with whatever library,
-framework, or community practice happens to be fashionable. Local architecture
-and established dependencies are authoritative unless the change is explicitly
-about replacing them.
+Do not recommend replacing repository conventions with whatever library, framework, or community practice happens to be fashionable. Local architecture and established dependencies are authoritative unless the change is explicitly about replacing them.
 
 ## Canonical examples
 
-Concrete examples of the code this reviewer should notice and the feedback it
-should give. These examples are part of the reviewer instructions.
+Concrete examples of the code this reviewer should notice and the feedback it should give. These examples are part of the reviewer instructions.
 
 ### Two implementations of one concept
 
@@ -101,9 +83,7 @@ Expected: `finding / reuse-existing`
 
 Expected review feedback:
 
-> `retry` and `withBackoff` are two implementations of the same concept. Use one
-> of them, or extend the existing one, rather than shipping a second copy. Is
-> there a reason they must stay separate?
+> `retry` and `withBackoff` are two implementations of the same concept. Use one of them, or extend the existing one, rather than shipping a second copy. Is there a reason they must stay separate?
 
 ### Similar syntax, different concepts
 
@@ -141,6 +121,4 @@ Expected: `question / justify-duplication`
 
 Expected review feedback:
 
-> `StreamingClient` overlaps `HttpClient` for requests but adds streaming. Is
-> this intentionally a separate concept, or should it reuse or extend the
-> existing client?
+> `StreamingClient` overlaps `HttpClient` for requests but adds streaming. Is this intentionally a separate concept, or should it reuse or extend the existing client?

@@ -172,32 +172,24 @@ describe('ToggleEditor', () => {
 
     test('renders children when on/off are undefined', async () => {
       const { node: offNode } = await render(
-        <ToggleEditor value={false} onChange={() => undefined}>
-          Custom Content
-        </ToggleEditor>,
+        <ToggleEditor value={false} onChange={() => undefined}>Custom Content</ToggleEditor>,
       )
       expect(offNode.textContent?.trim()).toBe('Custom Content')
 
       const { node: onNode } = await render(
-        <ToggleEditor value={true} onChange={() => undefined}>
-          Custom Content
-        </ToggleEditor>,
+        <ToggleEditor value={true} onChange={() => undefined}>Custom Content</ToggleEditor>,
       )
       expect(onNode.textContent?.trim()).toBe('Custom Content')
     })
 
     test('prioritizes on/off props over children', async () => {
       const { node: offNode } = await render(
-        <ToggleEditor off="Off Text" value={false} onChange={() => undefined}>
-          Children Content
-        </ToggleEditor>,
+        <ToggleEditor off="Off Text" value={false} onChange={() => undefined}>Children Content</ToggleEditor>,
       )
       expect(offNode.textContent?.trim()).toBe('Off Text')
 
       const { node: onNode } = await render(
-        <ToggleEditor on="On Text" value={true} onChange={() => undefined}>
-          Children Content
-        </ToggleEditor>,
+        <ToggleEditor on="On Text" value={true} onChange={() => undefined}>Children Content</ToggleEditor>,
       )
       expect(onNode.textContent?.trim()).toBe('On Text')
     })

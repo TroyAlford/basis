@@ -99,33 +99,34 @@ const numberOptions = [
 
 ## Props
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `options` | `OptionProps<T>[]` | - | Array of options to display |
-| `multiple` | `boolean` | `false` | Whether multiple options can be selected |
-| `orientation` | `'horizontal' \| 'vertical'` | `'vertical'` | Layout orientation |
-| `value` | `T \| T[]` | - | Current value(s) (controlled mode) |
-| `initialValue` | `T \| T[]` | - | Initial value(s) (uncontrolled mode) |
-| `onChange` | `(value: T \| T[], field: string, editor: Editor) => void` | - | Change handler |
-| `readOnly` | `boolean` | `false` | Whether the component is read-only |
-| `field` | `string` | - | Field identifier |
-| `aria-label` | `string` | - | ARIA label for accessibility |
-| `aria-labelledby` | `string` | - | ARIA labelledby for accessibility |
+| Prop              | Type                                                       | Default      | Description                              |
+| ----------------- | ---------------------------------------------------------- | ------------ | ---------------------------------------- |
+| `options`         | `OptionProps<T>[]`                                         | -            | Array of options to display              |
+| `multiple`        | `boolean`                                                  | `false`      | Whether multiple options can be selected |
+| `orientation`     | `'horizontal' \| 'vertical'`                               | `'vertical'` | Layout orientation                       |
+| `value`           | `T \| T[]`                                                 | -            | Current value(s) (controlled mode)       |
+| `initialValue`    | `T \| T[]`                                                 | -            | Initial value(s) (uncontrolled mode)     |
+| `onChange`        | `(value: T \| T[], field: string, editor: Editor) => void` | -            | Change handler                           |
+| `readOnly`        | `boolean`                                                  | `false`      | Whether the component is read-only       |
+| `field`           | `string`                                                   | -            | Field identifier                         |
+| `aria-label`      | `string`                                                   | -            | ARIA label for accessibility             |
+| `aria-labelledby` | `string`                                                   | -            | ARIA labelledby for accessibility        |
 
 ## Option Props
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `value` | `T` | - | The value for this option |
-| `label` | `string` | - | Label text for this option |
-| `disabled` | `boolean` | `false` | Whether this option is disabled |
-| `inputProps` | `React.InputHTMLAttributes<HTMLInputElement>` | - | Additional props for the input element |
+| Prop         | Type                                          | Default | Description                            |
+| ------------ | --------------------------------------------- | ------- | -------------------------------------- |
+| `value`      | `T`                                           | -       | The value for this option              |
+| `label`      | `string`                                      | -       | Label text for this option             |
+| `disabled`   | `boolean`                                     | `false` | Whether this option is disabled        |
+| `inputProps` | `React.InputHTMLAttributes<HTMLInputElement>` | -       | Additional props for the input element |
 
 ## Replacing Antd Radio Components
 
 This component can be used as a drop-in replacement for antd Radio components:
 
 ### Before (Antd)
+
 ```tsx
 import { Radio } from 'antd'
 
@@ -138,6 +139,7 @@ import { Radio } from 'antd'
 ```
 
 ### After (OptionGroup)
+
 ```tsx
 import { OptionGroup } from '@basis/react'
 

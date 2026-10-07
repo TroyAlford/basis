@@ -25,9 +25,7 @@ export class ImageDocs extends DocumentationPage<State> {
         <h1>Image</h1>
         <section>
           <h3>Interactive Demo</h3>
-          <p>
-            Try different alignment and sizing options to see how they affect the image:
-          </p>
+          <p>Try different alignment and sizing options to see how they affect the image:</p>
           <div style={{ display: 'grid', gap: '2rem', gridTemplateColumns: '250px 1fr' }}>
             {/* Configuration Menu */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -92,29 +90,17 @@ export class ImageDocs extends DocumentationPage<State> {
                   src={imageURL(256, 256)}
                 />
               </div>
-              <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
-                <strong>Container:</strong> 300px × 300px with visible border
-              </p>
+              <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}><strong>Container:</strong> 300px × 300px with visible border</p>
             </div>
           </div>
         </section>
         <section>
-          <p>
-            The Image component provides a robust, accessible way to display images with built-in
-            loading states, error handling, and intelligent caching. Built on the Component base
-            class, it automatically manages image loading, provides fallbacks, and ensures proper
-            accessibility attributes.
-          </p>
-          <p>
-            Image is particularly useful for applications that need reliable image display with
-            loading indicators, error states, and consistent alignment and sizing options.
-          </p>
+          <p>The Image component provides a robust, accessible way to display images with built-in loading states, error handling, and intelligent caching. Built on the Component base class, it automatically manages image loading, provides fallbacks, and ensures proper accessibility attributes.</p>
+          <p>Image is particularly useful for applications that need reliable image display with loading indicators, error states, and consistent alignment and sizing options.</p>
         </section>
         <section>
           <h3>Basic Usage</h3>
-          <p>
-            Image accepts a source URL and renders with proper loading states and accessibility:
-          </p>
+          <p>Image accepts a source URL and renders with proper loading states and accessibility:</p>
           {Code.format(`
           <Image src="/path/to/image.jpg" alt="Description of the image" />
         `)}
@@ -133,20 +119,14 @@ export class ImageDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h3>Implementation Approach</h3>
-          <p>
-            The Image component uses a <code>&lt;div&gt;</code> container with background-image instead
-            of <code>&lt;img&gt;</code> elements. This approach provides several advantages:
-          </p>
+          <p>The Image component uses a <code>&lt;div&gt;</code> container with background-image instead of <code>&lt;img&gt;</code> elements. This approach provides several advantages:</p>
           <ul>
             <li><strong>Better Sizing Control:</strong> Container dimensions can be explicitly controlled</li>
             <li><strong>Precise Alignment:</strong> Background positioning gives pixel-perfect control</li>
             <li><strong>Flexible Layouts:</strong> Container can be styled independently of the image</li>
             <li><strong>Performance:</strong> Maintains the same caching system for efficiency</li>
           </ul>
-          <p>
-            The component automatically manages the container sizing based on the selected mode, ensuring
-            consistent behavior across different use cases.
-          </p>
+          <p>The component automatically manages the container sizing based on the selected mode, ensuring consistent behavior across different use cases.</p>
         </section>
         <section>
           <h3>Props Interface</h3>
@@ -193,9 +173,7 @@ export class ImageDocs extends DocumentationPage<State> {
           <Image src="/image.jpg" align={Align.East} alt="Right edge image" />
           <Image src="/image.jpg" align={Align.West} alt="Left edge image" />
         `)}
-          <p>
-            Available alignment options:
-          </p>
+          <p>Available alignment options:</p>
           <ul>
             <li><strong>Center:</strong> Centers image both horizontally and vertically</li>
             <li><strong>North/South:</strong> Aligns to top or bottom edge</li>
@@ -205,9 +183,7 @@ export class ImageDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h3>Image Sizing</h3>
-          <p>
-            Control how images are sized relative to their container:
-          </p>
+          <p>Control how images are sized relative to their container:</p>
           {Code.format(`
           // Natural size (default) - uses image's original dimensions
           <Image src="/image.jpg" size={Size.Natural} alt="Natural size" />
@@ -309,10 +285,7 @@ export class ImageDocs extends DocumentationPage<State> {
           // State is automatically updated during image loading lifecycle
           // error: false → loading starts → error: true (if failed)
         `, 'ts')}
-          <p>
-            The component automatically handles state transitions and provides visual feedback
-            through data attributes.
-          </p>
+          <p>The component automatically handles state transitions and provides visual feedback through data attributes.</p>
         </section>
         <section>
           <h2>Best Practices</h2>
@@ -379,9 +352,7 @@ export class ImageDocs extends DocumentationPage<State> {
             }}
           />
         `)}
-          <p>
-            Error handling is automatic - failed loads set the error state and data-error attribute.
-          </p>
+          <p>Error handling is automatic - failed loads set the error state and data-error attribute.</p>
         </section>
         <section>
           <h3>Responsive Design</h3>

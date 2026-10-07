@@ -163,26 +163,14 @@ export class ThemeDocs extends DocumentationPage<State> {
       <>
         <h1>Theme</h1>
         <section>
-          <p>
-            Theme is a powerful component that manages design tokens and CSS variables for your application.
-            It provides a centralized way to define colors, typography, spacing, shadows, and other design
-            values that can be used consistently across all components.
-          </p>
+          <p>Theme is a powerful component that manages design tokens and CSS variables for your application. It provides a centralized way to define colors, typography, spacing, shadows, and other design values that can be used consistently across all components.</p>
         </section>
         <section>
           <h2>Key Features</h2>
           <ul>
-            <li>
-              <strong>Design Token System</strong>:
-              Centralized management of colors, typography, spacing, and more
-            </li>
-            <li>
-              <strong>CSS Variable Generation</strong>:
-              Automatically creates CSS custom properties for all theme values
-            </li>
-            <li><strong>Smart Color Processing</strong>:
-              Auto-computes contrast colors for primary colors using luminance analysis
-            </li>
+            <li><strong>Design Token System</strong>: Centralized management of colors, typography, spacing, and more</li>
+            <li><strong>CSS Variable Generation</strong>: Automatically creates CSS custom properties for all theme values</li>
+            <li><strong>Smart Color Processing</strong>: Auto-computes contrast colors for primary colors using luminance analysis</li>
             <li><strong>Namespaced Themes</strong>: Support for multiple named themes with automatic CSS scoping</li>
             <li><strong>Smart Value Processing</strong>: Automatic unit conversion and color processing</li>
             <li><strong>Performance Optimized</strong>: Styles are injected once and reused efficiently</li>
@@ -323,68 +311,30 @@ export class ThemeDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Key Props</h2>
-          <p>
-            Theme accepts a comprehensive set of design tokens that are automatically converted to CSS
-            variables. All values are optional and will fall back to sensible defaults.
-          </p>
+          <p>Theme accepts a comprehensive set of design tokens that are automatically converted to CSS variables. All values are optional and will fall back to sensible defaults.</p>
           <h3><code>name</code></h3>
-          <p>
-            The theme name used for namespacing CSS variables. When provided, variables are scoped
-            to <code>[data-theme="name"]</code> selectors. When omitted, variables are applied globally.
-          </p>
+          <p>The theme name used for namespacing CSS variables. When provided, variables are scoped to <code>[data-theme="name"]</code> selectors. When omitted, variables are applied globally.</p>
           <h3><code>color</code></h3>
-          <p>
-            Color palette for your theme. All colors are automatically processed and converted to
-            consistent formats. Supports hex, rgb, hsl, and named colors.
-          </p>
-          <p>
-            <strong>Auto-Computed Contrast</strong>: When you set a primary color, Theme automatically
-            computes an appropriate contrast color using luminance analysis. Light primary colors get
-            dark contrast colors, and dark primary colors get light contrast colors. This ensures
-            optimal readability and accessibility. The semantic <code>color.danger</code> and{' '}
-            <code>color.success</code> values similarly receive <code>--basis-color-danger-contrast</code>{' '}
-            and <code>--basis-color-success-contrast</code> for overlays (for example dialog and notification
-            chrome).
-          </p>
+          <p>Color palette for your theme. All colors are automatically processed and converted to consistent formats. Supports hex, rgb, hsl, and named colors.</p>
+          <p><strong>Auto-Computed Contrast</strong>: When you set a primary color, Theme automatically computes an appropriate contrast color using luminance analysis. Light primary colors get dark contrast colors, and dark primary colors get light contrast colors. This ensures optimal readability and accessibility. The semantic <code>color.danger</code> and <code>color.success</code> values similarly receive <code>--basis-color-danger-contrast</code> and <code>--basis-color-success-contrast</code> for overlays (for example dialog and notification chrome).</p>
           <h3><code>fontSize</code></h3>
-          <p>
-            Typography scale defined as percentages relative to the base font size (16px). Values are
-            automatically converted to percentage units in CSS.
-          </p>
+          <p>Typography scale defined as percentages relative to the base font size (16px). Values are automatically converted to percentage units in CSS.</p>
           <h3><code>radius</code></h3>
-          <p>
-            Border radius values in pixels. Automatically converted to CSS with <code>px</code> units.
-          </p>
+          <p>Border radius values in pixels. Automatically converted to CSS with <code>px</code> units.</p>
           <h3><code>shadow</code></h3>
-          <p>
-            Box shadow definitions. Passed through as-is since shadows are already in CSS format.
-          </p>
+          <p>Box shadow definitions. Passed through as-is since shadows are already in CSS format.</p>
           <h3><code>transition</code></h3>
-          <p>
-            Transition timing definitions. Passed through as-is since transitions are already in CSS format.
-          </p>
+          <p>Transition timing definitions. Passed through as-is since transitions are already in CSS format.</p>
           <h3><code>unit</code></h3>
-          <p>
-            Spacing scale in pixels. Automatically converted to CSS with <code>px</code> units.
-          </p>
+          <p>Spacing scale in pixels. Automatically converted to CSS with <code>px</code> units.</p>
         </section>
         <section>
           <h2>CSS Variable Generation</h2>
-          <p>
-            Theme automatically generates CSS custom properties for all design tokens. Variables are
-            namespaced under <code>--basis-</code> and follow a consistent naming pattern.
-          </p>
-          <p>
-            The block below is filled from <code>getComputedStyle(document.documentElement)</code> on each
-            paint, so it always matches the unnamed <code>&lt;Theme /&gt;</code> in <code>Layout</code>{' '}
-            (defaults merged into <code>:root</code>).
-          </p>
+          <p>Theme automatically generates CSS custom properties for all design tokens. Variables are namespaced under <code>--basis-</code> and follow a consistent naming pattern.</p>
+          <p>The block below is filled from <code>getComputedStyle(document.documentElement)</code> on each paint, so it always matches the unnamed <code>&lt;Theme /&gt;</code> in <code>Layout</code> (defaults merged into <code>:root</code>).</p>
           {Code.format(this.current.rootThemeCss, 'scss')}
           <h3>Namespaced Themes</h3>
-          <p>
-            When <code>name</code> is set, Theme emits <code>:root [data-theme="…"]</code> with the same
-            variable names. Put <code>data-theme</code> on a subtree to apply that token set.
-          </p>
+          <p>When <code>name</code> is set, Theme emits <code>:root [data-theme="…"]</code> with the same variable names. Put <code>data-theme</code> on a subtree to apply that token set.</p>
           {Code.format(`
             .my-component {
               background-color: var(--basis-color-background);
@@ -394,16 +344,11 @@ export class ThemeDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Default Values</h2>
-          <p>
-            JavaScript defaults are defined once in <code>libraries/react/components/Theme/Theme.tsx</code> as{' '}
-            <code>DEFAULT_THEME</code>. Use the live CSS block above for resolved values in this app.
-          </p>
+          <p>JavaScript defaults are defined once in <code>libraries/react/components/Theme/Theme.tsx</code> as <code>DEFAULT_THEME</code>. Use the live CSS block above for resolved values in this app.</p>
         </section>
         <section>
           <h2>Using Theme Variables in CSS</h2>
-          <p>
-            Once Theme is rendered, you can use the generated CSS variables anywhere in your stylesheets:
-          </p>
+          <p>Once Theme is rendered, you can use the generated CSS variables anywhere in your stylesheets:</p>
           {Code.format(`
             .my-button {
               background-color: var(--basis-color-primary);
@@ -426,9 +371,7 @@ export class ThemeDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Multiple Themes</h2>
-          <p>
-            You can create multiple themes and switch between them dynamically:
-          </p>
+          <p>You can create multiple themes and switch between them dynamically:</p>
           {Code.format(`
             // Light theme
             <Theme
@@ -457,19 +400,14 @@ export class ThemeDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Performance Considerations</h2>
-          <p>
-            Theme is optimized for performance:
-          </p>
+          <p>Theme is optimized for performance:</p>
           <ul>
             <li><strong>Style Injection</strong>: Styles are injected once and reused efficiently</li>
             <li><strong>CSS Variables</strong>: No runtime JavaScript overhead for style calculations</li>
             <li><strong>Smart Updates</strong>: Only re-injects styles when theme props change</li>
             <li><strong>Namespacing</strong>: Multiple themes can coexist without conflicts</li>
           </ul>
-          <p>
-            The component renders as <code>null</code> and only manages CSS injection, making it
-            extremely lightweight in the React component tree.
-          </p>
+          <p>The component renders as <code>null</code> and only manages CSS injection, making it extremely lightweight in the React component tree.</p>
         </section>
       </>
     )

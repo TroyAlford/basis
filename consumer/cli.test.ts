@@ -44,12 +44,34 @@ export const pick = (): string => join('a', 'b')
 export const present = (): boolean => existsSync('x')
 `
 
+const DIRTY_MD = `# Notes
+
+
+A paragraph that
+wraps across lines.
+`
+
+const FIXED_MD = `# Notes
+
+A paragraph that wraps across lines.
+`
+
+/** A throwaway consumer fixture spanning every lint surface. */
+interface Fixture {
+  /** The fixture directory. */
+  dir: string,
+  /** Path to the fixture Markdown document. */
+  markdown: string,
+  /** Path to the fixture TypeScript module. */
+  target: string,
+}
+
 /**
  * Creates a throwaway consumer whose ESLint config is the Basis preset. The
  * fixture deliberately breaks every fixable rule the report named.
- * @returns The fixture directory and its lint target path.
+ * @returns The fixture directory and its lint targets.
  */
-const makeFixture = (): { dir: string, target: string } => {
+const makeFixture = (): Fixture => {
   const dir = mkdtempSync(join(tmpdir(), 'basis-cli-'))
   /*
    * ESLint resolves its default formatter (and the plugin stack) through a
@@ -60,18 +82,20 @@ const makeFixture = (): { dir: string, target: string } => {
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fixture', type: 'module' }))
   const target = join(dir, 'fixture.ts')
   writeFileSync(target, DIRTY)
-  return { dir, target }
+  const markdown = join(dir, 'notes.md')
+  writeFileSync(markdown, DIRTY_MD)
+  return { dir, markdown, target }
 }
 
 /**
- * Runs the Basis CLI in a fixture directory.
- * @param args Arguments after the CLI's `lint` subcommand.
+ * Runs a Basis CLI command in a fixture directory.
+ * @param args Arguments for the CLI, including the command.
  * @param cwd Working directory for the CLI.
  * @returns The process exit code.
  */
-const runLint = (args: string[], cwd: string): number => {
+const run = (args: string[], cwd: string): number => {
   const result = Bun.spawnSync({
-    cmd: [process.execPath, CLI, 'lint', ...args],
+    cmd: [process.execPath, CLI, ...args],
     cwd,
     stderr: 'pipe',
     stdout: 'pipe',
@@ -79,25 +103,27 @@ const runLint = (args: string[], cwd: string): number => {
   return result.exitCode
 }
 
-describe('basis lint --fix', () => {
-  test('leaves a dirty file untouched without --fix', () => {
-    const { dir, target } = makeFixture()
+describe('basis lint and format', () => {
+  test('leaves dirty files untouched without formatting', () => {
+    const { dir, markdown, target } = makeFixture()
     try {
-      expect(runLint([], dir)).not.toBe(0)
+      expect(run(['lint'], dir)).not.toBe(0)
       expect(readFileSync(target, 'utf8')).toBe(DIRTY)
+      expect(readFileSync(markdown, 'utf8')).toBe(DIRTY_MD)
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
   })
 
-  test('applies every fixable rule in a single run', () => {
-    const { dir, target } = makeFixture()
+  test('applies every fixable rule across surfaces in a single run', () => {
+    const { dir, markdown, target } = makeFixture()
     try {
-      expect(runLint(['--fix'], dir)).toBe(0)
+      expect(run(['format'], dir)).toBe(0)
       expect(readFileSync(target, 'utf8')).toBe(FIXED)
+      expect(readFileSync(markdown, 'utf8')).toBe(FIXED_MD)
 
       // A second, report-only run proves the first pass fully converged.
-      expect(runLint([], dir)).toBe(0)
+      expect(run(['lint'], dir)).toBe(0)
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }

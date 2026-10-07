@@ -30,16 +30,8 @@ export class ToggleEditorDocs extends DocumentationPage<State> {
       <>
         <h1>ToggleEditor</h1>
         <Section>
-          <p>
-            ToggleEditor is a simple boolean toggle component that extends the Editor base class to provide
-            a clickable toggle with optional icons and text. It automatically handles keyboard navigation,
-            accessibility, and provides a consistent API for boolean state management.
-          </p>
-          <p>
-            Built on the Editor pattern, ToggleEditor supports both controlled and uncontrolled modes, making it
-            perfect for settings panels, feature toggles, and any interface requiring simple on/off state
-            with proper accessibility and keyboard navigation.
-          </p>
+          <p>ToggleEditor is a simple boolean toggle component that extends the Editor base class to provide a clickable toggle with optional icons and text. It automatically handles keyboard navigation, accessibility, and provides a consistent API for boolean state management.</p>
+          <p>Built on the Editor pattern, ToggleEditor supports both controlled and uncontrolled modes, making it perfect for settings panels, feature toggles, and any interface requiring simple on/off state with proper accessibility and keyboard navigation.</p>
         </Section>
         <Section title="Key Features">
           <ul>
@@ -169,11 +161,7 @@ export class ToggleEditorDocs extends DocumentationPage<State> {
           `)}
         </Section>
         <Section title="Key Props">
-          <p>
-            ToggleEditor supports both controlled and uncontrolled modes. Use <code>value</code> for controlled
-            mode where you manage the state, or <code>initialValue</code> for uncontrolled mode where the
-            component manages its own state.
-          </p>
+          <p>ToggleEditor supports both controlled and uncontrolled modes. Use <code>value</code> for controlled mode where you manage the state, or <code>initialValue</code> for uncontrolled mode where the component manages its own state.</p>
           <h3>Core Props</h3>
           <ul>
             <li><strong><code>value</code></strong>: Current boolean state</li>
@@ -199,10 +187,7 @@ export class ToggleEditorDocs extends DocumentationPage<State> {
             <li><strong>Enter</strong>: Toggle the state</li>
             <li><strong>Tab</strong>: Focus the component</li>
           </ul>
-          <p>
-            The component automatically handles focus management and ensures that keyboard navigation
-            works seamlessly with screen readers and other assistive technologies.
-          </p>
+          <p>The component automatically handles focus management and ensures that keyboard navigation works seamlessly with screen readers and other assistive technologies.</p>
         </Section>
         <Section title="Accessibility Features">
           <p>ToggleEditor includes comprehensive accessibility support:</p>
@@ -215,10 +200,7 @@ export class ToggleEditorDocs extends DocumentationPage<State> {
           </ul>
         </Section>
         <Section title="Styling & Theming">
-          <p>
-            ToggleEditor uses CSS custom properties for theming. All styles are prefixed with{' '}
-            <code>--basis-toggle-*</code> and can be customized:
-          </p>
+          <p>ToggleEditor uses CSS custom properties for theming. All styles are prefixed with <code>--basis-toggle-*</code> and can be customized:</p>
           {Code.format(`
             :root {
               --basis-toggle-background: transparent;
@@ -227,9 +209,7 @@ export class ToggleEditorDocs extends DocumentationPage<State> {
               --basis-color-primary: #007bff;
             }
           `)}
-          <p>
-            This allows for easy customization while maintaining consistency with your design system.
-          </p>
+          <p>This allows for easy customization while maintaining consistency with your design system.</p>
         </Section>
         <Section title="Best Practices">
           <h3>Use Descriptive Text</h3>

@@ -4,12 +4,7 @@ This monorepo provides a suite of development tools and utilities designed speci
 
 ## Consuming Basis
 
-The repository is the distribution artifact: consumers pin it as a Git
-dependency and import its stable source surfaces (`basis/react`,
-`basis/server`, `basis/logger`, `basis/review`, `basis/configuration`,
-`basis/eslint`, and `basis/tsconfig/*`). See
-[consumer/README.md](./consumer/README.md) for the React/server runtime
-contract, plus the ESLint, TypeScript, CLI, and patch contract.
+The repository is the distribution artifact: consumers pin it as a Git dependency and import its stable source surfaces (`basis/react`, `basis/server`, `basis/logger`, `basis/review`, `basis/configuration`, `basis/eslint`, `basis/lint`, and `basis/tsconfig/*`). See [consumer/README.md](./consumer/README.md) for the React/server runtime contract, plus the lint, TypeScript, CLI, and patch contract.
 
 ```bash
 bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
@@ -18,26 +13,34 @@ bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
 ## Workspaces
 
 ### [@basis/workspaces](./libraries/workspaces)
+
 CLI tools and utilities for managing monorepo workspaces. Features include:
+
 - Workspace discovery and management
 - Dependency tracking
 - Build system with license handling
 - Change detection
 
 ### [@basis/eslint-plugin](./libraries/eslint-plugin)
+
 Custom ESLint rules for maintaining code quality:
+
 - Type import organization
 - Object formatting rules
 - Additional TypeScript-specific rules
 
 ### [@basis/bun-plugins](./libraries/bun-plugins)
+
 Build plugins for the Bun runtime:
+
 - SASS/SCSS compilation
 - Global variable injection
 - Asset handling
 
 ### [@basis/utilities](./libraries/utilities)
+
 Common utility functions:
+
 - Formatting helpers
 - Type utilities
 - Shared logger with an optional bounded file sink

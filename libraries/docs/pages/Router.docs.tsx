@@ -8,23 +8,12 @@ export class RouterDocs extends DocumentationPage<Record<string, never>> {
       <>
         <h1>Router</h1>
         <section>
-          <p>
-            The Router component provides client-side routing capabilities for single-page applications.
-            Built on the Component base class, it delivers predictable routing behavior, excellent
-            TypeScript ergonomics, and seamless integration with the browser's history API.
-          </p>
-          <p>
-            Router works together with Link components to create a complete navigation system that
-            handles both programmatic navigation and user interactions while maintaining proper
-            browser history state.
-          </p>
+          <p>The Router component provides client-side routing capabilities for single-page applications. Built on the Component base class, it delivers predictable routing behavior, excellent TypeScript ergonomics, and seamless integration with the browser's history API.</p>
+          <p>Router works together with Link components to create a complete navigation system that handles both programmatic navigation and user interactions while maintaining proper browser history state.</p>
         </section>
         <section>
           <h3>Basic Usage</h3>
-          <p>
-            Router uses a declarative approach where you define routes as children. Each route
-            can be static or dynamic with parameters:
-          </p>
+          <p>Router uses a declarative approach where you define routes as children. Each route can be static or dynamic with parameters:</p>
           {Code.format(`
             <Router>
               <Router.Switch>
@@ -59,27 +48,13 @@ export class RouterDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h3>Router Components</h3>
-          <p>
-            The Router system consists of several components that work together to provide
-            complete routing functionality:
-          </p>
+          <p>The Router system consists of several components that work together to provide complete routing functionality:</p>
           <h4>Router</h4>
-          <p>
-            The main container component that manages routing state and renders the matching route.
-            It automatically handles browser history integration and route matching.
-          </p>
+          <p>The main container component that manages routing state and renders the matching route. It automatically handles browser history integration and route matching.</p>
           <h4>Switch</h4>
-          <p>
-            Ensures only the first matching route renders. In the example above, if a user
-            visits <code>/admin/users/123/edit</code>, only the <code>EditUser</code> component
-            will render, not the <code>UserProfile</code> component, even though both routes match.
-          </p>
+          <p>Ensures only the first matching route renders. In the example above, if a user visits <code>/admin/users/123/edit</code>, only the <code>EditUser</code> component will render, not the <code>UserProfile</code> component, even though both routes match.</p>
           <h4>Route</h4>
-          <p>
-            Defines a route with a template pattern and content to render. Routes can accept
-            either React components or functions that receive route parameters. The example above
-            shows both patterns:
-          </p>
+          <p>Defines a route with a template pattern and content to render. Routes can accept either React components or functions that receive route parameters. The example above shows both patterns:</p>
           <ul>
             <li><strong>Component routes:</strong>
               <ul>
@@ -98,10 +73,7 @@ export class RouterDocs extends DocumentationPage<Record<string, never>> {
             <li><strong>Route hierarchy:</strong> Define more specific routes before general ones</li>
           </ul>
           <h4>Link</h4>
-          <p>
-            Provides declarative navigation between routes. Links automatically track their
-            active state and integrate with the browser's history:
-          </p>
+          <p>Provides declarative navigation between routes. Links automatically track their active state and integrate with the browser's history:</p>
           {Code.format(`
             <Router.Link to="/dashboard">Dashboard</Router.Link>
             <Router.Link to="/users/123">User Profile</Router.Link>
@@ -109,10 +81,7 @@ export class RouterDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h3>Route Templates</h3>
-          <p>
-            Routes support both static paths and dynamic parameters using a simple template syntax.
-            The example above demonstrates all three types:
-          </p>
+          <p>Routes support both static paths and dynamic parameters using a simple template syntax. The example above demonstrates all three types:</p>
           <ul>
             <li>
               <strong>Static Routes:</strong>
@@ -122,10 +91,7 @@ export class RouterDocs extends DocumentationPage<Record<string, never>> {
                 <li><code>/admin</code></li>
               </ul>
             </li>
-            <li>
-              <strong>Dynamic Routes: </strong>
-              <code>/users/:id</code> - parameters are extracted and passed to the route handler
-            </li>
+            <li><strong>Dynamic Routes: </strong><code>/users/:id</code> - parameters are extracted and passed to the route handler</li>
             <li>
               <strong>Nested Routes:</strong>
               <ul>
@@ -134,17 +100,11 @@ export class RouterDocs extends DocumentationPage<Record<string, never>> {
               </ul>
             </li>
           </ul>
-          <p>
-            When a user visits <code>/admin/users/123/edit</code>, the <code>:id</code> parameter
-            is extracted and passed as <code>params.id</code> to the EditUser component.
-          </p>
+          <p>When a user visits <code>/admin/users/123/edit</code>, the <code>:id</code> parameter is extracted and passed as <code>params.id</code> to the EditUser component.</p>
         </section>
         <section>
           <h3>Navigation</h3>
-          <p>
-            Use the Link component for declarative navigation or <code>Router.navigate</code> for
-            programmatic routing:
-          </p>
+          <p>Use the Link component for declarative navigation or <code>Router.navigate</code> for programmatic routing:</p>
           {Code.format(`
             // Declarative navigation with Link
             <Router.Link to="/users/123">View Profile</Router.Link>
@@ -155,76 +115,33 @@ export class RouterDocs extends DocumentationPage<Record<string, never>> {
             // With query parameters
             await Router.navigate('/search?q=react&page=2')
           `)}
-          <p>
-            A route component may expose <code>dirty: boolean</code> for automatic unsaved-changes
-            confirmation, or implement <code>onBeforeNavigate(url)</code> for custom navigation
-            control. If both exist, <code>onBeforeNavigate</code> runs first and overrides the
-            default dirty dialog when it returns a value (including <code>true</code> to allow leaving
-            without prompting for discard).
-          </p>
-          <p>
-            The Router runs the same guard logic for programmatic navigation, browser Back/Forward,
-            and (where applicable) full document unload:
-          </p>
+          <p>A route component may expose <code>dirty: boolean</code> for automatic unsaved-changes confirmation, or implement <code>onBeforeNavigate(url)</code> for custom navigation control. If both exist, <code>onBeforeNavigate</code> runs first and overrides the default dirty dialog when it returns a value (including <code>true</code> to allow leaving without prompting for discard).</p>
+          <p>The Router runs the same guard logic for programmatic navigation, browser Back/Forward, and (where applicable) full document unload:</p>
           <ul>
-            <li>
-              <strong><code>Router.navigate</code> / <code>Router.Link</code>:</strong> uses the
-              awaitable <code>Dialog.confirm</code> when an <code>OverlayProvider</code> is mounted,
-              otherwise <code>window.confirm</code>.
-            </li>
-            <li>
-              <strong>Browser Back/Forward:</strong> the Router re-renders for the new URL before it
-              awaits leave hooks, so the destination can mount while a prior route&apos;s async{' '}
-              <code>onBeforeNavigate</code> is still pending. Only when the <strong>leaving</strong> route
-              is actually <code>dirty</code> does the Router pin matching to the previous URL until the
-              discard dialog finishes. If the user cancels, the Router calls <code>history.go(±1)</code>{' '}
-              (using <code>basisFrom</code> on session state from <code>Router.navigate</code> /{' '}
-              <code>Router.Link</code>) instead of <code>pushState</code>, so forward entries are not
-              truncated. Each push stores only that key so <code>history.pushState</code> always stays
-              inside the browser structured-clone rules.
-            </li>
-            <li>
-              <strong>Reload or tab close:</strong> uses the browser&apos;s native{' '}
-              <code>beforeunload</code> prompt only (not a Basis dialog); the handler sets{' '}
-              <code>preventDefault</code> and <code>returnValue</code> when the route is dirty.
-            </li>
+            <li><strong><code>Router.navigate</code> / <code>Router.Link</code>:</strong> uses the awaitable <code>Dialog.confirm</code> when an <code>OverlayProvider</code> is mounted, otherwise <code>window.confirm</code>.</li>
+            <li><strong>Browser Back/Forward:</strong> the Router re-renders for the new URL before it awaits leave hooks, so the destination can mount while a prior route&apos;s async <code>onBeforeNavigate</code> is still pending. Only when the <strong>leaving</strong> route is actually <code>dirty</code> does the Router pin matching to the previous URL until the discard dialog finishes. If the user cancels, the Router calls <code>history.go(±1)</code> (using <code>basisFrom</code> on session state from <code>Router.navigate</code> / <code>Router.Link</code>) instead of <code>pushState</code>, so forward entries are not truncated. Each push stores only that key so <code>history.pushState</code> always stays inside the browser structured-clone rules.</li>
+            <li><strong>Reload or tab close:</strong> uses the browser&apos;s native <code>beforeunload</code> prompt only (not a Basis dialog); the handler sets <code>preventDefault</code> and <code>returnValue</code> when the route is dirty.</li>
           </ul>
+          <p><code>Router.navigate()</code> resolves <code>false</code> when navigation is canceled and <code>true</code> when it updates browser history.</p>
+          <p>To test guarded navigation interactively, open the Router Guard Demo, change the editor value, then click another docs navigation link.</p>
           <p>
-            <code>Router.navigate()</code> resolves <code>false</code> when navigation is canceled and{' '}
-            <code>true</code> when it updates browser history.
-          </p>
-          <p>
-            To test guarded navigation interactively, open the Router Guard Demo, change the editor
-            value, then click another docs navigation link.
-          </p>
-          <p>
-            <Router.Link to="/components/router/guard-demo">
-              Open Router Guard Demo
-            </Router.Link>
+            <Router.Link to="/components/router/guard-demo">Open Router Guard Demo</Router.Link>
           </p>
         </section>
         <section>
           <h2>Best Practices</h2>
           <h3>Route Organization</h3>
-          <p>
-            The example above demonstrates proper route organization. Notice how more specific
-            routes are defined before general ones:
-          </p>
+          <p>The example above demonstrates proper route organization. Notice how more specific routes are defined before general ones:</p>
           <ul>
             <li><code>/admin/users/:id/edit</code> comes before <code>/admin/users/:id</code></li>
             <li><code>/admin/users/:id</code> comes before <code>/admin</code></li>
             <li>This ensures the most specific match is found first</li>
           </ul>
-          <p>
-            Always use the Switch component to ensure only one route renders at a time.
-          </p>
+          <p>Always use the Switch component to ensure only one route renders at a time.</p>
         </section>
         <section>
           <h3>Parameter Validation</h3>
-          <p>
-            Always validate route parameters before using them, especially for dynamic routes.
-            The function-based routes in our example should include validation:
-          </p>
+          <p>Always validate route parameters before using them, especially for dynamic routes. The function-based routes in our example should include validation:</p>
           {Code.format(`
             <Router.Route template="/users/:id">
               {params => {
@@ -239,10 +156,7 @@ export class RouterDocs extends DocumentationPage<Record<string, never>> {
         </section>
         <section>
           <h3>Active Link States</h3>
-          <p>
-            Link components automatically track their active state based on the current route.
-            Use this to highlight the current navigation item:
-          </p>
+          <p>Link components automatically track their active state based on the current route. Use this to highlight the current navigation item:</p>
           {Code.format(`
             // Link automatically gets data-active="true" when active
             <Router.Link to="/dashboard">
@@ -261,21 +175,10 @@ export class RouterDocs extends DocumentationPage<Record<string, never>> {
           <h3>Component Architecture</h3>
           <p>Router and Link extend the Component base class, which provides:</p>
           <ul>
-            <li>
-              <strong>Consistent Structure:</strong> All routing components follow the same pattern
-              for props, state, and lifecycle management
-            </li>
-            <li>
-              <strong>Type Safety:</strong> Full TypeScript support with proper prop validation
-              and route parameter typing
-            </li>
-            <li>
-              <strong>History Integration:</strong> Seamless integration with browser history
-              and popstate events
-            </li>
-            <li>
-              <strong>Event System:</strong> Custom NavigateEvent for cross-component communication
-            </li>
+            <li><strong>Consistent Structure:</strong> All routing components follow the same pattern for props, state, and lifecycle management</li>
+            <li><strong>Type Safety:</strong> Full TypeScript support with proper prop validation and route parameter typing</li>
+            <li><strong>History Integration:</strong> Seamless integration with browser history and popstate events</li>
+            <li><strong>Event System:</strong> Custom NavigateEvent for cross-component communication</li>
           </ul>
         </section>
         <section>

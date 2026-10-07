@@ -37,60 +37,33 @@ threshold:
 
 Choose the mechanism that matches the relationship, not a slogan.
 
-- Use a base class when there is shared default behavior that subclasses should
-  inherit.
-- Use an interface when there is a common required shape but no shared default
-  implementation.
-- Use composition or dependency injection when the behavior itself must vary
-  independently of the containing object's identity.
+- Use a base class when there is shared default behavior that subclasses should inherit.
+- Use an interface when there is a common required shape but no shared default implementation.
+- Use composition or dependency injection when the behavior itself must vary independently of the containing object's identity.
 
-A `RetryingService` base class with a protected `withRetry` helper is reasonable
-when retry behavior is the same shared default everywhere. A `RetryPolicy`
-injected into services becomes more attractive when the retry behavior itself
-must vary: test versus production, service-specific strategies, runtime or
-configuration selection, multiple policies chosen by a factory or container, or
-independent lifecycle, state, or ownership. Composition earns its complexity
-when the composed capability needs independent substitution. If the behavior is
-universal and stable, a base-class default can be simpler.
+A `RetryingService` base class with a protected `withRetry` helper is reasonable when retry behavior is the same shared default everywhere. A `RetryPolicy` injected into services becomes more attractive when the retry behavior itself must vary: test versus production, service-specific strategies, runtime or configuration selection, multiple policies chosen by a factory or container, or independent lifecycle, state, or ownership. Composition earns its complexity when the composed capability needs independent substitution. If the behavior is universal and stable, a base-class default can be simpler.
 
 Preserve these:
 
-- inheritance makes sense when multiple concrete implementations genuinely share
-  behavior and satisfy the same behavioral contract;
-- interfaces make sense when multiple implementations need the same shape but
-  not shared implementation;
+- inheritance makes sense when multiple concrete implementations genuinely share behavior and satisfy the same behavioral contract;
+- interfaces make sense when multiple implementations need the same shape but not shared implementation;
 - composition suits orthogonal behavior that varies independently;
-- shared implementation is evidence for a base class, but do not create an
-  inheritance hierarchy speculatively before reuse or variation has actually
-  emerged;
-- inheritance used only to borrow a convenient helper from an otherwise
-  unrelated type is suspect;
+- shared implementation is evidence for a base class, but do not create an inheritance hierarchy speculatively before reuse or variation has actually emerged;
+- inheritance used only to borrow a convenient helper from an otherwise unrelated type is suspect;
 - inheritance diamonds should be avoided;
-- divergent use cases expressed as flags or optional behavior on one class may
-  indicate a missing abstraction.
+- divergent use cases expressed as flags or optional behavior on one class may indicate a missing abstraction.
 
-The central question: is this relationship shared identity and default behavior,
-or an independently variable capability?
+The central question: is this relationship shared identity and default behavior, or an independently variable capability?
 
-Both inheritance and composition can be correct. When multiple designs are
-reasonable, ask about intent rather than asserting a universal answer. Do not
-reward dependency-injection plumbing merely for existing: if every environment
-and implementation uses the same retry policy, injecting `RetryPolicy` can be
-more machinery than a shared default implementation.
+Both inheritance and composition can be correct. When multiple designs are reasonable, ask about intent rather than asserting a universal answer. Do not reward dependency-injection plumbing merely for existing: if every environment and implementation uses the same retry policy, injecting `RetryPolicy` can be more machinery than a shared default implementation.
 
-Keep ownership distinct: whether implementations share a behavioral contract
-belongs to `substitutability`, and whether repeated variation has become an
-extension problem belongs to `open-closed-design`. This reviewer owns whether
-inheritance or composition is the right mechanism for the relationship.
+Keep ownership distinct: whether implementations share a behavioral contract belongs to `substitutability`, and whether repeated variation has become an extension problem belongs to `open-closed-design`. This reviewer owns whether inheritance or composition is the right mechanism for the relationship.
 
-Use `appropriate-inheritance` or `appropriate-composition` when the chosen
-mechanism matches the relationship, and `abstain` only when the available
-evidence cannot support a review at all.
+Use `appropriate-inheritance` or `appropriate-composition` when the chosen mechanism matches the relationship, and `abstain` only when the available evidence cannot support a review at all.
 
 ## Canonical examples
 
-Concrete examples of the code this reviewer should notice and the feedback it
-should give. These examples are part of the reviewer instructions.
+Concrete examples of the code this reviewer should notice and the feedback it should give. These examples are part of the reviewer instructions.
 
 ### Inheritance used to borrow a helper
 
@@ -113,9 +86,7 @@ Expected: `finding / misused-inheritance`
 
 Expected review feedback:
 
-> `UserService` extends `HttpClient` only to borrow a request helper; the two
-> share no identity. Compose an HTTP client (or extract a helper) instead of
-> inheriting from an unrelated type.
+> `UserService` extends `HttpClient` only to borrow a request helper; the two share no identity. Compose an HTTP client (or extract a helper) instead of inheriting from an unrelated type.
 
 ### Shared default behavior
 
@@ -157,6 +128,4 @@ Expected: `finding / variable-capability`
 
 Expected review feedback:
 
-> Retry behavior differs per service and environment, so it is not shared default
-> behavior — it is an independently variable capability. Inject a retry policy
-> rather than hard-wiring it into a base class.
+> Retry behavior differs per service and environment, so it is not shared default behavior — it is an independently variable capability. Inject a retry policy rather than hard-wiring it into a base class.

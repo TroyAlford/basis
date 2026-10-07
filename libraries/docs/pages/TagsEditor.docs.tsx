@@ -10,10 +10,7 @@ export class TagsEditorDocs extends DocumentationPage<Record<string, never>> {
         <h1>TagsEditor</h1>
         <section>
           <h2>Overview</h2>
-          <p>
-            The TagsEditor component allows users to add and remove tags from a list.
-            It provides an input field for adding new tags and displays existing tags with remove functionality.
-          </p>
+          <p>The TagsEditor component allows users to add and remove tags from a list. It provides an input field for adding new tags and displays existing tags with remove functionality.</p>
         </section>
         <section>
           <h2>Basic Usage</h2>
@@ -29,10 +26,7 @@ export class TagsEditorDocs extends DocumentationPage<Record<string, never>> {
           placeholder="Add tags..."
         />
       `)}
-          <p>
-            <strong>Keyboard shortcuts:</strong> Press <Tag>Enter</Tag> to add the current input as a tag,
-            or <Tag>Backspace</Tag> when the input is empty to remove the last tag.
-          </p>
+          <p><strong>Keyboard shortcuts:</strong> Press <Tag>Enter</Tag> to add the current input as a tag, or <Tag>Backspace</Tag> when the input is empty to remove the last tag.</p>
           <div style={{ marginTop: '1rem' }}>
             <TagsEditor
               initialValue={['react', 'typescript', 'ui']}

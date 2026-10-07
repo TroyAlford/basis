@@ -8,29 +8,14 @@ export class OverviewDocs extends DocumentationPage<Record<string, never>> {
       <>
         <section>
           <h1>Basis React Components</h1>
-          <p>
-            Basis is a cohesive UI component library built entirely with class-based React
-            components. The architecture is designed for composable classes with clear
-            responsibilities, so you get predictable structure, excellent TypeScript ergonomics,
-            and first-class accessibility.
-          </p>
-          <p>
-            All components inherit from
-            the <Router.Link to="/components/Component">Component</Router.Link> base class,
-            providing a consistent interface, shared functionality, and a strong lifecycle.
-          </p>
+          <p>Basis is a cohesive UI component library built entirely with class-based React components. The architecture is designed for composable classes with clear responsibilities, so you get predictable structure, excellent TypeScript ergonomics, and first-class accessibility.</p>
+          <p>All components inherit from the <Router.Link to="/components/Component">Component</Router.Link> base class, providing a consistent interface, shared functionality, and a strong lifecycle.</p>
         </section>
         <section>
           <h3>Design Principles and Conventions</h3>
           <ul>
-            <li>
-              <strong>className</strong> communicates a component's type clearly.
-              A <code>Button</code> component is <code>.button.component</code>.
-            </li>
-            <li>
-              <strong>data-*</strong> reflects runtime state.
-              A <code>Link</code> component with <code>state.active</code> renders <code>data-active="true"</code>.
-            </li>
+            <li><strong>className</strong> communicates a component's type clearly. A <code>Button</code> component is <code>.button.component</code>.</li>
+            <li><strong>data-*</strong> reflects runtime state. A <code>Link</code> component with <code>state.active</code> renders <code>data-active="true"</code>.</li>
           </ul>
         </section>
         <section>
@@ -62,21 +47,11 @@ export class OverviewDocs extends DocumentationPage<Record<string, never>> {
               </div>
             `)}
           </p>
-          <p>
-            Prefer hooks in your app code? No problem. Hooks and classes interact well, and you can
-            always mix-and-match, leveraging classes for some things and hooks for others.
-          </p>
+          <p>Prefer hooks in your app code? No problem. Hooks and classes interact well, and you can always mix-and-match, leveraging classes for some things and hooks for others.</p>
         </section>
         <section>
           <h3>Styling & Theming</h3>
-          <p>
-            All components are lightly styled with modern CSS via the lightweight
-            lightweight <Router.Link to="/utilities/style">style</Router.Link> utility.
-            Why? So that when you pull in basis components, you don't have to install or manage any
-            CSS-preprocessors like SCSS/LESS. We keep selectors tight, drive visuals
-            from <code>data-*</code> state, and expose CSS variables at the base and component level
-            for customization.
-          </p>
+          <p>All components are lightly styled with modern CSS via the lightweight lightweight <Router.Link to="/utilities/style">style</Router.Link> utility. Why? So that when you pull in basis components, you don't have to install or manage any CSS-preprocessors like SCSS/LESS. We keep selectors tight, drive visuals from <code>data-*</code> state, and expose CSS variables at the base and component level for customization.</p>
           {Code.format(`
             import { css, style } from '@basis/react'
 
@@ -90,21 +65,9 @@ export class OverviewDocs extends DocumentationPage<Record<string, never>> {
         <section>
           <h3>What's Next?</h3>
           <ul>
-            <li>
-              If you're looking to build components using this library's style, check out
-              the <Router.Link to="/components/Component">Component</Router.Link> base class.
-              If your component will edit data, check out
-              the <Router.Link to="/components/Editor">Editor</Router.Link> base class for even
-              more leverage.
-            </li>
-            <li>
-              If you just want to leverage basis components as a component library, browse the
-              component docs on the left to see accessibility and styling details in context.
-            </li>
-            <li>
-              The <Router.Link to="/engineering-principles">Engineering Principles</Router.Link> page
-              explains the philosophy behind the architecture and the reviewer policies.
-            </li>
+            <li>If you're looking to build components using this library's style, check out the <Router.Link to="/components/Component">Component</Router.Link> base class. If your component will edit data, check out the <Router.Link to="/components/Editor">Editor</Router.Link> base class for even more leverage.</li>
+            <li>If you just want to leverage basis components as a component library, browse the component docs on the left to see accessibility and styling details in context.</li>
+            <li>The <Router.Link to="/engineering-principles">Engineering Principles</Router.Link> page explains the philosophy behind the architecture and the reviewer policies.</li>
           </ul>
         </section>
       </>
