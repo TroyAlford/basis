@@ -80,8 +80,9 @@
     "svg-path-commander": "^2.3.3"
   },
   "scripts": {
+    "start": "bun ./server.ts",
     "build": "bun run --filter='*' build",
-    "docs": "bun ./server.ts",
+    "docs": "bun run start",
     "docs:check": "bun ./consumer/cli.ts docs check",
     "lint": "bun run lint:es && bun run lint:ts && bun run lint:css",
     "lint:css": "bun ./node_modules/stylelint/bin/stylelint.mjs \"**/*.styles.ts\" --config ./stylelint.config.mjs --allow-empty-input",

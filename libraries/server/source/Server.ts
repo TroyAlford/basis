@@ -410,7 +410,7 @@ export class Server {
     this.#readyError = null
     this.#status = 'starting'
     this.#ready = builder.initialBuild()
-      .then(() => undefined)
+      .then(() => { this.#status = 'ok' })
       .catch((error: unknown) => {
         const failure = error instanceof Error ? error : new Error(String(error))
         this.#readyError = failure
