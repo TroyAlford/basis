@@ -198,6 +198,14 @@
         "@basis/utilities": "workspace:*",
       },
     },
+    "testing/components": {
+      "name": "@/components-fixture",
+      "dependencies": {
+        "@basis/react": "workspace:*",
+        "react": "^19",
+        "react-dom": "^19",
+      },
+    },
     "testing/docs": {
       "name": "@/docs-fixture",
       "dependencies": {
@@ -236,6 +244,8 @@
     "@types/estree": "1.0.8",
   },
   "packages": {
+    "@/components-fixture": ["@/components-fixture@workspace:testing/components"],
+
     "@/docs-fixture": ["@/docs-fixture@workspace:testing/docs"],
 
     "@/server-fixture": ["@/server-fixture@workspace:testing/server"],

@@ -1,7 +1,7 @@
 import type * as React from 'react'
 import { describe, matchScreenshot, test } from '../../testing'
+import { Orientation } from '../types/Orientation'
 import { AutoComplete } from './AutoComplete/AutoComplete'
-import { Await } from './Await/Await'
 import { Button } from './Button/Button'
 import { Carousel } from './Carousel/Carousel'
 import { CheckboxEditor } from './CheckboxEditor/CheckboxEditor'
@@ -10,7 +10,6 @@ import { DropdownMenu } from './DropdownMenu/DropdownMenu'
 import { EnumEditor } from './EnumEditor/EnumEditor'
 import { Image } from './Image/Image'
 import { Menu } from './Menu/Menu'
-import { Mermaid } from './Mermaid/Mermaid'
 import { NumberEditor } from './NumberEditor/NumberEditor'
 import { OptionGroup } from './OptionGroup/OptionGroup'
 import { Link } from './Router/Link'
@@ -20,20 +19,23 @@ import { Tag } from './Tag/Tag'
 import { TagsEditor } from './TagsEditor/TagsEditor'
 import { TextEditor } from './TextEditor/TextEditor'
 import { ToggleEditor } from './ToggleEditor/ToggleEditor'
-import { Tooltip } from './Tooltip/Tooltip'
 
 /**
  * Per-component visual regression.
  *
- * Each component renders once to a committed snapshot so a styling or layout
- * change is reviewable as an image diff. Captures are static renders on the
- * shared capture page (`matchScreenshot(<Element/>)`), so the whole suite costs
- * one browser and no navigation.
+ * Each component renders its meaningful states side by side, labelled, to one
+ * committed snapshot, so a styling or layout change is reviewable as an image
+ * diff and a missing state is obvious. Captures are static renders on the shared
+ * capture page (`matchScreenshot(<Element/>)`), so the whole suite costs one
+ * browser and no navigation.
  *
- * Components that render nothing on their own (the abstract `Component`/`Editor`
- * bases, the `Router`/`ApplicationBase`/`Theme`/`OverlayProvider` hosts, and the
- * imperative `Dialog`/`Notification`) are exercised through the components that
- * use them rather than rendered in isolation.
+ * Components whose meaningful state only exists after mount — `Await` (resolved
+ * content), `Mermaid` (the rendered diagram), and `Tooltip` (floating placement)
+ * — are covered live in `visual.live.test.tsx`. The abstract/host components
+ * (`Component`, `Editor`, `Router`, `ApplicationBase`, `Theme`,
+ * `OverlayProvider`, `IndexHTML`) render nothing on their own and the imperative
+ * `Dialog`/`Notification` open through static APIs, so they are exercised
+ * through the components that use them.
  */
 
 /** Antialiasing differs across machines; absorb it the way the other snapshots do. */
@@ -46,21 +48,54 @@ const IMAGE = `data:image/svg+xml,${encodeURIComponent(
   ' font-family="sans-serif" font-size="16" text-anchor="middle">image</text></svg>',
 )}`
 
+const GALLERY_STYLE: React.CSSProperties = {
+  alignItems: 'flex-start',
+  background: '#fff',
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 20,
+  // Room for an open popup (EnumEditor/DropdownMenu) to fall inside the capture.
+  minHeight: 180,
+  padding: 16,
+}
+
+const LABEL: React.CSSProperties = {
+  color: '#666',
+  font: '600 11px system-ui, sans-serif',
+}
+
+const CELL: React.CSSProperties = {
+  alignItems: 'center',
+  display: 'inline-flex',
+  minHeight: 32,
+}
+
+const SIZED_IMAGE: React.CSSProperties = { display: 'inline-flex', height: 100, width: 160 }
+
+const SIZED_CAROUSEL: React.CSSProperties = { display: 'inline-flex', height: 160, width: 260 }
+
+const SIZED_EDITOR: React.CSSProperties = { display: 'inline-flex', width: 120 }
+
 /**
- * Frame a component on a white page so the capture is a stable, padded image.
- * @param children - The component to frame.
- * @returns The framed element.
+ * Lay out labelled component states in a wrap row.
+ * @param states - Labelled states.
+ * @returns The gallery element.
  */
-function frame(children: React.ReactNode): React.ReactElement {
+function gallery(states: [string, React.ReactNode][]): React.ReactElement {
   return (
-    <div style={{ background: '#fff', display: 'inline-flex', gap: 12, padding: 16 }}>
-      {children}
+    <div style={GALLERY_STYLE}>
+      {states.map(([label, node]) => (
+        <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={LABEL}>{label}</span>
+          <span style={CELL}>{node}</span>
+        </div>
+      ))}
     </div>
   )
 }
 
 /**
- * A minimal table for the {@link Table} snapshot.
+ * A minimal table for the Table snapshot.
  * @returns The table element.
  */
 function Users(): React.ReactElement {
@@ -104,26 +139,61 @@ async function noOptions(): Promise<string[]> {
   return []
 }
 
-/** One representative render per component. */
+const enumOptions = { Alpha: 'a', Beta: 'b', Gamma: 'c' }
+const dropdownItems = (
+  <>
+    <DropdownMenu.Item>View Profile</DropdownMenu.Item>
+    <DropdownMenu.Item>Settings</DropdownMenu.Item>
+    <DropdownMenu.Divider />
+    <DropdownMenu.Item>Logout</DropdownMenu.Item>
+  </>
+)
+const menuItems = (
+  <>
+    <Menu.Item>Profile</Menu.Item>
+    <Menu.Item>Settings</Menu.Item>
+    <Menu.Divider />
+    <Menu.Item disabled>Help</Menu.Item>
+  </>
+)
+const optionItems = (
+  <>
+    <OptionGroup.Option data="a">Alpha</OptionGroup.Option>
+    <OptionGroup.Option data="b">Beta</OptionGroup.Option>
+  </>
+)
+
+/** One labelled gallery per component. */
 const COMPONENTS: [string, React.ReactElement][] = [
-  ['AutoComplete', frame(
-    <AutoComplete
-      getOptionLabel={optionLabel}
-      getOptionValue={optionLabel}
-      placeholder="Search…"
-      onSearch={noOptions}
-    />,
-  )],
-  ['Await', frame(<Await fallback={<span>Loading…</span>}>{Promise.resolve(<span>Loaded</span>)}</Await>)],
-  ['Button', frame(
-    <>
-      <Button>Default</Button>
-      <Button type={Button.Type.Submit}>Submit</Button>
-      <Button disabled>Disabled</Button>
-    </>,
-  )],
-  ['Carousel', frame(<div style={{ height: 160, width: 260 }}><Carousel images={[IMAGE, IMAGE]} /></div>)],
-  ['CheckboxEditor', frame(<CheckboxEditor initialValue={true}>Checked</CheckboxEditor>)],
+  ['AutoComplete', gallery([
+    ['closed', (
+      <AutoComplete
+        getOptionLabel={optionLabel}
+        getOptionValue={optionLabel}
+        placeholder="Search…"
+        onSearch={noOptions}
+      />
+    )],
+  ])],
+  ['Button', gallery([
+    ['default', <Button>Default</Button>],
+    ['submit', <Button type={Button.Type.Submit}>Submit</Button>],
+    ['reset', <Button type={Button.Type.Reset}>Reset</Button>],
+    ['disabled', <Button disabled>Disabled</Button>],
+  ])],
+  ['Carousel', gallery([
+    ['images', (
+      <span style={SIZED_CAROUSEL}>
+        <Carousel images={[IMAGE, IMAGE]} />
+      </span>
+    )],
+  ])],
+  ['CheckboxEditor', gallery([
+    ['unchecked', <CheckboxEditor initialValue={false}>Unchecked</CheckboxEditor>],
+    ['checked', <CheckboxEditor initialValue={true}>Checked</CheckboxEditor>],
+    ['indeterminate', <CheckboxEditor allowIndeterminate initialValue={null}>Indeterminate</CheckboxEditor>],
+    ['disabled', <CheckboxEditor disabled initialValue={true}>Disabled</CheckboxEditor>],
+  ])],
   ['Documentation', (
     <Documentation
       active="/"
@@ -134,47 +204,71 @@ const COMPONENTS: [string, React.ReactElement][] = [
       <p>Documentation content.</p>
     </Documentation>
   )],
-  ['DropdownMenu', frame(
-    <DropdownMenu trigger={<Button>Open menu</Button>}>
-      <Menu>
-        <Menu.Item>One</Menu.Item>
-        <Menu.Item>Two</Menu.Item>
-      </Menu>
-    </DropdownMenu>,
-  )],
-  ['EnumEditor', frame(<EnumEditor enum={{ Alpha: 'a', Beta: 'b' }} initialValue="a" />)],
-  ['Image', frame(<div style={{ height: 100, width: 160 }}><Image alt="Example" src={IMAGE} /></div>)],
-  ['Link', frame(<Link to="/example">Example link</Link>)],
-  ['Menu', frame(
-    <Menu orientation={Menu.Orientation.Horizontal}>
-      <Menu.Item>One</Menu.Item>
-      <Menu.Item>Two</Menu.Item>
-    </Menu>,
-  )],
-  ['Mermaid', frame(<Mermaid>{'flowchart LR\n  A[Start] --> B[End]'}</Mermaid>)],
-  ['NumberEditor', frame(<NumberEditor initialValue={42} />)],
-  ['OptionGroup', frame(
-    <OptionGroup initialValue="a">
-      <OptionGroup.Option data="a">Alpha</OptionGroup.Option>
-      <OptionGroup.Option data="b">Beta</OptionGroup.Option>
-    </OptionGroup>,
-  )],
-  ['Section', frame(<Section title="Section title"><p>Section content.</p></Section>)],
-  ['Table', frame(<Users />)],
-  ['Tag', frame(
-    <>
-      <Tag>Label</Tag>
-      <Tag removable>Removable</Tag>
-    </>,
-  )],
-  ['TagsEditor', frame(<TagsEditor initialValue={['alpha', 'beta']} />)],
-  ['TextEditor', frame(<TextEditor initialValue="Some text" />)],
-  ['ToggleEditor', frame(<ToggleEditor initialValue={true}>Toggle</ToggleEditor>)],
-  ['Tooltip', (
-    <div style={{ background: '#fff', height: 100, padding: 24, position: 'relative', width: 200 }}>
-      <Tooltip visible>Tooltip content</Tooltip>
-    </div>
-  )],
+  ['DropdownMenu', gallery([
+    ['closed', (
+      <DropdownMenu trigger="Options">{dropdownItems}</DropdownMenu>
+    )],
+    ['open', (
+      <DropdownMenu open trigger="Options">{dropdownItems}</DropdownMenu>
+    )],
+  ])],
+  ['EnumEditor', gallery([
+    ['closed', <EnumEditor enum={enumOptions} initialValue="a" />],
+    ['open', <EnumEditor open enum={enumOptions} initialValue="a" />],
+  ])],
+  ['Image', gallery([
+    ['natural', (
+      <span style={SIZED_IMAGE}>
+        <Image alt="Example" src={IMAGE} />
+      </span>
+    )],
+  ])],
+  ['Link', gallery([
+    ['default', <Link to="/other">Link</Link>],
+    ['active', <Link active to="/current">Active</Link>],
+  ])],
+  ['Menu', gallery([
+    ['horizontal', (
+      <Menu orientation={Menu.Orientation.Horizontal}>{menuItems}</Menu>
+    )],
+    ['vertical', (
+      <Menu orientation={Menu.Orientation.Vertical}>{menuItems}</Menu>
+    )],
+  ])],
+  ['NumberEditor', gallery([
+    ['value', <span style={SIZED_EDITOR}><NumberEditor initialValue={42} /></span>],
+    ['disabled', <span style={SIZED_EDITOR}><NumberEditor disabled initialValue={7} /></span>],
+  ])],
+  ['OptionGroup', gallery([
+    ['vertical', (
+      <OptionGroup initialValue="a">{optionItems}</OptionGroup>
+    )],
+    ['horizontal', (
+      <OptionGroup initialValue="a" orientation={Orientation.Horizontal}>{optionItems}</OptionGroup>
+    )],
+  ])],
+  ['Section', gallery([
+    ['titled', <Section title="Section title"><p>Section content.</p></Section>],
+    ['untitled', <Section><p>Section content.</p></Section>],
+  ])],
+  ['Table', gallery([['default', <Users />]])],
+  ['Tag', gallery([
+    ['default', <Tag>Label</Tag>],
+    ['removable', <Tag removable>Removable</Tag>],
+  ])],
+  ['TagsEditor', gallery([
+    ['values', <TagsEditor initialValue={['alpha', 'beta']} />],
+    ['empty', <TagsEditor />],
+  ])],
+  ['TextEditor', gallery([
+    ['placeholder', <TextEditor placeholder="Placeholder" />],
+    ['value', <TextEditor initialValue="Some text" />],
+  ])],
+  ['ToggleEditor', gallery([
+    ['off', <ToggleEditor initialValue={false}>Off</ToggleEditor>],
+    ['on', <ToggleEditor initialValue={true}>On</ToggleEditor>],
+    ['disabled', <ToggleEditor disabled initialValue={true}>Disabled</ToggleEditor>],
+  ])],
 ]
 
 describe('components', () => {
