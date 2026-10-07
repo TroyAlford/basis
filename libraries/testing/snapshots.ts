@@ -61,6 +61,19 @@ export function writePng(path: string, png: PNG): void {
   writeFileSync(path, PNG.sync.write(png))
 }
 
+/**
+ * Write already-encoded PNG bytes, creating parent directories as needed.
+ *
+ * A capture already produces PNG bytes; writing them directly avoids a
+ * decode/re-encode round trip, which dominates for tall full-page captures.
+ * @param path - Destination path.
+ * @param bytes - The PNG-encoded image.
+ */
+export function writePngBytes(path: string, bytes: Buffer): void {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, bytes)
+}
+
 /** Outcome of comparing an actual screenshot against its snapshot. */
 export interface ScreenshotComparison {
   /** Image highlighting the differing pixels. */

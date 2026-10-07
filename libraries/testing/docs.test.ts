@@ -8,18 +8,11 @@ import { describe, test } from './test'
 const root = join(import.meta.dir, '..', '..')
 
 /*
- * The docs `Code` component awaits a shiki dynamic import from esm.sh. Serve a
- * tiny local shiki so the page renders deterministically and offline; the
- * network policy blocks everything else.
+ * The docs `Code` component loads Shiki from esm.sh and the Mermaid component
+ * loads its runtime from esm.sh; the network policy blocks both by default, so
+ * the visits allow that host and the pages render their real output.
  */
-const SHIKI_STUB = [
-  'export async function codeToHtml(code) {',
-  "  const escape = value => value.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))",
-  "  return '<pre class=\"shiki\"><code>' + escape(code) + '</code></pre>'",
-  '}',
-].join('\n')
-
-const STUBS = { 'https://esm.sh/shiki@3.0.0': SHIKI_STUB }
+const NETWORK = { allow: ['esm.sh'] }
 
 describe('testing/docs', () => {
   let app: ApplicationHandle
@@ -33,7 +26,7 @@ describe('testing/docs', () => {
   }, 120_000)
 
   test('captures the Button examples', async () => {
-    await app.visit('/components/button', { stubs: STUBS }, async page => {
+    await app.visit('/components/button', { ...NETWORK }, async page => {
       await page.waitForSelector('.button-examples')
       await matchScreenshot(page.locator('.button-examples').first(), 'button examples', {
         maxDiffPixelRatio: 0.01,
@@ -42,7 +35,7 @@ describe('testing/docs', () => {
   }, 60_000)
 
   test('captures the icon grid', async () => {
-    await app.visit('/icons', { stubs: STUBS }, async page => {
+    await app.visit('/icons', { ...NETWORK }, async page => {
       await page.waitForSelector('.icon-grid')
       await matchScreenshot(page.locator('.icon-grid'), 'icon grid', {
         maxDiffPixelRatio: 0.01,
@@ -51,7 +44,7 @@ describe('testing/docs', () => {
   }, 60_000)
 
   test('captures the whole icons page', async () => {
-    await app.visit('/icons', { stubs: STUBS }, async page => {
+    await app.visit('/icons', { ...NETWORK }, async page => {
       await page.waitForSelector('.icon-grid')
       /*
        * The docs shell is `100vh` with an inner scroll region, so a full-page
@@ -69,6 +62,10 @@ describe('testing/docs', () => {
           }
         `,
       })
+      // Wait for the real Shiki output so the captured code is highlighted.
+      if (await page.locator('.code.component').count() > 0) {
+        await page.waitForSelector('.code.component pre.shiki', { timeout: 30_000 })
+      }
       /*
        * The tall page is mostly prose, so give it a slightly wider budget to
        * absorb small cross-machine rasterisation differences.
@@ -85,7 +82,7 @@ describe('testing/docs', () => {
    * is the visual contract for flip-and-shift against a scrolling container.
    */
   test('flips a Popup inside its clipping boundary', async () => {
-    await app.visit('/mixins', { stubs: STUBS }, async page => {
+    await app.visit('/mixins', { ...NETWORK }, async page => {
       await page.waitForSelector('.popup-boundary-example button')
       await matchScreenshot(page.locator('.popup-boundary-example'), 'popup boundary', {
         maxDiffPixelRatio: 0.02,
@@ -99,7 +96,7 @@ describe('testing/docs', () => {
    * in every direction plus shift with an off-center arrow.
    */
   test('constrains tooltips to a boundary in every direction', async () => {
-    await app.visit('/components/tooltip', { stubs: STUBS }, async page => {
+    await app.visit('/components/tooltip', { ...NETWORK }, async page => {
       await page.waitForSelector('.tooltip-boundary-examples')
       const scenarios = [
         ['top', 'top edge'],
@@ -123,7 +120,7 @@ describe('testing/docs', () => {
    * the viewport, wraps rich option content, and follows a named theme.
    */
   test('aligns the AutoComplete dropdown to its editor', async () => {
-    await app.visit('/components/auto-complete', { stubs: STUBS }, async page => {
+    await app.visit('/components/auto-complete', { ...NETWORK }, async page => {
       const search = page.locator('.auto-complete').first()
       const input = search.locator('input')
       const menu = search.locator('.popup-menu')
