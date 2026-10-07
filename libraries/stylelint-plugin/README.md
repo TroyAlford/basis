@@ -2,7 +2,7 @@
 
 The Basis-owned CSS lint surface for `*.styles.ts`. It bundles the shared Stylelint configuration and the Basis-specific rules so consumers do not copy Stylelint dependencies, custom syntax, or configuration.
 
-Basis consumes this surface through `basis/stylelint`; external consumers should do the same rather than importing this workspace directly.
+`@basis/stylelint-plugin` is an internal workspace. Consumers import its public surface, `basis/stylelint`.
 
 ## What it parses
 

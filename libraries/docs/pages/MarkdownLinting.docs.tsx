@@ -16,7 +16,7 @@ export class MarkdownLintingDocs extends DocumentationPage<Record<string, never>
           <p><code>basis lint</code> reports; <code>basis format</code> applies the canonical serialization and every autofix in one pass:</p>
           {Code.format('bunx basis format', 'bash')}
           <p>A consumer can also adopt the shared configuration from their own unified pipeline:</p>
-          {Code.format("import { createMarkdownConfig } from 'basis/lint'", 'ts')}
+          {Code.format("import { createMarkdownConfig } from 'basis/markdown'", 'ts')}
         </section>
         <section>
           <h2>What it enforces</h2>

@@ -57,6 +57,11 @@ const main = (): void => {
 
     const basisBin = join(app, 'node_modules', '.bin', 'basis')
     run(['bun', basisBin, 'lint'], app, env)
+
+    // A consumer repo with no ESLint config still lints: Basis supplies its own.
+    rmSync(join(app, 'eslint.config.mjs'), { force: true })
+    run(['bun', basisBin, 'lint'], app, env)
+
     run(['bun', basisBin, 'typecheck'], app, env)
 
     // True clean reinstall: drop node_modules and the lockfile, install again.

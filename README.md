@@ -4,7 +4,7 @@ This monorepo provides a suite of development tools and utilities designed speci
 
 ## Consuming Basis
 
-The repository is the distribution artifact: consumers pin it as a Git dependency and import its stable source surfaces (`basis/react`, `basis/server`, `basis/logger`, `basis/review`, `basis/configuration`, `basis/eslint`, `basis/lint`, and `basis/tsconfig/*`). See [consumer/README.md](./consumer/README.md) for the React/server runtime contract, plus the lint, TypeScript, CLI, and patch contract.
+The repository is the distribution artifact: consumers pin it as a Git dependency and import its stable source surfaces (`basis/react`, `basis/server`, `basis/logger`, `basis/review`, `basis/configuration`, `basis/eslint`, `basis/markdown`, and `basis/tsconfig/*`). See [consumer/README.md](./consumer/README.md) for the React/server runtime contract, plus the lint, TypeScript, CLI, and patch contract.
 
 ```bash
 bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
