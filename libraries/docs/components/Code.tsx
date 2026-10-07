@@ -8,6 +8,26 @@ interface Props {
   theme: string,
 }
 
+/** The Shiki runtime surface this component uses. */
+interface Shiki {
+  /** Highlight `code` to Shiki HTML. */
+  codeToHtml: (code: string, options: { lang: string, theme: string }) => Promise<string>,
+}
+
+/** The Shiki runtime, loaded at most once per document. */
+let runtime: Promise<Shiki> | null = null
+
+/**
+ * Load the Shiki runtime, once per document.
+ * @returns The runtime.
+ */
+function loadShiki(): Promise<Shiki> {
+  // @ts-expect-error - the runtime is loaded from a URL, not a package.
+  // eslint-disable-next-line @basis/import-extensions
+  runtime ??= import('https://esm.sh/shiki@3.0.0')
+  return runtime
+}
+
 export class Code extends Component<Props> {
   static displayName = 'Code'
   static defaultProps: Props = {
@@ -58,9 +78,7 @@ export class Code extends Component<Props> {
 
   async renderCode() {
     if (typeof globalThis.document === 'undefined') return <code>{this.code}</code>
-    // @ts-expect-error - the runtime is loaded from a URL, not a package.
-    // eslint-disable-next-line @basis/import-extensions
-    const { codeToHtml } = await import('https://esm.sh/shiki@3.0.0')
+    const { codeToHtml } = await loadShiki()
     const html = await codeToHtml(this.code, {
       lang: this.props.language,
       theme: this.props.theme,
