@@ -1,6 +1,7 @@
 import type { Dirent } from 'node:fs'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, relative } from 'node:path'
+import { splitFrontMatter } from '../../utilities'
 
 /** A validation problem found in the docs tree. */
 export interface DocsIssue {
@@ -36,9 +37,6 @@ export interface DocsDocument {
 
 /** Markdown/MDX extensions the docs tree recognizes. */
 export const DOC_EXTENSIONS = ['.md', '.mdx']
-
-/** A leading YAML front-matter block. */
-const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
 
 /** A YAML-ish front-matter `key: value` pair. */
 const FRONT_MATTER_PAIR = /^([A-Za-z0-9_-]+):\s*(.*)$/
@@ -89,18 +87,22 @@ export function routePath(relativeFile: string): string {
 
 /**
  * Split a document's front-matter from its body and validate the pairs.
- * @param contents - Full document text.
+ * @param source - Full document text.
  * @param file - Repository-relative path, for issue reporting.
- * @returns The body, the front-matter title, and any issues.
+ * @returns The body, the front-matter title, the consumed line count, and any issues.
  */
-function splitFrontMatter(contents: string, file: string): { body: string, issues: DocsIssue[], title: string | null } {
-  const fence = FRONT_MATTER.exec(contents)
-  if (!fence) return { body: contents, issues: [], title: null }
+function parseFrontMatter(source: string, file: string): {
+  body: string,
+  issues: DocsIssue[],
+  lines: number,
+  title: string | null,
+} {
+  const { body, contents, lines } = splitFrontMatter(source)
+  if (contents === null) return { body, issues: [], lines, title: null }
 
   const issues: DocsIssue[] = []
   let title: string | null = null
-  const lines = fence[1].split(/\r?\n/)
-  lines.forEach((line, index) => {
+  contents.split(/\r?\n/).forEach((line, index) => {
     if (line.trim() === '' || line.trimStart().startsWith('#')) return
     const match = FRONT_MATTER_PAIR.exec(line)
     if (!match) {
@@ -110,7 +112,7 @@ function splitFrontMatter(contents: string, file: string): { body: string, issue
     }
     if (match[1] === 'title') title = match[2].replace(/^["']|["']$/g, '').trim()
   })
-  return { body: contents.slice(fence[0].length), issues, title }
+  return { body, issues, lines, title }
 }
 
 /**
@@ -181,13 +183,10 @@ export function scanDocs(root: string): DocsDocument[] {
   return collect(root).map(file => {
     const relativeFile = relative(root, file)
     const contents = readFileSync(file, 'utf8')
-    const frontMatter = splitFrontMatter(contents, relativeFile)
-    const offset = (contents.length - frontMatter.body.length > 0)
-      ? contents.slice(0, contents.length - frontMatter.body.length).split(/\r?\n/).length - 1
-      : 0
+    const frontMatter = parseFrontMatter(contents, relativeFile)
     return {
       body: frontMatter.body,
-      fenceIssues: checkFences(frontMatter.body, relativeFile, offset),
+      fenceIssues: checkFences(frontMatter.body, relativeFile, frontMatter.lines),
       frontMatterIssues: frontMatter.issues,
       frontMatterTitle: frontMatter.title,
       links: collectLinks(frontMatter.body),

@@ -5,8 +5,8 @@ import * as React from 'react'
 import * as runtime from 'react/jsx-runtime'
 import { renderToString } from 'react-dom/server'
 import remarkGfm from 'remark-gfm'
-import type { DocumentationEntry } from '../../react/components/Documentation/Documentation'
-import { Documentation } from '../../react/components/Documentation/Documentation'
+import type { DocumentationEntry, DocumentationRoute } from '../../react/components/Documentation/Documentation'
+import { buildDocumentationNavigation, Documentation } from '../../react/components/Documentation/Documentation'
 import { DOCUMENTATION_FONTS_URL } from '../../react/components/Documentation/typography'
 import { Mermaid, MERMAID_SOURCE } from '../../react/components/Mermaid/Mermaid'
 import { themeStyles } from '../../react/components/Theme/Theme'
@@ -159,8 +159,8 @@ function mermaidBootstrap(): string {
  */
 function DocumentationPre(props: React.HTMLAttributes<HTMLPreElement>): React.ReactElement {
   const child = React.Children.toArray(props.children)[0]
-  if (React.isValidElement(child)) {
-    const { children, className } = child.props as { children?: React.ReactNode, className?: string }
+  if (React.isValidElement<{ children?: React.ReactNode, className?: string }>(child)) {
+    const { children, className } = child.props
     if (className?.includes('language-mermaid')) return React.createElement(Mermaid, null, String(children ?? ''))
   }
   return React.createElement('pre', props)
@@ -192,25 +192,21 @@ export function discoverDocs(options: DocsOptions): DocsSite {
  * @returns Sorted navigation entries.
  */
 function navigation(site: DocsSite): DocumentationEntry[] {
-  const entries: DocumentationEntry[] = []
   const modulePaths = new Set(site.modules.keys())
+  const routes: DocumentationRoute[] = []
   for (const page of site.pages.values()) {
     const href = pageHref(site.route, page.path)
     if (modulePaths.has(href)) continue
-    entries.push({ href, title: page.title })
+    routes.push({ href, title: page.title })
   }
-
-  const modules = new Map<string, DocumentationEntry>()
-  for (const [path, page] of site.modules) modules.set(path, { children: [], href: path, title: page.title })
   for (const [path, page] of site.modules) {
-    const entry = modules.get(path)
-    if (!entry) continue
-    const parent = page.parent ? modules.get(pageHref(site.route, page.parent.replace(/^\/+|\/+$/g, ''))) : undefined
-    if (parent) parent.children = [...(parent.children ?? []), entry]
-    else entries.push(entry)
+    routes.push({
+      href: path,
+      parent: page.parent ? pageHref(site.route, page.parent.replace(/^\/+|\/+$/g, '')) : undefined,
+      title: page.title,
+    })
   }
-
-  return entries.sort((a, b) => a.title.localeCompare(b.title))
+  return buildDocumentationNavigation(routes)
 }
 
 /**

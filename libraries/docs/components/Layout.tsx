@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react'
 import type { DocumentationEntry } from '@basis/react'
-import { ApplicationBase, Documentation, Theme } from '@basis/react'
+import { ApplicationBase, buildDocumentationNavigation, Documentation, Theme } from '@basis/react'
 import { routes } from '../routes.ts'
 
 /**
@@ -20,21 +20,11 @@ export class Layout extends ApplicationBase {
    * @returns The navigation entries.
    */
   protected get navigation(): DocumentationEntry[] {
-    const entries = new Map<string, DocumentationEntry>()
-    for (const route of routes) {
-      entries.set(route.path, { href: route.path, title: route.title.split('/').pop() ?? route.title })
-    }
-
-    const roots: DocumentationEntry[] = []
-    for (const route of routes) {
-      const entry = entries.get(route.path)
-      if (!entry) continue
-      const parent = route.parent ? entries.get(route.parent) : undefined
-      if (parent) parent.children = [...(parent.children ?? []), entry]
-      else roots.push(entry)
-    }
-
-    return roots.sort((a, b) => a.title.localeCompare(b.title))
+    return buildDocumentationNavigation(routes.map(route => ({
+      href: route.path,
+      parent: route.parent,
+      title: route.title.split('/').pop() ?? route.title,
+    })))
   }
 
   protected layout(content: ReactNode): ReactNode {

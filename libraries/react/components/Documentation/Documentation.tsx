@@ -14,6 +14,42 @@ export interface DocumentationEntry {
   title: string,
 }
 
+/** A flat documentation route, before it is nested for navigation. */
+export interface DocumentationRoute {
+  /** Absolute link target. */
+  href: string,
+  /** The href of the parent entry, for nesting. */
+  parent?: string,
+  /** Display title. */
+  title: string,
+}
+
+/**
+ * Build the nested documentation navigation from a flat route list, nesting
+ * each entry under the parent named by its `parent` href.
+ *
+ * This is the one place the documentation tree is shaped: the docs app and the
+ * static documentation build both feed their routes through it, so navigation
+ * nests the same way everywhere.
+ * @param routes - The routes, in their intended sibling order.
+ * @returns The navigation entries, with the roots sorted by title.
+ */
+export function buildDocumentationNavigation(routes: readonly DocumentationRoute[]): DocumentationEntry[] {
+  const entries = new Map<string, DocumentationEntry>()
+  for (const route of routes) entries.set(route.href, { href: route.href, title: route.title })
+
+  const roots: DocumentationEntry[] = []
+  for (const route of routes) {
+    const entry = entries.get(route.href)
+    if (!entry) continue
+    const parent = route.parent ? entries.get(route.parent) : undefined
+    if (parent) parent.children = [...(parent.children ?? []), entry]
+    else roots.push(entry)
+  }
+
+  return roots.sort((a, b) => a.title.localeCompare(b.title))
+}
+
 interface Props {
   /** Current route path, highlighted in the navigation. */
   active?: string,

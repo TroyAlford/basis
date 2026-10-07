@@ -41,7 +41,6 @@ export class Mermaid extends Component<Props, HTMLDivElement, State> {
   }
 
   async componentDidMount(): Promise<void> {
-
     const { default: mermaid } = await import(MERMAID_SOURCE)
     mermaid.initialize({ startOnLoad: false })
     const { svg } = await mermaid.render(this.#id, this.source)

@@ -1,6 +1,7 @@
 import { compile } from '@mdx-js/mdx'
 import type { BunPlugin, PluginBuilder } from 'bun'
 import remarkGfm from 'remark-gfm'
+import { splitFrontMatter } from '../../utilities'
 
 /** The minimal Markdown/MDX node shape these transforms read and produce. */
 interface MarkdownNode {
@@ -9,15 +10,6 @@ interface MarkdownNode {
   name?: string,
   type: string,
   value?: string,
-}
-
-/**
- * Remove a leading YAML front-matter block so it is metadata, not page content.
- * @param source - The raw document.
- * @returns The document without front-matter.
- */
-function stripFrontMatter(source: string): string {
-  return source.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
 }
 
 /** Whether the document contains a Mermaid fence. */
@@ -66,11 +58,11 @@ export function pluginMarkdown(): BunPlugin {
     name: 'markdown',
     setup(build: PluginBuilder) {
       build.onLoad({ filter: /\.mdx?$/ }, async args => {
-        const body = stripFrontMatter(await Bun.file(args.path).text())
+        const body = splitFrontMatter(await Bun.file(args.path).text()).body
         const source = MERMAID_FENCE.test(body) ? MERMAID_IMPORT + body : body
         const compiled = await compile(source, {
           outputFormat: 'program',
-          remarkPlugins: [remarkGfm, remarkMermaid as never],
+          remarkPlugins: [remarkGfm, remarkMermaid],
         })
         return { contents: String(compiled), loader: 'js' }
       })
