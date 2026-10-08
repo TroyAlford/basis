@@ -23,6 +23,50 @@ describe('WATCH_IGNORED', () => {
 })
 
 describe('the development watcher', () => {
+  test('ignores test snapshot directories', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'basis-watcher-'))
+    const source = join(base, 'source')
+    const snapshots = join(source, '__screenshots__', 'thing.test.ts')
+    await mkdir(snapshots, { recursive: true })
+
+    const index = join(source, 'index.ts')
+    await writeFile(index, 'export const value = 1\n')
+
+    const watcher = watch([source], {
+      ignoreInitial: true,
+      ignored: WATCH_IGNORED,
+      persistent: true,
+    })
+
+    /* Every event under __screenshots__ would be a spurious rebuild. */
+    const screenshotEvents: string[] = []
+    const record = (changed: string) => {
+      if (changed.includes('__screenshots__')) screenshotEvents.push(changed)
+    }
+    watcher.on('add', record).on('change', record)
+
+    try {
+      await new Promise<void>(resolve => watcher.once('ready', () => resolve()))
+
+      await writeFile(join(snapshots, 'shot.png'), 'not really a png')
+
+      // A real source change still fires, proving the watcher is live.
+      const changed = new Promise<void>(resolve => watcher.once('change', () => resolve()))
+      await appendFile(index, '\nexport const next = 2\n')
+      await Promise.race([
+        changed,
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error('the watcher reported no change')), 5000)
+        }),
+      ])
+
+      expect(screenshotEvents).toEqual([])
+    } finally {
+      await watcher.close()
+      await rm(base, { force: true, recursive: true })
+    }
+  })
+
   test('reports a change in a source directory under a hidden ancestor', async () => {
     const base = await mkdtemp(join(tmpdir(), 'basis-watcher-'))
     const source = join(base, '.hidden', 'source')

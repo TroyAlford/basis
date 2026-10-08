@@ -36,10 +36,16 @@ const buildError = (error: unknown): Error => {
  * ancestor. Anchoring it to the basename keeps a checkout or worktree that lives
  * under a hidden directory (for example `/home/me/.work/project`) watchable;
  * matching any dotted segment would prune the whole tree and HMR would silently
- * never fire. `node_modules` and type declarations are ignored too.
+ * never fire.
+ *
+ * `node_modules`, type declarations, and test snapshot directories are ignored
+ * too. The snapshots matter because they are images written under the source
+ * tree while tests run: a buildable extension, so without this a running dev
+ * server would rebuild and reload on every captured screenshot.
  */
 export const WATCH_IGNORED: (RegExp | string)[] = [
   /(^|[/\\])\.[^/\\]+$/, // dot entries, by basename
+  /(^|[/\\])__screenshots__([/\\]|$)/, // test snapshot directories
   '**/node_modules/**',
   '**/*.d.ts',
 ]
