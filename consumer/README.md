@@ -258,7 +258,9 @@ new Server()
   })
 ```
 
-One server supports two explicit modes. Development keeps the live-compile, file-watch, HMR, and module-proxy workflow. Production builds once, bundles the installed application/Basis dependency graph (so serving never needs a third-party CDN), serves the SPA and its assets, and shuts down gracefully on `SIGINT`/`SIGTERM`.
+One server supports two explicit modes. Development delegates to Bun's dev server: it generates and serves the SPA shell through an HTML route so Bun owns live compilation, file watching, and hot updates. Edits apply without a full-page reload — Bun's dev server Fast-Refreshes function components, and the `basis/serve` plugin registers every class component (all of Basis's UI) so Bun's runtime refreshes the changed component in place, leaving the surrounding page and layout chrome (navigation, theme) untouched. A module that derives state from imported components (for example a route registry) must call `import.meta.hot.accept()` so it rebuilds that state; an update with no accepting boundary falls back to a reload. Production builds once, bundles the installed application/Basis dependency graph (so serving never needs a third-party CDN), serves the SPA and its assets, and shuts down gracefully on `SIGINT`/`SIGTERM`.
+
+Development HMR needs Bun's dev-server bundler to load Basis's modules. `bun install` registers the plugin in your `bunfig.toml` automatically, inside a fenced block it owns (`# >>> basis:development-server >>>` … `# <<< basis:development-server <<<`), so re-installing is idempotent and your own comments and formatting are untouched. If the file cannot be edited safely (for example it already declares `[serve.static]` elsewhere), the install fails loudly with the line to add.
 
 `start` options are `development`, `hostname`, `port`, and `version`; each falls back to `NODE_ENV`, `HOST`, `PORT`, and `VERSION`. A managed process should bind loopback and the deployment-assigned port, and pass the release version.
 

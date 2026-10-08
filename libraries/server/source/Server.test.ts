@@ -230,20 +230,105 @@ describe('Server production mode', () => {
 })
 
 describe('Server development mode', () => {
-  test('keeps live-build, HMR, and bundled dependencies (no CDN)', async () => {
+  test('serves the app through Bun dev-server HMR with runtime facts and no reload shim', async () => {
     const server = await startServer('development')
     const base = `http://127.0.0.1:${server.port}`
 
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
     const html = await Bun.fetch(base).then(response => response.text())
-    expect(html).not.toContain('/modules/')
-    expect(html).toContain('/scripts/hmr.js')
-    expect(html).toContain('/scripts/index.js')
 
-    expect((await Bun.fetch(`${base}/scripts/index.js`)).status).toBe(200)
-    expect((await Bun.fetch(`${base}/scripts/hmr.js`)).status).toBe(200)
+    /*
+     * Development delegates to Bun's dev server: the shell carries Bun's HMR
+     * client (served under `/_bun/`) and never the full-page-reload shim Basis
+     * used to ship as `hmr.js`.
+     */
+    expect(html).toContain('/_bun/')
+    expect(html).not.toContain('/scripts/hmr.js')
+
+    // The client bootstrap still receives the embedded runtime facts.
+    expect(html).toContain('id="basis-runtime"')
+    expect(html).toContain('id="root"')
+
+    // Unmatched paths fall back to the same HMR-enabled SPA shell.
+    const deep = await Bun.fetch(`${base}/decks/123`)
+    expect(deep.status).toBe(200)
+    expect(await deep.text()).toContain('/_bun/')
+
+    // Development never reaches the CDN module proxy.
+    expect(html).not.toContain('/modules/')
+
+    expect(await server.stop()).toBe(0)
   })
+
+  test('never reports healthy when a development build fails', async () => {
+    const server = await startServer('development', { ENTRY: './Broken.tsx' })
+    const base = `http://127.0.0.1:${server.port}`
+
+    const { body, response } = await waitForHealth(base, (result, payload) => (
+      result.status === 503 && payload.status === 'error'
+    ))
+    expect(response.status).toBe(503)
+    expect(body).toMatchObject({ status: 'error' })
+
+    expect(await server.stop()).toBe(0)
+  })
+})
+
+describe('Server development HMR', () => {
+  test('delivers a hot update over the HMR socket when a source file changes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'basis-hmr-'))
+
+    try {
+      const valueFile = join(dir, 'value.ts')
+      await Bun.write(valueFile, "export const value = 'one'\n")
+      await Bun.write(
+        join(dir, 'entry.ts'),
+        "import { value } from './value'\n;(globalThis as { __value?: string }).__value = value\n",
+      )
+
+      const server = await startServer('development', { ENTRY: join(dir, 'entry.ts') })
+      const base = `http://127.0.0.1:${server.port}`
+      await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
+
+      /*
+       * Touch the shell once so Bun traces the entrypoint and its import into
+       * the module graph; an edit before that would not be watched. A healthy
+       * shell proves the build succeeded, not that we are observing a build
+       * error frame.
+       */
+      const shell = await Bun.fetch(base).then(response => response.text())
+      expect(shell).not.toContain('Build Failed')
+
+      const script = [
+        'const fs = require(\'node:fs\')',
+        `const ws = new WebSocket('ws://127.0.0.1:${server.port}/_bun/hmr')`,
+        'ws.binaryType = \'arraybuffer\'',
+        'ws.onopen = () => {',
+        '  console.log(\'OPEN\')',
+        `  setTimeout(() => fs.writeFileSync(${JSON.stringify(valueFile)}, "export const value = 'two'\\n"), 400)`,
+        '}',
+        'ws.onmessage = event => {',
+        '  console.log(\'MESSAGE\', typeof event.data, event.data.byteLength ?? 0)',
+        '  setTimeout(() => process.exit(0), 50)',
+        '}',
+        'ws.onerror = () => { console.log(\'ERROR\'); process.exit(1) }',
+        'setTimeout(() => process.exit(0), 8000)',
+      ].join('\n')
+
+      const proc = Bun.spawn([process.execPath, '-e', script], { stderr: 'pipe', stdout: 'pipe' })
+      const stdout = await new Response(proc.stdout).text()
+      const exit = await proc.exited
+
+      expect(stdout).toContain('OPEN')
+      expect(stdout).toMatch(/MESSAGE object \d+/)
+      expect(exit).toBe(0)
+
+      expect(await server.stop()).toBe(0)
+    } finally {
+      await rm(dir, { force: true, recursive: true })
+    }
+  }, 20_000)
 })
 
 describe('Server SSE idle streams', () => {
@@ -516,7 +601,7 @@ describe('Server logging', () => {
 })
 
 describe('Server WebSocket routes', () => {
-  test('accepts upgrades on a registered route, including the internal HMR route', async () => {
+  test('accepts upgrades on a registered route', async () => {
     const server = await startServer('production')
 
     /*
@@ -524,7 +609,7 @@ describe('Server WebSocket routes', () => {
      * `WebSocket` with a browser stand-in that does not perform a real upgrade.
      */
     const script = [
-      `const ws = new WebSocket('ws://127.0.0.1:${server.port}/hmr')`,
+      `const ws = new WebSocket('ws://127.0.0.1:${server.port}/echo')`,
       "ws.onopen = () => { console.log('connected'); ws.close(); process.exit(0) }",
       "ws.onerror = () => { console.log('failed'); process.exit(1) }",
       "setTimeout(() => { console.log('timeout'); process.exit(2) }, 5000)",

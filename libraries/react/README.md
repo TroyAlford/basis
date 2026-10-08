@@ -107,3 +107,9 @@ A `mermaid` code fence in a `.mdx` document compiles to this component through t
 ## Default typography
 
 Importing `@basis/react` registers a root stylesheet that applies Basis's default type — Ubuntu for UI and Fira Code for code — from Google Fonts, so components render in Basis's type without configuration. The stylesheet URL is exported as `BASIS_FONTS_URL`; `basis/testing`'s HTML renderer loads the same fonts, so component screenshots get Basis type by default.
+
+## Hot module replacement
+
+Under a `basis/server` development runtime, edits apply to the running page without a full-page reload. Bun's dev server emits React Fast Refresh registrations only for function components, so the `basis/serve` plugin registers every class component and marks its module self-accepting; Bun's own runtime then refreshes the changed component in place. Changing one component re-renders only that component's subtree — not its page or the layout chrome (for example a scrolled navigation). Class state is not preserved (React Refresh does not preserve it for class components).
+
+A module that derives state from imported components — for example a route registry that maps imported page classes into an array — should call `import.meta.hot.accept()` so it re-evaluates and rebuilds that state when a dependency changes. Without an accepting boundary the update has nowhere to land and the page reloads.

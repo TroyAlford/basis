@@ -23,6 +23,11 @@ new Server()
   .root(import.meta.dir)
   .assets('./assets')
   .main(Bun.env.ENTRY ?? './Application.tsx')
+  // A round-trip socket used to prove route upgrades without the removed HMR shim.
+  .socket('echo', {
+    message: (socket, data) => socket.send(data),
+    open: socket => socket.send('ready'),
+  })
   // A quiet SSE route used to prove idle streams survive the HTTP idle timeout.
   .sse('idle', (_params, _context, channel) => {
     channel.send('ready', {})

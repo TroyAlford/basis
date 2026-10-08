@@ -50,12 +50,24 @@ Records carry a UTC ISO-8601 timestamp (date and timezone), a level, and any aut
 
 ## Development mode
 
-Development preserves the live workflow:
+Development runs on Bun's dev server, so updates apply to the running page instead of forcing a full-page reload:
 
-- entrypoints are compiled from source and rebuilt on change;
-- a Chokidar watcher drives rebuilds for source, style, and bundled asset (image/font) changes; it ignores dot entries and `node_modules` inside the watched tree, and keeps working when the checkout itself sits under a hidden directory (the ignore matches a dotted basename, never an ancestor);
-- a WebSocket (served through the general `socket` facility) broadcasts HMR notifications;
-- dependencies (including React) are bundled, so no CDN is required; the `/modules` proxy route remains available for explicit module requests but is not used by the default build.
+- the SPA shell is generated at startup and served through a Bun HTML route, so Bun owns the module graph, file watching, and hot updates;
+- Bun's dev server emits React Fast Refresh registrations only for function components, so the `basis/serve` plugin registers every class component itself and marks its module self-accepting; Bun's own refresh runtime then updates the changed component in place, without reloading the document and without re-rendering the surrounding page or layout chrome (navigation, theme);
+- a module that derives state from imported components (for example a route registry) should call `import.meta.hot.accept()` so it re-evaluates and rebuilds that state; an edit with no accepting boundary falls back to a reload;
+- styles registered through `style()` reconcile in place by id, so style edits apply without duplication;
+- the request's runtime facts are still embedded into the shell the client boots from;
+- `/health` stays `503 starting` until the first development build succeeds, and reports `503 error` when it fails, so development readiness is honest rather than optimistic;
+- dependencies (including React) are bundled by Bun, so no CDN is required; the `/modules` proxy route remains available for explicit module requests but is not used by the default build.
+
+Bun's dev server loads bundler plugins from `bunfig.toml`, so a consuming app registers Basis's SASS and Markdown loaders with:
+
+```toml
+[serve.static]
+plugins = ["basis/serve"]
+```
+
+The trusted `postinstall` hook adds that section automatically (and never touches the Basis monorepo's own `bunfig.toml`). An app that does not use SASS or Markdown does not need it, but it is harmless.
 
 ## Production mode
 
