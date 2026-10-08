@@ -1,5 +1,6 @@
+import type { PluginBuilder } from 'bun'
 import { describe, expect, test } from 'bun:test'
-import { classNames, transformModule } from './pluginRefresh'
+import { classNames, pluginRefresh, transformModule } from './pluginRefresh'
 
 describe('classNames', () => {
   test('finds top-level class declarations, exported or not', () => {
@@ -52,5 +53,39 @@ describe('transformModule', () => {
 
   test('leaves a class-free, non-style module untouched', () => {
     expect(transformModule('export const x = 1', '/app/util.ts', '/app')).toBeNull()
+  })
+})
+
+describe('pluginRefresh', () => {
+  /**
+   * Run plugin setup against a stub builder and report whether it registered a loader.
+   * @param nodeEnv - The NODE_ENV value to run under.
+   * @returns Whether `onLoad` was registered.
+   */
+  function registersLoader(nodeEnv: string | undefined): boolean {
+    const previous = process.env.NODE_ENV
+    if (nodeEnv === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = nodeEnv
+
+    try {
+      let registered = false
+      const build = {
+        config: { target: 'browser' },
+        onLoad: () => { registered = true },
+      } as unknown as PluginBuilder
+      pluginRefresh().setup(build)
+      return registered
+    } finally {
+      if (previous === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = previous
+    }
+  }
+
+  test('does not inject React Refresh into a production build', () => {
+    expect(registersLoader('production')).toBe(false)
+  })
+
+  test('registers the loader in a development build', () => {
+    expect(registersLoader(undefined)).toBe(true)
   })
 })

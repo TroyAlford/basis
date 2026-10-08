@@ -102,6 +102,12 @@ export const pluginRefresh = (): BunPlugin => ({
   name: 'basis-refresh',
   setup(build) {
     if (build.config.target !== 'browser') return
+    /*
+     * React Fast Refresh is development-only. Bun's HTML bundler exposes no
+     * development flag on the build config, so key on NODE_ENV: a production
+     * bundle must never include the refresh runtime — it throws on import.
+     */
+    if (process.env.NODE_ENV === 'production') return
 
     build.onLoad({ filter: /\.[jt]sx?$/ }, async args => {
       if (args.path.includes('node_modules') || /\.d\.[jt]s$/.test(args.path)) return undefined
