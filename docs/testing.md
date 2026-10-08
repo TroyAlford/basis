@@ -21,7 +21,7 @@ flowchart TD
     Run["One bun test run"] --> First["First capture"]
     First --> Runtime["Run-scoped runtime"]
     Runtime --> Container["One Docker container<br/>pinned Playwright image"]
-    Container --> Server["playwright run-server<br/>ephemeral port"]
+    Container --> Server["playwright run-server<br/>published localhost port"]
     Server --> Browser["One browser<br/>chromium.connect(ws)"]
     Browser --> Component["Component / JSX captures<br/>one reused page, setContent per capture"]
     Browser --> Visit["Application captures<br/>app.visit opens a fresh context per visit"]
@@ -56,7 +56,7 @@ test('renders the application', async () => {
 
 ## Docker and determinism
 
-Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime starts the container detached with `--network=host`, so the containerised browser can reach the application server on loopback; the container has no fixed name and the server binds an ephemeral port.
+Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime publishes the container's `run-server` to a random localhost port and connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server; the container has no fixed name and no host-network assumption.
 
 With no fixed identity, no lock files, no reference counts, and no PID protocols, there is nothing to coordinate between runs: each run owns exactly one container and removes it when it finishes.
 

@@ -33,9 +33,9 @@ const main = (): void => {
     const spec = `git+file://${source}#${tag}`
 
     /*
-     * Trusted install into a fresh host via the documented command. The install
-     * hook only downloads the pinned Chromium browser; it never invokes the
-     * platform package manager or escalates privileges.
+     * Trusted install into a fresh host via the documented command. The hook
+     * applies Basis-owned patches and validates declared host dependencies; it
+     * provisions no browser, because snapshot capture runs Chromium in Docker.
      */
     const app = join(workspace, 'app')
     initApp(app, spec, { includeBasis: false })

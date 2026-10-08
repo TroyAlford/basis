@@ -45,12 +45,30 @@ export function playwrightImage(version: string): string {
 }
 
 /**
+ * The pinned container image for the installed Playwright version.
+ * @returns The container image reference the runtime will use.
+ */
+export function snapshotImage(): string {
+  return playwrightImage(playwrightMount().version)
+}
+
+/**
  * Extract the remote browser endpoint from a container's run-server output.
  * @param log - The container's combined log output.
  * @returns The `ws://` endpoint, or null when no endpoint has been announced.
  */
 export function parseServerEndpoint(log: string): string | null {
   return /Listening on (ws:\/\/\S+)/.exec(log)?.[1] ?? null
+}
+
+/**
+ * Extract the published localhost port from `docker port` output.
+ * @param output - The command's standard output, for example `127.0.0.1:32768`.
+ * @returns The host port, or null when the port is not published.
+ */
+export function parsePublishedPort(output: string): number | null {
+  const match = /:(\d+)\s*$/m.exec(output.trim())
+  return match ? Number(match[1]) : null
 }
 
 /**
@@ -116,33 +134,42 @@ function docker(args: string[]): DockerResult {
   }
 }
 
+/** The run-server port inside the container; published to a random host port. */
+const RUN_SERVER_PORT = 3000
+
 /** How long to wait for the container to announce its browser endpoint. */
 const READY_TIMEOUT_MS = 60_000
 
 /** How often to poll the container log while waiting for its endpoint. */
 const READY_POLL_MS = 50
 
+/** Upper bound on the single browser connection. */
+const CONNECT_TIMEOUT_MS = 60_000
+
 /**
- * Start the one snapshot container and wait for its remote browser endpoint.
+ * Start the one snapshot container and resolve its published browser endpoint.
  *
- * The container is detached and unnamed (Docker assigns the identity), runs the
- * mounted Playwright package's `run-server` on an ephemeral port, and shares the
- * host network so the containerised browser can reach the application server on
- * loopback. Nothing about the container is fixed: no name, no port, no state
- * outside the returned id.
+ * The container is detached and unnamed (Docker assigns the identity). Its
+ * `run-server` listens on a fixed in-container port that is published to a
+ * random localhost port, so the browser is reachable without host networking,
+ * and the containerised browser reaches the application server through
+ * Playwright's loopback exposure on the single connection. Nothing about the
+ * container is fixed on the host: no name, no host port, no state outside the
+ * returned id.
  * @returns The container id and its browser endpoint.
  */
 async function startContainer(): Promise<{ endpoint: string, id: string }> {
   const mount = playwrightMount()
   const image = playwrightImage(mount.version)
   const args = [
-    'run', '-d', '--rm', '--pull', 'missing', '--network', 'host', '--ipc=host',
+    'run', '-d', '--rm', '--pull', 'missing', '--ipc=host',
+    '-p', `127.0.0.1::${RUN_SERVER_PORT}`,
     '-e', 'PLAYWRIGHT_BROWSERS_PATH=/ms-playwright',
     '-v', `${mount.dir}:/opt/pw/node_modules/playwright:ro`,
     '-v', `${mount.core}:/opt/pw/node_modules/playwright-core:ro`,
     image,
     'node', '/opt/pw/node_modules/playwright/cli.js',
-    'run-server', '--host', '127.0.0.1', '--port', '0',
+    'run-server', '--host', '0.0.0.0', '--port', String(RUN_SERVER_PORT),
   ]
 
   let run: DockerResult
@@ -162,8 +189,14 @@ async function startContainer(): Promise<{ endpoint: string, id: string }> {
   while (Date.now() < deadline) {
     const logs = docker(['logs', id])
     const output = `${logs.stdout}${logs.stderr}`
-    const endpoint = parseServerEndpoint(output)
-    if (endpoint) return { endpoint, id }
+    /*
+     * The run-server log is the readiness signal; the endpoint the client uses
+     * is the published localhost port, not the address the server prints.
+     */
+    if (parseServerEndpoint(output)) {
+      const port = parsePublishedPort(docker(['port', id, `${RUN_SERVER_PORT}/tcp`]).stdout)
+      if (port !== null) return { endpoint: `ws://127.0.0.1:${port}/`, id }
+    }
     if (logs.code !== 0) {
       throw dockerUnavailableError(output.trim() || 'the snapshot container exited before it was ready')
     }
@@ -243,7 +276,10 @@ async function startRuntime(): Promise<SnapshotRuntime> {
   const { chromium } = await import('playwright')
   let browser: Browser
   try {
-    browser = await chromium.connect(endpoint)
+    browser = await chromium.connect(endpoint, {
+      exposeNetwork: '<loopback>',
+      timeout: CONNECT_TIMEOUT_MS,
+    })
   } catch (error) {
     docker(['rm', '-f', id])
     throw dockerUnavailableError(error)

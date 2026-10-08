@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SNAPSHOT_ACTIVITY_LOG } from './browser'
+import { SNAPSHOT_ACTIVITY_LOG, snapshotImage } from './browser'
 
 /*
  * Lifecycle proof for the run-scoped snapshot runtime.
@@ -160,6 +160,13 @@ describe('snapshot runtime lifecycle', () => {
       'components-b.test.tsx': componentSuite('b', SECOND_COMPONENTS),
     })
 
+    /*
+     * Measure warm-runtime performance: ensure the pinned image is present so a
+     * cold pull never counts as a snapshot regression. The run must start the
+     * container itself, so this only warms the image, not the runtime.
+     */
+    Bun.spawnSync(['docker', 'pull', snapshotImage()], { stderr: 'ignore', stdout: 'ignore' })
+
     const start = Bun.nanoseconds()
     const proc = Bun.spawn([process.execPath, 'test', '--timeout', '60000'], {
       cwd: target.dir,
@@ -194,7 +201,7 @@ describe('snapshot runtime lifecycle', () => {
     expect(activity.containers).toBe(1)
     expect(activity.connects).toBe(1)
     expect(activity.teardowns).toBe(1)
-    // A loose ceiling: it fails if per-capture browser startup creeps in.
-    expect(durationMs).toBeLessThan(180_000)
-  }, 240_000)
+    // A run that reached for a browser per capture would blow far past this.
+    expect(durationMs).toBeLessThan(30_000)
+  }, 120_000)
 })

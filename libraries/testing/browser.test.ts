@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { DOCKER_UNAVAILABLE_HELP, dockerUnavailableError, parseServerEndpoint, playwrightImage } from './browser'
+import { DOCKER_UNAVAILABLE_HELP, dockerUnavailableError, parsePublishedPort, parseServerEndpoint, playwrightImage } from './browser'
 
 describe('snapshot runtime guidance', () => {
   test('pins the container image to the installed Playwright version', () => {
@@ -44,5 +44,19 @@ describe('run-server endpoint parsing', () => {
 
   test('reports no endpoint before the server announces one', () => {
     expect(parseServerEndpoint('starting up\n')).toBeNull()
+  })
+})
+
+describe('published port parsing', () => {
+  test('extracts the host port Docker published', () => {
+    expect(parsePublishedPort('127.0.0.1:32768')).toBe(32768)
+  })
+
+  test('extracts the port from IPv6 output', () => {
+    expect(parsePublishedPort('[::1]:32768')).toBe(32768)
+  })
+
+  test('reports no port when nothing is published', () => {
+    expect(parsePublishedPort('')).toBeNull()
   })
 })
