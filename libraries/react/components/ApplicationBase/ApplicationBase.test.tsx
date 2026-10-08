@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { ReactNode } from 'react'
+import { Component as ReactComponent } from 'react'
 import type { ServerEvent } from '../../runtime'
 import { render } from '../../testing/render'
 import { waitFor } from '../../testing/waitFor'
@@ -170,5 +171,34 @@ describe('Application', () => {
         globals.EventSource = original
       }
     })
+  })
+})
+
+describe('Application hot updates', () => {
+  test('remounts the component tree when refreshed for a hot update', async () => {
+    let mounts = 0
+
+    class Leaf extends ReactComponent {
+      componentDidMount(): void { mounts += 1 }
+      render(): ReactNode { return <span>leaf</span> }
+    }
+
+    class HotApplication extends ApplicationBase {
+      refresh(): void { this.hmrRefresh() }
+      protected layout(content: ReactNode): ReactNode { return <><Leaf />{content}</> }
+    }
+
+    const { instance, unmount } = await render<HotApplication>(<HotApplication />)
+    expect(mounts).toBe(1)
+
+    /*
+     * Component.shouldComponentUpdate skips a plain re-render, so a hot update
+     * must remount the subtree for updated class definitions to apply.
+     */
+    instance.refresh()
+    await waitFor(() => mounts === 2)
+    expect(mounts).toBe(2)
+
+    unmount()
   })
 })

@@ -50,10 +50,11 @@ Records carry a UTC ISO-8601 timestamp (date and timezone), a level, and any aut
 
 ## Development mode
 
-Development runs on Bun's dev server, so updates are real module hot replacements — with React Fast Refresh — rather than a full-page reload:
+Development runs on Bun's dev server, so updates apply to the running page instead of forcing a full-page reload:
 
 - the SPA shell is generated at startup and served through a Bun HTML route, so Bun owns the module graph, file watching, and hot updates;
-- a source edit hot-replaces the changed module; a module with no accepting boundary (and no React component) falls back to a reload;
+- Bun's dev server cannot React-Fast-Refresh class components — which is all of Basis's UI — so `ApplicationBase` remounts the component tree on `bun:afterUpdate`, applying updated class definitions without reloading the document;
+- a module that derives state from imported components (for example a route registry) must call `import.meta.hot.accept()` so it re-evaluates and rebuilds that state; an edit with no accepting boundary falls back to a reload;
 - styles registered through `style()` reconcile in place by id, so style edits apply without duplication;
 - the request's runtime facts are still embedded into the shell the client boots from;
 - dependencies (including React) are bundled by Bun, so no CDN is required; the `/modules` proxy route remains available for explicit module requests but is not used by the default build.
