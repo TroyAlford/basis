@@ -30,6 +30,21 @@ const buildError = (error: unknown): Error => {
 }
 
 /**
+ * Paths a development watcher never reports.
+ *
+ * The dot rule matches only a dotted *entry* — its final path segment — never an
+ * ancestor. Anchoring it to the basename keeps a checkout or worktree that lives
+ * under a hidden directory (for example `/home/me/.work/project`) watchable;
+ * matching any dotted segment would prune the whole tree and HMR would silently
+ * never fire. `node_modules` and type declarations are ignored too.
+ */
+export const WATCH_IGNORED: (RegExp | string)[] = [
+  /(^|[/\\])\.[^/\\]+$/, // dot entries, by basename
+  '**/node_modules/**',
+  '**/*.d.ts',
+]
+
+/**
  * Extensions that can change a build. Source, styles, and the assets Bun emits
  * as separate outputs all qualify; anything else in a watched directory is
  * ignored. `node_modules` and `.d.ts` files are excluded by the watcher itself.
@@ -122,11 +137,7 @@ export class Builder {
 
     this.#watcher = watch(Array.from(entrypointDirs), {
       ignoreInitial: true,
-      ignored: [
-        /(^|[/\\])\../, // dot files
-        '**/node_modules/**',
-        '**/*.d.ts',
-      ],
+      ignored: WATCH_IGNORED,
       persistent: true,
     })
 

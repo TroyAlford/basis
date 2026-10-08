@@ -53,7 +53,7 @@ Records carry a UTC ISO-8601 timestamp (date and timezone), a level, and any aut
 Development preserves the live workflow:
 
 - entrypoints are compiled from source and rebuilt on change;
-- a Chokidar watcher drives rebuilds for source, style, and bundled asset (image/font) changes;
+- a Chokidar watcher drives rebuilds for source, style, and bundled asset (image/font) changes; it ignores dot entries and `node_modules` inside the watched tree, and keeps working when the checkout itself sits under a hidden directory (the ignore matches a dotted basename, never an ancestor);
 - a WebSocket (served through the general `socket` facility) broadcasts HMR notifications;
 - dependencies (including React) are bundled, so no CDN is required; the `/modules` proxy route remains available for explicit module requests but is not used by the default build.
 
