@@ -13,6 +13,8 @@ preload = ["basis/testing/bun"]
 
 It registers happy-dom, every matcher, and the shared browser lifecycle, so a plain `bun test` runs the whole suite — DOM tests and snapshots alike.
 
+Visual snapshots capture Chromium inside Docker. Install Docker and make sure the daemon is running before `bun test`; the snapshot runtime starts one pinned `mcr.microsoft.com/playwright` container and never launches a host browser.
+
 ## DOM testing
 
 ```tsx
@@ -38,7 +40,7 @@ Snapshot tests are ordinary `*.test.*` files, so `bun test` discovers them.
 
 `matchScreenshot(subject, hint?, options?)` is a plain async function — not an `expect.extend` matcher — because Bun drives async matchers synchronously on its event loop, which makes the Playwright calls inside them dramatically slower than the same calls awaited normally. It accepts a React element, a Playwright `Page`, or a `Locator`. A React element is rendered to HTML, the component styles and the default theme are inlined, and the capture is cropped to the rendered content; a page is captured at its viewport and a locator at its element box.
 
-Element captures share one deterministically configured page — each capture replaces the document — and each capture keeps its Playwright round-trips to the minimum (wait for fonts and measure in one `evaluate`, then screenshot). Application `visit`s still open a fresh browser context per visit, so app and element captures stay isolated where it matters without paying for a new context per screenshot. Either way it mirrors `toMatchSnapshot`:
+Element captures share one deterministically configured page — each capture replaces the document — and each capture keeps its Playwright round-trips to the minimum (wait for fonts and measure in one `evaluate`, then screenshot). Application `visit`s still open a fresh browser context per visit, so app and element captures stay isolated where it matters without paying for a new context per screenshot. Both paths share the same run-scoped runtime: **one Docker container and one browser per `bun test` run**, started on the first capture and torn down once when the run ends. Either way it mirrors `toMatchSnapshot`:
 
 - no snapshot exists → the capture is written and the call resolves;
 - a snapshot exists → a new capture is compared; a mismatch throws and writes `<name>.actual.png` / `<name>.diff.png` artefacts;
@@ -119,10 +121,12 @@ await app.visit('/deck', {
 
 Basis's own docs site is captured this way in `libraries/testing/docs.test.ts` (a Button example and the icon grid), which keeps the fixture honest.
 
-Text and Skia rasterisation are pinned (grayscale anti-aliasing, no hinting, portable Skia), and the default comparison budget tolerates the greater of 10 pixels or 0.1%, so one committed snapshot holds across machines. Tighten or loosen it per call with `maxDiffPixels` / `maxDiffPixelRatio`.
+Rasterisation is pinned by the container image, and the default comparison budget tolerates the greater of 10 pixels or 0.1%, so one committed snapshot holds across machines. Tighten or loosen it per call with `maxDiffPixels` / `maxDiffPixelRatio`.
 
 ## Browsers
 
-Basis's trusted install hook downloads the pinned Chromium browser during `bun install`. It never escalates privileges or invokes a system package manager. The operating-system libraries Chromium needs to launch are the environment's responsibility: CI images provide them, and a dev host provisions them once with `bunx playwright install-deps chromium` (an admin step, outside the install hook). Set `BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook reports the skip. A download failure fails `bun install`. If Chromium cannot launch because those libraries are absent, the error names the exact `install-deps` command to run and reports the missing library when it can identify it.
+Snapshot capture runs Chromium inside the pinned Playwright container (`mcr.microsoft.com/playwright:v<installed playwright>-noble`). The runtime starts exactly one container per test run, connects to it once, and removes it when the run ends — locally and in CI. The container provides the browser and its operating-system libraries, so no host Chromium or `playwright install-deps` step is needed. Web fonts still load from Google Fonts over the network, as they do everywhere else.
+
+`basis/testing` resolves the installed Playwright version and runs the mounted Playwright package's `run-server` inside the container, publishing it to a random localhost port. It connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server. Nothing is fixed or shared across runs: the container has no name, the host port is random, and the only cross-process state is the container id the run owns. Set `BASIS_SNAPSHOT_ACTIVITY_LOG` to a path to record the runtime's lifecycle events; `libraries/testing/runtime.lifecycle.test.ts` uses it to prove one container start, one browser connection, and one teardown across several files and dozens of snapshots.
 
 The pre-commit hook runs the fast, deterministic checks (lint, typecheck, and build); run `bun test` for the complete suite.

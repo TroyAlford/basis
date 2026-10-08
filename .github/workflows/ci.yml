@@ -52,10 +52,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
-      # The trusted install hook downloads the pinned Chromium browser but never
-      # escalates privileges; CI provisions the OS libraries it needs explicitly.
-      - name: Install Chromium system dependencies
-        run: bunx playwright install-deps chromium
+      # Snapshot capture runs Chromium inside the pinned Playwright container, so
+      # no host browser or OS libraries are needed. Warm the image so the first
+      # capture is not a pull; the tag follows the installed Playwright version,
+      # exactly as the runtime resolves it.
+      - name: Warm the Playwright container image
+        run: |
+          image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
+          docker pull "$image"
       - name: Run tests
         run: bun run test
       - name: Upload snapshot artifacts
@@ -144,14 +148,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Latest conclusion of `job` from completed check runs on the head SHA
-          # that do not belong to this run.
+          # Latest conclusion of `job` from completed, non-skipped check runs on
+          # the head SHA that do not belong to this run. A skipped result is
+          # itself an edited run's placeholder, so it can never stand in for a
+          # code run: reusing it would let an edit report green while the
+          # committed code's CI never passed.
           latest_conclusion() {
             gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
               --jq "[.check_runs[]
                 | select(.name == \"$1\")
                 | select((((.details_url // \"\") | contains(\"/runs/${RUN_ID}/\")) | not))
-                | select(.status == \"completed\")]
+                | select(.status == \"completed\")
+                | select(.conclusion != \"skipped\")]
                 | sort_by(.completed_at) | last | .conclusion // \"missing\""
           }
 

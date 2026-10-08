@@ -1,63 +1,62 @@
 import { describe, expect, test } from 'bun:test'
-import { browserLaunchError, CHROMIUM_SYSTEM_LIBRARIES_HELP, missingSystemLibrary } from './browser'
+import { DOCKER_UNAVAILABLE_HELP, dockerUnavailableError, parsePublishedPort, parseServerEndpoint, playwrightImage } from './browser'
 
-/** A realistic Playwright launch error for a host missing an OS library. */
-const MISSING_LIBRARY_LOG = [
-  'launch: Target page, context or browser has been closed',
-  'Browser logs:',
-  '<launching> /root/.cache/ms-playwright/chromium-1243/chrome-linux/chrome',
-  '[pid=42][err] /root/.cache/ms-playwright/chromium-1243/chrome-linux/chrome:',
-  '  error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file:',
-  '  No such file or directory',
-  '[pid=42] <process did exit: exitCode=127, signal=null>',
-].join('\n')
-
-describe('chromium launch guidance', () => {
-  test('names the exact remediation for missing system libraries', () => {
-    expect(CHROMIUM_SYSTEM_LIBRARIES_HELP).toContain('bunx playwright install-deps chromium')
-    expect(CHROMIUM_SYSTEM_LIBRARIES_HELP).toContain('root')
-    expect(CHROMIUM_SYSTEM_LIBRARIES_HELP).toContain('never requires sudo')
+describe('snapshot runtime guidance', () => {
+  test('pins the container image to the installed Playwright version', () => {
+    expect(playwrightImage('1.63.0')).toBe('mcr.microsoft.com/playwright:v1.63.0-noble')
   })
 
-  test('extracts the missing shared library from the launch log', () => {
-    expect(missingSystemLibrary(new Error(MISSING_LIBRARY_LOG))).toBe('libatk-1.0.so.0')
+  test('names the exact remediation for a missing or stopped Docker daemon', () => {
+    expect(DOCKER_UNAVAILABLE_HELP).toContain('Docker')
+    expect(DOCKER_UNAVAILABLE_HELP).toContain('mcr.microsoft.com/playwright:v')
+    expect(DOCKER_UNAVAILABLE_HELP).toContain('never launches a host browser')
   })
 
-  test('extracts the library from a single-line log too', () => {
-    const line = 'foo: error while loading shared libraries: libnss3.so: cannot open shared object file'
+  test('wraps a startup failure with remediation and preserves the cause', () => {
+    const cause = new Error('Cannot connect to the Docker daemon')
+    const error = dockerUnavailableError(cause)
 
-    expect(missingSystemLibrary(line)).toBe('libnss3.so')
-  })
-
-  test('reports no library when the failure does not name one', () => {
-    expect(missingSystemLibrary(new Error('Target page, context or browser has been closed'))).toBeNull()
-  })
-
-  test('leads with the detected library, ahead of the log dump', () => {
-    const error = browserLaunchError(new Error(MISSING_LIBRARY_LOG))
-    const detected = error.message.indexOf('Detected missing system library: libatk-1.0.so.0')
-
-    expect(detected).toBeGreaterThanOrEqual(0)
-    expect(detected).toBeLessThan(error.message.indexOf('Underlying error:'))
-  })
-
-  test('wraps a launch failure with remediation and preserves the cause', () => {
-    const cause = new Error('Host system is missing dependencies to run browsers')
-    const error = browserLaunchError(cause)
-
-    expect(error.message).toContain('bunx playwright install-deps chromium')
-    expect(error.message).toContain('Host system is missing dependencies to run browsers')
+    expect(error.message).toContain('Docker')
+    expect(error.message).toContain('Cannot connect to the Docker daemon')
     expect((error as { cause?: unknown }).cause).toBe(cause)
   })
 
-  test('still guides when no specific library is named', () => {
-    const error = browserLaunchError(new Error('launch: Target page, context or browser has been closed'))
+  test('handles a non-Error cause', () => {
+    expect(dockerUnavailableError('boom').message).toContain('boom')
+  })
+})
 
-    expect(error.message).toContain('bunx playwright install-deps chromium')
-    expect(error.message).not.toContain('Detected missing system library')
+describe('run-server endpoint parsing', () => {
+  test('extracts the endpoint from the container log', () => {
+    const log = [
+      'Listening on ws://127.0.0.1:46565/',
+      '',
+    ].join('\n')
+
+    expect(parseServerEndpoint(log)).toBe('ws://127.0.0.1:46565/')
   })
 
-  test('handles a non-Error cause', () => {
-    expect(browserLaunchError('boom').message).toContain('boom')
+  test('extracts the endpoint when the line is surrounded by output', () => {
+    const log = 'starting\nListening on ws://127.0.0.1:3000/\nready'
+
+    expect(parseServerEndpoint(log)).toBe('ws://127.0.0.1:3000/')
+  })
+
+  test('reports no endpoint before the server announces one', () => {
+    expect(parseServerEndpoint('starting up\n')).toBeNull()
+  })
+})
+
+describe('published port parsing', () => {
+  test('extracts the host port Docker published', () => {
+    expect(parsePublishedPort('127.0.0.1:32768')).toBe(32768)
+  })
+
+  test('extracts the port from IPv6 output', () => {
+    expect(parsePublishedPort('[::1]:32768')).toBe(32768)
+  })
+
+  test('reports no port when nothing is published', () => {
+    expect(parsePublishedPort('')).toBeNull()
   })
 })
