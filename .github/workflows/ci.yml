@@ -148,14 +148,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Latest conclusion of `job` from completed check runs on the head SHA
-          # that do not belong to this run.
+          # Latest conclusion of `job` from completed, non-skipped check runs on
+          # the head SHA that do not belong to this run. A skipped result is
+          # itself an edited run's placeholder, so it can never stand in for a
+          # code run: reusing it would let an edit report green while the
+          # committed code's CI never passed.
           latest_conclusion() {
             gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
               --jq "[.check_runs[]
                 | select(.name == \"$1\")
                 | select((((.details_url // \"\") | contains(\"/runs/${RUN_ID}/\")) | not))
-                | select(.status == \"completed\")]
+                | select(.status == \"completed\")
+                | select(.conclusion != \"skipped\")]
                 | sort_by(.completed_at) | last | .conclusion // \"missing\""
           }
 
