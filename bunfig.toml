@@ -3,6 +3,11 @@ preload = [
   "./libraries/bun-plugins/register.ts"
 ]
 
+# Bun's development server bundles the SPA shell itself (that is what makes HMR
+# and React Fast Refresh work); register Basis's SASS and Markdown loaders for it.
+[serve.static]
+plugins = ["./libraries/bun-plugins/serve.ts"]
+
 [test]
 coverage = true
 coverageReporter = ["lcov"]

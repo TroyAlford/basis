@@ -6,7 +6,7 @@ import { renderToString } from 'react-dom/server'
 import type { Identity } from '../../oauth'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
-import { HttpVerb, Logger, parseTemplateURI, parseURI } from '../../utilities'
+import { HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
 import type { HealthStatus } from '../apis/health'
 import { health } from '../apis/health'
 import { ping } from '../apis/ping'
@@ -15,6 +15,7 @@ import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
+import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import type { SocketData } from './Sockets'
@@ -26,10 +27,11 @@ import { normalizeMountPrefix, serveMount } from './StaticMount'
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
   /**
-   * Run the live-development build/watch/HMR workflow. Development compiles
-   * from source and rebuilds on change; dependencies are bundled by default, so
-   * no CDN is required. When `false`, the server builds once and does not watch
-   * or broadcast HMR.
+   * Run the live-development workflow. Development delegates to Bun's dev
+   * server, which compiles from source, watches the module graph, and hot
+   * replaces changed modules (React Fast Refresh included); dependencies are
+   * bundled, so no CDN is required. When `false`, the server builds once,
+   * serves the classic-script bundle, and does not watch or hot update.
    * Defaults to `NODE_ENV !== 'production'`.
    */
   development?: boolean,
@@ -63,16 +65,17 @@ export interface ServerOptions {
  * A server for building, serving, and (in development) hot reloading React
  * applications.
  *
- * One server supports two explicit modes. Development keeps live-compile,
- * file-watch, and HMR, bundling dependencies by default (an opt-in
- * `globals` mode reuses browser-global builds through the module proxy).
+ * One server supports two explicit modes. Development delegates to Bun's dev
+ * server: the SPA shell is generated and served through an HTML route, so Bun
+ * owns live compilation, file watching, hot module replacement, and React Fast
+ * Refresh. A changed module is replaced in place — no document reload — and
+ * only falls back to a reload when nothing accepts the update.
  * Production builds once, bundles the installed dependency graph, serves the
  * SPA and its assets, reports the release version on `/health`, and shuts down
  * gracefully on SIGINT/SIGTERM.
  *
  * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
- * (`socket`), and static-mount (`mount`) facilities. HMR is implemented as an
- * internal consumer of the same WebSocket facility, not a separate mechanism.
+ * (`socket`), and static-mount (`mount`) facilities.
  */
 export class Server {
   static BadRequest: Response = new Response(null, { status: 400, statusText: 'Bad Request' })
@@ -83,7 +86,6 @@ export class Server {
   #builder: Builder | null = null
   #development = true
   #entrypoints: [string, string][] = []
-  #hmrClients = new Set<Socket>()
   #identity: Identity | null = null
   #logger: ILogger = new Logger()
   #modules = new Map<string, string>()
@@ -101,18 +103,6 @@ export class Server {
   constructor() {
     this.api([HttpVerb.Get], 'health', () => this.#health())
     this.api([HttpVerb.Get], 'ping', ping)
-    /*
-     * HMR is an internal consumer of the general WebSocket facility: it is just
-     * a socket route whose connections the server broadcasts to on rebuild.
-     */
-    this.socket('hmr', {
-      close: socket => {
-        this.#hmrClients.delete(socket)
-      },
-      open: socket => {
-        this.#hmrClients.add(socket)
-      },
-    })
   }
 
   /**
@@ -340,8 +330,28 @@ export class Server {
    */
   async handleUI(request?: Request): Promise<Response> {
     const identity = request && this.#identity ? this.#identity.get(request) : null
+    const runtime: BasisRuntime = { ...this.runtime, identity }
+
+    /*
+     * Development delegates module bundling, watching, and hot updates to Bun's
+     * dev server. Bun only enables HMR for HTML routes it bundles, so the shell
+     * is generated and registered at {@link DEV_SHELL_ROUTE}; every UI request
+     * proxies that shell and injects the per-request runtime facts.
+     */
+    if (this.#development && this.#server) {
+      const response = await fetch(this.#devShellURL())
+      const element = `<script id="basis-runtime" type="application/json">${serializeBasisRuntime(runtime)}</script>`
+      return new HTMLRewriter()
+        .on('head', {
+          element: target => {
+            target.append(element, { html: true })
+          },
+        })
+        .transform(response)
+    }
+
     const html = await renderToString(React.createElement(IndexHTML, {
-      runtime: { ...this.runtime, identity },
+      runtime,
       scripts: this.#scriptNames(),
       title: this.#title,
     }))
@@ -380,47 +390,64 @@ export class Server {
     this.#development = development
     this.#version = version
 
-    const builder = new Builder({
-      development,
-      logger: this.#logger,
-      onRebuild: () => {
-        this.#readyError = null
-        this.#status = 'ok'
-        this.#broadcast()
-      },
-      root: this.#root,
-      watch: development,
-    })
-
-    for (const [name, file] of this.#entrypoints) {
-      void builder.add(name, file)
-    }
+    let routes: Bun.Serve.Routes<SocketData, string> | undefined
 
     if (development) {
-      void builder.add('hmr.js', path.join(import.meta.dir, 'hmr.ts'))
+      /*
+       * Development is Bun's dev server: it owns the module graph, watching,
+       * and React Fast Refresh. The shell is generated beside a computed
+       * directory and registered as an HTML route, which is the only shape Bun
+       * enables HMR for.
+       */
+      const entrypoints = this.#entrypoints.map(([, file]) => file)
+      if (entrypoints.length > 0) {
+        const directory = devShellDirectory(JSON.stringify([this.#root, this.#title, ...entrypoints]))
+        const shell = writeDevShell({ directory, entrypoints, title: this.#title })
+        routes = { [DEV_SHELL_ROUTE]: import.meta.require(shell) } as Bun.Serve.Routes<SocketData, string>
+      }
+
+      this.#readyError = null
+      this.#status = 'ok'
+      this.#ready = Promise.resolve()
+    } else {
+      const builder = new Builder({
+        development,
+        logger: this.#logger,
+        onRebuild: () => {
+          this.#readyError = null
+          this.#status = 'ok'
+        },
+        root: this.#root,
+        watch: false,
+      })
+
+      for (const [name, file] of this.#entrypoints) {
+        void builder.add(name, file)
+      }
+
+      this.#builder = builder
+      this.#readyError = null
+      this.#status = 'starting'
+      this.#ready = builder.initialBuild()
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          const failure = error instanceof Error ? error : new Error(String(error))
+          this.#readyError = failure
+          this.#status = 'error'
+          this.#logger.error(`build failed: ${failure.message}`)
+          throw failure
+        })
+      // Avoid an unhandled rejection when a caller never awaits `ready()`.
+      void this.#ready.catch(() => undefined)
     }
 
-    this.#builder = builder
-    this.#readyError = null
-    this.#status = 'starting'
-    this.#ready = builder.initialBuild()
-      .then(() => undefined)
-      .catch((error: unknown) => {
-        const failure = error instanceof Error ? error : new Error(String(error))
-        this.#readyError = failure
-        this.#status = 'error'
-        this.#logger.error(`build failed: ${failure.message}`)
-        throw failure
-      })
-    // Avoid an unhandled rejection when a caller never awaits `ready()`.
-    void this.#ready.catch(() => undefined)
-
     this.#server = Bun.serve({
-      development,
+      development: development ? { hmr: true } : false,
       fetch: this.handle,
       hostname,
       ...(idleTimeout === undefined ? {} : { idleTimeout }),
       port,
+      ...(routes === undefined ? {} : { routes }),
       websocket: {
         close: (ws, code, reason) => {
           this.#sockets.get(ws.data.route)?.close?.(this.#socketFor(ws), code, reason)
@@ -434,7 +461,7 @@ export class Server {
           this.#sockets.get(ws.data.route)?.open?.(socket)
         },
       },
-    })
+    } as Bun.Serve.Options<SocketData>)
 
     process.on('SIGINT', this.#handleSignal)
     process.on('SIGTERM', this.#handleSignal)
@@ -453,8 +480,6 @@ export class Server {
     process.off('SIGTERM', this.#handleSignal)
 
     this.#logger.info('stopping')
-
-    this.#hmrClients.clear()
 
     void this.#builder?.stop()
     this.#builder = null
@@ -624,13 +649,24 @@ export class Server {
     return this
   }
 
-  /** Broadcasts a rebuild notification to connected development clients. */
-  #broadcast(): void {
-    if (!this.#development) return
-
-    this.#logger.info('[HMR] Rebuild complete')
-    const message = JSON.stringify({ timestamp: Date.now(), type: 'hmr' })
-    for (const socket of this.#hmrClients) socket.send(message)
+  /**
+   * Resolve the loopback URL of the generated development shell.
+   *
+   * `0.0.0.0` and `::` are wildcard binds that are not themselves
+   * diallable, so they map to their loopback counterparts.
+   * @returns The absolute URL of the shell document.
+   */
+  #devShellURL(): string {
+    const hostname = this.#server?.hostname ?? '127.0.0.1'
+    const host = hostname === '0.0.0.0'
+      ? '127.0.0.1'
+      : hostname === '::' || hostname === '[::]'
+        ? '[::1]'
+        : hostname.includes(':') && !hostname.startsWith('[')
+          ? `[${hostname}]`
+          : hostname
+    const port = this.#server?.port ?? 0
+    return `http://${host}:${port}${DEV_SHELL_ROUTE}`
   }
 
   /**
@@ -753,12 +789,13 @@ export class Server {
 
   /**
    * The script URIs the UI should load for the current mode.
+   *
+   * Production is the only mode that renders this shell; development proxies
+   * the Bun-generated HMR shell instead.
    * @returns The script names to include in the rendered UI.
    */
   #scriptNames(): string[] {
-    const names = this.#entrypoints.map(([name]) => name)
-    if (this.#development) names.push('hmr.js')
-    return names
+    return this.#entrypoints.map(([name]) => name)
   }
 }
 
