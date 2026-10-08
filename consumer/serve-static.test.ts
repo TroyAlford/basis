@@ -12,14 +12,14 @@ function plugins(text: string): string[] {
 }
 
 describe('ensureServeStaticConfig', () => {
-  test('creates the section when the document is empty', () => {
+  test('creates the fenced section when the document is empty', () => {
     const { changed, text } = ensureServeStaticConfig('')
 
     expect(changed).toBe(true)
     expect(plugins(text)).toEqual([SERVE_STATIC_PLUGIN])
   })
 
-  test('appends the section without disturbing existing content', () => {
+  test('appends the fence without disturbing existing content', () => {
     const existing = '# consumer config\n\n[test]\npreload = ["basis/testing/bun"]\n'
     const { changed, text } = ensureServeStaticConfig(existing)
 
@@ -29,47 +29,38 @@ describe('ensureServeStaticConfig', () => {
     expect(plugins(text)).toEqual([SERVE_STATIC_PLUGIN])
   })
 
-  test('inserts the plugin into an existing section that has no plugins key', () => {
-    const existing = '[serve.static]\nsomeSetting = true\n'
-    const { changed, text } = ensureServeStaticConfig(existing)
+  test('is idempotent once fenced', () => {
+    const first = ensureServeStaticConfig('')
+    const second = ensureServeStaticConfig(first.text)
+
+    expect(second.changed).toBe(false)
+    expect(second.text).toBe(first.text)
+  })
+
+  test('replaces a stale fenced block', () => {
+    const stale = [
+      '# >>> basis:development-server >>>',
+      '[serve.static]',
+      'plugins = ["./old.ts"]',
+      '# <<< basis:development-server <<<',
+      '',
+    ].join('\n')
+    const { changed, text } = ensureServeStaticConfig(stale)
 
     expect(changed).toBe(true)
-    expect(text).toContain('someSetting = true')
     expect(plugins(text)).toEqual([SERVE_STATIC_PLUGIN])
+    expect(text).not.toContain('./old.ts')
   })
 
-  test('extends an existing single-line plugins array', () => {
-    const existing = '[serve.static]\nplugins = ["./local.ts"]\n'
+  test('leaves a document that already names the plugin alone', () => {
+    const existing = '[serve.static]\nplugins = ["basis/serve"]\n'
     const { changed, text } = ensureServeStaticConfig(existing)
-
-    expect(changed).toBe(true)
-    expect(plugins(text)).toEqual(['./local.ts', SERVE_STATIC_PLUGIN])
-  })
-
-  test('extends a multiline plugins array', () => {
-    const existing = '[serve.static]\nplugins = [\n  "./local.ts",\n]\n'
-    const { changed, text } = ensureServeStaticConfig(existing)
-
-    expect(changed).toBe(true)
-    expect(plugins(text)).toEqual(['./local.ts', SERVE_STATIC_PLUGIN])
-  })
-
-  test('is idempotent once the plugin is configured', () => {
-    const configured = '[serve.static]\nplugins = ["basis/serve"]\n'
-    const { changed, text } = ensureServeStaticConfig(configured)
 
     expect(changed).toBe(false)
-    expect(text).toBe(configured)
+    expect(text).toBe(existing)
   })
 
-  test('fails loudly when plugins is not an array', () => {
-    expect(() => ensureServeStaticConfig('[serve.static]\nplugins = "nope"\n')).toThrow(/must be an array/)
-  })
-
-  test('leaves a malformed document parseable', () => {
-    const existing = '[test]\npreload = ["basis/testing/bun"]\n'
-    const { text } = ensureServeStaticConfig(existing)
-
-    expect(() => Bun.TOML.parse(text)).not.toThrow()
+  test('fails loudly on a mismatched fence', () => {
+    expect(() => ensureServeStaticConfig('# >>> basis:development-server >>>\n')).toThrow(/marker/)
   })
 })

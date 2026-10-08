@@ -57,6 +57,7 @@ Development runs on Bun's dev server, so updates apply to the running page inste
 - a module that derives state from imported components (for example a route registry) should call `import.meta.hot.accept()` so it re-evaluates and rebuilds that state; an edit with no accepting boundary falls back to a reload;
 - styles registered through `style()` reconcile in place by id, so style edits apply without duplication;
 - the request's runtime facts are still embedded into the shell the client boots from;
+- `/health` stays `503 starting` until the first development build succeeds, and reports `503 error` when it fails, so development readiness is honest rather than optimistic;
 - dependencies (including React) are bundled by Bun, so no CDN is required; the `/modules` proxy route remains available for explicit module requests but is not used by the default build.
 
 Bun's dev server loads bundler plugins from `bunfig.toml`, so a consuming app registers Basis's SASS and Markdown loaders with:

@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
+import * as React from 'react'
+import { renderToString } from 'react-dom/server'
+import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
 
 /**
  * The internal path Bun serves the generated development shell from. It is
@@ -34,13 +37,24 @@ export function devShellDirectory(seed: string): string {
 }
 
 /**
+ * Express an entrypoint as a URL relative to the shell document.
+ * @param directory - The directory the shell document is written to.
+ * @param entrypoint - The absolute entrypoint path.
+ * @returns The relative, POSIX-separated script source.
+ */
+function scriptSource(directory: string, entrypoint: string): string {
+  const relative = path.relative(directory, entrypoint).split(path.sep).join('/')
+  return relative.startsWith('.') ? relative : `./${relative}`
+}
+
+/**
  * Render the development shell document.
  *
  * Bun only enables HMR for HTML routes it bundles itself, so development serves
- * this generated document through an HTML route and lets Bun own the module
- * graph, hot updates, and React Fast Refresh. The entrypoints are referenced by
- * a path relative to the shell, which is why the document lives beside a
- * computed directory rather than being rendered to a string only.
+ * a generated document through an HTML route and lets Bun own the module graph,
+ * hot updates, and React Fast Refresh. The document is {@link IndexHTML} — the
+ * same shell production renders — loaded with module script sources instead of
+ * served entrypoint names, so the two shells cannot drift.
  * @param options - The entrypoints, shell directory, and document title.
  * @param options.directory - Directory the shell is written to.
  * @param options.entrypoints - Absolute entrypoint files to load, in order.
@@ -48,27 +62,9 @@ export function devShellDirectory(seed: string): string {
  * @returns The shell HTML.
  */
 export function renderDevShell({ directory, entrypoints, title }: DevShellOptions): string {
-  const scripts = entrypoints
-    .map(entrypoint => {
-      const relative = path.relative(directory, entrypoint).split(path.sep).join('/')
-      const source = relative.startsWith('.') ? relative : `./${relative}`
-      return `    <script type="module" src="${source}"></script>`
-    })
-    .join('\n')
-
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${title}</title>
-  </head>
-  <body>
-    <div id="root"></div>
-${scripts}
-  </body>
-</html>
-`
+  const scripts = entrypoints.map(entrypoint => ({ module: true, src: scriptSource(directory, entrypoint) }))
+  const body = renderToString(React.createElement(IndexHTML, { favicon: false, scripts, title }))
+  return `<!doctype html>\n${body}\n`
 }
 
 /**

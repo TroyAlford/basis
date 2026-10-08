@@ -22,7 +22,7 @@ describe('renderDevShell', () => {
     expect(html).toContain('<div id="root"></div>')
     expect(html).toContain('<title>My App</title>')
 
-    const sources = [...html.matchAll(/<script type="module" src="([^"]+)"><\/script>/g)].map(match => match[1])
+    const sources = [...html.matchAll(/<script src="([^"]+)" type="module"><\/script>/g)].map(match => match[1])
     expect(sources).toHaveLength(2)
     for (const [index, source] of sources.entries()) {
       // The script src must resolve back to its entrypoint from the shell's directory.

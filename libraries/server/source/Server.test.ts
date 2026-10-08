@@ -260,6 +260,19 @@ describe('Server development mode', () => {
 
     expect(await server.stop()).toBe(0)
   })
+
+  test('never reports healthy when a development build fails', async () => {
+    const server = await startServer('development', { ENTRY: './Broken.tsx' })
+    const base = `http://127.0.0.1:${server.port}`
+
+    const { body, response } = await waitForHealth(base, (result, payload) => (
+      result.status === 503 && payload.status === 'error'
+    ))
+    expect(response.status).toBe(503)
+    expect(body).toMatchObject({ status: 'error' })
+
+    expect(await server.stop()).toBe(0)
+  })
 })
 
 describe('Server development HMR', () => {

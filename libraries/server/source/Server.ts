@@ -407,7 +407,7 @@ export class Server {
       }
 
       this.#readyError = null
-      this.#status = 'ok'
+      this.#status = 'starting'
       this.#ready = Promise.resolve()
     } else {
       const builder = new Builder({
@@ -465,6 +465,9 @@ export class Server {
 
     process.on('SIGINT', this.#handleSignal)
     process.on('SIGTERM', this.#handleSignal)
+
+    // Development builds lazily; prove one build before reporting healthy.
+    if (development && routes) this.#warmDevelopment()
 
     this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
 
@@ -650,23 +653,36 @@ export class Server {
   }
 
   /**
-   * Resolve the loopback URL of the generated development shell.
-   *
-   * `0.0.0.0` and `::` are wildcard binds that are not themselves
-   * diallable, so they map to their loopback counterparts.
-   * @returns The absolute URL of the shell document.
+   * The loopback URL of the generated development shell. Development always
+   * binds a locally reachable interface, so the proxy targets loopback.
+   * @returns The URL the server proxies UI requests to.
    */
   #devShellURL(): string {
-    const hostname = this.#server?.hostname ?? '127.0.0.1'
-    const host = hostname === '0.0.0.0'
-      ? '127.0.0.1'
-      : hostname === '::' || hostname === '[::]'
-        ? '[::1]'
-        : hostname.includes(':') && !hostname.startsWith('[')
-          ? `[${hostname}]`
-          : hostname
-    const port = this.#server?.port ?? 0
-    return `http://${host}:${port}${DEV_SHELL_ROUTE}`
+    return `http://127.0.0.1:${this.#server?.port ?? 0}${DEV_SHELL_ROUTE}`
+  }
+
+  /**
+   * Build the development shell once so `/health` reflects a real build.
+   *
+   * Development compiles lazily on the first request, so `ready()` and
+   * `/health` stay `starting` until one build has actually succeeded. A failed
+   * build reports `error` rather than a healthy process.
+   */
+  #warmDevelopment(): void {
+    this.#ready = fetch(this.#devShellURL())
+      .then(response => {
+        if (!response.ok) throw new Error(`development build failed (${response.status})`)
+        this.#status = 'ok'
+      })
+      .catch((error: unknown) => {
+        const failure = error instanceof Error ? error : new Error(String(error))
+        this.#readyError = failure
+        this.#status = 'error'
+        this.#logger.error(`build failed: ${failure.message}`)
+        throw failure
+      })
+    // Avoid an unhandled rejection when a caller never awaits `ready()`.
+    void this.#ready.catch(() => undefined)
   }
 
   /**

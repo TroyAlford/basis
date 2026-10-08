@@ -1,14 +1,21 @@
 /**
  * The bundler plugin a consuming app's `bunfig.toml` must reference so Bun's
- * development server can compile Basis's SASS and Markdown modules.
+ * development server can compile Basis's modules and refresh class components.
  */
 export const SERVE_STATIC_PLUGIN = 'basis/serve'
 
-/** The `bunfig.toml` section Bun reads development-server plugins from. */
-const SECTION = '[serve.static]'
+/** Comment markers that fence the block Basis owns, so updates stay idempotent. */
+const START_MARKER = '# >>> basis:development-server >>>'
+const END_MARKER = '# <<< basis:development-server <<<'
 
-/** Matches the section header on its own line. */
-const SECTION_HEADER = /^[ \t]*\[serve\.static\][ \t]*$/m
+/** The fenced block Basis writes into a consumer's `bunfig.toml`. */
+const BLOCK = [
+  START_MARKER,
+  '[serve.static]',
+  `plugins = [${JSON.stringify(SERVE_STATIC_PLUGIN)}]`,
+  END_MARKER,
+  '',
+].join('\n')
 
 /** The result of ensuring the development-server plugin is configured. */
 export interface ServeStaticConfig {
@@ -20,64 +27,43 @@ export interface ServeStaticConfig {
 
 /**
  * Ensure a consuming app's `bunfig.toml` registers the Basis development-server
- * plugin.
+ * plugin, in a fenced, Basis-owned block.
  *
- * This edits text in place rather than re-serializing parsed TOML, so a
- * consumer's comments and formatting survive. It only handles unambiguous
- * edits: appending a missing section, adding a missing `plugins` key, or
- * extending a single `plugins` array. Anything else (for example a `plugins`
- * value that is not an array) fails loudly instead of guessing.
+ * Re-running replaces the fenced block instead of appending, so the edit is
+ * idempotent and never disturbs the consumer's own comments or formatting. A
+ * document that already mentions the plugin outside the fence is left alone.
  * @param existing - The current `bunfig.toml` contents, or an empty string.
  * @returns The (possibly unchanged) document and whether it changed.
  */
 export function ensureServeStaticConfig(existing: string): ServeStaticConfig {
-  const document = existing.trim().length === 0
-    ? ''
-    : existing.endsWith('\n') ? existing : `${existing}\n`
+  const current = existing.trim().length === 0 ? '' : `${existing.trimEnd()}\n`
 
-  if (document.includes(SERVE_STATIC_PLUGIN)) return { changed: false, text: document }
+  const start = current.indexOf(START_MARKER)
+  const end = current.indexOf(END_MARKER)
 
-  const match = SECTION_HEADER.exec(document)
-
-  if (!match) {
-    const separator = document.length === 0 || document.endsWith('\n\n') ? '' : '\n'
-    const appended = `${document}${separator}${SECTION}\nplugins = [${JSON.stringify(SERVE_STATIC_PLUGIN)}]\n`
-    return validate(appended)
+  if ((start === -1) !== (end === -1)) {
+    throw new Error(`bunfig.toml has one ${START_MARKER} marker without its ${END_MARKER} pair`)
   }
 
-  const bodyStart = match.index + match[0].length
-  const nextHeader = /^[ \t]*\[/m.exec(document.slice(bodyStart))
-  const bodyEnd = nextHeader ? bodyStart + nextHeader.index : document.length
-  const body = document.slice(bodyStart, bodyEnd)
-
-  const pluginLine = /^([ \t]*)plugins[ \t]*=[ \t]*\[([^\]]*)\]/m.exec(body)
-
-  if (!pluginLine) {
-    if (/^[ \t]*plugins[ \t]*=/m.test(body)) {
-      throw new Error(`bunfig.toml ${SECTION} "plugins" must be an array to add "${SERVE_STATIC_PLUGIN}"`)
-    }
-    const insertion = `\nplugins = [${JSON.stringify(SERVE_STATIC_PLUGIN)}]`
-    const updated = `${document.slice(0, bodyStart)}${insertion}${document.slice(bodyStart)}`
-    return validate(updated)
+  if (start !== -1 && end !== -1) {
+    const afterEnd = current[end + END_MARKER.length] === '\n' ? end + END_MARKER.length + 1 : end + END_MARKER.length
+    const text = `${current.slice(0, start)}${BLOCK}${current.slice(afterEnd)}`
+    return validate(text, text !== current)
   }
 
-  const [whole, indent, entries] = pluginLine
-  const existingEntries = entries.trim().replace(/,\s*$/, '')
-  const nextEntries = existingEntries.length === 0
-    ? JSON.stringify(SERVE_STATIC_PLUGIN)
-    : `${existingEntries}, ${JSON.stringify(SERVE_STATIC_PLUGIN)}`
-  const lineStart = bodyStart + pluginLine.index
-  const replacement = `${indent}plugins = [${nextEntries}]`
-  const updated = `${document.slice(0, lineStart)}${replacement}${document.slice(lineStart + whole.length)}`
-  return validate(updated)
+  if (current.includes(SERVE_STATIC_PLUGIN)) return { changed: false, text: current }
+
+  const separator = current.length === 0 ? '' : '\n'
+  return validate(`${current}${separator}${BLOCK}`, true)
 }
 
 /**
  * Prove an edited document still parses before it is offered for writing.
  * @param text - The edited TOML document.
+ * @param changed - Whether the edit differs from the input.
  * @returns The validated result.
  */
-function validate(text: string): ServeStaticConfig {
+function validate(text: string, changed: boolean): ServeStaticConfig {
   Bun.TOML.parse(text)
-  return { changed: true, text }
+  return { changed, text }
 }

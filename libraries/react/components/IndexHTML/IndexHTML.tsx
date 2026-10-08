@@ -2,15 +2,29 @@ import * as React from 'react'
 import type { BasisRuntime } from '../../../utilities'
 import { serializeBasisRuntime } from '../../../utilities'
 
+/** An explicit script source, for a shell whose scripts are not served names. */
+export interface ScriptSource {
+  /** Load as an ES module rather than a deferred classic script. */
+  module?: boolean,
+  /** The script URL, used as-is. */
+  src: string,
+}
+
 interface Props {
+  /** Whether to render the default favicon link. Defaults to `true`. */
+  favicon?: boolean,
   /**
    * Immutable runtime facts embedded for the client application context. When
    * present they are written as an escaped JSON document so the browser boots
    * without an extra fetch.
    */
   runtime?: BasisRuntime,
-  /** An array of script URLs to add, deferred. */
-  scripts: string[],
+  /**
+   * Scripts to load. A string is a production entrypoint name served from
+   * `/scripts/`; a {@link ScriptSource} is used exactly as given, which is how
+   * development loads module sources directly from Bun's dev server.
+   */
+  scripts: (string | ScriptSource)[],
   /** The document title. Defaults to `Document`. */
   title?: string,
 }
@@ -22,17 +36,18 @@ interface Props {
  * mode, so the shell loads only the compiled scripts and never a CDN or
  * browser-global build.
  * @param props - The component props.
+ * @param props.favicon - Whether to render the favicon link.
  * @param props.runtime - Runtime facts embedded for the client.
- * @param props.scripts - An array of script URLs to add, deferred.
+ * @param props.scripts - Entrypoint names or explicit script sources.
  * @param props.title - The document title.
  * @returns The rendered HTML.
  */
-export const IndexHTML: React.FC<Props> = ({ runtime, scripts = [], title = 'Document' }) => (
+export const IndexHTML: React.FC<Props> = ({ favicon = true, runtime, scripts = [], title = 'Document' }) => (
   <html lang="en">
     <head>
       <meta charSet="UTF-8" />
       <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-      <link href="/assets/favicon.svg" rel="icon" type="image/svg+xml" />
+      {favicon && <link href="/assets/favicon.svg" rel="icon" type="image/svg+xml" />}
       <title>{title}</title>
       {runtime && (
         /*
@@ -45,9 +60,12 @@ export const IndexHTML: React.FC<Props> = ({ runtime, scripts = [], title = 'Doc
           type="application/json"
         />
       )}
-      {scripts.map(script => (
-        <script key={script} defer src={`/scripts/${script}`} />
-      ))}
+      {scripts.map(script => {
+        const source = typeof script === 'string' ? { src: `/scripts/${script}` } : script
+        return source.module
+          ? <script key={source.src} src={source.src} type="module" />
+          : <script key={source.src} defer src={source.src} />
+      })}
     </head>
     <body>
       {/** biome-ignore lint/correctness/useUniqueElementIds: 'root' is always unique */}
