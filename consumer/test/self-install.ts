@@ -34,8 +34,8 @@ const main = (): void => {
 
     /*
      * Trusted install into a fresh host via the documented command. The install
-     * hook only downloads the pinned Chromium browser; it never invokes the
-     * platform package manager or escalates privileges.
+     * hook installs no browser and no system packages; snapshot capture runs
+     * through Docker instead.
      */
     const app = join(workspace, 'app')
     initApp(app, spec, { includeBasis: false })

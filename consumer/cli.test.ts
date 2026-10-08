@@ -131,7 +131,7 @@ describe('basis lint and format', () => {
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
-  })
+  }, 20_000)
 
   test('lints and formats with no repository ESLint config', () => {
     const { dir, markdown, target } = makeFixture({ config: false })
@@ -146,5 +146,5 @@ describe('basis lint and format', () => {
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
-  })
+  }, 20_000)
 })

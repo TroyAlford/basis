@@ -119,10 +119,10 @@ await app.visit('/deck', {
 
 Basis's own docs site is captured this way in `libraries/testing/docs.test.ts` (a Button example and the icon grid), which keeps the fixture honest.
 
-Text and Skia rasterisation are pinned (grayscale anti-aliasing, no hinting, portable Skia), and the default comparison budget tolerates the greater of 10 pixels or 0.1%, so one committed snapshot holds across machines. Tighten or loosen it per call with `maxDiffPixels` / `maxDiffPixelRatio`.
+Capture runs in the pinned container, so text and Skia rasterisation — the browser build, OS libraries, and fonts — are fixed, and one committed snapshot holds across machines. The default comparison budget tolerates the greater of 10 pixels or 0.1%; tighten or loosen it per call with `maxDiffPixels` / `maxDiffPixelRatio`.
 
 ## Browsers
 
-Basis's trusted install hook downloads the pinned Chromium browser during `bun install`. It never escalates privileges or invokes a system package manager. The operating-system libraries Chromium needs to launch are the environment's responsibility: CI images provide them, and a dev host provisions them once with `bunx playwright install-deps chromium` (an admin step, outside the install hook). Set `BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook reports the skip. A download failure fails `bun install`. If Chromium cannot launch because those libraries are absent, the error names the exact `install-deps` command to run and reports the missing library when it can identify it.
+Snapshot capture always runs through Docker: `basis/testing` starts the pinned Playwright image (`mcr.microsoft.com/playwright:v<installed Playwright version>-noble`) running Playwright's server from the mounted Playwright package, then connects the host client to it. The container carries the browser, its operating-system libraries, and the Google fonts `BASIS_FONTS_URL` pins, so capture renders identically on every host and in CI, and a host needs only Docker — never `playwright install-deps`, `sudo`, or a matching set of system libraries. The container is started once per run and reused for every capture. Declare `docker` in `basis.hostDependencies` so `bun install` fails loudly when it is absent. The first capture pulls the image; later runs reuse it. There is no host-browser fallback — a snapshot test that cannot reach Docker fails.
 
 The pre-commit hook runs the fast, deterministic checks (lint, typecheck, and build); run `bun test` for the complete suite.

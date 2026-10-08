@@ -52,10 +52,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
-      # The trusted install hook downloads the pinned Chromium browser but never
-      # escalates privileges; CI provisions the OS libraries it needs explicitly.
-      - name: Install Chromium system dependencies
-        run: bunx playwright install-deps chromium
+      # Snapshot capture runs in the pinned Playwright container; the runner
+      # provides Docker, and no host browser or system packages are installed.
       - name: Run tests
         run: bun run test
       - name: Upload snapshot artifacts

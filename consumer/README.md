@@ -8,7 +8,7 @@ The Basis repository is the distribution artifact. There is no npm/JSR publish s
 bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
 ```
 
-`--trust` records `basis` in the consumer's `trustedDependencies` so Basis's install hook can apply the transitive patches Basis owns and provision the browser runtime `basis/testing` needs. The hook is deterministic, idempotent, exact-version validated, and only touches packages Basis declares. Consumers never copy patch files or `patchedDependencies` entries, and never add their own browser provisioning: `bun install` downloads the pinned Chromium browser. It never escalates privileges or invokes a system package manager; the operating-system libraries Chromium needs to launch are the environment's responsibility (a CI image or a one-time host bootstrap). Set `BASIS_SKIP_BROWSER_INSTALL=1` to opt out; a download failure fails the install.
+`--trust` records `basis` in the consumer's `trustedDependencies` so Basis's install hook can apply the transitive patches Basis owns. The hook is deterministic, idempotent, exact-version validated, and only touches packages Basis declares. Consumers never copy patch files or `patchedDependencies` entries. The hook installs no browser and no system packages: Basis's snapshot capture runs through Docker, and the pinned Playwright image carries the browser, its operating-system libraries, and its fonts.
 
 Basis requires Bun `>=1.4.0`. Bun only honors root-level `patchedDependencies`, which is why the trusted hook exists.
 
@@ -214,8 +214,7 @@ test('renders a button', async () => {
 
 It accepts a React element, a Playwright `Page`, or a `Locator`, and throws with the diff details on a mismatch.
 
-Basis's trusted install hook downloads the pinned Chromium browser during `bun install`. It never escalates privileges or invokes a system package manager, so no `sudo` is ever required. The operating-system libraries Chromium needs to launch are the environment's responsibility: CI images provide them, and a dev host provisions them once with `bunx playwright install-deps chromium` (an admin step, outside the install hook). Set `BASIS_SKIP_BROWSER_INSTALL=1` to opt out intentionally; the hook then reports the skip. If the download fails, `bun
-install` fails loudly and names the command to retry; if Chromium later fails to launch, the error names the same `install-deps` command and reports the missing library when it can identify it.
+Snapshot capture always runs through Docker. `basis/testing` starts the pinned Playwright image (`mcr.microsoft.com/playwright:v<installed Playwright version>-noble`) running Playwright's server from the mounted Playwright package, then connects the host client to it; the container carries the browser, its operating-system libraries, and the Google fonts `BASIS_FONTS_URL` pins, so capture renders identically on every host and in CI. The container is started once per run and reused for every capture. Declare `docker` in `basis.hostDependencies` so `bun install` fails loudly when it is absent; the first capture pulls the image, later runs reuse it. There is no host-browser fallback.
 
 `matchScreenshot` never modifies or deletes a committed baseline unless the run explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A capture or comparison failure leaves baselines untouched.
 

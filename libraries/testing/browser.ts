@@ -1,104 +1,185 @@
-import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright'
-
 /**
- * Remediation shown when Chromium cannot launch.
+ * The shared, Docker-backed Playwright browser for Basis snapshot capture.
  *
- * Basis's install hook downloads the pinned browser but never installs system
- * packages and never escalates privileges, so the operating-system libraries are
- * the environment's responsibility. This is the exact next step for a host or
- * image that is missing them.
+ * Basis never launches a browser on the host: {@link getBrowser} connects to
+ * the pinned Playwright container (`browser-container.ts`), so a capture always
+ * runs in the same browser, OS, and font environment. The browser is imported
+ * dynamically so a suite that never captures a screenshot never loads the
+ * Playwright stack or needs Docker.
+ *
+ * The lifecycle state lives on `globalThis` rather than module scope: Bun gives
+ * each test file its own module registry, so module-global state would connect
+ * per file. One process-global registry means one connection per process, and
+ * the container itself is shared across `--parallel` workers, so a whole run
+ * uses a single browser container.
  */
-export const CHROMIUM_SYSTEM_LIBRARIES_HELP =
-  'Chromium could not launch. The host is most likely missing the operating-system ' +
-  'libraries Chromium needs. Install them with `bunx playwright install-deps chromium` ' +
-  '(as root/administrator), or use a CI image that provides them. Basis does not install ' +
-  'system packages from its install hook and never requires sudo.'
+
+import type { Browser, BrowserContext, BrowserContextOptions, BrowserType, Page } from 'playwright'
+import { acquireSharedBrowserContainer, releaseSharedBrowserContainer } from './browser-container'
+
+/** How long to wait for the container's Playwright server to accept connections. */
+const CONNECT_TIMEOUT_MS = 60_000
+
+/** Per-attempt connection timeout. */
+const CONNECT_ATTEMPT_TIMEOUT_MS = 10_000
+
+/** Delay between connection attempts while the container boots. */
+const CONNECT_RETRY_MS = 250
+
+/** Remediation shown when the Docker-backed browser cannot be connected. */
+export const DOCKER_BROWSER_HELP =
+  'Basis runs every snapshot capture through a Docker container pinned to the ' +
+  'installed Playwright version. Ensure Docker is installed and running, the ' +
+  'pinned image can be pulled, and `docker` is declared in this repository\'s ' +
+  '`basis.hostDependencies`.'
 
 /**
- * Name the shared library Chromium failed to load, when the failure says so.
- *
- * A missing OS library makes the Chromium process exit before Playwright can
- * connect, and the library name is buried in the browser log Playwright
- * attaches. Pulling it out lets the error lead with the specific fix.
- * @param cause - The error thrown by Playwright's `chromium.launch`.
- * @returns The library name, or null when the failure does not report one.
- */
-export const missingSystemLibrary = (cause: unknown): string | null => {
-  const text = cause instanceof Error ? cause.message : String(cause)
-  const match = /error while loading shared libraries:\s*([^\s:]+)/i.exec(text)
-  return match?.[1] ?? null
-}
-
-/**
- * Wrap a Chromium launch failure with actionable remediation and the cause.
- *
- * The missing library is surfaced on its own line, ahead of Playwright's log
- * dump, so the reader does not have to dig for it.
- * @param cause - The error thrown by Playwright's `chromium.launch`.
+ * Wrap a connection failure with the endpoint and remediation.
+ * @param endpoint - The container endpoint that would not accept a connection.
+ * @param cause - The connection error.
  * @returns The augmented error.
  */
-export const browserLaunchError = (cause: unknown): Error => {
+export function browserConnectError(endpoint: string, cause: unknown): Error {
   const detail = cause instanceof Error ? cause.message : String(cause)
-  const library = missingSystemLibrary(cause)
-  const detected = library ? `\n\nDetected missing system library: ${library}` : ''
   return new Error(
-    `${CHROMIUM_SYSTEM_LIBRARIES_HELP}${detected}\n\nUnderlying error: ${detail}`,
+    `Basis could not connect to its snapshot browser at ${endpoint}: ${detail}. ${DOCKER_BROWSER_HELP}`,
     { cause },
   )
 }
 
-let browser: Browser | null = null
-let captureContext: BrowserContext | null = null
-let capturePage: Page | null = null
-let captureQueue: Promise<unknown> = Promise.resolve()
+/** Process-global capture lifecycle state. */
+interface BrowserRegistry {
+  /** Whether this process has acquired the shared container and must release it. */
+  acquired: boolean,
+  /** The connected browser, or null. */
+  browser: Browser | null,
+  /** The shared context for React-element captures, or null. */
+  captureContext: BrowserContext | null,
+  /** The shared page for React-element captures, or null. */
+  capturePage: Page | null,
+  /** Serialises element captures on the shared page. */
+  captureQueue: Promise<unknown>,
+  /** The shared container endpoint this process acquired, or null. */
+  endpoint: string | null,
+}
+
+/** The `globalThis` property holding the process-wide capture registry. */
+const REGISTRY_PROPERTY = '__basisTestingBrowser'
 
 /**
- * Lazily launch (and cache) the shared Chromium instance.
- *
- * Playwright is imported dynamically so a suite that never captures a
- * screenshot (the normal, pre-commit suite) never loads the browser stack and
- * does not need a Playwright-capable host.
- * @returns The connected browser.
+ * The process-wide capture registry, created on first use.
+ * @returns The shared registry.
  */
-export async function getBrowser(): Promise<Browser> {
-  if (!browser || !browser.isConnected()) {
-    const { chromium } = await import('playwright')
-    try {
-      browser = await chromium.launch({
-        /*
-         * Deterministic rasterisation: grayscale anti-aliasing, no font hinting
-         * or subpixel positioning, and portable Skia paths, so the same markup
-         * renders identically across machines and architectures.
-         */
-        args: [
-          '--disable-lcd-text',
-          '--disable-font-subpixel-positioning',
-          '--disable-skia-runtime-opts',
-          '--font-render-hinting=none',
-          '--force-color-profile=srgb',
-        ],
-      })
-    } catch (error) {
-      /*
-       * The browser binary downloads without its OS libraries; tell the host
-       * exactly how to close that gap instead of surfacing Playwright's raw text.
-       */
-      throw browserLaunchError(error)
-    }
+function registry(): BrowserRegistry {
+  const scope = globalThis as unknown as Record<string, unknown>
+  const existing = scope[REGISTRY_PROPERTY] as BrowserRegistry | undefined
+  if (existing) return existing
+
+  const created: BrowserRegistry = {
+    acquired: false,
+    browser: null,
+    captureContext: null,
+    capturePage: null,
+    captureQueue: Promise.resolve(),
+    endpoint: null,
   }
-  return browser
+  scope[REGISTRY_PROPERTY] = created
+  return created
 }
 
 /**
- * Close the shared browser and the capture page, if running.
+ * Connect to the container's Playwright server, retrying while it boots.
+ * @param chromium - The Playwright Chromium browser type.
+ * @param endpoint - The container endpoint.
+ * @returns The connected browser.
+ * @throws {Error} When the server does not accept a connection in time.
+ */
+async function connectToContainer(chromium: BrowserType, endpoint: string): Promise<Browser> {
+  const deadline = Date.now() + CONNECT_TIMEOUT_MS
+  let lastError: unknown
+
+  for (;;) {
+    try {
+      return await chromium.connect(endpoint, { timeout: CONNECT_ATTEMPT_TIMEOUT_MS })
+    } catch (error) {
+      lastError = error
+      if (Date.now() >= deadline) break
+      await Bun.sleep(CONNECT_RETRY_MS)
+    }
+  }
+
+  throw browserConnectError(endpoint, lastError)
+}
+
+/**
+ * Acquire the shared container up front, without connecting a browser.
+ *
+ * The preload calls this so the whole run — including any `bun test`
+ * subprocesses and `--parallel` workers — shares one container, started before
+ * the first test and released when the last process exits.
+ * @throws {Error} When the container cannot be started.
+ */
+export async function warmBrowser(): Promise<void> {
+  const state = registry()
+  if (state.endpoint) return
+  state.endpoint = await acquireSharedBrowserContainer()
+  state.acquired = true
+}
+
+/**
+ * Lazily connect this process's browser to the shared container.
+ * @returns The connected browser.
+ * @throws {Error} When Docker or the pinned image is unavailable, or the
+ *   connection never succeeds.
+ */
+export async function getBrowser(): Promise<Browser> {
+  const state = registry()
+  if (state.browser && state.browser.isConnected()) return state.browser
+
+  if (!state.endpoint) {
+    state.endpoint = await acquireSharedBrowserContainer()
+    state.acquired = true
+  }
+
+  const { chromium } = await import('playwright')
+  try {
+    state.browser = await connectToContainer(chromium, state.endpoint)
+  } catch (error) {
+    state.acquired = false
+    state.endpoint = null
+    await releaseSharedBrowserContainer()
+    throw error
+  }
+  return state.browser
+}
+
+/**
+ * Close this process's browser and release the shared container.
+ *
+ * The graceful close is bounded: the browser is remote, and a wedged container
+ * must not hang the run's teardown. The container is removed only once every
+ * process has released it.
  */
 export async function closeBrowser(): Promise<void> {
-  await captureContext?.close()
-  captureContext = null
-  capturePage = null
-  captureQueue = Promise.resolve()
-  await browser?.close()
-  browser = null
+  const state = registry()
+  await state.captureContext?.close().catch(() => undefined)
+  state.captureContext = null
+  state.capturePage = null
+  state.captureQueue = Promise.resolve()
+
+  if (state.browser) {
+    await Promise.race([
+      state.browser.close().catch(() => undefined),
+      Bun.sleep(2_000),
+    ])
+  }
+  state.browser = null
+
+  if (state.acquired) {
+    state.acquired = false
+    state.endpoint = null
+    await releaseSharedBrowserContainer()
+  }
 }
 
 /**
@@ -106,17 +187,18 @@ export async function closeBrowser(): Promise<void> {
  * @returns The shared capture page.
  */
 async function getCapturePage(): Promise<Page> {
-  if (capturePage && !capturePage.isClosed()) return capturePage
+  const state = registry()
+  if (state.capturePage && !state.capturePage.isClosed()) return state.capturePage
 
   const instance = await getBrowser()
-  captureContext ??= await instance.newContext({
+  state.captureContext ??= await instance.newContext({
     colorScheme: 'light',
     deviceScaleFactor: 1,
     reducedMotion: 'reduce',
     viewport: { height: 800, width: 1280 },
   })
-  capturePage = await captureContext.newPage()
-  return capturePage
+  state.capturePage = await state.captureContext.newPage()
+  return state.capturePage
 }
 
 /**
@@ -131,8 +213,9 @@ async function getCapturePage(): Promise<Page> {
  * @returns The callback's result.
  */
 export async function withCapturePage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
-  const run = captureQueue.then(async () => await fn(await getCapturePage()))
-  captureQueue = run.catch(() => undefined)
+  const state = registry()
+  const run = state.captureQueue.then(async () => await fn(await getCapturePage()))
+  state.captureQueue = run.catch(() => undefined)
   return await run
 }
 
