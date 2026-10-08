@@ -110,6 +110,6 @@ Importing `@basis/react` registers a root stylesheet that applies Basis's defaul
 
 ## Hot module replacement
 
-Under a `basis/server` development runtime, edits apply to the running page without a full-page reload. Bun's dev server cannot React-Fast-Refresh class components, and all of Basis's UI is class-based, so `ApplicationBase` listens for Bun's `bun:afterUpdate` event and remounts the component tree with a fresh key. Updated class definitions take effect and class state is not preserved.
+Under a `basis/server` development runtime, edits apply to the running page without a full-page reload. Bun's dev server cannot React-Fast-Refresh class components, and all of Basis's UI is class-based, so `ApplicationBase` listens for Bun's `bun:afterUpdate` event and remounts the routed outlet with a fresh key. Updated class definitions take effect, the layout chrome (for example a scrolled navigation) keeps its DOM and state, and class state in the routed outlet is not preserved.
 
 A module that derives state from imported components — for example a route registry that maps imported page classes into an array — must call `import.meta.hot.accept()` so it re-evaluates and rebuilds that state when a dependency changes. Without an accepting boundary the update has nowhere to land and the page reloads.

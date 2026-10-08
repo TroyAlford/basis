@@ -222,18 +222,21 @@ export class ApplicationBase<
     const { Provider } = this.Context
     const { Provider: RuntimeProvider } = this.Runtime
     return (
-      <React.Fragment key={this.#hmrGeneration}>
-        <Provider value={this.state.context}>
-          <RuntimeProvider value={this.state.runtime}>
-            {this.layout(
-              <Router>
-                {this.renderRoutes()}
-              </Router>,
-            )}
-          </RuntimeProvider>
-        </Provider>
+      <Provider value={this.state.context}>
+        <RuntimeProvider value={this.state.runtime}>
+          {this.layout(
+            /*
+             * The key scopes the hot-update remount to the routed outlet, so
+             * application chrome the layout renders (navigation, theme, shells)
+             * keeps its DOM and state across an update.
+             */
+            <Router key={this.#hmrGeneration}>
+              {this.renderRoutes()}
+            </Router>,
+          )}
+        </RuntimeProvider>
         <OverlayProvider />
-      </React.Fragment>
+      </Provider>
     )
   }
 

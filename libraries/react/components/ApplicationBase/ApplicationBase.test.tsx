@@ -175,29 +175,39 @@ describe('Application', () => {
 })
 
 describe('Application hot updates', () => {
-  test('remounts the component tree when refreshed for a hot update', async () => {
-    let mounts = 0
+  test('remounts the routed outlet without remounting the layout chrome', async () => {
+    let chromeMounts = 0
+    let pageMounts = 0
 
-    class Leaf extends ReactComponent {
-      componentDidMount(): void { mounts += 1 }
-      render(): ReactNode { return <span>leaf</span> }
+    class Chrome extends ReactComponent {
+      componentDidMount(): void { chromeMounts += 1 }
+      render(): ReactNode { return <nav>chrome</nav> }
+    }
+
+    class Page extends ReactComponent {
+      componentDidMount(): void { pageMounts += 1 }
+      render(): ReactNode { return <main>page</main> }
     }
 
     class HotApplication extends ApplicationBase {
       refresh(): void { this.hmrRefresh() }
-      protected layout(content: ReactNode): ReactNode { return <><Leaf />{content}</> }
+      protected get routes() { return { '/': { component: Page } } }
+      protected layout(content: ReactNode): ReactNode { return <><Chrome />{content}</> }
     }
 
     const { instance, unmount } = await render<HotApplication>(<HotApplication />)
-    expect(mounts).toBe(1)
+    expect(chromeMounts).toBe(1)
+    expect(pageMounts).toBe(1)
 
     /*
      * Component.shouldComponentUpdate skips a plain re-render, so a hot update
-     * must remount the subtree for updated class definitions to apply.
+     * remounts the routed outlet. The layout chrome stays mounted, preserving
+     * its DOM and state (for example a scrolled navigation).
      */
     instance.refresh()
-    await waitFor(() => mounts === 2)
-    expect(mounts).toBe(2)
+    await waitFor(() => pageMounts === 2)
+    expect(pageMounts).toBe(2)
+    expect(chromeMounts).toBe(1)
 
     unmount()
   })
