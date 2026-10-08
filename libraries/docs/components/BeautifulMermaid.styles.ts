@@ -1,12 +1,12 @@
-import { css, style } from '../../utilities/style'
+import { css, style } from 'basis/react'
 
-style('basis:mermaid', css`
-  .mermaid-diagram.component {
+style('basis:docs:beautiful-mermaid', css`
+  .beautiful-mermaid.component {
     background: var(--basis-color-background);
     border: 1px solid var(--basis-color-disabled);
     border-radius: var(--basis-radius-md);
     box-shadow: var(--basis-shadow-sm);
-    margin: var(--basis-unit-md) 0;
+    margin: 0;
     overflow-x: auto;
     padding: var(--basis-unit-md);
     text-align: center;
@@ -18,14 +18,7 @@ style('basis:mermaid', css`
       max-width: 100%;
     }
 
-    .node rect,
-    .er.entityBox,
-    .cluster rect {
-      rx: var(--basis-radius-sm);
-      ry: var(--basis-radius-sm);
-    }
-
-    pre.mermaid {
+    pre {
       background: none;
       color: var(--basis-color-disabled-text);
       font-family: 'Fira Code', monospace;

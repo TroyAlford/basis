@@ -1,18 +1,16 @@
 import * as React from 'react'
 import { Component } from '../Component/Component'
-import type { MermaidConfig, MermaidVariant } from './theme'
+import type { MermaidConfig } from './theme'
 import { mermaidConfig, readMermaidTokens } from './theme'
 
 import './Mermaid.styles.ts'
 
 /** Source of the lazily loaded Mermaid runtime. */
-export const MERMAID_SOURCE = 'https://esm.sh/mermaid@11'
+export const MERMAID_SOURCE = 'https://esm.sh/mermaid@12'
 
 interface Props {
   /** Mermaid diagram source. */
   children?: React.ReactNode,
-  /** The named look applied to the diagram. Defaults to `basis`. */
-  variant?: MermaidVariant,
 }
 
 interface State {
@@ -74,12 +72,13 @@ function renderDiagram(id: string, source: string, config: MermaidConfig): Promi
  * class="mermaid">` block, and the client replaces it with the rendered SVG.
  *
  * The diagram is themed from the surrounding Basis design tokens, so it follows
- * the active `Theme` rather than Mermaid's stock palette. Use `variant` to pick
- * one of the named looks.
+ * the active `Theme`. There is no Mermaid-specific theme API in Basis — put the
+ * diagram in a named `Theme` scope (the component's `theme` prop sets
+ * `data-theme`) to restyle it.
  */
 export class Mermaid extends Component<Props, HTMLDivElement, State> {
   static displayName = 'MermaidDiagram'
-  static defaultProps: Props = { children: undefined, variant: 'basis' }
+  static defaultProps: Props = { children: undefined }
   #id = `basis-mermaid-${(sequence += 1)}`
 
   get defaultState(): State {
@@ -94,17 +93,9 @@ export class Mermaid extends Component<Props, HTMLDivElement, State> {
     return React.Children.toArray(this.props.children).join('').trim()
   }
 
-  override get attributes() {
-    return {
-      ...super.attributes,
-      'data-variant': this.props.variant,
-    }
-  }
-
   async componentDidMount(): Promise<void> {
     const tokens = readMermaidTokens(this.rootNode ?? document.documentElement)
-    const config = mermaidConfig(tokens, this.props.variant)
-    const svg = await renderDiagram(this.#id, this.source, config)
+    const svg = await renderDiagram(this.#id, this.source, mermaidConfig(tokens))
     await this.setState({ svg })
   }
 

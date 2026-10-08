@@ -254,16 +254,16 @@ describe('testing/docs', () => {
   }
 
   /*
-   * The Mermaid gallery renders every supported diagram type in the default
-   * on-brand look; the capture is the visual contract for the themed output.
+   * The Mermaid gallery renders every supported diagram type from the page
+   * theme; the capture is the visual contract for the themed output.
    */
   test('captures the Mermaid gallery', async () => {
     await app.visit('/components/mermaid', { ...NETWORK }, async page => {
-      // 1 basic usage + 3 variants + 12 gallery diagrams.
+      // 1 basic usage + 2 theming examples + 12 gallery + 5 comparison diagrams.
       await page.waitForFunction(
-        () => document.querySelectorAll('.mermaid-diagram .diagram svg').length >= 16,
+        () => document.querySelectorAll('.mermaid-diagram .diagram svg').length >= 20,
         undefined,
-        { timeout: 60_000 },
+        { timeout: 90_000 },
       )
       if (await page.locator('.code.component').count() > 0) {
         await page.waitForSelector('.code.component pre.shiki', { timeout: 30_000 })
@@ -274,20 +274,21 @@ describe('testing/docs', () => {
   }, 120_000)
 
   /*
-   * One section per named look, so a change to a variant's palette is visible
-   * in isolation rather than only inside the full gallery.
+   * A diagram follows the `Theme` around it. The default capture is the page
+   * theme; the named capture is the same diagram inside a scoped dark `Theme`,
+   * proving the tokens flow into the rendered SVG.
    */
-  test('captures the Mermaid variants', async () => {
+  test('captures the Mermaid theming', async () => {
     await app.visit('/components/mermaid', { ...NETWORK }, async page => {
       await page.waitForFunction(
-        () => document.querySelectorAll('[data-variant-section] .diagram svg').length >= 3,
+        () => document.querySelectorAll('[data-theme-example] .diagram svg').length >= 2,
         undefined,
         { timeout: 60_000 },
       )
-      for (const variant of ['basis', 'neutral', 'dark']) {
+      for (const example of ['default', 'named']) {
         await matchScreenshot(
-          page.locator(`[data-variant-section="${variant}"]`),
-          variant,
+          page.locator(`[data-theme-example="${example}"]`),
+          example,
           { maxDiffPixelRatio: 0.02 },
         )
       }
@@ -315,6 +316,28 @@ describe('testing/docs', () => {
           name ?? `diagram-${index}`,
           { maxDiffPixelRatio: 0.02 },
         )
+      }
+    })
+  }, 120_000)
+
+  /*
+   * The renderer comparison puts the shared diagram types through both Mermaid
+   * and beautiful-mermaid, so the trade-off is visible in a single capture.
+   */
+  test('captures the Mermaid renderer comparison', async () => {
+    await app.visit('/components/mermaid', { ...NETWORK }, async page => {
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-renderer-comparison] .beautiful-mermaid svg').length >= 5
+          && document.querySelectorAll('[data-renderer-comparison] .mermaid-diagram .diagram svg').length >= 5,
+        undefined,
+        { timeout: 90_000 },
+      )
+      const rows = page.locator('[data-renderer-comparison]')
+      const total = await rows.count()
+      for (let index = 0; index < total; index += 1) {
+        const row = rows.nth(index)
+        const name = await row.getAttribute('data-renderer-comparison')
+        await matchScreenshot(row, `compare ${name ?? index}`, { maxDiffPixelRatio: 0.02 })
       }
     })
   }, 120_000)

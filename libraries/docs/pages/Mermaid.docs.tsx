@@ -1,14 +1,11 @@
 import { Mermaid } from '../../react/components/Mermaid/Mermaid'
-import type { MermaidVariant } from '../../react/components/Mermaid/theme'
+import { Theme } from '../../react/components/Theme/Theme'
+import { BeautifulMermaid } from '../components/BeautifulMermaid'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
-/** Every look a diagram can be rendered with, in the order the page shows them. */
-const VARIANTS: readonly { readonly blurb: string, readonly id: MermaidVariant }[] = [
-  { blurb: 'On-brand. The default: Basis tokens with the primary color as the accent.', id: 'basis' },
-  { blurb: 'Editorial. A no-color treatment for dense or reference material.', id: 'neutral' },
-  { blurb: 'Dark. A high-contrast surface that stands apart from the page.', id: 'dark' },
-]
+/** Diagram types beautiful-mermaid also renders, for the renderer comparison. */
+const SHARED_TITLES = new Set(['Class', 'Entity relationship', 'Flowchart', 'Sequence', 'State'])
 
 const FLOWCHART = `flowchart TD
   A[Request] --> B{Signed in?}
@@ -169,7 +166,7 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
         <section>
           <h2>Overview</h2>
           <p>The Mermaid component renders a Mermaid diagram. The runtime is imported lazily on mount, so a page without diagrams never fetches it and server rendering never reaches the network.</p>
-          <p>Diagrams are themed from the surrounding Basis design tokens — the primary color, background, foreground, radius, and font — so they follow the active <code>Theme</code> instead of Mermaid’s stock palette. Use the <code>variant</code> prop to choose one of the named looks.</p>
+          <p>Diagrams are painted from the surrounding Basis design tokens — the primary color, background, foreground, and font — so they follow the active <code>Theme</code>. Basis deliberately ships no Mermaid-specific look API: to change how diagrams look, change the <code>Theme</code> around them.</p>
         </section>
         <section>
           <h2>Basic Usage</h2>
@@ -190,19 +187,40 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
           </Mermaid>
         </section>
         <section>
-          <h2>Theme Variants</h2>
-          <p>The <code>variant</code> prop selects one of four looks. Every look derives its palette from the same Basis tokens, so a custom primary color flows through all of them.</p>
-          {VARIANTS.map(({ blurb, id }) => (
-            <div key={id} data-variant-section={id}>
-              <h3><code>variant=&quot;{id}&quot;</code></h3>
-              <p>{blurb}</p>
-              <Mermaid variant={id}>{FLOWCHART}</Mermaid>
-            </div>
-          ))}
+          <h2>Theming</h2>
+          <p>A diagram is themed from the design tokens in scope where it renders, so wrapping it in a <code>Theme</code> is the whole customization surface. Render the <code>Theme</code> with a <code>name</code>, then put the diagram in that scope — the component’s <code>theme</code> prop sets <code>data-theme</code> for you.</p>
+          <div data-theme-example="default">
+            <h3>Default theme</h3>
+            <Mermaid>{FLOWCHART}</Mermaid>
+          </div>
+          <Theme
+            name="diagram-dusk"
+            color={{
+              background: '#0f172a',
+              foreground: '#e2e8f0',
+              primary: '#38bdf8',
+            }}
+          />
+          <div data-theme-example="named">
+            <h3>A named theme</h3>
+            <p>The same diagram inside <code>&lt;Mermaid theme=&quot;diagram-dusk&quot;&gt;</code>:</p>
+            <Mermaid theme="diagram-dusk">{FLOWCHART}</Mermaid>
+          </div>
+          {Code.format(`
+            import { Mermaid, Theme } from 'basis/react'
+
+            <Theme
+              name="diagram-dusk"
+              color={{ background: '#0f172a', foreground: '#e2e8f0', primary: '#38bdf8' }}
+            />
+
+            <Mermaid theme="diagram-dusk">{\`flowchart TD
+              A[Start] --> B[Ship]\`}</Mermaid>
+          `)}
         </section>
         <section>
           <h2>Diagram Gallery</h2>
-          <p>The component renders any Mermaid diagram type. Each of the following uses the default <code>basis</code> look.</p>
+          <p>The component renders any Mermaid diagram type. Each of the following uses the page theme.</p>
           {GALLERY.map(({ source, title }) => (
             <div key={title} data-diagram={title.toLowerCase().replace(/\s+/g, '-')}>
               <h3>{title}</h3>
@@ -211,14 +229,27 @@ export class MermaidDocs extends DocumentationPage<Record<string, never>> {
           ))}
         </section>
         <section>
-          <h2>Props</h2>
-          <h3><code>variant</code></h3>
-          <p>Optional. One of <code>basis</code> (default), <code>neutral</code>, or <code>dark</code>. The variant controls the Mermaid theme only; the container follows the page.</p>
-          {Code.format(`
-            <Mermaid variant="dark">{\`sequenceDiagram
-              A->>B: Hello
-              B-->>A: Hi\`}</Mermaid>
-          `)}
+          <h2>Renderer Comparison</h2>
+          <p>An evaluation of the same source through Mermaid and through <code>beautiful-mermaid</code>, both painted from the page tokens. <code>beautiful-mermaid</code> is a lighter renderer with a more restrained look, but it covers fewer diagram types.</p>
+          {GALLERY.filter(({ title }) => SHARED_TITLES.has(title)).map(({ source, title }) => (
+            <div key={title} data-renderer-comparison={title.toLowerCase().replace(/\s+/g, '-')} style={{ marginBottom: 'var(--basis-unit-lg)' }}>
+              <h3>{title}</h3>
+              <div style={{ display: 'grid', gap: 'var(--basis-unit-md)', gridTemplateColumns: '1fr 1fr' }}>
+                <div>
+                  <h4>Mermaid</h4>
+                  <Mermaid>{source}</Mermaid>
+                </div>
+                <div>
+                  <h4>beautiful-mermaid</h4>
+                  <BeautifulMermaid>{source}</BeautifulMermaid>
+                </div>
+              </div>
+            </div>
+          ))}
+        </section>
+        <section>
+          <h2>Runtime</h2>
+          <p>Diagrams render with Mermaid 12 using the <code>neo</code> look and the <code>elk</code> layout. Fonts, spacing, and the palette come from Basis; there is no separate Mermaid configuration surface to learn.</p>
         </section>
         <section>
           <h2>In Markdown and MDX</h2>

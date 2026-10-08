@@ -1,9 +1,6 @@
 import { Color } from '../../../utilities/functions/Color'
 import { DEFAULT_THEME } from '../Theme/Theme'
 
-/** A named Mermaid look Basis ships. */
-export type MermaidVariant = 'basis' | 'dark' | 'neutral'
-
 /** The resolved Basis design tokens a diagram theme is derived from. */
 export interface MermaidTokens {
   /** Surface color from `--basis-color-background`. */
@@ -22,7 +19,7 @@ export type MermaidConfig = Record<string, unknown>
 /** The pixels a `100%` font-size token resolves to. */
 const BASE_FONT_SIZE = 16
 
-/** The categorical palette used for pie, timeline, and git-graph accents. */
+/** The categorical accents used by pie, timeline, and git-graph surfaces. */
 const CATEGORICAL = [
   '#0070f3',
   '#00b8d4',
@@ -38,7 +35,7 @@ const CATEGORICAL = [
   '#f59e0b',
 ]
 
-/** The layout geometry shared by every variant. */
+/** The layout geometry shared by every diagram. */
 const GEOMETRY: MermaidConfig = {
   flowchart: {
     curve: 'basis',
@@ -58,6 +55,8 @@ const GEOMETRY: MermaidConfig = {
     useMaxWidth: true,
   },
   journey: { useMaxWidth: true },
+  layout: 'elk',
+  look: 'neo',
   pie: { useMaxWidth: true },
   quadrantChart: { useMaxWidth: true },
   sequence: {
@@ -97,14 +96,6 @@ interface MermaidPalette {
   text: Color,
 }
 
-/** A variant's resolved palette and surface mode. */
-interface ResolvedTheme {
-  /** Whether the palette targets a dark surface. */
-  darkMode: boolean,
-  /** The palette to paint with. */
-  palette: MermaidPalette,
-}
-
 /**
  * Mix two colors in sRGB.
  * @param from - The color to start from.
@@ -120,87 +111,30 @@ function mix(from: Color, to: Color, weight: number): Color {
 }
 
 /**
- * The categorical accents for a variant.
- * @param accent - The brand accent the palette leads with.
- * @param background - The surface the accents sit on.
- * @param monochrome - When true, render a grayscale ramp instead of hues.
- * @returns The ordered categorical colors.
- */
-function categorical(accent: Color, background: Color, monochrome: boolean): Color[] {
-  if (monochrome) {
-    return CATEGORICAL.map((_, index) => mix(accent, background, 0.15 + (index * 0.065)))
-  }
-  return CATEGORICAL.map(value => Color.from(value))
-}
-
-/**
- * Resolve the palette and surface mode for a variant.
- * @param variant - The named look.
+ * Derive the palette from the resolved Basis tokens.
+ *
+ * Every color is mixed toward the token background, so the same derivation
+ * adapts to a light or dark theme: a dark `background` yields dark node fills
+ * against light text, and the reverse on a light theme.
  * @param tokens - The resolved Basis tokens.
- * @returns The resolved theme.
+ * @returns The palette.
  */
-function resolveTheme(variant: MermaidVariant, tokens: MermaidTokens): ResolvedTheme {
+function resolvePalette(tokens: MermaidTokens): MermaidPalette {
   const background = Color.from(tokens.background)
   const foreground = Color.from(tokens.foreground)
   const primary = Color.from(tokens.primary)
-
-  if (variant === 'neutral') {
-    const ink = foreground
-    return {
-      darkMode: false,
-      palette: {
-        accent: mix(ink, background, 0.4),
-        background,
-        border: mix(ink, background, 0.55),
-        categorical: categorical(mix(ink, background, 0.2), background, true),
-        cluster: mix(ink, background, 0.97),
-        clusterBorder: mix(ink, background, 0.72),
-        line: mix(ink, background, 0.45),
-        muted: mix(ink, background, 0.95),
-        mutedBorder: mix(ink, background, 0.78),
-        surface: mix(ink, background, 0.95),
-        text: ink,
-      },
-    }
-  }
-
-  if (variant === 'dark') {
-    const surface = foreground
-    const text = Color.from('#f5f5f5')
-    const accent = mix(primary, Color.from('#ffffff'), 0.2)
-    return {
-      darkMode: true,
-      palette: {
-        accent,
-        background: surface,
-        border: mix(accent, surface, 0.35),
-        categorical: CATEGORICAL.map(value => mix(Color.from(value), Color.from('#ffffff'), 0.12)),
-        cluster: mix(accent, surface, 0.9),
-        clusterBorder: mix(accent, surface, 0.6),
-        line: mix(text, surface, 0.45),
-        muted: mix(text, surface, 0.9),
-        mutedBorder: mix(text, surface, 0.68),
-        surface: mix(accent, surface, 0.82),
-        text,
-      },
-    }
-  }
-
   return {
-    darkMode: false,
-    palette: {
-      accent: primary,
-      background,
-      border: primary,
-      categorical: categorical(primary, background, false),
-      cluster: mix(primary, background, 0.93),
-      clusterBorder: mix(primary, background, 0.6),
-      line: mix(foreground, background, 0.32),
-      muted: mix(foreground, background, 0.95),
-      mutedBorder: mix(foreground, background, 0.8),
-      surface: mix(primary, background, 0.86),
-      text: foreground,
-    },
+    accent: primary,
+    background,
+    border: primary,
+    categorical: CATEGORICAL.map(value => Color.from(value)),
+    cluster: mix(primary, background, 0.93),
+    clusterBorder: mix(primary, background, 0.6),
+    line: mix(foreground, background, 0.32),
+    muted: mix(foreground, background, 0.95),
+    mutedBorder: mix(foreground, background, 0.8),
+    surface: mix(primary, background, 0.86),
+    text: foreground,
   }
 }
 
@@ -345,20 +279,23 @@ function diagramCSS(palette: MermaidPalette): string {
 }
 
 /**
- * Build the Mermaid configuration for a variant.
+ * Build the Mermaid configuration from Basis tokens.
+ *
+ * There is no Mermaid-specific theme API: a diagram is painted from whatever
+ * `Theme` surrounds it. Use the base component's `theme` prop to render inside
+ * a named `Theme` scope.
  * @param tokens - The resolved Basis tokens.
- * @param variant - The named look. Defaults to `basis`.
  * @returns The Mermaid configuration.
  */
-export function mermaidConfig(tokens: MermaidTokens, variant: MermaidVariant = 'basis'): MermaidConfig {
-  const { darkMode, palette } = resolveTheme(variant, tokens)
+export function mermaidConfig(tokens: MermaidTokens): MermaidConfig {
+  const colors = resolvePalette(tokens)
   return {
     ...GEOMETRY,
     theme: 'base',
-    themeCSS: diagramCSS(palette),
+    themeCSS: diagramCSS(colors),
     themeVariables: {
-      ...themeVariables(palette, tokens),
-      darkMode,
+      ...themeVariables(colors, tokens),
+      darkMode: colors.background.toHSL().l < 50,
     },
   }
 }
