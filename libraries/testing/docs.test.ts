@@ -15,6 +15,21 @@ const root = join(import.meta.dir, '..', '..')
  */
 const NETWORK = { allow: ['esm.sh'] }
 
+/**
+ * Wait until every Code example on the page has been highlighted by Shiki.
+ *
+ * `Code` renders a plain fallback until its Shiki runtime resolves, so waiting
+ * for only the first highlighted block can catch a later one still unhighlighted,
+ * which shortens the page and changes the full-page snapshot.
+ * @param page - The docs page to wait on.
+ */
+async function waitForHighlightedCode(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const codes = Array.from(document.querySelectorAll('.code.component'))
+    return codes.length > 0 && codes.every(code => code.querySelector('pre.shiki') !== null)
+  }, undefined, { timeout: 30_000 })
+}
+
 describe('testing/docs', () => {
   let app: ApplicationHandle
 
@@ -64,9 +79,7 @@ describe('testing/docs', () => {
         `,
       })
       // Wait for the real Shiki output so the captured code is highlighted.
-      if (await page.locator('.code.component').count() > 0) {
-        await page.waitForSelector('.code.component pre.shiki', { timeout: 30_000 })
-      }
+      await waitForHighlightedCode(page)
       /*
        * The tall page is mostly prose, so give it a slightly wider budget to
        * absorb small cross-machine rasterisation differences.
@@ -265,9 +278,8 @@ describe('testing/docs', () => {
         undefined,
         { timeout: 60_000 },
       )
-      if (await page.locator('.code.component').count() > 0) {
-        await page.waitForSelector('.code.component pre.shiki', { timeout: 30_000 })
-      }
+      // Wait for the real Shiki output so the captured code is highlighted.
+      await waitForHighlightedCode(page)
       await releaseShell(page)
       await matchScreenshot(page, 'mermaid gallery', { maxDiffPixelRatio: 0.02 })
     })
