@@ -1,122 +1,326 @@
+import { appendFileSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname } from 'node:path'
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright'
 
-/**
- * Remediation shown when Chromium cannot launch.
+/*
+ * Run-scoped snapshot runtime.
  *
- * Basis's install hook downloads the pinned browser but never installs system
- * packages and never escalates privileges, so the operating-system libraries are
- * the environment's responsibility. This is the exact next step for a host or
- * image that is missing them.
+ * Visual capture is expensive to start and cheap to reuse: one Docker
+ * container running the pinned Playwright image, one browser connection, one
+ * reusable page for React-element captures, and one short-lived context per
+ * application visit. The runtime is memoised on `globalThis`, so every test
+ * file in a Bun run resolves the same instance, and the testing preload tears it
+ * down exactly once when the run ends.
+ *
+ * Capture always runs in the container, never in a host browser: local
+ * development and CI render in the same image, so a snapshot cannot depend on
+ * the host's Chromium build, operating-system libraries, or fonts. The browser
+ * is lazy — a run that never captures a screenshot never starts Docker.
  */
-export const CHROMIUM_SYSTEM_LIBRARIES_HELP =
-  'Chromium could not launch. The host is most likely missing the operating-system ' +
-  'libraries Chromium needs. Install them with `bunx playwright install-deps chromium` ' +
-  '(as root/administrator), or use a CI image that provides them. Basis does not install ' +
-  'system packages from its install hook and never requires sudo.'
+
+/** Environment variable that, when set, receives one line per lifecycle event. */
+export const SNAPSHOT_ACTIVITY_LOG = 'BASIS_SNAPSHOT_ACTIVITY_LOG'
 
 /**
- * Name the shared library Chromium failed to load, when the failure says so.
+ * Remediation shown when the snapshot runtime cannot start.
  *
- * A missing OS library makes the Chromium process exit before Playwright can
- * connect, and the library name is buried in the browser log Playwright
- * attaches. Pulling it out lets the error lead with the specific fix.
- * @param cause - The error thrown by Playwright's `chromium.launch`.
- * @returns The library name, or null when the failure does not report one.
+ * Capture runs Chromium inside the pinned Playwright container, so the runtime
+ * needs a working Docker daemon — not a host browser or its system libraries.
+ * This is the exact next step for a machine whose Docker is missing or stopped.
  */
-export const missingSystemLibrary = (cause: unknown): string | null => {
-  const text = cause instanceof Error ? cause.message : String(cause)
-  const match = /error while loading shared libraries:\s*([^\s:]+)/i.exec(text)
-  return match?.[1] ?? null
+export const DOCKER_UNAVAILABLE_HELP =
+  'Visual snapshots run Chromium inside Docker. Basis pins ' +
+  'mcr.microsoft.com/playwright:v<installed playwright>-noble so local development and CI ' +
+  'render in the same browser; it never launches a host browser. Install Docker, make sure ' +
+  'the daemon is running, and re-run.'
+
+/**
+ * Name the pinned container image for an installed Playwright version.
+ * @param version - The installed Playwright version.
+ * @returns The container image reference.
+ */
+export function playwrightImage(version: string): string {
+  return `mcr.microsoft.com/playwright:v${version}-noble`
 }
 
 /**
- * Wrap a Chromium launch failure with actionable remediation and the cause.
- *
- * The missing library is surfaced on its own line, ahead of Playwright's log
- * dump, so the reader does not have to dig for it.
- * @param cause - The error thrown by Playwright's `chromium.launch`.
+ * Extract the remote browser endpoint from a container's run-server output.
+ * @param log - The container's combined log output.
+ * @returns The `ws://` endpoint, or null when no endpoint has been announced.
+ */
+export function parseServerEndpoint(log: string): string | null {
+  return /Listening on (ws:\/\/\S+)/.exec(log)?.[1] ?? null
+}
+
+/**
+ * Wrap a container or browser startup failure with actionable remediation.
+ * @param cause - The error thrown while starting the runtime.
  * @returns The augmented error.
  */
-export const browserLaunchError = (cause: unknown): Error => {
+export function dockerUnavailableError(cause: unknown): Error {
   const detail = cause instanceof Error ? cause.message : String(cause)
-  const library = missingSystemLibrary(cause)
-  const detected = library ? `\n\nDetected missing system library: ${library}` : ''
-  return new Error(
-    `${CHROMIUM_SYSTEM_LIBRARIES_HELP}${detected}\n\nUnderlying error: ${detail}`,
-    { cause },
+  return new Error(`${DOCKER_UNAVAILABLE_HELP}\n\nUnderlying error: ${detail}`, { cause })
+}
+
+/** The mounted Playwright package and its core dependency, as host paths. */
+interface PlaywrightMount {
+  /** Absolute host path of the `playwright-core` package directory. */
+  core: string,
+  /** Absolute host path of the `playwright` package directory. */
+  dir: string,
+  /** The installed Playwright version. */
+  version: string,
+}
+
+/**
+ * Resolve the Playwright package the client will mount into the container.
+ *
+ * The client and the container must run the same Playwright version, so the
+ * image tag and the mounted package both come from the installed dependency
+ * rather than a constant. Resolution is relative to this module, so it follows
+ * the consumer's dependency graph.
+ * @returns The package directories and version.
+ */
+function playwrightMount(): PlaywrightMount {
+  const require = createRequire(import.meta.url)
+  const manifest = require.resolve('playwright/package.json')
+  const dir = dirname(manifest)
+  const { version } = JSON.parse(readFileSync(manifest, 'utf-8')) as { version: string }
+  const core = dirname(createRequire(manifest).resolve('playwright-core/package.json'))
+  return { core, dir, version }
+}
+
+/** Docker command result. */
+interface DockerResult {
+  /** Process exit code. */
+  code: number,
+  /** Combined standard error. */
+  stderr: string,
+  /** Combined standard output. */
+  stdout: string,
+}
+
+/**
+ * Run a Docker CLI command and capture its output.
+ * @param args - Arguments after `docker`.
+ * @returns The exit code and captured output.
+ */
+function docker(args: string[]): DockerResult {
+  const proc = Bun.spawnSync(['docker', ...args], { stderr: 'pipe', stdout: 'pipe' })
+  const decoder = new TextDecoder()
+  return {
+    code: proc.exitCode ?? -1,
+    stderr: decoder.decode(proc.stderr),
+    stdout: decoder.decode(proc.stdout),
+  }
+}
+
+/** How long to wait for the container to announce its browser endpoint. */
+const READY_TIMEOUT_MS = 60_000
+
+/** How often to poll the container log while waiting for its endpoint. */
+const READY_POLL_MS = 50
+
+/**
+ * Start the one snapshot container and wait for its remote browser endpoint.
+ *
+ * The container is detached and unnamed (Docker assigns the identity), runs the
+ * mounted Playwright package's `run-server` on an ephemeral port, and shares the
+ * host network so the containerised browser can reach the application server on
+ * loopback. Nothing about the container is fixed: no name, no port, no state
+ * outside the returned id.
+ * @returns The container id and its browser endpoint.
+ */
+async function startContainer(): Promise<{ endpoint: string, id: string }> {
+  const mount = playwrightMount()
+  const image = playwrightImage(mount.version)
+  const args = [
+    'run', '-d', '--rm', '--pull', 'missing', '--network', 'host', '--ipc=host',
+    '-e', 'PLAYWRIGHT_BROWSERS_PATH=/ms-playwright',
+    '-v', `${mount.dir}:/opt/pw/node_modules/playwright:ro`,
+    '-v', `${mount.core}:/opt/pw/node_modules/playwright-core:ro`,
+    image,
+    'node', '/opt/pw/node_modules/playwright/cli.js',
+    'run-server', '--host', '127.0.0.1', '--port', '0',
+  ]
+
+  let run: DockerResult
+  try {
+    run = docker(args)
+  } catch (error) {
+    throw dockerUnavailableError(error)
+  }
+  if (run.code !== 0) {
+    throw dockerUnavailableError(run.stderr.trim() || `docker run exited with ${run.code}`)
+  }
+
+  const id = run.stdout.trim()
+  record(`container-start ${id}`)
+
+  const deadline = Date.now() + READY_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    const logs = docker(['logs', id])
+    const output = `${logs.stdout}${logs.stderr}`
+    const endpoint = parseServerEndpoint(output)
+    if (endpoint) return { endpoint, id }
+    if (logs.code !== 0) {
+      throw dockerUnavailableError(output.trim() || 'the snapshot container exited before it was ready')
+    }
+    await Bun.sleep(READY_POLL_MS)
+  }
+
+  docker(['rm', '-f', id])
+  throw dockerUnavailableError(
+    `the snapshot container did not report an endpoint within ${READY_TIMEOUT_MS}ms`,
   )
 }
 
-let browser: Browser | null = null
-let captureContext: BrowserContext | null = null
-let capturePage: Page | null = null
-let captureQueue: Promise<unknown> = Promise.resolve()
+/** The process-wide snapshot runtime, created on first capture. */
+interface SnapshotRuntime {
+  /** The one connected browser. */
+  browser: Browser,
+  /** Deterministic context reused for React-element captures. */
+  captureContext: BrowserContext | null,
+  /** Page reused for React-element captures. */
+  capturePage: Page | null,
+  /** Serialises element captures so concurrent test files do not interleave. */
+  captureQueue: Promise<unknown>,
+  /** The running container's id. */
+  containerId: string,
+}
+
+/** The process-wide runtime registry. */
+interface RuntimeRegistry {
+  /** The runtime being started or already running. */
+  runtime: Promise<SnapshotRuntime> | null,
+  /** Whether teardown has run; guards idempotent close and post-close starts. */
+  stopped: boolean,
+}
+
+/** The `globalThis` property that holds the run-scoped runtime registry. */
+const REGISTRY_PROPERTY = '__basisSnapshotRuntime'
 
 /**
- * Lazily launch (and cache) the shared Chromium instance.
+ * The process-wide registry, created on first use.
+ * @returns The shared registry.
+ */
+function registry(): RuntimeRegistry {
+  const scope = globalThis as unknown as Record<string, unknown>
+  const existing = scope[REGISTRY_PROPERTY] as RuntimeRegistry | undefined
+  if (existing) return existing
+
+  const created: RuntimeRegistry = { runtime: null, stopped: false }
+  scope[REGISTRY_PROPERTY] = created
+  return created
+}
+
+/**
+ * Append a lifecycle event when the activity log is enabled.
  *
- * Playwright is imported dynamically so a suite that never captures a
- * screenshot (the normal, pre-commit suite) never loads the browser stack and
- * does not need a Playwright-capable host.
+ * This is observability for the runtime's lifecycle test, not coordination:
+ * with no `BASIS_SNAPSHOT_ACTIVITY_LOG` set it is inert, and a failed write
+ * never fails a snapshot.
+ * @param event - The event line to record.
+ */
+function record(event: string): void {
+  const path = process.env[SNAPSHOT_ACTIVITY_LOG]
+  if (!path) return
+  try {
+    appendFileSync(path, `${event}\n`)
+  } catch {
+    // Observability only; a failed log must never fail a snapshot.
+  }
+}
+
+/**
+ * Start the runtime: one container, one browser connection.
+ * @returns The running runtime.
+ */
+async function startRuntime(): Promise<SnapshotRuntime> {
+  const { endpoint, id } = await startContainer()
+
+  const { chromium } = await import('playwright')
+  let browser: Browser
+  try {
+    browser = await chromium.connect(endpoint)
+  } catch (error) {
+    docker(['rm', '-f', id])
+    throw dockerUnavailableError(error)
+  }
+
+  record('browser-connect')
+  return {
+    browser,
+    captureContext: null,
+    capturePage: null,
+    captureQueue: Promise.resolve(),
+    containerId: id,
+  }
+}
+
+/**
+ * Resolve the run-scoped runtime, starting it on first use.
+ *
+ * Every caller in the process awaits the same promise, so the first capture
+ * starts one container and one browser and every later capture reuses them.
+ * @returns The shared runtime.
+ * @throws {Error} When called after the runtime has been stopped.
+ */
+async function ensureRuntime(): Promise<SnapshotRuntime> {
+  const scope = registry()
+  if (scope.stopped) {
+    throw new Error('the snapshot runtime cannot start after it was stopped')
+  }
+
+  if (!scope.runtime) {
+    scope.runtime = startRuntime()
+    // Avoid an unhandled rejection when a caller never awaits the runtime.
+    void scope.runtime.catch(() => undefined)
+  }
+
+  return await scope.runtime
+}
+
+/**
+ * The one browser every capture in the run shares.
  * @returns The connected browser.
  */
 export async function getBrowser(): Promise<Browser> {
-  if (!browser || !browser.isConnected()) {
-    const { chromium } = await import('playwright')
-    try {
-      browser = await chromium.launch({
-        /*
-         * Deterministic rasterisation: grayscale anti-aliasing, no font hinting
-         * or subpixel positioning, and portable Skia paths, so the same markup
-         * renders identically across machines and architectures.
-         */
-        args: [
-          '--disable-lcd-text',
-          '--disable-font-subpixel-positioning',
-          '--disable-skia-runtime-opts',
-          '--font-render-hinting=none',
-          '--force-color-profile=srgb',
-        ],
-      })
-    } catch (error) {
-      /*
-       * The browser binary downloads without its OS libraries; tell the host
-       * exactly how to close that gap instead of surfacing Playwright's raw text.
-       */
-      throw browserLaunchError(error)
-    }
-  }
-  return browser
+  return (await ensureRuntime()).browser
 }
 
 /**
- * Close the shared browser and the capture page, if running.
+ * Close the browser and remove the container, once.
+ *
+ * Idempotent, so the preload's end-of-run teardown and an interruption handler
+ * cannot double-close. A run that never captured never started Docker, so this
+ * is a no-op.
  */
-export async function closeBrowser(): Promise<void> {
-  await captureContext?.close()
-  captureContext = null
-  capturePage = null
-  captureQueue = Promise.resolve()
-  await browser?.close()
-  browser = null
+export async function closeRuntime(): Promise<void> {
+  const scope = registry()
+  if (scope.stopped) return
+  scope.stopped = true
+
+  const pending = scope.runtime
+  scope.runtime = null
+  if (!pending) return
+
+  const runtime = await pending.catch(() => null)
+  if (!runtime) return
+
+  await runtime.captureContext?.close().catch(() => undefined)
+  await runtime.browser.close().catch(() => undefined)
+  docker(['rm', '-f', runtime.containerId])
+  record('teardown')
 }
 
-/**
- * The one deterministically configured page reused for React-element captures.
- * @returns The shared capture page.
- */
-async function getCapturePage(): Promise<Page> {
-  if (capturePage && !capturePage.isClosed()) return capturePage
-
-  const instance = await getBrowser()
-  captureContext ??= await instance.newContext({
-    colorScheme: 'light',
-    deviceScaleFactor: 1,
-    reducedMotion: 'reduce',
-    viewport: { height: 800, width: 1280 },
-  })
-  capturePage = await captureContext.newPage()
-  return capturePage
+/** The deterministic context options shared by capture and visits. */
+const CONTEXT_OPTIONS: BrowserContextOptions = {
+  colorScheme: 'light',
+  deviceScaleFactor: 1,
+  reducedMotion: 'reduce',
+  viewport: { height: 800, width: 1280 },
 }
 
 /**
@@ -126,13 +330,21 @@ async function getCapturePage(): Promise<Page> {
  * per capture is pure overhead — the dominant cost of a large icon matrix.
  * Reusing one page and replacing its document is deterministic, and the queue
  * keeps concurrent test files from interleaving on it. Application `visit`s
- * still open a fresh context, so server/browser state cannot leak between them.
+ * still open a fresh context on the same browser, so server/browser state cannot
+ * leak between them.
  * @param fn - Callback receiving the shared page.
  * @returns The callback's result.
  */
 export async function withCapturePage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
-  const run = captureQueue.then(async () => await fn(await getCapturePage()))
-  captureQueue = run.catch(() => undefined)
+  const runtime = await ensureRuntime()
+  const run = runtime.captureQueue.then(async () => {
+    if (!runtime.capturePage || runtime.capturePage.isClosed()) {
+      runtime.captureContext ??= await runtime.browser.newContext(CONTEXT_OPTIONS)
+      runtime.capturePage = await runtime.captureContext.newPage()
+    }
+    return await fn(runtime.capturePage)
+  })
+  runtime.captureQueue = run.then(() => undefined, () => undefined)
   return await run
 }
 
@@ -153,7 +365,8 @@ export interface PageOptions {
 }
 
 /**
- * Open a deterministically configured page, run a callback, then tear it down.
+ * Open a deterministically configured page on the shared browser, run a
+ * callback, then dispose the page and its context.
  * @param fn - Callback receiving the page.
  * @param options - Context options.
  * @returns The callback's result.
@@ -162,12 +375,10 @@ export async function withPage<T>(
   fn: (page: Page) => Promise<T>,
   options: PageOptions = {},
 ): Promise<T> {
-  const instance = await getBrowser()
-  const context = await instance.newContext({
-    colorScheme: 'light',
-    deviceScaleFactor: 1,
-    reducedMotion: 'reduce',
-    viewport: options.viewport ?? { height: 800, width: 1280 },
+  const browser = await getBrowser()
+  const context = await browser.newContext({
+    ...CONTEXT_OPTIONS,
+    ...(options.viewport ? { viewport: options.viewport } : {}),
     ...options.context,
   })
   try {
