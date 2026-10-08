@@ -1,7 +1,7 @@
 ---
 id: interface-boundaries
 title: Interface boundaries
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines
@@ -50,6 +50,8 @@ An infrastructure seam becomes increasingly warranted as pressure appears:
 Weigh these as evidence rather than predictions. Demonstrated reuse, a committed substitution, or a boundary that already exists is a reason now. "We might need another implementation someday" is not; it usually produces a mirror interface with one implementation forever.
 
 When the signal is present but intent or roadmap determines the answer, prefer a `question` — this is starting to look like a boundary — over manufacturing a finding because a diagram could contain two layers.
+
+Before designing a public package or module surface, ask what **consumer capability** must be exposed. Hide incidental infrastructure, testing seams, adapters, and construction details behind it unless actual consumers require them. A generic setter, transport operation, or implementation-shaped interface is not a substitute for a domain-level capability. Keep the public surface smaller than the implementation.
 
 Shape a new contract to the consumer, not the implementation. Depending on `PostgresDatabase` is often wrong, but so is depending on a generic `Database` that mirrors every capability the concrete class exposes. The useful contract is the narrow, domain-shaped capability the caller actually uses — for example a `ReportStore` with the find/save operations the caller needs — owned by the layer that requires it. A contract that copies the concrete class's public surface one method at a time is a leak with extra steps. Narrowing a contract that is being introduced belongs here; an existing contract that forces consumers to depend on members they do not use belongs to `interface-segregation`.
 

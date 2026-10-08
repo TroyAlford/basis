@@ -25,7 +25,7 @@ Front-matter fields:
 | ------------------ | ------------------------------------------------------------------------------------- |
 | `id`               | stable reviewer id (addressable by overlays)                                          |
 | `title`            | short human-readable title                                                            |
-| `executionProfile` | `deterministic`, `detector-then-adjudicate`, `local-semantic`, or `frontier-semantic` |
+| `executionProfile` | `deterministic`, `detector-then-adjudicate`, or `semantic` |
 | `detectors`        | `[{ detector, categories }]` selectors that feed the reviewer                         |
 | `context`          | context the runtime must assemble before adjudication                                 |
 | `outcomes`         | `[{ category, disposition, destructive }]` the reviewer may return                    |

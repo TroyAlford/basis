@@ -1,7 +1,7 @@
 ---
 id: interface-segregation
 title: Interface segregation
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines

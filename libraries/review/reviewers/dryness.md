@@ -1,7 +1,7 @@
 ---
 id: dryness
 title: DRYness
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines

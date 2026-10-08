@@ -32,7 +32,7 @@ describe('standard review manifest', () => {
     const reviewer = STANDARD_REVIEW_MANIFEST.reviewers
       .find(candidate => candidate.id === 'accidental-complexity')
 
-    expect(reviewer?.executionProfile).toBe('local-semantic')
+    expect(reviewer?.executionProfile).toBe('semantic')
     expect(reviewer?.detectors).toEqual([])
     expect(reviewer?.outcomes.map(outcome => outcome.category)).toEqual([
       'simplify-mechanism',
@@ -48,7 +48,7 @@ describe('standard review manifest', () => {
     const reviewer = STANDARD_REVIEW_MANIFEST.reviewers
       .find(candidate => candidate.id === 'component-style-semantics')
 
-    expect(reviewer?.executionProfile).toBe('local-semantic')
+    expect(reviewer?.executionProfile).toBe('semantic')
     expect(reviewer?.detectors).toEqual([])
     expect(reviewer?.outcomes.map(outcome => outcome.category)).toEqual([
       'state-semantics',

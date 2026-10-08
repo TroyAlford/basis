@@ -1,7 +1,7 @@
 ---
 id: file-responsibility
 title: File responsibility
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines

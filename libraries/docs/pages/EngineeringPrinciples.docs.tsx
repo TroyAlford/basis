@@ -124,30 +124,9 @@ export class EngineeringPrinciplesDocs extends DocumentationPage<Record<string, 
           <p>Many architectural choices are two-way doors. The purpose of semantic review is often to surface a high-value question with relevant repository evidence rather than pretend there is a universal theorem. Use findings when the current design is demonstrably fighting correctness, readability, or maintainability. Use questions when the code shows architectural pressure but intent, roadmap, scale, or ownership determines the right answer. That distinction is a feature of the review system, not uncertainty to hide.</p>
         </section>
         <section>
-          <h2>How Basis operationalizes these principles</h2>
-          <p>Basis turns this philosophy into small, versioned reviewer policies instead of one giant architecture reviewer. Each reviewer asks one bounded question and may produce a finding, a question, no finding, or abstain.</p>
-          <ul>
-            <li><code>dead-code</code> — do not ship code, exports, or dependencies nothing uses.</li>
-            <li><code>dryness</code> — do not create a second implementation of a concept the repository already expresses.</li>
-            <li><code>file-responsibility</code> — organize code around understandable units, not line counts.</li>
-            <li><code>readability-over-cleverness</code> — prefer code a future reader can follow.</li>
-            <li><code>interface-boundaries</code> — concrete by default; contracts are earned.</li>
-            <li><code>dependency-direction</code> — keep the graph acyclic and flowing from foundational to higher-order.</li>
-            <li><code>single-responsibility</code> — group behavior around a coherent identity.</li>
-            <li><code>open-closed-design</code> — extend when variation has become repeated.</li>
-            <li><code>substitutability</code> — implementations must honor the contract's behavior.</li>
-            <li><code>interface-segregation</code> — split on reusable capability commonality.</li>
-            <li><code>test-strategy</code> — cheapest deterministic confidence at the lowest useful level.</li>
-            <li><code>composition-vs-inheritance</code> — match the mechanism to the relationship.</li>
-            <li><code>component-style-semantics</code> — scoped component CSS; state uses native, genuine accessibility, or <code>data-*</code> semantics rather than ad-hoc classes.</li>
-          </ul>
-          <p>The dispositions are deliberately few:</p>
-          <ul>
-            <li><strong>finding</strong> — enough evidence that something should change now;</li>
-            <li><strong>question</strong> — architectural pressure whose resolution depends on intent, roadmap, scale, or ownership;</li>
-            <li><strong>no finding</strong> — the candidate is adequately explained or acceptable;</li>
-            <li><strong>abstain</strong> — the available evidence cannot support the review.</li>
-          </ul>
+          <h2>How Basis applies these principles</h2>
+          <p>Basis turns this philosophy into small, versioned reviewer policies instead of one giant architecture reviewer. Each policy asks one bounded question, so a review can be specific about the principle at stake rather than vague about architecture as a whole.</p>
+          <p>Keep the philosophy broad and the execution surface narrow. These principles are the authority; the reviewers exist to apply them to a particular change, not to restate or supersede them.</p>
         </section>
         <section>
           <h2>Layers of enforcement</h2>
@@ -156,7 +135,7 @@ export class EngineeringPrinciplesDocs extends DocumentationPage<Record<string, 
             <li><strong>This page</strong> — why Basis engineers software this way.</li>
             <li><strong>Reviewer policies</strong> — one focused, executable review question each.</li>
             <li><strong>Deterministic tooling</strong> — ESLint, TypeScript, Stylelint, Knip, and tests for what can be enforced mechanically.</li>
-            <li><strong>Alforge evaluation</strong> — whether the semantic reviewers actually make the intended judgments.</li>
+            <li><strong>Alforge evaluation</strong> — whether the reviewers actually make the intended judgments.</li>
           </ul>
           <p>Keeping the philosophy broad and the execution surface narrow is the point. This page is not runtime context that every reviewer receives; the reviewer files remain small and independently consumable.</p>
         </section>

@@ -13,8 +13,7 @@ import type { ContextRequirement, DetectorRequirement, ExecutionProfile, Outcome
 const EXECUTION_PROFILES: readonly ExecutionProfile[] = [
   'detector-then-adjudicate',
   'deterministic',
-  'frontier-semantic',
-  'local-semantic',
+  'semantic',
 ]
 
 /** Supported context requirements. */
