@@ -8,9 +8,7 @@ import remarkGfm from 'remark-gfm'
 import type { DocumentationEntry, DocumentationRoute } from '../../react/components/Documentation/Documentation'
 import { buildDocumentationNavigation, Documentation } from '../../react/components/Documentation/Documentation'
 import { DOCUMENTATION_FONTS_URL } from '../../react/components/Documentation/typography'
-import { Mermaid, MERMAID_SOURCE } from '../../react/components/Mermaid/Mermaid'
-import type { MermaidConfig } from '../../react/components/Mermaid/theme'
-import { defaultMermaidTokens, mermaidConfig } from '../../react/components/Mermaid/theme'
+import { Mermaid } from '../../react/components/Mermaid/Mermaid'
 import { themeStyles } from '../../react/components/Theme/Theme'
 import { styles } from '../../react/utilities/style'
 import type { DocsDocument } from './globDocs'
@@ -136,28 +134,10 @@ async function compileDocument(source: string, file: string): Promise<MdxContent
 }
 
 /**
- * The client bootstrap that renders Mermaid diagrams in a statically built
- * page, loading the runtime from the shared source only when a diagram is
- * present. The configuration is resolved server-side from the same defaults the
- * docs app's `Theme` emits, so a built page is themed like a served one.
- * @param config - The Mermaid configuration to initialize with.
- * @returns The module script.
- */
-function mermaidBootstrap(config: MermaidConfig): string {
-  return [
-    '<script type="module">',
-    `  import mermaid from '${MERMAID_SOURCE}'`,
-    `  mermaid.initialize(${JSON.stringify({ startOnLoad: false, ...config })})`,
-    "  await mermaid.run({ nodes: document.querySelectorAll('.mermaid') })",
-    '</script>',
-  ].join('\n')
-}
-
-/**
  * MDX `pre` mapping: a Mermaid fence renders through the {@link Mermaid}
- * component (whose static render emits the runtime's `<pre class="mermaid">`
- * block); every other code block is left as-is. This keeps Mermaid rendering in
- * the component tree instead of string-surgery on generated HTML.
+ * component, which renders its SVG synchronously at build time. This keeps
+ * Mermaid rendering in the component tree instead of string-surgery on
+ * generated HTML, and leaves no client bootstrap behind.
  * @param props - The MDX `pre` element props.
  * @returns The Mermaid component or a plain `pre`.
  */
@@ -217,8 +197,9 @@ function navigation(site: DocsSite): DocumentationEntry[] {
  * Wrap rendered content in the shared documentation shell and an HTML document.
  *
  * Inlines Basis's theme variables and every registered stylesheet, so a built
- * page carries the same presentation as the docs app without caller CSS, and
- * injects the Mermaid bootstrap only when a diagram is present.
+ * page carries the same presentation as the docs app without caller CSS. Mermaid
+ * diagrams are rendered to SVG during this pass, so no client bootstrap is
+ * needed.
  * @param site - The resolved site.
  * @param active - The active route path.
  * @param content - The page content.
@@ -243,7 +224,6 @@ function layout(site: DocsSite, active: string, content: React.ReactNode, title:
     `<style>${styles()}</style>`,
     '</head><body>',
     body,
-    body.includes('class="mermaid"') ? mermaidBootstrap(mermaidConfig(defaultMermaidTokens())) : '',
     '</body></html>',
   ].join('')
 }
@@ -277,8 +257,9 @@ export function moduleToHTML(site: DocsSite, page: DocsPageModule, path: string)
  *
  * Each page is written as `<outDir>/<route>/index.html`; root-relative links
  * are prefixed with `base` so a project Pages site served under a subpath
- * resolves. Mermaid and the documentation fonts load from their configured
- * sources, so the output needs no build step of its own.
+ * resolves. Diagrams are rendered to SVG during the build and the
+ * documentation fonts load from their configured source, so the output needs no
+ * build step of its own.
  * @param site - The resolved site.
  * @param outDir - Absolute output directory.
  * @param base - Optional base path prefixed to root-relative links.

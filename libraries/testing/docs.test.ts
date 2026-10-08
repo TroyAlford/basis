@@ -259,11 +259,11 @@ describe('testing/docs', () => {
    */
   test('captures the Mermaid gallery', async () => {
     await app.visit('/components/mermaid', { ...NETWORK }, async page => {
-      // 1 basic usage + 2 theming examples + 12 gallery + 5 comparison diagrams.
+      // 1 basic usage + 2 theming examples + 6 gallery diagrams.
       await page.waitForFunction(
-        () => document.querySelectorAll('.mermaid-diagram .diagram svg').length >= 20,
+        () => document.querySelectorAll('.mermaid-diagram .diagram svg').length >= 9,
         undefined,
-        { timeout: 90_000 },
+        { timeout: 60_000 },
       )
       if (await page.locator('.code.component').count() > 0) {
         await page.waitForSelector('.code.component pre.shiki', { timeout: 30_000 })
@@ -302,7 +302,7 @@ describe('testing/docs', () => {
   test('captures the Mermaid diagram types', async () => {
     await app.visit('/components/mermaid', { ...NETWORK }, async page => {
       await page.waitForFunction(
-        () => document.querySelectorAll('[data-diagram] .diagram svg').length >= 12,
+        () => document.querySelectorAll('[data-diagram] .diagram svg').length >= 6,
         undefined,
         { timeout: 60_000 },
       )
@@ -316,28 +316,6 @@ describe('testing/docs', () => {
           name ?? `diagram-${index}`,
           { maxDiffPixelRatio: 0.02 },
         )
-      }
-    })
-  }, 120_000)
-
-  /*
-   * The renderer comparison puts the shared diagram types through both Mermaid
-   * and beautiful-mermaid, so the trade-off is visible in a single capture.
-   */
-  test('captures the Mermaid renderer comparison', async () => {
-    await app.visit('/components/mermaid', { ...NETWORK }, async page => {
-      await page.waitForFunction(
-        () => document.querySelectorAll('[data-renderer-comparison] .beautiful-mermaid svg').length >= 5
-          && document.querySelectorAll('[data-renderer-comparison] .mermaid-diagram .diagram svg').length >= 5,
-        undefined,
-        { timeout: 90_000 },
-      )
-      const rows = page.locator('[data-renderer-comparison]')
-      const total = await rows.count()
-      for (let index = 0; index < total; index += 1) {
-        const row = rows.nth(index)
-        const name = await row.getAttribute('data-renderer-comparison')
-        await matchScreenshot(row, `compare ${name ?? index}`, { maxDiffPixelRatio: 0.02 })
       }
     })
   }, 120_000)

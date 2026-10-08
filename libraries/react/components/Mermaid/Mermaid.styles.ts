@@ -18,13 +18,6 @@ style('basis:mermaid', css`
       max-width: 100%;
     }
 
-    .node rect,
-    .er.entityBox,
-    .cluster rect {
-      rx: var(--basis-radius-sm);
-      ry: var(--basis-radius-sm);
-    }
-
     pre.mermaid {
       background: none;
       color: var(--basis-color-disabled-text);
