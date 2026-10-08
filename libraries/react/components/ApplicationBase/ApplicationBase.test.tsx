@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import type { ReactNode } from 'react'
-import { Component as ReactComponent } from 'react'
 import type { ServerEvent } from '../../runtime'
 import { render } from '../../testing/render'
 import { waitFor } from '../../testing/waitFor'
@@ -171,44 +170,5 @@ describe('Application', () => {
         globals.EventSource = original
       }
     })
-  })
-})
-
-describe('Application hot updates', () => {
-  test('remounts the routed outlet without remounting the layout chrome', async () => {
-    let chromeMounts = 0
-    let pageMounts = 0
-
-    class Chrome extends ReactComponent {
-      componentDidMount(): void { chromeMounts += 1 }
-      render(): ReactNode { return <nav>chrome</nav> }
-    }
-
-    class Page extends ReactComponent {
-      componentDidMount(): void { pageMounts += 1 }
-      render(): ReactNode { return <main>page</main> }
-    }
-
-    class HotApplication extends ApplicationBase {
-      refresh(): void { this.hmrRefresh() }
-      protected get routes() { return { '/': { component: Page } } }
-      protected layout(content: ReactNode): ReactNode { return <><Chrome />{content}</> }
-    }
-
-    const { instance, unmount } = await render<HotApplication>(<HotApplication />)
-    expect(chromeMounts).toBe(1)
-    expect(pageMounts).toBe(1)
-
-    /*
-     * Component.shouldComponentUpdate skips a plain re-render, so a hot update
-     * remounts the routed outlet. The layout chrome stays mounted, preserving
-     * its DOM and state (for example a scrolled navigation).
-     */
-    instance.refresh()
-    await waitFor(() => pageMounts === 2)
-    expect(pageMounts).toBe(2)
-    expect(chromeMounts).toBe(1)
-
-    unmount()
   })
 })

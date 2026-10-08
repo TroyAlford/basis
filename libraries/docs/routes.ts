@@ -122,10 +122,3 @@ export const routes = ([
 })
 
 export const defaultRoute = routes.find(route => route.default) || routes[0]
-
-/*
- * The route registry is the hot-update boundary for the documentation pages:
- * a page edit bubbles here, this module re-evaluates, and `routes` is rebuilt
- * with the new page class. ApplicationBase remounts the app on `bun:afterUpdate`.
- */
-if (import.meta.hot) import.meta.hot.accept()

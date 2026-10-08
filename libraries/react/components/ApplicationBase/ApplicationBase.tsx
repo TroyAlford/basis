@@ -59,31 +59,6 @@ export class ApplicationBase<
   /** Disposers for the connections opened from {@link ApplicationBase.subscriptions}. */
   #subscriptionDisposers: (() => void)[] = []
 
-  /**
-   * Bumped on each development hot update so the rendered subtree gets a new
-   * key. Bun's dev server cannot React-Fast-Refresh class components, and
-   * {@link Component.shouldComponentUpdate} bails out on unchanged props and
-   * state, so a fresh key is what forces the tree to re-render with the
-   * updated class definitions.
-   */
-  #hmrGeneration = 0
-
-  #handleHmrUpdate = (): void => {
-    this.hmrRefresh()
-  }
-
-  /**
-   * Re-render the application with a fresh subtree key, remounting the
-   * component tree so updated class definitions take effect.
-   *
-   * Development hot updates call this from the `bun:afterUpdate` HMR event.
-   * Exposed as a seam so hosts and tests can drive it directly.
-   */
-  protected hmrRefresh(): void {
-    this.#hmrGeneration += 1
-    this.forceUpdate()
-  }
-
   get classNames(): Set<string> { return super.classNames.add('application') }
   get defaultContext(): C {
     return {} as C
@@ -180,16 +155,12 @@ export class ApplicationBase<
     for (const definition of this.subscriptions) {
       this.#subscriptionDisposers.push(this.state.runtime.events.subscribe(definition))
     }
-
-    if (import.meta.hot) import.meta.hot.on('bun:afterUpdate', this.#handleHmrUpdate)
   }
 
   /** Closes the server-event subscriptions alongside mixin unmounting. */
   componentWillUnmount(): void {
     for (const dispose of this.#subscriptionDisposers) dispose()
     this.#subscriptionDisposers = []
-
-    if (import.meta.hot) import.meta.hot.off('bun:afterUpdate', this.#handleHmrUpdate)
 
     super.componentWillUnmount()
   }
@@ -225,12 +196,7 @@ export class ApplicationBase<
       <Provider value={this.state.context}>
         <RuntimeProvider value={this.state.runtime}>
           {this.layout(
-            /*
-             * The key scopes the hot-update remount to the routed outlet, so
-             * application chrome the layout renders (navigation, theme, shells)
-             * keeps its DOM and state across an update.
-             */
-            <Router key={this.#hmrGeneration}>
+            <Router>
               {this.renderRoutes()}
             </Router>,
           )}

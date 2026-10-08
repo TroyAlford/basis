@@ -68,6 +68,7 @@
     "postcss-styled-syntax": "^0.7.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "react-refresh": "^0.18.0",
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1",
     "remark-lint-no-consecutive-blank-lines": "^5.0.1",
