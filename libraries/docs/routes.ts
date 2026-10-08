@@ -3,6 +3,7 @@ import ArchitectureDoc from '../../docs/architecture.mdx'
 import ContributingDoc from '../../docs/contributing.mdx'
 import GuidesDoc from '../../docs/guides.mdx'
 import ReferenceDoc from '../../docs/reference.mdx'
+import TestingDoc from '../../docs/testing.md'
 import { AutoCompleteDocs } from './pages/AutoComplete.docs.tsx'
 import { AwaitDocs } from './pages/Await.docs.tsx'
 import { ButtonDocs } from './pages/Button.docs.tsx'
@@ -113,6 +114,7 @@ export const routes = ([
   docs({ component: ContributingDoc, path: '/contributing', title: 'Contributing' }),
   docs({ component: GuidesDoc, path: '/guides', title: 'Guides' }),
   docs({ component: ReferenceDoc, path: '/reference', title: 'Reference' }),
+  docs({ component: TestingDoc, path: '/testing', title: 'Visual snapshots' }),
 ]).sort((a, b) => {
   if (a.default) return -1
   if (b.default) return 1
