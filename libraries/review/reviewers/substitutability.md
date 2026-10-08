@@ -1,7 +1,7 @@
 ---
 id: substitutability
 title: Substitutability
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines

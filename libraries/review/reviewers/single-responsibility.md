@@ -1,7 +1,7 @@
 ---
 id: single-responsibility
 title: Single responsibility
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines

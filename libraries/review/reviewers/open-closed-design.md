@@ -1,7 +1,7 @@
 ---
 id: open-closed-design
 title: Open/closed design
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines

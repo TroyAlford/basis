@@ -1,7 +1,7 @@
 ---
 id: readability-over-cleverness
 title: Readability over cleverness
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines

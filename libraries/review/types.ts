@@ -15,8 +15,7 @@ export type Severity = 'error' | 'info' | 'warning'
 export type ExecutionProfile =
   | 'detector-then-adjudicate'
   | 'deterministic'
-  | 'frontier-semantic'
-  | 'local-semantic'
+  | 'semantic'
 
 /**
  * Portable disposition of a review.

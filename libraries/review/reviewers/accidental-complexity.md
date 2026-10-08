@@ -1,7 +1,7 @@
 ---
 id: accidental-complexity
 title: Accidental complexity
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines
@@ -59,6 +59,8 @@ Useful defaults include:
 Do not add configuration for a choice the software can safely derive or treat conventionally.
 
 Do not create an abstraction solely to make unlike things look uniform. A unified UI or API does not require unified ownership, lifecycle, storage, or runtime underneath it.
+
+For every new mechanism, consider a **deletion-first alternative**: can an existing owner or primitive deliver the same observable behavior with fewer moving parts? Do not merely optimize each layer of a cascade when deleting the initiating assumption removes the cascade.
 
 Watch for complexity cascades: one mechanism requires another mechanism, then an adapter, exception, migration, or recovery path. When several supporting concepts exist only because of one earlier design choice, review the originating choice instead of accepting each downstream piece independently.
 

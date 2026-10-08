@@ -1,7 +1,7 @@
 ---
 id: composition-vs-inheritance
 title: Composition vs inheritance
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines

@@ -1,7 +1,7 @@
 ---
 id: component-style-semantics
 title: Component style semantics
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines

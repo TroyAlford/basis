@@ -1,7 +1,7 @@
 ---
 id: dependency-direction
 title: Dependency direction
-executionProfile: local-semantic
+executionProfile: semantic
 context:
   - changed-files
   - changed-lines
