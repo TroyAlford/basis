@@ -86,7 +86,7 @@ const navigation: DocumentationEntry[] = [{ href: '/', title: 'Home' }]
 
 `buildDocumentationNavigation(routes)` nests a flat `{ href, title, parent? }` list by `parent`, with the roots sorted by title. The docs app and the static build both use it so navigation nests the same way everywhere.
 
-`Mermaid` renders a Mermaid diagram, importing the runtime on mount only, so a page without diagrams never fetches it:
+`Mermaid` renders Mermaid source with the `beautiful-mermaid` renderer. Rendering is synchronous and DOM-free, so server rendering emits the final SVG — there is no lazy runtime, no client bootstrap, and no network at render time:
 
 ```tsx
 import { Mermaid } from '@basis/react'
@@ -94,7 +94,15 @@ import { Mermaid } from '@basis/react'
 <Mermaid>{'flowchart TD\n  A[Start] --> B[Ship]'}</Mermaid>
 ```
 
-A `mermaid` code fence in a `.mdx` document compiles to this component through the Markdown build plugin (`@basis/bun-plugins`).
+Diagrams are painted from the surrounding Basis design tokens — the primary color, background, foreground, and font — so they follow the active `Theme`. There is no Mermaid-specific look API; to restyle diagrams, wrap them in a themed scope. Render a named `Theme` and set the component's `theme` prop to match:
+
+```tsx
+<Theme name="dusk" color={{ background: '#0f172a', foreground: '#e2e8f0', primary: '#38bdf8' }} />
+
+<Mermaid theme="dusk">{'flowchart TD\n  A[Start] --> B[Ship]'}</Mermaid>
+```
+
+A `mermaid` code fence in a `.mdx` document compiles to this component through the Markdown build plugin (`@basis/bun-plugins`), and the static docs build renders the SVG at build time, so a built page needs no client runtime.
 
 ## Default typography
 

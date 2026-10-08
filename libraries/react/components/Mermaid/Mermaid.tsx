@@ -1,36 +1,55 @@
+import { renderMermaidSVG } from 'beautiful-mermaid'
 import * as React from 'react'
 import { Component } from '../Component/Component'
 
 import './Mermaid.styles.ts'
-
-/** Source of the lazily loaded Mermaid runtime. */
-export const MERMAID_SOURCE = 'https://esm.sh/mermaid@11'
 
 interface Props {
   /** Mermaid diagram source. */
   children?: React.ReactNode,
 }
 
-interface State {
-  /** The rendered SVG, once the runtime has run. */
-  svg: string | null,
-}
-
-let sequence = 0
+/** The Basis UI font, applied to diagram labels. */
+const FONT = "'Ubuntu', sans-serif"
 
 /**
- * Renders a Mermaid diagram. The runtime is imported lazily on mount, so a page
- * that does not use diagrams never fetches it and server rendering never
- * reaches the network: SSR emits the source as the runtime's `<pre
- * class="mermaid">` block, and the client replaces it with the rendered SVG.
+ * Render diagram source to SVG, painted from the Basis design tokens.
+ *
+ * Colors are passed as CSS custom properties rather than resolved hex, so a
+ * diagram follows whatever `Theme` scope it renders in — including server
+ * rendering, where there is no computed style to read.
+ * @param source - The diagram source.
+ * @returns The SVG, or null when the source cannot be parsed.
  */
-export class Mermaid extends Component<Props, HTMLDivElement, State> {
-  static displayName = 'MermaidDiagram'
-  #id = `basis-mermaid-${(sequence += 1)}`
-
-  get defaultState(): State {
-    return { svg: null }
+function renderDiagram(source: string): string | null {
+  try {
+    return renderMermaidSVG(source, {
+      accent: 'var(--basis-color-primary)',
+      bg: 'var(--basis-color-background)',
+      border: 'var(--basis-color-primary)',
+      fg: 'var(--basis-color-foreground)',
+      font: FONT,
+      padding: 16,
+      transparent: true,
+    })
+  } catch {
+    return null
   }
+}
+
+/**
+ * Renders a Mermaid diagram with the `beautiful-mermaid` renderer.
+ *
+ * Rendering is synchronous and DOM-free, so server rendering emits the final
+ * SVG — there is no lazy runtime, no client bootstrap, and no network at
+ * render time. The diagram is painted from the surrounding Basis design tokens,
+ * so it follows the active `Theme`; there is no Mermaid-specific theme API in
+ * Basis. Put the diagram in a named `Theme` scope (the component's `theme` prop
+ * sets `data-theme`) to restyle it.
+ */
+export class Mermaid extends Component<Props, HTMLDivElement> {
+  static displayName = 'MermaidDiagram'
+  static defaultProps: Props = { children: undefined }
 
   /**
    * The diagram source, from the element's text children.
@@ -40,15 +59,8 @@ export class Mermaid extends Component<Props, HTMLDivElement, State> {
     return React.Children.toArray(this.props.children).join('').trim()
   }
 
-  async componentDidMount(): Promise<void> {
-    const { default: mermaid } = await import(MERMAID_SOURCE)
-    mermaid.initialize({ startOnLoad: false })
-    const { svg } = await mermaid.render(this.#id, this.source)
-    await this.setState({ svg })
-  }
-
-  content(): React.ReactNode {
-    const { svg } = this.state
+  override content(): React.ReactNode {
+    const svg = renderDiagram(this.source)
     if (svg) return <div className="diagram" dangerouslySetInnerHTML={{ __html: svg }} />
     return <pre className="mermaid">{this.source}</pre>
   }

@@ -68,13 +68,13 @@ describe('mdxToHTML', () => {
     expect(html).toContain('href="/docs"')
   })
 
-  test('emits Mermaid fences as a mermaid block and loads the runtime', async () => {
+  test('renders Mermaid fences to SVG at build time', async () => {
     const root = fixture({ 'docs/index.mdx': '# Home\n\n```mermaid\nflowchart TD\n  A-->B\n```\n' })
     const site = discoverDocs({ root: join(root, 'docs') })
     const html = await mdxToHTML(site, page(site, ''))
-    expect(html).toContain('<pre class="mermaid">')
-    expect(html).toContain('flowchart TD')
-    expect(html).toContain('esm.sh/mermaid')
+    expect(html).toContain('mermaid-diagram component')
+    expect(html).toContain('<svg')
+    expect(html).not.toContain('esm.sh/mermaid')
   })
 })
 

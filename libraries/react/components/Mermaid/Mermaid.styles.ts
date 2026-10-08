@@ -2,12 +2,30 @@ import { css, style } from '../../utilities/style'
 
 style('basis:mermaid', css`
   .mermaid-diagram.component {
-    .diagram svg {
+    background: var(--basis-color-background);
+    border: 1px solid var(--basis-color-disabled);
+    border-radius: var(--basis-radius-md);
+    box-shadow: var(--basis-shadow-sm);
+    margin: var(--basis-unit-md) 0;
+    overflow-x: auto;
+    padding: var(--basis-unit-md);
+    text-align: center;
+
+    svg {
+      display: block;
+      height: auto;
+      margin: 0 auto;
       max-width: 100%;
     }
+
     pre.mermaid {
       background: none;
-      text-align: center;
+      color: var(--basis-color-disabled-text);
+      font-family: 'Fira Code', monospace;
+      font-size: var(--basis-font-size-sm);
+      margin: 0;
+      text-align: left;
+      white-space: pre-wrap;
     }
   }
 `)
