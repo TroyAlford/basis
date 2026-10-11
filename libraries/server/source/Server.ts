@@ -378,8 +378,8 @@ export class Server {
    * The favicon descriptor the shell links, or `undefined` for the default.
    * @returns The favicon descriptor.
    */
-  #faviconDescriptor(): FaviconDescriptor | undefined {
-    return this.#favicon ? { href: this.#favicon.href, type: this.#favicon.type } : undefined
+  #faviconDescriptor(): FaviconDescriptor | false {
+    return this.#favicon ? { href: this.#favicon.href, type: this.#favicon.type } : false
   }
 
   /**
@@ -438,6 +438,15 @@ export class Server {
     this.#development = development
     this.#version = version
     this.#favicon = resolveFavicon(this.#faviconInput, this.#faviconOptions, process.cwd(), this.#root)
+    /*
+     * The fallback links the conventional `/assets/favicon.svg`; only keep it
+     * when an assets mount actually serves that file, so the shell never links
+     * a 404.
+     */
+    if (this.#favicon?.kind === 'link') {
+      const fallback = this.#assets ? path.join(this.#assets, 'favicon.svg') : null
+      if (!fallback || !fs.existsSync(fallback)) this.#favicon = null
+    }
 
     let routes: Bun.Serve.Routes<SocketData, string> | undefined
 

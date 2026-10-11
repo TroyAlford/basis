@@ -137,7 +137,7 @@ new Server().main('./index.tsx').favicon('./brand.png')
 new Server().main('./index.tsx').favicon(TriangleRight, { color: 'ff0000', filled: true })
 ```
 
-When no favicon is configured, the server discovers `favicon.{ico,svg,png,jpg,jpeg,gif,webp}` (in that order) in the working directory first, then `Server.root`, and links it. With neither, it falls back to `/assets/favicon.svg` (what an `.assets(...)` mount already serves).
+When no favicon is configured, the server discovers `favicon.{ico,svg,png,jpg,jpeg,gif,webp}` (in that order) in the working directory first, then `Server.root`, and links it. With neither, it links `/assets/favicon.svg` only when an `.assets(...)` mount actually serves that file; otherwise the shell carries no favicon link rather than one that 404s.
 
 ### Icons
 

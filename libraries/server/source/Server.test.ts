@@ -700,4 +700,21 @@ describe('Server favicon', () => {
 
     expect(await server.stop()).toBe(0)
   })
+
+  test('omits the favicon link when nothing can serve it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'basis-nofavicon-'))
+
+    try {
+      const server = await startServer('production', { ROOT: dir }, faviconFixture)
+      const base = `http://127.0.0.1:${server.port}`
+      await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
+
+      const shell = await Bun.fetch(base).then(response => response.text())
+      expect(shell).not.toContain('rel="icon"')
+
+      expect(await server.stop()).toBe(0)
+    } finally {
+      await rm(dir, { force: true, recursive: true })
+    }
+  })
 })
