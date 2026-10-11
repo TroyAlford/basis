@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadOverlayDirectory, loadReviewerDirectory } from './load'
 import { parseFrontMatter, parseReviewerOverlaySource, parseReviewerSource } from './markdown'
@@ -141,13 +141,13 @@ describe('parseReviewerOverlaySource', () => {
 
 describe('directory loaders', () => {
   test('load reviewers sorted by stable id and overlays by id', () => {
-    const reviewerDir = mkdtempSync(join(tmpdir(), 'basis-review-'))
+    const reviewerDir = tempDirectory('basis-review')
     writeFileSync(join(reviewerDir, 'b.md'), VALID_REVIEWER.replace('id: sample', 'id: beta'))
     writeFileSync(join(reviewerDir, 'a.md'), VALID_REVIEWER.replace('id: sample', 'id: alpha'))
     writeFileSync(join(reviewerDir, 'notes.txt'), 'ignored')
     expect(loadReviewerDirectory(reviewerDir).map(reviewer => reviewer.id)).toEqual(['alpha', 'beta'])
 
-    const overlayDir = mkdtempSync(join(tmpdir(), 'basis-overlay-'))
+    const overlayDir = tempDirectory('basis-overlay')
     writeFileSync(join(overlayDir, 'extend.md'), EXTEND_OVERLAY)
     writeFileSync(join(overlayDir, 'disable.md'), DISABLE_OVERLAY)
     expect(loadOverlayDirectory(overlayDir).map(overlay => overlay.mode)).toEqual(['disable', 'extend'])

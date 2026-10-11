@@ -1,7 +1,7 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { Linter } from 'eslint'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { importExtensions } from './importExtensions'
 
@@ -66,7 +66,7 @@ describe('importExtensions', () => {
   })
 
   test('reports and adds a missing json extension', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'basis-import-extensions-'))
+    const directory = tempDirectory('basis-import-extensions')
     try {
       writeFileSync(join(directory, 'data.json'), '{}\n')
       const code = "import data from './data'"
@@ -90,7 +90,7 @@ describe('importExtensions', () => {
   })
 
   test('fixes dynamic imports', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'basis-import-extensions-'))
+    const directory = tempDirectory('basis-import-extensions')
     try {
       writeFileSync(join(directory, 'data.json'), '{}\n')
       const output = lint("const data = import('./data')", {

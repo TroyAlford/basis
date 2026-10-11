@@ -1,15 +1,17 @@
 import * as parser from '@typescript-eslint/parser'
-import { afterAll, describe, expect, test } from 'bun:test'
+import { tempDirectory } from 'basis/testing'
+import { describe, expect, test } from 'bun:test'
 import { Linter } from 'eslint'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { noExtraneousDependencies } from './noExtraneousDependencies'
 
-const fixtureRoot = mkdtempSync(join(process.cwd(), 'tmp-no-extraneous-dependencies-'))
-
-afterAll(() => {
-  rmSync(fixtureRoot, { force: true, recursive: true })
-})
+/*
+ * The ESLint flat-config matcher only lints files below `process.cwd()`, so this
+ * fixture must live inside the repository. It sits under the gitignored `tmp/`
+ * and is owned by the run-scoped temp root, which the testing preload removes.
+ */
+const fixtureRoot = tempDirectory('no-extraneous-dependencies', join(process.cwd(), 'tmp'))
 
 const writeFixture = (path: string, contents: string): void => {
   const target = join(fixtureRoot, path)

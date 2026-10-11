@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { Logger } from './Logger'
@@ -184,7 +184,7 @@ describe('Logger', () => {
   })
 
   test('writes to the configured log file, creating parent directories', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'basis-logger-'))
+    const dir = tempDirectory('basis-logger')
     const path = join(dir, 'nested', 'app.log')
 
     try {
@@ -199,7 +199,7 @@ describe('Logger', () => {
   })
 
   test('trims synchronously so later appends cannot be lost', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'basis-logger-'))
+    const dir = tempDirectory('basis-logger')
     const path = join(dir, 'app.log')
 
     try {

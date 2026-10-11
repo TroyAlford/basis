@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ILogger } from '../../utilities'
 import { Logger } from '../../utilities'
@@ -279,7 +279,7 @@ describe('Server development mode', () => {
 
 describe('Server development HMR', () => {
   test('delivers a hot update over the HMR socket when a source file changes', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'basis-hmr-'))
+    const dir = tempDirectory('basis-hmr')
 
     try {
       const valueFile = join(dir, 'value.ts')
@@ -454,7 +454,7 @@ describe('Builder', () => {
 
 describe('Builder file watching', () => {
   test('rebuilds when an imported asset changes in development', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'basis-asset-watch-'))
+    const dir = tempDirectory('basis-asset-watch')
 
     try {
       await Bun.write(join(dir, 'pixel.png'), await Bun.file(join(fixtureRoot, 'pixel.png')).arrayBuffer())
@@ -632,7 +632,7 @@ const favIconFixture = join(repoRoot, 'testing', 'favicon', 'index.ts')
 
 describe('Server favicon', () => {
   test('discovers, serves, and links a favicon at the app root', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'basis-favicon-'))
+    const dir = tempDirectory('basis-favicon')
 
     try {
       const bytes = new Uint8Array([1, 2, 3, 4])
@@ -701,7 +701,7 @@ describe('Server favicon', () => {
   })
 
   test('defaults to the Basis mark when nothing is configured or discovered', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'basis-nofavicon-'))
+    const dir = tempDirectory('basis-nofavicon')
 
     try {
       const server = await startServer('production', { ROOT: dir }, favIconFixture)

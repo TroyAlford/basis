@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Identity } from '../../oauth'
 import { HttpVerb, Logger, parseURI } from '../../utilities'
@@ -128,7 +128,7 @@ describe('Server.api route context', () => {
 
 describe('Server.mount', () => {
   test('serves allow-listed files and rejects traversal, disallowed entries, and misses', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'basis-mount-'))
+    const directory = tempDirectory('basis-mount')
     try {
       mkdirSync(join(directory, 'allowed'))
       mkdirSync(join(directory, 'secret'))

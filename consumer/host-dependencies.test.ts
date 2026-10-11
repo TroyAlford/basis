@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { HostProbe } from './host-dependencies'
 import { checkHostDependencies, readHostDependencies, requireHostDependencies } from './host-dependencies'
@@ -14,7 +14,7 @@ const directories: string[] = []
  * @returns The fixture directory.
  */
 function fixture(manifest: unknown): string {
-  const directory = mkdtempSync(join(tmpdir(), 'basis-host-deps-'))
+  const directory = tempDirectory('basis-host-deps')
   directories.push(directory)
   writeFileSync(join(directory, 'package.json'), JSON.stringify(manifest))
   return directory
@@ -59,7 +59,7 @@ describe('readHostDependencies', () => {
   })
 
   test('fails loudly when the manifest is unreadable', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'basis-host-deps-'))
+    const directory = tempDirectory('basis-host-deps')
     directories.push(directory)
     expect(() => readHostDependencies(directory)).toThrow(/could not read/)
   })

@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tempDirectory } from './temp'
 
 /*
  * Lifecycle proof for `useApplication`.
@@ -112,7 +112,7 @@ afterAll(() => {
  * @returns The fixture directory and activity log path.
  */
 function fixture(files: Record<string, string>, preloads: string[] = [preload]): Fixture {
-  const dir = mkdtempSync(join(tmpdir(), 'basis-application-'))
+  const dir = tempDirectory('basis-application')
   created.push(dir)
   const activity = join(dir, 'activity.log')
   const resolved = preloads.map(entry => (entry.startsWith('/') ? entry : join(dir, entry)))

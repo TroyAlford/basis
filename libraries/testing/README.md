@@ -15,6 +15,20 @@ It registers happy-dom, every matcher, and the shared browser lifecycle, so a pl
 
 Visual snapshots capture Chromium inside Docker. Install Docker and make sure the daemon is running before `bun test`; the snapshot runtime starts one pinned `mcr.microsoft.com/playwright` container and never launches a host browser.
 
+## Temp directories
+
+The preload isolates the process temp directory: it points `TMPDIR` / `TMP` / `TEMP` at one run-scoped root, so `os.tmpdir()` — and therefore `mkdtemp`, any dependency that calls it, and any spawned child — writes inside that root. The preload removes the root when the run ends, including on a failed test, a thrown error, or `SIGINT` / `SIGTERM`, so nothing is left behind and no per-repo or per-file setup is needed.
+
+For a fixture that wants a named directory, `tempDirectory(prefix)` is the explicit primitive:
+
+```ts
+import { tempDirectory } from 'basis/testing'
+
+const directory = tempDirectory('my-fixture')
+```
+
+It creates a fresh directory under the same isolated root, so plain `mkdtemp(os.tmpdir())` and `tempDirectory` are cleaned up alike. The optional second `base` argument places the run root under a different directory, for the rare fixture a tool resolves only below the working tree; a base the run created is removed again once empty.
+
 ## DOM testing
 
 ```tsx
@@ -43,12 +57,12 @@ Snapshot tests are ordinary `*.test.*` files, so `bun test` discovers them.
 Element captures share one deterministically configured page — each capture replaces the document — and each capture keeps its Playwright round-trips to the minimum (wait for fonts and measure in one `evaluate`, then screenshot). Application `visit`s still open a fresh browser context per visit, so app and element captures stay isolated where it matters without paying for a new context per screenshot. Both paths share the same run-scoped runtime: **one Docker container and one browser per `bun test` run**, started on the first capture and torn down once when the run ends. Either way it mirrors `toMatchSnapshot`:
 
 - no snapshot exists → the capture is written and the call resolves;
-- a snapshot exists → a new capture is compared; a mismatch throws and writes `<name>.actual.png` / `<name>.diff.png` artefacts;
+- a snapshot exists → a new capture is compared; a mismatch throws with the diff kept in memory and writes nothing to disk;
 - `--update-snapshots` (or `UPDATE_SNAPSHOTS=1`) rewrites the snapshot.
 
-A committed baseline is **never** modified or deleted unless the run explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A browser-launch failure, missing Playwright system dependency, timeout, rendering failure, comparison failure, or ordinary test failure leaves every baseline byte-for-byte unchanged; a comparison failure writes only the `.actual`/`.diff` artefacts, and a capture failure writes nothing at all.
+A committed baseline is **never** modified or deleted unless the run explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A browser-launch failure, missing Playwright system dependency, timeout, rendering failure, comparison failure, or ordinary test failure leaves every baseline byte-for-byte unchanged; a comparison failure writes nothing at all, and a capture failure writes nothing at all.
 
-Obsolete snapshots are pruned only when updating. After an updating run, any committed snapshot in a test file's `__screenshots__` directory that no test referenced is removed, so a renamed or deleted capture cannot linger. Pruning is scoped to files whose entire suite executed: a file filtered with `-t`, or one containing a skipped test, keeps its snapshots. A passing comparison also clears any `*.actual.png` / `*.diff.png` left behind by an earlier failure.
+Obsolete snapshots are pruned only when updating. After an updating run, any committed snapshot in a test file's `__screenshots__` directory that no test referenced is removed, so a renamed or deleted capture cannot linger. Pruning is scoped to files whose entire suite executed: a file filtered with `-t`, or one containing a skipped test, keeps its snapshots. A passing comparison also clears any legacy `*.actual.png` / `*.diff.png` a pre-memory run left behind.
 
 ### Naming
 

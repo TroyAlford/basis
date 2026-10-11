@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { applyBasisPatches, findInstalledInstances, loadBasisPatches } from './install'
 
@@ -17,7 +17,7 @@ const makePatch = (value: number): string => `${[
   `+module.exports = ${value}`,
 ].join('\n')}\n`
 
-const makeTempDir = (): string => mkdtempSync(join(tmpdir(), 'basis-patches-'))
+const makeTempDir = (): string => tempDirectory('basis-patches')
 
 const makePackage = (root: string, relativePath: string, name: string, version: string): string => {
   const dir = join(root, relativePath)
