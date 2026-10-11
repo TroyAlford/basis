@@ -2,10 +2,17 @@ import { afterAll } from 'bun:test'
 import { stopApplications } from './application'
 import { closeRuntime } from './browser'
 import { pruneSnapshots } from './cleanup'
-import { cleanupTempDirectories } from './temp'
+import { cleanupTempDirectories, isolateTempDirectories } from './temp'
 
 import './happydom'
 import '../react/testing/bun/register'
+
+/*
+ * Isolate the process temp directory before the suite runs, so every test — and
+ * every dependency or spawned child — writes inside one run-scoped root that is
+ * removed when the run ends.
+ */
+isolateTempDirectories()
 
 afterAll(() => { pruneSnapshots() })
 afterAll(stopApplications)

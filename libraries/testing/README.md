@@ -17,7 +17,9 @@ Visual snapshots capture Chromium inside Docker. Install Docker and make sure th
 
 ## Temp directories
 
-Create test fixtures under a run-scoped root instead of calling `mkdtemp(os.tmpdir())` yourself:
+The preload isolates the process temp directory: it points `TMPDIR` / `TMP` / `TEMP` at one run-scoped root, so `os.tmpdir()` — and therefore `mkdtemp`, any dependency that calls it, and any spawned child — writes inside that root. The preload removes the root when the run ends, including on a failed test, a thrown error, or `SIGINT` / `SIGTERM`, so nothing is left behind and no per-repo or per-file setup is needed.
+
+For a fixture that wants a named directory, `tempDirectory(prefix)` is the explicit primitive:
 
 ```ts
 import { tempDirectory } from 'basis/testing'
@@ -25,7 +27,7 @@ import { tempDirectory } from 'basis/testing'
 const directory = tempDirectory('my-fixture')
 ```
 
-Every directory lives under one run-scoped root that the preload removes when the run ends — a passing suite, a thrown error, or `SIGINT`/`SIGTERM` alike — so a detonating test cannot leave a directory, or the files inside it, behind. Pass a second `base` argument only for a fixture that must sit inside the working tree (the ESLint rule fixtures, for instance, are only linted by the flat-config matcher below `process.cwd()`); the base is created if missing and removed again once empty.
+It creates a fresh directory under the same isolated root, so plain `mkdtemp(os.tmpdir())` and `tempDirectory` are cleaned up alike. The optional second `base` argument places the run root under a different directory, for the rare fixture a tool resolves only below the working tree; a base the run created is removed again once empty.
 
 ## DOM testing
 

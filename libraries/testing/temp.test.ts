@@ -1,42 +1,51 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { cleanupTempDirectories, tempDirectory } from './temp'
+import { basename, dirname, join } from 'node:path'
+import { tempDirectory } from './temp'
 
-describe('tempDirectory', () => {
-  test('nests every directory under one run-scoped root', () => {
-    const first = tempDirectory('one')
-    const second = tempDirectory('two')
+const modulePath = join(import.meta.dir, 'temp.ts')
 
-    expect(existsSync(first)).toBe(true)
-    expect(existsSync(second)).toBe(true)
-    expect(first).not.toBe(second)
-    expect(dirname(first)).toBe(dirname(second))
+describe('isolated temp directory', () => {
+  test('the preload points os.tmpdir() at a run-scoped root', () => {
+    expect(basename(tmpdir()).startsWith('basis-run-')).toBe(true)
   })
 
-  test('removes the root and every child, and recreates it on demand', () => {
-    const directory = tempDirectory('cleanup')
-    const root = dirname(directory)
-
-    cleanupTempDirectories()
-
-    expect(existsSync(root)).toBe(false)
-    expect(existsSync(directory)).toBe(false)
-
-    const recreated = tempDirectory('again')
-    expect(existsSync(recreated)).toBe(true)
-    expect(dirname(recreated)).not.toBe(root)
-  })
-
-  test('removes a base directory it created once empty', () => {
-    const base = join(tmpdir(), `basis-base-${process.pid}-${Date.now()}`)
-    const directory = tempDirectory('seeded', base)
+  test('tempDirectory creates a named directory under that root', () => {
+    const directory = tempDirectory('named')
 
     expect(existsSync(directory)).toBe(true)
+    expect(dirname(directory)).toBe(tmpdir())
+    expect(basename(directory).startsWith('named-')).toBe(true)
+  })
 
-    cleanupTempDirectories()
+  test('captures a plain os.tmpdir() write, not just tempDirectory', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'plain-'))
 
-    expect(existsSync(base)).toBe(false)
+    expect(dirname(directory)).toBe(tmpdir())
+    expect(existsSync(directory)).toBe(true)
+  })
+
+  test('cleanup removes the root and restores the temp environment', () => {
+    const script = `
+      import { existsSync, mkdtempSync } from 'node:fs'
+      import { tmpdir } from 'node:os'
+      import { join } from 'node:path'
+      import { cleanupTempDirectories, isolateTempDirectories } from ${JSON.stringify(modulePath)}
+      const before = process.env.TMPDIR
+      const root = isolateTempDirectories()
+      const directory = mkdtempSync(join(tmpdir(), 'probe-'))
+      const nested = directory.startsWith(root + '/')
+      cleanupTempDirectories()
+      console.log(JSON.stringify({
+        nested,
+        restored: process.env.TMPDIR === before,
+        rootGone: !existsSync(root),
+      }))
+    `
+    const result = Bun.spawnSync(['bun', '-e', script], { env: process.env })
+    const line = result.stdout.toString().trim().split('\n').pop() ?? ''
+
+    expect(JSON.parse(line)).toEqual({ nested: true, restored: true, rootGone: true })
   })
 })

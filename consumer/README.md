@@ -199,7 +199,17 @@ Components are consumed directly from source — there is no Basis build step. T
 preload = ["basis/testing/bun"]
 ```
 
-It registers happy-dom and the browser lifecycle, so a plain `bun test` runs the complete suite — DOM tests and browser-backed snapshot tests alike.
+It registers happy-dom and the browser lifecycle, so a plain `bun test` runs the complete suite — DOM tests and browser-backed snapshot tests alike. It also isolates the process temp directory: `os.tmpdir()` points at a run-scoped directory the preload removes when the run ends, so a fixture — or a dependency — that writes temp files cannot leak them.
+
+For a fixture that wants a named directory, `tempDirectory(prefix)` from `basis/testing` creates a fresh directory under that same isolated root:
+
+```ts
+import { tempDirectory } from 'basis/testing'
+
+const directory = tempDirectory('my-fixture')
+```
+
+Plain `mkdtemp(os.tmpdir())` is captured identically, so no per-repo or per-file configuration is needed.
 
 `matchScreenshot(subject, hint?, options?)` is an ordinary async function, not a custom matcher: Bun drives async matchers synchronously, which makes the Playwright calls inside them far slower than the same calls awaited normally.
 

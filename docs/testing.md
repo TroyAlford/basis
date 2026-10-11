@@ -66,7 +66,9 @@ With no fixed identity, no lock files, no reference counts, and no PID protocols
 
 ## Temp directories
 
-Fixtures that need a real directory use `tempDirectory(prefix, base?)` from `basis/testing` rather than `mkdtemp(os.tmpdir())`:
+The testing preload isolates the process temp directory: it points `TMPDIR` / `TMP` / `TEMP` at one run-scoped root, so `os.tmpdir()` — and therefore `mkdtemp`, any dependency, or any spawned child that uses it — writes inside that root. The preload removes the root when the run ends — success, failure, thrown error, or `SIGINT` / `SIGTERM` — so a detonating test cannot leak a directory or its contents, with no per-repo configuration.
+
+For a fixture that wants a named directory, `tempDirectory(prefix, base?)` from `basis/testing` creates a fresh directory under the same isolated root:
 
 ```ts
 import { tempDirectory } from 'basis/testing'
@@ -74,7 +76,7 @@ import { tempDirectory } from 'basis/testing'
 const directory = tempDirectory('my-fixture')
 ```
 
-Every directory lives under a run-scoped root the testing preload removes when the run ends — success, failure, thrown error, or `SIGINT`/`SIGTERM` — so a detonating test cannot leak a directory or its contents. The optional `base` places the run root somewhere other than the OS temp directory, for a fixture that must sit inside the working tree; a base the run created is removed again once empty.
+Plain `mkdtemp(os.tmpdir())` is captured the same way. The optional `base` places the run root elsewhere, for a fixture a tool resolves only below the working tree; a base the run created is removed again once empty.
 
 ## Updating snapshots
 
