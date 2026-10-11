@@ -40,13 +40,15 @@ const active = new Set<ServerHarness>()
  * Spawns the managed-application fixture and waits for its listening line.
  * @param mode The server mode to run the fixture in.
  * @param extraEnv Additional environment for the child.
+ * @param entry The fixture entrypoint module to spawn.
  * @returns A harness exposing the bound port and an idempotent stop.
  */
 const startServer = async (
   mode: 'development' | 'production',
   extraEnv: Record<string, string> = {},
+  entry: string = fixture,
 ): Promise<ServerHarness> => {
-  const proc = Bun.spawn([process.execPath, fixture], {
+  const proc = Bun.spawn([process.execPath, entry], {
     cwd: repoRoot,
     env: {
       ...process.env,
@@ -621,6 +623,80 @@ describe('Server WebSocket routes', () => {
 
     expect(stdout).toContain('connected')
     expect(code).toBe(0)
+
+    expect(await server.stop()).toBe(0)
+  })
+})
+
+const faviconFixture = join(repoRoot, 'testing', 'favicon', 'index.ts')
+
+describe('Server favicon', () => {
+  test('discovers, serves, and links a favicon at the app root', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'basis-favicon-'))
+
+    try {
+      const bytes = new Uint8Array([1, 2, 3, 4])
+      await Bun.write(join(dir, 'favicon.png'), bytes)
+
+      const server = await startServer('production', { ROOT: dir }, faviconFixture)
+      const base = `http://127.0.0.1:${server.port}`
+      await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
+
+      const shell = await Bun.fetch(base).then(response => response.text())
+      expect(shell).toContain('rel="icon"')
+      expect(shell).toContain('href="/favicon.png"')
+      expect(shell).toContain('type="image/png"')
+
+      const response = await Bun.fetch(`${base}/favicon.png`)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toBe('image/png')
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes)
+
+      expect(await server.stop()).toBe(0)
+    } finally {
+      await rm(dir, { force: true, recursive: true })
+    }
+  })
+
+  test('serves an IconBase favicon and links its options', async () => {
+    const server = await startServer('production', { COLOR: 'ff0000', FAVICON: 'icon', FILLED: 'true' }, faviconFixture)
+    const base = `http://127.0.0.1:${server.port}`
+    await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
+
+    const shell = await Bun.fetch(base).then(response => response.text())
+    expect(shell).toContain('href="/favicon.svg?color=ff0000&amp;filled=true"')
+    expect(shell).toContain('type="image/svg+xml"')
+
+    const svg = await Bun.fetch(`${base}/favicon.svg`).then(response => response.text())
+    expect(svg).toContain('stroke="#ff0000"')
+
+    expect(await server.stop()).toBe(0)
+  })
+
+  test('renders Basis and app icons at /icons/{Name}.svg with query options', async () => {
+    const server = await startServer('production', {}, faviconFixture)
+    const base = `http://127.0.0.1:${server.port}`
+    await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
+
+    const basis = await Bun.fetch(`${base}/icons/TriangleRight.svg?color=00ff00`).then(response => response.text())
+    expect(basis).toContain('stroke="#00ff00"')
+
+    const custom = await Bun.fetch(`${base}/icons/Custom.svg`).then(response => response.text())
+    expect(custom).toContain('<svg')
+
+    expect((await Bun.fetch(`${base}/icons/NotAnIcon.svg`)).status).toBe(404)
+
+    expect(await server.stop()).toBe(0)
+  })
+
+  test('injects the favicon link into the development shell', async () => {
+    const server = await startServer('development', { COLOR: '0000ff', FAVICON: 'icon' }, faviconFixture)
+    const base = `http://127.0.0.1:${server.port}`
+    await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
+
+    const shell = await Bun.fetch(base).then(response => response.text())
+    expect(shell).toContain('rel="icon"')
+    expect(shell).toContain('/favicon.svg?color=0000ff')
 
     expect(await server.stop()).toBe(0)
   })
