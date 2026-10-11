@@ -628,7 +628,7 @@ describe('Server WebSocket routes', () => {
   })
 })
 
-const faviconFixture = join(repoRoot, 'testing', 'favicon', 'index.ts')
+const favIconFixture = join(repoRoot, 'testing', 'favicon', 'index.ts')
 
 describe('Server favicon', () => {
   test('discovers, serves, and links a favicon at the app root', async () => {
@@ -638,7 +638,7 @@ describe('Server favicon', () => {
       const bytes = new Uint8Array([1, 2, 3, 4])
       await Bun.write(join(dir, 'favicon.png'), bytes)
 
-      const server = await startServer('production', { ROOT: dir }, faviconFixture)
+      const server = await startServer('production', { ROOT: dir }, favIconFixture)
       const base = `http://127.0.0.1:${server.port}`
       await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
@@ -658,7 +658,7 @@ describe('Server favicon', () => {
   })
 
   test('serves an IconBase favicon at the standard URL', async () => {
-    const server = await startServer('production', { COLOR: 'ff0000', FAVICON: 'icon', FILLED: 'true' }, faviconFixture)
+    const server = await startServer('production', { COLOR: 'ff0000', FAVICON: 'icon', FILLED: 'true' }, favIconFixture)
     const base = `http://127.0.0.1:${server.port}`
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
@@ -673,7 +673,7 @@ describe('Server favicon', () => {
   })
 
   test('renders Basis and app icons at /icons/{Name}.svg with query options', async () => {
-    const server = await startServer('production', {}, faviconFixture)
+    const server = await startServer('production', {}, favIconFixture)
     const base = `http://127.0.0.1:${server.port}`
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
@@ -689,7 +689,7 @@ describe('Server favicon', () => {
   })
 
   test('injects the favicon link into the development shell', async () => {
-    const server = await startServer('development', { COLOR: '0000ff', FAVICON: 'icon' }, faviconFixture)
+    const server = await startServer('development', { COLOR: '0000ff', FAVICON: 'icon' }, favIconFixture)
     const base = `http://127.0.0.1:${server.port}`
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
@@ -704,7 +704,7 @@ describe('Server favicon', () => {
     const dir = await mkdtemp(join(tmpdir(), 'basis-nofavicon-'))
 
     try {
-      const server = await startServer('production', { ROOT: dir }, faviconFixture)
+      const server = await startServer('production', { ROOT: dir }, favIconFixture)
       const base = `http://127.0.0.1:${server.port}`
       await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 

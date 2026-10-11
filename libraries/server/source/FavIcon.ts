@@ -34,13 +34,13 @@ export type IconClass = new (...args: unknown[]) => IconBase
 export type IconRegistry = Record<string, IconClass>
 
 /** What `.favicon(...)` accepts: a path, a file/blob, or an {@link IconBase} class. */
-export type FaviconInput = Blob | IconClass | string
+export type FavIconInput = Blob | IconClass | string
 
 /**
  * A favicon the server serves at {@link FAVICON_URL}. The source varies — a
  * file or an icon — but the URL is always the same.
  */
-export type ResolvedFavicon =
+export type ResolvedFavIcon =
   | { blob?: Blob, file?: string, href: string, kind: 'file', path: string, type: string }
   | { href: string, icon: IconClass, kind: 'icon', options: IconOptions, path: string, type: string }
 
@@ -64,7 +64,7 @@ export function matchIconPath(pathname: string): string | null {
  * @param extension - The file extension, without a dot.
  * @returns The content type.
  */
-export function faviconContentType(extension: string): string {
+export function favIconContentType(extension: string): string {
   return CONTENT_TYPES[extension.toLowerCase()] ?? 'application/octet-stream'
 }
 
@@ -78,7 +78,7 @@ export function faviconContentType(extension: string): string {
  * @param extraDirectories - Further directories to probe, such as an assets mount.
  * @returns The discovered favicon, or `null`.
  */
-export function discoverFavicon(
+export function discoverFavIcon(
   cwd: string,
   root: string,
   extraDirectories: readonly string[] = [],
@@ -155,13 +155,13 @@ export function renderIcon(icon: IconClass, options: IconOptions): string {
  * @param extraDirectories - Further directories to probe, such as an assets mount.
  * @returns The resolved favicon.
  */
-export function resolveFavicon(
-  input: FaviconInput | null,
+export function resolveFavIcon(
+  input: FavIconInput | null,
   options: IconOptions,
   cwd: string,
   root: string,
   extraDirectories: readonly string[] = [],
-): ResolvedFavicon {
+): ResolvedFavIcon {
   if (IconBase.isIcon(input)) {
     return {
       href: FAVICON_URL,
@@ -180,7 +180,7 @@ export function resolveFavicon(
       href: FAVICON_URL,
       kind: 'file',
       path: FAVICON_URL,
-      type: faviconContentType(path.extname(absolute).slice(1) || 'ico'),
+      type: favIconContentType(path.extname(absolute).slice(1) || 'ico'),
     }
   }
 
@@ -191,18 +191,18 @@ export function resolveFavicon(
       href: FAVICON_URL,
       kind: 'file',
       path: FAVICON_URL,
-      type: faviconContentType(path.extname(name).slice(1) || 'ico'),
+      type: favIconContentType(path.extname(name).slice(1) || 'ico'),
     }
   }
 
-  const discovered = discoverFavicon(cwd, root, extraDirectories)
+  const discovered = discoverFavIcon(cwd, root, extraDirectories)
   if (discovered) {
     return {
       file: discovered.path,
       href: FAVICON_URL,
       kind: 'file',
       path: FAVICON_URL,
-      type: faviconContentType(discovered.extension),
+      type: favIconContentType(discovered.extension),
     }
   }
 
@@ -222,7 +222,7 @@ export function resolveFavicon(
  * @param query - Query overrides, for an icon favicon.
  * @returns The response, or `null` when the backing file is missing.
  */
-export async function faviconResponse(favicon: ResolvedFavicon, query: URLSearchParams): Promise<Response | null> {
+export async function favIconResponse(favicon: ResolvedFavIcon, query: URLSearchParams): Promise<Response | null> {
   if (favicon.kind === 'icon') return iconResponse(favicon.icon, favicon.options, query)
 
   if (favicon.blob) {

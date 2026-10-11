@@ -1,11 +1,11 @@
-import { TriangleRight } from 'basis/react/icons'
+import { Basis, TriangleRight } from 'basis/react/icons'
 import { Server } from 'basis/server'
 import { join } from 'node:path'
 
 /*
  * Favicon/icon fixture. Spawned as a child process like the managed runtime.
  * `ROOT` overrides the app root (for discovery tests); `ENTRY` overrides the
- * entrypoint; `FAVICON=icon` configures an IconBase favicon.
+ * entrypoint; `FAVICON=icon` configures the Basis mark as an explicit icon.
  */
 const root = Bun.env.ROOT ?? import.meta.dir
 
@@ -15,7 +15,7 @@ const server = new Server()
   .icons({ Custom: TriangleRight })
 
 if (Bun.env.FAVICON === 'icon') {
-  server.favicon(TriangleRight, {
+  server.favicon(Basis, {
     color: Bun.env.COLOR ?? '000000',
     filled: Bun.env.FILLED === 'true',
   })

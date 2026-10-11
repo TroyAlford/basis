@@ -16,8 +16,8 @@ import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
-import type { FaviconInput, IconOptions, IconRegistry, ResolvedFavicon } from './Favicon'
-import { FAVICON_URL, faviconResponse, iconResponse, matchIconPath, resolveFavicon, resolveIcon } from './Favicon'
+import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
+import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import type { SocketData } from './Sockets'
@@ -88,9 +88,9 @@ export class Server {
   #builder: Builder | null = null
   #development = true
   #entrypoints: [string, string][] = []
-  #favicon: ResolvedFavicon | null = null
-  #faviconInput: FaviconInput | null = null
-  #faviconOptions: IconOptions = {}
+  #favIcon: ResolvedFavIcon | null = null
+  #favIconInput: FavIconInput | null = null
+  #favIconOptions: IconOptions = {}
   #icons: IconRegistry = {}
   #identity: Identity | null = null
   #logger: ILogger = new Logger()
@@ -375,9 +375,9 @@ export class Server {
    * @param uri - The request URI.
    * @returns The favicon response, or `null` to fall through.
    */
-  #handleFavicon(uri: URI): Promise<Response | null> {
-    if (!this.#favicon || uri.path !== this.#favicon.path) return Promise.resolve(null)
-    return faviconResponse(this.#favicon, uri.query)
+  #handleFavIcon(uri: URI): Promise<Response | null> {
+    if (!this.#favIcon || uri.path !== this.#favIcon.path) return Promise.resolve(null)
+    return favIconResponse(this.#favIcon, uri.query)
   }
 
   /**
@@ -425,9 +425,9 @@ export class Server {
     if (logger) this.#logger = logger
     this.#development = development
     this.#version = version
-    this.#favicon = resolveFavicon(
-      this.#faviconInput,
-      this.#faviconOptions,
+    this.#favIcon = resolveFavIcon(
+      this.#favIconInput,
+      this.#favIconOptions,
       process.cwd(),
       this.#root,
       this.#assets ? [this.#assets] : [],
@@ -708,9 +708,9 @@ export class Server {
    * @param options - Icon options (`color`, `filled`, `size`, …), for an icon.
    * @returns The server.
    */
-  favicon(input: FaviconInput, options: IconOptions = {}): Server {
-    this.#faviconInput = input
-    this.#faviconOptions = options
+  favicon(input: FavIconInput, options: IconOptions = {}): Server {
+    this.#favIconInput = input
+    this.#favIconOptions = options
     return this
   }
 
@@ -826,7 +826,7 @@ export class Server {
     const mounted = await this.handleMount(uri)
     if (mounted) return mounted
 
-    const favicon = await this.#handleFavicon(uri)
+    const favicon = await this.#handleFavIcon(uri)
     if (favicon) return favicon
 
     const icon = this.#handleIcon(uri)

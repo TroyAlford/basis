@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { IconBase } from '../../react/icons/IconBase/IconBase'
 import { Path } from '../../react/icons/parts/Path'
-import type { IconOptions } from './Favicon'
-import { discoverFavicon, faviconContentType, faviconResponse, iconResponse, renderIcon, resolveFavicon, resolveIcon } from './Favicon'
+import type { IconOptions } from './FavIcon'
+import { discoverFavIcon, favIconContentType, favIconResponse, iconResponse, renderIcon, resolveFavIcon, resolveIcon } from './FavIcon'
 
 /** A minimal icon used to exercise standalone rendering. */
 class TestIcon extends IconBase {
@@ -29,16 +29,16 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map(dir => rm(dir, { force: true, recursive: true })))
 })
 
-describe('faviconContentType', () => {
+describe('favIconContentType', () => {
   test('maps known extensions and falls back for unknown ones', () => {
-    expect(faviconContentType('ico')).toBe('image/x-icon')
-    expect(faviconContentType('SVG')).toBe('image/svg+xml')
-    expect(faviconContentType('png')).toBe('image/png')
-    expect(faviconContentType('bmp')).toBe('application/octet-stream')
+    expect(favIconContentType('ico')).toBe('image/x-icon')
+    expect(favIconContentType('SVG')).toBe('image/svg+xml')
+    expect(favIconContentType('png')).toBe('image/png')
+    expect(favIconContentType('bmp')).toBe('application/octet-stream')
   })
 })
 
-describe('discoverFavicon', () => {
+describe('discoverFavIcon', () => {
   test('prefers the working directory, then the root, then extension order', async () => {
     const cwd = await tempDir()
     const root = await tempDir()
@@ -47,7 +47,7 @@ describe('discoverFavicon', () => {
     await Bun.write(join(cwd, 'favicon.svg'), 'cwd-svg')
 
     // cwd wins outright; svg is probed before png.
-    expect(discoverFavicon(cwd, root)).toEqual({ extension: 'svg', path: join(cwd, 'favicon.svg') })
+    expect(discoverFavIcon(cwd, root)).toEqual({ extension: 'svg', path: join(cwd, 'favicon.svg') })
   })
 
   test('falls through to the root when the working directory has none', async () => {
@@ -55,11 +55,11 @@ describe('discoverFavicon', () => {
     const root = await tempDir()
     await Bun.write(join(root, 'favicon.ico'), 'root-ico')
 
-    expect(discoverFavicon(cwd, root)).toEqual({ extension: 'ico', path: join(root, 'favicon.ico') })
+    expect(discoverFavIcon(cwd, root)).toEqual({ extension: 'ico', path: join(root, 'favicon.ico') })
   })
 
   test('returns null when neither directory has a favicon', async () => {
-    expect(discoverFavicon(await tempDir(), await tempDir())).toBeNull()
+    expect(discoverFavIcon(await tempDir(), await tempDir())).toBeNull()
   })
 })
 
@@ -95,9 +95,9 @@ describe('renderIcon', () => {
   })
 })
 
-describe('resolveFavicon', () => {
+describe('resolveFavIcon', () => {
   test('resolves an IconBase to the standard URL', () => {
-    const resolved = resolveFavicon(TestIcon, { color: 'ff0000', filled: true }, '/cwd', '/root')
+    const resolved = resolveFavIcon(TestIcon, { color: 'ff0000', filled: true }, '/cwd', '/root')
 
     expect(resolved).toMatchObject({
       href: '/assets/favicon',
@@ -108,7 +108,7 @@ describe('resolveFavicon', () => {
   })
 
   test('resolves a path relative to the root', () => {
-    expect(resolveFavicon('./brand.png', {}, '/cwd', '/root')).toMatchObject({
+    expect(resolveFavIcon('./brand.png', {}, '/cwd', '/root')).toMatchObject({
       file: '/root/brand.png',
       href: '/assets/favicon',
       kind: 'file',
@@ -117,7 +117,7 @@ describe('resolveFavicon', () => {
   })
 
   test('resolves a file blob by its name', () => {
-    const resolved = resolveFavicon(Bun.file('/tmp/icon.svg'), {}, '/cwd', '/root')
+    const resolved = resolveFavIcon(Bun.file('/tmp/icon.svg'), {}, '/cwd', '/root')
 
     expect(resolved).toMatchObject({ href: '/assets/favicon', kind: 'file', type: 'image/svg+xml' })
   })
@@ -126,7 +126,7 @@ describe('resolveFavicon', () => {
     const root = await tempDir()
     await Bun.write(join(root, 'favicon.ico'), 'ico')
 
-    expect(resolveFavicon(null, {}, await tempDir(), root)).toMatchObject({
+    expect(resolveFavIcon(null, {}, await tempDir(), root)).toMatchObject({
       file: join(root, 'favicon.ico'),
       href: '/assets/favicon',
       kind: 'file',
@@ -137,7 +137,7 @@ describe('resolveFavicon', () => {
     const assets = await tempDir()
     await Bun.write(join(assets, 'favicon.svg'), '<svg/>')
 
-    expect(resolveFavicon(null, {}, await tempDir(), await tempDir(), [assets])).toMatchObject({
+    expect(resolveFavIcon(null, {}, await tempDir(), await tempDir(), [assets])).toMatchObject({
       file: join(assets, 'favicon.svg'),
       href: '/assets/favicon',
       kind: 'file',
@@ -146,7 +146,7 @@ describe('resolveFavicon', () => {
   })
 
   test('defaults to the Basis mark when nothing is configured or discovered', async () => {
-    expect(resolveFavicon(null, {}, await tempDir(), await tempDir())).toMatchObject({
+    expect(resolveFavIcon(null, {}, await tempDir(), await tempDir())).toMatchObject({
       href: '/assets/favicon',
       kind: 'icon',
       type: 'image/svg+xml',
@@ -154,13 +154,13 @@ describe('resolveFavicon', () => {
   })
 })
 
-describe('faviconResponse', () => {
+describe('favIconResponse', () => {
   test('serves a discovered file with its content type', async () => {
     const root = await tempDir()
     await Bun.write(join(root, 'favicon.ico'), 'ico-bytes')
-    const favicon = resolveFavicon(null, {}, await tempDir(), root)
+    const favicon = resolveFavIcon(null, {}, await tempDir(), root)
 
-    const response = await faviconResponse(favicon, new URLSearchParams())
+    const response = await favIconResponse(favicon, new URLSearchParams())
     expect(response?.headers.get('content-type')).toBe('image/x-icon')
     expect(await response?.text()).toBe('ico-bytes')
   })
@@ -171,8 +171,8 @@ describe('faviconResponse', () => {
   })
 
   test('serves the Basis mark by default', async () => {
-    const favicon = resolveFavicon(null, {}, await tempDir(), await tempDir())
-    const response = await faviconResponse(favicon, new URLSearchParams())
+    const favicon = resolveFavIcon(null, {}, await tempDir(), await tempDir())
+    const response = await favIconResponse(favicon, new URLSearchParams())
 
     expect(response?.headers.get('content-type')).toBe('image/svg+xml')
     expect(await response?.text()).toContain('<svg')
