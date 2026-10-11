@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { lintMarkdown } from './run'
 
@@ -17,7 +17,7 @@ const FIXED_GENERIC_MD = 'Use `<T>` in a paragraph that wraps across lines.\n'
  * @returns A promise that resolves once the tree is cleaned up.
  */
 const withTree = async (run: (root: string) => Promise<void>): Promise<void> => {
-  const root = mkdtempSync(join(tmpdir(), 'basis-markdown-'))
+  const root = tempDirectory('basis-markdown')
   try {
     await run(root)
   } finally {

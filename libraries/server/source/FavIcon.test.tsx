@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { IconBase } from '../../react/icons/IconBase/IconBase'
 import { Path } from '../../react/icons/parts/Path'
@@ -20,7 +20,7 @@ const tempDirs: string[] = []
  * @returns The directory path.
  */
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'basis-favicon-'))
+  const dir = tempDirectory('basis-favicon')
   tempDirs.push(dir)
   return dir
 }

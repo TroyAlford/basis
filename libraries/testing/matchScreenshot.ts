@@ -9,7 +9,7 @@ import { trackSnapshot } from './cleanup'
 import { renderHtml } from './document'
 import { formatSnapshotKey, slug } from './naming'
 import type { ScreenshotOptions } from './snapshots'
-import { comparePng, readPng, snapshotDirectory, writePng, writePngBytes } from './snapshots'
+import { comparePng, readPng, snapshotDirectory, writePngBytes } from './snapshots'
 import { currentTestName, nextSnapshotIndex } from './test'
 import { updating } from './update'
 
@@ -42,13 +42,13 @@ function isPage(value: Page | Locator): value is Page {
   return typeof (value as Page).goto === 'function'
 }
 
-/** Paths a snapshot and its failure artifacts resolve to. */
+/** Paths a snapshot resolves to, plus the failure artifacts it may supersede. */
 interface SnapshotPaths {
-  /** Captured image, written on a mismatch. */
+  /** Captured image, never written; only ever cleaned up. */
   actual: string,
   /** Committed snapshot. */
   baseline: string,
-  /** Diff image, written on a mismatch. */
+  /** Diff image, never written; only ever cleaned up. */
   diff: string,
 }
 
@@ -200,12 +200,12 @@ async function capture(subject: ScreenshotSubject, options: ScreenshotOptions): 
 /**
  * Apply a captured screenshot against the committed baseline for a key.
  *
- * This is the only place the matcher writes to disk. An existing baseline is
- * replaced only when `update` is true (`--update-snapshots` /
- * `UPDATE_SNAPSHOTS=1`); a comparison failure writes `*.actual.png` /
- * `*.diff.png` artifacts beside the baseline and never touches the baseline
- * itself. A failed or browser-less run therefore cannot mutate committed
- * snapshots. Exported so tests can prove that guarantee without a browser.
+ * The baseline is the only file written: a new one is written on first capture,
+ * and an existing one is replaced only when `update` is true
+ * (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A comparison failure keeps the
+ * diff in memory and writes nothing, so a mismatched run can neither mutate a
+ * committed snapshot nor leave artifacts in the working tree. Exported so tests
+ * can prove that guarantee without a browser.
  * @param file - The calling test file.
  * @param key - The snapshot key.
  * @param bytes - The captured PNG bytes.
@@ -246,16 +246,16 @@ export function commitScreenshot(
     return { message: () => `matchScreenshot: matches ${baseline}`, pass: true }
   }
 
-  writePng(actualPath, actual)
-  writePng(diffPath, comparison.diff)
-
+  /*
+   * A failure keeps the comparison in memory. Nothing is written to the disk:
+   * a mismatched run must not leave artifacts in the working tree.
+   */
   return {
     message: () => [
       `matchScreenshot: "${key}" differs from ${baseline}`,
       `${comparison.diffPixels}/${comparison.total} pixels ` +
         `(${(comparison.ratio * 100).toFixed(2)}%) differ`,
-      `actual: ${actualPath}`,
-      `diff:   ${diffPath}`,
+      'the diff is kept in memory and not written to disk',
     ].join('\n'),
     pass: false,
   }
@@ -346,10 +346,9 @@ export async function runMatchScreenshot(
  *
  * Mirrors `toMatchSnapshot`: when no snapshot exists (or `--update-snapshots` /
  * `UPDATE_SNAPSHOTS=1` is set) the capture is written and the call resolves;
- * otherwise the capture is compared and a mismatch throws, writing
- * `*.actual.png` / `*.diff.png` artifacts beside the snapshot. An existing
- * baseline is never written unless updating, and a capture failure (for example
- * a missing browser) leaves every baseline untouched.
+ * otherwise the capture is compared and a mismatch throws. The diff is kept in
+ * memory and never written to disk. A capture failure (for example a missing
+ * browser) leaves every baseline untouched.
  *
  * This is an ordinary async function rather than an `expect.extend` matcher on
  * purpose: Bun drives async matchers synchronously on its event loop, which

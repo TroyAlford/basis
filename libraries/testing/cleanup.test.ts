@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pruneDirectory, pruneSnapshots } from './cleanup'
+import { tempDirectory } from './temp'
 
 /**
  * Build a throwaway snapshot directory populated with the given filenames.
@@ -10,7 +11,7 @@ import { pruneDirectory, pruneSnapshots } from './cleanup'
  * @returns The directory path.
  */
 function snapshotDir(...names: string[]): string {
-  const dir = mkdtempSync(join(tmpdir(), 'basis-snapshots-'))
+  const dir = tempDirectory('basis-snapshots')
   for (const name of names) writeFileSync(join(dir, name), name)
   return dir
 }

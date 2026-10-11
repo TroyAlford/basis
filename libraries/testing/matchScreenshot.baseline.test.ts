@@ -1,15 +1,15 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Page } from 'playwright'
 import { PNG } from 'pngjs'
 import { commitScreenshot, runMatchScreenshot, runScreenshot } from './matchScreenshot'
 import { slug } from './naming'
 import { snapshotDirectory } from './snapshots'
+import { tempDirectory } from './temp'
 import { updating } from './update'
 
-const root = mkdtempSync(join(tmpdir(), 'basis-baseline-'))
+const root = tempDirectory('basis-baseline')
 
 afterAll(() => {
   rmSync(root, { force: true, recursive: true })
@@ -64,8 +64,8 @@ describe('baseline protection', () => {
 
     expect(result.pass).toBe(false)
     expect(Buffer.compare(readFileSync(baseline), original)).toBe(0)
-    expect(existsSync(actual)).toBe(true)
-    expect(existsSync(diff)).toBe(true)
+    expect(existsSync(actual)).toBe(false)
+    expect(existsSync(diff)).toBe(false)
   })
 
   test('leaves an existing baseline unchanged and clears stale artifacts on a match', () => {
@@ -167,7 +167,7 @@ describe('matchScreenshot', () => {
     expect(existsSync(diff)).toBe(false)
   })
 
-  test('throws an AssertionError on mismatch and writes artifacts without mutating the baseline', async () => {
+  test('throws an AssertionError on mismatch without writing artifacts or mutating the baseline', async () => {
     const file = join(root, 'mismatch.test.ts')
     const key = 'renders 1'
     const { actual, baseline, diff } = paths(file, key)
@@ -183,8 +183,8 @@ describe('matchScreenshot', () => {
     expect(error).toBeInstanceOf(Error)
     expect(error?.name).toBe('AssertionError')
     expect(Buffer.compare(readFileSync(baseline), original)).toBe(0)
-    expect(existsSync(actual)).toBe(true)
-    expect(existsSync(diff)).toBe(true)
+    expect(existsSync(actual)).toBe(false)
+    expect(existsSync(diff)).toBe(false)
   })
 
   test('rewrites the baseline in update mode', async () => {

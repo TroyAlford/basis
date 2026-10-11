@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SNAPSHOT_ACTIVITY_LOG, snapshotImage } from './browser'
+import { tempDirectory } from './temp'
 
 /*
  * Lifecycle proof for the run-scoped snapshot runtime.
@@ -95,7 +95,7 @@ function applicationSuite(): string {
  * @returns The fixture directory and activity log path.
  */
 function fixture(files: Record<string, string>): { activity: string, dir: string } {
-  const dir = mkdtempSync(join(tmpdir(), 'basis-snapshot-runtime-'))
+  const dir = tempDirectory('basis-snapshot-runtime')
   created.push(dir)
   /*
    * The generated suite is a real test file that may use JSX, so `react` and

@@ -1,7 +1,7 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { watch } from 'chokidar'
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { appendFile, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { WATCH_IGNORED } from './Builder'
 
@@ -24,7 +24,7 @@ describe('WATCH_IGNORED', () => {
 
 describe('the development watcher', () => {
   test('ignores test snapshot directories', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'basis-watcher-'))
+    const base = tempDirectory('basis-watcher')
     const source = join(base, 'source')
     const snapshots = join(source, '__screenshots__', 'thing.test.ts')
     await mkdir(snapshots, { recursive: true })
@@ -68,7 +68,7 @@ describe('the development watcher', () => {
   })
 
   test('reports a change in a source directory under a hidden ancestor', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'basis-watcher-'))
+    const base = tempDirectory('basis-watcher')
     const source = join(base, '.hidden', 'source')
     await mkdir(source, { recursive: true })
 

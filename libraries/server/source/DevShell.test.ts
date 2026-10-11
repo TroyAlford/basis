@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
 import { devShellDirectory, renderDevShell, writeDevShell } from './DevShell'
 
@@ -45,7 +45,7 @@ describe('renderDevShell', () => {
 
 describe('writeDevShell', () => {
   test('writes index.html into the shell directory and returns its path', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'basis-dev-shell-'))
+    const dir = tempDirectory('basis-dev-shell')
 
     try {
       const entrypoint = join(dir, 'entry.ts')

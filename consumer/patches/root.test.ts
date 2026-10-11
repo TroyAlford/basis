@@ -1,10 +1,10 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveInstallRoot } from './root'
 
-const makeTempDir = (): string => mkdtempSync(join(tmpdir(), 'basis-root-'))
+const makeTempDir = (): string => tempDirectory('basis-root')
 
 const makeProject = (root: string): void => {
   mkdirSync(join(root, 'node_modules'), { recursive: true })

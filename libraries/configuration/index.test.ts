@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as configuration from './index'
 
@@ -18,7 +18,7 @@ const directories: string[] = []
  * @returns The fixture directory.
  */
 function dotenvFixture(): string {
-  const directory = mkdtempSync(join(tmpdir(), 'basis-config-import-'))
+  const directory = tempDirectory('basis-config-import')
   directories.push(directory)
   writeFileSync(join(directory, '.env'), `${SENTINEL}=loaded\n`)
   return directory

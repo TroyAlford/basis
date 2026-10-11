@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const CLI = join(import.meta.dir, 'cli.ts')
@@ -76,7 +76,7 @@ interface Fixture {
  */
 const makeFixture = (options: { config?: boolean } = {}): Fixture => {
   const { config = true } = options
-  const dir = mkdtempSync(join(tmpdir(), 'basis-cli-'))
+  const dir = tempDirectory('basis-cli')
   /*
    * ESLint resolves its default formatter (and the plugin stack) through a
    * consumer node_modules; reuse the workspace install rather than a copy.

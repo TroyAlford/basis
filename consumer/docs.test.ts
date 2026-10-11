@@ -1,6 +1,6 @@
+import { tempDirectory } from 'basis/testing'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { checkDocs } from './docs'
 
@@ -13,7 +13,7 @@ const directories: string[] = []
  * @returns The repository root.
  */
 function fixture(files: Record<string, string>): string {
-  const directory = mkdtempSync(join(tmpdir(), 'basis-docs-'))
+  const directory = tempDirectory('basis-docs')
   directories.push(directory)
   for (const [path, contents] of Object.entries(files)) {
     const absolute = join(directory, path)

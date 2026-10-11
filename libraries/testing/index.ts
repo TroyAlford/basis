@@ -8,6 +8,7 @@ export type {
 export type { StubResponse } from './network'
 export { render } from '../react/testing/render'
 export { Simulate } from '../react/testing/Simulate'
+export { tempDirectory } from './temp'
 export { waitFor } from '../react/testing/waitFor'
 export { describe, it, test } from './test'
 export { matchScreenshot } from './matchScreenshot'
