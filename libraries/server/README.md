@@ -122,6 +122,42 @@ server.api([HttpVerb.Get], 'hello/:name', ({ name }, { logger, request }) => {
 
 Templates match the route under `/api` (`/api/hello/world`) and, for root-level paths, the first path segment (so built-in `/health` and `/ping` resolve). Every handler receives the request and the server's logger.
 
+## Favicon and icons
+
+Every Basis server serves the favicon at the standard, extensionless `/assets/favicon`, and the shell always links that URL. What it returns depends on configuration and discovery:
+
+```ts
+import { TriangleRight } from 'basis/react/icons'
+import { Server } from 'basis/server'
+
+// A file is served verbatim (its content type comes from the file).
+new Server().main('./index.tsx').favicon('./brand.png')
+
+// A Bun.file works the same way.
+new Server().main('./index.tsx').favicon(Bun.file('./brand.ico'))
+
+// An IconBase is rendered as an SVG, with its options applied.
+new Server().main('./index.tsx').favicon(TriangleRight, { color: 'ff0000', filled: true })
+```
+
+When no favicon is configured, the server discovers `favicon.{ico,svg,png,jpg,jpeg,gif,webp}` (in that order) in the working directory, then `Server.root`, then any `.assets(...)` folder. When nothing is configured or discovered, it serves the **Basis mark**, so every Basis server has a working favicon.
+
+### Icons
+
+Every Basis icon, plus any the app registers, is served as a standalone SVG at `/icons/{Name}.svg`:
+
+```ts
+import { Nerd } from './icons/Nerd'
+import { Server } from 'basis/server'
+
+new Server().main('./index.tsx').icons({ Nerd })
+// GET /icons/TriangleRight.svg?color=ff0000&filled=true&size=32
+```
+
+The query contract matches `NerdrageTools/nerdrage`: `color` is a hex value (with or without `#`, default `000000`), `filled` accepts `true`/empty/`filled`, `size` defaults to `1em`, and any other key becomes an icon prop except `stroke`. Registered icons take precedence over Basis's set.
+
+The shell renders `<link rel="icon" href="/assets/favicon">`; development injects that link (Bun's HTML bundler would otherwise try to bundle it), while production renders it directly.
+
 ## OAuth
 
 `server.oauth(options)` mounts a provider-agnostic authorization-code flow and wires the session capability into the server:

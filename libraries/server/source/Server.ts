@@ -16,6 +16,8 @@ import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
+import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
+import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import type { SocketData } from './Sockets'
@@ -86,6 +88,10 @@ export class Server {
   #builder: Builder | null = null
   #development = true
   #entrypoints: [string, string][] = []
+  #favIcon: ResolvedFavIcon | null = null
+  #favIconInput: FavIconInput | null = null
+  #favIconOptions: IconOptions = {}
+  #icons: IconRegistry = {}
   #identity: Identity | null = null
   #logger: ILogger = new Logger()
   #modules = new Map<string, string>()
@@ -340,7 +346,13 @@ export class Server {
      */
     if (this.#development && this.#server) {
       const response = await fetch(this.#devShellURL())
-      const element = `<script id="basis-runtime" type="application/json">${serializeBasisRuntime(runtime)}</script>`
+      const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
+      const runtimeScript = [
+        '<script id="basis-runtime" type="application/json">',
+        serializeBasisRuntime(runtime),
+        '</script>',
+      ].join('')
+      const element = `${favicon}${runtimeScript}`
       return new HTMLRewriter()
         .on('head', {
           element: target => {
@@ -356,6 +368,30 @@ export class Server {
       title: this.#title,
     }))
     return new Response(html, { headers: { 'Content-Type': 'text/html' } })
+  }
+
+  /**
+   * Serve the configured or discovered favicon, when the server owns its bytes.
+   * @param uri - The request URI.
+   * @returns The favicon response, or `null` to fall through.
+   */
+  #handleFavIcon(uri: URI): Promise<Response | null> {
+    if (!this.#favIcon || uri.path !== this.#favIcon.path) return Promise.resolve(null)
+    return favIconResponse(this.#favIcon, uri.query)
+  }
+
+  /**
+   * Serve a Basis or app icon as standalone SVG at `/icons/{Name}.svg`.
+   * @param uri - The request URI.
+   * @returns The icon response, or `null` when the path is not an icon.
+   */
+  #handleIcon(uri: URI): Response | null {
+    const name = matchIconPath(uri.path)
+    if (!name) return null
+
+    const icon = resolveIcon(name, this.#icons)
+    if (!icon) return Server.NotFound
+    return iconResponse(icon, {}, uri.query)
   }
 
   /**
@@ -389,6 +425,13 @@ export class Server {
     if (logger) this.#logger = logger
     this.#development = development
     this.#version = version
+    this.#favIcon = resolveFavIcon(
+      this.#favIconInput,
+      this.#favIconOptions,
+      process.cwd(),
+      this.#root,
+      this.#assets ? [this.#assets] : [],
+    )
 
     let routes: Bun.Serve.Routes<SocketData, string> | undefined
 
@@ -653,6 +696,37 @@ export class Server {
   }
 
   /**
+   * Configures the favicon the server serves at the standard
+   * `/assets/favicon` URL.
+   *
+   * Accepts a path, a file/blob, or a class extending `IconBase`, and sets what
+   * that URL returns. A path or file is served verbatim; an icon is rendered as
+   * SVG with the given options (and any request query) applied. When no favicon
+   * is configured, the server discovers a `favicon.<ext>` in the working
+   * directory, the app root, and any assets mount, defaulting to the Basis mark.
+   * @param input - The favicon path, file, or icon.
+   * @param options - Icon options (`color`, `filled`, `size`, …), for an icon.
+   * @returns The server.
+   */
+  favicon(input: FavIconInput, options: IconOptions = {}): Server {
+    this.#favIconInput = input
+    this.#favIconOptions = options
+    return this
+  }
+
+  /**
+   * Registers app icons for the `/icons/{Name}.svg` route.
+   *
+   * Registered icons take precedence over Basis's icon set.
+   * @param icons - Icon classes, keyed by the name used in the URL.
+   * @returns The server.
+   */
+  icons(icons: IconRegistry): Server {
+    Object.assign(this.#icons, icons)
+    return this
+  }
+
+  /**
    * The loopback URL of the generated development shell. Development always
    * binds a locally reachable interface, so the proxy targets loopback.
    * @returns The URL the server proxies UI requests to.
@@ -751,6 +825,12 @@ export class Server {
 
     const mounted = await this.handleMount(uri)
     if (mounted) return mounted
+
+    const favicon = await this.#handleFavIcon(uri)
+    if (favicon) return favicon
+
+    const icon = this.#handleIcon(uri)
+    if (icon) return icon
 
     switch (uri.type) {
       case 'api': return Server.BadRequest
