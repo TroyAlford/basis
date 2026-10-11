@@ -4,7 +4,11 @@ import type { ComponentType } from 'react'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import * as BasisIcons from '../../react/icons'
+import { Basis } from '../../react/icons/Basis'
 import { IconBase } from '../../react/icons/IconBase/IconBase'
+
+/** The standard, extensionless favicon URL every Basis server serves. */
+export const FAVICON_URL = '/assets/favicon'
 
 /** Extensions probed for an auto-discovered favicon, in order. */
 export const FAVICON_EXTENSIONS = ['ico', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp'] as const
@@ -29,6 +33,17 @@ export type IconClass = new (...args: unknown[]) => IconBase
 /** Additional icons an app registers for `/icons/{Name}.svg`, by name. */
 export type IconRegistry = Record<string, IconClass>
 
+/** What `.favicon(...)` accepts: a path, a file/blob, or an {@link IconBase} class. */
+export type FaviconInput = Blob | IconClass | string
+
+/**
+ * A favicon the server serves at {@link FAVICON_URL}. The source varies — a
+ * file or an icon — but the URL is always the same.
+ */
+export type ResolvedFavicon =
+  | { blob?: Blob, file?: string, href: string, kind: 'file', path: string, type: string }
+  | { href: string, icon: IconClass, kind: 'icon', options: IconOptions, path: string, type: string }
+
 /** The path segment prefix and suffix for the icon route. */
 const ICON_PREFIX = '/icons/'
 const ICON_SUFFIX = '.svg'
@@ -44,15 +59,6 @@ export function matchIconPath(pathname: string): string | null {
   return name.length > 0 && !name.includes('/') ? name : null
 }
 
-/** What `.favicon(...)` accepts: a path, a file/blob, or an {@link IconBase} class. */
-export type FaviconInput = Blob | IconClass | string
-
-/** A favicon resolved to what the server should serve and link. */
-export type ResolvedFavicon =
-  | { blob?: Blob, file?: string, href: string, kind: 'file', path: string, type: string }
-  | { href: string, icon: IconClass, kind: 'icon', options: IconOptions, path: string, type: string }
-  | { href: string, kind: 'link', path: string, type: string }
-
 /**
  * The content type for a favicon extension.
  * @param extension - The file extension, without a dot.
@@ -63,16 +69,21 @@ export function faviconContentType(extension: string): string {
 }
 
 /**
- * Find a `favicon.<ext>` in the working directory, then the app root.
+ * Find a `favicon.<ext>` across the given directories, in order.
  *
  * The working directory wins outright: a project-level favicon is preferred
  * over the app's own, and every extension is probed before moving on.
  * @param cwd - The consuming project's working directory.
  * @param root - The server's configured root.
+ * @param extraDirectories - Further directories to probe, such as an assets mount.
  * @returns The discovered favicon, or `null`.
  */
-export function discoverFavicon(cwd: string, root: string): { extension: string, path: string } | null {
-  for (const directory of [cwd, root]) {
+export function discoverFavicon(
+  cwd: string,
+  root: string,
+  extraDirectories: readonly string[] = [],
+): { extension: string, path: string } | null {
+  for (const directory of [cwd, root, ...extraDirectories]) {
     for (const extension of FAVICON_EXTENSIONS) {
       const candidate = path.join(directory, `favicon.${extension}`)
       if (fs.existsSync(candidate)) return { extension, path: candidate }
@@ -94,21 +105,6 @@ export function resolveIcon(name: string, registry: IconRegistry): IconClass | n
 
   const basis = (BasisIcons as Record<string, unknown>)[name]
   return IconBase.isIcon(basis) ? basis : null
-}
-
-/**
- * Build the query string for an icon's favicon href.
- * @param options - The icon options.
- * @returns A leading-`?` query string, or an empty string.
- */
-export function iconQueryString(options: IconOptions): string {
-  const query = new URLSearchParams()
-  for (const [key, value] of Object.entries(options)) {
-    if (value === undefined || value === false) continue
-    query.set(key, value === true ? 'true' : String(value))
-  }
-  const text = query.toString()
-  return text.length > 0 ? `?${text}` : ''
 }
 
 /**
@@ -146,15 +142,17 @@ export function renderIcon(icon: IconClass, options: IconOptions): string {
 }
 
 /**
- * Resolve the favicon the server should serve and link.
+ * Resolve what the server serves at {@link FAVICON_URL}.
  *
- * An explicit input wins. Otherwise a `favicon.<ext>` found via
- * {@link discoverFavicon} is used; failing that, the link falls back to the
- * conventional `/assets/favicon.svg` an app may already mount.
+ * An explicit input wins. Otherwise a `favicon.<ext>` is discovered across the
+ * working directory, the app root, and any extra directories (an assets mount).
+ * When nothing is found, the server serves the Basis mark, so every Basis server
+ * has a working favicon.
  * @param input - The configured favicon, or `null` to discover one.
  * @param options - Icon options, when the input is an icon.
  * @param cwd - The consuming project's working directory.
  * @param root - The server's configured root.
+ * @param extraDirectories - Further directories to probe, such as an assets mount.
  * @returns The resolved favicon.
  */
 export function resolveFavicon(
@@ -162,68 +160,70 @@ export function resolveFavicon(
   options: IconOptions,
   cwd: string,
   root: string,
+  extraDirectories: readonly string[] = [],
 ): ResolvedFavicon {
   if (IconBase.isIcon(input)) {
     return {
-      href: `/favicon.svg${iconQueryString(options)}`,
+      href: FAVICON_URL,
       icon: input,
       kind: 'icon',
       options,
-      path: '/favicon.svg',
+      path: FAVICON_URL,
       type: 'image/svg+xml',
     }
   }
 
   if (typeof input === 'string') {
     const absolute = path.isAbsolute(input) ? input : path.join(root, input)
-    const extension = path.extname(absolute).slice(1).toLowerCase() || 'ico'
     return {
       file: absolute,
-      href: `/favicon.${extension}`,
+      href: FAVICON_URL,
       kind: 'file',
-      path: `/favicon.${extension}`,
-      type: faviconContentType(extension),
+      path: FAVICON_URL,
+      type: faviconContentType(path.extname(absolute).slice(1) || 'ico'),
     }
   }
 
   if (input) {
     const name = (input as { name?: string }).name ?? ''
-    const extension = path.extname(name).slice(1).toLowerCase() || 'ico'
     return {
       blob: input,
-      href: `/favicon.${extension}`,
+      href: FAVICON_URL,
       kind: 'file',
-      path: `/favicon.${extension}`,
-      type: faviconContentType(extension),
+      path: FAVICON_URL,
+      type: faviconContentType(path.extname(name).slice(1) || 'ico'),
     }
   }
 
-  const discovered = discoverFavicon(cwd, root)
+  const discovered = discoverFavicon(cwd, root, extraDirectories)
   if (discovered) {
     return {
       file: discovered.path,
-      href: `/favicon.${discovered.extension}`,
+      href: FAVICON_URL,
       kind: 'file',
-      path: `/favicon.${discovered.extension}`,
+      path: FAVICON_URL,
       type: faviconContentType(discovered.extension),
     }
   }
 
-  return { href: '/assets/favicon.svg', kind: 'link', path: '/assets/favicon.svg', type: 'image/svg+xml' }
+  return {
+    href: FAVICON_URL,
+    icon: Basis,
+    kind: 'icon',
+    options: {},
+    path: FAVICON_URL,
+    type: 'image/svg+xml',
+  }
 }
 
 /**
- * Serve a resolved favicon, when the server owns its bytes.
+ * Serve a resolved favicon.
  * @param favicon - The resolved favicon.
  * @param query - Query overrides, for an icon favicon.
- * @returns The response, or `null` when the favicon is a mounted-link fallback.
+ * @returns The response, or `null` when the backing file is missing.
  */
 export async function faviconResponse(favicon: ResolvedFavicon, query: URLSearchParams): Promise<Response | null> {
-  if (favicon.kind === 'link') return null
-
-  if (favicon.kind === 'icon') {
-    return iconResponse(favicon.icon, favicon.options, query)
-  }
+  if (favicon.kind === 'icon') return iconResponse(favicon.icon, favicon.options, query)
 
   if (favicon.blob) {
     return new Response(await favicon.blob.arrayBuffer(), { headers: { 'Content-Type': favicon.type } })

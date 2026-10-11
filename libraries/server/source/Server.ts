@@ -4,7 +4,6 @@ import * as path from 'node:path'
 import * as React from 'react'
 import { renderToString } from 'react-dom/server'
 import type { Identity } from '../../oauth'
-import type { FaviconDescriptor } from '../../react/components/IndexHTML/IndexHTML'
 import { IndexHTML } from '../../react/components/IndexHTML/IndexHTML'
 import type { BasisRuntime, ILogger, URI } from '../../utilities'
 import { HttpVerb, Logger, parseTemplateURI, parseURI, serializeBasisRuntime } from '../../utilities'
@@ -18,7 +17,7 @@ import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
 import type { FaviconInput, IconOptions, IconRegistry, ResolvedFavicon } from './Favicon'
-import { faviconResponse, iconResponse, matchIconPath, resolveFavicon, resolveIcon } from './Favicon'
+import { FAVICON_URL, faviconResponse, iconResponse, matchIconPath, resolveFavicon, resolveIcon } from './Favicon'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import type { SocketData } from './Sockets'
@@ -347,9 +346,7 @@ export class Server {
      */
     if (this.#development && this.#server) {
       const response = await fetch(this.#devShellURL())
-      const favicon = this.#favicon
-        ? `<link rel="icon" href="${this.#favicon.href}" type="${this.#favicon.type}" />`
-        : ''
+      const favicon = `<link rel="icon" href="${FAVICON_URL}" />`
       const runtimeScript = [
         '<script id="basis-runtime" type="application/json">',
         serializeBasisRuntime(runtime),
@@ -366,20 +363,11 @@ export class Server {
     }
 
     const html = await renderToString(React.createElement(IndexHTML, {
-      favicon: this.#faviconDescriptor(),
       runtime,
       scripts: this.#scriptNames(),
       title: this.#title,
     }))
     return new Response(html, { headers: { 'Content-Type': 'text/html' } })
-  }
-
-  /**
-   * The favicon descriptor the shell links, or `undefined` for the default.
-   * @returns The favicon descriptor.
-   */
-  #faviconDescriptor(): FaviconDescriptor | false {
-    return this.#favicon ? { href: this.#favicon.href, type: this.#favicon.type } : false
   }
 
   /**
@@ -437,16 +425,13 @@ export class Server {
     if (logger) this.#logger = logger
     this.#development = development
     this.#version = version
-    this.#favicon = resolveFavicon(this.#faviconInput, this.#faviconOptions, process.cwd(), this.#root)
-    /*
-     * The fallback links the conventional `/assets/favicon.svg`; only keep it
-     * when an assets mount actually serves that file, so the shell never links
-     * a 404.
-     */
-    if (this.#favicon?.kind === 'link') {
-      const fallback = this.#assets ? path.join(this.#assets, 'favicon.svg') : null
-      if (!fallback || !fs.existsSync(fallback)) this.#favicon = null
-    }
+    this.#favicon = resolveFavicon(
+      this.#faviconInput,
+      this.#faviconOptions,
+      process.cwd(),
+      this.#root,
+      this.#assets ? [this.#assets] : [],
+    )
 
     let routes: Bun.Serve.Routes<SocketData, string> | undefined
 
@@ -711,13 +696,14 @@ export class Server {
   }
 
   /**
-   * Configures the favicon the shell links.
+   * Configures the favicon the server serves at the standard
+   * `/assets/favicon` URL.
    *
-   * Accepts a path, a file/blob, or a class extending `IconBase`. A path or
-   * file is served verbatim at `/favicon.<ext>`; an icon is rendered at
-   * `/favicon.svg` with the given options (and any request query) applied.
-   * When no favicon is configured, the server discovers a `favicon.<ext>` in
-   * the working directory and then the app root.
+   * Accepts a path, a file/blob, or a class extending `IconBase`, and sets what
+   * that URL returns. A path or file is served verbatim; an icon is rendered as
+   * SVG with the given options (and any request query) applied. When no favicon
+   * is configured, the server discovers a `favicon.<ext>` in the working
+   * directory, the app root, and any assets mount, defaulting to the Basis mark.
    * @param input - The favicon path, file, or icon.
    * @param options - Icon options (`color`, `filled`, `size`, …), for an icon.
    * @returns The server.

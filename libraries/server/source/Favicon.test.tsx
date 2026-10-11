@@ -96,17 +96,21 @@ describe('renderIcon', () => {
 })
 
 describe('resolveFavicon', () => {
-  test('resolves an IconBase to a favicon.svg link with its options', () => {
+  test('resolves an IconBase to the standard URL', () => {
     const resolved = resolveFavicon(TestIcon, { color: 'ff0000', filled: true }, '/cwd', '/root')
 
-    expect(resolved).toMatchObject({ kind: 'icon', path: '/favicon.svg', type: 'image/svg+xml' })
-    expect(resolved.href).toBe('/favicon.svg?color=ff0000&filled=true')
+    expect(resolved).toMatchObject({
+      href: '/assets/favicon',
+      kind: 'icon',
+      path: '/assets/favicon',
+      type: 'image/svg+xml',
+    })
   })
 
   test('resolves a path relative to the root', () => {
     expect(resolveFavicon('./brand.png', {}, '/cwd', '/root')).toMatchObject({
       file: '/root/brand.png',
-      href: '/favicon.png',
+      href: '/assets/favicon',
       kind: 'file',
       type: 'image/png',
     })
@@ -115,7 +119,7 @@ describe('resolveFavicon', () => {
   test('resolves a file blob by its name', () => {
     const resolved = resolveFavicon(Bun.file('/tmp/icon.svg'), {}, '/cwd', '/root')
 
-    expect(resolved).toMatchObject({ href: '/favicon.svg', kind: 'file', type: 'image/svg+xml' })
+    expect(resolved).toMatchObject({ href: '/assets/favicon', kind: 'file', type: 'image/svg+xml' })
   })
 
   test('discovers a favicon when none is configured', async () => {
@@ -124,15 +128,28 @@ describe('resolveFavicon', () => {
 
     expect(resolveFavicon(null, {}, await tempDir(), root)).toMatchObject({
       file: join(root, 'favicon.ico'),
-      href: '/favicon.ico',
+      href: '/assets/favicon',
       kind: 'file',
     })
   })
 
-  test('falls back to the mounted /assets/favicon.svg link', async () => {
+  test('discovers a favicon in an extra directory such as an assets mount', async () => {
+    const assets = await tempDir()
+    await Bun.write(join(assets, 'favicon.svg'), '<svg/>')
+
+    expect(resolveFavicon(null, {}, await tempDir(), await tempDir(), [assets])).toMatchObject({
+      file: join(assets, 'favicon.svg'),
+      href: '/assets/favicon',
+      kind: 'file',
+      type: 'image/svg+xml',
+    })
+  })
+
+  test('defaults to the Basis mark when nothing is configured or discovered', async () => {
     expect(resolveFavicon(null, {}, await tempDir(), await tempDir())).toMatchObject({
-      href: '/assets/favicon.svg',
-      kind: 'link',
+      href: '/assets/favicon',
+      kind: 'icon',
+      type: 'image/svg+xml',
     })
   })
 })
@@ -153,8 +170,11 @@ describe('faviconResponse', () => {
     expect(response.headers.get('content-type')).toBe('image/svg+xml')
   })
 
-  test('returns null for the mounted-link fallback', async () => {
+  test('serves the Basis mark by default', async () => {
     const favicon = resolveFavicon(null, {}, await tempDir(), await tempDir())
-    expect(await faviconResponse(favicon, new URLSearchParams())).toBeNull()
+    const response = await faviconResponse(favicon, new URLSearchParams())
+
+    expect(response?.headers.get('content-type')).toBe('image/svg+xml')
+    expect(await response?.text()).toContain('<svg')
   })
 })

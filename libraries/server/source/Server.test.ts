@@ -644,10 +644,9 @@ describe('Server favicon', () => {
 
       const shell = await Bun.fetch(base).then(response => response.text())
       expect(shell).toContain('rel="icon"')
-      expect(shell).toContain('href="/favicon.png"')
-      expect(shell).toContain('type="image/png"')
+      expect(shell).toContain('href="/assets/favicon"')
 
-      const response = await Bun.fetch(`${base}/favicon.png`)
+      const response = await Bun.fetch(`${base}/assets/favicon`)
       expect(response.status).toBe(200)
       expect(response.headers.get('content-type')).toBe('image/png')
       expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes)
@@ -658,16 +657,16 @@ describe('Server favicon', () => {
     }
   })
 
-  test('serves an IconBase favicon and links its options', async () => {
+  test('serves an IconBase favicon at the standard URL', async () => {
     const server = await startServer('production', { COLOR: 'ff0000', FAVICON: 'icon', FILLED: 'true' }, faviconFixture)
     const base = `http://127.0.0.1:${server.port}`
     await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
     const shell = await Bun.fetch(base).then(response => response.text())
-    expect(shell).toContain('href="/favicon.svg?color=ff0000&amp;filled=true"')
-    expect(shell).toContain('type="image/svg+xml"')
+    expect(shell).toContain('rel="icon"')
+    expect(shell).toContain('href="/assets/favicon"')
 
-    const svg = await Bun.fetch(`${base}/favicon.svg`).then(response => response.text())
+    const svg = await Bun.fetch(`${base}/assets/favicon`).then(response => response.text())
     expect(svg).toContain('stroke="#ff0000"')
 
     expect(await server.stop()).toBe(0)
@@ -696,12 +695,12 @@ describe('Server favicon', () => {
 
     const shell = await Bun.fetch(base).then(response => response.text())
     expect(shell).toContain('rel="icon"')
-    expect(shell).toContain('/favicon.svg?color=0000ff')
+    expect(shell).toContain('href="/assets/favicon"')
 
     expect(await server.stop()).toBe(0)
   })
 
-  test('omits the favicon link when nothing can serve it', async () => {
+  test('defaults to the Basis mark when nothing is configured or discovered', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'basis-nofavicon-'))
 
     try {
@@ -710,7 +709,10 @@ describe('Server favicon', () => {
       await waitForHealth(base, (result, payload) => result.status === 200 && payload.status === 'ok')
 
       const shell = await Bun.fetch(base).then(response => response.text())
-      expect(shell).not.toContain('rel="icon"')
+      expect(shell).toContain('href="/assets/favicon"')
+
+      const svg = await Bun.fetch(`${base}/assets/favicon`).then(response => response.text())
+      expect(svg).toContain('<svg')
 
       expect(await server.stop()).toBe(0)
     } finally {

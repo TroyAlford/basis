@@ -124,20 +124,23 @@ Templates match the route under `/api` (`/api/hello/world`) and, for root-level 
 
 ## Favicon and icons
 
-The server owns the SPA favicon. Configure it with `.favicon(...)` — a path, a `Bun.file(...)`, or a class extending `IconBase` — and it links the result in the shell:
+Every Basis server serves the favicon at the standard, extensionless `/assets/favicon`, and the shell always links that URL. What it returns depends on configuration and discovery:
 
 ```ts
 import { TriangleRight } from 'basis/react/icons'
 import { Server } from 'basis/server'
 
-// A file is served verbatim at /favicon.<ext>.
+// A file is served verbatim (its content type comes from the file).
 new Server().main('./index.tsx').favicon('./brand.png')
 
-// An icon is rendered at /favicon.svg, and its options become the link query.
+// A Bun.file works the same way.
+new Server().main('./index.tsx').favicon(Bun.file('./brand.ico'))
+
+// An IconBase is rendered as an SVG, with its options applied.
 new Server().main('./index.tsx').favicon(TriangleRight, { color: 'ff0000', filled: true })
 ```
 
-When no favicon is configured, the server discovers `favicon.{ico,svg,png,jpg,jpeg,gif,webp}` (in that order) in the working directory first, then `Server.root`, and links it. With neither, it links `/assets/favicon.svg` only when an `.assets(...)` mount actually serves that file; otherwise the shell carries no favicon link rather than one that 404s.
+When no favicon is configured, the server discovers `favicon.{ico,svg,png,jpg,jpeg,gif,webp}` (in that order) in the working directory, then `Server.root`, then any `.assets(...)` folder. When nothing is configured or discovered, it serves the **Basis mark**, so every Basis server has a working favicon.
 
 ### Icons
 
@@ -153,7 +156,7 @@ new Server().main('./index.tsx').icons({ Nerd })
 
 The query contract matches `NerdrageTools/nerdrage`: `color` is a hex value (with or without `#`, default `000000`), `filled` accepts `true`/empty/`filled`, `size` defaults to `1em`, and any other key becomes an icon prop except `stroke`. Registered icons take precedence over Basis's set.
 
-Development injects the same favicon link into the shell (Bun's HTML bundler would otherwise try to bundle it); production renders it directly.
+The shell renders `<link rel="icon" href="/assets/favicon">`; development injects that link (Bun's HTML bundler would otherwise try to bundle it), while production renders it directly.
 
 ## OAuth
 
