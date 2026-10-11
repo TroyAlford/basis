@@ -3,6 +3,7 @@ import { Button, css, EnumEditor, NumberEditor, Router, style, TextEditor } from
 import * as Icons from 'basis/react/icons'
 import type { ComponentType, ReactNode } from 'react'
 import { IconBase } from '../../react/icons/IconBase/IconBase'
+import { BRAND_CANDIDATES } from '../components/BrandCandidates'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
@@ -210,6 +211,17 @@ export class IconsDocs extends DocumentationPage<State> {
         <div style={{ marginBottom: '32px' }}>
           <h3>All Icons ({this.iconComponents.length})</h3>
           {this.renderIconGrid()}
+        </div>
+        <h2>Brand Mark Candidates</h2>
+        <p>Candidates for the Basis mark, taken from established open-source icon sets (source noted) rather than invented geometry. The chosen mark gets promoted into <code>basis/react/icons</code> and used for the docs favicon.</p>
+        <div className="special-icons-grid">
+          {BRAND_CANDIDATES.map(({ Icon, name, source }) => (
+            <div key={name} className="special-icon-item">
+              <div className="icon-demo-container"><Icon /></div>
+              <span className="special-icon-name">{name}</span>
+              <span className="special-icon-name">{source}</span>
+            </div>
+          ))}
         </div>
         <h2>Usage Examples</h2>
         <h3>Basic Icon Usage</h3>
