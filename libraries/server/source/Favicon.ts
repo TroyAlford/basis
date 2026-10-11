@@ -163,7 +163,7 @@ export function resolveFavicon(
   cwd: string,
   root: string,
 ): ResolvedFavicon {
-  if (typeof input === 'function') {
+  if (IconBase.isIcon(input)) {
     return {
       href: `/favicon.svg${iconQueryString(options)}`,
       icon: input,
