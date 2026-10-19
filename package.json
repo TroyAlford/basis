@@ -28,7 +28,7 @@
     "./tsconfig/react.json": "./consumer/tsconfig/react.json"
   },
   "engines": {
-    "bun": ">=1.4.0"
+    "bun": ">=1.4.3"
   },
   "overrides": {
     "@types/estree": "1.0.8"
@@ -106,7 +106,7 @@
     "lint:css": "bun ./node_modules/stylelint/bin/stylelint.mjs \"**/*.styles.ts\" --config ./stylelint.config.mjs --allow-empty-input",
     "lint:es": "bun run update:linter && bun ./node_modules/eslint/bin/eslint.js .",
     "lint:md": "bun ./libraries/markdown-plugin/bin.ts",
-    "lint:ts": "bun ./node_modules/@typescript/native/bin/tsc --noEmit",
+    "lint:ts": "bun ./consumer/cli.ts typecheck",
     "postinstall": "bun ./consumer/install.ts",
     "prepare": "bun ./scripts/prepare.ts",
     "test": "bun test . ./.github",
