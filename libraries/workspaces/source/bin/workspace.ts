@@ -8,14 +8,12 @@ import { findWorkspace } from '../functions/findWorkspace'
 import { getChangedFiles } from '../functions/getChangedFiles'
 import { getChangedWorkspaces } from '../functions/getChangedWorkspaces'
 import { listWorkspaces } from '../functions/listWorkspaces'
-import { publishJSR } from '../functions/publishJSR'
 import type { Workspace } from '../types/Workspace'
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   args: Bun.argv.slice(2),
   options: {
-    dryRun: { type: 'boolean' },
     license: { default: 'none', type: 'string' },
     not: { default: [], multiple: true, type: 'string' },
     only: { default: [], multiple: true, type: 'string' },
@@ -98,10 +96,6 @@ async function buildPackageWithOptions(name: string, workspace: Workspace) {
         return workspace.packagePath
       })
       .when('list').then(() => listWorkspaces({ not: values.not, only: values.only }))
-      .when('publish').then(async () => {
-        if (!values.version) throw new Error('Usage: workspace publish --version <version> [options]')
-        return publishJSR(values)
-      })
       .else(() => {
         throw new Error(`Unknown command: ${command}`)
       })

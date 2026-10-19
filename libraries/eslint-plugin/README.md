@@ -2,44 +2,40 @@
 
 ## Overview
 
-The `@basis/eslint-plugin` workspace provides a comprehensive set of ESLint rules designed to enforce a consistent coding style across your projects. This plugin is intended to be used as a base configuration that can be easily integrated into your projects by installing the `@basis/eslint-plugin` package via JSR. The rules focus on maintaining code quality, readability, and consistency, with an emphasis on modern JavaScript and TypeScript practices. This is a flat-config ESLint\@9+ configuration that is highly opinionated.
+The `@basis/eslint-plugin` workspace provides a comprehensive set of ESLint rules designed to enforce a consistent coding style across your projects. This plugin is an internal workspace, consumed through the Basis repository as `basis/eslint`; it is not published as a standalone package. The rules focus on maintaining code quality, readability, and consistency, with an emphasis on modern JavaScript and TypeScript practices. This is a flat-config ESLint\@9+ configuration that is highly opinionated.
 
 ## Installation
 
-```sh
-bunx jsr add @basis/eslint-plugin
-```
-
-> **Note:** All `@basis` packages, including this one, are published via `jsr` instead of `npm`. This approach ensures a streamlined and efficient package management experience tailored for Bun.
+The plugin is an internal workspace. Consumers use `basis/eslint` from the Basis repository pinned to a Git tag; there is no standalone package install and no package publish step.
 
 The plugin ships as TypeScript source; there is no separate JavaScript build.
 
 ## Usage
 
-To use this ESLint plugin in your project, follow these steps:
-
-1. **Create a Root-Level ESLint Configuration**: In your project's root directory, create a file named `eslint.config.mjs` that references the plugin.
+Create a root-level `eslint.config.mjs` that re-exports the Basis policy:
 
 ```ts
-import eslintPlugin from '@basis/eslint-plugin'
+import basis from 'basis/eslint'
 
-export default eslintPlugin
+export default basis
 ```
 
-2. **Customize the Configuration**: You can override the base rules provided by the plugin to suit your project's specific needs. Here's an example of how to extend and customize the configuration:
+To customize the policy, use the `createConfig` factory:
 
 ```ts
-import eslintPlugin from '@basis/eslint-plugin'
+import { createConfig } from 'basis/eslint'
 
-export default {
-  ...eslintPlugin,
-  rules: {
-    ...eslintPlugin.rules,
-    'no-console': 'warn', // Override the rule to allow console statements with a warning
-    'quotes': ['error', 'double'], // Change the quotes rule to enforce double quotes
-    'semi': ['error', 'always'], // Enforce the use of semicolons
-  },
-}
+export default createConfig({
+  overrides: [
+    {
+      rules: {
+        'no-console': 'warn',
+        'quotes': ['error', 'double'],
+        'semi': ['error', 'always'],
+      },
+    },
+  ],
+})
 ```
 
 ## Style and Rules

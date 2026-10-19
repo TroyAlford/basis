@@ -21,11 +21,7 @@ A key feature of this library is the abstract `Component` class, which serves as
 
 ## Installation
 
-```sh
-bunx jsr add @basis/react
-```
-
-> **Note:** All `@basis` packages, including this one, are published via `jsr` instead of `npm`. This approach ensures a streamlined and efficient package management experience tailored for Bun.
+`@basis/react` is consumed from the Basis repository over a pinned Git tag as `basis/react` (see [`consumer/README.md`](../../consumer/README.md)). There is no package publish step.
 
 ## Requirements
 
@@ -39,7 +35,7 @@ This package includes various utilities and components. Here’s a brief example
 
 ```tsx
 import * as React from 'react';
-import { Component } from '@basis/react';
+import { Component } from 'basis/react';
 
 class MyComponent extends Component {
   render() {
