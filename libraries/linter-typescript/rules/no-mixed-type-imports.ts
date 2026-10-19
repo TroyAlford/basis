@@ -11,13 +11,13 @@ export const noMixedTypeImports: Rule.RuleModule = {
           type: new Set<string>(),
           value: new Set<string>(),
         }
-        const semi = context.sourceCode.getText(decl).endsWith(';') ? ';' : ''
+        const semi = context.sourceCode.text.slice(decl.range[0], decl.range[1]).endsWith(';') ? ';' : ''
 
         decl.specifiers.forEach(specifier => {
           if (specifier.type !== 'ImportSpecifier') return
           const importedName = specifier.imported.type === 'Identifier'
             ? specifier.imported.name
-            : specifier.imported.value
+            : String(specifier.imported.value)
           const importKind = specifier.importKind === 'type' ? 'type' : 'value'
           imports[importKind].add(importedName)
         })

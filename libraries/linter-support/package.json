@@ -9,7 +9,6 @@
     "./ts-eslint": "./ts-eslint.ts"
   },
   "dependencies": {
-    "@eslint-community/eslint-utils": "^4.9.1",
-    "@typescript-eslint/types": "^8.70.0"
+    "@eslint-community/eslint-utils": "^4.9.1"
   }
 }

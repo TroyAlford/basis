@@ -57,7 +57,7 @@ const clean = (raw: string): string => {
  * @returns The tag name, or `null` for a namespaced or member name.
  */
 const tagName = (node: TSESTree.JSXOpeningElement): string | null => (
-  node.name.type === 'JSXIdentifier' ? node.name.name : null
+  node.name.type === 'JSXIdentifier' ? (node.name as TSESTree.Identifier).name : null
 )
 
 /**
