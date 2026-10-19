@@ -1,5 +1,5 @@
 {
-  "name": "@/server-fixture",
+  "name": "@basis/testing-server",
   "dependencies": {
     "@basis/react": "workspace:*",
     "@basis/server": "workspace:*",
