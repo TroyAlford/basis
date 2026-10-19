@@ -115,10 +115,10 @@ Presets: `basis/tsconfig/base.json`, `basis/tsconfig/bun.json`, `basis/tsconfig/
 
 Basis type-checks with Bun's built-in TypeScript checker (`bun --check`) rather than a standalone `tsc` process. It reports TypeScript 7 diagnostics and requires Bun 1.4.3 or newer; `basis typecheck` and `basis check` stop with an actionable error on older runtimes.
 
-The workspace still installs two TypeScript packages for other jobs:
+The workspace still installs TypeScript 6 for the jobs that need a compiler:
 
-- `@typescript/native` (aliased to `typescript@^7`) emits the ESLint plugin's JavaScript build; it is not the type-check surface.
-- `typescript` is aliased to `@typescript/typescript6` so tooling that needs the TypeScript 6 API (notably typescript-eslint and editors) keeps working.
+- `typescript` is aliased to `@typescript/typescript6` for typescript-eslint, editors, and the workspace declaration emitter. It is not the type-check surface; `bun check` does not use it.
+- The ESLint plugin is consumed as source by ESLint and published as source to JSR, so it has no separate TypeScript build.
 
 The presets target TS 6/7 and so omit options removed in that release (for example `downlevelIteration`).
 

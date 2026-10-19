@@ -12,6 +12,8 @@ bunx jsr add @basis/eslint-plugin
 
 > **Note:** All `@basis` packages, including this one, are published via `jsr` instead of `npm`. This approach ensures a streamlined and efficient package management experience tailored for Bun.
 
+The plugin ships as TypeScript source; there is no separate JavaScript build.
+
 ## Usage
 
 To use this ESLint plugin in your project, follow these steps:
@@ -19,7 +21,7 @@ To use this ESLint plugin in your project, follow these steps:
 1. **Create a Root-Level ESLint Configuration**: In your project's root directory, create a file named `eslint.config.mjs` that references the plugin.
 
 ```ts
-import eslintPlugin from './node_modules/@basis/eslint-plugin/dist/index.mjs'
+import eslintPlugin from '@basis/eslint-plugin'
 
 export default eslintPlugin
 ```
@@ -27,7 +29,7 @@ export default eslintPlugin
 2. **Customize the Configuration**: You can override the base rules provided by the plugin to suit your project's specific needs. Here's an example of how to extend and customize the configuration:
 
 ```ts
-import eslintPlugin from './node_modules/@basis/eslint-plugin/dist/index.mjs'
+import eslintPlugin from '@basis/eslint-plugin'
 
 export default {
   ...eslintPlugin,
