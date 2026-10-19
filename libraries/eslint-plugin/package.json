@@ -1,17 +1,11 @@
 {
-  "main": "./index.mjs",
-  "module": "./index.mjs",
   "name": "@basis/eslint-plugin",
   "description": "A comprehensive ESLint plugin for enforcing coding standards and best practices.",
   "type": "module",
   "engines": {
     "bun": "*"
   },
-  "scripts": {
-    "build": "bun build:tsc && bun build:fix-extensions",
-    "build:tsc": "bun ../../node_modules/@typescript/native/bin/tsc ./index.ts ./compliance.ts --ignoreConfig --allowSyntheticDefaultImports --esModuleInterop --module ESNext --moduleResolution bundler --outDir ./dist --skipLibCheck --strict false --types bun-types",
-    "build:fix-extensions": "bun scripts/fix-extensions.ts"
-  },
+  "exports": "./index.ts",
   "dependencies": {
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^5.10.0",
