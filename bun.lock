@@ -135,7 +135,6 @@
     "libraries/linter-typescript": {
       "name": "@basis/linter-typescript",
       "dependencies": {
-        "@basis/linter-support": "workspace:*",
         "@eslint/js": "^10.0.1",
         "@stylistic/eslint-plugin": "^5.10.0",
         "eslint": "^10.11.0",
