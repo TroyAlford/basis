@@ -43,7 +43,7 @@ export const noJsxSpaceInjection: Rule.RuleModule = {
     const check = (node: TSESTree.JSXElement | TSESTree.JSXFragment): void => {
       if (hasNewline(textOf(node))) return
       const name = node.type === 'JSXElement' && node.openingElement.name.type === 'JSXIdentifier'
-        ? node.openingElement.name.name
+        ? (node.openingElement.name as TSESTree.Identifier).name
         : null
       if (name !== null && WHITESPACE_SENSITIVE.has(name)) return
 

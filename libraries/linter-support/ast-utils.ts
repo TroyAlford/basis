@@ -1,5 +1,5 @@
 import { isParenthesized } from '@eslint-community/eslint-utils'
-import { AST_TOKEN_TYPES } from '@typescript-eslint/types'
+import { AST_TOKEN_TYPES } from './ast'
 
 /** A token as seen by an ESLint rule. */
 interface Token {

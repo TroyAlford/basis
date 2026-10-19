@@ -94,7 +94,7 @@ const getObjectBody = (
   }
 }
 
-const getProperty = (node: TSESTree.Node): TSESTree.Node | undefined => {
+const getProperty = (node: TSESTree.Node): TSESTree.Node | TSESTree.Identifier | undefined => {
   switch (node.type) {
     case AST_NODE_TYPES.TSIndexSignature: {
       const [identifier] = node.parameters as [TSESTree.Identifier]
@@ -115,9 +115,9 @@ const getPropertyName = (node: TSESTree.Node): string | undefined => {
   if (!property) return undefined
   switch (property.type) {
     case AST_NODE_TYPES.Literal:
-      return String(property.value)
+      return String((property as TSESTree.Literal).value)
     case AST_NODE_TYPES.Identifier:
-      return property.name
+      return (property as TSESTree.Identifier).name
     default:
       return undefined
   }
