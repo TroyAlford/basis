@@ -4,7 +4,7 @@ A Bun application server for Basis React applications. One `Server` supports two
 
 ## Installation
 
-`@basis/server` is consumed from the Basis repository over a pinned Git tag (see [`consumer/README.md`](../../consumer/README.md)). There is no npm/JSR publish step.
+`@basis/server` is consumed from the Basis repository over a pinned Git tag (see [`consumer/README.md`](../../consumer/README.md)). There is no package publish step.
 
 ## Usage
 

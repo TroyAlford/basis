@@ -12,11 +12,7 @@ The `@basis/utilities` package offers a collection of utility functions designed
 
 ## Installation
 
-```sh
-bunx jsr add @basis/utilities
-```
-
-> **Note:** All `@basis` packages, including this one, are published via `jsr` instead of `npm`. This approach ensures a streamlined and efficient package management experience tailored for Bun.
+`@basis/utilities` is an internal workspace consumed from the Basis repository. There is no package publish step.
 
 ## Usage Example
 

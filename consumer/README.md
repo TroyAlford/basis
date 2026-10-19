@@ -1,6 +1,6 @@
 # Consuming Basis
 
-The Basis repository is the distribution artifact. There is no npm/JSR publish step and no consumer build step: Bun resolves the source directly from a pinned Git tag.
+The Basis repository is the distribution artifact. There is no package publish step and no consumer build step: Bun resolves the source directly from a pinned Git tag.
 
 ## Install
 
@@ -118,7 +118,7 @@ Basis type-checks with Bun's built-in TypeScript checker (`bun --check`) rather 
 The workspace still installs TypeScript 6 for the jobs that need a compiler:
 
 - `typescript` is aliased to `@typescript/typescript6` for typescript-eslint, editors, and the workspace declaration emitter. It is not the type-check surface; `bun check` does not use it.
-- The ESLint plugin is consumed as source by ESLint and published as source to JSR, so it has no separate TypeScript build.
+- The ESLint plugin is consumed as source by ESLint, so it has no separate TypeScript build.
 
 The presets target TS 6/7 and so omit options removed in that release (for example `downlevelIteration`).
 
