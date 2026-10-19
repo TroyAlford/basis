@@ -1,6 +1,6 @@
 import type { Rule } from 'eslint'
 import type * as ESTree from 'estree'
-import type { TSESTree } from '@basis/linter-support'
+import type { TSESTree } from '../../linter-support'
 
 /** A JSON-ish expression that is nothing but spaces. */
 const SPACES = /^ +$/

@@ -7,8 +7,8 @@
  * plain lexicographic comparison with index signatures weighted to the front.
  */
 import type { Rule } from 'eslint'
-import type { TSESTree } from '@basis/linter-support'
-import { AST_NODE_TYPES, AST_TOKEN_TYPES } from '@basis/linter-support'
+import type { TSESTree } from '../../linter-support'
+import { AST_NODE_TYPES, AST_TOKEN_TYPES } from '../../linter-support'
 
 /** The TS-aware source code surface used by the sorting rules. */
 export interface SourceCode {

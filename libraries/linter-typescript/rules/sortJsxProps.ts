@@ -1,5 +1,5 @@
 import type { Rule } from 'eslint'
-import type { TSESTree } from '@basis/linter-support'
+import type { TSESTree } from '../../linter-support'
 
 /** A custom JSX prop group. */
 interface CustomGroup {

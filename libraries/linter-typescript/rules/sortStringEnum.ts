@@ -7,8 +7,8 @@
  * plain lexicographic comparison of string enum member names.
  */
 import type { Rule } from 'eslint'
-import type { TSESTree } from '@basis/linter-support'
-import { AST_NODE_TYPES } from '@basis/linter-support'
+import type { TSESTree } from '../../linter-support'
+import { AST_NODE_TYPES } from '../../linter-support'
 import type { RuleContext } from './sortInterface'
 import { createReporter } from './sortInterface'
 
