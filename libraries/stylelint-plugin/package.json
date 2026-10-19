@@ -9,7 +9,6 @@
   "dependencies": {
     "postcss": "^8.5.28",
     "postcss-selector-parser": "^7.1.6",
-    "postcss-styled-syntax": "^0.7.3",
     "stylelint": "^17.15.0",
     "stylelint-order": "^8.1.1"
   }

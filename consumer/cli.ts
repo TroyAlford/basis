@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { bunCheckUnsupportedReason } from './bun-version'
 import { runDocs, runDocsBuild } from './docs'
+import { runBunLint } from './lint'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
 
@@ -98,36 +99,6 @@ const runBin = (packageName: string, binName: string, args: string[]): number =>
   return result.exitCode
 }
 
-/** Flat ESLint config filenames ESLint discovers automatically. */
-const ESLINT_CONFIG_FILES = [
-  'eslint.config.cjs',
-  'eslint.config.cts',
-  'eslint.config.js',
-  'eslint.config.mjs',
-  'eslint.config.mts',
-  'eslint.config.ts',
-]
-
-/**
- * Whether the working directory provides its own ESLint config, in which case
- * the repository's policy wins over the Basis fallback.
- * @returns Whether a flat ESLint config file exists in the working directory.
- */
-const hasEslintConfig = (): boolean => ESLINT_CONFIG_FILES.some(name => existsSync(join(process.cwd(), name)))
-
-/**
- * Runs the TypeScript/JSX ESLint policy.
- *
- * A repository's own `eslint.config.*` wins when present; otherwise Basis
- * supplies its own config, so `basis lint` / `basis format` need no setup.
- * @param fix Whether to let ESLint apply the fixes it supports.
- * @returns The child process exit code.
- */
-const runEslint = (fix: boolean): number => {
-  const config = hasEslintConfig() ? [] : ['--config', join(basisDir(), 'eslint.config.mjs')]
-  return runBin('eslint', 'eslint', ['.', ...config, ...(fix ? ['--fix'] : [])])
-}
-
 /**
  * Runs the Basis CSS policy over every `*.styles.ts` file.
  * @param fix Whether to let Stylelint apply the fixes it supports.
@@ -166,7 +137,7 @@ const runMarkdown = (fix: boolean): number => {
  * @returns The first non-zero child process exit code, or `0`.
  */
 const runLint = (fix: boolean): number => {
-  const eslintCode = runEslint(fix)
+  const eslintCode = runBunLint(fix)
   if (eslintCode !== 0) return eslintCode
 
   const stylelintCode = runStylelint(fix)

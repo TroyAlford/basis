@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import * as postcssStyledSyntax from 'postcss-styled-syntax'
 import type { Config } from 'stylelint'
+import * as basisSyntax from '../syntax'
 import { lintStyles } from '../testUtils'
 import { noStateClasses, ruleName, STATE_CLASSES } from './noStateClasses'
 
 const config = (ignore?: string[]): Config => ({
-  customSyntax: postcssStyledSyntax,
+  customSyntax: basisSyntax,
   plugins: [noStateClasses],
   rules: {
     [ruleName]: ignore ? [true, { ignore }] : true,

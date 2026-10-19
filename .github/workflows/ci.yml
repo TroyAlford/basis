@@ -22,8 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
-      - name: Run ESLint
-        run: NODE_NO_WARNINGS=1 bun ./node_modules/eslint/bin/eslint.js
+      - name: Run Bun lint
+        run: bun ./consumer/lint-es.ts
       - name: Run Stylelint
         run: bun ./node_modules/stylelint/bin/stylelint.mjs "**/*.styles.ts" --config ./stylelint.config.mjs --allow-empty-input
       - name: Run Markdown lint

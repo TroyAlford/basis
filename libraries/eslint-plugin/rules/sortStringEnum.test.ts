@@ -1,38 +1,16 @@
-import * as parser from '@typescript-eslint/parser'
 import { describe, expect, test } from 'bun:test'
-import { Linter } from 'eslint'
-import { sortStringEnum } from './sortStringEnum'
+import { join } from 'node:path'
+import { lintWithBun } from './testUtils'
+
+const lint = (code: string) => lintWithBun({
+  code,
+  fix: true,
+  ruleExport: 'sortStringEnum',
+  ruleName: 'sort-string-enum',
+  rulePath: join(import.meta.dir, 'sortStringEnum.ts'),
+})
 
 describe('sort-string-enum', () => {
-  const lint = (code: string) => {
-    const linter = new Linter()
-    return linter.verifyAndFix(
-      code,
-      [
-        {
-          files: ['**/*.ts'],
-          languageOptions: {
-            parser,
-            parserOptions: {
-              ecmaVersion: 'latest',
-              sourceType: 'module',
-            },
-          },
-          plugins: {
-            test: {
-              rules: {
-                'sort-string-enum': sortStringEnum,
-              },
-            },
-          },
-          rules: {
-            'test/sort-string-enum': 'error',
-          },
-        },
-      ],
-      { filename: 'sort-string-enum.fixture.ts' },
-    )
-  }
 
   test('sorts string enum members ascending', () => {
     const output = lint(`

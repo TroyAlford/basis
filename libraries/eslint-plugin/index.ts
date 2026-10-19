@@ -1,18 +1,17 @@
 /* eslint-disable @basis/no-default-export */
 import eslint from '@eslint/js'
-import type { ESLint } from 'eslint'
+import type { ESLint, Linter } from 'eslint'
 import pluginJSDoc from 'eslint-plugin-jsdoc'
-import type { ConfigWithExtends } from 'typescript-eslint'
-import pluginTypescript from 'typescript-eslint'
 import { IGNORE_PATTERNS } from './ignores'
 import { plugins } from './plugins'
+import { TYPESCRIPT_FILES, TYPESCRIPT_RULES } from './rules/typescript'
 
 /** Plugin options */
 interface PluginOptions {
   /** Files to include */
-  files?: ConfigWithExtends['files'],
+  files?: Linter.Config['files'],
   /** Rules to apply */
-  rules: ConfigWithExtends['rules'],
+  rules: Linter.Config['rules'],
 }
 
 /**
@@ -20,13 +19,9 @@ interface PluginOptions {
  * @param options - The plugin options.
  * @returns The ESLint configuration.
  */
-const plugin = (options: PluginOptions): ConfigWithExtends => {
+const plugin = (options: PluginOptions): Linter.Config => {
   const { files, rules } = options
-  const config: ConfigWithExtends = {
-    languageOptions: {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
-    },
+  const config: Linter.Config = {
     plugins: {
       ...plugins,
     },
@@ -39,15 +34,27 @@ const plugin = (options: PluginOptions): ConfigWithExtends => {
   return config
 }
 
-export default pluginTypescript.config(
+const TYPESCRIPT_CONFIG: Linter.Config = {
+  files: TYPESCRIPT_FILES,
+  languageOptions: {
+    parser: '@typescript-eslint/parser',
+    parserOptions: {
+      ecmaFeatures: { jsx: true },
+    },
+  },
+  rules: TYPESCRIPT_RULES as unknown as Linter.Config['rules'],
+}
+
+export default [
   { ignores: IGNORE_PATTERNS },
   eslint.configs.recommended,
   pluginJSDoc.configs['flat/recommended-typescript-error'],
-  ...pluginTypescript.configs.strict,
-  ...pluginTypescript.configs.stylistic,
+  TYPESCRIPT_CONFIG,
   plugin({
     rules: {
       '@basis/component-architecture': 'error',
+      '@basis/eol-last': ['error', 'always'],
+      '@basis/function-paren-newline': ['error', 'multiline-arguments'],
       '@basis/import-extensions': 'error',
       '@basis/no-default-export': 'error',
       '@basis/no-extraneous-dependencies': 'error',
@@ -64,13 +71,11 @@ export default pluginTypescript.config(
       '@stylistic/arrow-parens': ['error', 'as-needed'],
       '@stylistic/class-methods-use-this': 'off',
       '@stylistic/default-case': 'off',
-      '@stylistic/eol-last': ['error', 'always'],
       '@stylistic/func-names': 'off',
       '@stylistic/js/arrow-parens': ['error', 'as-needed'],
       '@stylistic/js/arrow-spacing': ['error', { after: true, before: true }],
       '@stylistic/js/computed-property-spacing': ['error', 'never'],
       '@stylistic/js/function-call-argument-newline': ['error', 'consistent'],
-      '@stylistic/js/function-paren-newline': ['error', 'multiline-arguments'],
       '@stylistic/js/implicit-arrow-linebreak': ['error', 'beside'],
       '@stylistic/js/indent': 'off',
       '@stylistic/js/jsx-quotes': ['error', 'prefer-double'],
@@ -234,8 +239,6 @@ export default pluginTypescript.config(
       'camelcase': ['error', { properties: 'always' }],
       'consistent-return': 'error',
       'dot-notation': 'error',
-      'eol-last': ['error', 'always'],
-      'function-paren-newline': ['error', 'multiline-arguments'],
       'jsdoc/escape-inline-tags': 'error',
       'no-console': 'error',
       'no-return-assign': 'error',
@@ -288,4 +291,4 @@ export default pluginTypescript.config(
       '@stylistic/max-len': 'off',
     },
   }),
-) as ESLint.ConfigData
+] as ESLint.ConfigData
