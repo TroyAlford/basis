@@ -21,13 +21,21 @@ CLI tools and utilities for managing monorepo workspaces. Features include:
 - Build system with license handling
 - Change detection
 
-### [@basis/eslint-plugin](./libraries/eslint-plugin)
+### [TypeScript linter](./libraries/linter-typescript)
 
-Custom ESLint rules for maintaining code quality:
+Rules for TypeScript and JavaScript files:
 
 - Type import organization
 - Object formatting rules
 - Additional TypeScript-specific rules
+
+### [CSS linter](./libraries/linter-css)
+
+Stylelint policy and rules for `*.styles.ts` files.
+
+### [Markdown linter](./libraries/linter-markdown)
+
+Remark/unified policy and rules for Markdown and MDX files.
 
 ### [@basis/bun-plugins](./libraries/bun-plugins)
 

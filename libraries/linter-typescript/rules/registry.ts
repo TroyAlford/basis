@@ -9,6 +9,7 @@ import { noExtraneousDependencies } from './noExtraneousDependencies'
 import { noJsxLineBreaks } from './noJsxLineBreaks'
 import { noJsxSpaceInjection } from './noJsxSpaceInjection'
 import { sortInterface } from './sortInterface'
+import { sortJsxProps } from './sortJsxProps'
 import { sortKeys } from './sortKeys'
 import { sortStringEnum } from './sortStringEnum'
 
@@ -25,6 +26,7 @@ export default {
     'no-mixed-type-imports': noMixedTypeImports,
     'no-object-padding': noObjectPadding,
     'sort-interface': sortInterface,
+    'sort-jsx-props': sortJsxProps,
     'sort-keys': sortKeys,
     'sort-string-enum': sortStringEnum,
   },

@@ -6,9 +6,9 @@
  * Only the default Basis behavior is implemented: ascending, case-sensitive,
  * plain lexicographic comparison of string enum member names.
  */
-import type { TSESTree } from '@typescript-eslint/types'
-import { AST_NODE_TYPES } from '@typescript-eslint/types'
 import type { Rule } from 'eslint'
+import type { TSESTree } from '@basis/linter-support'
+import { AST_NODE_TYPES } from '@basis/linter-support'
 import type { RuleContext } from './sortInterface'
 import { createReporter } from './sortInterface'
 

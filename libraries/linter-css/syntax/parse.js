@@ -1,6 +1,6 @@
 import postcss from 'postcss';
 import { Parser } from './parser.js';
-import { parseTemplates } from './parseTemplates.js';
+import { parseTemplates } from './parseTemplates';
 
 /** @typedef {import('./types.d.ts').NodeData} NodeData */
 

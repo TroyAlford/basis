@@ -1,2 +1,2 @@
-export { createMarkdownConfig, markdownConfig } from '../libraries/markdown-plugin'
-export type { CreateMarkdownConfigOptions, MarkdownConfig } from '../libraries/markdown-plugin'
+export { createMarkdownConfig, markdownConfig } from '../libraries/linter-markdown'
+export type { CreateMarkdownConfigOptions, MarkdownConfig } from '../libraries/linter-markdown'

@@ -1,8 +1,8 @@
-# `@basis/markdown-plugin`
+# Markdown linter
 
 The Basis-owned Markdown/MDX lint surface. It bundles the shared remark/unified configuration and the Basis-specific rules so consumers do not copy the parser, the off-the-shelf rules, or the serialization settings.
 
-`@basis/markdown-plugin` is an internal workspace. Consumers import its public surface, `basis/markdown`.
+The Markdown linter is an internal workspace. Consumers import its public surface, `basis/markdown`.
 
 ## Engine
 
@@ -44,4 +44,4 @@ const config = createMarkdownConfig({
 
 ## Tests
 
-The rule and the parsing contract are covered under `libraries/markdown-plugin/*.test.ts`: soft-wrapped paragraphs, hard breaks, list-item paragraphs, `.md` prose that is not valid MDX, front-matter, and the fix-then-converge contract.
+The rule and the parsing contract are covered under `libraries/linter-markdown/*.test.ts`: soft-wrapped paragraphs, hard breaks, list-item paragraphs, `.md` prose that is not valid MDX, front-matter, and the fix-then-converge contract.

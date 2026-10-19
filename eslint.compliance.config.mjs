@@ -1,3 +1,3 @@
-import { createComplianceConfig } from './libraries/eslint-plugin/compliance'
+import { createComplianceConfig } from './libraries/linter-typescript/compliance'
 
 export default createComplianceConfig()
