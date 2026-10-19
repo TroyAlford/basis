@@ -123,10 +123,12 @@ import { createMarkdownConfig } from 'basis/markdown'
 
 Presets: `basis/tsconfig/base.json`, `basis/tsconfig/bun.json`, `basis/tsconfig/react.json`. They contain no Basis-monorepo path mappings.
 
-Basis targets TypeScript 7 (the native compiler). Since TS 7 ships no programmatic API, the workspace installs it side-by-side:
+Basis type-checks with Bun's built-in TypeScript checker (`bun --check`) rather than a standalone `tsc` process. It reports TypeScript 7 diagnostics and requires Bun 1.4.3 or newer; `basis typecheck` and `basis check` stop with an actionable error on older runtimes.
 
-- `@typescript/native` (aliased to `typescript@^7`) provides the native `tsc` that `basis typecheck` / `basis check` run.
-- `typescript` is aliased to `@typescript/typescript6` so tooling that needs the TypeScript 6 API (notably typescript-eslint) keeps working.
+The workspace still installs two TypeScript packages for other jobs:
+
+- `@typescript/native` (aliased to `typescript@^7`) emits the ESLint plugin's JavaScript build; it is not the type-check surface.
+- `typescript` is aliased to `@typescript/typescript6` so tooling that needs the TypeScript 6 API (notably typescript-eslint and editors) keeps working.
 
 The presets target TS 6/7 and so omit options removed in that release (for example `downlevelIteration`).
 
@@ -341,7 +343,7 @@ bunx basis docs check # validate the docs/ tree (front-matter, fences, links)
 bunx basis docs build # project the docs/ tree to a static site
 ```
 
-`basis lint` and `basis format` need no setup: Stylelint and Markdown are always configured by Basis, and when a repository has no `eslint.config.*` Basis supplies its own. A repository's own ESLint config wins when present. `basis lint` reports every surface; `basis format` applies the fixes each surface supports in a single pass, including the Markdown serialization that resolves blank-line spacing. A follow-up `basis lint` reports nothing fixable that the first run did not already resolve; rulings without a safe transformation (for example JSDoc contracts and `max-len`) still require a manual edit. `basis check` runs `basis lint` before it typechecks.
+`basis lint` and `basis format` need no setup: Stylelint and Markdown are always configured by Basis, and when a repository has no `eslint.config.*` Basis supplies its own. A repository's own ESLint config wins when present. `basis lint` reports every surface; `basis format` applies the fixes each surface supports in a single pass, including the Markdown serialization that resolves blank-line spacing. A follow-up `basis lint` reports nothing fixable that the first run did not already resolve; rulings without a safe transformation (for example JSDoc contracts and `max-len`) still require a manual edit. `basis typecheck` runs Bun's built-in TypeScript checker and requires Bun 1.4.3 or newer; an older runtime fails with an upgrade instruction. `basis check` runs `basis lint` before it typechecks.
 
 `basis docs check` validates the canonical `docs/` tree — front-matter, code fences, and repository-relative links — and `basis docs build` projects it to a static site suitable for GitHub Pages (`--out` defaults to `docs-dist`, `--base` prefixes links for a project Pages site, and `--title` sets the shell heading). Both read an optional `basis.docs.source` from `package.json`, defaulting to `docs`.
 

@@ -258,11 +258,11 @@ export abstract class Component<
    * @returns The rendered React node.
    */
   render(): React.ReactNode {
-    const Tag = this.tag
+    const Tag = this.tag as React.ElementType
     const { children, className, nodeRef } = this.props
 
-    const rendered = ( // @ts-expect-error - we are assuming a props match
-      <Tag // @ts-expect-error - we are assuming a props match
+    const rendered = (
+      <Tag
         ref={nodeRef ?? this.nodeRef}
         {...this.attributes}
         className={classNames(className, this.classNames)}
