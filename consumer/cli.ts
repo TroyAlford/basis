@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { bunCheckUnsupportedReason } from './bun-version'
 import { runDocs, runDocsBuild } from './docs'
+import { runBunLint } from './lint'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
 
@@ -97,36 +99,6 @@ const runBin = (packageName: string, binName: string, args: string[]): number =>
   return result.exitCode
 }
 
-/** Flat ESLint config filenames ESLint discovers automatically. */
-const ESLINT_CONFIG_FILES = [
-  'eslint.config.cjs',
-  'eslint.config.cts',
-  'eslint.config.js',
-  'eslint.config.mjs',
-  'eslint.config.mts',
-  'eslint.config.ts',
-]
-
-/**
- * Whether the working directory provides its own ESLint config, in which case
- * the repository's policy wins over the Basis fallback.
- * @returns Whether a flat ESLint config file exists in the working directory.
- */
-const hasEslintConfig = (): boolean => ESLINT_CONFIG_FILES.some(name => existsSync(join(process.cwd(), name)))
-
-/**
- * Runs the TypeScript/JSX ESLint policy.
- *
- * A repository's own `eslint.config.*` wins when present; otherwise Basis
- * supplies its own config, so `basis lint` / `basis format` need no setup.
- * @param fix Whether to let ESLint apply the fixes it supports.
- * @returns The child process exit code.
- */
-const runEslint = (fix: boolean): number => {
-  const config = hasEslintConfig() ? [] : ['--config', join(basisDir(), 'eslint.config.mjs')]
-  return runBin('eslint', 'eslint', ['.', ...config, ...(fix ? ['--fix'] : [])])
-}
-
 /**
  * Runs the Basis CSS policy over every `*.styles.ts` file.
  * @param fix Whether to let Stylelint apply the fixes it supports.
@@ -148,7 +120,7 @@ const runStylelint = (fix: boolean): number => runBin('stylelint', 'stylelint', 
 const runMarkdown = (fix: boolean): number => {
   const result = Bun.spawnSync([
     process.execPath,
-    join(basisDir(), 'libraries', 'markdown-plugin', 'bin.ts'),
+    join(basisDir(), 'libraries', 'linter-markdown', 'bin.ts'),
     ...(fix ? ['--fix'] : []),
   ], {
     stderr: 'inherit',
@@ -165,7 +137,7 @@ const runMarkdown = (fix: boolean): number => {
  * @returns The first non-zero child process exit code, or `0`.
  */
 const runLint = (fix: boolean): number => {
-  const eslintCode = runEslint(fix)
+  const eslintCode = runBunLint(fix)
   if (eslintCode !== 0) return eslintCode
 
   const stylelintCode = runStylelint(fix)
@@ -173,6 +145,33 @@ const runLint = (fix: boolean): number => {
 
   return runMarkdown(fix)
 }
+
+/**
+ * Reports whether the running Bun can type check through `bun --check`.
+ * @returns Whether the type checker is available.
+ */
+const requireBunCheck = (): boolean => {
+  const reason = bunCheckUnsupportedReason()
+  if (reason === null) return true
+  process.stderr.write(`${reason}\n`)
+  return false
+}
+
+/**
+ * Runs Bun's built-in TypeScript checker for the current project.
+ * @returns The child process exit code.
+ */
+const spawnBunCheck = (): number => Bun.spawnSync([process.execPath, '--check'], {
+  stderr: 'inherit',
+  stdin: 'inherit',
+  stdout: 'inherit',
+}).exitCode
+
+/**
+ * Runs the TypeScript checker after validating the runtime.
+ * @returns The child process exit code.
+ */
+const runTypecheck = (): number => (requireBunCheck() ? spawnBunCheck() : 1)
 
 /**
  * Verifies the installed Basis surface and its owned patches.
@@ -186,6 +185,14 @@ const doctor = (): number => {
 
   write(`[basis] version ${manifest.version ?? 'unknown'}`)
   write(`[basis] consumer root ${installRoot}`)
+
+  const unsupportedBun = bunCheckUnsupportedReason()
+  if (unsupportedBun === null) {
+    write(`[basis] bun ${Bun.version} typecheck ok`)
+  } else {
+    failures += 1
+    write(unsupportedBun)
+  }
 
   for (const subpath of REQUIRED_EXPORTS) {
     const target = manifest.exports?.[subpath]
@@ -246,11 +253,11 @@ const main = (): void => {
   if (command === 'doctor') process.exit(doctor())
   if (command === 'lint') process.exit(runLint(false))
   if (command === 'format') process.exit(runLint(true))
-  if (command === 'typecheck') process.exit(runBin('@typescript/native', 'tsc', ['--noEmit']))
+  if (command === 'typecheck') process.exit(runTypecheck())
   if (command === 'check') {
+    if (!requireBunCheck()) process.exit(1)
     const lintCode = runLint(false)
-    const typeCode = lintCode === 0 ? runBin('@typescript/native', 'tsc', ['--noEmit']) : lintCode
-    process.exit(typeCode)
+    process.exit(lintCode === 0 ? spawnBunCheck() : lintCode)
   }
 
   if (command === 'docs') {

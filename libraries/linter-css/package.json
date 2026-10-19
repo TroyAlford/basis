@@ -1,0 +1,16 @@
+{
+  "name": "@basis/linter-css",
+  "description": "Basis-owned Stylelint configuration and rules for CSS-in-TypeScript styles.",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./rules": "./rules/index.ts"
+  },
+  "dependencies": {
+    "postcss": "^8.5.28",
+    "oxc-parser": "^0.155.0",
+    "postcss-selector-parser": "^7.1.6",
+    "stylelint": "^17.15.0",
+    "stylelint-order": "^8.1.1"
+  }
+}

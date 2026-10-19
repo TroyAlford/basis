@@ -1,7 +1,6 @@
 /* eslint-disable consistent-return, no-console */
 import type { BuildConfig as BunBuildConfig } from 'bun'
 import chalk from 'chalk'
-import fs from 'fs'
 import { resolve } from 'path'
 import { pluginGlobals, pluginSASS } from '../../../bun-plugins'
 import { formatBytes, formatMilliseconds } from '../../../utilities'
@@ -155,45 +154,6 @@ export async function buildPackage(options: BuildOptions) {
     const totalSize = result.outputs.reduce((sum, output) => sum + output.size, 0)
     const duration = performance.now() - startTime
 
-    // Create temporary tsconfig for declarations
-    const declarationConfig = {
-      compilerOptions: {
-        declaration: true,
-        emitDeclarationOnly: true,
-        jsx: 'react-jsx',
-        module: 'ESNext',
-        moduleResolution: 'bundler',
-        outDir: outdir,
-        skipLibCheck: true,
-        target: 'ESNext',
-      },
-      include: [
-        resolve(packagePath, '*.ts'),
-        resolve(packagePath, '*.tsx'),
-      ],
-    }
-
-    const tempTsConfigPath = resolve(packagePath, 'tsconfig.build.json')
-    await Bun.write(tempTsConfigPath, JSON.stringify(declarationConfig, null, 2))
-
-    // Generate types with temporary config
-    console.log('Generating TypeScript declarations...')
-    const tsc = Bun.spawn(['tsc', '--project', tempTsConfigPath], {
-      cwd: packagePath,
-      stderr: 'inherit',
-      stdout: 'inherit',
-    })
-
-    const typesSuccess = await tsc.exited === 0
-
-    // Clean up temporary config
-    await Bun.write(tempTsConfigPath, '')
-    await fs.unlinkSync(tempTsConfigPath)
-
-    if (!typesSuccess) {
-      throw new Error('Failed to generate TypeScript declarations')
-    }
-
     // Handle license
     const licenseFile = await handleLicense(packagePath, license)
 
@@ -204,7 +164,6 @@ export async function buildPackage(options: BuildOptions) {
     const files = [
       `${outdir}/**/*.js`,
       `${outdir}/**/*.js.map`,
-      `${outdir}/**/*.d.ts`,
     ]
 
     if (hasReadme) files.push('README.md')
@@ -217,7 +176,6 @@ export async function buildPackage(options: BuildOptions) {
       main: `${outdir}/index.js`,
       module: `${outdir}/index.js`,
       source: 'index.ts',
-      types: `${outdir}/index.d.ts`,
       version,
     }
 
