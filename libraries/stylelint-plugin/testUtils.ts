@@ -1,10 +1,10 @@
-import * as postcssStyledSyntax from 'postcss-styled-syntax'
 import type { Config } from 'stylelint'
 import stylelint from 'stylelint'
+import * as basisSyntax from './syntax'
 
 /**
  * Wraps a CSS body in a `*.styles.ts`-shaped module so fixtures parse through
- * the same `postcss-styled-syntax` custom syntax consumers use.
+ * the same template-literal custom syntax consumers use.
  * @param body The CSS body to embed.
  * @returns A TypeScript module that registers the CSS.
  */
@@ -41,7 +41,7 @@ export const lintStyles = async (
   body: string,
   options: LintStylesOptions = {},
 ): Promise<LintStylesOutcome> => {
-  const { config = { customSyntax: postcssStyledSyntax, rules: {} }, fix = false } = options
+  const { config = { customSyntax: basisSyntax, rules: {} }, fix = false } = options
   const result = await stylelint.lint({ code: stylesModule(body), config, fix })
 
   return {

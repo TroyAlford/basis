@@ -46,7 +46,7 @@ The config also adds Basis rules of its own. `@basis/no-jsx-line-breaks` keeps i
 
 ## CSS linting
 
-Component CSS lives in `*.styles.ts` as `css` tagged template literals. Basis lints it with Stylelint through the `postcss-styled-syntax` custom syntax, so the embedded stylesheet is parsed as real CSS (including nesting and `${...}` interpolations) rather than matched as text.
+Component CSS lives in `*.styles.ts` as `css` tagged template literals. Basis lints it with Stylelint through its template-literal custom syntax, so the embedded stylesheet is parsed as real CSS (including nesting and `${...}` interpolations) rather than matched as text.
 
 The supported zero-config route is the CLI, which runs the ESLint, CSS, and Markdown policies together:
 
@@ -113,12 +113,11 @@ import { createMarkdownConfig } from 'basis/markdown'
 
 Presets: `basis/tsconfig/base.json`, `basis/tsconfig/bun.json`, `basis/tsconfig/react.json`. They contain no Basis-monorepo path mappings.
 
-Basis type-checks with Bun's built-in TypeScript checker (`bun --check`) rather than a standalone `tsc` process. It reports TypeScript 7 diagnostics and requires Bun 1.4.3 or newer; `basis typecheck` and `basis check` stop with an actionable error on older runtimes.
+Basis type-checks with Bun's built-in TypeScript checker (`bun --check`) and lints with Bun's built-in linter (`bun lint`). It does not install a standalone TypeScript compiler; editors use their own TypeScript language service.
 
-The workspace still installs TypeScript 6 for the jobs that need a compiler:
+The native toolchain requires the stable Bun release that ships both commands (1.4.4 or newer). `basis typecheck`, `basis lint`, and `basis check` stop with an actionable error on older runtimes.
 
-- `typescript` is aliased to `@typescript/typescript6` for typescript-eslint, editors, and the workspace declaration emitter. It is not the type-check surface; `bun check` does not use it.
-- The ESLint plugin is consumed as source by ESLint, so it has no separate TypeScript build.
+The ESLint plugin is consumed as source by the linter, so it has no separate TypeScript build.
 
 The presets target TS 6/7 and so omit options removed in that release (for example `downlevelIteration`).
 
@@ -310,7 +309,7 @@ bunx basis docs check # validate the docs/ tree (front-matter, fences, links)
 bunx basis docs build # project the docs/ tree to a static site
 ```
 
-`basis lint` and `basis format` need no setup: Stylelint and Markdown are always configured by Basis, and when a repository has no `eslint.config.*` Basis supplies its own. A repository's own ESLint config wins when present. `basis lint` reports every surface; `basis format` applies the fixes each surface supports in a single pass, including the Markdown serialization that resolves blank-line spacing. A follow-up `basis lint` reports nothing fixable that the first run did not already resolve; rulings without a safe transformation (for example JSDoc contracts and `max-len`) still require a manual edit. `basis typecheck` runs Bun's built-in TypeScript checker and requires Bun 1.4.3 or newer; an older runtime fails with an upgrade instruction. `basis check` runs `basis lint` before it typechecks.
+`basis lint` and `basis format` need no setup: Stylelint and Markdown are always configured by Basis, and when a repository has no `eslint.config.*` Basis supplies its own. A repository's own ESLint config wins when present. `basis lint` reports every surface; `basis format` applies the fixes each surface supports in a single pass, including the Markdown serialization that resolves blank-line spacing. A follow-up `basis lint` reports nothing fixable that the first run did not already resolve; rulings without a safe transformation (for example JSDoc contracts and `max-len`) still require a manual edit. `basis typecheck` runs Bun's built-in TypeScript checker and `basis lint` runs Bun's built-in linter. Both require the stable Bun release that ships them; an older runtime fails with an upgrade instruction. `basis check` runs `basis lint` before it typechecks.
 
 `basis docs check` validates the canonical `docs/` tree — front-matter, code fences, and repository-relative links — and `basis docs build` projects it to a static site suitable for GitHub Pages (`--out` defaults to `docs-dist`, `--base` prefixes links for a project Pages site, and `--title` sets the shell heading). Both read an optional `basis.docs.source` from `package.json`, defaulting to `docs`.
 

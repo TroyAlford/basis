@@ -6,7 +6,7 @@ The Basis-owned CSS lint surface for `*.styles.ts`. It bundles the shared Stylel
 
 ## What it parses
 
-Styles are parsed with [`postcss-styled-syntax`](https://github.com/hudochenkov/postcss-styled-syntax), a maintained template-literal custom syntax. It understands the `css` tagged templates in TypeScript, nested CSS, and `${...}` interpolations inside selectors and values. The deprecated generic `postcss-css-in-js` path is intentionally not used.
+Styles are parsed with Basis's template-literal custom syntax, adapted from [`postcss-styled-syntax`](https://github.com/hudochenkov/postcss-styled-syntax) (MIT). It understands the `css` tagged templates in TypeScript, nested CSS, and `${...}` interpolations inside selectors and values. The deprecated generic `postcss-css-in-js` path is intentionally not used.
 
 ## Configuration
 
@@ -60,4 +60,4 @@ Requires `*.styles.ts` stylesheets to be in **canonical ownership form**, and au
 
 ## Tests
 
-The rules and the parsing contract are covered under `libraries/stylelint-plugin/*.test.ts`. Fixtures run through the same `postcss-styled-syntax` custom syntax consumers use, covering nested CSS, tagged templates, interpolations, structural classes, native/ARIA/`data-*` state selectors, invalid state classes, and autofixable ordering.
+The rules and the parsing contract are covered under `libraries/stylelint-plugin/*.test.ts`. Fixtures run through the same template-literal custom syntax consumers use, covering nested CSS, tagged templates, interpolations, structural classes, native/ARIA/`data-*` state selectors, invalid state classes, and autofixable ordering.
