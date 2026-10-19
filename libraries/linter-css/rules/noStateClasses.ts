@@ -56,7 +56,7 @@ const messages = ruleMessages(ruleName, {
 })
 
 const meta = {
-  url: 'https://github.com/TroyAlford/basis/blob/main/libraries/stylelint-plugin/README.md',
+  url: 'https://github.com/TroyAlford/basis/blob/main/libraries/linter-css/README.md',
 }
 
 /** Secondary options accepted by `basis/no-state-classes`. */

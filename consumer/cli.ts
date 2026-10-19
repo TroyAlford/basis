@@ -120,7 +120,7 @@ const runStylelint = (fix: boolean): number => runBin('stylelint', 'stylelint', 
 const runMarkdown = (fix: boolean): number => {
   const result = Bun.spawnSync([
     process.execPath,
-    join(basisDir(), 'libraries', 'markdown-plugin', 'bin.ts'),
+    join(basisDir(), 'libraries', 'linter-markdown', 'bin.ts'),
     ...(fix ? ['--fix'] : []),
   ], {
     stderr: 'inherit',

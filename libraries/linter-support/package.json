@@ -1,6 +1,6 @@
 {
-  "name": "@typescript-eslint/utils",
-  "version": "8.70.0",
+  "name": "@basis/linter-support",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "exports": {

@@ -1,5 +1,5 @@
 {
-  "name": "@basis/markdown-plugin",
+  "name": "@basis/linter-markdown",
   "description": "Basis-owned remark/unified configuration and rules for Markdown and MDX.",
   "type": "module",
   "exports": {

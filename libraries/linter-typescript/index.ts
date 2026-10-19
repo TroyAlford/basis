@@ -4,7 +4,6 @@ import pluginStylistic from '@stylistic/eslint-plugin'
 import type { ESLint, Linter } from 'eslint'
 import pluginImportNewlines from 'eslint-plugin-import-newlines'
 import pluginJSDoc from 'eslint-plugin-jsdoc'
-import pluginPerfectionist from 'eslint-plugin-perfectionist'
 import pluginImportSort from 'eslint-plugin-simple-import-sort'
 import pluginSortDestructureKeys from 'eslint-plugin-sort-destructure-keys'
 import pluginBasis from './rules'
@@ -35,7 +34,6 @@ const plugin = (options: PluginOptions): Linter.Config => {
       '@stylistic/jsx': pluginStylistic as unknown,
       '@stylistic/ts': pluginStylistic as unknown,
       '@typescript-eslint': {} as ESLint.Plugin,
-      'perfectionist': pluginPerfectionist,
       'simple-import-sort': pluginImportSort,
       'sort-destructure-keys': pluginSortDestructureKeys,
     },
@@ -81,6 +79,22 @@ export default [
       '@basis/no-mixed-type-imports': 'error',
       '@basis/no-object-padding': 'error',
       '@basis/sort-interface': 'error',
+      '@basis/sort-jsx-props': ['error', {
+        customGroups: [
+          { elementNamePattern: '^(key|ref)$', groupName: 'reserved' },
+          { elementNamePattern: '^on[A-Z]', groupName: 'multiline-callback', modifiers: ['multiline'] },
+          { elementNamePattern: '^on[A-Z]', groupName: 'callback' },
+        ],
+        groups: [
+          'reserved',
+          'shorthand-prop',
+          'unknown',
+          'multiline-prop',
+          'callback',
+          'multiline-callback',
+        ],
+        ignoreCase: true,
+      }],
       '@basis/sort-keys': 'error',
       '@basis/sort-string-enum': 'error',
       '@import-newlines/enforce': ['error', { items: Infinity, semi: false }],
@@ -263,22 +277,6 @@ export default [
       'no-shadow': 'error',
       'no-unused-vars': 'off',
       'no-var': 'error',
-      'perfectionist/sort-jsx-props': ['error', {
-        customGroups: [
-          { elementNamePattern: '^(key|ref)$', groupName: 'reserved' },
-          { elementNamePattern: '^on[A-Z]', groupName: 'multiline-callback', modifiers: ['multiline'] },
-          { elementNamePattern: '^on[A-Z]', groupName: 'callback' },
-        ],
-        groups: [
-          'reserved',
-          'shorthand-prop',
-          'unknown',
-          'multiline-prop',
-          'callback',
-          'multiline-callback',
-        ],
-        ignoreCase: true,
-      }],
       'prefer-destructuring': ['error', { AssignmentExpression: { array: false, object: false } }],
       'simple-import-sort/imports': ['error', { groups: [['^[a-z@]', '^@basis/', '^([.]+[/])+', '.s?css$']] }],
       'sort-destructure-keys/sort-destructure-keys': ['error', { caseSensitive: false }],

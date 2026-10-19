@@ -1,8 +1,8 @@
-# ESLint Plugin
+# TypeScript linter
 
 ## Overview
 
-The `@basis/eslint-plugin` workspace provides a comprehensive set of ESLint rules designed to enforce a consistent coding style across your projects. This plugin is an internal workspace, consumed through the Basis repository as `basis/eslint`; it is not published as a standalone package. The rules focus on maintaining code quality, readability, and consistency, with an emphasis on modern JavaScript and TypeScript practices. This is a flat-config ESLint\@9+ configuration that is highly opinionated.
+The TypeScript linter provides a comprehensive set of rules designed to enforce a consistent coding style across your projects. This plugin is an internal workspace, consumed through the Basis repository as `basis/eslint`; it is not published as a standalone package. The rules focus on maintaining code quality, readability, and consistency, with an emphasis on modern JavaScript and TypeScript practices. This is a flat-config ESLint\@9+ configuration that is highly opinionated.
 
 ## Installation
 

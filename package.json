@@ -32,7 +32,9 @@
   },
   "overrides": {
     "@types/estree": "1.0.8",
-    "@typescript-eslint/utils": "workspace:*"
+    "@typescript-eslint/utils": "file:libraries/linter-support",
+    "playwright": "1.63.0",
+    "playwright-core": "1.63.0"
   },
   "dependencies": {
     "@babel/generator": "^7.29.1",
@@ -47,7 +49,6 @@
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@typescript-eslint/types": "^8.70.0",
     "beautiful-mermaid": "^1.1.3",
     "chalk": "^6.0.0",
     "chokidar": "^5.0.0",
@@ -55,11 +56,11 @@
     "eslint": "^10.11.0",
     "eslint-plugin-import-newlines": "^2.0.0",
     "eslint-plugin-jsdoc": "^64.5.4",
-    "eslint-plugin-perfectionist": "^5.11.1",
     "eslint-plugin-simple-import-sort": "^14.0.0",
     "eslint-plugin-sort-destructure-keys": "^3.0.0",
     "less": "^4.6.4",
     "pixelmatch": "^7.2.0",
+    "oxc-parser": "^0.155.0",
     "playwright": "^1.63.0",
     "pngjs": "^7.0.0",
     "postcss": "^8.5.28",
@@ -101,7 +102,7 @@
     "lint": "bun run lint:es && bun run lint:ts && bun run lint:css && bun run lint:md",
     "lint:css": "bun ./node_modules/stylelint/bin/stylelint.mjs \"**/*.styles.ts\" --config ./stylelint.config.mjs --allow-empty-input",
     "lint:es": "bun ./consumer/lint-es.ts",
-    "lint:md": "bun ./libraries/markdown-plugin/bin.ts",
+    "lint:md": "bun ./libraries/linter-markdown/bin.ts",
     "lint:ts": "bun ./consumer/cli.ts typecheck",
     "postinstall": "bun ./consumer/install.ts",
     "prepare": "bun ./scripts/prepare.ts",

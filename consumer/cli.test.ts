@@ -4,7 +4,7 @@ import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const CLI = join(import.meta.dir, 'cli.ts')
-const ESLINT_PLUGIN = join(import.meta.dir, '..', 'libraries', 'eslint-plugin', 'index.ts')
+const TYPESCRIPT_LINTER = join(import.meta.dir, '..', 'libraries', 'linter-typescript', 'index.ts')
 
 const DIRTY = `import { join } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -82,7 +82,7 @@ const makeFixture = (options: { config?: boolean } = {}): Fixture => {
    * consumer node_modules; reuse the workspace install rather than a copy.
    */
   symlinkSync(join(import.meta.dir, '..', 'node_modules'), join(dir, 'node_modules'), 'dir')
-  if (config) writeFileSync(join(dir, 'eslint.config.mjs'), `export { default } from '${ESLINT_PLUGIN}'\n`)
+  if (config) writeFileSync(join(dir, 'eslint.config.mjs'), `export { default } from '${TYPESCRIPT_LINTER}'\n`)
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fixture', type: 'module' }))
   const target = join(dir, 'fixture.ts')
   writeFileSync(target, DIRTY)

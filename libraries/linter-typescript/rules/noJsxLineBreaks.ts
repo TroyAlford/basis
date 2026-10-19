@@ -1,6 +1,6 @@
-import type { TSESTree } from '@typescript-eslint/types'
 import type { Rule } from 'eslint'
 import type * as ESTree from 'estree'
+import type { TSESTree } from '@basis/linter-support'
 
 /** HTML elements that establish block structure; any such descendant forbids a one-line collapse. */
 const BLOCK_ELEMENTS = new Set([

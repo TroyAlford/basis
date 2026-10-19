@@ -1,8 +1,8 @@
-# `@basis/stylelint-plugin`
+# CSS linter
 
 The Basis-owned CSS lint surface for `*.styles.ts`. It bundles the shared Stylelint configuration and the Basis-specific rules so consumers do not copy Stylelint dependencies, custom syntax, or configuration.
 
-`@basis/stylelint-plugin` is an internal workspace. Consumers import its public surface, `basis/stylelint`.
+The CSS linter is an internal workspace. Consumers import its public surface, `basis/stylelint`.
 
 ## What it parses
 
@@ -60,4 +60,4 @@ Requires `*.styles.ts` stylesheets to be in **canonical ownership form**, and au
 
 ## Tests
 
-The rules and the parsing contract are covered under `libraries/stylelint-plugin/*.test.ts`. Fixtures run through the same template-literal custom syntax consumers use, covering nested CSS, tagged templates, interpolations, structural classes, native/ARIA/`data-*` state selectors, invalid state classes, and autofixable ordering.
+The rules and the parsing contract are covered under `libraries/linter-css/*.test.ts`. Fixtures run through the same template-literal custom syntax consumers use, covering nested CSS, tagged templates, interpolations, structural classes, native/ARIA/`data-*` state selectors, invalid state classes, and autofixable ordering.
