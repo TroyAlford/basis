@@ -1,4 +1,5 @@
 /* eslint-disable @basis/no-default-export */
+import pluginStylistic from '@stylistic/eslint-plugin'
 import { importExtensions } from './importExtensions'
 import { noMixedTypeImports } from './no-mixed-type-imports'
 import { noObjectPadding } from './no-object-padding'
@@ -12,6 +13,8 @@ import { sortStringEnum } from './sortStringEnum'
 
 export default {
   rules: {
+    'eol-last': pluginStylistic.rules['eol-last'],
+    'function-paren-newline': pluginStylistic.rules['function-paren-newline'],
     'import-extensions': importExtensions,
     'no-default-export': noDefaultExport,
     'no-extraneous-dependencies': noExtraneousDependencies,

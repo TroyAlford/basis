@@ -31,7 +31,8 @@
     "bun": ">=1.4.3"
   },
   "overrides": {
-    "@types/estree": "1.0.8"
+    "@types/estree": "1.0.8",
+    "@typescript-eslint/utils": "workspace:*"
   },
   "dependencies": {
     "@babel/generator": "^7.29.1",
@@ -46,8 +47,7 @@
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@typescript-eslint/parser": "^8.70.0",
-    "@typescript-eslint/utils": "^8.70.0",
+    "@typescript-eslint/types": "^8.70.0",
     "beautiful-mermaid": "^1.1.3",
     "chalk": "^6.0.0",
     "chokidar": "^5.0.0",
@@ -64,7 +64,6 @@
     "pngjs": "^7.0.0",
     "postcss": "^8.5.28",
     "postcss-selector-parser": "^7.1.6",
-    "postcss-styled-syntax": "^0.7.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-refresh": "^0.18.0",
@@ -78,8 +77,6 @@
     "sass": "1.98.0",
     "stylelint": "^17.15.0",
     "stylelint-order": "^8.1.1",
-    "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "typescript-eslint": "^8.70.0",
     "unified": "^11.0.5",
     "unified-lint-rule": "^3.0.1",
     "unist-util-visit": "^5.1.0",
@@ -103,7 +100,7 @@
     "format": "bun ./consumer/cli.ts format",
     "lint": "bun run lint:es && bun run lint:ts && bun run lint:css && bun run lint:md",
     "lint:css": "bun ./node_modules/stylelint/bin/stylelint.mjs \"**/*.styles.ts\" --config ./stylelint.config.mjs --allow-empty-input",
-    "lint:es": "bun ./node_modules/eslint/bin/eslint.js .",
+    "lint:es": "bun ./consumer/lint-es.ts",
     "lint:md": "bun ./libraries/markdown-plugin/bin.ts",
     "lint:ts": "bun ./consumer/cli.ts typecheck",
     "postinstall": "bun ./consumer/install.ts",

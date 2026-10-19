@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import * as postcssStyledSyntax from 'postcss-styled-syntax'
 import type { Config } from 'stylelint'
 import orderPlugins from 'stylelint-order'
+import * as basisSyntax from '../syntax'
 import { lintStyles } from '../testUtils'
 import { noAvoidableNesting, ruleName } from './noAvoidableNesting'
 
 const config: Config = {
-  customSyntax: postcssStyledSyntax,
+  customSyntax: basisSyntax,
   plugins: [noAvoidableNesting],
   rules: { [ruleName]: true },
 }
@@ -322,7 +322,7 @@ describe('basis/no-avoidable-nesting canonical tree', () => {
 describe('basis/no-avoidable-nesting fix and downstream rules', () => {
   test('factoring a selector-list owner keeps a source for no-duplicate-selectors', async () => {
     const downstream: Config = {
-      customSyntax: postcssStyledSyntax,
+      customSyntax: basisSyntax,
       plugins: [noAvoidableNesting],
       rules: { 'no-duplicate-selectors': true, [ruleName]: true },
     }
@@ -343,7 +343,7 @@ describe('basis/no-avoidable-nesting fix and downstream rules', () => {
 
   test('factoring sibling owners keeps a source for stylelint-order', async () => {
     const downstream: Config = {
-      customSyntax: postcssStyledSyntax,
+      customSyntax: basisSyntax,
       plugins: [noAvoidableNesting, ...orderPlugins],
       rules: { 'order/properties-alphabetical-order': true, [ruleName]: true },
     }

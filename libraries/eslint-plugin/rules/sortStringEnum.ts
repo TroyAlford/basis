@@ -6,9 +6,10 @@
  * Only the default Basis behavior is implemented: ascending, case-sensitive,
  * plain lexicographic comparison of string enum member names.
  */
-import type { TSESLint } from '@typescript-eslint/utils'
-import { AST_NODE_TYPES } from '@typescript-eslint/utils'
+import type { TSESTree } from '@typescript-eslint/types'
+import { AST_NODE_TYPES } from '@typescript-eslint/types'
 import type { Rule } from 'eslint'
+import type { RuleContext } from './sortInterface'
 import { createReporter } from './sortInterface'
 
 const stringEnumInvalidOrder = [
@@ -18,13 +19,13 @@ const stringEnumInvalidOrder = [
 
 export const sortStringEnum: Rule.RuleModule = {
   create(context: Rule.RuleContext): Rule.RuleListener {
-    const ruleContext = context as unknown as TSESLint.RuleContext<'invalidOrder', []>
+    const ruleContext = context as unknown as RuleContext
     const compareNodeListAndReport = createReporter(ruleContext, node => ({
       loc: node.loc,
       messageId: 'invalidOrder',
     }))
-    const listener: TSESLint.RuleListener = {
-      TSEnumDeclaration(node) {
+    const listener = {
+      TSEnumDeclaration(node: TSESTree.TSEnumDeclaration) {
         const body = node.body.members
         const isStringEnum = body.every(member => {
           const { initializer } = member

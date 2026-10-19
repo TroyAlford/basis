@@ -6,9 +6,52 @@
  * Only the default Basis behavior is implemented: ascending, case-sensitive,
  * plain lexicographic comparison with index signatures weighted to the front.
  */
-import type { TSESLint, TSESTree } from '@typescript-eslint/utils'
-import { AST_NODE_TYPES, AST_TOKEN_TYPES } from '@typescript-eslint/utils'
+import type { TSESTree } from '@typescript-eslint/types'
+import { AST_NODE_TYPES, AST_TOKEN_TYPES } from '@typescript-eslint/types'
 import type { Rule } from 'eslint'
+
+/** The TS-aware source code surface used by the sorting rules. */
+export interface SourceCode {
+  /** Comments before a node. */
+  getCommentsBefore(node: TSESTree.Node): TSESTree.Comment[],
+  /** Source text for a node or comment. */
+  getText(node: TSESTree.Node | TSESTree.Comment): string,
+  /** The token after a node. */
+  getTokenAfter(
+    node: TSESTree.Node,
+    options?: { filter?: (token: TSESTree.Token) => boolean, includeComments?: boolean },
+  ): TSESTree.Token | null,
+  /** The token before a node. */
+  getTokenBefore(node: TSESTree.Node): TSESTree.Token | null,
+  /** The absolute offsets where each line starts. */
+  readonly lineStartIndices: readonly number[],
+  /** The source text. */
+  readonly text: string,
+}
+
+/** A fixer that accepts TypeScript ESTree nodes. */
+export interface RuleFixer {
+  /** Insert text before a node. */
+  insertTextBefore(node: TSESTree.Node, text: string): Rule.Fix,
+  /** Remove a node or token. */
+  remove(node: TSESTree.Node | TSESTree.Token): Rule.Fix,
+  /** Remove a range. */
+  removeRange(range: TSESTree.Range): Rule.Fix,
+}
+
+/** A rule context with the TS-aware source code surface. */
+export interface RuleContext extends Omit<Rule.RuleContext, 'report' | 'sourceCode'> {
+  /** Report a finding. */
+  report(descriptor: {
+    data?: Record<string, unknown>,
+    fix?: (fixer: RuleFixer) => Rule.Fix | Rule.Fix[],
+    loc?: TSESTree.SourceLocation,
+    messageId: 'invalidOrder',
+    node?: TSESTree.Node,
+  }): void,
+  /** The TS-aware source code. */
+  sourceCode: SourceCode,
+}
 
 interface NodePosition {
   final: number,
@@ -80,7 +123,7 @@ const getPropertyName = (node: TSESTree.Node): string | undefined => {
   }
 }
 
-const createNodeSwapper = (context: TSESLint.RuleContext<'invalidOrder', []>) => {
+const createNodeSwapper = (context: RuleContext) => {
   const { sourceCode } = context
 
   const getIndentRange = (node: TSESTree.Node): [number, number] => {
@@ -113,11 +156,11 @@ const createNodeSwapper = (context: TSESLint.RuleContext<'invalidOrder', []>) =>
   }
 
   return (
-    fixer: TSESLint.RuleFixer,
+    fixer: RuleFixer,
     nodePositions: Map<TSESTree.Node, NodePosition>,
     currentNode: TSESTree.Node,
     replaceNode: TSESTree.Node,
-  ): TSESLint.RuleFix[] => [currentNode, replaceNode].reduce<TSESLint.RuleFix[]>((acc, node) => {
+  ): Rule.Fix[] => [currentNode, replaceNode].reduce<Rule.Fix[]>((acc, node) => {
     const otherNode = node === currentNode ? replaceNode : currentNode
     const comments = sourceCode.getCommentsBefore(node)
     const nextSibling = sourceCode.getTokenAfter(node)
@@ -150,7 +193,7 @@ const createNodeSwapper = (context: TSESLint.RuleContext<'invalidOrder', []>) =>
 
 // Shared with the string-enum rule. Module-internal; not part of the public API.
 export const createReporter = (
-  context: TSESLint.RuleContext<'invalidOrder', []>,
+  context: RuleContext,
   createReportObject: (node: TSESTree.Node) => { loc: TSESTree.SourceLocation, messageId: 'invalidOrder' },
 ): ((body: TSESTree.Node[]) => void) => {
   const swapNodes = createNodeSwapper(context)
@@ -199,16 +242,16 @@ const interfaceInvalidOrder = [
 
 export const sortInterface: Rule.RuleModule = {
   create(context: Rule.RuleContext): Rule.RuleListener {
-    const ruleContext = context as unknown as TSESLint.RuleContext<'invalidOrder', []>
+    const ruleContext = context as unknown as RuleContext
     const compareNodeListAndReport = createReporter(ruleContext, node => ({
       loc: node.loc,
       messageId: 'invalidOrder',
     }))
-    const listener: TSESLint.RuleListener = {
-      TSInterfaceDeclaration(node) {
+    const listener = {
+      TSInterfaceDeclaration(node: TSESTree.TSInterfaceDeclaration) {
         compareNodeListAndReport(getObjectBody(node))
       },
-      TSTypeLiteral(node) {
+      TSTypeLiteral(node: TSESTree.TSTypeLiteral) {
         compareNodeListAndReport(getObjectBody(node))
       },
     }

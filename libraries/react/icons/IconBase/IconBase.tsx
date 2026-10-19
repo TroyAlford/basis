@@ -1,6 +1,5 @@
 import type { MouseEventHandler } from 'react'
 import React from 'react'
-import type { JsxChild, JsxFragment } from 'typescript'
 import { noop } from '../../../utilities'
 import { Component } from '../../components/Component/Component'
 import { Rect } from '../parts/Rect'
@@ -162,7 +161,7 @@ export abstract class IconBase<
    * @param child - The child to process
    * @returns The processed child
    */
-  #maskChildren = (child: React.ReactNode | JsxChild): React.ReactNode => {
+  #maskChildren = (child: React.ReactNode): React.ReactNode => {
     if (React.isValidElement<Shape>(child)) {
       // @ts-expect-error - color is valid for Shape children
       return React.cloneElement(child, { color: 'black' })
@@ -184,7 +183,7 @@ export abstract class IconBase<
 
     const maskId = `basis:icon:${displayName}:mask:${id}`
 
-    const processed = React.isValidElement<JsxFragment>(children) && children.type === React.Fragment
+    const processed = React.isValidElement<{ children?: React.ReactNode }>(children) && children.type === React.Fragment
       ? React.Children.map(children.props.children, this.#maskChildren)
       : this.#maskChildren(children)
 

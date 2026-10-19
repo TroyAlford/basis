@@ -1,10 +1,8 @@
-import * as parser from '@typescript-eslint/parser'
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { Linter } from 'eslint'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
-import { noExtraneousDependencies } from './noExtraneousDependencies'
+import { dirname, join } from 'node:path'
+import { lintWithBun } from './testUtils'
 
 /*
  * The ESLint flat-config matcher only lints files below `process.cwd()`, so this
@@ -49,40 +47,19 @@ writeFixture('monorepo/packages/app/package.json', JSON.stringify({
   version: '1.0.0',
 }))
 
-const filenameFor = (path: string): string => relative(process.cwd(), join(fixtureRoot, path))
+const lint = (code: string, filename = 'index.ts') => lintWithBun({
+  code,
+  filename,
+  root: fixtureRoot,
+  ruleExport: 'noExtraneousDependencies',
+  ruleName: 'no-extraneous-dependencies',
+  rulePath: join(import.meta.dir, 'noExtraneousDependencies.ts'),
+})
 
-const lint = (code: string, filename = filenameFor('index.ts')) => {
-  const linter = new Linter()
-  return linter.verifyAndFix(code, [
-    {
-      files: ['**/*.ts'],
-      languageOptions: {
-        parser,
-        parserOptions: {
-          ecmaVersion: 'latest',
-          sourceType: 'module',
-        },
-      },
-      plugins: {
-        test: {
-          rules: {
-            'no-extraneous-dependencies': noExtraneousDependencies,
-          },
-        },
-      },
-      rules: {
-        'test/no-extraneous-dependencies': 'error',
-      },
-    },
-  ], { filename })
+const messageIds = (code: string, filename?: string): string[] => {
+  const { report } = lint(code, filename)
+  return report.includes('test/no-extraneous-dependencies') ? ['missingDependency'] : []
 }
-
-const messageIds = (
-  code: string,
-  filename?: string,
-): (string | undefined)[] => lint(code, filename).messages
-  .filter(message => message.ruleId === 'test/no-extraneous-dependencies')
-  .map(message => message.messageId)
 
 describe('noExtraneousDependencies', () => {
   test('allows dependencies declared in the nearest package.json', () => {
@@ -102,13 +79,11 @@ describe('noExtraneousDependencies', () => {
   })
 
   test('reports an undeclared bare import', () => {
-    const messages = lint("import value from 'undeclared-dep'").messages
-      .filter(message => message.ruleId === 'test/no-extraneous-dependencies')
+    const { report } = lint("import value from 'undeclared-dep'")
 
-    expect(messages.map(message => message.messageId)).toEqual(['missingDependency'])
-    expect(messages[0]?.message).toBe(
-      "'undeclared-dep' should be listed in the project's dependencies. Run 'npm i -S undeclared-dep' to add it",
-    )
+    expect(report).toContain('test/no-extraneous-dependencies')
+    expect(report).toContain("'undeclared-dep' should be listed in the project's dependencies")
+    expect(report).toContain("Run 'npm i -S undeclared-dep' to add it")
   })
 
   test('handles scoped packages', () => {
@@ -137,14 +112,14 @@ describe('noExtraneousDependencies', () => {
   })
 
   test('walks up to the nearest package.json', () => {
-    const nested = filenameFor('nested/index.ts')
+    const nested = 'nested/index.ts'
 
     expect(messageIds("import value from 'nested-dep'", nested)).toEqual([])
     expect(messageIds("import value from 'declared-dep'", nested)).toEqual(['missingDependency'])
   })
 
   test('ignores a workspace importing the monorepo root package by name', () => {
-    const app = filenameFor('monorepo/packages/app/index.ts')
+    const app = 'monorepo/packages/app/index.ts'
 
     expect(messageIds("import value from 'monorepo-root/react'", app)).toEqual([])
     expect(messageIds("import value from 'undeclared-dep'", app)).toEqual(['missingDependency'])

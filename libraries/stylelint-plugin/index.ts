@@ -1,7 +1,7 @@
-import * as postcssStyledSyntax from 'postcss-styled-syntax'
 import type { Config } from 'stylelint'
 import orderPlugins from 'stylelint-order'
 import { basisPlugins } from './rules/index'
+import * as basisSyntax from './syntax'
 
 /**
  * The Basis CSS policy, independent of `*.styles.ts` parsing. Exported so tests
@@ -54,7 +54,7 @@ export interface CreateConfigOptions {
 /**
  * Builds the Basis Stylelint configuration for a consumer project.
  *
- * The configuration targets `*.styles.ts` through the `postcss-styled-syntax`
+ * The configuration targets `*.styles.ts` through the Basis template-literal
  * custom syntax, so it parses `css` tagged template literals (including nesting
  * and `${...}` interpolations) rather than treating them as plain strings.
  * Basis owns every plugin, custom syntax, and rule setting the configuration
@@ -65,7 +65,7 @@ export interface CreateConfigOptions {
 export const createConfig = (options: CreateConfigOptions = {}): Config => {
   const { overrides = [], rules = {} } = options
   return {
-    customSyntax: postcssStyledSyntax,
+    customSyntax: basisSyntax,
     overrides,
     plugins: [...orderPlugins, ...basisPlugins],
     rules: { ...BASE_RULES, ...rules },

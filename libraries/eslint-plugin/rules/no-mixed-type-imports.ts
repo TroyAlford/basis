@@ -18,7 +18,8 @@ export const noMixedTypeImports: Rule.RuleModule = {
           const importedName = specifier.imported.type === 'Identifier'
             ? specifier.imported.name
             : specifier.imported.value
-          imports[specifier.importKind].add(importedName)
+          const importKind = specifier.importKind === 'type' ? 'type' : 'value'
+          imports[importKind].add(importedName)
         })
 
         if (!imports.type.size || !imports.value.size) return
