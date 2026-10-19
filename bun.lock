@@ -223,7 +223,7 @@
       },
     },
     "testing/components": {
-      "name": "@/components-fixture",
+      "name": "@basis/testing-components",
       "dependencies": {
         "@basis/react": "workspace:*",
         "react": "^19",
@@ -231,7 +231,7 @@
       },
     },
     "testing/docs": {
-      "name": "@/docs-fixture",
+      "name": "@basis/testing-docs",
       "dependencies": {
         "@basis/react": "workspace:*",
         "@basis/server": "workspace:*",
@@ -241,7 +241,7 @@
       },
     },
     "testing/e2e": {
-      "name": "@/test",
+      "name": "@basis/testing-e2e",
       "dependencies": {
         "@basis/react": "workspace:*",
         "@basis/server": "workspace:*",
@@ -251,7 +251,7 @@
       },
     },
     "testing/server": {
-      "name": "@/server-fixture",
+      "name": "@basis/testing-server",
       "dependencies": {
         "@basis/react": "workspace:*",
         "@basis/server": "workspace:*",
@@ -271,14 +271,6 @@
     "playwright-core": "1.63.0",
   },
   "packages": {
-    "@/components-fixture": ["@/components-fixture@workspace:testing/components"],
-
-    "@/docs-fixture": ["@/docs-fixture@workspace:testing/docs"],
-
-    "@/server-fixture": ["@/server-fixture@workspace:testing/server"],
-
-    "@/test": ["@/test@workspace:testing/e2e"],
-
     "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
 
     "@babel/generator": ["@babel/generator@7.29.8", "", { "dependencies": { "@babel/parser": "^7.29.8", "@babel/types": "^7.29.8", "@jridgewell/gen-mapping": "^0.3.12", "@jridgewell/trace-mapping": "^0.3.28", "jsesc": "^3.0.2" } }, "sha512-gZbepsdh3WDtgZKWL+vTPh71LSBrm/Y4/QDZBVCcYfmeTEEuoOYwlSy+G1StfJg+/Zy550u/3TATbm7qDbbMtg=="],
@@ -320,6 +312,14 @@
     "@basis/server": ["@basis/server@workspace:libraries/server"],
 
     "@basis/testing": ["@basis/testing@workspace:libraries/testing"],
+
+    "@basis/testing-components": ["@basis/testing-components@workspace:testing/components"],
+
+    "@basis/testing-docs": ["@basis/testing-docs@workspace:testing/docs"],
+
+    "@basis/testing-e2e": ["@basis/testing-e2e@workspace:testing/e2e"],
+
+    "@basis/testing-server": ["@basis/testing-server@workspace:testing/server"],
 
     "@basis/utilities": ["@basis/utilities@workspace:libraries/utilities"],
 

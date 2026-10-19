@@ -1,5 +1,5 @@
 {
-  "name": "@/components-fixture",
+  "name": "@basis/testing-components",
   "dependencies": {
     "@basis/react": "workspace:*",
     "react": "^19",
