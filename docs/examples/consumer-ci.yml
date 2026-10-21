@@ -12,9 +12,10 @@ on:
   pull_request:
     branches: [main]
     # `converted_to_draft` creates a run whose jobs all skip, which lets the
-    # concurrency group cancel the in-flight ready-for-review run. `edited`
-    # re-checks the title-only case without rerunning the code jobs.
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
+    # concurrency group cancel the in-flight ready-for-review run. Title-only
+    # edits are handled by the separate title workflow; they do not create a
+    # code run, so the existing Required result for the same HEAD stays valid.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 
 # Code checks only read the checked-out revision. The required job adds
 # `checks: read`; nothing here needs a write token.
@@ -29,12 +30,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap preflight: decide which suites the exact merge-base diff can affect
+  # before any expensive runner is allocated. It does not install dependencies
+  # and does not execute pull-request code. The policy is read from the merge
+  # base, so a PR cannot weaken the gates that validate it.
+  impact:
+    name: Impact
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # For a fork PR, add
+          # `repository: ${{ github.event.pull_request.head.repo.full_name }}`.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Fetch the base branch for the exact merge base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: git fetch --no-tags origin "$BASE_REF"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Analyze change impact
+        id: impact
+        uses: TroyAlford/basis/.github/actions/change-impact@main
+        with:
+          base-ref: origin/${{ github.event.pull_request.base.ref }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          config-path: .github/ci-impact.json
+      - name: Upload the impact decision
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: impact-decision
+          path: impact-decision.json
+          if-no-files-found: warn
+
   # Consolidate lightweight checks into one job: one checkout, one toolchain
   # setup, one dependency install. Keep distinct steps so a failure names the
   # check that failed.
   quality:
     name: Quality
-    if: ${{ !github.event.pull_request.draft && github.event.action != 'edited' }}
+    needs: impact
+    if: >-
+      ${{ needs.impact.result == 'success'
+      && !github.event.pull_request.draft
+      && needs.impact.outputs.quality-needed == 'true' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
@@ -55,11 +100,36 @@ jobs:
         with:
           fail-on-findings: 'false'
 
+  # Documentation has its own suite so a docs-only change never starts lint,
+  # unit, integration, or visual jobs. Remove this job and the `docs` suite from
+  # the policy when the repository has no docs check.
+  docs:
+    name: Docs
+    needs: impact
+    if: >-
+      ${{ needs.impact.result == 'success'
+      && !github.event.pull_request.draft
+      && needs.impact.outputs.docs-needed == 'true' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Check documentation
+        run: bun run docs:check
+
   # Keep the unit suite in its own process. It is independent of `quality` so a
   # lint failure does not hide a test failure.
   test:
     name: Test
-    if: ${{ !github.event.pull_request.draft && github.event.action != 'edited' }}
+    needs: impact
+    if: >-
+      ${{ needs.impact.result == 'success'
+      && !github.event.pull_request.draft
+      && needs.impact.outputs.unit-needed == 'true' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
@@ -71,13 +141,37 @@ jobs:
       - name: Unit tests
         run: bun run test
 
+  # Integration/session tests stay isolated. Replace the command with the
+  # repository's own, or remove this job and the `integration` suite together.
+  integration:
+    name: Integration
+    needs: impact
+    if: >-
+      ${{ needs.impact.result == 'success'
+      && !github.event.pull_request.draft
+      && needs.impact.outputs.integration-needed == 'true' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Integration tests
+        run: bun run test:integration
+
   # Keep visual/integration suites isolated from the unit process. The pinned
   # Playwright image is pulled by the Basis snapshot runtime on first capture;
   # this optional step only surfaces the pull as a named step. It does not
   # change billed minutes: the job is billed either way.
   visual:
     name: Visual
-    if: ${{ !github.event.pull_request.draft && github.event.action != 'edited' }}
+    needs: impact
+    if: >-
+      ${{ needs.impact.result == 'success'
+      && !github.event.pull_request.draft
+      && needs.impact.outputs.visual-needed == 'true' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
@@ -93,19 +187,20 @@ jobs:
       - name: Visual tests
         run: bun run test:visual
 
-  # Extension point: add repository-specific integration jobs here, then list
-  # them in `required.needs` below. Keep each one a separate process; do not
-  # fold a suite into another job to save a checkout.
+  # Extension point: add repository-specific jobs here, then list them in
+  # `required.needs` and in the impact policy. Keep each one a separate process;
+  # do not fold a suite into another job to save a checkout.
 
   # The single stable branch-protection context. On a Draft event this job is
-  # skipped, so it posts no green status at all. On `edited` (a ready PR) the
-  # code jobs are skipped, and the gate reuses their completed results on the
-  # exact head SHA. On every ready code event it requires every dependency to
-  # have succeeded in this run.
+  # skipped, so it posts no green status at all. On every ready code event it
+  # requires every needed suite to have succeeded, and accepts a skipped suite
+  # only with an exact-head impact decision that records it as unaffected. A
+  # title-only edit runs the separate title workflow and leaves this result
+  # valid for the unchanged HEAD.
   required:
     name: Required
     if: ${{ always() && !github.event.pull_request.draft }}
-    needs: [quality, test, visual]
+    needs: [impact, quality, docs, test, integration, visual]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     permissions:
       checks: read
@@ -118,5 +213,8 @@ jobs:
           github-token: ${{ github.token }}
           needs: ${{ toJSON(needs) }}
           head-sha: ${{ github.event.pull_request.head.sha }}
+          impact-decision: ${{ needs.impact.outputs.decision }}
+          impact-hash: ${{ needs.impact.outputs.decision-hash }}
+          require-impact: 'true'
           check-names: |
-            {"quality":"Quality","test":"Test","visual":"Visual"}
+            {"quality":"Quality","docs":"Docs","test":"Test","integration":"Integration","visual":"Visual"}

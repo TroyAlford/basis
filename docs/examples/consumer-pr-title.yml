@@ -8,7 +8,10 @@ name: PR title
 
 # `pull_request_target` so the write-scoped token can comment on fork PRs.
 # This workflow only reads the title from the event payload and calls the GitHub
-# API; it must never check out or execute code from the pull request head.
+# API; it must never check out or execute code from the pull request head. The
+# code workflow intentionally does not run on `edited`; a title-only edit lands
+# here without rerunning code checks or invalidating the existing Required
+# result for the unchanged HEAD.
 on:
   pull_request_target:
     branches: [main]

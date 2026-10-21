@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "maxGraphFiles": 20000,
+  "aliases": {
+    "basis/": "./consumer/",
+    "@basis/": "./libraries/"
+  },
+  "docs": {
+    "globs": ["**/*.md", "**/*.mdx", "docs/**"]
+  },
+  "suites": {
+    "quality": {
+      "mode": "paths",
+      "testGlobs": [],
+      "sourceGlobs": [
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.json",
+        "**/*.yml",
+        "**/*.yaml"
+      ],
+      "alwaysRunGlobs": [
+        "package.json",
+        "bun.lock",
+        "bun.lockb",
+        ".tool-versions",
+        "tsconfig*.json",
+        "bunfig.toml",
+        "eslint.config.*",
+        "stylelint.config.*",
+        ".github/**"
+      ],
+      "ignoreGlobs": ["docs/**", "**/*.md", "**/*.mdx", "**/*.png", "**/*.svg", "**/*.woff*"],
+      "unreachableSource": "run"
+    },
+    "docs": {
+      "mode": "paths",
+      "testGlobs": [],
+      "sourceGlobs": ["docs/**", "README.md"],
+      "alwaysRunGlobs": [],
+      "ignoreGlobs": ["**"],
+      "unreachableSource": "run"
+    },
+    "unit": {
+      "testGlobs": ["**/*.test.ts", "**/*.test.tsx", "**/*.test.js", "**/*.test.jsx"],
+      "testExcludeGlobs": [
+        "**/*.visual.test.ts",
+        "**/*.visual.test.tsx",
+        "**/*.integration.test.ts",
+        "**/*.integration.test.tsx"
+      ],
+      "sourceGlobs": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],
+      "alwaysRunGlobs": [
+        "package.json",
+        "bun.lock",
+        "bun.lockb",
+        ".tool-versions",
+        "tsconfig*.json",
+        "bunfig.toml",
+        "docs/examples/**",
+        "**/__snapshots__/**",
+        "**/test/**",
+        "**/testing/**"
+      ],
+      "ignoreGlobs": [
+        ".github/**",
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.png",
+        "**/*.svg",
+        "**/*.woff*"
+      ],
+      "unreachableSource": "run"
+    },
+    "integration": {
+      "testGlobs": ["**/*.integration.test.ts", "**/*.integration.test.tsx"],
+      "sourceGlobs": ["**/*.ts", "**/*.tsx"],
+      "alwaysRunGlobs": [
+        "package.json",
+        "bun.lock",
+        "bun.lockb",
+        ".tool-versions",
+        "tsconfig*.json",
+        "bunfig.toml",
+        "**/test/integration/**",
+        "**/testing/**"
+      ],
+      "ignoreGlobs": [
+        ".github/**",
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.png",
+        "**/*.svg",
+        "**/*.woff*"
+      ],
+      "unreachableSource": "run"
+    },
+    "visual": {
+      "testGlobs": [
+        "**/*.visual.test.tsx",
+        "**/*.visual.test.ts",
+        "**/visual/**/*.test.tsx",
+        "**/visual/**/*.test.ts"
+      ],
+      "sourceGlobs": [
+        "**/*.tsx",
+        "**/*.styles.ts",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.svg",
+        "**/*.png",
+        "**/*.woff*",
+        "**/testing/**"
+      ],
+      "alwaysRunGlobs": [
+        "**/__screenshots__/**",
+        "**/*.styles.ts",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "libraries/testing/**",
+        "playwright.config.*",
+        "package.json",
+        "bun.lock",
+        "bun.lockb",
+        ".tool-versions",
+        "bunfig.toml"
+      ],
+      "ignoreGlobs": [
+        ".github/**",
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.ts",
+        "**/*.js",
+        "**/*.json",
+        "**/*.yml",
+        "**/*.yaml"
+      ],
+      "unreachableSource": "run",
+      "extraRoots": []
+    }
+  }
+}

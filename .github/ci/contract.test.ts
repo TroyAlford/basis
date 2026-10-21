@@ -20,6 +20,7 @@ interface Job {
   'permissions'?: Record<string, string>,
   'runs-on'?: string,
   'steps'?: Step[],
+  'timeout-minutes'?: number,
 }
 
 interface Step {
@@ -43,6 +44,7 @@ interface Workflow {
 
 interface Action {
   inputs?: Record<string, { default?: string, required?: boolean, type?: string }>,
+  outputs?: Record<string, { value?: string }>,
   runs?: { steps?: Step[] },
 }
 
@@ -98,11 +100,11 @@ describe('reference consumer CI', () => {
       'reopened',
       'ready_for_review',
       'converted_to_draft',
-      'edited',
     ]) {
       expect(types).toContain(event)
     }
-    expect(types).toHaveLength(6)
+    expect(types).toHaveLength(5)
+    expect(types).not.toContain('edited')
   })
 
   test('uses a per-pull-request concurrency group that cancels superseded runs', () => {
@@ -116,13 +118,40 @@ describe('reference consumer CI', () => {
     expect(workflow.jobs?.required?.permissions?.checks).toBe('read')
   })
 
-  test('skips every code job for Draft events and title-only edits', () => {
-    for (const id of ['quality', 'test', 'visual']) {
+  test('skips every suite job for Draft events', () => {
+    for (const id of ['quality', 'docs', 'test', 'integration', 'visual']) {
       const job = workflow.jobs?.[id]
       expect(job).toBeDefined()
+      expect(job?.needs).toContain('impact')
+      expect(job?.if).toContain('needs.impact.result')
       expect(job?.if).toContain('!github.event.pull_request.draft')
-      expect(job?.if).toContain("github.event.action != 'edited'")
+      expect(job?.if).toContain(`needs.impact.outputs.${id === 'test' ? 'unit' : id}-needed`)
     }
+  })
+
+  test('runs a cheap exact-merge-base preflight before the suites', () => {
+    const job = workflow.jobs?.impact
+    expect(job).toBeDefined()
+    expect(job?.if).toContain('!github.event.pull_request.draft')
+    expect(job?.if).not.toContain("github.event.action != 'edited'")
+    expect(job?.['timeout-minutes']).toBe(5)
+
+    const checkout = job?.steps?.find(step => step.uses?.startsWith('actions/checkout'))
+    expect(checkout?.with?.['fetch-depth']).toBe(0)
+    expect(checkout?.with?.ref).toBe('${{ github.event.pull_request.head.sha }}')
+
+    const fetch = job?.steps?.find(step => step.run?.includes('git fetch'))
+    expect(fetch?.env?.BASE_REF).toBe('${{ github.event.pull_request.base.ref }}')
+    expect(fetch?.run).toContain('"$BASE_REF"')
+
+    const impact = job?.steps?.find(step => step.uses?.includes('/change-impact@'))
+    expect(impact).toBeDefined()
+    expect(impact?.with?.['head-sha']).toBe('${{ github.event.pull_request.head.sha }}')
+    expect(impact?.with?.['base-ref']).toBe('origin/${{ github.event.pull_request.base.ref }}')
+    expect(impact?.with?.['config-path']).toBe('.github/ci-impact.json')
+
+    const artifact = job?.steps?.find(step => step.uses?.includes('/upload-artifact@'))
+    expect(artifact?.with?.path).toBe('impact-decision.json')
   })
 
   test('consolidates lightweight checks into one job with distinct steps', () => {
@@ -132,24 +161,25 @@ describe('reference consumer CI', () => {
     expect(steps.some(step => step.uses?.includes('/knip@'))).toBe(true)
   })
 
-  test('keeps the unit and visual suites in separate processes', () => {
-    expect(workflow.jobs?.test).toBeDefined()
-    expect(workflow.jobs?.visual).toBeDefined()
+  test('keeps unit, integration, docs, and visual suites in separate processes', () => {
     expect(workflow.jobs?.test?.steps?.some(step => step.run === 'bun run test')).toBe(true)
+    expect(workflow.jobs?.integration?.steps?.some(step => step.run === 'bun run test:integration')).toBe(true)
+    expect(workflow.jobs?.docs?.steps?.some(step => step.run === 'bun run docs:check')).toBe(true)
     expect(workflow.jobs?.visual?.steps?.some(step => step.run === 'bun run test:visual')).toBe(true)
   })
 
-  test('posts no required status on Draft events', () => {
+  test('posts no required status on Draft events and keeps the gate checkout-free', () => {
     const required = workflow.jobs?.required
     expect(required?.name).toBe('Required')
     expect(required?.if).toContain('always()')
     expect(required?.if).toContain('!github.event.pull_request.draft')
     expect(required?.if).not.toContain("github.event.action != 'edited'")
+    expect(required?.steps?.some(step => step.uses?.startsWith('actions/checkout'))).toBe(false)
   })
 
-  test('requires every code job through the portable gate', () => {
+  test('requires the impact preflight and every suite through the portable gate', () => {
     const required = workflow.jobs?.required
-    for (const id of ['quality', 'test', 'visual']) {
+    for (const id of ['impact', 'quality', 'docs', 'test', 'integration', 'visual']) {
       expect(required?.needs).toContain(id)
     }
 
@@ -157,7 +187,12 @@ describe('reference consumer CI', () => {
     expect(gate).toBeDefined()
     expect(gate?.with?.needs).toBe('${{ toJSON(needs) }}')
     expect(gate?.with?.['head-sha']).toBe('${{ github.event.pull_request.head.sha }}')
+    expect(gate?.with?.['impact-decision']).toBe('${{ needs.impact.outputs.decision }}')
+    expect(gate?.with?.['impact-hash']).toBe('${{ needs.impact.outputs.decision-hash }}')
+    expect(gate?.with?.['require-impact']).toBe('true')
     expect(JSON.parse(gate?.with?.['check-names'] ?? '{}')).toEqual({
+      docs: 'Docs',
+      integration: 'Integration',
       quality: 'Quality',
       test: 'Test',
       visual: 'Visual',
@@ -165,9 +200,50 @@ describe('reference consumer CI', () => {
   })
 
   test('uses the same caller-selectable runner everywhere', () => {
-    for (const id of ['quality', 'test', 'visual', 'required']) {
+    for (const id of ['impact', 'quality', 'docs', 'test', 'integration', 'visual', 'required']) {
       expect(workflow.jobs?.[id]?.['runs-on']).toBe("${{ vars.CI_RUNNER || 'ubuntu-latest' }}")
     }
+  })
+})
+
+describe('reference change-impact policy', () => {
+  const policy = loadJson('docs/examples/ci-impact.json')
+
+  test('declares the reference suites and conservative defaults', () => {
+    expect(policy.version).toBe(1)
+    expect(policy.maxGraphFiles).toBe(20000)
+    const suites = policy.suites as Record<string, {
+      testExcludeGlobs?: string[],
+      unreachableSource?: string,
+    }>
+    expect(Object.keys(suites).sort()).toEqual(['docs', 'integration', 'quality', 'unit', 'visual'])
+    expect(suites.unit.testExcludeGlobs).toContain('**/*.visual.test.tsx')
+    expect(suites.visual.unreachableSource).toBe('run')
+  })
+})
+
+describe('change-impact action contract', () => {
+  const action = Bun.YAML.parse(
+    readFileSync(join(root, '.github/actions/change-impact/action.yml'), 'utf8'),
+  ) as Action
+
+  test('requires the exact head SHA and a policy path', () => {
+    expect(action.inputs?.['head-sha']?.required).toBe(true)
+    expect(action.inputs?.['config-path']?.default).toBe('.github/ci-impact.json')
+    expect(action.inputs?.['base-ref']?.default).toBe('origin/main')
+  })
+
+  test('exposes the decision and its evidence hash', () => {
+    expect(action.outputs).toHaveProperty('decision')
+    expect(action.outputs).toHaveProperty('decision-hash')
+    expect(action.outputs).toHaveProperty('policy-hash')
+    expect(action.outputs).toHaveProperty('any-needed')
+  })
+
+  test('runs the analyzer from the pinned action path', () => {
+    const step = action.runs?.steps?.[0]
+    expect(step?.run).toContain('github.action_path')
+    expect(step?.run).toContain('index.ts')
   })
 })
 

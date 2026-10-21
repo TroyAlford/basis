@@ -42,6 +42,10 @@ Actions that need a toolchain (for example `bun`) say so in their own README and
    - Description: Reduces a workflow's `needs` results into one reliable required status, failing closed on skipped, cancelled, missing, neutral or stale work while reusing a prior success only for the exact head SHA.
    - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/required-gate)
 
+7. **Change Impact**
+   - Description: Computes a fail-safe, exact-merge-base suite decision from the base policy, changed paths, and a resolved import graph, so a workflow can skip unaffected suites before allocating their runners.
+   - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/change-impact)
+
 ## Usage
 
 To use these actions in your workflows, reference them in your `.yml` files as shown in the individual action documentation.

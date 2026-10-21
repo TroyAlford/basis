@@ -67,4 +67,4 @@ Start with this README, then read the durable documentation under [`docs/`](./do
 
 ## CI recipe
 
-Basis publishes a portable, locally validated GitHub Actions pattern for low-cost pull-request checks: Draft events allocate no hosted jobs, promotion runs the full suite, and one required gate rejects skipped, cancelled, stale or missing work. Start with [`docs/ci.mdx`](./docs/ci.mdx); the reference workflows live under [`docs/examples`](./docs/examples), and `bun run ci:verify` runs the static contract tests plus an optional `act` dry-run without contacting GitHub Actions.
+Basis publishes a portable, locally validated GitHub Actions pattern for low-cost pull-request checks: Draft events allocate no hosted jobs, promotion runs only the suites the exact change can affect, and one required gate rejects skipped, cancelled, stale, missing, or unevidenced work. Start with [`docs/ci.mdx`](./docs/ci.mdx); the reference workflows and impact policy live under [`docs/examples`](./docs/examples), and `bun run ci:verify` runs the static contract tests plus an optional `act` dry-run without contacting GitHub Actions.

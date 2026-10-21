@@ -98,6 +98,7 @@
   "scripts": {
     "start": "bun ./server.ts",
     "build": "bun run --filter='*' build",
+    "bench:impact": "bun ./scripts/benchmark-impact.ts",
     "bench:snapshot": "bun ./scripts/benchmark-snapshot-image.ts",
     "ci:contract": "bun test ./.github/ci",
     "ci:verify": "bun ./scripts/verify-ci.ts",

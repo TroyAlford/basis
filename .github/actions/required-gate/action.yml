@@ -24,6 +24,26 @@ inputs:
       for jobs that set `name:`. Unmapped jobs use the key itself.
     required: false
     default: '{}'
+  impact-decision:
+    description: >-
+      The exact-head impact decision JSON from the preflight job. When supplied,
+      a skipped suite is accepted only if the decision records it as unaffected.
+    required: false
+    default: ''
+  impact-hash:
+    description: 'SHA-256 of the canonical impact decision JSON.'
+    required: false
+    default: ''
+  event-action:
+    description: >-
+      The pull_request action. An `edited` event may reuse a prior successful
+      suite check on the same head SHA; every other skip needs an impact decision.
+    required: false
+    default: ''
+  require-impact:
+    description: 'Fail when no impact decision is supplied.'
+    required: false
+    default: 'false'
   reuse-timeout-seconds:
     description: >-
       How long to wait for an in-flight check run on the head SHA before
@@ -45,6 +65,10 @@ runs:
         NEEDS: ${{ inputs.needs }}
         HEAD_SHA: ${{ inputs.head-sha }}
         CHECK_NAMES: ${{ inputs.check-names }}
+        IMPACT_DECISION: ${{ inputs.impact-decision }}
+        IMPACT_HASH: ${{ inputs.impact-hash }}
+        EVENT_ACTION: ${{ inputs.event-action }}
+        REQUIRE_IMPACT: ${{ inputs.require-impact }}
         REPO: ${{ github.repository }}
         RUN_ID: ${{ github.run_id }}
         REUSE_TIMEOUT_SECONDS: ${{ inputs.reuse-timeout-seconds }}
