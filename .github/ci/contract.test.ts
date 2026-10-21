@@ -17,6 +17,7 @@ interface Job {
   'if'?: string,
   'name'?: string,
   'needs'?: string[],
+  'outputs'?: Record<string, string>,
   'permissions'?: Record<string, string>,
   'runs-on'?: string,
   'steps'?: Step[],
@@ -119,13 +120,13 @@ describe('reference consumer CI', () => {
   })
 
   test('skips every suite job for Draft events', () => {
-    for (const id of ['quality', 'docs', 'test', 'integration', 'visual']) {
+    for (const id of ['quality', 'docs', 'unit', 'integration', 'visual']) {
       const job = workflow.jobs?.[id]
       expect(job).toBeDefined()
       expect(job?.needs).toContain('impact')
       expect(job?.if).toContain('needs.impact.result')
       expect(job?.if).toContain('!github.event.pull_request.draft')
-      expect(job?.if).toContain(`needs.impact.outputs.${id === 'test' ? 'unit' : id}-needed`)
+      expect(job?.if).toContain(`needs.impact.outputs.${id}-needed`)
     }
   })
 
@@ -154,6 +155,32 @@ describe('reference consumer CI', () => {
     expect(artifact?.with?.path).toBe('impact-decision.json')
   })
 
+  test('republishes every consumed impact output at job scope', () => {
+    const outputs = workflow.jobs?.impact?.outputs ?? {}
+    const consumed = new Set<string>(['decision', 'decision-hash'])
+    for (const job of Object.values(workflow.jobs ?? {})) {
+      for (const match of job.if?.matchAll(/needs\.impact\.outputs\.([a-z-]+)/g) ?? []) {
+        consumed.add(match[1])
+      }
+    }
+    for (const key of consumed) {
+      expect(outputs[key]).toBe(`\${{ steps.impact.outputs.${key} }}`)
+    }
+    for (const key of [
+      'quality-needed',
+      'docs-needed',
+      'unit-needed',
+      'integration-needed',
+      'visual-needed',
+    ]) {
+      expect(outputs[key]).toBe(`\${{ steps.impact.outputs.${key} }}`)
+    }
+
+    const verify = workflow.jobs?.impact?.steps?.find(step => step.name === 'Verify impact outputs')
+    expect(verify?.run).toContain('DECISION')
+    expect(verify?.env?.DECISION_HASH).toBe('${{ steps.impact.outputs.decision-hash }}')
+  })
+
   test('consolidates lightweight checks into one job with distinct steps', () => {
     const steps = workflow.jobs?.quality?.steps ?? []
     expect(steps.some(step => step.run === 'bun run lint')).toBe(true)
@@ -162,7 +189,7 @@ describe('reference consumer CI', () => {
   })
 
   test('keeps unit, integration, docs, and visual suites in separate processes', () => {
-    expect(workflow.jobs?.test?.steps?.some(step => step.run === 'bun run test')).toBe(true)
+    expect(workflow.jobs?.unit?.steps?.some(step => step.run === 'bun run test')).toBe(true)
     expect(workflow.jobs?.integration?.steps?.some(step => step.run === 'bun run test:integration')).toBe(true)
     expect(workflow.jobs?.docs?.steps?.some(step => step.run === 'bun run docs:check')).toBe(true)
     expect(workflow.jobs?.visual?.steps?.some(step => step.run === 'bun run test:visual')).toBe(true)
@@ -179,7 +206,7 @@ describe('reference consumer CI', () => {
 
   test('requires the impact preflight and every suite through the portable gate', () => {
     const required = workflow.jobs?.required
-    for (const id of ['impact', 'quality', 'docs', 'test', 'integration', 'visual']) {
+    for (const id of ['impact', 'quality', 'docs', 'unit', 'integration', 'visual']) {
       expect(required?.needs).toContain(id)
     }
 
@@ -194,13 +221,13 @@ describe('reference consumer CI', () => {
       docs: 'Docs',
       integration: 'Integration',
       quality: 'Quality',
-      test: 'Test',
+      unit: 'Test',
       visual: 'Visual',
     })
   })
 
   test('uses the same caller-selectable runner everywhere', () => {
-    for (const id of ['impact', 'quality', 'docs', 'test', 'integration', 'visual', 'required']) {
+    for (const id of ['impact', 'quality', 'docs', 'unit', 'integration', 'visual', 'required']) {
       expect(workflow.jobs?.[id]?.['runs-on']).toBe("${{ vars.CI_RUNNER || 'ubuntu-latest' }}")
     }
   })

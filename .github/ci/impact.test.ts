@@ -318,6 +318,67 @@ describe('conservative policy rules', () => {
   })
 })
 
+describe('reference workflow propagation', () => {
+  const workflow = Bun.YAML.parse(
+    readFileSync(join(root, 'docs/examples/consumer-ci.yml'), 'utf8'),
+  ) as {
+    jobs: Record<string, { if?: string, outputs?: Record<string, string> }>,
+  }
+  const suiteJobs: Record<string, string> = {
+    docs: 'docs',
+    integration: 'integration',
+    quality: 'quality',
+    unit: 'unit',
+    visual: 'visual',
+  }
+
+  /**
+   * Map a decision to the reference suite jobs that should run.
+   * @param decision An exact-head decision.
+   * @returns Sorted job ids.
+   */
+  function scheduled(decision: ImpactDecision): string[] {
+    return Object.entries(suiteJobs)
+      .filter(([, key]) => decision.suites[key]?.needed)
+      .map(([job]) => job)
+      .sort()
+  }
+
+  test('republishes each consumed suite output at job scope', () => {
+    const outputs = workflow.jobs.impact.outputs ?? {}
+    expect(outputs.decision).toBe('${{ steps.impact.outputs.decision }}')
+    expect(outputs['decision-hash']).toBe('${{ steps.impact.outputs.decision-hash }}')
+    for (const [job, key] of Object.entries(suiteJobs)) {
+      expect(outputs[`${key}-needed`]).toBe(`\${{ steps.impact.outputs.${key}-needed }}`)
+      expect(workflow.jobs[job]?.if).toContain(`needs.impact.outputs.${key}-needed == 'true'`)
+    }
+  })
+
+  test('a docs-only change schedules only docs', async () => {
+    const decision = await decide({ 'docs/guide.md': '# Guide\n' }, [change('docs/guide.md')])
+    expect(scheduled(decision)).toEqual(['docs'])
+  })
+
+  test('a backend-only change schedules quality, unit and integration', async () => {
+    const decision = await decide(
+      { 'src/server.ts': 'export const server = 1\n' },
+      [change('src/server.ts')],
+    )
+    expect(scheduled(decision)).toEqual(['integration', 'quality', 'unit'])
+  })
+
+  test('a UI change schedules quality, unit, integration and visual', async () => {
+    const decision = await decide(
+      {
+        'src/Button.test.tsx': "import { Button } from './Button'\ntest('button', () => Button)\n",
+        'src/Button.tsx': 'export const Button = 1\n',
+      },
+      [change('src/Button.tsx')],
+    )
+    expect(scheduled(decision)).toEqual(['integration', 'quality', 'unit', 'visual'])
+  })
+})
+
 describe('git integration', () => {
   test('uses the exact merge base rather than the base branch head', async () => {
     const repo = await gitRepo({ 'src/a.ts': 'export const a = 1\n' })

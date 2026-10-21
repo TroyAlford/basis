@@ -41,6 +41,17 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+    # Composite-action step outputs are step-scoped. Every value consumed by a
+    # downstream job must be republished as a job output here.
+    outputs:
+      decision: ${{ steps.impact.outputs.decision }}
+      decision-hash: ${{ steps.impact.outputs.decision-hash }}
+      any-needed: ${{ steps.impact.outputs.any-needed }}
+      quality-needed: ${{ steps.impact.outputs.quality-needed }}
+      docs-needed: ${{ steps.impact.outputs.docs-needed }}
+      unit-needed: ${{ steps.impact.outputs.unit-needed }}
+      integration-needed: ${{ steps.impact.outputs.integration-needed }}
+      visual-needed: ${{ steps.impact.outputs.visual-needed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,6 +73,15 @@ jobs:
           base-ref: origin/${{ github.event.pull_request.base.ref }}
           head-sha: ${{ github.event.pull_request.head.sha }}
           config-path: .github/ci-impact.json
+      # Fail the preflight instead of letting empty outputs skip every suite and
+      # leaving the Required gate to discover the missing evidence later.
+      - name: Verify impact outputs
+        env:
+          DECISION: ${{ steps.impact.outputs.decision }}
+          DECISION_HASH: ${{ steps.impact.outputs.decision-hash }}
+        run: |
+          test -n "$DECISION" || { echo "::error::impact decision output is empty"; exit 1; }
+          test -n "$DECISION_HASH" || { echo "::error::impact decision hash output is empty"; exit 1; }
       - name: Upload the impact decision
         if: always()
         uses: actions/upload-artifact@v4
@@ -123,7 +143,7 @@ jobs:
 
   # Keep the unit suite in its own process. It is independent of `quality` so a
   # lint failure does not hide a test failure.
-  test:
+  unit:
     name: Test
     needs: impact
     if: >-
@@ -200,7 +220,7 @@ jobs:
   required:
     name: Required
     if: ${{ always() && !github.event.pull_request.draft }}
-    needs: [impact, quality, docs, test, integration, visual]
+    needs: [impact, quality, docs, unit, integration, visual]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     permissions:
       checks: read
@@ -217,4 +237,4 @@ jobs:
           impact-hash: ${{ needs.impact.outputs.decision-hash }}
           require-impact: 'true'
           check-names: |
-            {"quality":"Quality","docs":"Docs","test":"Test","integration":"Integration","visual":"Visual"}
+            {"quality":"Quality","docs":"Docs","unit":"Test","integration":"Integration","visual":"Visual"}

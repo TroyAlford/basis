@@ -36,7 +36,7 @@ The portable [required gate](../.github/actions/required-gate/README.md) fails c
 required:
   name: Required
   if: ${{ always() && !github.event.pull_request.draft }}
-  needs: [impact, quality, docs, test, integration, visual]
+  needs: [impact, quality, docs, unit, integration, visual]
   runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
   permissions:
     checks: read
@@ -52,7 +52,7 @@ required:
         event-action: ${{ github.event.action }}
         require-impact: 'true'
         check-names: |
-          {"quality":"Quality","docs":"Docs","test":"Test","integration":"Integration","visual":"Visual"}
+          {"quality":"Quality","docs":"Docs","unit":"Test","integration":"Integration","visual":"Visual"}
 ```
 
 Every dependency must have succeeded in the current run, or have been skipped for one of exactly two reasons:
@@ -97,6 +97,8 @@ impact:
 ```
 
 The policy declares suite keys, test roots, source globs, always-run paths, ignored paths, optional non-test entry points, and a conservative mode. The reference policy is [ci-impact.json](./examples/ci-impact.json); consumers copy it to `.github/ci-impact.json` and edit the paths for their repository. The analyzer returns a deterministic JSON decision with `needed`, `reason`, `evidence`, `selectedTests`, and `unknownFiles` per suite, plus `changedFiles`, `mergeBase`, `headSha`, `policyHash`, and `docsOnly`.
+
+Composite-action outputs are step-scoped, so the reference `impact` job republishes every consumed value as a job output. A wiring mistake fails the preflight's non-empty evidence check, and the gate then fails rather than silently skipping every suite. The action also fails closed if the decision is too large for the GitHub output limit; the full decision remains in the uploaded artifact.
 
 Add every runtime application entry to the relevant suite's `extraRoots`. The reference visual suite is conservative for `.tsx` and style changes, but a plain `.ts` helper is ignored unless a visual test or an `extraRoots` entry reaches it; list the server, docs, and app entries so runtime-loaded code is not missed. A docs suite can use `ignoreGlobs: ["**"]` because source, test, always-run, and import-reachability checks happen before ignore; only its docs sources can trigger it.
 
@@ -211,7 +213,7 @@ Decision: do not change `libraries/testing/browser.ts`. It already starts one pi
 
 The baseline is the current pilot pull-request loop: six independent code jobs (`lint`, `typecheck`, `test`, `knip`, `session-environment`, `visual`) plus a one-job `Required` on every Draft push, and a separate title job. That is three Draft pushes of (6 code + `Required` + title) plus a promotion push of the same shape: **32 jobs**.
 
-The recipe adds one cheap impact preflight at promotion, consolidates lint, typecheck and advisory Knip into one `quality` job, keeps `docs`, `test`, `integration` and `visual` separate, and runs only the suites the exact-head decision marks needed. Draft pushes run zero jobs.
+The recipe adds one cheap impact preflight at promotion, consolidates lint, typecheck and advisory Knip into one `quality` job, keeps `docs`, `unit`, `integration` and `visual` separate, and runs only the suites the exact-head decision marks needed. Draft pushes run zero jobs.
 
 For a representative cycle of three Draft pushes followed by promotion:
 

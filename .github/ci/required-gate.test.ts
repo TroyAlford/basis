@@ -472,4 +472,32 @@ describe('required gate impact evidence', () => {
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain('required jobs did not pass: unit')
   })
+
+  for (const scenario of [
+    {
+      name: 'docs-only',
+      suites: { docs: true, integration: false, quality: false, unit: false, visual: false },
+    },
+    {
+      name: 'backend-only',
+      suites: { docs: false, integration: true, quality: true, unit: true, visual: false },
+    },
+    {
+      name: 'UI',
+      suites: { docs: false, integration: true, quality: true, unit: true, visual: true },
+    },
+  ]) {
+    test(`accepts ${scenario.name} scheduling evidence`, async () => {
+      const needs: Record<string, { result: string }> = { impact: { result: 'success' } }
+      for (const [key, needed] of Object.entries(scenario.suites)) {
+        needs[key] = { result: needed ? 'success' : 'skipped' }
+      }
+      const result = await runGate({
+        needs,
+        requireImpact: true,
+        ...impact(scenario.suites),
+      })
+      expect(result.exitCode).toBe(0)
+    })
+  }
 })

@@ -94,12 +94,23 @@ impact:
   name: Impact
   if: ${{ !github.event.pull_request.draft }}
   runs-on: ubuntu-latest
+  outputs:
+    decision: ${{ steps.impact.outputs.decision }}
+    decision-hash: ${{ steps.impact.outputs.decision-hash }}
+    quality-needed: ${{ steps.impact.outputs.quality-needed }}
+    docs-needed: ${{ steps.impact.outputs.docs-needed }}
+    unit-needed: ${{ steps.impact.outputs.unit-needed }}
+    integration-needed: ${{ steps.impact.outputs.integration-needed }}
+    visual-needed: ${{ steps.impact.outputs.visual-needed }}
   steps:
     - uses: actions/checkout@v4
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 0
-    - run: git fetch --no-tags origin ${{ github.event.pull_request.base.ref }}
+    - name: Fetch the base branch
+      env:
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+      run: git fetch --no-tags origin "$BASE_REF"
     - uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: .tool-versions
@@ -110,6 +121,8 @@ impact:
         head-sha: ${{ github.event.pull_request.head.sha }}
         config-path: .github/ci-impact.json
 ```
+
+Composite-action outputs are step-scoped. A job that calls the action must republish every value consumed by another job as a job output; `needs.<job>.outputs.*` does not read `steps.<id>.outputs.*` automatically. The reference workflow also verifies the two evidence outputs are non-empty before the job succeeds, so a wiring mistake fails the preflight instead of silently skipping every suite.
 
 The preflight does not install dependencies and does not execute PR code. Its one billed minute is disclosed in the recipe's before/after table; skipping a visual job that includes the pinned Playwright image pull is the saving that pays for it.
 
@@ -128,7 +141,7 @@ The `Required` gate receives the decision and hash and accepts a skipped suite o
 - The analyzer parses files; it never executes them. It does not follow symlinks, skips sources larger than 2 MB, and fails closed when the graph exceeds `maxGraphFiles`.
 - It resolves relative imports, configured aliases, directory indexes, and static/dynamic import records. It does not evaluate arbitrary runtime module resolution; an unresolved or dynamic path is conservative.
 - `selectedTests` is evidence, not permission to skip the rest of a suite. Setup, preloads and global state can create dependencies the file graph cannot see.
-- A decision over the GitHub output limit fails the action rather than truncating. The full decision is still written to `impact-decision.json` for the artifact.
+- A decision over the GitHub output limit fails the action rather than truncating. The full decision is still written to `impact-decision.json` for the artifact. The decision contains paths and reasons, not source contents, but GitHub's output size and redaction rules still apply.
 - The policy and the action are trusted inputs. Pin the action to a released tag and keep the policy on the base branch.
 
 ## Local verification
