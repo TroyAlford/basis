@@ -4,7 +4,7 @@ title: Portable CI contract
 
 # Portable CI contract
 
-Basis owns a reusable, locally validated pattern for low-cost GitHub Actions. It is a contract and a reference implementation, not repository infrastructure: Basis does not choose an organization's runners, labels, credentials, budgets, or per-repository check set. The pilot is [Alforge/ai #171](https://github.com/Alforge/ai/issues/171); do not roll the pattern out to the other organizations until the pilot is reviewed.
+Basis owns a reusable, locally validated pattern for low-cost GitHub Actions. It is a contract and a reference implementation, not repository infrastructure: Basis does not choose an organization's runners, labels, credentials, budgets, or per-repository check set. A consumer repository is the pilot; do not roll the pattern out to other organizations until the pilot is reviewed.
 
 The expensive part of the current PR loop is not screenshot execution. It is repeated job startup, repeated checkout and dependency setup, repeated image provisioning, and running all of that for Draft commits that cannot merge. The recipe keeps the final gate at least as strict as today while spending no hosted runner minutes on routine Draft events.
 
@@ -111,7 +111,7 @@ The import graph is rooted at each suite's test globs and declared `extraRoots`.
 
 A docs-only change therefore runs the docs check and `Required`, not lint, typecheck, unit, integration or visual. A truly untested markdown change produces an all-false decision; the reference still runs the checkout-free `Required` job because it is the stable branch-protection context, which is one bounded minute rather than an expensive runner. A repository that does not require `Required` on such changes can gate that job on `any-needed`. A backend-only change runs quality, unit and integration but not visual. A component or stylesheet change runs visual. A lockfile or toolchain change runs every code suite. Mixed commits get a per-suite decision rather than an all-or-nothing switch.
 
-The preflight is one cheap job and is billed like any other job. It pays for itself when it skips a visual job, which includes the 36–55 s image pull and 62–81 s of hosted work; it also pays for itself on docs-only and backend-only promotions. A change that affects every suite pays one extra preflight minute, so the recipe is a net saving on the review cycles where Draft suppression and selective promotion matter, not a promise that every single Ready PR is cheaper than the old full suite. The before/after table below makes that trade-off explicit.
+The preflight is one cheap job and is billed like any other job. It pays for itself when it skips a visual job, which includes a roughly 35–55 s image pull and roughly 60–80 s of hosted work; it also pays for itself on docs-only and backend-only promotions. A change that affects every suite pays one extra preflight minute, so the recipe is a net saving on the review cycles where Draft suppression and selective promotion matter, not a promise that every single Ready PR is cheaper than the old full suite. The before/after table below makes that trade-off explicit.
 
 ## Security boundaries
 
@@ -186,7 +186,7 @@ A consumer checkout omits `--local-repository` and resolves the pinned released 
 
 ## Image provisioning benchmark
 
-Measured on 2026-10-21 on the local sandbox: Linux 7.0.0-1009-oracle, aarch64, 4 vCPU, 24 GiB RAM, Docker 29.8.1, Bun 1.4.2, Playwright 1.63.0. The pinned image was `mcr.microsoft.com/playwright:v1.63.0-noble` at digest `sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27`, warm in the local cache (88 active containers were already using it).
+Measured on 2026-10-21 on a local arm64 development host with a warm Docker cache, using Docker 29.8.1, Bun 1.4.2, and Playwright 1.63.0 with `mcr.microsoft.com/playwright:v1.63.0-noble`. These are local relative timings, not hosted billing or timing data.
 
 Reproduce the warm measurements with `bun run bench:snapshot`; add `-- --save-load` to include the docker save/load artifact cost. The script never removes the image or running containers.
 
@@ -197,19 +197,19 @@ Reproduce the warm measurements with `bun run bench:snapshot`; add `-- --save-lo
 | `docker save` | 16.6–23.9 s, 0.87 GiB tar | `docker save <image> -o <tempdir>/image.tar` |
 | `docker load` | 9.0–9.7 s | `docker load -i <tempdir>/image.tar`; restore/load proxy, not a hosted cache action |
 | one snapshot capture, warm image | 2.3–3.4 s over 4 runs | `bun test libraries/testing/matchScreenshot.test.tsx`; runtime starts one container |
-| hosted cold image pull | 36–55 s per visual job | Alforge/ai pilot logs, GitHub-hosted amd64 runners |
-| hosted setup | 17–21 s per job | Alforge/ai pilot logs |
-| hosted 17–18 screenshot tests | 3–4 s | Alforge/ai pilot logs |
+| hosted cold image pull | roughly 35–55 s per visual job | reported pilot logs, hosted amd64 runners |
+| hosted setup | roughly 15–20 s per job | reported pilot logs |
+| hosted screenshot suite | a few seconds | reported pilot logs |
 
-The local host is arm64 while GitHub-hosted runners are amd64, so a local cold pull would not be a like-for-like hosted measurement even if the shared Docker cache could be cleared. It could not: the pinned image had 88 active containers, and removing it would disrupt other work. The hosted pull and setup ranges above are reported pilot data, not numbers this change re-measured.
+The local host is arm64 while hosted runners are amd64, so a local cold pull is not a like-for-like hosted measurement. The benchmark leaves the pinned image in the local cache rather than removing it, because other local work may be using it. The hosted pull and setup ranges above are reported pilot data, not numbers this change re-measured.
 
-The change-impact preflight itself took **0.53–0.54 s** locally for 20 changed files and 125 test roots (`bun run bench:impact`). On a hosted runner it also pays checkout, base fetch and Bun setup, so it bills as one minute. That is the overhead the impact decision must beat; a skipped visual job avoids the 36–55 s image pull and 62–81 s of visual work, and a docs-only or backend-only promotion skips several jobs, so the preflight is a net saving on the cycles that matter.
+The change-impact preflight itself took **0.53–0.54 s** locally for 20 changed files and 125 test roots (`bun run bench:impact`). On a hosted runner it also pays checkout, base fetch and Bun setup, so it bills as one minute. That is the overhead the impact decision must beat; a skipped visual job avoids a roughly 35–55 s image pull and roughly 60–80 s of visual work, and a docs-only or backend-only promotion skips several jobs, so the preflight is a net saving on the cycles that matter.
 
-Decision: do not change `libraries/testing/browser.ts`. It already starts one pinned container and one browser per test run, reuses a page for element captures, and keeps application visits isolated. Screenshot execution is 3–4 s; cold provisioning is the cost. A consumer pre-pull only moves the pull into a named step and does not reduce billed minutes, because the job is billed either way. A local `docker save`/`load` cache would add a 0.87 GiB artifact and at least 9 s of restore time for a benefit that is not clearly cheaper than a hosted pull. A purpose-built image or any runtime change is not authorized without proof of identical rendered snapshots and a clear material saving. Prefer the workflow fix; keep an optional pre-pull only if it improves failure diagnostics.
+Decision: do not change `libraries/testing/browser.ts`. It already starts one pinned container and one browser per test run, reuses a page for element captures, and keeps application visits isolated. Screenshot execution takes a few seconds; cold provisioning is the cost. A consumer pre-pull only moves the pull into a named step and does not reduce billed minutes, because the job is billed either way. A local `docker save`/`load` cache would add a 0.87 GiB artifact and at least 9 s of restore time for a benefit that is not clearly cheaper than a hosted pull. A purpose-built image or any runtime change is not authorized without proof of identical rendered snapshots and a clear material saving. Prefer the workflow fix; keep an optional pre-pull only if it improves failure diagnostics.
 
 ## Before and after
 
-The baseline is the current Alforge/ai pull-request loop described in #171: six independent code jobs (`lint`, `typecheck`, `test`, `knip`, `session-environment`, `visual`) plus a one-job `Required` on every Draft push, and a separate title job. That is three Draft pushes of (6 code + `Required` + title) plus a promotion push of the same shape: **32 jobs**.
+The baseline is the current pilot pull-request loop: six independent code jobs (`lint`, `typecheck`, `test`, `knip`, `session-environment`, `visual`) plus a one-job `Required` on every Draft push, and a separate title job. That is three Draft pushes of (6 code + `Required` + title) plus a promotion push of the same shape: **32 jobs**.
 
 The recipe adds one cheap impact preflight at promotion, consolidates lint, typecheck and advisory Knip into one `quality` job, keeps `docs`, `test`, `integration` and `visual` separate, and runs only the suites the exact-head decision marks needed. Draft pushes run zero jobs.
 
@@ -223,7 +223,7 @@ For a representative cycle of three Draft pushes followed by promotion:
 
 That is 25–28 fewer hosted job allocations for the cycle, or about 78–88% fewer. Even the worst case, where every suite is affected, still eliminates the three Draft runs and the repeated visual pull; the preflight adds one job at promotion but the visual image pull is paid once instead of four times.
 
-The billed-minute comparison is better than the job count in the cases that matter. The preflight bills as one minute. A skipped visual job avoids a 62–81 s job plus a 36–55 s pinned-image pull, which bills as two or more minutes. A docs-only or backend-only promotion skips three or four jobs, not just the visual one. A full-impact promotion pays one extra preflight minute, so the recipe is a net saving because of Draft suppression and the single promotion visual, not because the preflight is free.
+The billed-minute comparison is better than the job count in the cases that matter. The preflight bills as one minute. A skipped visual job avoids a roughly 60–80 s job plus a roughly 35–55 s pinned-image pull, which bills as two or more minutes. A docs-only or backend-only promotion skips three or four jobs, not just the visual one. A full-impact promotion pays one extra preflight minute, so the recipe is a net saving because of Draft suppression and the single promotion visual, not because the preflight is free.
 
 These are job-allocation arithmetic from reported data, not a new hosted measurement. GitHub rounds each billable job up to the nearest minute, so wall-clock seconds are not the billed quantity; job allocations and the per-job setup/pull share are the robust comparison. A job that spends 20 s on setup can still bill as one minute. The recipe does not collapse the unit, docs, integration or visual suites, does not drop the OpenCode/session-environment checks from a consumer's set, and does not weaken branch protection. Those checks stay, but they run only after promotion and only when the exact-head decision says they can be affected.
 
@@ -231,10 +231,10 @@ No hosted confirmation was run for this change. Prove the candidate locally, the
 
 ## Migration checklist
 
-Use this for Alforge, TroyAlford-Projects, and NerdrageTools. Do the pilot first; do not mass-edit repositories.
+Use this for the pilot and the other consumer organizations. Do the pilot first; do not mass-edit repositories.
 
 - [ ] Map the repository's current jobs to `impact`, `quality`, `docs`, `test` (unit), `integration`, and `visual`. Keep suites that currently run in separate processes separate.
-- [ ] Copy the reference workflows and replace the setup action, install command, and check commands with the repository's own. Do not copy Alforge-specific setup into Basis or another organization.
+- [ ] Copy the reference workflows and replace the setup action, install command, and check commands with the repository's own. Do not copy consumer-specific setup into Basis or another organization.
 - [ ] Commit `.github/ci-impact.json` as its own policy change **before** enabling impact gating. The preflight reads the policy from the merge base; a PR that changes the policy is analyzed against the old one, and a missing base policy fails closed.
 - [ ] Set `vars.CI_RUNNER` only if the repository needs a non-default runner; leave it unset to keep `ubuntu-latest`.
 - [ ] Add the `Required` job to branch protection and add `impact` to its `needs`. Pass `impact-decision`, `impact-hash`, `event-action`, and `require-impact: 'true'`. Keep its name stable; remove individual job contexts if `Required` is now the single gate, or keep them as additional contexts.
@@ -244,10 +244,10 @@ Use this for Alforge, TroyAlford-Projects, and NerdrageTools. Do the pilot first
 - [ ] Prove the impact matrix: docs-only, tested docs, backend-only, component, direct and transitive imports, aliases, dynamic imports, styles, screenshots, unit/visual test separation, lockfiles, toolchain, preloads, renames, deletions, unknown files, and mixed commits. Verify a missing, cancelled, skipped, neutral, stale, or tampered result fails `Required`, and that a `needed: false` suite is accepted without a prior check.
 - [ ] Prove the event matrix with the fixtures: Draft open/push/reopen/edit/convert, Ready open/push/reopen/edit, and re-draft to re-promotion.
 - [ ] Plan one hosted confirmation only after local proof and operator approval. Record job allocations, per-job durations, setup repetition, preflight overhead, and image-pull share. Label hosted data separately from local estimates.
-- [ ] Apply to Alforge/ai #171 first, review the pilot, then repeat for TroyAlford-Projects and NerdrageTools. Do not change Basis's shared runtime or release semantics as part of a consumer migration.
+- [ ] Apply to the pilot first, review it, then repeat for the other consumer organizations. Do not change Basis's shared runtime or release semantics as part of a consumer migration.
 
 ## Ownership boundary
 
-Basis owns the portable contract, the reference workflows, the required-gate action, the change-impact action and policy schema, the local verification recipe, and the caller-selectable release runner input. Each consumer owns its event policy, suite paths and exclusions, check set, commands, runner labels, budgets, secrets, branch protection, and workflow files. Alforge/ai #171 owns its Draft-first PR lifecycle, explicit ready action, and its own workflow optimization and measurements.
+Basis owns the portable contract, the reference workflows, the required-gate action, the change-impact action and policy schema, the local verification recipe, and the caller-selectable release runner input. Each consumer owns its event policy, suite paths and exclusions, check set, commands, runner labels, budgets, secrets, branch protection, and workflow files. The pilot owns its Draft-first PR lifecycle, explicit ready action, and its own workflow optimization and measurements.
 
 Nothing here authorizes a privileged Docker socket on application runners, an OCI runner migration, a new CI service, a weakened visual suite, erased branch protections, or a privileged checkout of pull-request code. Those are separate decisions with separate security and cost cases.

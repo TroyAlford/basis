@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /* eslint-disable no-console -- this is an operator-facing benchmark command. */
 import { mkdtemp, rm, stat } from 'node:fs/promises'
-import { arch, cpus, release, tmpdir, totalmem } from 'node:os'
+import { arch, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /*
@@ -11,7 +11,7 @@ import { join } from 'node:path'
  * and, with --save-load, the docker save/load cost of a cache artifact. It does
  * not remove the image or running containers, so it cannot produce a cold-pull
  * number on a shared daemon. The hosted cold-pull data in docs/ci.mdx comes from
- * the Alforge/ai pilot logs and is labelled separately.
+ * reported pilot logs and is labelled separately.
  */
 
 const root = join(import.meta.dir, '..')
@@ -65,8 +65,8 @@ const image = `mcr.microsoft.com/playwright:v${playwright.version}-noble`
 const present = measure(['docker', 'image', 'inspect', image, '--format', '{{json .}}'])
 const cacheState = present.code === 0 ? 'warm' : 'missing'
 
-const inspect = measure(['docker', 'image', 'inspect', image, '--format', '{{.Size}} {{index .RepoDigests 0}}'])
-const [size, digest] = inspect.code === 0 ? inspect.output.split(' ') : ['unknown', 'unknown']
+const inspect = measure(['docker', 'image', 'inspect', image, '--format', '{{.Size}}'])
+const size = inspect.code === 0 ? inspect.output : 'unknown'
 
 const pull = measure(['docker', 'pull', image])
 requireSuccess('docker pull', pull)
@@ -107,11 +107,11 @@ const bun = measure([process.execPath, '--version'])
 
 console.log('\n# Snapshot image benchmark\n')
 console.log(`- Date: ${new Date().toISOString()}`)
-console.log(`- Host: ${release()}, ${arch()}, ${cpus().length} vCPU, ${(totalmem() / (1024 ** 3)).toFixed(0)} GiB RAM`)
+console.log(`- Host architecture: ${arch()}`)
 console.log(`- Docker: ${docker.output}`)
 console.log(`- Bun: ${bun.output}`)
 console.log(`- Playwright: ${playwright.version}`)
-console.log(`- Image: \`${image}\` (${digest}, ${size} bytes, ${cacheState} cache)`)
+console.log(`- Image: \`${image}\` (${size} bytes, ${cacheState} cache)`)
 console.log('')
 console.log('| Measurement | Result |')
 console.log('| --- | --- |')
