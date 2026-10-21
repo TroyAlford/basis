@@ -105,12 +105,19 @@ impact:
   steps:
     - uses: actions/checkout@v4
       with:
-        ref: ${{ github.event.pull_request.head.sha }}
+        # Base repository at the event's base commit, with full history.
+        ref: ${{ github.event.pull_request.base.sha }}
         fetch-depth: 0
-    - name: Fetch the base branch
+    - name: Fetch the pull-request head and base branch
       env:
         BASE_REF: ${{ github.event.pull_request.base.ref }}
-      run: git fetch --no-tags origin "$BASE_REF"
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr-head"
+        git fetch --no-tags origin "$BASE_REF"
+        test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
+        git checkout --detach refs/remotes/origin/pr-head
     - uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: .tool-versions
@@ -122,6 +129,8 @@ impact:
         config-path: .github/ci-impact.json
 ```
 
+The head is fetched from the base repository's `refs/pull/<number>/head`, so a fork PR does not depend on fetching the fork repository from `origin`. The preflight verifies the fetched PR ref is the exact event head SHA before checking it out; the base branch is fetched separately for the merge base.
+
 Composite-action outputs are step-scoped. A job that calls the action must republish every value consumed by another job as a job output; `needs.<job>.outputs.*` does not read `steps.<id>.outputs.*` automatically. The reference workflow also verifies the two evidence outputs are non-empty before the job succeeds, so a wiring mistake fails the preflight instead of silently skipping every suite.
 
 The preflight does not install dependencies and does not execute PR code. Its one billed minute is disclosed in the recipe's before/after table; skipping a visual job that includes the pinned Playwright image pull is the saving that pays for it.
@@ -131,7 +140,7 @@ Downstream jobs must use the decision, not a fake success status:
 ```yaml
 visual:
   needs: impact
-  if: ${{ needs.impact.result == 'success' && !github.event.pull_request.draft && github.event.action != 'edited' && needs.impact.outputs.visual-needed == 'true' }}
+  if: ${{ needs.impact.result == 'success' && !github.event.pull_request.draft && needs.impact.outputs.visual-needed == 'true' }}
 ```
 
 The `Required` gate receives the decision and hash and accepts a skipped suite only when the decision records it as unaffected. See [required-gate](../required-gate/README.md).

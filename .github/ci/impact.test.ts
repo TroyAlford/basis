@@ -96,6 +96,34 @@ function git(cwd: string, args: string[]): void {
 }
 
 /**
+ * Run a git command and return trimmed standard output.
+ * @param cwd Repository root.
+ * @param args Arguments after `git`.
+ * @returns Trimmed standard output.
+ */
+function gitOutput(cwd: string, args: string[]): string {
+  const result = Bun.spawnSync(['git', ...args], { cwd, stderr: 'pipe', stdout: 'pipe' })
+  if (result.exitCode !== 0) {
+    throw new Error(new TextDecoder().decode(result.stderr))
+  }
+  return new TextDecoder().decode(result.stdout).trim()
+}
+
+/**
+ * Clone a repository into a temporary directory.
+ * @param source Repository path to clone.
+ * @returns The clone root.
+ */
+async function clone(source: string): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), 'basis-impact-clone-'))
+  directories.push(directory)
+  git(directory, ['clone', '-q', source, '.'])
+  git(directory, ['config', 'user.email', 'test@example.com'])
+  git(directory, ['config', 'user.name', 'Test'])
+  return directory
+}
+
+/**
  * Create a temporary git repository with a committed base.
  * @param files Base files.
  * @returns The repository root.
@@ -469,5 +497,41 @@ describe('git integration', () => {
     expect(output).toContain('decision<<__BASIS_IMPACT_DECISION__')
     expect(output).toContain('unit-needed=true')
     expect(output).toContain(`decision-hash=${decisionHash(result.decision as ImpactDecision)}`)
+  })
+})
+
+describe('fork pull request topology', () => {
+  test('fetches the PR head from the base repository and analyzes the exact head', async () => {
+    const base = await gitRepo({ 'src/a.ts': 'export const a = 1\n' })
+    await mkdir(join(base, '.github'), { recursive: true })
+    await writeFile(join(base, CONFIG_PATH), configText)
+    git(base, ['add', '-A'])
+    git(base, ['commit', '-qm', 'config'])
+    const baseSha = gitOutput(base, ['rev-parse', 'HEAD'])
+
+    const fork = await clone(base)
+    git(fork, ['checkout', '-qb', 'feature'])
+    await writeFile(join(fork, 'src/a.ts'), 'export const a = 2\n')
+    git(fork, ['add', '-A'])
+    git(fork, ['commit', '-qm', 'feature'])
+    const headSha = gitOutput(fork, ['rev-parse', 'HEAD'])
+
+    // GitHub exposes a fork head as refs/pull/<number>/head on the base repo.
+    git(base, ['fetch', '--no-tags', fork, 'feature:refs/pull/1/head'])
+
+    // Simulate actions/checkout at the base SHA, then the workflow fetch steps.
+    const runner = await clone(base)
+    git(runner, ['checkout', '--detach', baseSha])
+    git(runner, ['fetch', '--no-tags', 'origin', 'refs/pull/1/head:refs/remotes/origin/pr-head'])
+    git(runner, ['fetch', '--no-tags', 'origin', 'main'])
+    expect(gitOutput(runner, ['rev-parse', 'refs/remotes/origin/pr-head'])).toBe(headSha)
+    git(runner, ['checkout', '--detach', 'refs/remotes/origin/pr-head'])
+
+    const result = cli(runner, ['--base-ref', 'origin/main', '--head-sha', headSha])
+    expect(result.code).toBe(0)
+    expect(result.decision?.headSha).toBe(headSha)
+    expect(result.decision?.mergeBase).toBe(baseSha)
+    expect(result.decision?.changedFiles.map(file => file.path)).toEqual(['src/a.ts'])
+    expect(result.decision?.suites.unit.needed).toBe(true)
   })
 })

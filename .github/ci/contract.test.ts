@@ -139,11 +139,17 @@ describe('reference consumer CI', () => {
 
     const checkout = job?.steps?.find(step => step.uses?.startsWith('actions/checkout'))
     expect(checkout?.with?.['fetch-depth']).toBe(0)
-    expect(checkout?.with?.ref).toBe('${{ github.event.pull_request.head.sha }}')
+    expect(checkout?.with?.ref).toBe('${{ github.event.pull_request.base.sha }}')
+    expect(checkout?.with?.repository).toBeUndefined()
 
-    const fetch = job?.steps?.find(step => step.run?.includes('git fetch'))
+    const fetch = job?.steps?.find(step => step.run?.includes('refs/pull/'))
     expect(fetch?.env?.BASE_REF).toBe('${{ github.event.pull_request.base.ref }}')
-    expect(fetch?.run).toContain('"$BASE_REF"')
+    expect(fetch?.env?.PR_NUMBER).toBe('${{ github.event.pull_request.number }}')
+    expect(fetch?.env?.HEAD_SHA).toBe('${{ github.event.pull_request.head.sha }}')
+    expect(fetch?.run).toContain('refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr-head')
+    expect(fetch?.run).toContain('git fetch --no-tags origin "$BASE_REF"')
+    expect(fetch?.run).toContain('git rev-parse refs/remotes/origin/pr-head')
+    expect(fetch?.run).toContain('git checkout --detach refs/remotes/origin/pr-head')
 
     const impact = job?.steps?.find(step => step.uses?.includes('/change-impact@'))
     expect(impact).toBeDefined()

@@ -82,9 +82,19 @@ impact:
   steps:
     - uses: actions/checkout@v4
       with:
-        ref: ${{ github.event.pull_request.head.sha }}
+        # Base repository at the event's base commit, with full history.
+        ref: ${{ github.event.pull_request.base.sha }}
         fetch-depth: 0
-    - run: git fetch --no-tags origin ${{ github.event.pull_request.base.ref }}
+    - name: Fetch the pull-request head and base branch
+      env:
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr-head"
+        git fetch --no-tags origin "$BASE_REF"
+        test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
+        git checkout --detach refs/remotes/origin/pr-head
     - uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: .tool-versions
@@ -95,6 +105,8 @@ impact:
         head-sha: ${{ github.event.pull_request.head.sha }}
         config-path: .github/ci-impact.json
 ```
+
+The head comes from the base repository's `refs/pull/<number>/head`, so the preflight works for a fork PR without assuming the fork repository is fetchable from `origin`. It verifies that the fetched PR ref is the exact event head SHA, then checks out that detached head; the base branch is fetched separately for the merge base.
 
 The policy declares suite keys, test roots, source globs, always-run paths, ignored paths, optional non-test entry points, and a conservative mode. The reference policy is [ci-impact.json](./examples/ci-impact.json); consumers copy it to `.github/ci-impact.json` and edit the paths for their repository. The analyzer returns a deterministic JSON decision with `needed`, `reason`, `evidence`, `selectedTests`, and `unknownFiles` per suite, plus `changedFiles`, `mergeBase`, `headSha`, `policyHash`, and `docsOnly`.
 
