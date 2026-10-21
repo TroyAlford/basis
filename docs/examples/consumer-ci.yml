@@ -1,0 +1,122 @@
+# Reference consumer CI workflow.
+#
+# This file is documentation, not an active workflow: it deliberately lives
+# outside `.github/workflows` so GitHub never runs it from the Basis repository.
+# Copy it into a consumer repository and replace the commands and setup action
+# with that repository's own. Pin every `TroyAlford/basis/...@main` reference to
+# the released tag you consume. See `docs/ci.mdx` for the contract and the local
+# verification recipe.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    # `converted_to_draft` creates a run whose jobs all skip, which lets the
+    # concurrency group cancel the in-flight ready-for-review run. `edited`
+    # re-checks the title-only case without rerunning the code jobs.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
+
+# Code checks only read the checked-out revision. The required job adds
+# `checks: read`; nothing here needs a write token.
+permissions:
+  contents: read
+
+# One group per pull request, not per ref: `ready_for_review` and
+# `converted_to_draft` must supersede the run they are replacing. A newer draft
+# run cancels an older ready run, and re-promotion revalidates the current HEAD.
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Consolidate lightweight checks into one job: one checkout, one toolchain
+  # setup, one dependency install. Keep distinct steps so a failure names the
+  # check that failed.
+  quality:
+    name: Quality
+    if: ${{ !github.event.pull_request.draft && github.event.action != 'edited' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Lint
+        run: bun run lint
+      # Drop this step when the repository's lint command already runs it.
+      - name: Typecheck
+        run: bun run typecheck
+      # Advisory only; the shared action fails on configuration errors, not on
+      # findings. Drop it or make it required per repository policy.
+      - name: Knip (advisory)
+        uses: TroyAlford/basis/.github/actions/knip@main
+        with:
+          fail-on-findings: 'false'
+
+  # Keep the unit suite in its own process. It is independent of `quality` so a
+  # lint failure does not hide a test failure.
+  test:
+    name: Test
+    if: ${{ !github.event.pull_request.draft && github.event.action != 'edited' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Unit tests
+        run: bun run test
+
+  # Keep visual/integration suites isolated from the unit process. The pinned
+  # Playwright image is pulled by the Basis snapshot runtime on first capture;
+  # this optional step only surfaces the pull as a named step. It does not
+  # change billed minutes: the job is billed either way.
+  visual:
+    name: Visual
+    if: ${{ !github.event.pull_request.draft && github.event.action != 'edited' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Warm the pinned Playwright image
+        run: |
+          image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
+          docker pull "$image"
+      - name: Visual tests
+        run: bun run test:visual
+
+  # Extension point: add repository-specific integration jobs here, then list
+  # them in `required.needs` below. Keep each one a separate process; do not
+  # fold a suite into another job to save a checkout.
+
+  # The single stable branch-protection context. On a Draft event this job is
+  # skipped, so it posts no green status at all. On `edited` (a ready PR) the
+  # code jobs are skipped, and the gate reuses their completed results on the
+  # exact head SHA. On every ready code event it requires every dependency to
+  # have succeeded in this run.
+  required:
+    name: Required
+    if: ${{ always() && !github.event.pull_request.draft }}
+    needs: [quality, test, visual]
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    permissions:
+      checks: read
+      contents: read
+    steps:
+      - name: Reduce required results
+        # Pin a released Basis tag in a real consumer.
+        uses: TroyAlford/basis/.github/actions/required-gate@main
+        with:
+          github-token: ${{ github.token }}
+          needs: ${{ toJSON(needs) }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          check-names: |
+            {"quality":"Quality","test":"Test","visual":"Visual"}

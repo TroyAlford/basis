@@ -1,0 +1,52 @@
+name: 'Required Gate'
+description: >-
+  Reduce a workflow's `needs` results into one reliable required status. Fails
+  on failure, cancellation, timeout, missing work, or an unreused skip; a
+  skipped job can only pass by reusing a successful check on the exact head SHA.
+
+inputs:
+  github-token:
+    description: 'Token with `checks: read` for the repository.'
+    required: true
+  needs:
+    description: >-
+      The workflow's `needs` context as JSON. The calling job passes the
+      `toJSON(needs)` value.
+    required: true
+  head-sha:
+    description: >-
+      The exact commit the gate represents. For pull requests this is the
+      pull request head SHA.
+    required: true
+  check-names:
+    description: >-
+      Optional JSON object mapping a `needs` key to its GitHub check-run name,
+      for jobs that set `name:`. Unmapped jobs use the key itself.
+    required: false
+    default: '{}'
+  reuse-timeout-seconds:
+    description: >-
+      How long to wait for an in-flight check run on the head SHA before
+      failing a skipped job.
+    required: false
+    default: '2400'
+  reuse-poll-seconds:
+    description: 'Seconds between checks while waiting for an in-flight run.'
+    required: false
+    default: '15'
+
+runs:
+  using: composite
+  steps:
+    - name: Reduce required results
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        NEEDS: ${{ inputs.needs }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        CHECK_NAMES: ${{ inputs.check-names }}
+        REPO: ${{ github.repository }}
+        RUN_ID: ${{ github.run_id }}
+        REUSE_TIMEOUT_SECONDS: ${{ inputs.reuse-timeout-seconds }}
+        REUSE_POLL_SECONDS: ${{ inputs.reuse-poll-seconds }}
+      run: bash "${{ github.action_path }}/run.sh"

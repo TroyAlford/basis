@@ -1,0 +1,21 @@
+{
+  "action": "synchronize",
+  "number": 42,
+  "pull_request": {
+    "base": {
+      "ref": "main",
+      "sha": "89abcdef0123456789abcdef0123456789abcdef"
+    },
+    "draft": true,
+    "head": {
+      "ref": "feature",
+      "sha": "0123456789abcdef0123456789abcdef01234567"
+    },
+    "number": 42,
+    "title": "feat(ci): draft iteration"
+  },
+  "repository": {
+    "default_branch": "main",
+    "full_name": "example/repo"
+  }
+}

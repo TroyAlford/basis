@@ -38,6 +38,10 @@ Actions that need a toolchain (for example `bun`) say so in their own README and
    - Description: Runs the Basis-owned knip dead-code analysis, using the shared version pin and default config instead of each repository declaring its own.
    - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/knip)
 
+6. **Required Gate**
+   - Description: Reduces a workflow's `needs` results into one reliable required status, failing closed on skipped, cancelled, missing, neutral or stale work while reusing a prior success only for the exact head SHA.
+   - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/required-gate)
+
 ## Usage
 
 To use these actions in your workflows, reference them in your `.yml` files as shown in the individual action documentation.
