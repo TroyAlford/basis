@@ -1,0 +1,44 @@
+# Reference consumer pull-request title workflow.
+#
+# This file is documentation, not an active workflow: it lives outside
+# `.github/workflows` so GitHub never runs it from the Basis repository. Pin the
+# shared action to the released tag you consume. See `docs/ci.mdx` for the
+# security boundary and branch-protection guidance.
+name: PR title
+
+# `pull_request_target` so the write-scoped token can comment on fork PRs.
+# This workflow only reads the title from the event payload and calls the GitHub
+# API; it must never check out or execute code from the pull request head. The
+# code workflow intentionally does not run on `edited`; a title-only edit lands
+# here without rerunning code checks or invalidating the existing Required
+# result for the unchanged HEAD.
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, edited, reopened, ready_for_review, synchronize]
+
+# The only write is the informational PR comment. No contents write, no
+# packages, no id-token.
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+# Under `pull_request_target` the ref is the base branch, so key on the PR.
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    name: PR title
+    # Routine Draft events create a run but allocate no runner: the job is
+    # skipped before checkout. Promotion rechecks the then-current title.
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      # Reads `github.event.pull_request.title`; no checkout and no PR-head code.
+      - name: Check Conventional Commit title
+        uses: TroyAlford/basis/.github/actions/enforce-convco@main
+        with:
+          github-token: ${{ github.token }}

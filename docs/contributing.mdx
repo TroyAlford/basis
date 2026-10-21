@@ -14,7 +14,7 @@ bun run lint
 bun test
 ```
 
-`bun run lint` reports the ESLint, CSS, and Markdown policies; `bun run format` applies every autofix they support. Run `bun run test:consumer` when changing `exports`, dependencies, presets, or patch handling.
+`bun run lint` reports the ESLint, CSS, and Markdown policies; `bun run format` applies every autofix they support. Run `bun run test:consumer` when changing `exports`, dependencies, presets, or patch handling. Run `bun run ci:verify` when changing workflows or the portable CI recipe; it runs the static contract tests and, when `act` is installed, dry-runs the reference workflows without contacting GitHub Actions.
 
 ## Documentation
 

@@ -1,0 +1,83 @@
+name: 'Change Impact'
+description: >-
+  Compute a fail-safe, exact-merge-base impact decision for a pull request. The
+  policy is read from the merge base, not the PR head, and each configured suite
+  is classified from changed paths plus a resolved import graph.
+
+inputs:
+  base-ref:
+    description: 'Git ref used to compute the merge base. Defaults to the base branch at origin.'
+    required: false
+    default: 'origin/main'
+  head-sha:
+    description: 'Exact pull-request head commit to analyze.'
+    required: true
+  config-path:
+    description: 'Repository-relative path to the impact policy.'
+    required: false
+    default: '.github/ci-impact.json'
+  output-file:
+    description: 'Repository-relative path for the decision artifact.'
+    required: false
+    default: 'impact-decision.json'
+  working-directory:
+    description: 'Repository checkout directory.'
+    required: false
+    default: '.'
+
+outputs:
+  decision:
+    description: 'The complete decision as JSON.'
+    value: ${{ steps.impact.outputs.decision }}
+  decision-hash:
+    description: 'SHA-256 of the canonical decision JSON.'
+    value: ${{ steps.impact.outputs.decision-hash }}
+  policy-hash:
+    description: 'SHA-256 of the policy read from the merge base.'
+    value: ${{ steps.impact.outputs.policy-hash }}
+  merge-base:
+    description: 'Exact merge base used for the diff.'
+    value: ${{ steps.impact.outputs.merge-base }}
+  head-sha:
+    description: 'Exact head commit the decision represents.'
+    value: ${{ steps.impact.outputs.head-sha }}
+  docs-only:
+    description: 'Whether every changed path is documentation.'
+    value: ${{ steps.impact.outputs.docs-only }}
+  any-needed:
+    description: 'Whether any configured suite is needed.'
+    value: ${{ steps.impact.outputs.any-needed }}
+  quality-needed:
+    description: 'Convenience output for the reference `quality` suite.'
+    value: ${{ steps.impact.outputs.quality-needed }}
+  docs-needed:
+    description: 'Convenience output for the reference `docs` suite.'
+    value: ${{ steps.impact.outputs.docs-needed }}
+  unit-needed:
+    description: 'Convenience output for the reference `unit` suite.'
+    value: ${{ steps.impact.outputs.unit-needed }}
+  integration-needed:
+    description: 'Convenience output for the reference `integration` suite.'
+    value: ${{ steps.impact.outputs.integration-needed }}
+  visual-needed:
+    description: 'Convenience output for the reference `visual` suite.'
+    value: ${{ steps.impact.outputs.visual-needed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Analyze changed files
+      id: impact
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        CONFIG_PATH: ${{ inputs.config-path }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+      run: >-
+        bun "${{ github.action_path }}/index.ts"
+        --base-ref "$BASE_REF"
+        --head-sha "$HEAD_SHA"
+        --config-path "$CONFIG_PATH"
+        --output "$OUTPUT_FILE"

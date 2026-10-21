@@ -1,0 +1,267 @@
+---
+title: Portable CI contract
+---
+
+# Portable CI contract
+
+Basis owns a reusable, locally validated pattern for low-cost GitHub Actions. It is a contract and a reference implementation, not repository infrastructure: Basis does not choose an organization's runners, labels, credentials, budgets, or per-repository check set. A consumer repository is the pilot; do not roll the pattern out to other organizations until the pilot is reviewed.
+
+The expensive part of the current PR loop is not screenshot execution. It is repeated job startup, repeated checkout and dependency setup, repeated image provisioning, and running all of that for Draft commits that cannot merge. The recipe keeps the final gate at least as strict as today while spending no hosted runner minutes on routine Draft events.
+
+## Event contract
+
+| Event | Draft pull request | Ready pull request |
+| --- | --- | --- |
+| `opened` | 0 hosted jobs | impact preflight plus the selected suites and `Required` |
+| `synchronize` | 0 hosted jobs | impact preflight plus the selected suites and `Required` |
+| `reopened` | 0 hosted jobs | impact preflight plus the selected suites and `Required` |
+| `ready_for_review` | not applicable | impact preflight plus the selected suites and `Required` for the current HEAD |
+| `edited` (title or body) | 0 hosted jobs | title check only; the code workflow is not triggered, so the existing `Required` result for the unchanged HEAD stays valid |
+| `converted_to_draft` | 0 hosted jobs; the run exists only so concurrency cancels the in-flight Ready run | not applicable |
+| push to the default branch | release path, independent of pull-request state | release path, independent of pull-request state |
+
+The Draft state itself blocks merging, so a Draft must not post a green `Required` status. The recipe skips every job, including the impact preflight and the required job, before runner allocation. A workflow run may still exist for a Draft event; that is free as long as every job is skipped.
+
+A newer run in the same per-pull-request concurrency group cancels the older one. A cancelled or timed-out job is never success. Re-drafting cancels the in-flight Ready validation, and re-promotion revalidates the then-current HEAD rather than trusting an earlier promotion.
+
+Use a separate `workflow_dispatch` workflow if a maintainer deliberately wants to debug a Draft. Keep it explicit and bounded; do not add an automatic Draft run or a "run everything but call it skipped" path.
+
+## The required gate
+
+Do not reduce `needs` with `contains(needs.*.result, 'failure')`. That expression passes `skipped`, `cancelled`, missing and `neutral` results, so it becomes a false green the moment a Draft is promoted.
+
+The portable [required gate](../.github/actions/required-gate/README.md) fails closed and accepts a skip only with exact-head evidence:
+
+```yaml
+required:
+  name: Required
+  if: ${{ always() && !github.event.pull_request.draft }}
+  needs: [impact, quality, docs, unit, integration, visual]
+  runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+  permissions:
+    checks: read
+    contents: read
+  steps:
+    - uses: TroyAlford/basis/.github/actions/required-gate@<released-tag>
+      with:
+        github-token: ${{ github.token }}
+        needs: ${{ toJSON(needs) }}
+        head-sha: ${{ github.event.pull_request.head.sha }}
+        impact-decision: ${{ needs.impact.outputs.decision }}
+        impact-hash: ${{ needs.impact.outputs.decision-hash }}
+        event-action: ${{ github.event.action }}
+        require-impact: 'true'
+        check-names: |
+          {"quality":"Quality","docs":"Docs","unit":"Test","integration":"Integration","visual":"Visual"}
+```
+
+Every dependency must have succeeded in the current run, or have been skipped for one of exactly two reasons:
+
+- the exact-head impact decision records the suite as `needed: false` with a non-empty reason; or
+- the event is `edited` and the exact head SHA already has a completed, non-skipped success for that suite outside the current run. The reference keeps title edits in a separate workflow, so this path is for consumers that also run code validation on `edited`.
+
+`failure`, `cancelled`, `timed_out`, a missing result, a `neutral` conclusion, a prior `skipped` result, absent or malformed impact evidence, a tampered decision hash, a needed suite that was skipped, or a check that never completes before the timeout fails the gate. A failed job always fails, even if the decision claims the suite was unaffected.
+
+The gate reads check runs; it never writes statuses. Branch protection should require the calling job's name (`Required`), not each dependency. If a dependency has a `name:` that differs from its job id, pass `check-names`, and update branch protection if the `Required` job is renamed. Every mandatory check must be in `needs`; a check the gate does not receive is absent, not skipped.
+
+## Change impact
+
+The [change-impact](../.github/actions/change-impact/README.md) preflight decides which suites a Ready PR can affect before any expensive runner is allocated. It is the difference between "run everything on promotion" and "run only what the change can touch".
+
+The preflight compares the exact merge base with the PR head, not the previous commit and not the base branch head. It enumerates added, modified, deleted, renamed and copied paths with `git diff --name-status -M -z`. It reads the policy from the merge base, so a pull request cannot weaken the gates that validate it; policy changes take effect only after they are merged. If the policy is absent at the merge base, the preflight fails closed.
+
+The reference preflight is deliberately cheap: checkout the head with full history, fetch the base branch, set up Bun, and run the pinned action. It does not install dependencies and does not execute pull-request code. The action parses source files to resolve imports; it never runs them.
+
+```yaml
+impact:
+  name: Impact
+  if: ${{ !github.event.pull_request.draft }}
+  runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+  permissions:
+    contents: read
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        # Base repository at the event's base commit, with full history.
+        ref: ${{ github.event.pull_request.base.sha }}
+        fetch-depth: 0
+    - name: Fetch the pull-request head and base branch
+      env:
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr-head"
+        git fetch --no-tags origin "$BASE_REF"
+        test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
+        git checkout --detach refs/remotes/origin/pr-head
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: .tool-versions
+    - id: impact
+      uses: TroyAlford/basis/.github/actions/change-impact@<released-tag>
+      with:
+        base-ref: origin/${{ github.event.pull_request.base.ref }}
+        head-sha: ${{ github.event.pull_request.head.sha }}
+        config-path: .github/ci-impact.json
+```
+
+The head comes from the base repository's `refs/pull/<number>/head`, so the preflight works for a fork PR without assuming the fork repository is fetchable from `origin`. It verifies that the fetched PR ref is the exact event head SHA, then checks out that detached head; the base branch is fetched separately for the merge base.
+
+The policy declares suite keys, test roots, source globs, always-run paths, ignored paths, optional non-test entry points, and a conservative mode. The reference policy is [ci-impact.json](./examples/ci-impact.json); consumers copy it to `.github/ci-impact.json` and edit the paths for their repository. The analyzer returns a deterministic JSON decision with `needed`, `reason`, `evidence`, `selectedTests`, and `unknownFiles` per suite, plus `changedFiles`, `mergeBase`, `headSha`, `policyHash`, and `docsOnly`.
+
+Composite-action outputs are step-scoped, so the reference `impact` job republishes every consumed value as a job output. A wiring mistake fails the preflight's non-empty evidence check, and the gate then fails rather than silently skipping every suite. The action also fails closed if the decision is too large for the GitHub output limit; the full decision remains in the uploaded artifact.
+
+Add every runtime application entry to the relevant suite's `extraRoots`. The reference visual suite is conservative for `.tsx` and style changes, but a plain `.ts` helper is ignored unless a visual test or an `extraRoots` entry reaches it; list the server, docs, and app entries so runtime-loaded code is not missed. A docs suite can use `ignoreGlobs: ["**"]` because source, test, always-run, and import-reachability checks happen before ignore; only its docs sources can trigger it.
+
+The import graph is rooted at each suite's test globs and declared `extraRoots`. A changed source that a root reaches marks the suite needed and records the root tests; a changed test marks its own suite needed; a test belonging to another suite is ignored unless this suite reaches it. The path rules cover the dependencies an import graph cannot see:
+
+- lockfiles, package manifests, toolchain files, test preloads, browser configuration, and shared testing runtime always run the suites that consume them;
+- stylesheets, global styles, fonts, runtime assets and screenshot baselines always run visual;
+- a rename or deletion of a source file runs the affected suite;
+- docs are documentation-only unless a suite claims them; a declared docs suite runs the repository's real docs check, and a docs app captured by visual adds docs paths to the visual policy;
+- unknown files fail closed across every code suite;
+- a dynamic import, an unparseable file, an unreachable source with `unreachableSource: run`, or a graph over `maxGraphFiles` runs the suite. `skip` is an explicit policy choice for a suite whose `extraRoots` cover every runtime entry point.
+
+A docs-only change therefore runs the docs check and `Required`, not lint, typecheck, unit, integration or visual. A truly untested markdown change produces an all-false decision; the reference still runs the checkout-free `Required` job because it is the stable branch-protection context, which is one bounded minute rather than an expensive runner. A repository that does not require `Required` on such changes can gate that job on `any-needed`. A backend-only change runs quality, unit and integration but not visual. A component or stylesheet change runs visual. A lockfile or toolchain change runs every code suite. Mixed commits get a per-suite decision rather than an all-or-nothing switch.
+
+The preflight is one cheap job and is billed like any other job. It pays for itself when it skips a visual job, which includes a roughly 35–55 s image pull and roughly 60–80 s of hosted work; it also pays for itself on docs-only and backend-only promotions. A change that affects every suite pays one extra preflight minute, so the recipe is a net saving on the review cycles where Draft suppression and selective promotion matter, not a promise that every single Ready PR is cheaper than the old full suite. The before/after table below makes that trade-off explicit.
+
+## Security boundaries
+
+Code checks run on `pull_request` with a read-only token unless the repository deliberately grants more. Do not run code checks on `pull_request_target`.
+
+`pull_request_target` is for metadata workflows that need a write-scoped token, such as posting an informational title comment on a fork PR. Such a workflow must never check out or execute pull-request head code, must never pass secrets to it, and must never use the PR head SHA as a checkout ref. The reference title workflow only reads `github.event.pull_request.title` from the event payload and calls the GitHub API.
+
+The impact preflight is the opposite boundary: it runs on `pull_request`, checks out the PR head so the pinned analyzer can parse it, and never executes PR code or receives a write token. It is not a `pull_request_target` workflow, and the policy it reads comes from the merge base. The analyzer reads only regular repository files, does not follow symlinks, and skips oversized sources.
+
+There is a branch-protection nuance: check runs from a `pull_request_target` workflow are associated with the base ref, not the pull-request head. If a title check must be a required status on the head SHA, run it on `pull_request` instead; the token is read-only on fork PRs, so comments are best-effort, but the job's exit status still enforces the title. Never resolve that by checking out PR code under the write-scoped `pull_request_target` token.
+
+## Reference workflows
+
+- [consumer-ci.yml](./examples/consumer-ci.yml) is the code workflow: a cheap `impact` preflight, a consolidated `quality` job (lint, typecheck, advisory Knip), separate `docs`, `test`, `integration`, and `visual` jobs, extension points for repository-specific checks, and the single `Required` gate. Every suite job is gated on the exact-head impact decision, so an unaffected suite is never allocated.
+- [ci-impact.json](./examples/ci-impact.json) is the reference impact policy. Copy it to `.github/ci-impact.json`; the preflight reads it from the merge base, so merge the policy before enabling impact gating.
+- [consumer-pr-title.yml](./examples/consumer-pr-title.yml) is the metadata workflow: `pull_request_target`, no checkout, gated on Ready.
+- [events/](./examples/events) contains the Draft, Ready, title-edit and re-draft fixtures used by `act`.
+
+The examples select a runner with `${{ vars.CI_RUNNER || 'ubuntu-latest' }}`. The default is the existing GitHub-hosted runner; a repository that needs a larger hosted runner or a self-hosted label sets its own repository variable. No organization or OCI label is hardcoded in Basis.
+
+The reusable release workflow now accepts a caller-provided `runs-on` input, defaulting to `ubuntu-latest`, and applies it to every release job with an explicit `ubuntu-latest` fallback for `push` and `workflow_dispatch`, where `inputs` is empty:
+
+```yaml
+jobs:
+  release:
+    permissions:
+      contents: write
+    uses: TroyAlford/basis/.github/workflows/release.yml@<released-tag>
+    with:
+      runs-on: ubuntu-latest
+```
+
+The value is a scheduling label, never interpolated into a shell command. Existing callers keep the default; the release triggers, permissions, outputs and release actions are unchanged. Basis's own jobs can keep whatever hosted runners they use.
+
+## Local-first verification
+
+Prerequisites: Bun, Docker with a running daemon, and optionally [`nektos/act`](https://github.com/nektos/act) for workflow parsing. The static tests need neither Docker nor network.
+
+```bash
+bun install
+bun run ci:contract
+bun run ci:verify
+bun run lint
+bun run lint:ts
+bun test
+bun run test:consumer
+```
+
+`bun run ci:contract` runs the static YAML event/job-graph contract tests, the impact matrix, and the reducer tests against a fake `gh`. It proves the event matrix, Draft gating, required-job graph, change-impact decisions, release runner input, and fail-closed reducer behaviour without a hosted runner. The impact matrix covers docs-only, tested docs, backend-only, component, direct and transitive imports, aliases, dynamic imports, styles, screenshots, unit/visual test separation, lockfiles, toolchain, preloads, renames, deletions, unknown files, mixed commits, exact merge base, base policy, and `GITHUB_OUTPUT`.
+
+`bun run bench:impact` measures the analyzer on the current branch against `upstream/main` and prints the decision and elapsed time. It is a local diagnostic; the action always reads the policy from the merge base.
+
+`bun run ci:verify` runs those tests and, when `act` is installed, dry-runs the reference workflows, the reusable release workflow on `workflow_call`, and the release workflow on `push`. It never contacts GitHub Actions. Use `./` when invoking the hidden test directory directly: `bun test ./.github/ci`.
+
+Validated locally with `act` 0.2.89: both reference workflows parse and dry-run against `docs/examples/events/ready-for-review.json`, and the release workflow dry-runs on both `workflow_call` and `push`. The two `act` invocations for the pull-request workflows are:
+
+```bash
+act pull_request --dryrun -P ubuntu-latest=catthehacker/ubuntu:act-latest \
+  --local-repository "TroyAlford/basis@main=$PWD" --var CI_RUNNER=ubuntu-latest \
+  --workflows docs/examples/consumer-ci.yml \
+  --eventpath docs/examples/events/ready-for-review.json
+
+act pull_request_target --dryrun -P ubuntu-latest=catthehacker/ubuntu:act-latest \
+  --local-repository "TroyAlford/basis@main=$PWD" --var CI_RUNNER=ubuntu-latest \
+  --workflows docs/examples/consumer-pr-title.yml \
+  --eventpath docs/examples/events/ready-for-review.json
+```
+
+A consumer checkout omits `--local-repository` and resolves the pinned released action from its `uses:` tag. The `-P` mapping avoids `act`'s first-run image prompt; `--dryrun` does not pull it.
+
+`act` is a workflow parser and local executor, not proof of hosted behaviour. It cannot reproduce GitHub-hosted image pull speeds or caches, billing-minute rounding, token permissions and fork behaviour, branch-protection check association, or every event semantic. Use it for the event matrix and job graph; use the static tests for the gate's negative cases; use one deliberately planned hosted confirmation after local proof. Do not push repeatedly to discover CI behaviour.
+
+## Image provisioning benchmark
+
+Measured on 2026-10-21 on a local arm64 development host with a warm Docker cache, using Docker 29.8.1, Bun 1.4.2, and Playwright 1.63.0 with `mcr.microsoft.com/playwright:v1.63.0-noble`. These are local relative timings, not hosted billing or timing data.
+
+Reproduce the warm measurements with `bun run bench:snapshot`; add `-- --save-load` to include the docker save/load artifact cost. The script never removes the image or running containers.
+
+| Measurement | Result | Cache / command |
+| --- | --- | --- |
+| warm `docker pull` | 0.15–0.20 s | `docker pull mcr.microsoft.com/playwright:v1.63.0-noble`; manifest check, no layer download |
+| warm container start | 0.33–0.49 s | `docker run --rm --pull missing <image> node -e 'console.log(process.version)'` |
+| `docker save` | 16.6–23.9 s, 0.87 GiB tar | `docker save <image> -o <tempdir>/image.tar` |
+| `docker load` | 9.0–9.7 s | `docker load -i <tempdir>/image.tar`; restore/load proxy, not a hosted cache action |
+| one snapshot capture, warm image | 2.3–3.4 s over 4 runs | `bun test libraries/testing/matchScreenshot.test.tsx`; runtime starts one container |
+| hosted cold image pull | roughly 35–55 s per visual job | reported pilot logs, hosted amd64 runners |
+| hosted setup | roughly 15–20 s per job | reported pilot logs |
+| hosted screenshot suite | a few seconds | reported pilot logs |
+
+The local host is arm64 while hosted runners are amd64, so a local cold pull is not a like-for-like hosted measurement. The benchmark leaves the pinned image in the local cache rather than removing it, because other local work may be using it. The hosted pull and setup ranges above are reported pilot data, not numbers this change re-measured.
+
+The change-impact preflight itself took **0.53–0.54 s** locally for 20 changed files and 125 test roots (`bun run bench:impact`). On a hosted runner it also pays checkout, base fetch and Bun setup, so it bills as one minute. That is the overhead the impact decision must beat; a skipped visual job avoids a roughly 35–55 s image pull and roughly 60–80 s of visual work, and a docs-only or backend-only promotion skips several jobs, so the preflight is a net saving on the cycles that matter.
+
+Decision: do not change `libraries/testing/browser.ts`. It already starts one pinned container and one browser per test run, reuses a page for element captures, and keeps application visits isolated. Screenshot execution takes a few seconds; cold provisioning is the cost. A consumer pre-pull only moves the pull into a named step and does not reduce billed minutes, because the job is billed either way. A local `docker save`/`load` cache would add a 0.87 GiB artifact and at least 9 s of restore time for a benefit that is not clearly cheaper than a hosted pull. A purpose-built image or any runtime change is not authorized without proof of identical rendered snapshots and a clear material saving. Prefer the workflow fix; keep an optional pre-pull only if it improves failure diagnostics.
+
+## Before and after
+
+The baseline is the current pilot pull-request loop: six independent code jobs (`lint`, `typecheck`, `test`, `knip`, `session-environment`, `visual`) plus a one-job `Required` on every Draft push, and a separate title job. That is three Draft pushes of (6 code + `Required` + title) plus a promotion push of the same shape: **32 jobs**.
+
+The recipe adds one cheap impact preflight at promotion, consolidates lint, typecheck and advisory Knip into one `quality` job, keeps `docs`, `unit`, `integration` and `visual` separate, and runs only the suites the exact-head decision marks needed. Draft pushes run zero jobs.
+
+For a representative cycle of three Draft pushes followed by promotion:
+
+| Ready change | Current cycle | Recipe cycle | Suites skipped at promotion |
+| --- | --- | --- | --- |
+| Docs-only | 32 jobs | 4 jobs (impact, docs, `Required`, title) | quality, test, integration, visual |
+| Backend-only | 32 jobs | 6 jobs (impact, quality, test, integration, `Required`, title) | docs, visual |
+| Component or shared runtime | 32 jobs | 7 jobs (impact, quality, test, integration, visual, `Required`, title) | docs |
+
+That is 25–28 fewer hosted job allocations for the cycle, or about 78–88% fewer. Even the worst case, where every suite is affected, still eliminates the three Draft runs and the repeated visual pull; the preflight adds one job at promotion but the visual image pull is paid once instead of four times.
+
+The billed-minute comparison is better than the job count in the cases that matter. The preflight bills as one minute. A skipped visual job avoids a roughly 60–80 s job plus a roughly 35–55 s pinned-image pull, which bills as two or more minutes. A docs-only or backend-only promotion skips three or four jobs, not just the visual one. A full-impact promotion pays one extra preflight minute, so the recipe is a net saving because of Draft suppression and the single promotion visual, not because the preflight is free.
+
+These are job-allocation arithmetic from reported data, not a new hosted measurement. GitHub rounds each billable job up to the nearest minute, so wall-clock seconds are not the billed quantity; job allocations and the per-job setup/pull share are the robust comparison. A job that spends 20 s on setup can still bill as one minute. The recipe does not collapse the unit, docs, integration or visual suites, does not drop the OpenCode/session-environment checks from a consumer's set, and does not weaken branch protection. Those checks stay, but they run only after promotion and only when the exact-head decision says they can be affected.
+
+No hosted confirmation was run for this change. Prove the candidate locally, then plan at most one hosted confirmation with the operator and record its actual job allocations before claiming production savings.
+
+## Migration checklist
+
+Use this for the pilot and the other consumer organizations. Do the pilot first; do not mass-edit repositories.
+
+- [ ] Map the repository's current jobs to `impact`, `quality`, `docs`, `test` (unit), `integration`, and `visual`. Keep suites that currently run in separate processes separate.
+- [ ] Copy the reference workflows and replace the setup action, install command, and check commands with the repository's own. Do not copy consumer-specific setup into Basis or another organization.
+- [ ] Commit `.github/ci-impact.json` as its own policy change **before** enabling impact gating. The preflight reads the policy from the merge base; a PR that changes the policy is analyzed against the old one, and a missing base policy fails closed.
+- [ ] Set `vars.CI_RUNNER` only if the repository needs a non-default runner; leave it unset to keep `ubuntu-latest`.
+- [ ] Add the `Required` job to branch protection and add `impact` to its `needs`. Pass `impact-decision`, `impact-hash`, `event-action`, and `require-impact: 'true'`. Keep its name stable; remove individual job contexts if `Required` is now the single gate, or keep them as additional contexts.
+- [ ] Keep the title workflow on `pull_request_target` only for metadata and comments, never checkout PR head code. If the title must be a required head-SHA check, use `pull_request` instead and accept best-effort comments on forks.
+- [ ] Confirm the release workflow still triggers on the default branch and is not gated by Draft state. Pass `runs-on` only when the caller needs a different runner.
+- [ ] Run `bun run ci:contract`, `bun run ci:verify`, `bun run bench:impact`, `bun run lint`, `bun run lint:ts`, `bun test`, and `bun run test:consumer` locally. Record the results.
+- [ ] Prove the impact matrix: docs-only, tested docs, backend-only, component, direct and transitive imports, aliases, dynamic imports, styles, screenshots, unit/visual test separation, lockfiles, toolchain, preloads, renames, deletions, unknown files, and mixed commits. Verify a missing, cancelled, skipped, neutral, stale, or tampered result fails `Required`, and that a `needed: false` suite is accepted without a prior check.
+- [ ] Prove the event matrix with the fixtures: Draft open/push/reopen/edit/convert, Ready open/push/reopen/edit, and re-draft to re-promotion.
+- [ ] Plan one hosted confirmation only after local proof and operator approval. Record job allocations, per-job durations, setup repetition, preflight overhead, and image-pull share. Label hosted data separately from local estimates.
+- [ ] Apply to the pilot first, review it, then repeat for the other consumer organizations. Do not change Basis's shared runtime or release semantics as part of a consumer migration.
+
+## Ownership boundary
+
+Basis owns the portable contract, the reference workflows, the required-gate action, the change-impact action and policy schema, the local verification recipe, and the caller-selectable release runner input. Each consumer owns its event policy, suite paths and exclusions, check set, commands, runner labels, budgets, secrets, branch protection, and workflow files. The pilot owns its Draft-first PR lifecycle, explicit ready action, and its own workflow optimization and measurements.
+
+Nothing here authorizes a privileged Docker socket on application runners, an OCI runner migration, a new CI service, a weakened visual suite, erased branch protections, or a privileged checkout of pull-request code. Those are separate decisions with separate security and cost cases.

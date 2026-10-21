@@ -64,3 +64,7 @@ bun test
 ## Documentation
 
 Start with this README, then read the durable documentation under [`docs/`](./docs/index.mdx). [`AGENTS.md`](./AGENTS.md) directs coding agents to read both before planning or changing code. Component behavior is showcased in the docs app under [`libraries/docs`](./libraries/docs). Validate the docs tree with `bun run docs:check`, and project it to a static site with `bun run docs:build`.
+
+## CI recipe
+
+Basis publishes a portable, locally validated GitHub Actions pattern for low-cost pull-request checks: Draft events allocate no hosted jobs, promotion runs only the suites the exact change can affect, and one required gate rejects skipped, cancelled, stale, missing, or unevidenced work. Start with [`docs/ci.mdx`](./docs/ci.mdx); the reference workflows and impact policy live under [`docs/examples`](./docs/examples), and `bun run ci:verify` runs the static contract tests plus an optional `act` dry-run without contacting GitHub Actions.

@@ -9,6 +9,8 @@ name: Release
 #       permissions:
 #         contents: write
 #       uses: TroyAlford/basis/.github/workflows/release.yml@<released-tag>
+#       with:
+#         runs-on: ubuntu-latest
 #
 # Self-references to Basis's own actions use `@main` on purpose: pinning a
 # self-reference to a tag is always one release behind the action it targets.
@@ -18,6 +20,16 @@ on:
     branches: [ 'main' ]
   workflow_dispatch:
   workflow_call:
+    inputs:
+      runs-on:
+        description: >-
+          Runner label applied to every release job. The default keeps
+          existing callers on GitHub-hosted `ubuntu-latest`; a caller with a
+          self-hosted or larger hosted runner can override it. This is a
+          scheduling label, never interpolated into a shell command.
+        required: false
+        type: string
+        default: ubuntu-latest
 
 permissions:
   # Least privilege: a caller that grants `contents: write` can call this
@@ -29,7 +41,9 @@ permissions:
 
 jobs:
   determine-version:
-    runs-on: ubuntu-latest
+    # `inputs` is empty on `push` and `workflow_dispatch`, so keep the
+    # hosted-runner default explicit for every non-reusable trigger.
+    runs-on: ${{ inputs.runs-on || 'ubuntu-latest' }}
     outputs:
       release-needed: ${{ steps.version.outputs.release-needed }}
       next-version: ${{ steps.version.outputs.next-version }}
@@ -57,7 +71,7 @@ jobs:
   create-release:
     needs: determine-version
     if: needs.determine-version.outputs.release-needed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -72,7 +86,7 @@ jobs:
   # publish:
   #   needs: determine-version
   #   if: needs.determine-version.outputs.release-needed == 'true'
-  #   runs-on: ubuntu-latest
+  #   runs-on: ${{ inputs.runs-on || 'ubuntu-latest' }}
   #   steps:
   #     - uses: actions/checkout@v4
   #       with: { fetch-depth: 0 }
