@@ -1,5 +1,5 @@
 import type { DocumentationEntry } from 'basis/react'
-import { ApplicationBase, buildDocumentationNavigation, Documentation, Theme } from 'basis/react'
+import { ApplicationBase, Basis, buildDocumentationNavigation, Documentation, Theme } from 'basis/react'
 import type { ComponentType, ReactNode } from 'react'
 import { routes } from '../routes.ts'
 
@@ -32,7 +32,7 @@ export class Layout extends ApplicationBase {
     return (
       <>
         <Theme />
-        <Documentation active={active} navigation={this.navigation} title="Basis Docs">
+        <Documentation active={active} icon={<Basis />} navigation={this.navigation} title="Basis Docs">
           {content}
         </Documentation>
       </>

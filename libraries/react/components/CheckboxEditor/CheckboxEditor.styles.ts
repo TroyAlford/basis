@@ -24,7 +24,7 @@ style('basis:checkbox-editor', css`
     }
 
     &:focus-within {
-      outline: 2px solid var(--basis-focus-color);
+      outline: 2px solid var(--basis-color-focus);
       outline-offset: 2px;
     }
 

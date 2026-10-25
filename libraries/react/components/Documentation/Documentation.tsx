@@ -56,6 +56,8 @@ interface Props {
   active?: string,
   /** Page content. */
   children?: React.ReactNode,
+  /** Optional icon rendered before the site title. */
+  icon?: React.ReactNode,
   /** Navigation entries, optionally nested. */
   navigation?: DocumentationEntry[],
   /** Site title shown above the navigation. */
@@ -98,12 +100,12 @@ export class Documentation extends Component<Props> {
   }
 
   content(): React.ReactNode {
-    const { children, navigation = [], title } = this.props
+    const { children, icon, navigation = [], title } = this.props
     return (
       <>
         <nav className="links">
-          <h1>{title}</h1>
-          {this.#renderEntries(navigation)}
+          <h1>{icon}{title}</h1>
+          <div className="entries">{this.#renderEntries(navigation)}</div>
         </nav>
         <main>{children}</main>
       </>

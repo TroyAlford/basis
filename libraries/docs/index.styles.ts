@@ -12,7 +12,7 @@ style('basis:docs:index', css`
     i, em { font-style: italic; }
 
     code:not(.code.component code) {
-      color: green;
+      color: var(--basis-color-success);
       font-family: 'Fira Code', monospace;
       font-variant-ligatures: contextual;
       font-weight: 500;

@@ -18,6 +18,14 @@ describe('Theme', () => {
       expect(styleElement?.textContent).toContain('--basis-color-success-contrast:')
     })
 
+    test('follows the system color scheme when no name is supplied', async () => {
+      await render(<Theme />)
+
+      const styleElement = document.getElementById('basis:theme:default')
+      expect(styleElement?.textContent).toContain('@media (prefers-color-scheme: dark)')
+      expect(styleElement?.textContent).toContain('--basis-color-background: #080a0dff;')
+    })
+
     test('renders with all props', async () => {
       await render(
         <Theme

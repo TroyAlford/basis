@@ -27,10 +27,10 @@ export class IconsDocs extends DocumentationPage<State> {
   static override defaultProps = {
     ...DocumentationPage.defaultProps,
     initialValue: {
-      color: '#000000',
+      color: '',
       filled: false,
       filterText: '',
-      iconColor: '#222222',
+      iconColor: '',
       iconFilled: false,
       overlayColor: '#66aa66',
       overlayFilled: false,
@@ -145,12 +145,12 @@ export class IconsDocs extends DocumentationPage<State> {
     } = this.current
     style('basis:docs:icons:dynamic', css`
       .icon-demo-container {
-        --demo-icon-color: ${color};
+        --demo-icon-color: ${color || 'currentColor'};
         --demo-icon-size: ${size}px;
       }
 
       .overlay-demo-container {
-        --basis-icon-color: ${iconColor};
+        --basis-icon-color: ${iconColor || 'currentColor'};
         --basis-icon-overlay-color: ${overlayColor};
         --basis-icon-size: ${overlaySize}px;
       }
@@ -176,7 +176,7 @@ export class IconsDocs extends DocumentationPage<State> {
             <input
               className="color-input"
               type="color"
-              value={color}
+              value={color || '#000000'}
               onChange={event => void this.handleField(event.target.value, 'color')}
             />
           </div>
@@ -323,7 +323,7 @@ export class IconsDocs extends DocumentationPage<State> {
                 <input
                   className="color-input"
                   type="color"
-                  value={iconColor}
+                  value={iconColor || '#000000'}
                   onChange={event => void this.handleField(event.target.value, 'iconColor')}
                 />
               </div>

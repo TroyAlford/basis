@@ -3,15 +3,10 @@ import { TextAlign } from '../../types/TextAlign'
 import { css, style } from '../../utilities/style'
 
 style('basis:table-header-cell', css`
-  :root {
-    --basis-table-header-cell-foreground: var(--basis-color-contrast);
-    --basis-table-header-cell-padding: var(--basis-table-cell-padding);
-  }
-
   .table-header-cell.component {
     background-color: inherit;
-    border-bottom: 1px solid var(--basis-table-border-color);
-    color: var(--basis-table-header-cell-foreground);
+    border-bottom: 1px solid var(--basis-table-border-color, var(--basis-color-border-subtle));
+    color: var(--basis-table-header-cell-foreground, var(--basis-color-contrast));
     isolation: isolate;
 
     > .content {
@@ -19,7 +14,7 @@ style('basis:table-header-cell', css`
       display: flex;
       flex-direction: row;
       justify-content: space-between;
-      padding: var(--basis-table-header-cell-padding);
+      padding: var(--basis-table-header-cell-padding, var(--basis-table-cell-padding, 0 .5em));
 
       > .title {
         flex: 1;

@@ -78,7 +78,7 @@ export class TooltipDocs extends DocumentationPage<State> {
               </div>
             </div>
             {/* Demo Area */}
-            <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '2rem', textAlign: 'center' }}>
+            <div style={{ border: '1px solid var(--basis-color-border-subtle)', borderRadius: '4px', padding: '2rem', textAlign: 'center' }}>
               <div style={{ display: 'inline-block', position: 'relative' }}>
                 <Button>Hover Me<Tooltip anchorPoint={this.current.anchorPoint} visible={this.current.visible}>This tooltip shows contextual information about the button above!</Tooltip></Button>
               </div>
