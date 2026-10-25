@@ -80,7 +80,7 @@ export class CheckboxEditor extends Editor<boolean | null, HTMLLabelElement, Pro
     if (value === true) {
       icon = <Square.Check />
     } else if (value === false) {
-      icon = <Square.X />
+      icon = <Square />
     } else {
       // value === null
       icon = <Square.Dash />

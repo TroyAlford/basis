@@ -29,6 +29,7 @@ style('basis:checkbox-editor', css`
     }
 
     &[disabled], &[readonly] {
+      opacity: 0.5;
       pointer-events: none;
     }
   }

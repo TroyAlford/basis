@@ -210,23 +210,15 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
           <p>Any React content works, including native controls. A plain input keeps its own keyboard behavior and does not need to import a Basis component. This example&#39;s completion state and bulk update are ordinary consumer state, not a reusable table-selection API.</p>
         </Section>
         <Section title="Row Selection">
-          <p>Selection is opt-in and fully controlled. Pass a <code>selection</code> object with the current <code>selectedKeys</code>, an <code>onChange</code> callback that receives a new set, and the consumer&#39;s eligible <code>pageKeys</code>. The table renders a pinned checkbox column and a header Select Page checkbox; it never owns a second selection store.</p>
-          <p><code>getRowState</code> can disable an individual row and provide the reason, while <code>rowLabel</code> supplies the accessible row label. All keys come from the table&#39;s existing <code>keyField</code>, so sorting and filtering retain stable identity. Selection changes update the checkbox column and summary only; unrelated cell renderers are left untouched.</p>
+          <p>Row selection is opt-in and always controlled. Set <code>enableRowSelection</code>, pass the current <code>selectedRows</code> as any iterable of keys, and provide <code>onStateChange</code> to receive the next <code>TableState</code>. The table renders one fixed-width, left-pinned, nonsortable checkbox column before every declared column. It never owns a second selection store.</p>
+          <p>Selection keys come from the existing <code>keyField</code> (default <code>id</code>). The header selects or clears all rows in the current <code>value</code>; selected keys outside the current rows are preserved. Every displayed row is selectable, and the only disabled checkbox is the header when the table has no rows. <code>onStateChange</code> is the table interaction-state notification and is distinct from the row-data <code>onChange</code>.</p>
           <TableSelectionExample />
           {Code.format(`
             <Table
+              enableRowSelection
+              selectedRows={selectedRows}
               value={people}
-              selection={{
-                selectedKeys: selected,
-                onChange: setSelected,
-                pageKeys: people.map(person => person.id),
-                getRowState: person => (
-                  person.archived
-                    ? { disabled: true, reason: 'Archived' }
-                    : { disabled: false }
-                ),
-                rowLabel: person => person.name,
-              }}
+              onStateChange={state => setSelectedRows(state.selectedRows)}
             >
               {Column.Text({ field: 'name', pin: Pin.Left, title: 'Name' })}
               {Column.Text({ field: 'role', title: 'Role' })}
@@ -238,9 +230,11 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
           <h4>Table Props</h4>
           <ul>
             <li><code>className?: string</code> - Additional CSS classes</li>
+            <li><code>enableRowSelection?: boolean</code> - Adds the controlled selection column and header checkbox</li>
             <li><code>keyField?: PathOf&lt;T&gt;</code> - Field to use as unique row identifier (default: 'id')</li>
+            <li><code>onStateChange?: (state: TableState) =&gt; void</code> - Receives the next controlled table state; required when row selection is enabled</li>
             <li><code>readOnly?: boolean</code> - Whether the table is read-only</li>
-            <li><code>selection?: TableSelection&lt;T&gt;</code> - Controlled row selection, including the pinned checkbox column and Select Page header</li>
+            <li><code>selectedRows?: Iterable&lt;TableKey&gt;</code> - The controlled selected row keys; required when row selection is enabled</li>
             <li><code>value: T[]</code> - Array of data to display</li>
           </ul>
           <h4>Column Props</h4>
@@ -253,16 +247,6 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             <li><code>title?: ReactNode</code> - Column header content, including interactive controls (defaults to field name)</li>
             <li><code>type?: ColumnType</code> - Column type (Text, Number, Boolean, Date, DateTime, Enum)</li>
             <li><code>width?: string | number</code> - Column width</li>
-          </ul>
-          <h4>Selection Props</h4>
-          <ul>
-            <li><code>selectedKeys: ReadonlySet&lt;TableKey&gt;</code> - The consumer-owned selected keys</li>
-            <li><code>onChange: (selectedKeys: Set&lt;TableKey&gt;) =&gt; void</code> - Receives a new set when a row or the page checkbox is activated</li>
-            <li><code>pageKeys?: readonly TableKey[]</code> - Eligible keys for Select Page; defaults to the selectable visible rows</li>
-            <li><code>getRowState?: (row: T) =&gt; boolean | RowSelectionState</code> - Whether a row can be selected, optionally with a reason</li>
-            <li><code>rowLabel?: (row: T) =&gt; string</code> - Accessible row label; defaults to the row key</li>
-            <li><code>pageLabel?: string</code> - Accessible header label; defaults to "Select page"</li>
-            <li><code>width?: string | number</code> - Selection column width; defaults to 2.5em</li>
           </ul>
         </Section>
       </>

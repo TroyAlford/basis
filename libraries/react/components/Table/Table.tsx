@@ -10,7 +10,7 @@ import { Cell } from './Cell'
 import type { ColumnProps } from './Column'
 import { Column, ColumnType } from './Column'
 import { HeaderCell } from './HeaderCell'
-import type { RowSelectionState, SelectionContextValue, TableKey, TableSelection } from './Selection'
+import type { SelectionContextValue, TableKey, TableState } from './Selection'
 import { SELECTION_COLUMN_WIDTH, SELECTION_FIELD, SelectionCell, SelectionContext, SelectionHeader } from './Selection'
 
 import './Table.styles.ts'
@@ -18,8 +18,10 @@ import './Table.styles.ts'
 interface Props<T> {
   children?: React.ReactNode,
   className?: string,
+  enableRowSelection?: boolean,
   keyField?: PathOf<T>,
-  selection?: TableSelection<T>,
+  onStateChange?: (state: TableState) => void,
+  selectedRows?: Iterable<TableKey>,
 }
 
 interface State<T> {
@@ -80,69 +82,59 @@ export class Table<T extends object = { id: string }>
   }
 
   shouldComponentUpdate(nextProps: Props<T>, nextState: State<T>): boolean {
-    if (nextProps.selection?.selectedKeys !== this.props.selection?.selectedKeys) return true
+    if (nextProps.enableRowSelection !== this.props.enableRowSelection) return true
+    if (nextProps.selectedRows !== this.props.selectedRows) return true
+    if (nextProps.onStateChange !== this.props.onStateChange) return true
     return !deepEquals(this.props, nextProps) || !deepEquals(this.state, nextState)
   }
 
-  private getSelectionKey = (row: unknown): TableKey | null => {
-    const key = get(row as T, this.props.keyField)
-    return typeof key === 'string' || typeof key === 'number' ? key : null
+  private keyFor = (row: T, index: number): TableKey => {
+    const value = get(row, this.props.keyField)
+
+    if (value === undefined) {
+      if (this.props.enableRowSelection) {
+        throw new Error(
+          `Table: row ${index} has no "${String(this.props.keyField)}" value required for row selection`,
+        )
+      }
+      return index
+    }
+
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      throw new Error(
+        `Table: "${String(this.props.keyField)}" must resolve to a string or number (row ${index})`,
+      )
+    }
+
+    return value
   }
 
-  private getRowSelection = (row: unknown): RowSelectionState => {
-    const declaration = this.props.selection?.getRowState?.(row as T)
+  private get selectionContext(): SelectionContextValue | null {
+    if (!this.props.enableRowSelection) return null
 
-    if (declaration === false) return { disabled: true }
-    if (declaration === undefined || declaration === true) return { disabled: false }
+    const { onStateChange, selectedRows } = this.props
+    if (selectedRows === undefined || selectedRows === null) {
+      throw new Error('Table: enableRowSelection requires selectedRows')
+    }
+    if (!onStateChange) {
+      throw new Error('Table: enableRowSelection requires onStateChange')
+    }
 
-    return { disabled: declaration.disabled, reason: declaration.reason }
+    return {
+      onStateChange,
+      rowKeys: (this.current ?? []).map((row, index) => this.keyFor(row, index)),
+      selectedRows: new Set(selectedRows),
+    }
   }
 
-  private getRowLabel = (row: unknown): string => {
-    const selection = this.props.selection
-    if (selection?.rowLabel) return selection.rowLabel(row as T)
-
-    const key = this.getSelectionKey(row)
-    return key === null ? '' : String(key)
-  }
-
-  private get pageKeys(): readonly TableKey[] {
-    const selection = this.props.selection
-    if (!selection) return []
-    if (selection.pageKeys) return selection.pageKeys
-
-    return (this.current ?? [])
-      .filter(row => !this.getRowSelection(row).disabled)
-      .map(row => this.getSelectionKey(row))
-      .filter((key): key is TableKey => key !== null)
-  }
-
-  private get selectionColumn(): ColumnProps<T, PathOf<T>> | null {
-    const selection = this.props.selection
-    if (!selection) return null
-
+  private get selectionColumn(): ColumnProps<T, PathOf<T>> {
     return {
       align: TextAlign.Center,
       field: SELECTION_FIELD as PathOf<T>,
       pin: Pin.Left,
       sortable: false,
       title: <SelectionHeader />,
-      width: selection.width ?? SELECTION_COLUMN_WIDTH,
-    }
-  }
-
-  private get selectionContext(): SelectionContextValue | null {
-    const selection = this.props.selection
-    if (!selection) return null
-
-    return {
-      getKey: this.getSelectionKey,
-      getRowState: this.getRowSelection,
-      onChange: selection.onChange,
-      pageKeys: this.pageKeys,
-      pageLabel: selection.pageLabel ?? 'Select page',
-      rowLabel: this.getRowLabel,
-      selectedKeys: selection.selectedKeys,
+      width: SELECTION_COLUMN_WIDTH,
     }
   }
 
@@ -211,11 +203,6 @@ export class Table<T extends object = { id: string }>
     return null
   }
 
-  private rowId = (row: T, index: number): string | number => {
-    const keyField = this.props.keyField
-    return (get(row, keyField) || index) as string | number
-  }
-
   private handleColumnChange = (change: ColumnProps<T, PathOf<T>>) => {
     const { states } = this.state
     const field = change.field
@@ -268,11 +255,11 @@ export class Table<T extends object = { id: string }>
   content(): React.ReactNode {
     const data = this.current ?? []
     const columns = this.columns
-    const selection = this.props.selection
+    const selectionEnabled = Boolean(this.props.enableRowSelection)
     const selectionColumn = this.selectionColumn
     const context = this.selectionContext
 
-    if (!columns.length && !selection) return null
+    if (!columns.length && !selectionEnabled) return null
 
     // Look for any column with a sort direction and sort accordingly
     const sortedColumn = columns.find(col => col.sortDirection)
@@ -288,7 +275,7 @@ export class Table<T extends object = { id: string }>
       <table>
         <thead>
           <tr key="header">
-            {selectionColumn && (
+            {selectionEnabled && (
               <HeaderCell<T, PathOf<T>>
                 key={SELECTION_FIELD}
                 pin={Pin.Left}
@@ -307,38 +294,41 @@ export class Table<T extends object = { id: string }>
           </tr>
         </thead>
         <tbody>
-          {displayData.map((row, index) => (
-            <tr key={this.rowId(row, index)}>
-              {selection && (
-                <SelectionCell
-                  key={SELECTION_FIELD}
-                  pin={Pin.Left}
-                  row={row}
-                  width={selection.width}
-                />
-              )}
-              {columns.map(props => {
-                const { field, type } = props
-                const value = get(row, field)
+          {displayData.map((row, index) => {
+            const rowKey = this.keyFor(row, index)
 
-                return (
-                  <Cell
-                    key={field}
-                    align={props.align}
-                    column={props}
-                    enum={props.enum}
-                    field={field}
-                    header={props.header}
-                    pin={props.pin}
-                    readOnly={this.props.readOnly}
-                    row={row}
-                    type={type}
-                    value={value}
+            return (
+              <tr key={rowKey}>
+                {selectionEnabled && (
+                  <SelectionCell
+                    key={SELECTION_FIELD}
+                    pin={Pin.Left}
+                    rowKey={rowKey}
                   />
-                )
-              })}
-            </tr>
-          ))}
+                )}
+                {columns.map(props => {
+                  const { field, type } = props
+                  const value = get(row, field)
+
+                  return (
+                    <Cell
+                      key={field}
+                      align={props.align}
+                      column={props}
+                      enum={props.enum}
+                      field={field}
+                      header={props.header}
+                      pin={props.pin}
+                      readOnly={this.props.readOnly}
+                      row={row}
+                      type={type}
+                      value={value}
+                    />
+                  )
+                })}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     )

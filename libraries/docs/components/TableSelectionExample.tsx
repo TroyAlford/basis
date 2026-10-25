@@ -1,10 +1,9 @@
-import type { RowSelectionState, TableKey } from 'basis/react'
+import type { TableKey, TableState } from 'basis/react'
 import { Button, Component, Pin, TypedTable } from 'basis/react'
 import type * as React from 'react'
 
 interface Person {
   action: string,
-  archived?: boolean,
   id: number,
   location: string,
   name: string,
@@ -52,13 +51,12 @@ const PEOPLE: Person[] = [
   },
   {
     action: 'Open',
-    archived: true,
     id: 4,
     location: 'Toronto',
     name: 'Margaret Hamilton',
     notes: 'Flight software',
     role: 'Admin',
-    status: 'Archived',
+    status: 'Active',
     team: 'Guidance',
   },
   {
@@ -87,20 +85,17 @@ const { Column, Table } = TypedTable.of<Person>()
 
 /**
  * A pinned Actions cell.
- * @param props - The cell props.
- * @param props.row - The row.
  * @returns The row action.
  */
-const ActionCell = ({ row }: { row: Person }): React.ReactNode => (
-  <Button disabled={row.archived} onActivate={() => undefined}>Open</Button>
+const ActionCell = (): React.ReactNode => (
+  <Button onActivate={() => undefined}>Open</Button>
 )
 
 /**
  * Live example for controlled table selection.
  *
- * The consumer owns the selected keys, the eligible page keys, and the reason a
- * row cannot be selected. The table only renders checkboxes and requests the
- * next set.
+ * The consumer owns the selected keys. The table only renders checkboxes and
+ * emits the next public state through `onStateChange`.
  */
 export class TableSelectionExample extends Component<Record<string, never>, HTMLDivElement, State> {
   static displayName = 'TableSelectionExample'
@@ -112,27 +107,13 @@ export class TableSelectionExample extends Component<Record<string, never>, HTML
     }
   }
 
-  private get pageKeys(): TableKey[] {
-    return this.state.people
-      .filter(person => !person.archived)
-      .map(person => person.id)
-  }
-
-  private handleSelectionChange = (selected: Set<TableKey>): void => {
-    void this.setState({ selected })
+  private handleStateChange = (state: TableState): void => {
+    void this.setState({ selected: state.selectedRows })
   }
 
   private handleClear = (): void => {
     void this.setState({ selected: new Set() })
   }
-
-  private getRowState = (person: Person): RowSelectionState => (
-    person.archived
-      ? { disabled: true, reason: 'Archived' }
-      : { disabled: false }
-  )
-
-  private rowLabel = (person: Person): string => person.name
 
   content() {
     const { people, selected } = this.state
@@ -153,16 +134,11 @@ export class TableSelectionExample extends Component<Record<string, never>, HTML
           }}
         >
           <Table
+            enableRowSelection
             readOnly
+            selectedRows={selected}
             value={people}
-            selection={{
-              getRowState: this.getRowState,
-              onChange: this.handleSelectionChange,
-              pageKeys: this.pageKeys,
-              pageLabel: 'Select page',
-              rowLabel: this.rowLabel,
-              selectedKeys: selected,
-            }}
+            onStateChange={this.handleStateChange}
           >
             {Column.Text({ field: 'name', pin: Pin.Left, title: 'Name' })}
             {Column.Text({ field: 'role', title: 'Role' })}
