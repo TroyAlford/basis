@@ -80,7 +80,7 @@ export class CheckboxEditor extends Editor<boolean | null, HTMLLabelElement, Pro
     if (value === true) {
       icon = <Square.Check />
     } else if (value === false) {
-      icon = <Square.X />
+      icon = <Square />
     } else {
       // value === null
       icon = <Square.Dash />
@@ -100,6 +100,7 @@ export class CheckboxEditor extends Editor<boolean | null, HTMLLabelElement, Pro
         aria-label={this.props.label}
         aria-labelledby={this.props.labelledBy}
         checked={value === true}
+        disabled={this.props.disabled || this.props.readOnly || undefined}
         name={this.props.field}
         type="checkbox"
         onChange={this.#handleChange}

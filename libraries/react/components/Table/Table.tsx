@@ -1,27 +1,55 @@
 import * as React from 'react'
-import { get, sortBy } from '../../../utilities'
+import { deepEquals, get, sortBy } from '../../../utilities'
 import type { PathOf } from '../../../utilities/types/PathOf'
 import type { Mixin } from '../../types/Mixin'
 import { Pin } from '../../types/Pin'
 import { SortDirection } from '../../types/SortDirection'
+import { TextAlign } from '../../types/TextAlign'
 import { Editor } from '../Editor/Editor'
 import { Cell } from './Cell'
 import type { ColumnProps } from './Column'
 import { Column, ColumnType } from './Column'
 import { HeaderCell } from './HeaderCell'
+import type { SelectionContextValue, TableKey, TableState } from './Selection'
+import { SELECTION_COLUMN_WIDTH, SELECTION_FIELD, SelectionCell, SelectionContext, SelectionHeader } from './Selection'
 
 import './Table.styles.ts'
 
 interface Props<T> {
   children?: React.ReactNode,
   className?: string,
+  enableRowSelection?: boolean,
   keyField?: PathOf<T>,
+  onStateChange?: (state: TableState) => void,
+  selectedRows?: Iterable<TableKey>,
 }
 
 interface State<T> {
   definitions?: Map<PathOf<T>, ColumnProps<T, PathOf<T>>>,
   prevChildren?: React.ReactNode,
   states?: Map<PathOf<T>, Partial<ColumnProps<T, PathOf<T>>>>,
+}
+
+/**
+ * Compare two column definitions without traversing ReactNode titles.
+ *
+ * `onKeyDown` is a Component-owned default rather than a column declaration;
+ * `Component.defaultProps` creates it fresh on every read, so it must not make
+ * an otherwise unchanged column look changed.
+ * @param one - The next definition.
+ * @param two - The previous definition.
+ * @returns Whether every declared value is the same reference or primitive.
+ */
+function columnEquals(one: object, two: object): boolean {
+  const keys = new Set([...Object.keys(one), ...Object.keys(two)])
+
+  for (const key of keys) {
+    if (key === 'onKeyDown') continue
+    if (!(key in one) || !(key in two)) return false
+    if ((one as Record<string, unknown>)[key] !== (two as Record<string, unknown>)[key]) return false
+  }
+
+  return true
 }
 
 export class Table<T extends object = { id: string }>
@@ -31,6 +59,8 @@ export class Table<T extends object = { id: string }>
   static Column = Column
   static ColumnType = ColumnType
   static HeaderCell = HeaderCell
+
+  private columnCache = new WeakMap<object, ColumnProps<T, PathOf<T>>>()
 
   static get mixins(): Set<Mixin> {
     return super.mixins
@@ -48,6 +78,63 @@ export class Table<T extends object = { id: string }>
       definitions: new Map<PathOf<T>, ColumnProps<T, PathOf<T>>>(),
       prevChildren: null,
       states: new Map<PathOf<T>, Partial<ColumnProps<T, PathOf<T>>>>(),
+    }
+  }
+
+  shouldComponentUpdate(nextProps: Props<T>, nextState: State<T>): boolean {
+    if (nextProps.enableRowSelection !== this.props.enableRowSelection) return true
+    if (nextProps.selectedRows !== this.props.selectedRows) return true
+    if (nextProps.onStateChange !== this.props.onStateChange) return true
+    return !deepEquals(this.props, nextProps) || !deepEquals(this.state, nextState)
+  }
+
+  private keyFor = (row: T, index: number): TableKey => {
+    const value = get(row, this.props.keyField)
+
+    if (value === undefined) {
+      if (this.props.enableRowSelection) {
+        throw new Error(
+          `Table: row ${index} has no "${String(this.props.keyField)}" value required for row selection`,
+        )
+      }
+      return index
+    }
+
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      throw new Error(
+        `Table: "${String(this.props.keyField)}" must resolve to a string or number (row ${index})`,
+      )
+    }
+
+    return value
+  }
+
+  private get selectionContext(): SelectionContextValue | null {
+    if (!this.props.enableRowSelection) return null
+
+    const { onStateChange, selectedRows } = this.props
+    if (selectedRows === undefined || selectedRows === null) {
+      throw new Error('Table: enableRowSelection requires selectedRows')
+    }
+    if (!onStateChange) {
+      throw new Error('Table: enableRowSelection requires onStateChange')
+    }
+
+    return {
+      onStateChange,
+      rowKeys: (this.current ?? []).map((row, index) => this.keyFor(row, index)),
+      selectedRows: new Set(selectedRows),
+    }
+  }
+
+  private get selectionColumn(): ColumnProps<T, PathOf<T>> {
+    return {
+      align: TextAlign.Center,
+      field: SELECTION_FIELD as PathOf<T>,
+      pin: Pin.Left,
+      sortable: false,
+      title: <SelectionHeader />,
+      width: SELECTION_COLUMN_WIDTH,
     }
   }
 
@@ -76,17 +163,29 @@ export class Table<T extends object = { id: string }>
           definitions.set(field, definition)
           const previous = previousDefinitions.get(field)
           const current = states.get(field)
+          const unchanged = current !== undefined
+            && previous !== undefined
+            && columnEquals(definition, previous)
 
           /*
            * Sorting is table state, so a rerender preserves it while the
            * consumer's declaration is unchanged. When the consumer declares a
            * new sort direction, that declaration wins.
            */
-          const sortDirection = previous && current && definition.sortDirection === previous.sortDirection
-            ? current.sortDirection
-            : definition.sortDirection
+          const preserveSort = previous !== undefined
+            && current !== undefined
+            && definition.sortDirection === previous.sortDirection
+          const sortDirection = preserveSort && current ? current.sortDirection : definition.sortDirection
 
-          states.set(field, { ...definition, sortDirection })
+          /*
+           * Reuse the previous state object for an unchanged declaration so
+           * body cells keep stable column props during selection updates.
+           */
+          const nextState = unchanged && current && sortDirection === current.sortDirection
+            ? current
+            : { ...definition, sortDirection }
+
+          states.set(field, nextState)
         })
 
       // Drop state for columns the consumer removed.
@@ -104,11 +203,6 @@ export class Table<T extends object = { id: string }>
     return null
   }
 
-  private rowId = (row: T, index: number): string | number => {
-    const keyField = this.props.keyField
-    return (get(row, keyField) || index) as string | number
-  }
-
   private handleColumnChange = (change: ColumnProps<T, PathOf<T>>) => {
     const { states } = this.state
     const field = change.field
@@ -124,6 +218,11 @@ export class Table<T extends object = { id: string }>
         }
       })
 
+      /*
+       * Sorting mutates the existing column state, so cached column props must
+       * be rebuilt before the next render sees the new direction.
+       */
+      this.columnCache = new WeakMap<object, ColumnProps<T, PathOf<T>>>()
       this.forceUpdate()
     }
   }
@@ -133,7 +232,14 @@ export class Table<T extends object = { id: string }>
 
     const columns: ColumnProps<T, PathOf<T>>[] = []
     for (const [, state] of states) {
-      columns.push({ ...state })
+      let column = this.columnCache.get(state)
+
+      if (!column) {
+        column = { ...state } as ColumnProps<T, PathOf<T>>
+        this.columnCache.set(state, column)
+      }
+
+      columns.push(column)
     }
 
     // Sort columns by pin priority: Left → Unpinned → Right
@@ -149,8 +255,11 @@ export class Table<T extends object = { id: string }>
   content(): React.ReactNode {
     const data = this.current ?? []
     const columns = this.columns
+    const selectionEnabled = Boolean(this.props.enableRowSelection)
+    const selectionColumn = this.selectionColumn
+    const context = this.selectionContext
 
-    if (!columns.length) return null
+    if (!columns.length && !selectionEnabled) return null
 
     // Look for any column with a sort direction and sort accordingly
     const sortedColumn = columns.find(col => col.sortDirection)
@@ -162,10 +271,18 @@ export class Table<T extends object = { id: string }>
       }
     }
 
-    return (
+    const table = (
       <table>
         <thead>
           <tr key="header">
+            {selectionEnabled && (
+              <HeaderCell<T, PathOf<T>>
+                key={SELECTION_FIELD}
+                pin={Pin.Left}
+                value={selectionColumn}
+                onChange={this.handleColumnChange}
+              />
+            )}
             {columns.map(column => (
               <HeaderCell<T, PathOf<T>>
                 key={column.field}
@@ -177,32 +294,49 @@ export class Table<T extends object = { id: string }>
           </tr>
         </thead>
         <tbody>
-          {displayData.map((row, index) => (
-            <tr key={this.rowId(row, index)}>
-              {columns.map(props => {
-                const { field, type } = props
-                const value = get(row, field)
+          {displayData.map((row, index) => {
+            const rowKey = this.keyFor(row, index)
 
-                return (
-                  <Cell
-                    key={field}
-                    align={props.align}
-                    column={props}
-                    enum={props.enum}
-                    field={field}
-                    header={props.header}
-                    pin={props.pin}
-                    readOnly={this.props.readOnly}
-                    row={row}
-                    type={type}
-                    value={value}
+            return (
+              <tr key={rowKey}>
+                {selectionEnabled && (
+                  <SelectionCell
+                    key={SELECTION_FIELD}
+                    pin={Pin.Left}
+                    rowKey={rowKey}
                   />
-                )
-              })}
-            </tr>
-          ))}
+                )}
+                {columns.map(props => {
+                  const { field, type } = props
+                  const value = get(row, field)
+
+                  return (
+                    <Cell
+                      key={field}
+                      align={props.align}
+                      column={props}
+                      enum={props.enum}
+                      field={field}
+                      header={props.header}
+                      pin={props.pin}
+                      readOnly={this.props.readOnly}
+                      row={row}
+                      type={type}
+                      value={value}
+                    />
+                  )
+                })}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     )
+
+    return context ? (
+      <SelectionContext.Provider value={context}>
+        {table}
+      </SelectionContext.Provider>
+    ) : table
   }
 }

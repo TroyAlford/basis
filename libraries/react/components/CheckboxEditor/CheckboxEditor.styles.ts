@@ -10,9 +10,18 @@ style('basis:checkbox-editor', css`
     cursor: pointer;
     display: inline-flex;
     gap: 0.25em;
+    position: relative;
     user-select: none;
 
-    > input[type="checkbox"] { display: none; }
+    > input[type="checkbox"] {
+      block-size: 1px;
+      clip-path: inset(50%);
+      inline-size: 1px;
+      margin: -1px;
+      overflow: hidden;
+      position: absolute;
+      white-space: nowrap;
+    }
 
     &:focus-within {
       outline: 2px solid var(--basis-focus-color);
@@ -20,6 +29,7 @@ style('basis:checkbox-editor', css`
     }
 
     &[disabled], &[readonly] {
+      opacity: 0.5;
       pointer-events: none;
     }
   }

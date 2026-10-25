@@ -3,6 +3,7 @@ import { Pin, Section, SortDirection, TextAlign, TypedTable } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 import { TableHeaderExample } from '../components/TableHeaderExample'
+import { TableSelectionExample } from '../components/TableSelectionExample'
 
 faker.seed(42)
 
@@ -208,12 +209,32 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
           `)}
           <p>Any React content works, including native controls. A plain input keeps its own keyboard behavior and does not need to import a Basis component. This example&#39;s completion state and bulk update are ordinary consumer state, not a reusable table-selection API.</p>
         </Section>
+        <Section title="Row Selection">
+          <p>Row selection is opt-in and always controlled. Set <code>enableRowSelection</code>, pass the current <code>selectedRows</code> as any iterable of keys, and provide <code>onStateChange</code> to receive the next <code>TableState</code>. The table renders one fixed-width, left-pinned, nonsortable checkbox column before every declared column. It never owns a second selection store.</p>
+          <p>Selection keys come from the existing <code>keyField</code> (default <code>id</code>). The header selects or clears all rows in the current <code>value</code>; selected keys outside the current rows are preserved. Every displayed row is selectable, and the only disabled checkbox is the header when the table has no rows. <code>onStateChange</code> is the table interaction-state notification and is distinct from the row-data <code>onChange</code>.</p>
+          <TableSelectionExample />
+          {Code.format(`
+            <Table
+              enableRowSelection
+              selectedRows={selectedRows}
+              value={people}
+              onStateChange={state => setSelectedRows(state.selectedRows)}
+            >
+              {Column.Text({ field: 'name', pin: Pin.Left, title: 'Name' })}
+              {Column.Text({ field: 'role', title: 'Role' })}
+              {Column.Text({ field: 'actions', pin: Pin.Right, title: 'Actions' })}
+            </Table>
+          `)}
+        </Section>
         <Section title="API Reference">
           <h4>Table Props</h4>
           <ul>
             <li><code>className?: string</code> - Additional CSS classes</li>
+            <li><code>enableRowSelection?: boolean</code> - Adds the controlled selection column and header checkbox</li>
             <li><code>keyField?: PathOf&lt;T&gt;</code> - Field to use as unique row identifier (default: 'id')</li>
+            <li><code>onStateChange?: (state: TableState) =&gt; void</code> - Receives the next controlled table state; required when row selection is enabled</li>
             <li><code>readOnly?: boolean</code> - Whether the table is read-only</li>
+            <li><code>selectedRows?: Iterable&lt;TableKey&gt;</code> - The controlled selected row keys; required when row selection is enabled</li>
             <li><code>value: T[]</code> - Array of data to display</li>
           </ul>
           <h4>Column Props</h4>
