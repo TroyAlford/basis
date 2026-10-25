@@ -124,7 +124,7 @@ export class AutoCompleteDocs extends DocumentationPage<State> {
               </div>
             </div>
             {/* Demo Area */}
-            <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '2rem' }}>
+            <div style={{ border: '1px solid var(--basis-color-border-subtle)', borderRadius: '4px', padding: '2rem' }}>
               <h3>Article Search</h3>
               <AutoComplete<SearchResult>
                 anchorPoint={this.current.anchorPoint}
@@ -136,7 +136,7 @@ export class AutoCompleteDocs extends DocumentationPage<State> {
                 getOptionLabel={result => (
                   <div>
                     <div style={{ fontWeight: 'bold' }}>{result.headline}</div>
-                    <div style={{ color: '#666', fontSize: '0.9em' }}>{result.preview}</div>
+                    <div style={{ color: 'var(--basis-color-foreground-muted)', fontSize: '0.9em' }}>{result.preview}</div>
                   </div>
                 )}
                 onSearch={this.searchArticles}
@@ -154,7 +154,7 @@ export class AutoCompleteDocs extends DocumentationPage<State> {
                     <span>{user.avatar}</span>
                     <div>
                       <div>{user.name}</div>
-                      <div style={{ color: '#666', fontSize: '0.9em' }}>{user.email}</div>
+                      <div style={{ color: 'var(--basis-color-foreground-muted)', fontSize: '0.9em' }}>{user.email}</div>
                     </div>
                   </div>
                 )}

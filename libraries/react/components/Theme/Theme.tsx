@@ -46,6 +46,8 @@ interface Props {
     surfaceElevated?: string,
     /** Inset surface color for prefixes, suffixes, and similar chrome */
     surfaceInset?: string,
+    /** Muted surface color for quiet panels and secondary chrome */
+    surfaceMuted?: string,
   },
 
   /** Font sizes relative to base size (16px) */
@@ -146,6 +148,7 @@ export const DEFAULT_THEME = {
     surfaceAlt: '#dddddd',
     surfaceElevated: '#ffffff',
     surfaceInset: '#88888844',
+    surfaceMuted: '#f8f9fa',
   },
   fontSize: {
     lg: 112.5, // 16px
@@ -223,6 +226,7 @@ export const DARK_THEME = {
     surfaceAlt: '#161b21',
     surfaceElevated: '#1c232b',
     surfaceInset: '#212a33',
+    surfaceMuted: '#141a20',
   },
 }
 
@@ -299,24 +303,120 @@ function processObject(prefix: string, values: Record<string, unknown>): string[
     })
 }
 
+/** The colour category of a theme. */
+type ThemeColor = NonNullable<Props['color']>
+
 /**
- * Build the CSS custom properties for a theme without mounting a `Theme`.
- * @param props - Theme overrides.
- * @returns The theme stylesheet.
+ * The contrast partners for the semantic accents of a colour palette.
+ * @param color - The palette.
+ * @returns The contrast custom property declarations.
  */
-export function themeStyles(props: Props = {}): string {
-  const theme = merge<Props>(DEFAULT_THEME, props)
+function contrastVariables(color: ThemeColor): string[] {
+  return [
+    `--basis-color-contrast: ${Color.from(color.primary ?? DEFAULT_THEME.color.primary).contrast()};`,
+    `--basis-color-danger-contrast: ${Color.from(color.danger ?? DEFAULT_THEME.color.danger).contrast()};`,
+    `--basis-color-success-contrast: ${Color.from(color.success ?? DEFAULT_THEME.color.success).contrast()};`,
+  ]
+}
+
+/**
+ * Render a colour palette, including its computed contrast partners.
+ * @param color - The palette.
+ * @returns The colour custom property declarations.
+ */
+function colorVariables(color: ThemeColor): string[] {
+  return [
+    ...processObject('color', color as Record<string, unknown>),
+    ...contrastVariables(color),
+  ]
+}
+
+/**
+ * Choose the native browser color scheme for a background colour.
+ * @param background - The theme background colour.
+ * @returns The matching `color-scheme` value.
+ */
+function colorSchemeFor(background: string): 'dark' | 'light' {
+  const { b, g, r } = Color.from(background).toRGB()
+  const linear = (channel: number): number => {
+    const value = channel / 255
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  }
+  const luminance = (0.2126 * linear(r)) + (0.7152 * linear(g)) + (0.0722 * linear(b))
+  return luminance < 0.5 ? 'dark' : 'light'
+}
+
+/**
+ * Render every category of a resolved theme.
+ * @param theme - The resolved theme.
+ * @returns The custom property declarations.
+ */
+function themeVariables(theme: Props): string[] {
   const variables = CATEGORIES.flatMap(category => {
     const values = theme[category]
     return values && typeof values === 'object'
       ? processObject(category, values as Record<string, unknown>)
       : []
   })
-  variables.push(`--basis-color-contrast: ${Color.from(theme.color.primary).contrast()};`)
-  variables.push(`--basis-color-danger-contrast: ${Color.from(theme.color.danger).contrast()};`)
-  variables.push(`--basis-color-success-contrast: ${Color.from(theme.color.success).contrast()};`)
+  variables.push(...contrastVariables(theme.color ?? DEFAULT_THEME.color))
+  return variables
+}
 
-  return props.name?.trim()
-    ? `:root [data-theme="${props.name}"] { ${variables.join('\n')} }`
-    : `:root { ${variables.join('\n')} }`
+/**
+ * Keep only the colour values a caller explicitly changed from the defaults.
+ *
+ * `Theme.defaultProps` carries the full light palette, so a dark-mode override
+ * cannot simply merge the props over `DARK_THEME`: that would re-apply the light
+ * defaults. Comparing against `DEFAULT_THEME` separates intentional overrides
+ * from defaults the component supplied.
+ * @param props - Theme props.
+ * @returns The explicit colour overrides.
+ */
+function explicitColorOverrides(props: Props): ThemeColor {
+  const defaults = DEFAULT_THEME.color
+  return Object.fromEntries(
+    Object.entries(props.color ?? {}).filter(([key, value]) => (
+      value != null && value !== defaults[key as keyof typeof defaults]
+    )),
+  ) as ThemeColor
+}
+
+/**
+ * Build the CSS custom properties for a theme without mounting a `Theme`.
+ *
+ * An unnamed theme is the application default: it follows the user's
+ * `prefers-color-scheme` preference. A named theme is explicit and keeps the
+ * exact palette it was given, regardless of the system preference.
+ * @param props - Theme overrides.
+ * @returns The theme stylesheet.
+ */
+export function themeStyles(props: Props = {}): string {
+  const name = props.name?.trim()
+
+  if (name) {
+    const theme = merge<Props>(DEFAULT_THEME, props)
+    const color = theme.color ?? DEFAULT_THEME.color
+    return [
+      `:root [data-theme="${props.name}"] {`,
+      `  color-scheme: ${colorSchemeFor(color.background ?? DEFAULT_THEME.color.background)};`,
+      `  ${themeVariables(theme).join('\n  ')}`,
+      '}',
+    ].join('\n')
+  }
+
+  const light = merge<Props>(DEFAULT_THEME, props)
+  const dark = { ...DARK_THEME.color, ...explicitColorOverrides(props) }
+
+  return [
+    ':root {',
+    `  color-scheme: ${colorSchemeFor(light.color?.background ?? DEFAULT_THEME.color.background)};`,
+    `  ${themeVariables(light).join('\n  ')}`,
+    '}',
+    '@media (prefers-color-scheme: dark) {',
+    '  :root {',
+    '    color-scheme: dark;',
+    `    ${colorVariables(dark).join('\n    ')}`,
+    '  }',
+    '}',
+  ].join('\n')
 }

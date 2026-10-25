@@ -126,7 +126,7 @@ export class TableSelectionExample extends Component<Record<string, never>, HTML
         </div>
         <div
           style={{
-            border: '1px solid #ddd',
+            border: '1px solid var(--basis-color-border-subtle)',
             borderRadius: '4px',
             maxWidth: '100%',
             overflow: 'hidden',

@@ -64,7 +64,7 @@ export class MenuDocs extends DocumentationPage<State> {
               </div>
             </div>
             {/* Demo Area */}
-            <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '2rem' }}>
+            <div style={{ border: '1px solid var(--basis-color-border-subtle)', borderRadius: '4px', padding: '2rem' }}>
               <div style={{ display: 'flex', gap: '2rem', justifyContent: 'center' }}>
                 <div>
                   <Menu

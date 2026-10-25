@@ -50,6 +50,60 @@ describe('testing/docs', () => {
     })
   }, 60_000)
 
+  test('follows the system color scheme and toggles the theme page presets', async () => {
+    await app.visit('/components/theme', {
+      ...NETWORK,
+      init: page => page.emulateMedia({ colorScheme: 'dark' }),
+    }, async page => {
+      await page.waitForSelector('.option-group')
+
+      // The unnamed root Theme follows the emulated system preference.
+      expect(await page.evaluate(() => (
+        getComputedStyle(document.body).getPropertyValue('--basis-color-background').trim()
+      ))).toBe('#080a0dff')
+      expect(await page.evaluate(() => document.body.dataset.theme ?? null)).toBeNull()
+
+      // The page toggle applies the named light preset, including the shell nav.
+      await page.locator('button.toggle', { hasText: 'Light' }).click()
+      await page.waitForFunction(() => document.body.dataset.theme === 'light')
+      expect(await page.evaluate(() => (
+        getComputedStyle(document.body).getPropertyValue('--basis-color-background').trim()
+      ))).toBe('#ffffffff')
+      expect(await page.evaluate(() => (
+        getComputedStyle(document.querySelector('nav.links')).backgroundColor
+      ))).toBe('rgb(248, 249, 250)')
+
+      // The dark preset switches the shell, controls, and their text together.
+      await page.locator('button.toggle', { hasText: 'Dark' }).click()
+      await page.waitForFunction(() => document.body.dataset.theme === 'dark')
+      expect(await page.evaluate(() => (
+        getComputedStyle(document.body).getPropertyValue('--basis-color-surface').trim()
+      ))).toBe('#11151aff')
+      expect(await page.evaluate(() => (
+        getComputedStyle(document.querySelector('nav.links')).backgroundColor
+      ))).toBe('rgb(20, 26, 32)')
+      expect(await page.evaluate(() => {
+        const link = document.querySelector('nav.links a')
+        return {
+          background: getComputedStyle(document.querySelector('nav.links')).backgroundColor,
+          color: getComputedStyle(link).color,
+        }
+      })).toEqual({ background: 'rgb(20, 26, 32)', color: 'rgb(243, 245, 247)' })
+      expect(await page.locator('button.toggle', { hasText: 'Dark' }).getAttribute('aria-pressed')).toBe('true')
+      expect(await page.evaluate(() => (
+        getComputedStyle(document.querySelector('button.toggle')).color
+      ))).toBe('rgb(243, 245, 247)')
+
+      // Leaving the page cleans up the explicit override and returns to system.
+      await page.locator('nav.links a', { hasText: 'Button' }).click()
+      await page.waitForFunction(() => document.querySelector('main h1')?.textContent === 'Button')
+      expect(await page.evaluate(() => document.body.dataset.theme ?? null)).toBeNull()
+      expect(await page.evaluate(() => (
+        getComputedStyle(document.body).getPropertyValue('--basis-color-background').trim()
+      ))).toBe('#080a0dff')
+    })
+  }, 60_000)
+
   test('captures table pinned columns and header actions at a narrow width', async () => {
     await app.visit('/components/table', { ...NETWORK }, async page => {
       const example = page.locator('[data-table-header-example]')

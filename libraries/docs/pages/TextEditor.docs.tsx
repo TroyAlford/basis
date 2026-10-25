@@ -121,7 +121,7 @@ export class TextEditorDocs extends DocumentationPage<State> {
               </div>
             </div>
             {/* Demo Area */}
-            <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '1rem' }}>
+            <div style={{ border: '1px solid var(--basis-color-border-subtle)', borderRadius: '4px', padding: '1rem' }}>
               <h3>Editable</h3>
               <TextEditor
                 placeholder={this.current.placeholder}

@@ -5,8 +5,8 @@ import.meta.hot.accept()
 style('basis:docs:moonphase', css`
   .moon-phase-docs {
     .moon-phase-section {
-      background-color: #f8f9fa;
-      border: 1px solid #e9ecef;
+      background-color: var(--basis-color-surface-muted);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 8px;
       display: grid;
       gap: 24px;
@@ -45,15 +45,15 @@ style('basis:docs:moonphase', css`
 
     .moon-demo-container {
       --basis-icon-size: 120px;
-      background-color: white;
-      border: 1px solid #dee2e6;
+      background-color: var(--basis-color-surface);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 50%;
       margin-bottom: 16px;
       padding: 20px;
     }
 
     .color-input {
-      border: 1px solid #ced4da;
+      border: 1px solid var(--basis-color-border);
       border-radius: 4px;
       cursor: pointer;
       height: 32px;
@@ -61,7 +61,7 @@ style('basis:docs:moonphase', css`
     }
 
     .moon-phase-name {
-      color: #6c757d;
+      color: var(--basis-color-foreground-muted);
       font-size: 14px;
       font-weight: 500;
       text-align: center;

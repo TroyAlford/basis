@@ -14,7 +14,7 @@ style('basis:image', css`
 
     /* Accessibility focus styles */
     &:focus-visible {
-      outline: 2px solid #007acc;
+      outline: 2px solid var(--basis-color-focus);
       outline-offset: 2px;
     }
 

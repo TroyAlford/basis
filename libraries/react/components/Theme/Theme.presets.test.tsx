@@ -68,6 +68,7 @@ describe('Theme presets', () => {
       DARK_THEME.color.background,
       DARK_THEME.color.surface,
       DARK_THEME.color.surfaceAlt,
+      DARK_THEME.color.surfaceMuted,
       DARK_THEME.color.surfaceElevated,
       DARK_THEME.color.border,
       DARK_THEME.color.borderSubtle,
@@ -77,14 +78,22 @@ describe('Theme presets', () => {
 
     expect(new Set(roles).size).toBe(roles.length)
     expect(luminance(DARK_THEME.color.background)).toBeLessThan(luminance(DARK_THEME.color.surface))
-    expect(luminance(DARK_THEME.color.surface)).toBeLessThan(luminance(DARK_THEME.color.surfaceAlt))
+    expect(luminance(DARK_THEME.color.surface)).toBeLessThan(luminance(DARK_THEME.color.surfaceMuted))
+    expect(luminance(DARK_THEME.color.surfaceMuted)).toBeLessThan(luminance(DARK_THEME.color.surfaceAlt))
     expect(luminance(DARK_THEME.color.surfaceAlt)).toBeLessThan(luminance(DARK_THEME.color.surfaceElevated))
     expect(luminance(DARK_THEME.color.surfaceElevated)).toBeLessThan(luminance(DARK_THEME.color.border))
   })
 
   test('keeps text readable on every dark interactive surface', () => {
     const { color } = DARK_THEME
-    const states = [color.surface, color.surfaceAlt, color.surfaceElevated, color.hover, color.selection]
+    const states = [
+      color.surface,
+      color.surfaceMuted,
+      color.surfaceAlt,
+      color.surfaceElevated,
+      color.hover,
+      color.selection,
+    ]
 
     for (const state of states) {
       expect(contrast(color.foreground, state)).toBeGreaterThanOrEqual(4.5)
@@ -110,6 +119,7 @@ describe('Theme presets', () => {
     const css = themeStyles({ name: 'dark', ...DARK_THEME })
 
     expect(css).toMatch(/^:root \[data-theme="dark"\] {/)
+    expect(css).toContain('color-scheme: dark;')
     for (const token of [
       'background',
       'border',
@@ -127,6 +137,7 @@ describe('Theme presets', () => {
       'surface',
       'surface-alt',
       'surface-elevated',
+      'surface-muted',
     ]) {
       expect(css).toContain(`--basis-color-${token}:`)
     }
@@ -135,10 +146,38 @@ describe('Theme presets', () => {
     expect(declared(css, '--basis-color-surface-elevated')).toBe('#1c232bff')
   })
 
+  test('makes an unnamed theme follow the system color scheme', () => {
+    const css = themeStyles()
+
+    expect(css).toMatch(/^:root {/)
+    expect(css).toContain('color-scheme: light;')
+    expect(css).toContain('@media (prefers-color-scheme: dark) {')
+    expect(css).toContain('color-scheme: dark;')
+    expect(css).toContain('--basis-color-background: #080a0dff;')
+    expect(css).toContain('--basis-color-surface: #11151aff;')
+    expect(css).toContain('--basis-color-foreground: #f3f5f7ff;')
+  })
+
+  test('keeps named themes explicit instead of adding a system override', () => {
+    expect(themeStyles({ name: 'dark', ...DARK_THEME })).not.toContain('@media')
+    expect(themeStyles({ name: 'light', ...LIGHT_THEME })).not.toContain('@media')
+  })
+
+  test('preserves explicit unnamed colour overrides in the system dark palette', () => {
+    const css = themeStyles({ color: { primary: '#ff0000' } })
+    const darkStart = css.indexOf('@media (prefers-color-scheme: dark)')
+    const dark = css.slice(darkStart)
+
+    expect(darkStart).toBeGreaterThan(-1)
+    expect(dark).toContain('--basis-color-primary: #ff0000ff;')
+    expect(dark).toContain('--basis-color-surface: #11151aff;')
+  })
+
   test('keeps the existing light token values under a named light theme', () => {
     const css = themeStyles({ name: 'light', ...LIGHT_THEME })
 
     expect(css).toMatch(/^:root \[data-theme="light"\] {/)
+    expect(css).toContain('color-scheme: light;')
     expect(declared(css, '--basis-color-background')).toBe('#ffffffff')
     expect(declared(css, '--basis-color-foreground')).toBe('#171717ff')
     expect(declared(css, '--basis-color-primary')).toBe('#0070f3ff')
@@ -146,5 +185,6 @@ describe('Theme presets', () => {
     expect(declared(css, '--basis-color-success')).toBe('#008000ff')
     expect(declared(css, '--basis-color-disabled')).toBe('#e5e5e5ff')
     expect(declared(css, '--basis-color-disabled-text')).toBe('#a3a3a3ff')
+    expect(declared(css, '--basis-color-surface-muted')).toBe('#f8f9faff')
   })
 })

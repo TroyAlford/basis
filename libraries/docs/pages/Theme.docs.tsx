@@ -1,6 +1,7 @@
+import { OptionGroup, Orientation, ToggleEditor } from 'basis/react'
 import { createRef } from 'react'
 import { TextEditor } from '../../react/components/TextEditor/TextEditor'
-import { Theme } from '../../react/components/Theme/Theme'
+import { DARK_THEME, LIGHT_THEME, Theme } from '../../react/components/Theme/Theme'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
@@ -20,6 +21,7 @@ const ROOT_THEME_CSS_SNAPSHOT_SECTIONS: readonly { readonly title: string, reado
       '--basis-color-surface-alt',
       '--basis-color-surface-elevated',
       '--basis-color-surface-inset',
+      '--basis-color-surface-muted',
       '--basis-color-border',
       '--basis-color-border-subtle',
       '--basis-color-foreground',
@@ -73,6 +75,7 @@ const ROOT_THEME_CSS_SNAPSHOT_SECTIONS: readonly { readonly title: string, reado
 
 interface State {
   borderRadius: number,
+  colorScheme: 'system' | 'light' | 'dark',
   fontSize: number,
   previewCode: string,
   primaryColor: string,
@@ -84,10 +87,17 @@ interface State {
 export class ThemeDocs extends DocumentationPage<State> {
   previewThemeTargetRef = createRef<HTMLDivElement>()
 
+  handleColorSchemeChange = (value: unknown): void => {
+    if (value === 'system' || value === 'light' || value === 'dark') {
+      void this.handleField(value, 'colorScheme')
+    }
+  }
+
   static override defaultProps = {
     ...DocumentationPage.defaultProps,
     initialValue: {
       borderRadius: 8,
+      colorScheme: 'system' as const,
       fontSize: 100,
       previewCode: '',
       primaryColor: '#0070f3',
@@ -131,6 +141,12 @@ export class ThemeDocs extends DocumentationPage<State> {
     ].join('\n')
   }
 
+  #applyColorScheme = (): void => {
+    if (typeof document === 'undefined') return
+    if (this.current.colorScheme === 'system') delete document.body.dataset.theme
+    else document.body.dataset.theme = this.current.colorScheme
+  }
+
   #refreshSnapshots = (): void => {
     if (typeof document === 'undefined') return
     requestAnimationFrame(() => {
@@ -139,7 +155,7 @@ export class ThemeDocs extends DocumentationPage<State> {
           ...this.current,
           previewCode: ThemeDocs.formatPreviewVariableLines(this.previewThemeTargetRef.current),
           rootThemeCss: ThemeDocs.formatCssVariableSnapshot(
-            document.documentElement,
+            document.body,
             ROOT_THEME_CSS_SNAPSHOT_SECTIONS,
           ),
         },
@@ -148,6 +164,7 @@ export class ThemeDocs extends DocumentationPage<State> {
   }
 
   override componentDidMount(): void {
+    this.#applyColorScheme()
     this.#refreshSnapshots()
   }
 
@@ -155,10 +172,12 @@ export class ThemeDocs extends DocumentationPage<State> {
     prevProps: Readonly<object>,
     prevState: Readonly<{ current: State }>,
   ): void {
+    this.#applyColorScheme()
     const prev = prevState.current
     const cur = this.current
     if (
       prev.borderRadius !== cur.borderRadius
+      || prev.colorScheme !== cur.colorScheme
       || prev.fontSize !== cur.fontSize
       || prev.primaryColor !== cur.primaryColor
       || prev.shadow !== cur.shadow
@@ -168,12 +187,41 @@ export class ThemeDocs extends DocumentationPage<State> {
     }
   }
 
+  override componentWillUnmount(): void {
+    if (typeof document !== 'undefined') delete document.body.dataset.theme
+    super.componentWillUnmount()
+  }
+
   content() {
+    const { colorScheme } = this.current
+
     return (
-      <>
+      <div
+        style={{
+          backgroundColor: 'var(--basis-color-background)',
+          color: 'var(--basis-color-foreground)',
+          minHeight: '100%',
+        }}
+      >
+        <Theme name="light" {...LIGHT_THEME} />
+        <Theme name="dark" {...DARK_THEME} />
         <h1>Theme</h1>
         <section>
           <p>Theme is a powerful component that manages design tokens and CSS variables for your application. It provides a centralized way to define colors, typography, spacing, shadows, and other design values that can be used consistently across all components.</p>
+        </section>
+        <section>
+          <h2>Color Scheme</h2>
+          <p>An unnamed <code>&lt;Theme /&gt;</code> follows the operating system's <code>prefers-color-scheme</code>. Choose a scheme to preview the official presets explicitly on this page.</p>
+          <OptionGroup
+            field="colorScheme"
+            orientation={Orientation.Horizontal}
+            value={colorScheme}
+            onChange={this.handleColorSchemeChange}
+          >
+            <ToggleEditor data="system" off="System" on="System" />
+            <ToggleEditor data="light" off="Light" on="Light" />
+            <ToggleEditor data="dark" off="Dark" on="Dark" />
+          </OptionGroup>
         </section>
         <section>
           <h2>Key Features</h2>
@@ -263,7 +311,7 @@ export class ThemeDocs extends DocumentationPage<State> {
                 <span>{this.current.borderRadius}px</span>
               </div>
             </div>
-            <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '2rem' }}>
+            <div style={{ border: '1px solid var(--basis-color-border-subtle)', borderRadius: '4px', padding: '2rem' }}>
               <Theme
                 color={{ primary: this.current.primaryColor }}
                 fontSize={{ md: this.current.fontSize }}
@@ -287,7 +335,7 @@ export class ThemeDocs extends DocumentationPage<State> {
                 <h3>Theme Preview</h3>
                 <p>This element uses CSS variables from your custom theme!</p>
                 <div style={{
-                  backgroundColor: '#ffffff88',
+                  backgroundColor: 'var(--basis-color-overlay-light)',
                   borderRadius: '4px',
                   margin: '1rem 0',
                   padding: '0.5rem',
@@ -368,7 +416,7 @@ export class ThemeDocs extends DocumentationPage<State> {
         <section>
           <h2>CSS Variable Generation</h2>
           <p>Theme automatically generates CSS custom properties for all design tokens. Variables are namespaced under <code>--basis-</code> and follow a consistent naming pattern.</p>
-          <p>The block below is filled from <code>getComputedStyle(document.documentElement)</code> on each paint, so it always matches the unnamed <code>&lt;Theme /&gt;</code> in <code>Layout</code> (defaults merged into <code>:root</code>).</p>
+          <p>The block below is filled from the live page root on each paint, so it shows the system default or the scheme selected above.</p>
           {Code.format(this.current.rootThemeCss, 'scss')}
           <h3>Namespaced Themes</h3>
           <p>When <code>name</code> is set, Theme emits <code>:root [data-theme="…"]</code> with the same variable names. Put <code>data-theme</code> on a subtree to apply that token set. For the shipped palettes, prefer <code>&lt;Theme name="dark" &#123;...DARK_THEME&#125; /&gt;</code> over hand-written colour values so controls and overlays resolve the same semantic roles.</p>
@@ -446,7 +494,7 @@ export class ThemeDocs extends DocumentationPage<State> {
           </ul>
           <p>The component renders as <code>null</code> and only manages CSS injection, making it extremely lightweight in the React component tree.</p>
         </section>
-      </>
+      </div>
     )
   }
 }

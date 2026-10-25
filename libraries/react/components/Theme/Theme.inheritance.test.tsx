@@ -10,13 +10,18 @@ import { resetOverlayProvider } from '../OverlayProvider/OverlayProvider.testUti
 import { DARK_THEME, Theme } from './Theme'
 
 import '../Button/Button.styles.ts'
+import '../Documentation/Documentation.styles.ts'
+import '../Menu/Menu.styles.ts'
 import '../NumberEditor/NumberEditor.styles.ts'
 import '../OverlayProvider/Dialog.styles.ts'
+import '../OverlayProvider/Notification.styles.ts'
 import '../PopupMenu/PopupMenu.styles.ts'
 import '../Table/Cell.styles.ts'
 import '../Table/HeaderCell.styles.ts'
 import '../Table/Table.styles.ts'
 import '../TextEditor/TextEditor.styles.ts'
+import '../ToggleEditor/ToggleEditor.styles.ts'
+import '../Tooltip/Tooltip.styles.ts'
 import '../../mixins/PrefixSuffix.styles.ts'
 
 /**
@@ -128,6 +133,45 @@ describe('themed control inheritance', () => {
 
     expect(all).not.toMatch(/:root\s*{[^}]*--basis-table-/)
     expect(header).toContain('var(--basis-table-header-cell-foreground, var(--basis-color-contrast))')
+  })
+
+  test('ToggleEditor resolves unselected, hover, focus, and selected text from its theme', () => {
+    const css = block('.toggle.editor')
+    const all = styles()
+
+    expect(all).not.toMatch(/:root\s*{[^}]*--basis-toggle-/)
+    expect(css).toContain('background-color: var(--basis-toggle-background, var(--basis-color-surface))')
+    expect(css).toContain('color: var(--basis-toggle-foreground, var(--basis-color-foreground))')
+    expect(css).toContain('var(--basis-toggle-background-hover, var(--basis-color-hover))')
+    expect(css).toContain('outline: 2px solid var(--basis-color-focus)')
+    expect(css).toContain('var(--basis-toggle-background-on, var(--basis-color-primary))')
+  })
+
+  test('Menu items use the theme hover and selection states', () => {
+    const css = block('.menu-item.component')
+
+    expect(css).toContain('background-color: var(--basis-color-hover)')
+    expect(css).toContain('background-color: var(--basis-color-selection)')
+    expect(css).toContain('outline: 1px solid var(--basis-color-focus)')
+  })
+
+  test('Documentation chrome follows the active theme instead of hardcoded light colours', () => {
+    const css = block('> nav.links')
+    const all = styles()
+
+    expect(css).toContain('background: var(--basis-color-surface-muted)')
+    expect(css).toContain('border-right: 1px solid var(--basis-color-border-subtle)')
+    expect(css).toContain('color: var(--basis-color-foreground)')
+    expect(all).toContain("input:not(.value):not([type='checkbox'])")
+    expect(css).not.toContain('#eee')
+  })
+
+  test('Tooltip and notification surfaces use the elevated theme token', () => {
+    const tooltip = block('.tooltip.component')
+    const notification = block('.notification.component')
+
+    expect(tooltip).toContain('var(--tooltip-color-background, var(--basis-color-surface-elevated))')
+    expect(notification).toContain('background-color: var(--basis-color-surface-elevated)')
   })
 
   test('PrefixSuffix inherits the theme inset surface and muted text', () => {
