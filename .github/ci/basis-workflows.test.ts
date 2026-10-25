@@ -92,11 +92,12 @@ describe('Basis Code CI', () => {
     expect(code.on?.pull_request?.types).not.toContain('closed')
   })
 
-  test('runs every code job without edit or draft skip paths', () => {
-    for (const id of ['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install']) {
+  test('skips every code job on drafts and has no edit skip path', () => {
+    for (const id of ['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install', 'required']) {
       const job = code.jobs?.[id]
       expect(job).toBeDefined()
-      expect(job?.if).toBeUndefined()
+      expect(job?.if).toContain('!github.event.pull_request.draft')
+      expect(job?.if).not.toContain('github.event.action')
     }
     expect(code.jobs?.['check-pr-title']).toBeUndefined()
   })
@@ -125,7 +126,8 @@ describe('Basis Code CI', () => {
     expect(code.permissions).toEqual({ contents: 'read' })
     const required = code.jobs?.required
     expect(required?.name).toBe('required')
-    expect(required?.if).toBe('always()')
+    expect(required?.if).toContain('always()')
+    expect(required?.if).toContain('!github.event.pull_request.draft')
     expect(required?.needs).toEqual(['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install'])
 
     const script = gateScript(code)
