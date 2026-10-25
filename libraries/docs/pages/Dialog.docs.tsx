@@ -142,7 +142,7 @@ export class DialogDocs extends DocumentationPage<State> {
         {
           action: async () => {
             await new Promise<void>(resolve => window.setTimeout(resolve, 800))
-            void this.setState({ current: { ...this.current, lastChoice: 'saved without closing' } })
+            void this.setState({ current: { ...this.current, lastChoice: 'saved while staying open' } })
           },
           label: 'Save',
         },
@@ -163,12 +163,12 @@ export class DialogDocs extends DocumentationPage<State> {
       <>
         <h1>Dialog</h1>
         <section>
-          <p><code>Dialog</code> wraps the native <code>&lt;dialog&gt;</code> element. Static helpers <code>Dialog.open</code>, <code>Dialog.choice</code>, <code>Dialog.confirm</code>, and <code>Dialog.editor</code> register a row on the application <Router.Link to="/components/overlay-provider">OverlayProvider</Router.Link>, so they are safe to call from deep in the tree without threading props.</p>
+          <p><code>Dialog</code> wraps the native <code>&lt;dialog&gt;</code> element. Static helpers <code>Dialog.open</code>, <code>Dialog.choice</code>, <code>Dialog.confirm</code>, and <code>Dialog.editor</code> register a row on the application <Router.Link to="/components/overlay-provider">OverlayProvider</Router.Link>, so they are safe to call from deep in the tree while the provider supplies the host.</p>
           <p>Dialogs and <Router.Link to="/components/notification">Notification</Router.Link> share one provider-owned lifecycle: a stable id, mutable options, exactly one terminal transition, callback dispatch, and cleanup. The renderers stay type-specific: dialogs use native modal stacking and focus; notifications use independent live regions.</p>
         </section>
         <section>
           <h2>Managed handles</h2>
-          <p>Every helper returns the same awaitable handle shape. The handle is the actual Promise result, extended with methods — no <code>.result</code> wrapper and no derived <code>.then()</code> adaptation.</p>
+          <p>Every helper returns the same awaitable handle shape. The handle is the actual Promise result extended with methods, so <code>await</code> and <code>.then()</code> compose with <code>id</code>, <code>update</code>, <code>dismiss</code>, and <code>resolve</code> on one object.</p>
           {Code.format(`
             interface DialogHandle<T> extends Promise<T | false> {
               readonly id: string
@@ -178,7 +178,7 @@ export class DialogDocs extends DocumentationPage<State> {
             }
           `)}
           <ul>
-            <li><code>update</code> patches only supplied fields on the same mounted dialog. Omitted fields are retained; updates after settlement are no-ops.</li>
+            <li><code>update</code> patches only supplied fields on the same mounted dialog, retaining omitted fields. Updates target the mounted row, which is gone once the dialog settles.</li>
             <li><code>resolve(value)</code> completes with a result. <code>dismiss()</code> abandons. Each returns <code>true</code> only when that request effected a terminal transition; veto, busy, non-topmost, and already-settled requests return <code>false</code>.</li>
             <li><code>id</code> stays stable across updates and is used for React reconciliation.</li>
           </ul>
@@ -204,8 +204,8 @@ export class DialogDocs extends DocumentationPage<State> {
           <h2><code>Dialog.open</code></h2>
           <p>Pass an options object for the historical behavior, or raw JSX/content for a handle-only overlay.</p>
           <ul>
-            <li><strong>Options object</strong> — with no <code>buttons</code> (or an empty array) renders <strong>Cancel</strong> and <strong>OK</strong>. Cancel and Escape abandon; OK resolves <code>true</code>. Custom buttons can use <code>{'{'} label, value {'}'}</code>, <code>{'{'} label, resolve {'}'}</code>, JSX <code>data-value</code>, or a persistent <code>{'{'} label, action {'}'}</code>.</li>
-            <li><strong>JSX/content shorthand</strong> — <code>Dialog.open(&lt;span&gt;Loading&lt;/span&gt;)</code> has no implicit footer. Close it through its handle or through native dismissal. This is the natural target for a loading-to-loaded update.</li>
+            <li><strong>Options object</strong> — when <code>buttons</code> is omitted (or empty) it renders <strong>Cancel</strong> and <strong>OK</strong>. Cancel and Escape abandon; OK resolves <code>true</code>. Custom buttons can use <code>{'{'} label, value {'}'}</code>, <code>{'{'} label, resolve {'}'}</code>, JSX <code>data-value</code>, or a persistent <code>{'{'} label, action {'}'}</code>.</li>
+            <li><strong>JSX/content shorthand</strong> — <code>Dialog.open(&lt;span&gt;Loading&lt;/span&gt;)</code> renders the content alone; close it through its handle or through native dismissal. This is the natural target for a loading-to-loaded update.</li>
           </ul>
           <p>An object button whose static <code>value</code> is <code>false</code> represents Cancel/dismissal. An explicitly programmed <code>resolve: () =&gt; false</code> is a real negative resolution, so lifecycle events distinguish it even though the public result is <code>false</code> in both cases.</p>
           {Code.format(`
@@ -254,9 +254,9 @@ export class DialogDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2><code>Dialog.editor</code></h2>
-          <p>An editor dialog fixes its component class for the life of the handle. <code>T</code> is inferred only from the supplied <code>Editor&lt;T&gt;</code> constructor — including indirect subclasses — using <code>InstanceType&lt;C&gt;['current']</code>. The second argument is a shallow <code>Partial&lt;T&gt;</code> and is checked against the already-established <code>T</code>; it never participates in inference. The awaited result is the full <code>T | false</code>.</p>
-          <p>The partial value is completed and validated only by the editor's explicit <code>static initialize(initialValue: Partial&lt;T&gt;): T</code> contract before the handle is created. The base <code>Editor.initialize</code> throws: Basis never invents missing fields and never resolves an incomplete object as if it were a full <code>T</code>. Every editor used with <code>Dialog.editor</code> must implement <code>initialize</code>: editors with optional-only values can validate and return the value, while editors with required fields supply domain defaults or throw to reject incomplete input. This keeps the baseline, dirty comparison, and resolved value honest.</p>
-          <p>The editor handle narrows <code>update</code>: it cannot replace content or swap the editor constructor. Pass a partial typed <code>props</code> patch instead. A value-free update preserves the current draft, baseline, focus, and editor identity; an explicit <code>props.value</code> deliberately replaces the working value and flows through dirty checks and resolution.</p>
+          <p>An editor dialog fixes its component class for the life of the handle. <code>T</code> comes from the supplied <code>Editor&lt;T&gt;</code> constructor — including indirect subclasses — using <code>InstanceType&lt;C&gt;['current']</code>. The second argument is a shallow <code>Partial&lt;T&gt;</code> checked against that constructor-established type, and the awaited result is the full <code>T | false</code>.</p>
+          <p>The editor's explicit <code>static initialize(initialValue: Partial&lt;T&gt;): T</code> contract completes and validates the value before the handle is created. Editors with optional-only values validate and return the value; editors with required fields supply domain defaults or throw for incomplete input. The base <code>Editor.initialize</code> rejects the value. The resolved value is always the full <code>T</code>, and the baseline, dirty comparison, and resolved value stay coherent.</p>
+          <p>The editor handle narrows <code>update</code> to shell options and partial typed <code>props</code> patches. A value-free update preserves the current draft, baseline, focus, and editor identity; an explicit <code>props.value</code> deliberately replaces the working value and flows through dirty checks and resolution.</p>
           <p>Dirty-state protection is built in. An unchanged editor dismisses immediately. A dirty editor asks with Basis-owned <strong>Keep editing</strong> and <strong>Discard</strong> actions through the same modal stack; vetoing keeps the draft and focus. A consumer <code>onDismissing</code> is an additional guard that runs only after that built-in decision. Affirmative completion runs <code>onResolving(latestValue)</code> and bypasses the abandonment guard.</p>
           {Code.format(`
             import { Dialog, Editor } from 'basis/react'
@@ -289,11 +289,11 @@ export class DialogDocs extends DocumentationPage<State> {
 
             const edited = await dialog // Card | false
           `)}
-          <p>An editor dialog returns values; it never persists on its own. Use a non-resolving <code>Save</code> action where repeated persistence is required.</p>
+          <p>An editor dialog returns values; persistence stays with the application. Use a non-resolving <code>Save</code> action where repeated persistence is required.</p>
         </section>
         <section>
           <h2>Lifecycle callbacks</h2>
-          <p>Callbacks use one shared contract, with no dismissal-reason enum or source-specific variants. Pre-terminal hooks can veto with <code>false</code>; async hooks are awaited before closing. A rejection or throw vetoes, keeps the overlay active, reports through <code>onError</code>, and rejects an imperative operation.</p>
+          <p>Callbacks use one shared contract across both overlay kinds, distinguishing abandonment from resolution. Pre-terminal hooks can veto with <code>false</code>; async hooks are awaited before closing. A rejection or throw vetoes, keeps the overlay active, reports through <code>onError</code>, and rejects an imperative operation.</p>
           {Code.format(`
             const dialog = Dialog.open({
               content: 'Delete this item?',
@@ -308,12 +308,12 @@ export class DialogDocs extends DocumentationPage<State> {
           <ul>
             <li><code>onDismissing</code> / <code>onDismissed</code> cover Cancel/Close, Escape, native cancel, backdrop, and imperative <code>dismiss()</code>.</li>
             <li><code>onResolving(value)</code> / <code>onResolved(value)</code> cover affirmative footer choices and imperative <code>resolve(value)</code>.</li>
-            <li>After-hooks run once before the public Promise settles. Their errors are reported without changing the outcome.</li>
+            <li>After-hooks run once before the public Promise settles; their errors are reported while the settled outcome stands.</li>
           </ul>
         </section>
         <section>
           <h2>Persistent actions</h2>
-          <p>The non-resolving <code>{'{'} label, intent?, action {'}'}</code> form runs and keeps the same dialog mounted. It never invokes <code>onResolving</code> or settles the Promise, and it is never an implicit Enter target. An async action is at most once concurrently; while it runs, repeated activation, Enter, Escape, Cancel, and programmatic terminal requests are blocked. Failure keeps the dialog open, reports through <code>onError</code>, and remains retryable.</p>
+          <p>The non-resolving <code>{'{'} label, intent?, action {'}'}</code> form runs and keeps the same dialog mounted. Resolution stays with the dialog's resolving controls, and Enter targets those controls. An async action runs at most once concurrently; while it runs, repeated activation, Enter, Escape, Cancel, and programmatic terminal requests are blocked. Failure keeps the dialog open, reports through <code>onError</code>, and remains retryable.</p>
           {Code.format(`
             const dialog = Dialog.open({
               buttons: [
@@ -332,7 +332,7 @@ export class DialogDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Stacking and focus</h2>
-          <p>Nested dialogs mount as a real stack of native dialogs. A parent guard can await a nested <code>Dialog.confirm</code> without deadlocking; only the top dialog receives keyboard and backdrop interactions. Closing a child preserves the mounted parent and its unsaved state and restores focus to the prior element inside that parent. Closing the root restores the original trigger when it still exists. Updating a background dialog never steals focus.</p>
+          <p>Nested dialogs mount as a real stack of native dialogs. A parent guard can await a nested <code>Dialog.confirm</code> while its own transition is pending; the top dialog receives keyboard and backdrop interactions. Closing a child preserves the mounted parent and its unsaved state and restores focus to the prior element inside that parent. Closing the root restores the original trigger when it still exists. Updating a background dialog preserves the current focus.</p>
           {Code.format(`
             const dialog = Dialog.open({
               buttons: [{ label: 'Close', value: false }],
@@ -347,14 +347,14 @@ export class DialogDocs extends DocumentationPage<State> {
               },
             })
           `)}
-          <p>Provider teardown is a forced cleanup, not a user dismissal: it does not await guards, settles every stacked dialog as <code>false</code>, runs <code>onDismissed</code> at most once per row, and never leaves an unresolved Promise.</p>
+          <p>Provider teardown is a forced cleanup: it settles every stacked dialog as <code>false</code>, runs <code>onDismissed</code> at most once per row, releases guards immediately, and settles every public Promise.</p>
         </section>
         <section>
           <h2>Intent and header chrome</h2>
           <p>Optional <code>intent</code> on <code>DialogOptions</code> drives border and header styling on the dialog shell. <code>Dialog.Intent</code> is the same enum as <code>Notification.Intent</code> and the package export <code>Intent</code>. Shell <code>className</code> and <code>style</code> are documented options; Basis always owns header, body, and footer chrome.</p>
           <ul>
-            <li><strong>Default</strong>: neutral shell; header shows when you pass a <code>title</code> (or when another intent would show chrome without a title).</li>
-            <li><strong>Primary</strong>: primary border and header band; no icon.</li>
+            <li><strong>Default</strong>: neutral shell; the header appears when you pass a <code>title</code> or when the intent supplies chrome.</li>
+            <li><strong>Primary</strong>: primary border and header band; the header uses text only.</li>
             <li><strong>Danger</strong>: danger border and header band; warning icon in the header.</li>
             <li><strong>Success</strong>: success border and header band; SquareCheck (checkbox) icon in the header.</li>
           </ul>
@@ -363,7 +363,7 @@ export class DialogDocs extends DocumentationPage<State> {
           <h2>Keyboard</h2>
           <ul>
             <li><strong>Escape</strong> — the top dialog receives native <code>keydown</code> (including focus on a footer button) or <code>cancel</code>, and routes one guarded dismissal.</li>
-            <li><strong>Enter</strong> — an unhandled Enter activates the default action when the dialog has exactly one non-cancel, non-action button, or exactly one primary/affirmative choice. Multiline editors and editors that handle Enter keep their normal behavior. Persistent actions are never Enter targets.</li>
+            <li><strong>Enter</strong> — an unhandled Enter activates the default action when the dialog has exactly one non-cancel, non-action button, or exactly one primary/affirmative choice. Multiline editors and editors that handle Enter keep their normal behavior. Enter targets the dialog's default resolving action; persistent actions participate through their own button.</li>
             <li><strong>Backdrop</strong> — a real outside click is distinguished from clicks inside the dialog content by hit-testing the native dialog bounds.</li>
           </ul>
         </section>

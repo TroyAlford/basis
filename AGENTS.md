@@ -19,11 +19,11 @@ Guidance for humans and coding agents working in this repository.
 
 ## Overlays
 
-- **One provider lifecycle.** `OverlayProvider` owns registration, stable ids, updates, terminal transitions, callback dispatch, timers, and cleanup for both `Dialog` and `Notification`. Do not add a second manager, a global event bus, or a separate dismissal engine.
-- **One terminal outcome.** Resolve and dismiss are mutually exclusive and exactly-once. Pre-terminal guards may veto or throw; after-hooks never change the settled result. Provider teardown forces dismissal without waiting for guards and never leaves an unresolved Promise.
-- **Stable identity.** Updating an overlay patches the same mounted row. It must not close, remount, or change identity solely because options changed; editor dialogs keep their mounted instance and unsaved draft.
-- **Editor inference and initialization.** `Dialog.editor` infers its value type only from the concrete `Editor<T>` constructor and accepts a shallow `Partial<T>` initial value. Every editor used with `Dialog.editor` must implement the explicit `Editor.initialize` contract; the base implementation rejects the value. Never invent missing fields or cast a partial value into a full one. Editor handles reject content/constructor/baseline updates at both the type and runtime boundaries.
-- **Real modal stack.** Dialogs mount as a stack of native `<dialog>` elements. Only the top dialog receives keyboard, backdrop, and programmatic terminal interactions. Dismissal guards may open nested dialogs without deadlock.
+- **One provider lifecycle.** `OverlayProvider` is the single manager for `Dialog` and `Notification`: registration, stable ids, updates, terminal transitions, callback dispatch, timers, and cleanup.
+- **One terminal outcome.** Resolve and dismiss are mutually exclusive and exactly-once. Pre-terminal guards may veto or throw; after-hooks report errors while the settled result stands. Provider teardown forces dismissal, settles every row, and resolves every public Promise.
+- **Stable identity.** Updating an overlay patches the same mounted row, preserving its identity; editor dialogs keep their mounted instance and unsaved draft.
+- **Editor inference and initialization.** `Dialog.editor` derives its value type from the concrete `Editor<T>` constructor and accepts a shallow `Partial<T>` initial value. Every editor used with `Dialog.editor` implements the explicit `Editor.initialize` contract; the base implementation rejects the value. The editor supplies defaults or rejects incomplete input, and the resolved value is always the full `T`. Editor handles accept shell options and typed props patches while preserving the mounted editor.
+- **Real modal stack.** Dialogs mount as a stack of native `<dialog>` elements. The top dialog receives keyboard, backdrop, and programmatic terminal interactions. Dismissal guards may open nested dialogs while the parent transition is pending.
 - **Both surfaces ship together.** Any public overlay API change updates its tests (behavior, type contracts, and real-browser coverage where native behavior is involved) and the matching `libraries/docs/pages/*.docs.tsx` page.
 
 ## Commits

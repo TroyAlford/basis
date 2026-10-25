@@ -20,7 +20,7 @@ export class NotificationDocs extends DocumentationPage<State> {
 
   showPrimary = () => {
     const handle = Notification.create({
-      content: 'Primary intent uses the brand colors on the notification shell; there is no icon.',
+      content: 'Primary intent uses the brand colors on the notification shell with a text-only header.',
       intent: Notification.Intent.Primary,
       timeout: 5_000,
       title: 'Saved',
@@ -87,8 +87,8 @@ export class NotificationDocs extends DocumentationPage<State> {
         <h1>Notification</h1>
         <section>
           <p><code>Notification.create</code> registers a dismissible row on the <Router.Link to="/components/overlay-provider">OverlayProvider</Router.Link>. The returned handle exposes <code>id</code>, <code>update</code>, and an async <code>dismiss</code> so you can refresh copy or remove the note programmatically.</p>
-          <p>Notifications and <Router.Link to="/components/dialog">Dialog</Router.Link> share one provider-owned registration, update, terminal-transition, callback, and cleanup lifecycle. Notifications remain nonmodal: they never take dialog focus, never stack, and have no result or resolution semantics.</p>
-          <p>Import <code>type {'{'} INotification {'}'}</code> or <code>type {'{'} NotificationHandle {'}'}</code> from the same module as <code>Notification</code> for typing partial payloads and handles; they are not re-exported from <code>@basis/react</code>.</p>
+          <p>Notifications and <Router.Link to="/components/dialog">Dialog</Router.Link> share one provider-owned registration, update, terminal-transition, callback, and cleanup lifecycle. Notifications remain nonmodal: they render independently of the dialog stack, preserve their creation order, and expose id, update, and async dismiss through their handle.</p>
+          <p>Import <code>type {'{'} INotification {'}'}</code> or <code>type {'{'} NotificationHandle {'}'}</code> from the same module as <code>Notification</code> for typing partial payloads and handles; the package entrypoint exposes the component, while these supporting types live alongside it.</p>
         </section>
         <section>
           <h2>Handle</h2>
@@ -100,9 +100,9 @@ export class NotificationDocs extends DocumentationPage<State> {
             }
           `)}
           <ul>
-            <li><code>update</code> patches only supplied fields on the same mounted row. Updates after dismissal are no-ops.</li>
+            <li><code>update</code> patches only supplied fields on the same mounted row. Updates target the mounted row, which is gone once the notification dismisses.</li>
             <li><code>dismiss()</code> runs the same shared dismissal guard as the close control and timer expiry. It resolves <code>true</code> when dismissal was accepted, <code>false</code> when vetoed, and rejects if a guard throws.</li>
-            <li>Notifications are not awaitable and have no <code>resolve</code> concept.</li>
+            <li>Notifications provide a dismissal lifecycle: their handle exposes <code>id</code>, <code>update</code>, and async <code>dismiss</code>, with results reported through the dismissal hooks.</li>
           </ul>
         </section>
         <section>
@@ -110,7 +110,7 @@ export class NotificationDocs extends DocumentationPage<State> {
           <p>Optional <code>intent</code> on <code>INotification</code> tints the shell and selects a header icon where applicable. Omitting <code>intent</code> defaults to <code>Default</code>; omitting <code>icon</code> lets the notification choose the icon from the intent. Values mirror <code>Dialog</code>:</p>
           <ul>
             <li><strong>Default</strong>: neutral shell and header.</li>
-            <li><strong>Primary</strong>: primary colors; no icon.</li>
+            <li><strong>Primary</strong>: primary colors; the header uses text only.</li>
             <li><strong>Danger</strong>: danger colors; warning icon in the header.</li>
             <li><strong>Success</strong>: success colors; SquareCheck (checkbox) icon in the header.</li>
           </ul>
@@ -119,9 +119,9 @@ export class NotificationDocs extends DocumentationPage<State> {
           <h2>Timeout and persistence</h2>
           <p><code>timeout</code> is milliseconds until auto-dismiss, or <code>null</code> to keep the row until dismissed. Omitting <code>timeout</code> defaults to <code>null</code> via the overlay host.</p>
           <ul>
-            <li>Updating <code>title</code>, <code>content</code>, <code>intent</code>, or <code>icon</code> does not reset the timer.</li>
-            <li>Explicitly updating <code>timeout</code> cancels and rearms the timer from the time of the update; <code>null</code> disables it.</li>
-            <li>A vetoed timeout is consumed once. It does not retry until a new <code>timeout</code> value is supplied.</li>
+            <li>Updating <code>title</code>, <code>content</code>, <code>intent</code>, or <code>icon</code> keeps the timer's original deadline.</li>
+            <li>Explicitly updating <code>timeout</code> cancels and rearms the timer from the time of the update; <code>null</code> clears the timer and keeps the row visible until dismissed.</li>
+            <li>A vetoed timeout is consumed when it fires; supplying a new <code>timeout</code> value arms a fresh timer.</li>
             <li>Timer expiry, the close control, and <code>dismiss()</code> all route through the same argument-free <code>onDismissing</code> / <code>onDismissed</code> lifecycle.</li>
           </ul>
         </section>
@@ -148,7 +148,7 @@ export class NotificationDocs extends DocumentationPage<State> {
               content: 'Preparing files…',
               intent: Notification.Intent.Primary,
               timeout: null,
-              onDismissing: () => canClose(), // false vetoes; no reason argument
+              onDismissing: () => canClose(), // false vetoes an argument-free hook
               onDismissed: () => console.log('closed'),
             })
 
