@@ -109,7 +109,7 @@ describe('OverlayProvider', () => {
 
       const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog.dialog.component'))
       expect(dialog).toBeInstanceOf(HTMLDialogElement)
-      expect(dialog.textContent).toContain('Dialog title')
+      expect(dialog.querySelector('header')?.textContent).toContain('Dialog title')
       expect(dialog.textContent).toContain('Dialog content')
 
       const ok = await waitFor(() => Array.from(node.querySelectorAll('button'))
@@ -117,6 +117,29 @@ describe('OverlayProvider', () => {
       ok.click()
 
       expect(await result).toBe(true)
+
+      unmount()
+    })
+
+    test('omits the header when no title, icon, or intent chrome is supplied', async () => {
+      const { node, unmount } = await renderOverlayProvider()
+      void Dialog.confirm({ content: 'Header-free confirmation' })
+
+      const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog.dialog.component'))
+      expect(dialog.querySelector('header')).toBeNull()
+
+      unmount()
+    })
+
+    test('renders the intent header when no title is supplied', async () => {
+      const { node, unmount } = await renderOverlayProvider()
+      Dialog.open({
+        content: 'Danger content',
+        intent: Dialog.Intent.Danger,
+      })
+
+      const dialog = await waitFor(() => node.querySelector<HTMLDialogElement>('dialog.dialog.component'))
+      expect(dialog.querySelector('header svg.icon')).toBeTruthy()
 
       unmount()
     })

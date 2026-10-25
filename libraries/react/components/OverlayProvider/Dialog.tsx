@@ -671,15 +671,29 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
     return <IntentIcon intent={intent} />
   }
 
+  /**
+   * Whether this dialog has header content to render.
+   * @returns True when a title, explicit icon, or intent glyph supplies the header.
+   */
+  #hasHeader(): boolean {
+    const { icon, title } = this.props
+    const intent = this.props.intent ?? Dialog.Intent.Default
+    const hasTitle = title !== null && title !== undefined && title !== false && title !== ''
+
+    return Boolean(icon) || hasTitle || intent === Dialog.Intent.Danger || intent === Dialog.Intent.Success
+  }
+
   content(): ReactNode {
     const { buttons, content, title } = this.props
 
     return (
       <>
-        <header>
-          {this.icon}
-          {title}
-        </header>
+        {this.#hasHeader() && (
+          <header>
+            {this.icon}
+            {title}
+          </header>
+        )}
         <section>
           {content}
         </section>

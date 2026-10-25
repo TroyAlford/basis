@@ -352,9 +352,10 @@ export class DialogDocs extends DocumentationPage<State> {
         <section>
           <h2>Intent and header chrome</h2>
           <p>Optional <code>intent</code> on <code>DialogOptions</code> drives border and header styling on the dialog shell. <code>Dialog.Intent</code> is the same enum as <code>Notification.Intent</code> and the package export <code>Intent</code>. Shell <code>className</code> and <code>style</code> are documented options; Basis always owns header, body, and footer chrome.</p>
+          <p>The header renders when a title, explicit icon, or intent glyph supplies content.</p>
           <ul>
-            <li><strong>Default</strong>: neutral shell; the header appears when you pass a <code>title</code> or when the intent supplies chrome.</li>
-            <li><strong>Primary</strong>: primary border and header band; the header uses text only.</li>
+            <li><strong>Default</strong>: neutral shell; the header appears with a <code>title</code> or intent chrome.</li>
+            <li><strong>Primary</strong>: primary border; the header band uses text when a title is supplied.</li>
             <li><strong>Danger</strong>: danger border and header band; warning icon in the header.</li>
             <li><strong>Success</strong>: success border and header band; SquareCheck (checkbox) icon in the header.</li>
           </ul>
