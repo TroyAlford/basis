@@ -348,7 +348,8 @@ describe('testing/docs', () => {
       await page.addStyleTag({
         content: [
           ':root [data-theme="verify"] {',
-          '  --basis-color-background: #000000;',
+          '  --basis-color-border: #444444;',
+          '  --basis-color-surface-elevated: #000000;',
           '  --basis-color-foreground: #ffffff;',
           '}',
         ].join(' '),
