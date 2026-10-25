@@ -1,0 +1,46 @@
+name: PR Metadata
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  # One group per workflow and pull request. This is distinct from Code CI's
+  # group, so a title or description edit never cancels code validation.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/enforce-convco
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # PR Metadata's only required status context. It judges the title job that
+  # ran in this same workflow run; it never reads check runs from another run.
+  required:
+    name: metadata
+    if: always()
+    needs: [check-pr-title]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the title check to succeed in this run
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          result=$(jq -r '.["check-pr-title"].result // "missing"' <<<"$NEEDS")
+          if [[ "$result" != "success" ]]; then
+            echo "::error::The PR title check did not succeed in this run (${result})."
+            exit 1
+          fi
+          echo "The PR title check succeeded in this run."

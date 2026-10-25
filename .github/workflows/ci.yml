@@ -1,36 +1,23 @@
-name: CI
+name: Code CI
 
 on:
   pull_request:
-    types: [opened, synchronize, edited]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
 
 permissions:
-  checks: read
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
 
 concurrency:
-  # `edited` runs must not cancel in-flight code runs (and vice versa), so the
-  # action is part of the group.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.action }}
+  # One group per workflow and pull request. A newer Code CI run supersedes an
+  # unfinished earlier Code CI run; PR Metadata is a separate workflow and
+  # never cancels code validation.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  check-pr-title:
-    # Check runs attach to a commit SHA, so a new commit needs its own title
-    # check; the code gates below are what a title/body edit reuses instead.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/enforce-convco
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
   eslint:
-    # A title/body edit never reruns the code gates.
-    if: github.event.action != 'edited'
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +34,7 @@ jobs:
         run: bun test consumer/cli.test.ts
 
   run-tests:
-    if: github.event.action != 'edited'
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,7 +62,7 @@ jobs:
           if-no-files-found: ignore
 
   type-check:
-    if: github.event.action != 'edited'
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +74,7 @@ jobs:
         run: bun run lint:ts
 
   consumer-install:
-    if: github.event.action != 'edited'
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +83,7 @@ jobs:
         run: bun run test:consumer
 
   knip:
-    if: github.event.action != 'edited'
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,85 +98,28 @@ jobs:
         with:
           fail-on-findings: 'false'
 
-  # The single required status context. Every event posts it, so a title-only
-  # edit cannot leave a stale red (or a stale green) behind: jobs that did not
-  # run in this pass are resolved from their most recent completed check run on
-  # the head SHA.
+  # Code CI's only required status context. It judges the five code jobs that
+  # ran in this same workflow run; it never reads check runs from another run.
   required:
-    if: always()
-    needs:
-      - check-pr-title
-      - eslint
-      - run-tests
-      - type-check
-      - knip
-      - consumer-install
+    name: required
+    if: ${{ always() && !github.event.pull_request.draft }}
+    needs: [eslint, run-tests, type-check, knip, consumer-install]
     runs-on: ubuntu-latest
     steps:
-      - name: Fail if any job in this run did not pass
+      - name: Require every code job to succeed in this run
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: |
-          failed=$(jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key' <<<"$NEEDS")
-          if [[ -n "$failed" ]]; then
-            echo "Required jobs did not pass: ${failed//$'\n'/, }"
-            exit 1
-          fi
-          echo "All jobs in this run passed or were intentionally skipped."
-
-      - name: Wait for and reuse completed results for jobs this event skipped
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEEDS: ${{ toJSON(needs) }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          RUN_ID: ${{ github.run_id }}
-          # A title/body edit can land while a code run for the same commit is
-          # still in flight. Wait for it instead of failing on an empty result
-          # set; a genuinely absent pass still fails once the wait elapses.
-          REUSE_TIMEOUT_SECONDS: '2400'
-          REUSE_POLL_SECONDS: '15'
         run: |
           set -euo pipefail
-
-          # Latest conclusion of `job` from completed, non-skipped check runs on
-          # the head SHA that do not belong to this run. A skipped result is
-          # itself an edited run's placeholder, so it can never stand in for a
-          # code run: reusing it would let an edit report green while the
-          # committed code's CI never passed.
-          latest_conclusion() {
-            gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
-              --jq "[.check_runs[]
-                | select(.name == \"$1\")
-                | select((((.details_url // \"\") | contains(\"/runs/${RUN_ID}/\")) | not))
-                | select(.status == \"completed\")
-                | select(.conclusion != \"skipped\")]
-                | sort_by(.completed_at) | last | .conclusion // \"missing\""
-          }
-
-          # Number of check runs for `job` on the head SHA still in flight.
-          pending_count() {
-            gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
-              --jq "[.check_runs[]
-                | select(.name == \"$1\")
-                | select((((.details_url // \"\") | contains(\"/runs/${RUN_ID}/\")) | not))
-                | select(.status != \"completed\")] | length"
-          }
-
-          deadline=$(( SECONDS + REUSE_TIMEOUT_SECONDS ))
-          skipped=$(jq -r 'to_entries[] | select(.value.result == "skipped") | .key' <<<"$NEEDS")
-          for job in $skipped; do
-            while [[ "$(pending_count "$job")" -gt 0 ]]; do
-              if (( SECONDS >= deadline )); then
-                echo "${job}: still in flight after ${REUSE_TIMEOUT_SECONDS}s; no result to reuse"
-                exit 1
-              fi
-              echo "${job}: waiting for an in-flight run to finish"
-              sleep "$REUSE_POLL_SECONDS"
-            done
-            conclusion=$(latest_conclusion "$job")
-            case "$conclusion" in
-              success|skipped|neutral) echo "${job}: reusing ${conclusion}" ;;
-              *) echo "${job}: no current pass (${conclusion})"; exit 1 ;;
-            esac
+          failed=''
+          for job in eslint run-tests type-check knip consumer-install; do
+            result=$(jq -r --arg job "$job" '.[$job].result // "missing"' <<<"$NEEDS")
+            if [[ "$result" != "success" ]]; then
+              failed+="${job} (${result}) "
+            fi
           done
+          if [[ -n "$failed" ]]; then
+            echo "::error::Required code jobs did not pass in this run: ${failed}"
+            exit 1
+          fi
+          echo "All required code jobs succeeded in this run."
