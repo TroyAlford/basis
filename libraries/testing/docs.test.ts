@@ -110,6 +110,7 @@ describe('testing/docs', () => {
       ))
       expect(await checkbox.isChecked()).toBe(true)
 
+      await checkbox.focus()
       await page.keyboard.press('Space')
       await page.waitForFunction(() => (
         document.querySelector('[data-table-selection-example] strong')?.textContent === '0 selected'

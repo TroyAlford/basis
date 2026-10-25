@@ -200,17 +200,20 @@ describe('Table selection', () => {
   })
 
   test('selection updates do not rerender unrelated cell content', async () => {
-    let expensiveRenders = 0
-    const ExpensiveCell = ({ value }: { value: unknown }): React.ReactElement => {
-      expensiveRenders += 1
+    const renders = new Map<number, number>()
+    const ExpensiveCell = ({ row, value }: { row: Person, value: unknown }): React.ReactElement => {
+      renders.set(row.id, (renders.get(row.id) ?? 0) + 1)
       return <span>{String(value)}</span>
     }
 
-    const table = (selected: Set<TableKey>): React.ReactElement => (
+    const table = (
+      selected: Set<TableKey>,
+      onChange: (keys: Set<TableKey>) => void = () => undefined,
+    ): React.ReactElement => (
       <Table
         value={PEOPLE}
         selection={{
-          onChange: () => undefined,
+          onChange,
           pageKeys: PEOPLE.map(row => row.id),
           selectedKeys: selected,
         }}
@@ -221,26 +224,16 @@ describe('Table selection', () => {
     )
 
     const rendered = await render(table(new Set()))
-    expensiveRenders = 0
+    renders.clear()
 
-    const onChange = mock()
-    const next = new Set<TableKey>([1])
-    await rendered.update(
-      <Table
-        value={PEOPLE}
-        selection={{
-          onChange,
-          pageKeys: PEOPLE.map(row => row.id),
-          selectedKeys: next,
-        }}
-      >
-        {Column.Text({ field: 'name', title: 'Name' })}
-        {Column.Text({ component: ExpensiveCell, field: 'notes', title: 'Notes' })}
-      </Table>,
-    )
-
-    expect(expensiveRenders).toBe(0)
+    // Select one row, then several rows: no unrelated row cell re-renders.
+    await rendered.update(table(new Set<TableKey>([1])))
+    expect(renders.size).toBe(0)
     expect(rowCheckboxes(rendered.node)[0].checked).toBe(true)
+
+    await rendered.update(table(new Set<TableKey>([1, 2, 3])))
+    expect(renders.size).toBe(0)
+    expect(rowCheckboxes(rendered.node).map(checkbox => checkbox.checked)).toEqual([true, true, true])
   })
 
   test('keeps the selection column pinned with the other pinned columns', async () => {

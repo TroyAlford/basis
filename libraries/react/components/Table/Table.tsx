@@ -30,18 +30,24 @@ interface State<T> {
 
 /**
  * Compare two column definitions without traversing ReactNode titles.
+ *
+ * `onKeyDown` is a Component-owned default rather than a column declaration;
+ * `Component.defaultProps` creates it fresh on every read, so it must not make
+ * an otherwise unchanged column look changed.
  * @param one - The next definition.
  * @param two - The previous definition.
  * @returns Whether every declared value is the same reference or primitive.
  */
-function shallowEqual(one: object, two: object): boolean {
-  const oneKeys = Object.keys(one)
-  const twoKeys = Object.keys(two)
-  if (oneKeys.length !== twoKeys.length) return false
+function columnEquals(one: object, two: object): boolean {
+  const keys = new Set([...Object.keys(one), ...Object.keys(two)])
 
-  return oneKeys.every(key => (
-    (one as Record<string, unknown>)[key] === (two as Record<string, unknown>)[key]
-  ))
+  for (const key of keys) {
+    if (key === 'onKeyDown') continue
+    if (!(key in one) || !(key in two)) return false
+    if ((one as Record<string, unknown>)[key] !== (two as Record<string, unknown>)[key]) return false
+  }
+
+  return true
 }
 
 export class Table<T extends object = { id: string }>
@@ -160,13 +166,6 @@ export class Table<T extends object = { id: string }>
             ...defaultProps,
             ...childProps,
           } as ColumnProps<T, PathOf<T>>
-
-          /*
-           * Component.defaultProps creates a fresh noop on every read. Columns
-           * never use it, and retaining it would make every declaration look
-           * changed on a parent render.
-           */
-          delete (definition as { onKeyDown?: unknown }).onKeyDown
           const { field } = definition
 
           definitions.set(field, definition)
@@ -174,7 +173,7 @@ export class Table<T extends object = { id: string }>
           const current = states.get(field)
           const unchanged = current !== undefined
             && previous !== undefined
-            && shallowEqual(definition, previous)
+            && columnEquals(definition, previous)
 
           /*
            * Sorting is table state, so a rerender preserves it while the
