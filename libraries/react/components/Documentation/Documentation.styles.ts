@@ -16,15 +16,30 @@ style('basis:documentation', css`
       background: var(--basis-color-surface-muted);
       border-right: 1px solid var(--basis-color-border-subtle);
       color: var(--basis-color-foreground);
+      display: flex;
+      flex-direction: column;
       grid-area: nav;
-      overflow-y: auto;
+      overflow: hidden;
       width: 200px;
       > h1 {
-        background-color: var(--basis-color-foreground);
-        color: var(--basis-color-background);
+        align-items: center;
+        background-color: var(--basis-color-surface);
+        border-bottom: 1px solid var(--basis-color-border-subtle);
+        color: var(--basis-color-foreground);
+        display: flex;
+        flex: 0 0 auto;
         font-size: var(--basis-font-size-xxl);
+        gap: var(--basis-unit-sm);
         margin: 0;
         padding: var(--basis-unit-md);
+        > svg {
+          flex: 0 0 auto;
+        }
+      }
+      > .entries {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
       }
       li {
         > a {
