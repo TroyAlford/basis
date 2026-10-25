@@ -14,6 +14,15 @@ export function isDialogCancelButton(button: DialogButton<unknown>): boolean {
 }
 
 /**
+ * Whether a dialog button is a persistent action that never resolves the dialog.
+ * @param button - Footer button from {@link Dialog.open}.
+ * @returns True for the `{ action }` form.
+ */
+export function isDialogActionButton(button: DialogButton<unknown>): boolean {
+  return !isValidElement(button) && 'action' in button && typeof button.action === 'function'
+}
+
+/**
  * Whether a dialog button is styled as the primary/default action.
  * @param button - Footer button from {@link Dialog.open}.
  * @returns True for primary, success, or danger intent.
@@ -50,7 +59,7 @@ export function dialogCancelButtonIndex(buttons: DialogButton<unknown>[]): numbe
 export function dialogDefaultButtonIndex(buttons: DialogButton<unknown>[]): number | null {
   const nonCancel = buttons
     .map((button, index) => ({ button, index }))
-    .filter(({ button }) => !isDialogCancelButton(button))
+    .filter(({ button }) => !isDialogCancelButton(button) && !isDialogActionButton(button))
 
   if (nonCancel.length === 1) return nonCancel[0].index
 

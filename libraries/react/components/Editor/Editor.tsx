@@ -2,7 +2,7 @@ import type { PathOf, TypeAt } from '../../../utilities'
 import { clone, deepEquals, isNil, noop, set } from '../../../utilities'
 import { Component } from '../Component/Component'
 
-interface TProps<Value> {
+export interface EditorProps<Value> {
   /** Field identifier (number or string) */
   field?: string,
   /** Initial value for uncontrolled mode */
@@ -35,7 +35,7 @@ interface TState<Value> {
   current: Value,
 }
 
-type P<V, T> = TProps<V> & T
+type P<V, T> = EditorProps<V> & T
 type S<V, T> = TState<V> & T
 
 /**
@@ -47,10 +47,10 @@ type S<V, T> = TState<V> & T
 export abstract class Editor<
   Value,
   Element extends HTMLElement = HTMLElement,
-  Props = TProps<Value>,
+  Props = EditorProps<Value>,
   State = TState<Value>,
 > extends Component<P<Value, Props>, Element, S<Value, State>> {
-  static defaultProps: Partial<TProps<unknown> & Component['props']> = {
+  static defaultProps: Partial<EditorProps<unknown> & Component['props']> = {
     ...super.defaultProps,
     onChange: noop,
     readOnly: false,

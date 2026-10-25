@@ -7,8 +7,8 @@ interface State {
 }
 
 /**
- * Documentation for {@link Notification}: static {@link Notification.create}, handle API, and
- * {@link Notification.Intent}.
+ * Documentation for {@link Notification}: static {@link Notification.create}, handle API,
+ * shared dismissal lifecycle, timeout behavior, and {@link Notification.Intent}.
  */
 export class NotificationDocs extends DocumentationPage<State> {
   static override defaultProps = {
@@ -66,6 +66,19 @@ export class NotificationDocs extends DocumentationPage<State> {
     }, 1_200)
   }
 
+  showGuarded = () => {
+    const handle = Notification.create({
+      content: 'This row refuses one timer dismissal, then allows the next explicit timeout.',
+      onDismissed: () => {
+        void this.setState({ current: { ...this.current, lastHandle: `${handle.id} (dismissed)` } })
+      },
+      onDismissing: () => window.confirm('Dismiss this notification?'),
+      timeout: 5_000,
+      title: 'Guarded',
+    })
+    void this.setState({ current: { ...this.current, lastHandle: handle.id } })
+  }
+
   content() {
     const { lastHandle } = this.current
 
@@ -73,8 +86,24 @@ export class NotificationDocs extends DocumentationPage<State> {
       <>
         <h1>Notification</h1>
         <section>
-          <p><code>Notification.create</code> enqueues a dismissible row on the <Router.Link to="/components/overlay-provider">OverlayProvider</Router.Link>. The returned handle exposes <code>id</code>, <code>update</code>, and <code>dismiss</code> so you can refresh copy or remove the note programmatically.</p>
-          <p>Import <code>type {'{'} INotification {'}'}</code> from the same module as <code>Notification</code> for typing partial payloads; it is not re-exported from <code>@basis/react</code>.</p>
+          <p><code>Notification.create</code> registers a dismissible row on the <Router.Link to="/components/overlay-provider">OverlayProvider</Router.Link>. The returned handle exposes <code>id</code>, <code>update</code>, and an async <code>dismiss</code> so you can refresh copy or remove the note programmatically.</p>
+          <p>Notifications and <Router.Link to="/components/dialog">Dialog</Router.Link> share one provider-owned registration, update, terminal-transition, callback, and cleanup lifecycle. Notifications remain nonmodal: they never take dialog focus, never stack, and have no result or resolution semantics.</p>
+          <p>Import <code>type {'{'} INotification {'}'}</code> or <code>type {'{'} NotificationHandle {'}'}</code> from the same module as <code>Notification</code> for typing partial payloads and handles; they are not re-exported from <code>@basis/react</code>.</p>
+        </section>
+        <section>
+          <h2>Handle</h2>
+          {Code.format(`
+            interface NotificationHandle {
+              readonly id: string
+              update(update: Partial<INotification>): void
+              dismiss(): Promise<boolean>
+            }
+          `)}
+          <ul>
+            <li><code>update</code> patches only supplied fields on the same mounted row. Updates after dismissal are no-ops.</li>
+            <li><code>dismiss()</code> runs the same shared dismissal guard as the close control and timer expiry. It resolves <code>true</code> when dismissal was accepted, <code>false</code> when vetoed, and rejects if a guard throws.</li>
+            <li>Notifications are not awaitable and have no <code>resolve</code> concept.</li>
+          </ul>
         </section>
         <section>
           <h2>Intent</h2>
@@ -88,7 +117,13 @@ export class NotificationDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Timeout and persistence</h2>
-          <p><code>timeout</code> is milliseconds until auto-dismiss, or <code>null</code> to keep the row until <code>dismiss</code>. Omitting <code>timeout</code> defaults to <code>null</code> via the overlay host. Both <code>title</code> and <code>content</code> are optional.</p>
+          <p><code>timeout</code> is milliseconds until auto-dismiss, or <code>null</code> to keep the row until dismissed. Omitting <code>timeout</code> defaults to <code>null</code> via the overlay host.</p>
+          <ul>
+            <li>Updating <code>title</code>, <code>content</code>, <code>intent</code>, or <code>icon</code> does not reset the timer.</li>
+            <li>Explicitly updating <code>timeout</code> cancels and rearms the timer from the time of the update; <code>null</code> disables it.</li>
+            <li>A vetoed timeout is consumed once. It does not retry until a new <code>timeout</code> value is supplied.</li>
+            <li>Timer expiry, the close control, and <code>dismiss()</code> all route through the same argument-free <code>onDismissing</code> / <code>onDismissed</code> lifecycle.</li>
+          </ul>
         </section>
         <section>
           <h2>Interactive examples</h2>
@@ -96,7 +131,8 @@ export class NotificationDocs extends DocumentationPage<State> {
             <Button onActivate={this.showPrimary}>Primary</Button>{' '}
             <Button onActivate={this.showDanger}>Danger</Button>{' '}
             <Button onActivate={this.showSuccess}>Success</Button>{' '}
-            <Button onActivate={this.showLifecycleDemo}>Update after delay</Button>
+            <Button onActivate={this.showLifecycleDemo}>Update after delay</Button>{' '}
+            <Button onActivate={this.showGuarded}>Guarded dismissal</Button>
           </p>
           {lastHandle && (
             <p>Last created id: <code>{lastHandle}</code></p>
@@ -112,6 +148,8 @@ export class NotificationDocs extends DocumentationPage<State> {
               content: 'Preparing files…',
               intent: Notification.Intent.Primary,
               timeout: null,
+              onDismissing: () => canClose(), // false vetoes; no reason argument
+              onDismissed: () => console.log('closed'),
             })
 
             note.update({
@@ -121,13 +159,13 @@ export class NotificationDocs extends DocumentationPage<State> {
               timeout: 4000,
             })
 
-            note.dismiss()
+            const dismissed = await note.dismiss()
           `)}
         </section>
         <section>
           <h2>Related</h2>
           <ul>
-            <li><Router.Link to="/components/dialog">Dialog</Router.Link> — modal confirmations with the same <code>Intent</code> enum.</li>
+            <li><Router.Link to="/components/dialog">Dialog</Router.Link> — managed modal handles with the same <code>Intent</code> enum.</li>
             <li><Router.Link to="/components/overlay-provider">OverlayProvider</Router.Link> — host component and mounting notes.</li>
           </ul>
         </section>

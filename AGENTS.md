@@ -17,6 +17,14 @@ Guidance for humans and coding agents working in this repository.
 - **Subclass `Component`.** UI in this package must be implemented as a `class` that extends `libraries/react/components/Component/Component.tsx` (or another basis component), using `displayName`, `get tag()`, `get attributes()`, `get classNames()`, and `content()` as appropriate. Do **not** add new functional components or use React hooks for package UI; match existing components (for example `Button`, `ApplicationBase`).
 - **Styling.** Rely on `Component`’s automatic root class (`kebabCase(displayName)` plus `component`) and theme or layout CSS that targets those names. Do not introduce ad-hoc BEM-style blocks (`block__element--modifier`) on package components.
 
+## Overlays
+
+- **One provider lifecycle.** `OverlayProvider` owns registration, stable ids, updates, terminal transitions, callback dispatch, timers, and cleanup for both `Dialog` and `Notification`. Do not add a second manager, a global event bus, or a separate dismissal engine.
+- **One terminal outcome.** Resolve and dismiss are mutually exclusive and exactly-once. Pre-terminal guards may veto or throw; after-hooks never change the settled result. Provider teardown forces dismissal without waiting for guards and never leaves an unresolved Promise.
+- **Stable identity.** Updating an overlay patches the same mounted row. It must not close, remount, or change identity solely because options changed; editor dialogs keep their mounted instance and unsaved draft.
+- **Real modal stack.** Dialogs mount as a stack of native `<dialog>` elements. Only the top dialog receives keyboard, backdrop, and programmatic terminal interactions. Dismissal guards may open nested dialogs without deadlock.
+- **Both surfaces ship together.** Any public overlay API change updates its tests (behavior, type contracts, and real-browser coverage where native behavior is involved) and the matching `libraries/docs/pages/*.docs.tsx` page.
+
 ## Commits
 
 - **Do not skip repository checks** when committing (for example `--no-verify` or other flags that bypass Husky). Let lint, typecheck, and tests run; fix failures instead of silencing hooks.

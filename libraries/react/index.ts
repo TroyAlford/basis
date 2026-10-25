@@ -17,9 +17,20 @@ export { Menu } from './components/Menu/Menu'
 export { NumberEditor } from './components/NumberEditor/NumberEditor'
 export { OptionGroup } from './components/OptionGroup/OptionGroup'
 export { Dialog } from './components/OverlayProvider/Dialog'
-export type { DialogEditorOptions } from './components/OverlayProvider/Dialog'
+export type {
+  DialogButton,
+  DialogConfirmOptions,
+  DialogEditorHandle,
+  DialogEditorOptions,
+  DialogEditorUpdate,
+  DialogEditorUpdateProps,
+  DialogHandle,
+  DialogOptions,
+  IDialog,
+} from './components/OverlayProvider/Dialog'
 export { Intent as IntentKind } from './types/Intent'
 export { Notification } from './components/OverlayProvider/Notification'
+export type { INotification, NotificationHandle } from './components/OverlayProvider/Notification'
 export { OverlayProvider } from './components/OverlayProvider/OverlayProvider'
 export { Router } from './components/Router/Router'
 export { Section } from './components/Section/Section'

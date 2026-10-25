@@ -1,6 +1,7 @@
 import { AnchorPoint, Await, Mermaid, Theme, Tooltip } from 'basis/react'
 import * as React from 'react'
 import { createRoot } from 'react-dom/client'
+import { OverlayStage } from './OverlayStage'
 
 /*
  * A tiny live stage for components whose meaningful state only exists after
@@ -13,6 +14,7 @@ const STAGES: Record<string, React.ReactNode> = {
     <Await fallback={<span>Loading…</span>}>{Promise.resolve(<span>Loaded content</span>)}</Await>
   ),
   mermaid: <Mermaid>{'flowchart LR\n  A[Start] --> B[End]'}</Mermaid>,
+  overlay: <OverlayStage />,
   tooltip: (
     <div style={{ display: 'inline-block', padding: 80 }}>
       <div style={{ display: 'inline-block', height: 40, position: 'relative', width: 120 }}>
