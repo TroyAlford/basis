@@ -36,6 +36,10 @@ style('basis:table', css`
       th, td {
         height: var(--basis-table-row-height);
         &[data-pin="${Pin.Left}"], &[data-pin="${Pin.Right}"] {
+          /*
+           * Pinned cells inherit their row's background. The row backgrounds
+           * must be opaque so scrolled content cannot show through the pins.
+           */
           background-color: inherit;
         }
       }
@@ -51,7 +55,7 @@ style('basis:table', css`
             background-color: var(--basis-table-row-background-odd);
           }
           &:nth-child(even) {
-            background-color: #8883;
+            background-color: var(--basis-table-row-background-even);
           }
 
           &:hover > :is(td, th):after {

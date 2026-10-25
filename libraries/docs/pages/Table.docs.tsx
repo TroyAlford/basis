@@ -2,6 +2,7 @@ import { faker } from '@faker-js/faker'
 import { Pin, Section, SortDirection, TextAlign, TypedTable } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
+import { TableHeaderExample } from '../components/TableHeaderExample'
 
 faker.seed(42)
 
@@ -186,6 +187,27 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             </Table>
           `)}
         </Section>
+        <Section title="Custom Header Content">
+          <p><code>title</code> accepts any React content, so a header can render an accessible checkbox or an action alongside its label. The header&#39;s native semantics come from that content, and its sort state is exposed with <code>aria-sort</code>.</p>
+          <p>Interactive descendants of a title keep their own pointer and keyboard behavior and do not activate sorting; the rest of the header remains clickable and keyboard-sortable. In the example, click the <strong>Done</strong> or <strong>Notes</strong> label to sort; activating the checkbox or <strong>Clear</strong> button leaves the sort unchanged. The owning component controls a control&#39;s <code>checked</code>, <code>indeterminate</code> and <code>disabled</code> state. The example below renders an indeterminate checkbox until every task is complete, and disables the notes action when no row has notes. Both header controls live in pinned columns; narrow the viewport to see the pinned edges hold while the table scrolls.</p>
+          <TableHeaderExample />
+          {Code.format(`
+            {Column.Boolean({
+              field: 'complete',
+              title: (
+                <>
+                  <span>Done</span>
+                  <CheckboxEditor
+                    label="Mark all tasks complete"
+                    value={completeState}  // true, false, or null (indeterminate)
+                    onChange={handleAllComplete}
+                  />
+                </>
+              ),
+            })}
+          `)}
+          <p>Any React content works, including native controls. A plain input keeps its own keyboard behavior and does not need to import a Basis component. This example&#39;s completion state and bulk update are ordinary consumer state, not a reusable table-selection API.</p>
+        </Section>
         <Section title="API Reference">
           <h4>Table Props</h4>
           <ul>
@@ -201,7 +223,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             <li><code>field: PathOf&lt;T&gt;</code> - Path to the data field (supports dot notation)</li>
             <li><code>pin?: Pin</code> - Column pinning position (Left, Right, Unpinned)</li>
             <li><code>sortable?: boolean</code> - Whether the column is sortable (default: true)</li>
-            <li><code>title?: string</code> - Column header text (defaults to field name)</li>
+            <li><code>title?: ReactNode</code> - Column header content, including interactive controls (defaults to field name)</li>
             <li><code>type?: ColumnType</code> - Column type (Text, Number, Boolean, Date, DateTime, Enum)</li>
             <li><code>width?: string | number</code> - Column width</li>
           </ul>

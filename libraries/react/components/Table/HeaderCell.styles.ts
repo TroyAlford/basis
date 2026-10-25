@@ -27,6 +27,14 @@ style('basis:table-header-cell', css`
         text-overflow: ellipsis;
         user-select: none;
         white-space: nowrap;
+        &[data-rich-title] {
+          align-items: center;
+          display: flex;
+          gap: 0.5em;
+          overflow: visible;
+          text-overflow: clip;
+          white-space: normal;
+        }
       }
 
       > .sort.icon[data-sort-by="${SortBy.None}"] {
@@ -51,6 +59,15 @@ style('basis:table-header-cell', css`
     }
     &[data-align="${TextAlign.Right}"] > .content > .title {
       text-align: right;
+    }
+    &[data-align="${TextAlign.Center}"] > .content > .title[data-rich-title] {
+      justify-content: center;
+    }
+    &[data-align="${TextAlign.Left}"] > .content > .title[data-rich-title] {
+      justify-content: flex-start;
+    }
+    &[data-align="${TextAlign.Right}"] > .content > .title[data-rich-title] {
+      justify-content: flex-end;
     }
   }
 `)

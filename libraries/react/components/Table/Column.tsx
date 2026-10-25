@@ -33,7 +33,7 @@ export interface ColumnProps<TRow = unknown, TField extends PathOf<TRow> = PathO
   sortBy?: SortBy,
   sortDirection?: SortDirection | null,
   sortable?: boolean,
-  title?: string,
+  title?: React.ReactNode,
   type?: ColumnType,
   width?: string | number,
 }
