@@ -34,6 +34,34 @@ const plugin = (options: PluginOptions): Linter.Config => {
   return config
 }
 
+const TYPESCRIPT_POLICY = {
+  '@typescript-eslint/ban-ts-comment': 'warn',
+  '@typescript-eslint/class-literal-property-style': 'off',
+  '@typescript-eslint/consistent-type-imports': ['error', {
+    disallowTypeAnnotations: true,
+    fixStyle: 'separate-type-imports',
+    prefer: 'type-imports',
+  }],
+  '@typescript-eslint/member-ordering': ['error', {
+    classes: 'never',
+    interfaces: {
+      order: 'alphabetically',
+    },
+    typeLiterals: {
+      memberTypes: ['signature', 'constructor', 'field', 'method'],
+      order: 'alphabetically',
+    },
+  }],
+  '@typescript-eslint/naming-convention': [
+    'error',
+    { format: ['PascalCase'], selector: 'enum' },
+    { format: ['PascalCase'], selector: 'enumMember' },
+    { format: ['PascalCase'], selector: 'typeLike' },
+  ],
+  '@typescript-eslint/no-explicit-any': 'error',
+  '@typescript-eslint/no-import-type-side-effects': 'error',
+} as unknown as Linter.Config['rules']
+
 const TYPESCRIPT_CONFIG: Linter.Config = {
   files: TYPESCRIPT_FILES,
   languageOptions: {
@@ -42,7 +70,7 @@ const TYPESCRIPT_CONFIG: Linter.Config = {
       ecmaFeatures: { jsx: true },
     },
   },
-  rules: TYPESCRIPT_RULES as unknown as Linter.Config['rules'],
+  rules: { ...TYPESCRIPT_RULES, ...TYPESCRIPT_POLICY } as unknown as Linter.Config['rules'],
 }
 
 export default [
@@ -226,31 +254,6 @@ export default [
         before: false,
         overrides: { arrow: 'ignore' },
       }],
-      '@typescript-eslint/ban-ts-comment': 'warn',
-      '@typescript-eslint/class-literal-property-style': 'off',
-      '@typescript-eslint/consistent-type-imports': ['error', {
-        disallowTypeAnnotations: true,
-        fixStyle: 'separate-type-imports',
-        prefer: 'type-imports',
-      }],
-      '@typescript-eslint/member-ordering': ['error', {
-        classes: 'never',
-        interfaces: {
-          order: 'alphabetically',
-        },
-        typeLiterals: {
-          memberTypes: ['signature', 'constructor', 'field', 'method'],
-          order: 'alphabetically',
-        },
-      }],
-      '@typescript-eslint/naming-convention': [
-        'error',
-        { format: ['PascalCase'], selector: 'enum' },
-        { format: ['PascalCase'], selector: 'enumMember' },
-        { format: ['PascalCase'], selector: 'typeLike' },
-      ],
-      '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-import-type-side-effects': 'error',
       'arrow-body-style': ['error', 'as-needed'],
       'camelcase': ['error', { properties: 'always' }],
       'consistent-return': 'error',

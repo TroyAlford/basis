@@ -1,7 +1,6 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { bunLintUnsupportedReason } from './bun-version'
 
 /** Flat ESLint config filenames Bun discovers automatically. */
 const ESLINT_CONFIG_FILES = [
@@ -21,12 +20,33 @@ const basisDir = (): string => join(import.meta.dir, '..')
 
 /**
  * Reports whether the running Bun can run the built-in linter.
+ *
+ * The linter is not part of every stable Bun release yet, so probe the command
+ * instead of assuming a version number is sufficient.
  * @returns Whether the linter is available.
  */
 export const requireBunLint = (): boolean => {
-  const reason = bunLintUnsupportedReason()
-  if (reason === null) return true
-  process.stderr.write(`${reason}\n`)
+  const scratch = mkdtempSync(join(tmpdir(), 'basis-lint-probe-'))
+
+  try {
+    writeFileSync(
+      join(scratch, 'package.json'),
+      JSON.stringify({ name: 'basis-lint-probe', private: true, type: 'module' }),
+    )
+    const probe = Bun.spawnSync([process.execPath, 'lint', '--help'], {
+      cwd: scratch,
+      stderr: 'pipe',
+      stdout: 'pipe',
+    })
+    if (probe.exitCode === 0 && probe.stdout.toString().includes('Usage: bun lint')) return true
+  } finally {
+    rmSync(scratch, { force: true, recursive: true })
+  }
+
+  process.stderr.write(
+    `[basis] lint requires a Bun release with the built-in linter; found ${Bun.version}. ` +
+    'Run `bun upgrade` and retry.\n',
+  )
   return false
 }
 

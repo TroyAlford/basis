@@ -2,7 +2,6 @@ import pluginStylistic from '@stylistic/eslint-plugin'
 import type { ESLint } from 'eslint'
 import pluginImportNewlines from 'eslint-plugin-import-newlines'
 import pluginJSDoc from 'eslint-plugin-jsdoc'
-import pluginPerfectionist from 'eslint-plugin-perfectionist'
 import pluginImportSort from 'eslint-plugin-simple-import-sort'
 import pluginSortDestructureKeys from 'eslint-plugin-sort-destructure-keys'
 import pluginBasis from './rules/registry'
@@ -24,7 +23,6 @@ export const plugins = {
   '@stylistic/jsx': pluginStylistic,
   '@stylistic/ts': pluginStylistic,
   '@typescript-eslint': {} as ESLint.Plugin,
-  'perfectionist': pluginPerfectionist,
   'simple-import-sort': pluginImportSort,
   'sort-destructure-keys': pluginSortDestructureKeys,
 }
