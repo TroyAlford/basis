@@ -199,7 +199,28 @@ Components are consumed directly from source — there is no Basis build step. T
 preload = ["basis/testing/bun"]
 ```
 
-It registers happy-dom and the browser lifecycle, so a plain `bun test` runs the complete suite — DOM tests and browser-backed snapshot tests alike. It also isolates the process temp directory: `os.tmpdir()` points at a run-scoped directory the preload removes when the run ends, so a fixture — or a dependency — that writes temp files cannot leak them.
+It registers happy-dom and the browser lifecycle. A plain `bun test` runs the fast `.test`/`.spec` lane; the opt-in screenshot and end-to-end lanes run only when a script names their files explicitly. A file's suffix selects its lane:
+
+| Suffix                                                  | Purpose                                                                                | Default `bun test`? | Canonical command  |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------- | ------------------ |
+| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests                        | Yes                 | `bun test`         |
+| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level `matchScreenshot` visual contracts; no application mount               | No                  | `test:screenshots` |
+| `*.e2e.ts` / `*.e2e.tsx`                                | `useApplication().visit()` feature journeys in a real browser; may capture screenshots | No                  | `test:e2e`         |
+
+```json
+{
+  "scripts": {
+    "test": "bun test",
+    "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
+    "test:e2e": "bun test ./source/e2e/*.e2e.ts",
+    "test:all": "bun run test && bun run test:screenshots && bun run test:e2e"
+  }
+}
+```
+
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots` and `test:e2e` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+
+The preload also isolates the process temp directory: `os.tmpdir()` points at a run-scoped directory the preload removes when the run ends, so a fixture — or a dependency — that writes temp files cannot leak them.
 
 For a fixture that wants a named directory, `tempDirectory(prefix)` from `basis/testing` creates a fresh directory under that same isolated root:
 
@@ -214,6 +235,7 @@ Plain `mkdtemp(os.tmpdir())` is captured identically, so no per-repo or per-file
 `matchScreenshot(subject, hint?, options?)` is an ordinary async function, not a custom matcher: Bun drives async matchers synchronously, which makes the Playwright calls inside them far slower than the same calls awaited normally.
 
 ```tsx
+// Button.screenshot.tsx
 import { Button } from 'basis/react'
 import { matchScreenshot, test } from 'basis/testing'
 
@@ -222,7 +244,7 @@ test('renders a button', async () => {
 })
 ```
 
-It accepts a React element, a Playwright `Page`, or a `Locator`, and throws with the diff details on a mismatch.
+It accepts a React element, a Playwright `Page`, or a `Locator`, and throws with the diff details on a mismatch. Run it with `bun run test:screenshots`; mounted component tests that assert behavior stay in `*.test.tsx`.
 
 Snapshot capture runs Chromium inside the pinned Playwright container (see [libraries/testing/README.md](../libraries/testing/README.md)); it never downloads or launches a host Chromium, so `bun install` provisions no browser and no `playwright install-deps` step is needed. The only host capability snapshots need is a running Docker daemon.
 
@@ -233,6 +255,7 @@ Snapshot capture runs Chromium inside the pinned Playwright container (see [libr
 Boot the app **once for the whole run** with `useApplication`. The preload stops it when the run ends, so no test file needs its own `beforeAll`/`afterAll`:
 
 ```tsx
+// Deck.e2e.ts
 import { matchScreenshot, test, useApplication } from 'basis/testing'
 
 test('renders the deck builder', async () => {
@@ -244,8 +267,7 @@ test('renders the deck builder', async () => {
 })
 ```
 
-Every file shares one server per `(cwd, entry)`; the first caller boots it and concurrent callers await the same boot. `visit` still gives a deterministic page (fresh browser context, stubbed network, per-visit `init`), but **server-side
-state is shared across the run** — a test that needs a clean server boots its own with the low-level `startApplication`.
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Every file shares one server per `(cwd, entry)`; the first caller boots it and concurrent callers await the same boot. `visit` still gives a deterministic page (fresh browser context, stubbed network, per-visit `init`), but **server-side state is shared across the run** — a test that needs a clean server boots its own with the low-level `startApplication`.
 
 `useApplication` is lazy by default. To boot before the suite and fail fast on a broken server, add a second preload that calls it (`await useApplication(...)`) through the same registry — see the testing README for the eager pattern.
 

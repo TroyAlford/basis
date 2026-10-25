@@ -92,8 +92,10 @@ Run the repository's real checks locally before pushing:
   bun run lint
   bun run lint:ts
   bun test
+  bun run test:screenshots
+  bun run test:e2e
   bun run test:consumer
 
 For the snapshot runtime on its own:
-  bun test libraries/testing/matchScreenshot.test.tsx
+  bun test libraries/testing/matchScreenshot.screenshot.tsx
 `)

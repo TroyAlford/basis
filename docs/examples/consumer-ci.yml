@@ -50,7 +50,6 @@ jobs:
       quality-needed: ${{ steps.impact.outputs.quality-needed }}
       docs-needed: ${{ steps.impact.outputs.docs-needed }}
       unit-needed: ${{ steps.impact.outputs.unit-needed }}
-      integration-needed: ${{ steps.impact.outputs.integration-needed }}
       visual-needed: ${{ steps.impact.outputs.visual-needed }}
     steps:
       - uses: actions/checkout@v4
@@ -129,7 +128,7 @@ jobs:
           fail-on-findings: 'false'
 
   # Documentation has its own suite so a docs-only change never starts lint,
-  # unit, integration, or visual jobs. Remove this job and the `docs` suite from
+  # unit, or visual jobs. Remove this job and the `docs` suite from
   # the policy when the repository has no docs check.
   docs:
     name: Docs
@@ -169,30 +168,11 @@ jobs:
       - name: Unit tests
         run: bun run test
 
-  # Integration/session tests stay isolated. Replace the command with the
-  # repository's own, or remove this job and the `integration` suite together.
-  integration:
-    name: Integration
-    needs: impact
-    if: >-
-      ${{ needs.impact.result == 'success'
-      && !github.event.pull_request.draft
-      && needs.impact.outputs.integration-needed == 'true' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .tool-versions
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-      - name: Integration tests
-        run: bun run test:integration
-
-  # Keep visual/integration suites isolated from the unit process. The pinned
-  # Playwright image is pulled by the Basis snapshot runtime on first capture;
-  # this optional step only surfaces the pull as a named step. It does not
-  # change billed minutes: the job is billed either way.
+  # Keep component screenshots and end-to-end journeys isolated from the unit
+  # process, but run them as separately named steps in one impact-selected job.
+  # The pinned Playwright image is pulled by the Basis snapshot runtime on first
+  # capture; this optional step only surfaces the pull as a named step. It does
+  # not change billed minutes: the job is billed either way.
   visual:
     name: Visual
     needs: impact
@@ -212,8 +192,10 @@ jobs:
         run: |
           image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
           docker pull "$image"
-      - name: Visual tests
-        run: bun run test:visual
+      - name: Component screenshots
+        run: bun run test:screenshots
+      - name: End-to-end tests
+        run: bun run test:e2e
 
   # Extension point: add repository-specific jobs here, then list them in
   # `required.needs` and in the impact policy. Keep each one a separate process;
@@ -228,7 +210,7 @@ jobs:
   required:
     name: Required
     if: ${{ always() && !github.event.pull_request.draft }}
-    needs: [impact, quality, docs, unit, integration, visual]
+    needs: [impact, quality, docs, unit, visual]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     permissions:
       checks: read
@@ -245,4 +227,4 @@ jobs:
           impact-hash: ${{ needs.impact.outputs.decision-hash }}
           require-impact: 'true'
           check-names: |
-            {"quality":"Quality","docs":"Docs","unit":"Test","integration":"Integration","visual":"Visual"}
+            {"quality":"Quality","docs":"Docs","unit":"Test","visual":"Visual"}

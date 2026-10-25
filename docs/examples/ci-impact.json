@@ -47,12 +47,15 @@
       "unreachableSource": "run"
     },
     "unit": {
-      "testGlobs": ["**/*.test.ts", "**/*.test.tsx", "**/*.test.js", "**/*.test.jsx"],
-      "testExcludeGlobs": [
-        "**/*.visual.test.ts",
-        "**/*.visual.test.tsx",
-        "**/*.integration.test.ts",
-        "**/*.integration.test.tsx"
+      "testGlobs": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.test.js",
+        "**/*.test.jsx",
+        "**/*.spec.ts",
+        "**/*.spec.tsx",
+        "**/*.spec.js",
+        "**/*.spec.jsx"
       ],
       "sourceGlobs": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],
       "alwaysRunGlobs": [
@@ -81,39 +84,12 @@
       ],
       "unreachableSource": "run"
     },
-    "integration": {
-      "testGlobs": ["**/*.integration.test.ts", "**/*.integration.test.tsx"],
-      "sourceGlobs": ["**/*.ts", "**/*.tsx"],
-      "alwaysRunGlobs": [
-        "package.json",
-        "bun.lock",
-        "bun.lockb",
-        ".tool-versions",
-        "tsconfig*.json",
-        "bunfig.toml",
-        "**/test/integration/**",
-        "**/testing/**"
-      ],
-      "ignoreGlobs": [
-        ".github/**",
-        "docs/**",
-        "**/*.md",
-        "**/*.mdx",
-        "**/*.css",
-        "**/*.scss",
-        "**/*.less",
-        "**/*.png",
-        "**/*.svg",
-        "**/*.woff*"
-      ],
-      "unreachableSource": "run"
-    },
     "visual": {
       "testGlobs": [
-        "**/*.visual.test.tsx",
-        "**/*.visual.test.ts",
-        "**/visual/**/*.test.tsx",
-        "**/visual/**/*.test.ts"
+        "**/*.screenshot.tsx",
+        "**/*.screenshot.ts",
+        "**/*.e2e.ts",
+        "**/*.e2e.tsx"
       ],
       "sourceGlobs": [
         "**/*.tsx",

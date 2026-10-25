@@ -6,7 +6,34 @@ title: Visual snapshots
 
 Snapshot tests pin the rendered output of a component or an application page to a committed PNG. `basis/testing` exposes one async helper, `matchScreenshot(subject, hint?, options?)`, with the same shape as Bun's `toMatchSnapshot`: a missing snapshot is written, a changed snapshot throws (the diff is kept in memory and nothing is written to disk), and `--update-snapshots` (or `UPDATE_SNAPSHOTS=1`) rewrites it. The subject is a React element, a Playwright `Page`, or a `Locator`.
 
-A `bun test` run is fast and deterministic because the expensive part — the browser — is paid for once and reused:
+## Test lanes
+
+A test file's suffix selects its lane. Bun's default discovery runs only `.test` and `.spec`; the screenshot and end-to-end lanes stay opt-in and run only when a command names their files explicitly.
+
+| Suffix                                                  | Purpose                                                                                             | Default `bun test`? | Canonical command  |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- | ------------------ |
+| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests via `render`, `Simulate`, `waitFor` | Yes                 | `bun test`         |
+| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level visual-regression contracts via `matchScreenshot`; no application mount             | No                  | `test:screenshots` |
+| `*.e2e.ts` / `*.e2e.tsx`                                | Feature-level `useApplication().visit()` journeys in a real browser; may capture screenshots        | No                  | `test:e2e`         |
+
+```json
+{
+  "scripts": {
+    "test": "bun test",
+    "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
+    "test:e2e": "bun test ./source/e2e/*.e2e.ts",
+    "test:all": "bun run test && bun run test:screenshots && bun run test:e2e"
+  }
+}
+```
+
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots` and `test:e2e` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+
+Basis recognizes all three lanes when it attributes a caller, registers a test, and scopes orphan pruning. That recognition never makes a heavy lane a default test: Bun still discovers only `.test` and `.spec`.
+
+Visual snapshots assert appearance; mounted component tests assert behavior; end-to-end journeys validate actual browser and integration boundaries.
+
+A test-lane run is fast and deterministic because the expensive part — the browser — is paid for once and reused:
 
 - exactly **one Docker container** runs Chromium for the whole run;
 - exactly **one browser connection** serves every capture;
@@ -18,7 +45,7 @@ A `bun test` run is fast and deterministic because the expensive part — the br
 
 ```mermaid
 flowchart TD
-    Run["One bun test run"] --> First["First capture"]
+    Run["One test-lane run"] --> First["First capture"]
     First --> Runtime["Run-scoped runtime"]
     Runtime --> Container["One Docker container<br/>pinned Playwright image"]
     Container --> Server["playwright run-server<br/>published localhost port"]
@@ -34,15 +61,16 @@ The runtime is memoised on `globalThis`, so every test file in the process resol
 
 ## Component captures
 
-`matchScreenshot(<Button>Save</Button>)` renders the element to a standalone document with `react-dom/server`, inlines Basis's component styles and default theme, and loads it into one reused page with `setContent`. Each capture replaces that page's document, so the page — and the browser behind it — is created once. Playwright round-trips are kept to a minimum: one `evaluate` that waits for fonts and measures the element, then one screenshot.
+`matchScreenshot(<Button>Save</Button>)` renders the element to a standalone document with `react-dom/server`, inlines Basis's component styles and default theme, and loads it into one reused page with `setContent`. Each capture replaces that page's document, so the page — and the browser behind it — is created once. Playwright round-trips are kept to a minimum: one `evaluate` that waits for fonts and measures the element, then one screenshot. Put these captures in `*.screenshot.tsx` and run them with `bun run test:screenshots`.
 
-Components whose meaningful state only exists after mount — the resolved `Await`, a rendered `Mermaid` diagram, a placed `Tooltip` — are captured live through `app.visit` in `visual.live.test.tsx`. Everything else is a static element capture.
+Components whose meaningful state only exists after mount — the resolved `Await`, a rendered `Mermaid` diagram, a placed `Tooltip` — are captured live through `app.visit` in `visual.live.e2e.ts`. Everything else is a static element capture.
 
 ## Application captures
 
 `useApplication({ entry })` boots the real server once per run on a free loopback port and waits for readiness. `app.visit(path, options?, fn)` opens a fresh browser context on the shared browser, applies the deterministic network policy, navigates, and runs the callback. Contexts are cheap: they keep server and browser state from leaking between visits without paying for a new browser.
 
 ```tsx
+// Deck.e2e.ts
 import { matchScreenshot, test, useApplication } from 'basis/testing'
 
 test('renders the application', async () => {
@@ -53,6 +81,8 @@ test('renders the application', async () => {
   })
 })
 ```
+
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Component appearance belongs in `*.screenshot.tsx` and runs with `bun run test:screenshots`; neither is part of the default `bun test` lane.
 
 ## Docker and determinism
 
@@ -81,9 +111,15 @@ Plain `mkdtemp(os.tmpdir())` is captured the same way. The optional `base` place
 ## Updating snapshots
 
 ```sh
+# Fast lane
 bun test --update-snapshots
-# or
-UPDATE_SNAPSHOTS=1 bun test
+
+# A visual or end-to-end lane
+bun run test:screenshots --update-snapshots
+bun run test:e2e --update-snapshots
+
+# Or set the environment variable for any lane
+UPDATE_SNAPSHOTS=1 bun run test:screenshots
 ```
 
 A committed baseline is only rewritten when the run explicitly updates. A failed or browser-less run never mutates a committed snapshot; a comparison failure writes nothing, and any legacy `.actual` / `.diff` artefacts from an older run are cleared on the next pass. Obsolete snapshots are pruned only while updating, and only for files whose entire suite executed.

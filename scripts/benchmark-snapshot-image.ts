@@ -78,7 +78,7 @@ const start = measure([
 requireSuccess('docker run', start)
 
 const snapshot = measure([
-  process.execPath, 'test', 'libraries/testing/matchScreenshot.test.tsx',
+  process.execPath, 'test', 'libraries/testing/matchScreenshot.screenshot.tsx',
 ])
 requireSuccess('snapshot test', snapshot)
 

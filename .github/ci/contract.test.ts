@@ -120,7 +120,7 @@ describe('reference consumer CI', () => {
   })
 
   test('skips every suite job for Draft events', () => {
-    for (const id of ['quality', 'docs', 'unit', 'integration', 'visual']) {
+    for (const id of ['quality', 'docs', 'unit', 'visual']) {
       const job = workflow.jobs?.[id]
       expect(job).toBeDefined()
       expect(job?.needs).toContain('impact')
@@ -176,7 +176,6 @@ describe('reference consumer CI', () => {
       'quality-needed',
       'docs-needed',
       'unit-needed',
-      'integration-needed',
       'visual-needed',
     ]) {
       expect(outputs[key]).toBe(`\${{ steps.impact.outputs.${key} }}`)
@@ -194,11 +193,11 @@ describe('reference consumer CI', () => {
     expect(steps.some(step => step.uses?.includes('/knip@'))).toBe(true)
   })
 
-  test('keeps unit, integration, docs, and visual suites in separate processes', () => {
+  test('keeps unit, docs, and visual suites in separate processes', () => {
     expect(workflow.jobs?.unit?.steps?.some(step => step.run === 'bun run test')).toBe(true)
-    expect(workflow.jobs?.integration?.steps?.some(step => step.run === 'bun run test:integration')).toBe(true)
     expect(workflow.jobs?.docs?.steps?.some(step => step.run === 'bun run docs:check')).toBe(true)
-    expect(workflow.jobs?.visual?.steps?.some(step => step.run === 'bun run test:visual')).toBe(true)
+    expect(workflow.jobs?.visual?.steps?.some(step => step.run === 'bun run test:screenshots')).toBe(true)
+    expect(workflow.jobs?.visual?.steps?.some(step => step.run === 'bun run test:e2e')).toBe(true)
   })
 
   test('posts no required status on Draft events and keeps the gate checkout-free', () => {
@@ -212,7 +211,7 @@ describe('reference consumer CI', () => {
 
   test('requires the impact preflight and every suite through the portable gate', () => {
     const required = workflow.jobs?.required
-    for (const id of ['impact', 'quality', 'docs', 'unit', 'integration', 'visual']) {
+    for (const id of ['impact', 'quality', 'docs', 'unit', 'visual']) {
       expect(required?.needs).toContain(id)
     }
 
@@ -225,7 +224,6 @@ describe('reference consumer CI', () => {
     expect(gate?.with?.['require-impact']).toBe('true')
     expect(JSON.parse(gate?.with?.['check-names'] ?? '{}')).toEqual({
       docs: 'Docs',
-      integration: 'Integration',
       quality: 'Quality',
       unit: 'Test',
       visual: 'Visual',
@@ -233,7 +231,7 @@ describe('reference consumer CI', () => {
   })
 
   test('uses the same caller-selectable runner everywhere', () => {
-    for (const id of ['impact', 'quality', 'docs', 'unit', 'integration', 'visual', 'required']) {
+    for (const id of ['impact', 'quality', 'docs', 'unit', 'visual', 'required']) {
       expect(workflow.jobs?.[id]?.['runs-on']).toBe("${{ vars.CI_RUNNER || 'ubuntu-latest' }}")
     }
   })
@@ -246,11 +244,9 @@ describe('reference change-impact policy', () => {
     expect(policy.version).toBe(1)
     expect(policy.maxGraphFiles).toBe(20000)
     const suites = policy.suites as Record<string, {
-      testExcludeGlobs?: string[],
       unreachableSource?: string,
     }>
-    expect(Object.keys(suites).sort()).toEqual(['docs', 'integration', 'quality', 'unit', 'visual'])
-    expect(suites.unit.testExcludeGlobs).toContain('**/*.visual.test.tsx')
+    expect(Object.keys(suites).sort()).toEqual(['docs', 'quality', 'unit', 'visual'])
     expect(suites.visual.unreachableSource).toBe('run')
   })
 })

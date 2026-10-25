@@ -37,7 +37,7 @@ The preflight must read the policy from the merge base and run from a pinned act
 required:
   name: Required
   if: ${{ always() && !github.event.pull_request.draft }}
-  needs: [impact, quality, docs, unit, integration, visual]
+  needs: [impact, quality, docs, unit, visual]
   runs-on: ubuntu-latest
   permissions:
     checks: read
@@ -54,7 +54,7 @@ required:
         require-impact: 'true'
         # Only needed when a dependency sets `name:`.
         check-names: |
-          {"quality":"Quality","docs":"Docs","unit":"Test","integration":"Integration","visual":"Visual"}
+          {"quality":"Quality","docs":"Docs","unit":"Test","visual":"Visual"}
 ```
 
 Pin a released Basis tag; `main` is for Basis's own workflows.

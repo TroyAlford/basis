@@ -31,7 +31,7 @@ import { ToggleEditor } from './ToggleEditor/ToggleEditor'
  *
  * Components whose meaningful state only exists after mount — `Await` (resolved
  * content), `Mermaid` (the rendered diagram), and `Tooltip` (floating placement)
- * — are covered live in `visual.live.test.tsx`. The abstract/host components
+ * — are covered live in `visual.live.e2e.ts`. The abstract/host components
  * (`Component`, `Editor`, `Router`, `ApplicationBase`, `Theme`,
  * `OverlayProvider`, `IndexHTML`) render nothing on their own and the imperative
  * `Dialog`/`Notification` open through static APIs, so they are exercised

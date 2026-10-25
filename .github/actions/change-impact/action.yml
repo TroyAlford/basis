@@ -56,9 +56,6 @@ outputs:
   unit-needed:
     description: 'Convenience output for the reference `unit` suite.'
     value: ${{ steps.impact.outputs.unit-needed }}
-  integration-needed:
-    description: 'Convenience output for the reference `integration` suite.'
-    value: ${{ steps.impact.outputs.integration-needed }}
   visual-needed:
     description: 'Convenience output for the reference `visual` suite.'
     value: ${{ steps.impact.outputs.visual-needed }}
