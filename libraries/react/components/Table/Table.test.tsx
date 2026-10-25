@@ -194,6 +194,39 @@ describe('Table', () => {
       expect((updatedHeader.querySelector('input') as HTMLInputElement).disabled).toBe(true)
     })
 
+    test('sorts a rich title without traversing its React content', async () => {
+      const content: Record<string, unknown> = {}
+      Object.defineProperty(content, 'self', {
+        enumerable: true,
+        get: () => { throw new Error('rich title content was traversed') },
+      })
+
+      /**
+       * A title component carrying opaque content that must never be cloned.
+       * @param props - The title props.
+       * @param props.content - Opaque content attached to the element.
+       * @returns The rendered title.
+       */
+      const Title = (props: { content: unknown }): React.ReactElement => {
+        void props.content
+        return <span>Status</span>
+      }
+
+      const { node } = await render(
+        <Table value={ROWS}>
+          {Column.Boolean({
+            field: 'status',
+            title: <Title content={content} />,
+          })}
+        </Table>,
+      )
+
+      const header = headerFor(node, 'status')
+      header.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flush()
+      expect(header).toHaveAttribute('aria-sort', 'ascending')
+    })
+
     test('takes indeterminate state from the owning consumer', async () => {
       const { node } = await render(
         <Table value={ROWS}>
