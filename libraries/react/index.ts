@@ -33,7 +33,7 @@ export { ToggleEditor } from './components/ToggleEditor/ToggleEditor'
 export { buildDocumentationNavigation, Documentation } from './components/Documentation/Documentation'
 export type { DocumentationEntry, DocumentationRoute } from './components/Documentation/Documentation'
 export { BASIS_FONTS_URL } from './utilities/fonts'
-export { Theme } from './components/Theme/Theme'
+export { DARK_THEME, DEFAULT_THEME, LIGHT_THEME, Theme } from './components/Theme/Theme'
 export { Tooltip } from './components/Tooltip/Tooltip'
 
 export { Accessible } from './mixins/Accessible'

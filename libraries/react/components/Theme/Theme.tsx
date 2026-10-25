@@ -8,24 +8,44 @@ import { Component } from '../Component/Component'
 interface Props {
   /** Colors */
   color?: {
-    /** Background color */
+    /** Page/application background color */
     background?: string,
+    /** Border color for controls and surfaces */
+    border?: string,
+    /** Muted border color for dividers and table rules */
+    borderSubtle?: string,
     /** Semantic danger / destructive accent (dialogs, notifications) */
     danger?: string,
     /** Disabled state color */
     disabled?: string,
     /** Disabled text color */
     disabledText?: string,
+    /** Focus ring color */
+    focus?: string,
     /** Foreground/text color */
     foreground?: string,
+    /** Secondary/less prominent text color */
+    foregroundMuted?: string,
+    /** Hover state background color */
+    hover?: string,
     /** Dark overlay color */
     overlayDark?: string,
     /** Light overlay color */
     overlayLight?: string,
     /** Primary brand color */
     primary?: string,
+    /** Selected state background color */
+    selection?: string,
     /** Semantic success accent (dialogs, notifications) */
     success?: string,
+    /** Base surface color for controls and content */
+    surface?: string,
+    /** Alternating surface color for striped content such as table rows */
+    surfaceAlt?: string,
+    /** Elevated surface color for dialogs and popup menus */
+    surfaceElevated?: string,
+    /** Inset surface color for prefixes, suffixes, and similar chrome */
+    surfaceInset?: string,
   },
 
   /** Font sizes relative to base size (16px) */
@@ -108,14 +128,24 @@ interface Props {
 export const DEFAULT_THEME = {
   color: {
     background: '#ffffff',
+    border: '#171717',
+    borderSubtle: '#88888880',
     danger: '#C00000',
     disabled: '#e5e5e5',
     disabledText: '#a3a3a3',
+    focus: '#0070f3',
     foreground: '#171717',
+    foregroundMuted: '#666666',
+    hover: '#0070f340',
     overlayDark: '#00000080',
     overlayLight: '#ffffff80',
     primary: '#0070f3',
+    selection: '#0070f380',
     success: '#008000',
+    surface: '#ffffff',
+    surfaceAlt: '#dddddd',
+    surfaceElevated: '#ffffff',
+    surfaceInset: '#88888844',
   },
   fontSize: {
     lg: 112.5, // 16px
@@ -150,6 +180,49 @@ export const DEFAULT_THEME = {
     xs: 4,
     xxl: 48,
     xxs: 2,
+  },
+}
+
+/**
+ * The official light preset. It carries the same values as {@link DEFAULT_THEME}
+ * so applications can opt into a named light theme without changing appearance.
+ */
+export const LIGHT_THEME = {
+  ...DEFAULT_THEME,
+  color: { ...DEFAULT_THEME.color },
+}
+
+/**
+ * The official dark preset. It uses a neutral, substantially darker palette
+ * than the legacy MTG `#30404d` chrome and separates the page background,
+ * resting surfaces, elevated overlays, borders, and interactive states.
+ *
+ * Apply it to a subtree with `<Theme name="dark" {...DARK_THEME} />` and
+ * `data-theme="dark"`.
+ */
+export const DARK_THEME = {
+  ...LIGHT_THEME,
+  color: {
+    ...LIGHT_THEME.color,
+    background: '#080a0d',
+    border: '#3d4754',
+    borderSubtle: '#2a323d',
+    danger: '#f87171',
+    disabled: '#1a1f26',
+    disabledText: '#8b96a3',
+    focus: '#7aa2f7',
+    foreground: '#f3f5f7',
+    foregroundMuted: '#b6c0cc',
+    hover: '#1d2631',
+    overlayDark: '#000000cc',
+    overlayLight: '#ffffff33',
+    primary: '#5b9dff',
+    selection: '#1f3a5f',
+    success: '#4ade80',
+    surface: '#11151a',
+    surfaceAlt: '#161b21',
+    surfaceElevated: '#1c232b',
+    surfaceInset: '#212a33',
   },
 }
 

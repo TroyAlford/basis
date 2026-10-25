@@ -16,7 +16,17 @@ const ROOT_THEME_CSS_SNAPSHOT_SECTIONS: readonly { readonly title: string, reado
       '--basis-color-success',
       '--basis-color-success-contrast',
       '--basis-color-background',
+      '--basis-color-surface',
+      '--basis-color-surface-alt',
+      '--basis-color-surface-elevated',
+      '--basis-color-surface-inset',
+      '--basis-color-border',
+      '--basis-color-border-subtle',
       '--basis-color-foreground',
+      '--basis-color-foreground-muted',
+      '--basis-color-hover',
+      '--basis-color-selection',
+      '--basis-color-focus',
       '--basis-color-disabled',
       '--basis-color-disabled-text',
       '--basis-color-overlay-dark',
@@ -178,6 +188,33 @@ export class ThemeDocs extends DocumentationPage<State> {
           </ul>
         </section>
         <section>
+          <h2>Official Presets</h2>
+          <p>Basis ships <code>LIGHT_THEME</code> and <code>DARK_THEME</code> from <code>basis/react</code>. <code>LIGHT_THEME</code> carries the same values as <code>DEFAULT_THEME</code>, so the existing default light appearance is unchanged. <code>DARK_THEME</code> uses a neutral palette that is substantially darker than the legacy MTG <code>#30404d</code> chrome and separates the page background from resting, elevated, and inset surfaces.</p>
+          {Code.format(`
+            import { Button, DARK_THEME, LIGHT_THEME, Theme } from 'basis/react'
+
+            // Named light theme (same values as the default)
+            <Theme name="light" {...LIGHT_THEME} />
+
+            // Named dark theme
+            <Theme name="dark" {...DARK_THEME} />
+
+            // data-theme selects the token set for the whole subtree
+            <main data-theme="dark">
+              <Button>Dark button</Button>
+            </main>
+          `)}
+          <p>Controls resolve their state colours from the nearest theme instead of computing light values on <code>:root</code>. A dark-themed ancestor therefore reaches buttons, editors, tables, dialogs, notifications, tooltips, and popup menus without component-specific palette overrides.</p>
+          <h3>Semantic colour roles</h3>
+          <ul>
+            <li><code>background</code>, <code>surface</code>, <code>surfaceAlt</code>, <code>surfaceElevated</code>, and <code>surfaceInset</code> separate the page, resting content, alternating rows, overlays, and inset chrome.</li>
+            <li><code>foreground</code> and <code>foregroundMuted</code> carry primary and secondary text.</li>
+            <li><code>border</code> and <code>borderSubtle</code> carry control outlines, dividers, and table rules.</li>
+            <li><code>hover</code>, <code>selection</code>, <code>focus</code>, <code>disabled</code>, and <code>disabledText</code> cover interactive states.</li>
+            <li><code>primary</code>, <code>danger</code>, and <code>success</code> keep their auto-computed contrast partners for filled accents.</li>
+          </ul>
+        </section>
+        <section>
           <h2>Interactive Demo</h2>
           <div style={{ display: 'grid', gap: '2rem', gridTemplateColumns: '300px 1fr' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -334,7 +371,7 @@ export class ThemeDocs extends DocumentationPage<State> {
           <p>The block below is filled from <code>getComputedStyle(document.documentElement)</code> on each paint, so it always matches the unnamed <code>&lt;Theme /&gt;</code> in <code>Layout</code> (defaults merged into <code>:root</code>).</p>
           {Code.format(this.current.rootThemeCss, 'scss')}
           <h3>Namespaced Themes</h3>
-          <p>When <code>name</code> is set, Theme emits <code>:root [data-theme="…"]</code> with the same variable names. Put <code>data-theme</code> on a subtree to apply that token set.</p>
+          <p>When <code>name</code> is set, Theme emits <code>:root [data-theme="…"]</code> with the same variable names. Put <code>data-theme</code> on a subtree to apply that token set. For the shipped palettes, prefer <code>&lt;Theme name="dark" &#123;...DARK_THEME&#125; /&gt;</code> over hand-written colour values so controls and overlays resolve the same semantic roles.</p>
           {Code.format(`
             .my-component {
               background-color: var(--basis-color-background);
@@ -344,7 +381,7 @@ export class ThemeDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2>Default Values</h2>
-          <p>JavaScript defaults are defined once in <code>libraries/react/components/Theme/Theme.tsx</code> as <code>DEFAULT_THEME</code>. Use the live CSS block above for resolved values in this app.</p>
+          <p>JavaScript defaults are defined once in <code>libraries/react/components/Theme/Theme.tsx</code> as <code>DEFAULT_THEME</code>, with <code>LIGHT_THEME</code> and <code>DARK_THEME</code> as the official presets. Use the live CSS block above for resolved values in this app.</p>
         </section>
         <section>
           <h2>Using Theme Variables in CSS</h2>

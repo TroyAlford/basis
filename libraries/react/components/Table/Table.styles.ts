@@ -2,19 +2,8 @@ import { Pin } from '../../types/Pin'
 import { css, style } from '../../utilities/style'
 
 style('basis:table', css`
-  :root {
-    --basis-table-border-color: #8888;
-    --basis-table-header-cell-background: var(--basis-color-primary);
-    --basis-table-header-cell-foreground: var(--basis-color-contrast);
-    --basis-table-header-row-z: 2;
-    --basis-table-row-background-even: #ddd;
-    --basis-table-row-background-odd: var(--basis-color-background);
-    --basis-table-row-height: 2em;
-    --basis-table-row-hover-color: var(--basis-color-primary);
-  }
-
   .table.editor.component {
-    border-color: var(--basis-table-border-color);
+    border-color: var(--basis-table-border-color, var(--basis-color-border-subtle));
     overflow: auto;
     padding: 0;
     position: relative;
@@ -25,16 +14,16 @@ style('basis:table', css`
       width: 100%;
 
       thead tr {
-        background-color: var(--basis-table-header-cell-background);
-        height: var(--basis-table-row-height);
+        background-color: var(--basis-table-header-cell-background, var(--basis-color-primary));
+        height: var(--basis-table-row-height, 2em);
         isolation: isolate;
         position: sticky;
         top: 0;
-        z-index: var(--basis-table-header-row-z);
+        z-index: var(--basis-table-header-row-z, 2);
       }
       
       th, td {
-        height: var(--basis-table-row-height);
+        height: var(--basis-table-row-height, 2em);
         &[data-pin="${Pin.Left}"], &[data-pin="${Pin.Right}"] {
           /*
            * Pinned cells inherit their row's background. The row backgrounds
@@ -45,27 +34,27 @@ style('basis:table', css`
       }
 
       tbody {
-        background-color: var(--basis-table-row-background-odd);
+        background-color: var(--basis-table-row-background-odd, var(--basis-color-surface));
 
         tr {
-          height: var(--basis-table-row-height);
+          height: var(--basis-table-row-height, 2em);
           position: relative;
 
           &:nth-child(odd) {
-            background-color: var(--basis-table-row-background-odd);
+            background-color: var(--basis-table-row-background-odd, var(--basis-color-surface));
           }
           &:nth-child(even) {
-            background-color: var(--basis-table-row-background-even);
+            background-color: var(--basis-table-row-background-even, var(--basis-color-surface-alt));
           }
 
           &:hover > :is(td, th):after {
-            background-color: var(--basis-table-row-hover-color);
+            background-color: var(--basis-table-row-hover-color, var(--basis-color-primary));
             content: '';
             inset: 0;
             opacity: 0.2;
             pointer-events: none;
             position: absolute;
-            z-index: var(--basis-table-header-row-z);
+            z-index: var(--basis-table-header-row-z, 2);
           }
         }
       }

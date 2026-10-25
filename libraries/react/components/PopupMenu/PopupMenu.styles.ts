@@ -12,8 +12,8 @@ style('basis:popup-menu', css`
   }
 
   .popup-menu.component {
-    background-color: var(--popup-menu-color-background, var(--basis-color-background));
-    border: 1px solid var(--popup-menu-color-border, var(--basis-color-foreground));
+    background-color: var(--popup-menu-color-background, var(--basis-color-surface-elevated));
+    border: 1px solid var(--popup-menu-color-border, var(--basis-color-border));
     border-radius: 4px;
     box-shadow: var(--basis-shadow-md);
     box-sizing: border-box;

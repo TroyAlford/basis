@@ -2,16 +2,11 @@ import { TextAlign } from '../../types/TextAlign'
 import { css, style } from '../../utilities/style'
 
 style('basis:table-cell', css`
-  :root {
-    --basis-table-cell-background: var(--basis-color-background);
-    --basis-table-cell-foreground: var(--basis-color-foreground);
-    --basis-table-cell-padding: 0 .5em;
-  }
-
   .table-cell.component {
-    color: var(--basis-table-cell-foreground);
+    background-color: var(--basis-table-cell-background, transparent);
+    color: var(--basis-table-cell-foreground, var(--basis-color-foreground));
     isolation: isolate;
-    padding: var(--basis-table-cell-padding);
+    padding: var(--basis-table-cell-padding, 0 .5em);
     white-space: nowrap;
 
     ${Object.values(TextAlign).map(align => (css`

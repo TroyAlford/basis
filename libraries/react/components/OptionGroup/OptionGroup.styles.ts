@@ -31,7 +31,7 @@ style('basis:option-group', css`
       transition: background-color 0.15s ease;
       
       &:hover {
-        background: var(--basis-color-background-hover);
+        background: var(--basis-color-hover);
       }
       
       &[data-disabled] {
