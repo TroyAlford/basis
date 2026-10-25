@@ -50,6 +50,20 @@ describe('testing/docs', () => {
     })
   }, 60_000)
 
+  test('captures table pinned columns and header actions at a narrow width', async () => {
+    await app.visit('/components/table', { ...NETWORK }, async page => {
+      const example = page.locator('[data-table-header-example]')
+      await example.waitFor()
+      await example.locator('.table.component').waitFor()
+      // Settle the code blocks above the example before measuring the capture.
+      await waitForHighlightedCode(page)
+      await page.waitForTimeout(100)
+      await matchScreenshot(example, 'narrow pinned header actions', {
+        maxDiffPixelRatio: 0.02,
+      })
+    })
+  }, 60_000)
+
   test('captures the icon grid', async () => {
     await app.visit('/icons', { ...NETWORK }, async page => {
       await page.waitForSelector('.icon-grid')

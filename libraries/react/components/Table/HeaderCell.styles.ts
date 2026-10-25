@@ -21,6 +21,13 @@ style('basis:table-header-cell', css`
       justify-content: space-between;
       padding: var(--basis-table-header-cell-padding);
 
+      > .header-content {
+        align-items: center;
+        display: flex;
+        flex: 1;
+        min-width: 0;
+      }
+
       > .title {
         flex: 1;
         overflow: hidden;
@@ -51,6 +58,15 @@ style('basis:table-header-cell', css`
     }
     &[data-align="${TextAlign.Right}"] > .content > .title {
       text-align: right;
+    }
+    &[data-align="${TextAlign.Center}"] > .content > .header-content {
+      justify-content: center;
+    }
+    &[data-align="${TextAlign.Left}"] > .content > .header-content {
+      justify-content: flex-start;
+    }
+    &[data-align="${TextAlign.Right}"] > .content > .header-content {
+      justify-content: flex-end;
     }
   }
 `)

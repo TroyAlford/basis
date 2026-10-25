@@ -2,6 +2,7 @@ import * as React from 'react'
 import type { PathOf } from '../../../utilities'
 import { Sort } from '../../icons/Sort'
 import { Pinnable } from '../../mixins/Pinnable'
+import { Keyboard } from '../../types/Keyboard'
 import type { Mixin } from '../../types/Mixin'
 import { SortBy } from '../../types/SortBy'
 import { SortDirection } from '../../types/SortDirection'
@@ -19,22 +20,39 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
   }
 
   get attributes() {
-    const { sortable } = this.current
+    const { headerContent, sortable, sortDirection } = this.current
     return {
       ...super.attributes,
+      'aria-label': headerContent === undefined || headerContent === null ? undefined : this.displayTitle,
+      'aria-sort': sortable ? this.ariaSort : undefined,
       'data-align': this.current.align,
       'data-field': this.current.field,
-      'data-sort-direction': this.current.sortDirection || undefined,
-      'data-sortable': this.current.sortable ? 'true' : 'false',
+      'data-sort-direction': sortDirection || undefined,
+      'data-sortable': sortable ? 'true' : 'false',
       'onClick': sortable ? this.handleSort : undefined,
+      'onKeyDown': this.handleSortKeyDown,
       'style': {
         minWidth: this.current.width ?? undefined,
         width: this.current.width ?? '100%',
       },
+      'tabIndex': sortable ? 0 : undefined,
     }
   }
 
   get tag(): keyof React.JSX.IntrinsicElements { return 'th' }
+
+  private get displayTitle(): string {
+    const { field, title } = this.current
+    return title || String(field)
+  }
+
+  private get ariaSort(): 'ascending' | 'descending' | 'none' {
+    switch (this.current.sortDirection) {
+      case SortDirection.Asc: return 'ascending'
+      case SortDirection.Desc: return 'descending'
+      default: return 'none'
+    }
+  }
 
   private handleSort = () => {
     const { sortable, sortDirection } = this.current
@@ -55,16 +73,55 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
     this.handleField(direction, 'sortDirection')
   }
 
+  /**
+   * Sort from the keyboard without letting an interactive control inside
+   * `headerContent` trigger the column's sort.
+   * @param event - The keydown event on the header cell.
+   */
+  private handleSortKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
+    this.props.onKeyDown?.(event)
+    if (event.defaultPrevented || !this.current.sortable) return
+    if (event.key !== Keyboard.Enter && event.key !== Keyboard.Space) return
+
+    event.preventDefault()
+    this.handleSort()
+  }
+
+  /**
+   * Keep pointer and keyboard events from an interactive header control out of
+   * the header cell's own sort handling.
+   * @param event - The event bubbling from the header content.
+   */
+  private stopHeaderContentPropagation = (event: React.SyntheticEvent): void => {
+    event.stopPropagation()
+  }
+
+  private get header(): React.ReactNode {
+    const { headerContent } = this.current
+    if (headerContent === undefined || headerContent === null) {
+      return <span className="title">{this.displayTitle}</span>
+    }
+
+    return (
+      <div
+        className="header-content"
+        onClick={this.stopHeaderContentPropagation}
+        onKeyDown={this.stopHeaderContentPropagation}
+      >
+        {headerContent}
+      </div>
+    )
+  }
+
   content(): React.ReactNode {
-    const { field, sortable, sortDirection, title } = this.current
-    const displayTitle = title || String(field)
+    const { sortable, sortDirection } = this.current
 
     return super.content(
       <div className="content">
-        <span className="title">{displayTitle}</span>
+        {this.header}
         {sortable && (
           <Sort
-            aria-label={`Sort by ${displayTitle}`}
+            aria-label={`Sort by ${this.displayTitle}`}
             direction={sortDirection || undefined}
             sortBy={sortDirection ? this.sortBy : SortBy.None}
           />

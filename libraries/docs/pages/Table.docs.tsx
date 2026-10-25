@@ -2,6 +2,7 @@ import { faker } from '@faker-js/faker'
 import { Pin, Section, SortDirection, TextAlign, TypedTable } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
+import { TableHeaderExample } from '../components/TableHeaderExample'
 
 faker.seed(42)
 
@@ -186,6 +187,25 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             </Table>
           `)}
         </Section>
+        <Section title="Custom Header Content">
+          <p>Use <code>headerContent</code> to render React content in a column header, such as an accessible checkbox or an action. The column <code>title</code> remains its accessible name and its sort label. Interactive header content is isolated from the column&#39;s sort click, so a checkbox or button inside the header never changes the sort.</p>
+          <p>The owning component controls the control&#39;s <code>checked</code>, <code>indeterminate</code> and <code>disabled</code> state. The example below renders an indeterminate checkbox until every task is complete, and disables the notes action when no row has notes. Both header controls live in pinned columns; scroll the table horizontally to see the pinned edges.</p>
+          <TableHeaderExample />
+          {Code.format(`
+            {Column.Boolean({
+              field: 'complete',
+              title: 'Done',
+              headerContent: (
+                <CheckboxEditor
+                  label="Mark all tasks complete"
+                  value={completeState}  // true, false, or null (indeterminate)
+                  onChange={handleAllComplete}
+                />
+              ),
+            })}
+          `)}
+          <p>Any React content works, including native controls. A plain input keeps its own keyboard behavior and does not need to import a Basis component; clicks and keydowns inside the slot never bubble to the header&#39;s sort handler.</p>
+        </Section>
         <Section title="API Reference">
           <h4>Table Props</h4>
           <ul>
@@ -199,6 +219,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             <li><code>align?: TextAlign</code> - Text alignment (Left, Right, Center)</li>
             <li><code>enum?: Record&lt;string, string | number&gt;</code> - Enum options for Enum columns</li>
             <li><code>field: PathOf&lt;T&gt;</code> - Path to the data field (supports dot notation)</li>
+            <li><code>headerContent?: ReactNode</code> - Declarative header content, replacing the title text; <code>title</code> remains the accessible name</li>
             <li><code>pin?: Pin</code> - Column pinning position (Left, Right, Unpinned)</li>
             <li><code>sortable?: boolean</code> - Whether the column is sortable (default: true)</li>
             <li><code>title?: string</code> - Column header text (defaults to field name)</li>

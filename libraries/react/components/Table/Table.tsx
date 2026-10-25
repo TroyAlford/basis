@@ -54,6 +54,8 @@ export class Table<T extends object = { id: string }>
   static getDerivedStateFromProps<T extends object>(nextProps: Props<T>, prevState: State<T>): State<T> {
     // Recompute definitions if children changed
     if (nextProps.children !== prevState.prevChildren) {
+      const previousDefinitions = prevState.definitions ?? new Map<PathOf<T>, ColumnProps<T, PathOf<T>>>()
+      const states = new Map(prevState.states ?? new Map<PathOf<T>, Partial<ColumnProps<T, PathOf<T>>>>())
       const definitions = new Map<PathOf<T>, ColumnProps<T, PathOf<T>>>()
 
       React.Children.toArray(nextProps.children)
@@ -72,14 +74,30 @@ export class Table<T extends object = { id: string }>
           const { field } = definition
 
           definitions.set(field, definition)
-          if (!prevState.states?.has(field)) {
-            prevState.states.set(field, { ...definition })
-          }
+          const previous = previousDefinitions.get(field)
+          const current = states.get(field)
+
+          /*
+           * Sorting is table state, so a rerender preserves it while the
+           * consumer's declaration is unchanged. When the consumer declares a
+           * new sort direction, that declaration wins.
+           */
+          const sortDirection = previous && current && definition.sortDirection === previous.sortDirection
+            ? current.sortDirection
+            : definition.sortDirection
+
+          states.set(field, { ...definition, sortDirection })
         })
+
+      // Drop state for columns the consumer removed.
+      for (const field of states.keys()) {
+        if (!definitions.has(field)) states.delete(field)
+      }
 
       return {
         definitions,
         prevChildren: nextProps.children,
+        states,
       }
     }
 
