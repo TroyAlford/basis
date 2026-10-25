@@ -71,6 +71,7 @@ export class TableHeaderExample extends Component<Record<string, never>, HTMLDiv
           {Column.Boolean({
             field: 'complete',
             pin: Pin.Left,
+            sortable: true,
             title: (
               <>
                 <span>Done</span>
@@ -88,6 +89,7 @@ export class TableHeaderExample extends Component<Record<string, never>, HTMLDiv
           {Column.Text({
             field: 'notes',
             pin: Pin.Right,
+            sortable: true,
             title: (
               <>
                 <span>Notes</span>

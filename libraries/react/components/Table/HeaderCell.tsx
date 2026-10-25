@@ -120,8 +120,11 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
       direction = null
     }
 
-    // @ts-expect-error - some error in TypeAt? Not sure yet
-    this.handleField(direction, 'sortDirection')
+    /*
+     * Update only the sort declaration. `Editor.handleField` deep-clones the
+     * editor value, which must not walk arbitrary React content in a title.
+     */
+    void this.handleChange({ ...this.current, sortDirection: direction })
   }
 
   /**
