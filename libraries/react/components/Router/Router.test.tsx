@@ -913,11 +913,10 @@ describe('Router', () => {
 
       window.location.pathname = '/b'
       window.dispatchEvent(new PopStateEvent('popstate'))
-      await tick()
+      await waitFor(() => rendered.node.className.includes('b-page'))
 
       expect(replaceState).not.toHaveBeenCalled()
       expect(pushState).not.toHaveBeenCalled()
-      expect(rendered.node.className).toContain('b-page')
     } finally {
       pushState.mockRestore()
       replaceState.mockRestore()

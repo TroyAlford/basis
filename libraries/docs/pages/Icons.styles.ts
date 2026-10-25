@@ -9,8 +9,8 @@ style('basis:docs:icons', css`
   }
   .icons-docs {
     .controls-grid {
-      background-color: #f8f9fa;
-      border: 1px solid #e9ecef;
+      background-color: var(--basis-color-surface-muted);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 8px;
       display: grid;
       gap: 16px;
@@ -26,7 +26,7 @@ style('basis:docs:icons', css`
     }
 
     .color-input {
-      border: 1px solid #ced4da;
+      border: 1px solid var(--basis-color-border);
       border-radius: 4px;
       cursor: pointer;
       height: 32px;
@@ -34,8 +34,8 @@ style('basis:docs:icons', css`
     }
 
     .icon-grid {
-      background-color: #f8f9fa;
-      border: 1px solid #e9ecef;
+      background-color: var(--basis-color-surface-muted);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 8px;
       display: grid;
       gap: 16px;
@@ -45,8 +45,8 @@ style('basis:docs:icons', css`
 
     .icon-item {
       align-items: center;
-      background-color: white;
-      border: 1px solid #dee2e6;
+      background-color: var(--basis-color-surface);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 6px;
       cursor: pointer;
       display: flex;
@@ -55,17 +55,17 @@ style('basis:docs:icons', css`
       transition: all 0.2s ease;
 
       > .icon-demo-container {
-        background-color: #ccc;
+        background-color: var(--basis-color-surface-alt);
       }
 
       &:hover {
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        box-shadow: var(--basis-shadow-md);
         transform: translateY(-2px);
       }
     }
 
     .icon-name {
-      color: #6c757d;
+      color: var(--basis-color-foreground-muted);
       font-size: 12px;
       margin-top: 8px;
       text-align: center;
@@ -73,8 +73,8 @@ style('basis:docs:icons', css`
     }
 
     .special-icons-grid {
-      background-color: #f8f9fa;
-      border: 1px solid #e9ecef;
+      background-color: var(--basis-color-surface-muted);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 8px;
       display: grid;
       gap: 16px;
@@ -84,8 +84,8 @@ style('basis:docs:icons', css`
 
     .special-icon-item {
       align-items: center;
-      background-color: white;
-      border: 1px solid #dee2e6;
+      background-color: var(--basis-color-surface);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 6px;
       display: flex;
       flex-direction: column;
@@ -93,15 +93,15 @@ style('basis:docs:icons', css`
     }
 
     .special-icon-name {
-      color: #6c757d;
+      color: var(--basis-color-foreground-muted);
       font-size: 12px;
       margin-top: 8px;
       text-align: center;
     }
 
     .moon-controls-grid {
-      background-color: #f8f9fa;
-      border: 1px solid #e9ecef;
+      background-color: var(--basis-color-surface-muted);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 8px;
       display: grid;
       gap: 16px;
@@ -111,8 +111,8 @@ style('basis:docs:icons', css`
     }
 
     .moon-phase-section {
-      background-color: #f8f9fa;
-      border: 1px solid #e9ecef;
+      background-color: var(--basis-color-surface-muted);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 8px;
       display: grid;
       gap: 24px;
@@ -140,23 +140,23 @@ style('basis:docs:icons', css`
     .moon-demo-container {
       --basis-icon-color: var(--demo-icon-color, currentColor);
       --basis-icon-size: 120px;
-      background-color: white;
-      border: 1px solid #dee2e6;
+      background-color: var(--basis-color-surface);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 50%;
       margin-bottom: 16px;
       padding: 20px;
     }
 
     .moon-phase-name {
-      color: #6c757d;
+      color: var(--basis-color-foreground-muted);
       font-size: 14px;
       font-weight: 500;
       text-align: center;
     }
 
     .overlay-section {
-      background-color: #f8f9fa;
-      border: 1px solid #e9ecef;
+      background-color: var(--basis-color-surface-muted);
+      border: 1px solid var(--basis-color-border-subtle);
       border-radius: 8px;
       display: flex;
       flex-direction: column;
@@ -178,8 +178,8 @@ style('basis:docs:icons', css`
 
       > .overlay-demo-container {
         align-items: center;
-        background-color: white;
-        border: 1px solid #dee2e6;
+        background-color: var(--basis-color-surface);
+        border: 1px solid var(--basis-color-border-subtle);
         border-radius: 6px;
         display: flex;
         justify-content: center;

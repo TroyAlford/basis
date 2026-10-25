@@ -4,8 +4,8 @@ import { css, style } from '../../utilities/style'
 style('basis:notification', css`
   .notification.component {
     align-items: center;
-    background-color: var(--basis-color-background);
-    border: 1px solid var(--basis-color-foreground);
+    background-color: var(--basis-color-surface-elevated);
+    border: 1px solid var(--basis-color-border);
     border-radius: 0.25em;
     color: var(--basis-color-foreground);
     display: flex;

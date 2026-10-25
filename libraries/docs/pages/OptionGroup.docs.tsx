@@ -108,8 +108,8 @@ export class OptionGroupDocs extends DocumentationPage<State> {
               <div>
                 <strong>Current Selection</strong>
                 <div style={{
-                  background: '#f8f9fa',
-                  border: '1px solid #dee2e6',
+                  background: 'var(--basis-color-surface-muted)',
+                  border: '1px solid var(--basis-color-border-subtle)',
                   borderRadius: '4px',
                   fontSize: '0.875rem',
                   padding: '0.5rem',
@@ -122,7 +122,7 @@ export class OptionGroupDocs extends DocumentationPage<State> {
               </div>
             </div>
             {/* Demo Area */}
-            <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '1rem' }}>
+            <div style={{ border: '1px solid var(--basis-color-border-subtle)', borderRadius: '4px', padding: '1rem' }}>
               <h3>Live OptionGroup</h3>
               <OptionGroup
                 field="selectedValue"

@@ -60,8 +60,8 @@ export class ImageDocs extends DocumentationPage<State> {
                 </select>
               </div>
               <div style={{
-                backgroundColor: '#f8f9fa',
-                border: '1px solid #dee2e6',
+                backgroundColor: 'var(--basis-color-surface-muted)',
+                border: '1px solid var(--basis-color-border-subtle)',
                 borderRadius: '4px',
                 fontSize: '0.875rem',
                 padding: '1rem',
@@ -76,8 +76,8 @@ export class ImageDocs extends DocumentationPage<State> {
             <div>
               <h4>Image Preview</h4>
               <div style={{
-                backgroundColor: '#f8f8f8',
-                border: '2px solid #e0e0e0',
+                backgroundColor: 'var(--basis-color-surface-muted)',
+                border: '2px solid var(--basis-color-border-subtle)',
                 height: '300px',
                 position: 'relative',
                 width: '100%',

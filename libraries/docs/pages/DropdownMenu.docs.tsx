@@ -67,7 +67,7 @@ export class DropdownMenuDocs extends DocumentationPage<State> {
               </div>
             </div>
             {/* Demo Area */}
-            <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '2rem', textAlign: 'center' }}>
+            <div style={{ border: '1px solid var(--basis-color-border-subtle)', borderRadius: '4px', padding: '2rem', textAlign: 'center' }}>
               <div style={{ display: 'inline-block', position: 'relative' }}>
                 <DropdownMenu
                   anchorPoint={this.current.anchorPoint}

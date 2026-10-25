@@ -55,7 +55,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
         <h1>Table</h1>
         <Section title="Interactive Demo">
           <p>The Table component provides a flexible, type-safe way to display tabular data. Built on the Component base class, it offers excellent TypeScript ergonomics with strongly-typed columns and automatic field validation.</p>
-          <div style={{ border: '1px solid #ddd', borderRadius: '4px', overflow: 'hidden' }}>
+          <div style={{ border: '1px solid var(--basis-color-border-subtle)', borderRadius: '4px', overflow: 'hidden' }}>
             <UserTable data={this.users} />
           </div>
         </Section>

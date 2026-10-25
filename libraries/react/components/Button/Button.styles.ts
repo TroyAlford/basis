@@ -1,26 +1,13 @@
 import { css, style } from '../../utilities/style'
 
 style('basis:button', css`
-  :root {
-    --basis-button-background: var(--basis-color-background);
-    --basis-button-background-disabled: var(--basis-color-disabled);
-    --basis-button-background-focus: rgb(from var(--basis-color-primary) r g b / 0.5);
-    --basis-button-background-hover: rgb(from var(--basis-color-primary) r g b / 0.25);
-    --basis-button-border: 1px solid var(--basis-button-border-color);
-    --basis-button-border-color: var(--basis-color-foreground);
-    --basis-button-foreground: var(--basis-color-foreground);
-    --basis-button-foreground-disabled: var(--basis-color-disabled-text);
-    --basis-button-shadow: 0 0 0 3px var(--basis-button-shadow-color);
-    --basis-button-shadow-color: var(--basis-color-primary);
-  }
-
   .button.component {
     align-items: center;
     appearance: none;
-    background-color: var(--basis-button-background);
-    border: var(--basis-button-border);
+    background-color: var(--basis-button-background, var(--basis-color-surface));
+    border: var(--basis-button-border, 1px solid var(--basis-button-border-color, var(--basis-color-border)));
     border-radius: var(--basis-radius-sm);
-    color: var(--basis-button-foreground);
+    color: var(--basis-button-foreground, var(--basis-color-foreground));
     cursor: pointer;
     display: inline-flex;
     font-family: inherit;
@@ -34,20 +21,25 @@ style('basis:button', css`
     white-space: nowrap;
 
     &:hover:not(:disabled) {
-      background-color: var(--basis-button-background-hover);
+      background-color: var(--basis-button-background-hover, var(--basis-color-hover));
     }
 
     &:focus {
-      background-color: var(--basis-button-background-focus);
-      border-color: var(--basis-color-primary);
+      background-color: var(--basis-button-background-focus, var(--basis-color-selection));
+      border-color: var(--basis-button-border-color, var(--basis-color-focus));
       outline: none;
     }
 
+    &[aria-pressed="true"], &[aria-selected="true"] {
+      background-color: var(--basis-button-background-selected, var(--basis-color-selection));
+      border-color: var(--basis-button-border-color, var(--basis-color-focus));
+    }
+
     &:disabled, &[disabled] {
-      background-color: var(--basis-button-background-disabled);
-      color: var(--basis-button-foreground-disabled);
+      background-color: var(--basis-button-background-disabled, var(--basis-color-disabled));
+      color: var(--basis-button-foreground-disabled, var(--basis-color-disabled-text));
       cursor: not-allowed;
       pointer-events: none;
     }
-  } 
+  }
 `)

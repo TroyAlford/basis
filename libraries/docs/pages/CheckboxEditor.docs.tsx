@@ -55,7 +55,7 @@ export class CheckboxEditorDocs extends DocumentationPage<State> {
             </div>
             {/* Demo Area */}
             <div style={{
-              border: '1px solid #ccc',
+              border: '1px solid var(--basis-color-border-subtle)',
               borderRadius: '.25em',
               display: 'flex',
               justifyContent: 'center',

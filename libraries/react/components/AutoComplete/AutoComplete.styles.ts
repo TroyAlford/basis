@@ -16,7 +16,7 @@ style('basis:auto-complete', css`
     }
 
     > .text-editor {
-      background-color: var(--basis-auto-complete-background, var(--basis-color-background));
+      background-color: var(--basis-auto-complete-background, var(--basis-color-surface));
     }
 
     > .popup-menu.menu.component {
@@ -36,7 +36,7 @@ style('basis:auto-complete', css`
 
         &:hover {
           background-color: var(--basis-color-primary);
-          color: var(--basis-color-primary-contrast);
+          color: var(--basis-color-contrast);
         }
 
         &[disabled], &[disabled]:hover {
@@ -60,12 +60,12 @@ style('basis:auto-complete', css`
       }
 
       > [data-state="${AutoCompleteStatus.Error}"] {
-        color: var(--basis-color-error);
+        color: var(--basis-color-danger);
       }
 
       > [data-state="${AutoCompleteStatus.NotFound}"] {
-        color: var(--basis-color-foreground);
-        opacity: 0.7;
+        color: var(--basis-color-foreground-muted);
+        opacity: 1;
       }
     }
   }

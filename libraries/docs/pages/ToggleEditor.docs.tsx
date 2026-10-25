@@ -81,8 +81,8 @@ export class ToggleEditorDocs extends DocumentationPage<State> {
               <div>
                 <strong>Current Value</strong>
                 <div style={{
-                  background: '#f8f9fa',
-                  border: '1px solid #dee2e6',
+                  background: 'var(--basis-color-surface-muted)',
+                  border: '1px solid var(--basis-color-border-subtle)',
                   borderRadius: '4px',
                   fontSize: '0.875rem',
                   padding: '0.5rem',
@@ -93,7 +93,7 @@ export class ToggleEditorDocs extends DocumentationPage<State> {
               </div>
             </div>
             {/* Demo Area */}
-            <div style={{ border: '1px solid #ccc', borderRadius: '4px', padding: '1rem' }}>
+            <div style={{ border: '1px solid var(--basis-color-border-subtle)', borderRadius: '4px', padding: '1rem' }}>
               <h3>Live ToggleEditor</h3>
               <ToggleEditor
                 aria-label="Demo toggle"
@@ -202,11 +202,12 @@ export class ToggleEditorDocs extends DocumentationPage<State> {
         <Section title="Styling & Theming">
           <p>ToggleEditor uses CSS custom properties for theming. All styles are prefixed with <code>--basis-toggle-*</code> and can be customized:</p>
           {Code.format(`
-            :root {
-              --basis-toggle-background: transparent;
-              --basis-toggle-background-hover: var(--basis-color-background-hover);
+            .toggle.editor {
+              --basis-toggle-background: var(--basis-color-surface);
+              --basis-toggle-background-hover: var(--basis-color-hover);
+              --basis-toggle-border-color: var(--basis-color-border-subtle);
               --basis-toggle-border-radius: var(--basis-radius-sm);
-              --basis-color-primary: #007bff;
+              --basis-toggle-foreground: var(--basis-color-foreground);
             }
           `)}
           <p>This allows for easy customization while maintaining consistency with your design system.</p>

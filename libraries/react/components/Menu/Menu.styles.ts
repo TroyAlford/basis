@@ -4,6 +4,7 @@ import { css, style } from '../../utilities/style'
 // Base Menu styles for inline menus
 style('basis:menu', css`
   .menu.component {
+    color: var(--basis-color-foreground);
     display: flex;
     list-style: none;
     margin: 0;
@@ -20,6 +21,8 @@ style('basis:menu', css`
 
     > .menu-item.component {
       align-items: center;
+      background-color: transparent;
+      color: inherit;
       cursor: pointer;
       display: inline-flex;
       flex-direction: row;
@@ -35,8 +38,16 @@ style('basis:menu', css`
         cursor: default;
       }
 
-      &:focus {
-        outline: 1px solid var(--basis-color-primary);
+      &:hover:not([disabled]) {
+        background-color: var(--basis-color-hover);
+      }
+
+      &[aria-selected="true"] {
+        background-color: var(--basis-color-selection);
+      }
+
+      &:focus-visible {
+        outline: 1px solid var(--basis-color-focus);
         outline-offset: -1px;
       }
     }

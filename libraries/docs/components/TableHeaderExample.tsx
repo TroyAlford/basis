@@ -66,7 +66,7 @@ export class TableHeaderExample extends Component<Record<string, never>, HTMLDiv
       <div
         data-table-header-example
         style={{
-          border: '1px solid #ddd',
+          border: '1px solid var(--basis-color-border-subtle)',
           borderRadius: '4px',
           maxWidth: '100%',
           overflow: 'hidden',

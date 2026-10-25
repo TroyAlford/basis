@@ -13,17 +13,33 @@ style('basis:documentation', css`
     overflow: hidden;
     width: 100vw;
     > nav.links {
-      background: #eee;
-      border-right: 1px solid #e9ecef;
+      background: var(--basis-color-surface-muted);
+      border-right: 1px solid var(--basis-color-border-subtle);
+      color: var(--basis-color-foreground);
+      display: flex;
+      flex-direction: column;
       grid-area: nav;
-      overflow-y: auto;
+      overflow: hidden;
       width: 200px;
       > h1 {
-        background-color: var(--basis-color-foreground);
-        color: var(--basis-color-background);
+        align-items: center;
+        background-color: var(--basis-color-surface);
+        border-bottom: 1px solid var(--basis-color-border-subtle);
+        color: var(--basis-color-foreground);
+        display: flex;
+        flex: 0 0 auto;
         font-size: var(--basis-font-size-xxl);
+        gap: var(--basis-unit-sm);
         margin: 0;
         padding: var(--basis-unit-md);
+        > svg {
+          flex: 0 0 auto;
+        }
+      }
+      > .entries {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
       }
       li {
         > a {
@@ -31,6 +47,9 @@ style('basis:documentation', css`
           display: block;
           padding: var(--basis-unit-sm) var(--basis-unit-md);
           text-decoration: none;
+          &:hover {
+            background-color: var(--basis-color-hover);
+          }
           &[data-active='true'] {
             background-color: var(--basis-color-background);
             color: var(--basis-color-primary);
@@ -56,7 +75,7 @@ style('basis:documentation', css`
         border-bottom: 2px solid var(--basis-color-primary);
       }
       code {
-        color: green;
+        color: var(--basis-color-success);
         font-family: 'Fira Code', monospace;
         font-variant-ligatures: contextual;
         font-weight: 500;
@@ -70,9 +89,18 @@ style('basis:documentation', css`
           margin-bottom: 0;
         }
       }
+      select, input:not(.value):not([type='checkbox']):not([type='radio']):not([type='range']) {
+        background-color: var(--basis-color-surface);
+        border: 1px solid var(--basis-color-border);
+        border-radius: var(--basis-radius-sm);
+        color: var(--basis-color-foreground);
+      }
       select {
         padding: 0.5rem;
         width: 100%;
+      }
+      input:not(.value):not([type='checkbox']):not([type='radio']):not([type='range']) {
+        padding: .25em .5em;
       }
       ul {
         list-style: disc;

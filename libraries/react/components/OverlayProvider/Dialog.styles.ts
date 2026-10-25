@@ -3,8 +3,8 @@ import { css, style } from '../../utilities/style'
 
 style('basis:dialog', css`
   .dialog.component {
-    background-color: var(--basis-color-background);
-    border: 1px solid var(--basis-color-foreground);
+    background-color: var(--basis-color-surface-elevated);
+    border: 1px solid var(--basis-color-border);
     border-radius: 0.5em;
     color: var(--basis-color-foreground);
     display: flex;
