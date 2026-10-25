@@ -152,7 +152,7 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
     }
 
     expect(() => Dialog.editor(
-      NotAnEditor,
+      NotAnEditor as unknown as typeof TestEditor,
       { id: 0 },
       { props: { label: 'Invalid' } },
     )).toThrow('Dialog.editor: expected an Editor subclass constructor')

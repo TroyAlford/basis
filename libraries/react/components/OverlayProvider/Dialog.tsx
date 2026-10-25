@@ -7,6 +7,7 @@ import { Intent } from '../../types/Intent'
 import { Keyboard } from '../../types/Keyboard'
 import { Button } from '../Button/Button'
 import { Component } from '../Component/Component'
+import type { editorClassBrand } from '../Editor/Editor'
 import { Editor } from '../Editor/Editor'
 import { dialogDefaultButtonIndex } from './DialogKeyboard.ts'
 import type { OverlayLifecycle } from './OverlayLifecycle'
@@ -67,13 +68,30 @@ export interface DialogHandle<T> extends Promise<T | false> {
   update(options: Partial<DialogOptions<T>>): void,
 }
 
-/** Editor props accepted when opening an editor dialog (the value comes positionally). */
-export type DialogEditorInitialProps<Props extends object = object> =
-  Partial<Omit<Props, 'initialValue' | 'value'>>
+/**
+ * Type-only constructor constraint for concrete editor classes. The editor brand and public
+ * `current`/`props` members give the constraint editor-specific identity without expanding
+ * `Editor`'s generic type arguments, which exceeds TypeScript's instantiation depth.
+ */
+type EditorClass = new (...args: never[]) => {
+  readonly current: unknown,
+  readonly [editorClassBrand]: true,
+  readonly props: object,
+}
 
-/** Editor props accepted by a handle update, including a deliberate `value` patch. */
-export type DialogEditorUpdateProps<Props extends object = object> =
-  Partial<Omit<Props, 'initialValue'>>
+/** The full value type carried by an `Editor<T>` subclass constructor. */
+export type EditorValueOf<C extends EditorClass> = InstanceType<C>['current']
+
+/** The React props declared by an `Editor<T>` subclass constructor. */
+export type EditorPropsOf<C extends EditorClass> = InstanceType<C>['props']
+
+/** Editor props accepted when opening an editor dialog (the value comes positionally). */
+export type DialogEditorInitialProps<C extends EditorClass> =
+  Partial<Omit<EditorPropsOf<C>, 'value' | 'initialValue'>>
+
+/** Editor props accepted by a handle update, including a deliberate full `value` patch. */
+export type DialogEditorUpdateProps<C extends EditorClass> =
+  Partial<Omit<EditorPropsOf<C>, 'initialValue'>>
 
 /** Options accepted by {@link Dialog.editor}. */
 export interface DialogEditorOptions<Value, Props extends object = object> extends OverlayLifecycle<Value> {
@@ -84,44 +102,51 @@ export interface DialogEditorOptions<Value, Props extends object = object> exten
   /** Dialog shell intent. Defaults to {@link Intent.Primary}. */
   intent?: Intent,
   /** Initial editor props. The value comes from the positional `initialValue` argument. */
-  props?: DialogEditorInitialProps<Props>,
+  props?: Props,
   /** Shell style. */
   style?: CSSProperties,
   /** Dialog title. */
   title?: ReactNode,
 }
 
-/** Update options for an editor dialog handle; editor replacement is not permitted. */
-export interface DialogEditorUpdate<Value, Props extends object = object>
-  extends Partial<Omit<DialogEditorOptions<Value, Props>, 'props'>> {
-  /** Partial editor prop patch. `value` deliberately replaces the working value. */
-  props?: DialogEditorUpdateProps<Props>,
-}
+/**
+ * Update options for an editor dialog handle. Shell/lifecycle options are allowed; replacing
+ * the editor content, constructor, or initial baseline is forbidden.
+ */
+export type DialogEditorUpdate<C extends EditorClass> =
+  Pick<
+    Partial<DialogOptions<EditorValueOf<C>>>,
+    | 'buttons'
+    | 'className'
+    | 'icon'
+    | 'intent'
+    | 'onDismissed'
+    | 'onDismissing'
+    | 'onError'
+    | 'onResolved'
+    | 'onResolving'
+    | 'style'
+    | 'title'
+  >
+  & {
+    /** Editor content cannot be replaced through the handle. */
+    content?: never,
+    /** The editor constructor cannot be replaced through the handle. */
+    editor?: never,
+    /** Partial editor prop patch. A full `value` deliberately replaces the working value. */
+    props?: DialogEditorUpdateProps<C>,
+  }
 
-/** Public handle returned by {@link Dialog.editor}. */
-export interface DialogEditorHandle<Value, Props extends object = object> extends Promise<Value | false> {
-  /** Abandon the dialog through the editor's dirty guard and the shared dismissal guard. */
-  dismiss(): Promise<boolean>,
-  /** Stable identity for the mounted dialog row. */
-  readonly id: string,
-  /** Complete the dialog with an explicit typed value. */
-  resolve(value: Value): Promise<boolean>,
-  /** Patch editor shell options or typed editor props without replacing the editor. */
-  update(options: DialogEditorUpdate<Value, Props>): void,
-}
-
-type EditorInstance<Constructor> =
-  Constructor extends new (...args: never[]) => infer Instance ? Instance : never
-
-/** The value type carried by an `Editor<T>` subclass constructor. */
-export type EditorValueOf<Constructor> =
-  EditorInstance<Constructor> extends { current: infer Value } ? Value : never
-
-/** The props declared by an `Editor<T>` subclass constructor. */
-export type EditorPropsOf<Constructor> =
-  EditorInstance<Constructor> extends { props: infer Props }
-    ? Props extends object ? Props : object
-    : object
+/**
+ * Public handle returned by {@link Dialog.editor}: the same native Promise-backed handle,
+ * with the unrestricted dialog `update` replaced by the editor-specific contract.
+ */
+export type DialogEditorHandle<C extends EditorClass> =
+  Omit<DialogHandle<EditorValueOf<C>>, 'update'>
+  & {
+    /** Patch editor shell options or typed editor props without replacing the editor. */
+    update(options: DialogEditorUpdate<C>): void,
+  }
 
 /** A runtime-only view of the editor state shared by {@link Dialog.editor} and the provider. */
 export class DialogEditorState<Value = unknown> {
@@ -231,6 +256,78 @@ function defaultButtons<T>(): DialogButton<T>[] {
     { intent: Intent.Default, label: 'Cancel', value: false },
     { intent: Intent.Primary, label: 'OK', value: true },
   ] as DialogButton<T>[]
+}
+
+/**
+ * Register an editor dialog through the shared provider lifecycle.
+ * @param EditorComponent - Editor subclass (validated with {@link Editor.isEditor}).
+ * @param initialValue - Shallow partial starting value and dirty baseline.
+ * @param options - Shell options and initial typed editor props.
+ * @returns An awaitable editor handle with restricted updates.
+ */
+function openEditorDialog<C extends EditorClass>(
+  EditorComponent: C,
+  initialValue: NoInfer<Partial<EditorValueOf<C>>>,
+  options: DialogEditorOptions<EditorValueOf<C>, DialogEditorInitialProps<C>> = {},
+): DialogEditorHandle<C> {
+  if (typeof window === 'undefined' || !window.overlayProvider) throw new Error(REQUIRED_MESSAGE)
+  const provider = window.overlayProvider
+
+  if (!Editor.isEditor(EditorComponent)) {
+    throw new Error('Dialog.editor: expected an Editor subclass constructor')
+  }
+
+  type Value = EditorValueOf<C>
+
+  const {
+    className,
+    icon,
+    intent = Intent.Primary,
+    onDismissed,
+    onDismissing,
+    onError,
+    onResolved,
+    onResolving,
+    props: initialProps = {} as DialogEditorInitialProps<C>,
+    style,
+    title,
+  } = options
+
+  /*
+   * `initialize` is the editor's explicit completion contract. The base contract passes the
+   * shallow partial through unchanged; editors with required fields override it.
+   */
+  const initialize = (EditorComponent as unknown as {
+    initialize: (value: Partial<Value>) => Value,
+  }).initialize
+  const baseline = initialize.call(EditorComponent, initialValue)
+
+  const editor = new DialogEditorState<Value>(
+    EditorComponent as unknown as new (...args: never[]) => { current: Value },
+    baseline,
+    initialProps as Record<string, unknown>,
+  )
+
+  const handle = provider.openDialog<Value>({
+    buttons: [
+      { intent, label: 'OK', resolve: () => editor.value },
+      { intent: Intent.Default, label: 'Cancel', value: false as Value },
+    ],
+    className,
+    content: null,
+    editor,
+    icon,
+    intent,
+    onDismissed,
+    onDismissing,
+    onError,
+    onResolved,
+    onResolving,
+    style,
+    title,
+  })
+
+  return handle as unknown as DialogEditorHandle<C>
 }
 
 /**
@@ -356,68 +453,21 @@ export class Dialog extends Component<Props<unknown>, HTMLDialogElement> {
   }
 
   /**
-   * Open a dialog whose body is an {@link Editor} subclass. `T` is inferred from the editor
-   * constructor, never from `initialValue`. The editor's dirty state is guarded by default.
+   * Open a dialog whose body is an {@link Editor} subclass. `T` is inferred only from the
+   * concrete editor constructor, including inherited subclasses, never from `initialValue`.
+   * The editor's explicit `initialize` contract completes shallow partial input, and its dirty
+   * state is guarded by default.
    * @param EditorComponent - Editor subclass (validated with {@link Editor.isEditor}).
-   * @param initialValue - Starting editor value and dirty baseline.
+   * @param initialValue - Shallow partial starting value and dirty baseline.
    * @param options - Shell options and initial typed editor props.
    * @returns An awaitable editor handle with restricted updates.
    */
-  static editor<Constructor extends new (
-    ...args: never[]) => object>(
-    EditorComponent: Constructor,
-    initialValue: NoInfer<EditorValueOf<Constructor>>,
-    options: DialogEditorOptions<EditorValueOf<Constructor>, EditorPropsOf<Constructor>> = {},
-  ): DialogEditorHandle<EditorValueOf<Constructor>, EditorPropsOf<Constructor>> {
-    const provider = Dialog.provider()
-
-    if (!Editor.isEditor(EditorComponent)) {
-      throw new Error('Dialog.editor: expected an Editor subclass constructor')
-    }
-
-    type Value = EditorValueOf<Constructor>
-    type EditorProperties = EditorPropsOf<Constructor>
-
-    const {
-      className,
-      icon,
-      intent = Dialog.Intent.Primary,
-      onDismissed,
-      onDismissing,
-      onError,
-      onResolved,
-      onResolving,
-      props: initialProps = {} as DialogEditorInitialProps<EditorProperties>,
-      style,
-      title,
-    } = options
-
-    const editor = new DialogEditorState<Value>(
-      EditorComponent as unknown as new (...args: never[]) => { current: Value },
-      initialValue as Value,
-      initialProps as Record<string, unknown>,
-    )
-
-    const handle = provider.openDialog<Value>({
-      buttons: [
-        { intent, label: 'OK', resolve: () => editor.value },
-        { intent: Dialog.Intent.Default, label: 'Cancel', value: false as Value },
-      ],
-      className,
-      content: null,
-      editor,
-      icon,
-      intent,
-      onDismissed,
-      onDismissing,
-      onError,
-      onResolved,
-      onResolving,
-      style,
-      title,
-    })
-
-    return handle as unknown as DialogEditorHandle<Value, EditorProperties>
+  static editor<C extends EditorClass>(
+    EditorComponent: C,
+    initialValue: NoInfer<Partial<EditorValueOf<C>>>,
+    options: DialogEditorOptions<EditorValueOf<C>, DialogEditorInitialProps<C>> = {},
+  ): DialogEditorHandle<C> {
+    return openEditorDialog(EditorComponent, initialValue, options)
   }
 
   #escapeCloseHandled = false

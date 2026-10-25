@@ -32,6 +32,23 @@ class DraftEditor extends Editor<Draft, HTMLDivElement, { label: string }> {
   }
 }
 
+class DefaultingDraftEditor extends DraftEditor {
+  static override initialize(initialValue: Partial<Draft>): Draft {
+    return {
+      id: initialValue.id ?? 0,
+      name: initialValue.name ?? '',
+    }
+  }
+}
+
+class OtherDraftEditor extends Editor<Draft, HTMLDivElement> {
+  static displayName = 'OtherDraftEditor'
+
+  get tag(): 'div' {
+    return 'div'
+  }
+}
+
 /**
  * Find a rendered button by its visible label.
  * @param node - Root node to search.
@@ -605,6 +622,51 @@ describe('modal stacking', () => {
     unmount()
     target.remove()
   })
+
+  test('after-hooks observe the removed dialog and restored trigger focus', async () => {
+    const target = document.createElement('div')
+    document.body.append(target)
+    const { node, unmount } = await render(<OverlayProvider />, target)
+
+    const trigger = document.createElement('button')
+    trigger.textContent = 'Trigger'
+    document.body.append(trigger)
+    trigger.focus()
+
+    interface Observation { active: Element | null, dialogs: number }
+    let resolved: Observation | undefined
+    let dismissed: Observation | undefined
+
+    const first = Dialog.open({
+      content: 'Resolve hook',
+      onResolved: () => {
+        resolved = { active: document.activeElement, dialogs: target.querySelectorAll('dialog').length }
+      },
+    })
+
+    await waitFor(() => node.querySelector('dialog'))
+    await first.resolve(true)
+    await waitFor(() => resolved !== undefined)
+
+    expect(resolved).toEqual({ active: trigger, dialogs: 0 })
+
+    const second = Dialog.open({
+      content: 'Dismiss hook',
+      onDismissed: () => {
+        dismissed = { active: document.activeElement, dialogs: target.querySelectorAll('dialog').length }
+      },
+    })
+
+    await waitFor(() => node.querySelector('dialog'))
+    await second.dismiss()
+    await waitFor(() => dismissed !== undefined)
+
+    expect(dismissed).toEqual({ active: trigger, dialogs: 0 })
+
+    trigger.remove()
+    unmount()
+    target.remove()
+  })
 })
 
 describe('dialog editor lifecycle', () => {
@@ -793,6 +855,137 @@ describe('dialog editor lifecycle', () => {
 
     await waitFor(() => node.querySelectorAll('dialog').length === 1)
     expect(node.querySelectorAll('dialog')).toHaveLength(1)
+    unmount()
+  })
+
+  test('partial initial values use the editor initialization contract', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    const dialog = Dialog.editor(DefaultingDraftEditor, { name: 'Partial' }, {
+      props: { label: 'Draft' },
+      title: 'Edit',
+    })
+
+    const input = await findInput(node)
+    expect(input.value).toBe('Partial')
+
+    await Simulate.change(input, 'Edited')
+    const ok = await findButton(node, 'OK')
+    ok.click()
+
+    expect(await dialog).toEqual({ id: 0, name: 'Edited' })
+    unmount()
+  })
+
+  test('an editor without an initialization contract receives the shallow partial unchanged', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+
+    const cleanDialog = Dialog.editor(DraftEditor, { name: 'Only name' }, {
+      props: { label: 'Draft' },
+      title: 'Edit',
+    })
+
+    await findInput(node)
+    const cleanCancel = await findButton(node, 'Cancel')
+    cleanCancel.click()
+    expect(await cleanDialog).toBe(false)
+    expect(node.querySelectorAll('dialog')).toHaveLength(0)
+
+    const dialog = Dialog.editor(DraftEditor, { name: 'Only name' }, {
+      props: { label: 'Draft' },
+      title: 'Edit',
+    })
+
+    const input = await findInput(node)
+    expect(input.value).toBe('Only name')
+    await Simulate.change(input, 'Edited')
+
+    const ok = await findButton(node, 'OK')
+    ok.click()
+
+    const result = await dialog
+    expect(result as Partial<Draft>).toEqual({ name: 'Edited' })
+    unmount()
+  })
+
+  test('an explicit full value update keeps the mounted instance and resolves a full value', async () => {
+    const { find, node, unmount } = await render(<OverlayProvider />)
+    const dialog = Dialog.editor(DraftEditor, { name: 'Partial' }, {
+      props: { label: 'Draft' },
+      title: 'Edit',
+    })
+
+    const editor = await find(DraftEditor)
+    const input = await findInput(node)
+
+    dialog.update({ props: { value: { id: 7, name: 'Complete' } } })
+    await waitFor(() => input.value === 'Complete')
+
+    expect(await find(DraftEditor)).toBe(editor)
+
+    const ok = await findButton(node, 'OK')
+    ok.click()
+
+    expect(await dialog).toEqual({ id: 7, name: 'Complete' })
+    unmount()
+  })
+
+  test('chrome and value updates retain editor focus', async () => {
+    const target = document.createElement('div')
+    document.body.append(target)
+    const { node, unmount } = await render(<OverlayProvider />, target)
+
+    const dialog = Dialog.editor(DraftEditor, { id: 1, name: '' }, {
+      props: { label: 'Draft' },
+      title: 'Edit',
+    })
+
+    const input = await findInput(node)
+    input.focus()
+    expect(document.activeElement).toBe(input)
+
+    dialog.update({ title: 'Workspace draft' })
+    await waitFor(() => node.textContent?.includes('Workspace draft'))
+    expect(document.activeElement).toBe(input)
+
+    dialog.update({ props: { value: { id: 2, name: 'Next' } } })
+    await waitFor(() => input.value === 'Next')
+    expect(document.activeElement).toBe(input)
+
+    await dialog.resolve({ id: 2, name: 'Next' })
+    unmount()
+    target.remove()
+  })
+
+  test('unsafe editor updates cannot replace content, constructor, or baseline', async () => {
+    const { find, node, unmount } = await render(<OverlayProvider />)
+    const dialog = Dialog.editor(DraftEditor, { id: 1, name: 'Draft' }, {
+      props: { label: 'Draft' },
+      title: 'Edit',
+    })
+
+    const editor = await find(DraftEditor)
+    const input = await findInput(node)
+    await Simulate.change(input, 'Unsaved')
+
+    const unsafeUpdate = dialog.update as (options: unknown) => void
+    unsafeUpdate({ content: <div data-testid="replacement">Replacement</div> })
+    unsafeUpdate({ editor: OtherDraftEditor })
+    unsafeUpdate({ props: { initialValue: { id: 99, name: 'Reset' } } })
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+    expect(await find(DraftEditor)).toBe(editor)
+    expect(node.querySelector('[data-testid="replacement"]')).toBeNull()
+    expect(input.value).toBe('Unsaved')
+
+    const cancel = await findButton(node, 'Cancel')
+    cancel.click()
+    await waitFor(() => node.querySelectorAll('dialog').length === 2)
+
+    const keep = await findButton(node, 'Keep editing')
+    keep.click()
+    await waitFor(() => node.querySelectorAll('dialog').length === 1)
+
+    expect(input.value).toBe('Unsaved')
     unmount()
   })
 })

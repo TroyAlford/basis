@@ -37,7 +37,7 @@ interface OverlayEntryOptions<Value> {
   /** Whether the row belongs to the dialog stack or the notification region. */
   kind: 'dialog' | 'notification',
   /** Provider-owned removal; called exactly once when the entry settles. */
-  onRemove: () => void,
+  onRemove: () => Promise<void> | void,
   /** Promise settlement for the public handle. */
   onSettled: (result: Value | false) => void,
   /** Lifecycle callbacks and current public options. */
@@ -67,7 +67,7 @@ export class OverlayEntry<Value = never> {
 
   transition: Transition | null = null
 
-  readonly #onRemove: () => void
+  readonly #onRemove: () => Promise<void> | void
 
   readonly #onSettled: (result: Value | false) => void
 
@@ -114,7 +114,7 @@ export class OverlayEntry<Value = never> {
     if (this.settled) return
     this.settled = true
     this.outcome = 'dismissed'
-    this.#onRemove()
+    void Promise.resolve(this.#onRemove()).catch(error => this.reportError(error))
     this.#after('dismissed', false)
     this.#onSettled(false)
   }
@@ -196,7 +196,12 @@ export class OverlayEntry<Value = never> {
     this.outcome = kind === 'dismiss' ? 'dismissed' : 'resolved'
     const result = kind === 'dismiss' ? false : value as Value
 
-    this.#onRemove()
+    try {
+      await this.#onRemove()
+    } catch (error) {
+      this.reportError(error)
+    }
+
     this.#after(this.outcome, result)
     this.#onSettled(result)
 

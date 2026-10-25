@@ -254,15 +254,25 @@ export class DialogDocs extends DocumentationPage<State> {
         </section>
         <section>
           <h2><code>Dialog.editor</code></h2>
-          <p>An editor dialog fixes its component class for the life of the handle. <code>T</code> is inferred from the supplied <code>Editor&lt;T&gt;</code> constructor — including subclasses — not from <code>initialValue</code>. The awaited result is <code>T | false</code>.</p>
+          <p>An editor dialog fixes its component class for the life of the handle. <code>T</code> is inferred only from the supplied <code>Editor&lt;T&gt;</code> constructor — including indirect subclasses — using <code>InstanceType&lt;C&gt;['current']</code>. The second argument is a shallow <code>Partial&lt;T&gt;</code> and is checked against the already-established <code>T</code>; it never participates in inference. The awaited result is the full <code>T | false</code>.</p>
+          <p>The partial value is completed only by the editor's explicit <code>static initialize(initialValue: Partial&lt;T&gt;): T</code> contract. The base <code>Editor.initialize</code> passes the shallow partial through unchanged: Basis never invents missing fields. Editors whose value has required fields must override <code>initialize</code> to supply domain defaults, or throw to reject incomplete input. This keeps the baseline, dirty comparison, and resolved value honest.</p>
           <p>The editor handle narrows <code>update</code>: it cannot replace content or swap the editor constructor. Pass a partial typed <code>props</code> patch instead. A value-free update preserves the current draft, baseline, focus, and editor identity; an explicit <code>props.value</code> deliberately replaces the working value and flows through dirty checks and resolution.</p>
           <p>Dirty-state protection is built in. An unchanged editor dismisses immediately. A dirty editor asks with Basis-owned <strong>Keep editing</strong> and <strong>Discard</strong> actions through the same modal stack; vetoing keeps the draft and focus. A consumer <code>onDismissing</code> is an additional guard that runs only after that built-in decision. Affirmative completion runs <code>onResolving(latestValue)</code> and bypasses the abandonment guard.</p>
           {Code.format(`
             import { Dialog, Editor } from 'basis/react'
 
-            class CardEditor extends Editor<Card> { /* ... */ }
+            class CardEditor extends Editor<Card> {
+              static initialize(initialValue: Partial<Card>): Card {
+                return {
+                  name: initialValue.name ?? '',
+                  cost: initialValue.cost ?? 0,
+                }
+              }
+              // ...
+            }
 
-            const dialog = Dialog.editor(CardEditor, initialCard, {
+            // Partial input is valid; T is still Card.
+            const dialog = Dialog.editor(CardEditor, { name: 'Card' }, {
               props: { label: 'Card' },
               title: 'Edit card',
             })
@@ -275,6 +285,7 @@ export class DialogDocs extends DocumentationPage<State> {
             // dialog.update({ content: <div /> })
             // dialog.update({ editor: OtherEditor })
             // dialog.update({ props: { value: 'not a Card' } })
+            // dialog.update({ props: { initialValue: updatedCard } })
 
             const edited = await dialog // Card | false
           `)}

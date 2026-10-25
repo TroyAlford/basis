@@ -39,6 +39,12 @@ type P<V, T> = EditorProps<V> & T
 type S<V, T> = TState<V> & T
 
 /**
+ * Type-only brand identifying concrete editor classes without expanding the editor's generics.
+ * It gives constructor constraints an editor-specific identity that stays cheap to instantiate.
+ */
+export declare const editorClassBrand: unique symbol
+
+/**
  * Abstract base class for editor components.
  * Extends Component to provide common editor functionality.
  */
@@ -50,6 +56,9 @@ export abstract class Editor<
   Props = EditorProps<Value>,
   State = TState<Value>,
 > extends Component<P<Value, Props>, Element, S<Value, State>> {
+  /** Type-only editor identity for constructor constraints. */
+  declare readonly [editorClassBrand]: true
+
   static defaultProps: Partial<EditorProps<unknown> & Component['props']> = {
     ...super.defaultProps,
     onChange: noop,
@@ -68,6 +77,20 @@ export abstract class Editor<
     if (ctor === Editor) return true
     if (ctor instanceof Editor) return true
     return typeof ctor === 'function' && ctor.prototype instanceof Editor
+  }
+
+  /**
+   * Complete a shallow partial initial value into this editor's full value.
+   *
+   * The base contract passes the supplied value through unchanged: Basis never invents
+   * missing fields. Editors whose value has required fields and that accept partial initial
+   * values must override this with their explicit, tested defaulting rules (or throw to
+   * reject incomplete input).
+   * @param initialValue - Shallow partial initial value.
+   * @returns The value to use as the editor baseline.
+   */
+  static initialize(initialValue: Partial<unknown>): unknown {
+    return initialValue
   }
 
   get defaultState(): S<Value, State> {

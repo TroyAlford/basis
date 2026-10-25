@@ -4,7 +4,7 @@ import { createElement, createRef, isValidElement } from 'react'
 import { Intent } from '../../types/Intent'
 import { createId } from '../../utilities/createId'
 import { Component } from '../Component/Component'
-import type { DialogButton, DialogEditorState, DialogEditorUpdate, DialogHandle, DialogOptions, DialogRequest } from './Dialog'
+import type { DialogButton, DialogEditorState, DialogHandle, DialogOptions, DialogRequest } from './Dialog'
 import { Dialog } from './Dialog'
 import { Dialogs } from './Dialogs'
 import type { INotification, NotificationHandle } from './Notification'
@@ -20,8 +20,23 @@ interface State {
   notifications: NotificationRow[],
 }
 
+/** Shell and lifecycle options an editor dialog handle may update. */
+const EDITOR_UPDATE_KEYS: ReadonlySet<string> = new Set([
+  'buttons',
+  'className',
+  'icon',
+  'intent',
+  'onDismissed',
+  'onDismissing',
+  'onError',
+  'onResolved',
+  'onResolving',
+  'style',
+  'title',
+])
+
 interface EntryHooks<Value> {
-  onRemove: () => void,
+  onRemove: () => Promise<void> | void,
   onSettled: (result: Value | false) => void,
   prepareDismiss?: () => Promise<boolean>,
 }
@@ -91,6 +106,8 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
 
   #notificationTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
+  #releases = new Set<() => void>()
+
   #teardown = false
 
   get defaultState(): State {
@@ -115,6 +132,8 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
     this.state.dialogs.forEach(row => row.forceDismiss())
     this.state.notifications.forEach(row => row.forceDismiss())
     this.#dialogOrder = []
+    this.#releases.forEach(release => release())
+    this.#releases.clear()
     this.#notificationTimeouts.forEach(timeout => clearTimeout(timeout))
     this.#notificationTimeouts.clear()
     if (typeof window !== 'undefined' && window.overlayProvider === this) {
@@ -202,9 +221,33 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
   #updateDialog<Value>(row: DialogRow<Value>, patch: Partial<DialogOptions<Value>>): void {
     if (row.settled) return
 
-    const props = 'props' in patch
-      ? (patch as DialogEditorUpdate<Value, object>).props
-      : undefined
+    const entries = Object.entries(patch as Record<string, unknown>)
+
+    if (row.editor) {
+      const shell: Record<string, unknown> = {}
+      for (const [key, value] of entries) {
+        if (key !== 'props' && EDITOR_UPDATE_KEYS.has(key)) shell[key] = value
+      }
+
+      if (Object.keys(shell).length > 0) {
+        row.options = {
+          ...row.options,
+          ...shell,
+        } as unknown as DialogRequest<Value>
+      }
+
+      const unsafeProps = (patch as { props?: Record<string, unknown> }).props
+      if (unsafeProps) {
+        const props = { ...unsafeProps }
+        delete props.content
+        delete props.editor
+        delete props.initialValue
+        row.editor.updateProps(props)
+      }
+
+      this.forceUpdate()
+      return
+    }
 
     const shell = { ...patch }
     delete (shell as { props?: unknown }).props
@@ -214,10 +257,6 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
         ...row.options,
         ...shell,
       } as unknown as DialogRequest<Value>
-    }
-
-    if (row.editor && props) {
-      row.editor.updateProps(props as Record<string, unknown>)
     }
 
     this.forceUpdate()
@@ -377,19 +416,31 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
   /**
    * Remove a settled dialog row, close its native node, and restore focus.
    * @param row - Dialog row.
+   * @returns A promise resolved after the row is removed and focus is restored.
    */
-  #removeDialog(row: DialogRow<unknown>): void {
+  #removeDialog(row: DialogRow<unknown>): Promise<void> {
     this.#dialogOrder = this.#dialogOrder.filter(candidate => candidate !== row)
 
     const node = row.nodeRef.current
     if (node?.open) node.close()
 
-    if (this.#teardown) return
+    if (this.#teardown) return Promise.resolve()
 
-    this.setState(
-      state => ({ dialogs: state.dialogs.filter(candidate => candidate !== row) }),
-      () => this.#restoreFocus(row),
-    )
+    return new Promise<void>(resolve => {
+      const release = (): void => {
+        this.#releases.delete(release)
+        resolve()
+      }
+
+      this.#releases.add(release)
+      this.setState(
+        state => ({ dialogs: state.dialogs.filter(candidate => candidate !== row) }),
+        () => {
+          this.#restoreFocus(row)
+          release()
+        },
+      )
+    })
   }
 
   /**
