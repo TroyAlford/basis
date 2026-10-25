@@ -356,8 +356,8 @@ export class DialogDocs extends DocumentationPage<State> {
           <ul>
             <li><strong>Default</strong>: neutral shell; the header appears with a <code>title</code> or intent chrome.</li>
             <li><strong>Primary</strong>: primary border; the header band uses text when a title is supplied.</li>
-            <li><strong>Danger</strong>: danger border and header band; warning icon in the header.</li>
-            <li><strong>Success</strong>: success border and header band; SquareCheck (checkbox) icon in the header.</li>
+            <li><strong>Danger</strong>: danger border and header band; filled warning icon in the header.</li>
+            <li><strong>Success</strong>: success border and header band; filled SquareCheck (checkbox) icon in the header.</li>
           </ul>
         </section>
         <section>

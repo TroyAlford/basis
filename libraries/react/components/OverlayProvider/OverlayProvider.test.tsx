@@ -255,6 +255,7 @@ describe('OverlayProvider', () => {
       const dialog = await waitFor(() => node.querySelector<HTMLElement>('dialog.dialog.component'))
       expect(dialog?.dataset.intent).toBe('danger')
       expect(dialog?.querySelector('header svg.icon')).toBeTruthy()
+      expect(dialog?.querySelector('header svg path[mask]')).toBeTruthy()
 
       unmount()
     })
@@ -271,6 +272,7 @@ describe('OverlayProvider', () => {
       const dialog = await waitFor(() => node.querySelector<HTMLElement>('dialog.dialog.component'))
       expect(dialog?.dataset.intent).toBe('success')
       expect(dialog?.querySelector('header svg.icon')).toBeTruthy()
+      expect(dialog?.querySelector('header svg path[mask]')).toBeTruthy()
 
       const done = await waitFor(() => Array.from(node.querySelectorAll('button'))
         .find(button => button.textContent === 'Done') as HTMLButtonElement | undefined)
@@ -371,6 +373,7 @@ describe('OverlayProvider', () => {
       const aside = await waitFor(() => node.querySelector<HTMLElement>('aside.notification.component'))
       expect(aside.dataset.intent).toBe('success')
       expect(aside.querySelector('header svg.icon')).toBeTruthy()
+      expect(aside.querySelector('header svg path[mask]')).toBeTruthy()
 
       unmount()
     })

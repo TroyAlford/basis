@@ -111,8 +111,8 @@ export class NotificationDocs extends DocumentationPage<State> {
           <ul>
             <li><strong>Default</strong>: neutral shell and header.</li>
             <li><strong>Primary</strong>: primary colors; the header uses text only.</li>
-            <li><strong>Danger</strong>: danger colors; warning icon in the header.</li>
-            <li><strong>Success</strong>: success colors; SquareCheck (checkbox) icon in the header.</li>
+            <li><strong>Danger</strong>: danger colors; filled warning icon in the header.</li>
+            <li><strong>Success</strong>: success colors; filled SquareCheck (checkbox) icon in the header.</li>
           </ul>
         </section>
         <section>
