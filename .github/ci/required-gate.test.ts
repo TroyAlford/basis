@@ -476,15 +476,15 @@ describe('required gate impact evidence', () => {
   for (const scenario of [
     {
       name: 'docs-only',
-      suites: { docs: true, integration: false, quality: false, unit: false, visual: false },
+      suites: { docs: true, quality: false, unit: false, visual: false },
     },
     {
       name: 'backend-only',
-      suites: { docs: false, integration: true, quality: true, unit: true, visual: false },
+      suites: { docs: false, quality: true, unit: true, visual: false },
     },
     {
       name: 'UI',
-      suites: { docs: false, integration: true, quality: true, unit: true, visual: true },
+      suites: { docs: false, quality: true, unit: true, visual: true },
     },
   ]) {
     test(`accepts ${scenario.name} scheduling evidence`, async () => {

@@ -5,7 +5,7 @@ import { matchScreenshot, test, useApplication } from '../../testing'
  * Visual regression for the components whose meaningful state only exists after
  * mount, rendered live on the component stage: the resolved `Await`, the
  * rendered `Mermaid` diagram, and the placed `Tooltip`. Everything else is
- * captured statically in `visual.test.tsx`.
+ * captured statically in `visual.screenshot.tsx`.
  */
 
 /** Antialiasing differs across machines; absorb it the way the other snapshots do. */

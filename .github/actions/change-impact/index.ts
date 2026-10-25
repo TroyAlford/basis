@@ -414,12 +414,16 @@ function expandGlobs(cwd: string, globs: string[]): string[] {
 }
 
 /**
- * Test whether a path is a test or spec file.
+ * Test whether a path is a test file.
+ *
+ * Includes the opt-in `.screenshot` and `.e2e` lanes as well as Bun's default
+ * `.test`/`.spec`, so a test owned by another suite does not count as
+ * unreachable source for this one.
  * @param path Repo-relative path.
- * @returns True for `*.test.*` and `*.spec.*` files.
+ * @returns True for a supported test filename.
  */
 function isTestFile(path: string): boolean {
-  return /(^|\/)[^/]+\.(test|spec)\.[^/]+$/.test(path)
+  return /(^|\/)[^/]+\.(test|spec|screenshot|e2e)\.[^/]+$/.test(path)
 }
 
 /**

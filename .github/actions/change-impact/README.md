@@ -28,7 +28,7 @@ Outputs:
 - `decision-hash`: SHA-256 of the canonical decision JSON.
 - `policy-hash`: SHA-256 of the policy text read from the merge base.
 - `merge-base`, `head-sha`, `docs-only`, `any-needed`.
-- `quality-needed`, `docs-needed`, `unit-needed`, `integration-needed`, `visual-needed` for the reference suite names.
+- `quality-needed`, `docs-needed`, `unit-needed`, `visual-needed` for the reference suite names.
 
 The decision also contains `changedFiles`, `docsOnly`, and per-suite `needed`, `reason`, `evidence`, `selectedTests`, and `unknownFiles`.
 
@@ -43,7 +43,6 @@ The decision also contains `changedFiles`, `docsOnly`, and per-suite `needed`, `
   "suites": {
     "unit": {
       "testGlobs": ["**/*.test.ts", "**/*.test.tsx"],
-      "testExcludeGlobs": ["**/*.visual.test.tsx"],
       "sourceGlobs": ["**/*.ts", "**/*.tsx"],
       "alwaysRunGlobs": ["package.json", "bun.lock", "bunfig.toml"],
       "ignoreGlobs": ["docs/**", "**/*.md"],
@@ -55,7 +54,7 @@ The decision also contains `changedFiles`, `docsOnly`, and per-suite `needed`, `
 }
 ```
 
-- `testGlobs`: this suite's test files. They are import-graph roots.
+- `testGlobs`: this suite's test files. They are import-graph roots. The reference unit suite owns `.test`/`.spec`; the reference visual suite owns `.screenshot`/`.e2e`.
 - `testExcludeGlobs`: tests that belong to another suite, such as visual tests excluded from unit.
 - `sourceGlobs`: files that can affect the suite.
 - `alwaysRunGlobs`: paths that always run the suite, such as manifests, lockfiles, toolchain, preloads, snapshots, styles, and browser configuration.
@@ -66,7 +65,7 @@ The decision also contains `changedFiles`, `docsOnly`, and per-suite `needed`, `
 
 A suite with no decision entry is invalid. A suite entry must have a boolean `needed` and a non-empty `reason`.
 
-The reference `docs` suite uses `ignoreGlobs: ["**"]`. Source, test, always-run and import-reachability checks happen before ignore, so only its declared docs `sourceGlobs` can trigger it; unrelated files are ignored. Add every runtime application entry to the relevant suite's `extraRoots`. The reference visual suite keeps `unreachableSource: run` for `.tsx` and style changes, but a plain `.ts` helper is ignored unless a visual test or an `extraRoots` entry reaches it; list your server, docs, and app entries so runtime-loaded code is not missed.
+The reference `docs` suite uses `ignoreGlobs: ["**"]`. Source, test, always-run and import-reachability checks happen before ignore, so only its declared docs `sourceGlobs` can trigger it; unrelated files are ignored. Add every runtime application entry to the relevant suite's `extraRoots`. The reference visual suite keeps `unreachableSource: run` for `.tsx` and style changes, but a plain `.ts` helper is ignored unless a screenshot or e2e test (or an `extraRoots` entry) reaches it; list your server, docs, and app entries so runtime-loaded code is not missed.
 
 ## Conservative rules
 
@@ -100,7 +99,6 @@ impact:
     quality-needed: ${{ steps.impact.outputs.quality-needed }}
     docs-needed: ${{ steps.impact.outputs.docs-needed }}
     unit-needed: ${{ steps.impact.outputs.unit-needed }}
-    integration-needed: ${{ steps.impact.outputs.integration-needed }}
     visual-needed: ${{ steps.impact.outputs.visual-needed }}
   steps:
     - uses: actions/checkout@v4

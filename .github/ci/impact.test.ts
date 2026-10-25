@@ -192,7 +192,7 @@ describe('docs and non-code changes', () => {
       [change('docs/guide.md'), change('src/server.ts')],
     )
     expect(decision.docsOnly).toBe(false)
-    expect(needed(decision)).toEqual(['docs', 'integration', 'quality', 'unit'])
+    expect(needed(decision)).toEqual(['docs', 'quality', 'unit'])
   })
 
   test('a docs example used by contract tests runs the owning suite too', async () => {
@@ -211,7 +211,7 @@ describe('import graph and path rules', () => {
       { 'src/server.ts': 'export const server = 1\n' },
       [change('src/server.ts')],
     )
-    expect(needed(decision)).toEqual(['integration', 'quality', 'unit'])
+    expect(needed(decision)).toEqual(['quality', 'unit'])
     expect(decision.suites.visual.needed).toBe(false)
   })
 
@@ -223,7 +223,7 @@ describe('import graph and path rules', () => {
       },
       [change('src/Button.tsx')],
     )
-    expect(needed(decision)).toEqual(['integration', 'quality', 'unit', 'visual'])
+    expect(needed(decision)).toEqual(['quality', 'unit', 'visual'])
     expect(decision.suites.unit.reason).toBe('import-reachable')
     expect(decision.suites.unit.selectedTests).toEqual(['src/Button.test.tsx'])
   })
@@ -291,10 +291,18 @@ describe('import graph and path rules', () => {
     expect(needed(decision)).toEqual(['visual'])
   })
 
-  test('a visual test change does not run unit', async () => {
+  test('a screenshot lane change runs visual without running unit', async () => {
     const decision = await decide(
-      { 'src/Button.visual.test.tsx': "test('visual', () => {})\n" },
-      [change('src/Button.visual.test.tsx')],
+      { 'src/Button.screenshot.tsx': "test('visual', () => {})\n" },
+      [change('src/Button.screenshot.tsx')],
+    )
+    expect(needed(decision)).toEqual(['quality', 'visual'])
+  })
+
+  test('an end-to-end lane change runs visual without running unit', async () => {
+    const decision = await decide(
+      { 'src/Checkout.e2e.ts': "test('e2e', () => {})\n" },
+      [change('src/Checkout.e2e.ts')],
     )
     expect(needed(decision)).toEqual(['quality', 'visual'])
   })
@@ -311,17 +319,17 @@ describe('import graph and path rules', () => {
 describe('conservative policy rules', () => {
   test('a lockfile change runs every code suite', async () => {
     const decision = await decide({ 'bun.lock': 'lock\n' }, [change('bun.lock')])
-    expect(needed(decision)).toEqual(['integration', 'quality', 'unit', 'visual'])
+    expect(needed(decision)).toEqual(['quality', 'unit', 'visual'])
   })
 
   test('a toolchain change runs every code suite', async () => {
     const decision = await decide({ '.tool-versions': 'bun 1.4.2\n' }, [change('.tool-versions')])
-    expect(needed(decision)).toEqual(['integration', 'quality', 'unit', 'visual'])
+    expect(needed(decision)).toEqual(['quality', 'unit', 'visual'])
   })
 
   test('a test preload change runs the suites that use it', async () => {
     const decision = await decide({ 'bunfig.toml': '[test]\n' }, [change('bunfig.toml')])
-    expect(needed(decision)).toEqual(['integration', 'quality', 'unit', 'visual'])
+    expect(needed(decision)).toEqual(['quality', 'unit', 'visual'])
   })
 
   test('a renamed source file runs the affected suite', async () => {
@@ -338,8 +346,8 @@ describe('conservative policy rules', () => {
 
   test('an unknown file fails closed across every code suite', async () => {
     const decision = await decide({ 'assets/data.bin': 'binary\n' }, [change('assets/data.bin')])
-    expect(needed(decision)).toEqual(['integration', 'quality', 'unit', 'visual'])
-    for (const key of ['integration', 'quality', 'unit', 'visual']) {
+    expect(needed(decision)).toEqual(['quality', 'unit', 'visual'])
+    for (const key of ['quality', 'unit', 'visual']) {
       expect(decision.suites[key].reason).toBe('unknown-change-conservative')
       expect(decision.suites[key].unknownFiles).toEqual(['assets/data.bin'])
     }
@@ -354,7 +362,6 @@ describe('reference workflow propagation', () => {
   }
   const suiteJobs: Record<string, string> = {
     docs: 'docs',
-    integration: 'integration',
     quality: 'quality',
     unit: 'unit',
     visual: 'visual',
@@ -387,15 +394,15 @@ describe('reference workflow propagation', () => {
     expect(scheduled(decision)).toEqual(['docs'])
   })
 
-  test('a backend-only change schedules quality, unit and integration', async () => {
+  test('a backend-only change schedules quality and unit', async () => {
     const decision = await decide(
       { 'src/server.ts': 'export const server = 1\n' },
       [change('src/server.ts')],
     )
-    expect(scheduled(decision)).toEqual(['integration', 'quality', 'unit'])
+    expect(scheduled(decision)).toEqual(['quality', 'unit'])
   })
 
-  test('a UI change schedules quality, unit, integration and visual', async () => {
+  test('a UI change schedules quality, unit and visual', async () => {
     const decision = await decide(
       {
         'src/Button.test.tsx': "import { Button } from './Button'\ntest('button', () => Button)\n",
@@ -403,7 +410,7 @@ describe('reference workflow propagation', () => {
       },
       [change('src/Button.tsx')],
     )
-    expect(scheduled(decision)).toEqual(['integration', 'quality', 'unit', 'visual'])
+    expect(scheduled(decision)).toEqual(['quality', 'unit', 'visual'])
   })
 })
 

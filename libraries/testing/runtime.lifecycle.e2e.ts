@@ -155,9 +155,9 @@ function readActivity(path: string): Activity {
 describe('snapshot runtime lifecycle', () => {
   test('starts one container and one browser for many captures across several files', async () => {
     const target = fixture({
-      'application.test.tsx': applicationSuite(),
-      'components-a.test.tsx': componentSuite('a', FIRST_COMPONENTS),
-      'components-b.test.tsx': componentSuite('b', SECOND_COMPONENTS),
+      'application.e2e.tsx': applicationSuite(),
+      'components-a.screenshot.tsx': componentSuite('a', FIRST_COMPONENTS),
+      'components-b.screenshot.tsx': componentSuite('b', SECOND_COMPONENTS),
     })
 
     /*
@@ -168,7 +168,15 @@ describe('snapshot runtime lifecycle', () => {
     Bun.spawnSync(['docker', 'pull', snapshotImage()], { stderr: 'ignore', stdout: 'ignore' })
 
     const start = Bun.nanoseconds()
-    const proc = Bun.spawn([process.execPath, 'test', '--timeout', '60000'], {
+    const proc = Bun.spawn([
+      process.execPath,
+      'test',
+      './components-a.screenshot.tsx',
+      './components-b.screenshot.tsx',
+      './application.e2e.tsx',
+      '--timeout',
+      '60000',
+    ], {
       cwd: target.dir,
       env: {
         ...process.env,
