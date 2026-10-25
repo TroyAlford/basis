@@ -12,6 +12,38 @@ export interface IPinnable {
 }
 
 /**
+ * Format a pixel length.
+ * @param value - The length in pixels.
+ * @returns The CSS length.
+ */
+function px(value: number): string {
+  return `${value}px`
+}
+
+/**
+ * The sticky offset for a pinned cell, measured from the widths of the pinned
+ * siblings on the same side. Sibling widths are layout facts; the cell's own
+ * offset can reflect the current scroll or sticky position and would move the
+ * pin when it is re-applied.
+ * @param cell - The cell to measure.
+ * @param side - The pinned side.
+ * @returns The offset in pixels.
+ */
+function pinnedOffset(cell: HTMLElement, side: 'left' | 'right'): number {
+  let offset = 0
+  let sibling = side === 'left' ? cell.previousElementSibling : cell.nextElementSibling
+
+  while (sibling) {
+    if (sibling instanceof HTMLElement && sibling.dataset.pin === side) {
+      offset += sibling.offsetWidth
+    }
+    sibling = side === 'left' ? sibling.previousElementSibling : sibling.nextElementSibling
+  }
+
+  return offset
+}
+
+/**
  * Apply pinning logic to a component.
  * @param component - The component to apply pinning logic to.
  */
@@ -25,21 +57,11 @@ function apply<E extends HTMLElement | SVGElement, S>(
   match(pin)
     .when(Pin.Left).then(() => {
       delete rootNode.style.right
-      rootNode.style.left = `${CSS.px(rootNode.offsetLeft)}`
+      rootNode.style.left = px(pinnedOffset(rootNode, 'left'))
     })
     .when(Pin.Right).then(() => {
       delete rootNode.style.left
-      // Calculate right position: parent width - (element left + element width)
-      const parent = rootNode.parentElement
-      if (parent) {
-        const parentWidth = parent.offsetWidth
-        const elementLeft = rootNode.offsetLeft
-        const elementWidth = rootNode.offsetWidth
-        const rightPosition = parentWidth - elementLeft - elementWidth
-        rootNode.style.right = `${CSS.px(rightPosition)}`
-      } else {
-        rootNode.style.right = `${CSS.px(0)}`
-      }
+      rootNode.style.right = px(pinnedOffset(rootNode, 'right'))
     })
     .else(() => {
       delete rootNode.style.left
