@@ -294,8 +294,8 @@ function openEditorDialog<C extends EditorClass>(
   } = options
 
   /*
-   * `initialize` is the editor's explicit completion contract. The base contract passes the
-   * shallow partial through unchanged; editors with required fields override it.
+   * `initialize` is the editor's explicit completion and validation contract. The base
+   * implementation rejects the value; concrete editors must complete it or throw.
    */
   const initialize = (EditorComponent as unknown as {
     initialize: (value: Partial<Value>) => Value,
