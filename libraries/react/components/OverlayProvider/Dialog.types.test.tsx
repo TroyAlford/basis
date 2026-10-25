@@ -9,6 +9,13 @@ interface Card {
 }
 
 class CardEditor extends Editor<Card, HTMLDivElement, { label: string }> {
+  static initialize(initialValue: Partial<Card>): Card {
+    return {
+      cost: initialValue.cost ?? 0,
+      name: initialValue.name ?? '',
+    }
+  }
+
   get tag(): 'div' {
     return 'div'
   }
@@ -29,6 +36,10 @@ class OtherEditor extends Editor<Card, HTMLDivElement> {
 }
 
 class StringEditor extends Editor<string> {
+  static initialize(initialValue: Partial<string>): string {
+    return initialValue
+  }
+
   get tag(): 'div' {
     return 'div'
   }
@@ -39,6 +50,10 @@ class StringEditor extends Editor<string> {
 }
 
 class BooleanEditor extends Editor<boolean> {
+  static initialize(initialValue: Partial<boolean>): boolean {
+    return initialValue
+  }
+
   get tag(): 'div' {
     return 'div'
   }

@@ -10,6 +10,13 @@ export interface NameSlugValue {
 export class NameSlugEditor extends Editor<NameSlugValue, HTMLDivElement> {
   static displayName = 'NameSlugEditor'
 
+  static initialize(initialValue: Partial<NameSlugValue>): NameSlugValue {
+    return {
+      name: initialValue.name ?? '',
+      slug: initialValue.slug ?? '',
+    }
+  }
+
   content() {
     return super.content(
       <>

@@ -19,6 +19,10 @@ interface Draft {
 class DraftEditor extends Editor<Draft, HTMLDivElement, { label: string }> {
   static displayName = 'OverlayStageDraftEditor'
 
+  static initialize(initialValue: Partial<Draft>): Draft {
+    return { name: initialValue.name ?? '' }
+  }
+
   get tag(): 'div' {
     return 'div'
   }

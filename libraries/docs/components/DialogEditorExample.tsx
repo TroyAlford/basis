@@ -9,6 +9,14 @@ interface Value {
 export class DialogEditorExample extends Editor<Value, HTMLDivElement> {
   static displayName = 'DialogEditorExample'
 
+  static initialize(initialValue: Partial<Value>): Value {
+    return {
+      name: initialValue.name ?? '',
+      notes: initialValue.notes ?? '',
+      slug: initialValue.slug ?? '',
+    }
+  }
+
   override get tag() {
     return 'div' as const
   }

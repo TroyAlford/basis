@@ -19,6 +19,10 @@ interface TestValue {
 class TestEditor extends Editor<TestValue, HTMLDivElement, { label: string }> {
   static displayName = 'TestEditor'
 
+  static initialize(initialValue: Partial<TestValue>): TestValue {
+    return { id: initialValue.id ?? 0 }
+  }
+
   content() {
     return (
       <button

@@ -17,6 +17,17 @@ interface Draft {
 class DraftEditor extends Editor<Draft, HTMLDivElement, { label: string }> {
   static displayName = 'DraftEditor'
 
+  static initialize(initialValue: Partial<Draft>): Draft {
+    if (initialValue.id === undefined || initialValue.name === undefined) {
+      throw new Error('DraftEditor: id and name are required')
+    }
+
+    return {
+      id: initialValue.id,
+      name: initialValue.name,
+    }
+  }
+
   get tag(): 'div' {
     return 'div'
   }
@@ -43,6 +54,14 @@ class DefaultingDraftEditor extends DraftEditor {
 
 class OtherDraftEditor extends Editor<Draft, HTMLDivElement> {
   static displayName = 'OtherDraftEditor'
+
+  get tag(): 'div' {
+    return 'div'
+  }
+}
+
+class UninitializedDraftEditor extends Editor<Draft, HTMLDivElement, { label: string }> {
+  static displayName = 'UninitializedDraftEditor'
 
   get tag(): 'div' {
     return 'div'
@@ -876,40 +895,25 @@ describe('dialog editor lifecycle', () => {
     unmount()
   })
 
-  test('an editor without an initialization contract receives the shallow partial unchanged', async () => {
-    const { node, unmount } = await render(<OverlayProvider />)
+  test('an editor without an initialization contract rejects unsupported input', async () => {
+    const { unmount } = await render(<OverlayProvider />)
 
-    const cleanDialog = Dialog.editor(DraftEditor, { name: 'Only name' }, {
+    expect(() => Dialog.editor(UninitializedDraftEditor, { name: 'Only name' }, {
       props: { label: 'Draft' },
       title: 'Edit',
-    })
+    })).toThrow('UninitializedDraftEditor must implement static initialize()')
 
-    await findInput(node)
-    const cleanCancel = await findButton(node, 'Cancel')
-    cleanCancel.click()
-    expect(await cleanDialog).toBe(false)
-    expect(node.querySelectorAll('dialog')).toHaveLength(0)
-
-    const dialog = Dialog.editor(DraftEditor, { name: 'Only name' }, {
+    expect(() => Dialog.editor(UninitializedDraftEditor, { id: 1, name: 'Complete' }, {
       props: { label: 'Draft' },
       title: 'Edit',
-    })
+    })).toThrow('UninitializedDraftEditor must implement static initialize()')
 
-    const input = await findInput(node)
-    expect(input.value).toBe('Only name')
-    await Simulate.change(input, 'Edited')
-
-    const ok = await findButton(node, 'OK')
-    ok.click()
-
-    const result = await dialog
-    expect(result as Partial<Draft>).toEqual({ name: 'Edited' })
     unmount()
   })
 
   test('an explicit full value update keeps the mounted instance and resolves a full value', async () => {
     const { find, node, unmount } = await render(<OverlayProvider />)
-    const dialog = Dialog.editor(DraftEditor, { name: 'Partial' }, {
+    const dialog = Dialog.editor(DraftEditor, { id: 1, name: 'Partial' }, {
       props: { label: 'Draft' },
       title: 'Edit',
     })

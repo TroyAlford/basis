@@ -444,19 +444,31 @@ export class OverlayProvider extends Component<object, HTMLDivElement, State> {
   }
 
   /**
-   * Remove a settled notification row and release its timer.
+   * Remove a settled notification row, release its timer, and wait for the React commit.
    * @param row - Notification row.
+   * @returns A promise resolved after the row is removed from the provider state.
    */
-  #removeNotification(row: NotificationRow): void {
+  #removeNotification(row: NotificationRow): Promise<void> {
     const timeout = this.#notificationTimeouts.get(row.id)
     if (timeout) clearTimeout(timeout)
     this.#notificationTimeouts.delete(row.id)
 
-    if (this.#teardown) return
+    if (this.#teardown) return Promise.resolve()
 
-    this.setState(state => ({
-      notifications: state.notifications.filter(candidate => candidate !== row),
-    }))
+    return new Promise<void>(resolve => {
+      const release = (): void => {
+        this.#releases.delete(release)
+        resolve()
+      }
+
+      this.#releases.add(release)
+      this.setState(
+        state => ({
+          notifications: state.notifications.filter(candidate => candidate !== row),
+        }),
+        release,
+      )
+    })
   }
 
   /**

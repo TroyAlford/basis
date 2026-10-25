@@ -80,17 +80,17 @@ export abstract class Editor<
   }
 
   /**
-   * Complete a shallow partial initial value into this editor's full value.
+   * Complete and validate a shallow partial initial value into this editor's full value.
    *
-   * The base contract passes the supplied value through unchanged: Basis never invents
-   * missing fields. Editors whose value has required fields and that accept partial initial
-   * values must override this with their explicit, tested defaulting rules (or throw to
-   * reject incomplete input).
+   * Editors used with `Dialog.editor` must override this with their explicit, tested
+   * initialization contract. The base implementation rejects the value instead of silently
+   * passing an incomplete object through as if it were complete.
    * @param initialValue - Shallow partial initial value.
-   * @returns The value to use as the editor baseline.
+   * @throws {Error} When the concrete editor does not implement an initialization contract.
    */
   static initialize(initialValue: Partial<unknown>): unknown {
-    return initialValue
+    void initialValue
+    throw new Error(`${this.name} must implement static initialize() to accept a Dialog.editor initial value.`)
   }
 
   get defaultState(): S<Value, State> {

@@ -38,6 +38,25 @@ describe('notification lifecycle', () => {
     unmount()
   })
 
+  test('onDismissed observes the notification row already removed', async () => {
+    const { node, unmount } = await render(<OverlayProvider />)
+    let observed: boolean | undefined
+
+    const note = Notification.create({
+      content: 'Hook order',
+      onDismissed: () => {
+        observed = !!node.querySelector('aside.notification.component')
+      },
+    })
+
+    await findNotification(node)
+    expect(await note.dismiss()).toBe(true)
+    await waitFor(() => observed !== undefined)
+
+    expect(observed).toBe(false)
+    unmount()
+  })
+
   test('a vetoed dismissal keeps the notification and returns false', async () => {
     const { node, unmount } = await render(<OverlayProvider />)
     let allow = false
