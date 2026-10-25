@@ -3,6 +3,7 @@ import { Pin, Section, SortDirection, TextAlign, TypedTable } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 import { TableHeaderExample } from '../components/TableHeaderExample'
+import { TableSelectionExample } from '../components/TableSelectionExample'
 
 faker.seed(42)
 
@@ -208,12 +209,38 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
           `)}
           <p>Any React content works, including native controls. A plain input keeps its own keyboard behavior and does not need to import a Basis component. This example&#39;s completion state and bulk update are ordinary consumer state, not a reusable table-selection API.</p>
         </Section>
+        <Section title="Row Selection">
+          <p>Selection is opt-in and fully controlled. Pass a <code>selection</code> object with the current <code>selectedKeys</code>, an <code>onChange</code> callback that receives a new set, and the consumer&#39;s eligible <code>pageKeys</code>. The table renders a pinned checkbox column and a header Select Page checkbox; it never owns a second selection store.</p>
+          <p><code>getRowState</code> can disable an individual row and provide the reason, while <code>rowLabel</code> supplies the accessible row label. All keys come from the table&#39;s existing <code>keyField</code>, so sorting and filtering retain stable identity. Selection changes update the checkbox column and summary only; unrelated cell renderers are left untouched.</p>
+          <TableSelectionExample />
+          {Code.format(`
+            <Table
+              value={people}
+              selection={{
+                selectedKeys: selected,
+                onChange: setSelected,
+                pageKeys: people.map(person => person.id),
+                getRowState: person => (
+                  person.archived
+                    ? { disabled: true, reason: 'Archived' }
+                    : { disabled: false }
+                ),
+                rowLabel: person => person.name,
+              }}
+            >
+              {Column.Text({ field: 'name', pin: Pin.Left, title: 'Name' })}
+              {Column.Text({ field: 'role', title: 'Role' })}
+              {Column.Text({ field: 'actions', pin: Pin.Right, title: 'Actions' })}
+            </Table>
+          `)}
+        </Section>
         <Section title="API Reference">
           <h4>Table Props</h4>
           <ul>
             <li><code>className?: string</code> - Additional CSS classes</li>
             <li><code>keyField?: PathOf&lt;T&gt;</code> - Field to use as unique row identifier (default: 'id')</li>
             <li><code>readOnly?: boolean</code> - Whether the table is read-only</li>
+            <li><code>selection?: TableSelection&lt;T&gt;</code> - Controlled row selection, including the pinned checkbox column and Select Page header</li>
             <li><code>value: T[]</code> - Array of data to display</li>
           </ul>
           <h4>Column Props</h4>
@@ -226,6 +253,16 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             <li><code>title?: ReactNode</code> - Column header content, including interactive controls (defaults to field name)</li>
             <li><code>type?: ColumnType</code> - Column type (Text, Number, Boolean, Date, DateTime, Enum)</li>
             <li><code>width?: string | number</code> - Column width</li>
+          </ul>
+          <h4>Selection Props</h4>
+          <ul>
+            <li><code>selectedKeys: ReadonlySet&lt;TableKey&gt;</code> - The consumer-owned selected keys</li>
+            <li><code>onChange: (selectedKeys: Set&lt;TableKey&gt;) =&gt; void</code> - Receives a new set when a row or the page checkbox is activated</li>
+            <li><code>pageKeys?: readonly TableKey[]</code> - Eligible keys for Select Page; defaults to the selectable visible rows</li>
+            <li><code>getRowState?: (row: T) =&gt; boolean | RowSelectionState</code> - Whether a row can be selected, optionally with a reason</li>
+            <li><code>rowLabel?: (row: T) =&gt; string</code> - Accessible row label; defaults to the row key</li>
+            <li><code>pageLabel?: string</code> - Accessible header label; defaults to "Select page"</li>
+            <li><code>width?: string | number</code> - Selection column width; defaults to 2.5em</li>
           </ul>
         </Section>
       </>

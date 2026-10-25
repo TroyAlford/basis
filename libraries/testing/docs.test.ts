@@ -64,6 +64,60 @@ describe('testing/docs', () => {
     })
   }, 60_000)
 
+  test('captures table selection with pinned name and actions', async () => {
+    await app.visit('/components/table', { ...NETWORK }, async page => {
+      const example = page.locator('[data-table-selection-example]')
+      await example.waitFor()
+      const table = example.locator('.table.component')
+      await table.waitFor()
+      await waitForHighlightedCode(page)
+
+      // Select two rows so the header checkbox is indeterminate.
+      const rows = example.locator('tbody .checkbox-editor')
+      await rows.nth(0).click()
+      await rows.nth(1).click()
+
+      // Align the last middle column with the pinned Name column.
+      await table.evaluate(element => {
+        const notes = element.querySelector('th[data-field="notes"]') as HTMLElement
+        const name = element.querySelector('th[data-field="name"]') as HTMLElement
+        const selection = element.querySelector('th[data-field="__selection__"]') as HTMLElement
+        const notesLeft = notes.getBoundingClientRect().left -
+          element.getBoundingClientRect().left +
+          element.scrollLeft
+
+        element.scrollLeft = notesLeft - name.offsetWidth - selection.offsetWidth
+      })
+      await page.waitForTimeout(100)
+      await matchScreenshot(example, 'selection pinned', {
+        maxDiffPixelRatio: 0.02,
+      })
+    })
+  }, 60_000)
+
+  test('supports keyboard selection in the table example', async () => {
+    await app.visit('/components/table', { ...NETWORK }, async page => {
+      const example = page.locator('[data-table-selection-example]')
+      await example.waitFor()
+      const checkbox = example.locator('tbody input[type="checkbox"]').first()
+
+      await checkbox.focus()
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+
+      await page.keyboard.press('Space')
+      await page.waitForFunction(() => (
+        document.querySelector('[data-table-selection-example] strong')?.textContent === '1 selected'
+      ))
+      expect(await checkbox.isChecked()).toBe(true)
+
+      await page.keyboard.press('Space')
+      await page.waitForFunction(() => (
+        document.querySelector('[data-table-selection-example] strong')?.textContent === '0 selected'
+      ))
+      expect(await checkbox.isChecked()).toBe(false)
+    })
+  }, 60_000)
+
   test('captures the icon grid', async () => {
     await app.visit('/icons', { ...NETWORK }, async page => {
       await page.waitForSelector('.icon-grid')

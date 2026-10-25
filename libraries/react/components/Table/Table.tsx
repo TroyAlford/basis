@@ -1,14 +1,17 @@
 import * as React from 'react'
-import { get, sortBy } from '../../../utilities'
+import { deepEquals, get, sortBy } from '../../../utilities'
 import type { PathOf } from '../../../utilities/types/PathOf'
 import type { Mixin } from '../../types/Mixin'
 import { Pin } from '../../types/Pin'
 import { SortDirection } from '../../types/SortDirection'
+import { TextAlign } from '../../types/TextAlign'
 import { Editor } from '../Editor/Editor'
 import { Cell } from './Cell'
 import type { ColumnProps } from './Column'
 import { Column, ColumnType } from './Column'
 import { HeaderCell } from './HeaderCell'
+import type { RowSelectionState, SelectionContextValue, TableKey, TableSelection } from './Selection'
+import { SELECTION_COLUMN_WIDTH, SELECTION_FIELD, SelectionCell, SelectionContext, SelectionHeader } from './Selection'
 
 import './Table.styles.ts'
 
@@ -16,12 +19,29 @@ interface Props<T> {
   children?: React.ReactNode,
   className?: string,
   keyField?: PathOf<T>,
+  selection?: TableSelection<T>,
 }
 
 interface State<T> {
   definitions?: Map<PathOf<T>, ColumnProps<T, PathOf<T>>>,
   prevChildren?: React.ReactNode,
   states?: Map<PathOf<T>, Partial<ColumnProps<T, PathOf<T>>>>,
+}
+
+/**
+ * Compare two column definitions without traversing ReactNode titles.
+ * @param one - The next definition.
+ * @param two - The previous definition.
+ * @returns Whether every declared value is the same reference or primitive.
+ */
+function shallowEqual(one: object, two: object): boolean {
+  const oneKeys = Object.keys(one)
+  const twoKeys = Object.keys(two)
+  if (oneKeys.length !== twoKeys.length) return false
+
+  return oneKeys.every(key => (
+    (one as Record<string, unknown>)[key] === (two as Record<string, unknown>)[key]
+  ))
 }
 
 export class Table<T extends object = { id: string }>
@@ -31,6 +51,8 @@ export class Table<T extends object = { id: string }>
   static Column = Column
   static ColumnType = ColumnType
   static HeaderCell = HeaderCell
+
+  private columnCache = new WeakMap<object, ColumnProps<T, PathOf<T>>>()
 
   static get mixins(): Set<Mixin> {
     return super.mixins
@@ -48,6 +70,73 @@ export class Table<T extends object = { id: string }>
       definitions: new Map<PathOf<T>, ColumnProps<T, PathOf<T>>>(),
       prevChildren: null,
       states: new Map<PathOf<T>, Partial<ColumnProps<T, PathOf<T>>>>(),
+    }
+  }
+
+  shouldComponentUpdate(nextProps: Props<T>, nextState: State<T>): boolean {
+    if (nextProps.selection?.selectedKeys !== this.props.selection?.selectedKeys) return true
+    return !deepEquals(this.props, nextProps) || !deepEquals(this.state, nextState)
+  }
+
+  private getSelectionKey = (row: unknown): TableKey | null => {
+    const key = get(row as T, this.props.keyField)
+    return typeof key === 'string' || typeof key === 'number' ? key : null
+  }
+
+  private getRowSelection = (row: unknown): RowSelectionState => {
+    const declaration = this.props.selection?.getRowState?.(row as T)
+
+    if (declaration === false) return { disabled: true }
+    if (declaration === undefined || declaration === true) return { disabled: false }
+
+    return { disabled: declaration.disabled, reason: declaration.reason }
+  }
+
+  private getRowLabel = (row: unknown): string => {
+    const selection = this.props.selection
+    if (selection?.rowLabel) return selection.rowLabel(row as T)
+
+    const key = this.getSelectionKey(row)
+    return key === null ? '' : String(key)
+  }
+
+  private get pageKeys(): readonly TableKey[] {
+    const selection = this.props.selection
+    if (!selection) return []
+    if (selection.pageKeys) return selection.pageKeys
+
+    return (this.current ?? [])
+      .filter(row => !this.getRowSelection(row).disabled)
+      .map(row => this.getSelectionKey(row))
+      .filter((key): key is TableKey => key !== null)
+  }
+
+  private get selectionColumn(): ColumnProps<T, PathOf<T>> | null {
+    const selection = this.props.selection
+    if (!selection) return null
+
+    return {
+      align: TextAlign.Center,
+      field: SELECTION_FIELD as PathOf<T>,
+      pin: Pin.Left,
+      sortable: false,
+      title: <SelectionHeader />,
+      width: selection.width ?? SELECTION_COLUMN_WIDTH,
+    }
+  }
+
+  private get selectionContext(): SelectionContextValue | null {
+    const selection = this.props.selection
+    if (!selection) return null
+
+    return {
+      getKey: this.getSelectionKey,
+      getRowState: this.getRowSelection,
+      onChange: selection.onChange,
+      pageKeys: this.pageKeys,
+      pageLabel: selection.pageLabel ?? 'Select page',
+      rowLabel: this.getRowLabel,
+      selectedKeys: selection.selectedKeys,
     }
   }
 
@@ -71,22 +160,41 @@ export class Table<T extends object = { id: string }>
             ...defaultProps,
             ...childProps,
           } as ColumnProps<T, PathOf<T>>
+
+          /*
+           * Component.defaultProps creates a fresh noop on every read. Columns
+           * never use it, and retaining it would make every declaration look
+           * changed on a parent render.
+           */
+          delete (definition as { onKeyDown?: unknown }).onKeyDown
           const { field } = definition
 
           definitions.set(field, definition)
           const previous = previousDefinitions.get(field)
           const current = states.get(field)
+          const unchanged = current !== undefined
+            && previous !== undefined
+            && shallowEqual(definition, previous)
 
           /*
            * Sorting is table state, so a rerender preserves it while the
            * consumer's declaration is unchanged. When the consumer declares a
            * new sort direction, that declaration wins.
            */
-          const sortDirection = previous && current && definition.sortDirection === previous.sortDirection
-            ? current.sortDirection
-            : definition.sortDirection
+          const preserveSort = previous !== undefined
+            && current !== undefined
+            && definition.sortDirection === previous.sortDirection
+          const sortDirection = preserveSort && current ? current.sortDirection : definition.sortDirection
 
-          states.set(field, { ...definition, sortDirection })
+          /*
+           * Reuse the previous state object for an unchanged declaration so
+           * body cells keep stable column props during selection updates.
+           */
+          const nextState = unchanged && current && sortDirection === current.sortDirection
+            ? current
+            : { ...definition, sortDirection }
+
+          states.set(field, nextState)
         })
 
       // Drop state for columns the consumer removed.
@@ -124,6 +232,11 @@ export class Table<T extends object = { id: string }>
         }
       })
 
+      /*
+       * Sorting mutates the existing column state, so cached column props must
+       * be rebuilt before the next render sees the new direction.
+       */
+      this.columnCache = new WeakMap<object, ColumnProps<T, PathOf<T>>>()
       this.forceUpdate()
     }
   }
@@ -133,7 +246,14 @@ export class Table<T extends object = { id: string }>
 
     const columns: ColumnProps<T, PathOf<T>>[] = []
     for (const [, state] of states) {
-      columns.push({ ...state })
+      let column = this.columnCache.get(state)
+
+      if (!column) {
+        column = { ...state } as ColumnProps<T, PathOf<T>>
+        this.columnCache.set(state, column)
+      }
+
+      columns.push(column)
     }
 
     // Sort columns by pin priority: Left → Unpinned → Right
@@ -149,8 +269,11 @@ export class Table<T extends object = { id: string }>
   content(): React.ReactNode {
     const data = this.current ?? []
     const columns = this.columns
+    const selection = this.props.selection
+    const selectionColumn = this.selectionColumn
+    const context = this.selectionContext
 
-    if (!columns.length) return null
+    if (!columns.length && !selection) return null
 
     // Look for any column with a sort direction and sort accordingly
     const sortedColumn = columns.find(col => col.sortDirection)
@@ -162,10 +285,18 @@ export class Table<T extends object = { id: string }>
       }
     }
 
-    return (
+    const table = (
       <table>
         <thead>
           <tr key="header">
+            {selectionColumn && (
+              <HeaderCell<T, PathOf<T>>
+                key={SELECTION_FIELD}
+                pin={Pin.Left}
+                value={selectionColumn}
+                onChange={this.handleColumnChange}
+              />
+            )}
             {columns.map(column => (
               <HeaderCell<T, PathOf<T>>
                 key={column.field}
@@ -179,6 +310,14 @@ export class Table<T extends object = { id: string }>
         <tbody>
           {displayData.map((row, index) => (
             <tr key={this.rowId(row, index)}>
+              {selection && (
+                <SelectionCell
+                  key={SELECTION_FIELD}
+                  pin={Pin.Left}
+                  row={row}
+                  width={selection.width}
+                />
+              )}
               {columns.map(props => {
                 const { field, type } = props
                 const value = get(row, field)
@@ -204,5 +343,11 @@ export class Table<T extends object = { id: string }>
         </tbody>
       </table>
     )
+
+    return context ? (
+      <SelectionContext.Provider value={context}>
+        {table}
+      </SelectionContext.Provider>
+    ) : table
   }
 }

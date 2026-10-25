@@ -24,6 +24,12 @@ export { OverlayProvider } from './components/OverlayProvider/OverlayProvider'
 export { Router } from './components/Router/Router'
 export { Section } from './components/Section/Section'
 export { Table } from './components/Table/Table'
+export type {
+  RowSelectionDeclaration,
+  RowSelectionState,
+  TableKey,
+  TableSelection,
+} from './components/Table/Selection'
 export { TypedTable } from './components/Table/TypedTable'
 export { Tag } from './components/Tag/Tag'
 export { TagsEditor } from './components/TagsEditor/TagsEditor'
