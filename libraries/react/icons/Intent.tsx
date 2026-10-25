@@ -36,6 +36,7 @@ export class Intent extends IconBase<Props> {
   static get defaultProps() {
     return {
       ...super.defaultProps,
+      filled: true,
       intent: IntentEnum.Danger,
     }
   }

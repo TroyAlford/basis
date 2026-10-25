@@ -19,6 +19,10 @@ interface TestValue {
 class TestEditor extends Editor<TestValue, HTMLDivElement, { label: string }> {
   static displayName = 'TestEditor'
 
+  static initialize(initialValue: Partial<TestValue>): TestValue {
+    return { id: initialValue.id ?? 0 }
+  }
+
   content() {
     return (
       <button
@@ -152,7 +156,7 @@ describe('Dialog.open with resolve and Dialog.editor', () => {
     }
 
     expect(() => Dialog.editor(
-      NotAnEditor,
+      NotAnEditor as unknown as typeof TestEditor,
       { id: 0 },
       { props: { label: 'Invalid' } },
     )).toThrow('Dialog.editor: expected an Editor subclass constructor')

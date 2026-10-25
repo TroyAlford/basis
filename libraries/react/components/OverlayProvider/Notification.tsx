@@ -5,12 +5,23 @@ import { IconBase } from '../../icons/IconBase/IconBase'
 import { Intent as IntentIcon } from '../../icons/Intent'
 import { Intent } from '../../types/Intent'
 import { Component } from '../Component/Component'
+import type { OverlayDismissGuard } from './OverlayLifecycle'
 import { REQUIRED_MESSAGE } from './REQUIRED_MESSAGE.ts'
 
 import './Notification.styles.ts'
 
+/** Lifecycle callbacks available to notifications (no resolution events). */
+export interface NotificationLifecycle {
+  /** Runs once after a dismissal is accepted. */
+  onDismissed?: () => void,
+  /** Runs before any dismissal; `false` keeps the notification visible. */
+  onDismissing?: OverlayDismissGuard,
+  /** Reports guard or hook failures without resurrecting the notification. */
+  onError?: (error: unknown) => void,
+}
+
 /** Payload for {@link Notification.create} and rows owned by {@link OverlayProvider} (before `id`). */
-export interface INotification {
+export interface INotification extends NotificationLifecycle {
   /** Optional notification body. */
   content?: ReactNode,
   /** Header icon. Defaults from `intent` when omitted. */
@@ -21,6 +32,16 @@ export interface INotification {
   timeout?: number | null,
   /** Optional notification heading. */
   title?: ReactNode,
+}
+
+/** Handle returned by {@link Notification.create}. */
+export interface NotificationHandle {
+  /** Dismiss through the shared notification dismissal guard. */
+  dismiss(): Promise<boolean>,
+  /** Stable identity for the mounted notification row. */
+  readonly id: string,
+  /** Patch the same mounted notification; omitted fields are retained. */
+  update(update: Partial<INotification>): void,
 }
 
 interface Props extends INotification {
@@ -42,7 +63,7 @@ export class Notification extends Component<Props, HTMLElement> {
    *   module; it is not re-exported from `@basis/react`.
    * @returns Handle for update and dismiss (shape follows {@link OverlayProvider.createNotification}).
    */
-  static create(request: Partial<INotification>) {
+  static create(request: Partial<INotification>): NotificationHandle {
     if (typeof window === 'undefined' || !window.overlayProvider) throw new Error(REQUIRED_MESSAGE)
     return window.overlayProvider.createNotification(request)
   }

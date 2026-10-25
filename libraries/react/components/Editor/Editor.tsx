@@ -2,7 +2,7 @@ import type { PathOf, TypeAt } from '../../../utilities'
 import { clone, deepEquals, isNil, noop, set } from '../../../utilities'
 import { Component } from '../Component/Component'
 
-interface TProps<Value> {
+export interface EditorProps<Value> {
   /** Field identifier (number or string) */
   field?: string,
   /** Initial value for uncontrolled mode */
@@ -35,8 +35,14 @@ interface TState<Value> {
   current: Value,
 }
 
-type P<V, T> = TProps<V> & T
+type P<V, T> = EditorProps<V> & T
 type S<V, T> = TState<V> & T
+
+/**
+ * Type-only brand identifying concrete editor classes without expanding the editor's generics.
+ * It gives constructor constraints an editor-specific identity that stays cheap to instantiate.
+ */
+export declare const editorClassBrand: unique symbol
 
 /**
  * Abstract base class for editor components.
@@ -47,10 +53,13 @@ type S<V, T> = TState<V> & T
 export abstract class Editor<
   Value,
   Element extends HTMLElement = HTMLElement,
-  Props = TProps<Value>,
+  Props = EditorProps<Value>,
   State = TState<Value>,
 > extends Component<P<Value, Props>, Element, S<Value, State>> {
-  static defaultProps: Partial<TProps<unknown> & Component['props']> = {
+  /** Type-only editor identity for constructor constraints. */
+  declare readonly [editorClassBrand]: true
+
+  static defaultProps: Partial<EditorProps<unknown> & Component['props']> = {
     ...super.defaultProps,
     onChange: noop,
     readOnly: false,
@@ -68,6 +77,20 @@ export abstract class Editor<
     if (ctor === Editor) return true
     if (ctor instanceof Editor) return true
     return typeof ctor === 'function' && ctor.prototype instanceof Editor
+  }
+
+  /**
+   * Complete and validate a shallow partial initial value into this editor's full value.
+   *
+   * Editors used with `Dialog.editor` must override this with their explicit, tested
+   * initialization contract. The base implementation rejects the value instead of silently
+   * passing an incomplete object through as if it were complete.
+   * @param initialValue - Shallow partial initial value.
+   * @throws {Error} When the concrete editor does not implement an initialization contract.
+   */
+  static initialize(initialValue: Partial<unknown>): unknown {
+    void initialValue
+    throw new Error(`${this.name} must implement static initialize() to accept a Dialog.editor initial value.`)
   }
 
   get defaultState(): S<Value, State> {

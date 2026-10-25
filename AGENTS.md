@@ -17,6 +17,15 @@ Guidance for humans and coding agents working in this repository.
 - **Subclass `Component`.** UI in this package must be implemented as a `class` that extends `libraries/react/components/Component/Component.tsx` (or another basis component), using `displayName`, `get tag()`, `get attributes()`, `get classNames()`, and `content()` as appropriate. Do **not** add new functional components or use React hooks for package UI; match existing components (for example `Button`, `ApplicationBase`).
 - **Styling.** Rely on `Component`’s automatic root class (`kebabCase(displayName)` plus `component`) and theme or layout CSS that targets those names. Do not introduce ad-hoc BEM-style blocks (`block__element--modifier`) on package components.
 
+## Overlays
+
+- **One provider lifecycle.** `OverlayProvider` is the single manager for `Dialog` and `Notification`: registration, stable ids, updates, terminal transitions, callback dispatch, timers, and cleanup.
+- **One terminal outcome.** Resolve and dismiss are mutually exclusive and exactly-once. Pre-terminal guards may veto or throw; after-hooks report errors while the settled result stands. Provider teardown forces dismissal, settles every row, and resolves every public Promise.
+- **Stable identity.** Updating an overlay patches the same mounted row, preserving its identity; editor dialogs keep their mounted instance and unsaved draft.
+- **Editor inference and initialization.** `Dialog.editor` derives its value type from the concrete `Editor<T>` constructor and accepts a shallow `Partial<T>` initial value. Every editor used with `Dialog.editor` implements the explicit `Editor.initialize` contract; the base implementation rejects the value. The editor supplies defaults or rejects incomplete input, and the resolved value is always the full `T`. Editor handles accept shell options and typed props patches while preserving the mounted editor.
+- **Real modal stack.** Dialogs mount as a stack of native `<dialog>` elements. The top dialog receives keyboard, backdrop, and programmatic terminal interactions. Dismissal guards may open nested dialogs while the parent transition is pending.
+- **Both surfaces ship together.** Any public overlay API change updates its tests (behavior, type contracts, and real-browser coverage where native behavior is involved) and the matching `libraries/docs/pages/*.docs.tsx` page.
+
 ## Commits
 
 - **Do not skip repository checks** when committing (for example `--no-verify` or other flags that bypass Husky). Let lint, typecheck, and tests run; fix failures instead of silencing hooks.
