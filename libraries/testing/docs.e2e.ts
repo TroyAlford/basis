@@ -118,7 +118,7 @@ describe('testing/docs', () => {
       const header = page.locator('nav.links > h1')
       await header.waitFor()
 
-      expect(await header.locator('svg.icon.component').count()).toBe(1)
+      expect(await header.locator('svg.basis-icon.component').count()).toBe(1)
       expect(await header.textContent()).toContain('Basis Docs')
 
       const before = await header.boundingBox()
