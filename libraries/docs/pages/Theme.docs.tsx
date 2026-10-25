@@ -19,6 +19,7 @@ const ROOT_THEME_CSS_SNAPSHOT_SECTIONS: readonly { readonly title: string, reado
       '--basis-color-background',
       '--basis-color-surface',
       '--basis-color-surface-alt',
+      '--basis-color-surface-code',
       '--basis-color-surface-elevated',
       '--basis-color-surface-inset',
       '--basis-color-surface-muted',

@@ -72,6 +72,10 @@ describe('testing/docs', () => {
       expect(await page.evaluate(() => (
         getComputedStyle(document.querySelector('nav.links')).backgroundColor
       ))).toBe('rgb(248, 249, 250)')
+      await waitForHighlightedCode(page)
+      expect(await page.evaluate(() => (
+        getComputedStyle(document.querySelector('.code.component pre')).backgroundColor
+      ))).toBe('rgb(13, 17, 23)')
 
       // The dark preset switches the shell, controls, and their text together.
       await page.locator('button.toggle', { hasText: 'Dark' }).click()
@@ -93,6 +97,11 @@ describe('testing/docs', () => {
       expect(await page.evaluate(() => (
         getComputedStyle(document.querySelector('button.toggle')).color
       ))).toBe('rgb(243, 245, 247)')
+      await waitForHighlightedCode(page)
+      expect(await page.evaluate(() => ({
+        code: getComputedStyle(document.querySelector('.code.component pre')).backgroundColor,
+        input: getComputedStyle(document.querySelector('.text-editor.component')).backgroundColor,
+      }))).toEqual({ code: 'rgb(17, 21, 26)', input: 'rgb(17, 21, 26)' })
 
       // Leaving the page cleans up the explicit override and returns to system.
       await page.locator('nav.links a', { hasText: 'Button' }).click()

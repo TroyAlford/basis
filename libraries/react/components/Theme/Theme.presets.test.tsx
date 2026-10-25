@@ -136,6 +136,7 @@ describe('Theme presets', () => {
       'success',
       'surface',
       'surface-alt',
+      'surface-code',
       'surface-elevated',
       'surface-muted',
     ]) {
@@ -143,6 +144,7 @@ describe('Theme presets', () => {
     }
     expect(declared(css, '--basis-color-background')).toBe('#080a0dff')
     expect(declared(css, '--basis-color-surface')).toBe('#11151aff')
+    expect(declared(css, '--basis-color-surface-code')).toBe('#11151aff')
     expect(declared(css, '--basis-color-surface-elevated')).toBe('#1c232bff')
   })
 
@@ -186,5 +188,6 @@ describe('Theme presets', () => {
     expect(declared(css, '--basis-color-disabled')).toBe('#e5e5e5ff')
     expect(declared(css, '--basis-color-disabled-text')).toBe('#a3a3a3ff')
     expect(declared(css, '--basis-color-surface-muted')).toBe('#f8f9faff')
+    expect(declared(css, '--basis-color-surface-code')).toBe('#0d1117ff')
   })
 })

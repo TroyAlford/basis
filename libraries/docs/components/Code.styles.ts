@@ -13,6 +13,8 @@ style('basis:docs:highlight', css`
       padding: 0;
       
       > pre {
+        /* Shiki writes its theme background inline; the Basis code surface wins. */
+        background-color: var(--basis-color-surface-code) !important;
         border-radius: var(--basis-radius-md);
         margin: 0;
         padding: var(--basis-unit-md);

@@ -42,6 +42,8 @@ interface Props {
     surface?: string,
     /** Alternating surface color for striped content such as table rows */
     surfaceAlt?: string,
+    /** Code/preformatted surface color */
+    surfaceCode?: string,
     /** Elevated surface color for dialogs and popup menus */
     surfaceElevated?: string,
     /** Inset surface color for prefixes, suffixes, and similar chrome */
@@ -146,6 +148,7 @@ export const DEFAULT_THEME = {
     success: '#008000',
     surface: '#ffffff',
     surfaceAlt: '#dddddd',
+    surfaceCode: '#0d1117',
     surfaceElevated: '#ffffff',
     surfaceInset: '#88888844',
     surfaceMuted: '#f8f9fa',
@@ -224,6 +227,7 @@ export const DARK_THEME = {
     success: '#4ade80',
     surface: '#11151a',
     surfaceAlt: '#161b21',
+    surfaceCode: '#11151a',
     surfaceElevated: '#1c232b',
     surfaceInset: '#212a33',
     surfaceMuted: '#141a20',
