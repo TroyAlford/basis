@@ -65,7 +65,13 @@ export class TableHeaderExample extends Component<Record<string, never>, HTMLDiv
     return (
       <div
         data-table-header-example
-        style={{ border: '1px solid #ddd', borderRadius: '4px', maxWidth: '100%', overflow: 'hidden', width: '34em' }}
+        style={{
+          border: '1px solid #ddd',
+          borderRadius: '4px',
+          maxWidth: '100%',
+          overflow: 'hidden',
+          width: 'fit-content',
+        }}
       >
         <Table readOnly value={tasks}>
           {Column.Boolean({
@@ -82,10 +88,9 @@ export class TableHeaderExample extends Component<Record<string, never>, HTMLDiv
                 />
               </>
             ),
-            width: '8em',
           })}
-          {Column.Text({ field: 'task', pin: Pin.Left, title: 'Task', width: '8em' })}
-          {Column.Text({ field: 'owner', title: 'Owner', width: '8em' })}
+          {Column.Text({ field: 'task', pin: Pin.Left, title: 'Task' })}
+          {Column.Text({ field: 'owner', title: 'Owner' })}
           {Column.Text({
             field: 'notes',
             pin: Pin.Right,
@@ -96,7 +101,6 @@ export class TableHeaderExample extends Component<Record<string, never>, HTMLDiv
                 <Button disabled={!hasNotes} onActivate={this.handleClearNotes}>Clear</Button>
               </>
             ),
-            width: '11em',
           })}
         </Table>
       </div>
