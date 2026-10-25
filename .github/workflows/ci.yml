@@ -92,7 +92,7 @@ jobs:
   # Code CI's only required status context. It judges the five code jobs that
   # ran in this same workflow run; it never reads check runs from another run.
   required:
-    name: code / required
+    name: required
     if: always()
     needs: [eslint, run-tests, type-check, knip, consumer-install]
     runs-on: ubuntu-latest

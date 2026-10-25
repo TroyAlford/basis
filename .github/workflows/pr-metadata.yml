@@ -28,7 +28,7 @@ jobs:
   # PR Metadata's only required status context. It judges the title job that
   # ran in this same workflow run; it never reads check runs from another run.
   required:
-    name: metadata / required
+    name: metadata
     if: always()
     needs: [check-pr-title]
     runs-on: ubuntu-latest

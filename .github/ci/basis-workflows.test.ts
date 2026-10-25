@@ -124,7 +124,7 @@ describe('Basis Code CI', () => {
   test('is read-only and has one named required gate', () => {
     expect(code.permissions).toEqual({ contents: 'read' })
     const required = code.jobs?.required
-    expect(required?.name).toBe('code / required')
+    expect(required?.name).toBe('required')
     expect(required?.if).toBe('always()')
     expect(required?.needs).toEqual(['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install'])
 
@@ -192,7 +192,7 @@ describe('Basis PR Metadata', () => {
 
   test('has one named required gate that judges only this run', () => {
     const required = metadata.jobs?.required
-    expect(required?.name).toBe('metadata / required')
+    expect(required?.name).toBe('metadata')
     expect(required?.if).toBe('always()')
     expect(required?.needs).toEqual(['check-pr-title'])
 
