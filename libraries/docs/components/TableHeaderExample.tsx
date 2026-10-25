@@ -65,32 +65,36 @@ export class TableHeaderExample extends Component<Record<string, never>, HTMLDiv
     return (
       <div
         data-table-header-example
-        style={{ border: '1px solid #ddd', borderRadius: '4px', maxWidth: '100%', overflow: 'hidden', width: '27.5em' }}
+        style={{ border: '1px solid #ddd', borderRadius: '4px', maxWidth: '100%', overflow: 'hidden', width: '34em' }}
       >
         <Table readOnly value={tasks}>
           {Column.Boolean({
             field: 'complete',
-            headerContent: (
-              <CheckboxEditor
-                label="Mark all tasks complete"
-                value={this.completeState}
-                onChange={this.handleAllComplete}
-              />
-            ),
             pin: Pin.Left,
-            title: 'Done',
-            width: '4em',
+            title: (
+              <>
+                <span>Done</span>
+                <CheckboxEditor
+                  label="Mark all tasks complete"
+                  value={this.completeState}
+                  onChange={this.handleAllComplete}
+                />
+              </>
+            ),
+            width: '8em',
           })}
           {Column.Text({ field: 'task', pin: Pin.Left, title: 'Task', width: '8em' })}
           {Column.Text({ field: 'owner', title: 'Owner', width: '8em' })}
           {Column.Text({
             field: 'notes',
-            headerContent: (
-              <Button disabled={!hasNotes} onActivate={this.handleClearNotes}>Clear</Button>
-            ),
             pin: Pin.Right,
-            title: 'Notes',
-            width: '8em',
+            title: (
+              <>
+                <span>Notes</span>
+                <Button disabled={!hasNotes} onActivate={this.handleClearNotes}>Clear</Button>
+              </>
+            ),
+            width: '11em',
           })}
         </Table>
       </div>

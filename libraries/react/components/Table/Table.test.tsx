@@ -1,7 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
-import { SortDirection } from '../../types/SortDirection'
 import { CheckboxEditor } from '../CheckboxEditor/CheckboxEditor'
 import { TypedTable } from './TypedTable'
 
@@ -35,29 +34,8 @@ const headerFor = (node: HTMLElement, field: keyof TestRow): HTMLTableCellElemen
 )
 
 describe('Table', () => {
-  describe('headerContent', () => {
-    test('renders declarative header content and keeps title as its accessible name', async () => {
-      const onChange = mock()
-      const { node } = await render(
-        <Table value={ROWS}>
-          {Column.Boolean({
-            field: 'status',
-            headerContent: (
-              <input aria-label="Mark all complete" type="checkbox" onChange={onChange} />
-            ),
-            title: 'Status',
-          })}
-        </Table>,
-      )
-
-      const header = headerFor(node, 'status')
-      expect(header).toHaveAttribute('aria-label', 'Status')
-      expect(header.querySelector('.title')).toBeNull()
-      expect(header.querySelectorAll('.header-content input')).toHaveLength(1)
-      expect(header.querySelector('input')).toHaveAttribute('aria-label', 'Mark all complete')
-    })
-
-    test('keeps the default title when headerContent is absent', async () => {
+  describe('titles', () => {
+    test('renders a plain text title with native header semantics', async () => {
       const { node } = await render(
         <Table value={ROWS}>
           {Column.Boolean({ field: 'status', title: 'Status' })}
@@ -65,48 +43,89 @@ describe('Table', () => {
       )
 
       const header = headerFor(node, 'status')
+      expect(header).toHaveTextContent('Status')
       expect(header).not.toHaveAttribute('aria-label')
-      expect(header.querySelector('.title')).toHaveTextContent('Status')
+      expect(header).toHaveAttribute('aria-sort', 'none')
+
+      header.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flush()
+      expect(header).toHaveAttribute('aria-sort', 'ascending')
+
+      header.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
+      await flush()
+      expect(header).toHaveAttribute('aria-sort', 'descending')
     })
 
-    test('does not sort when an interactive header control is activated', async () => {
-      const onChange = mock()
+    test('renders arbitrary React content in a title', async () => {
+      const onActivate = mock()
       const { node } = await render(
         <Table value={ROWS}>
           {Column.Boolean({
             field: 'status',
-            headerContent: (
-              <input aria-label="Mark all complete" type="checkbox" onChange={onChange} />
+            title: (
+              <>
+                <span>Status</span>
+                <button type="button" onClick={onActivate}>Act</button>
+              </>
             ),
-            title: 'Status',
           })}
         </Table>,
       )
 
       const header = headerFor(node, 'status')
-      const input = header.querySelector('input') as HTMLInputElement
-
-      input.click()
-      await flush()
-
-      expect(onChange).toHaveBeenCalledTimes(1)
-      expect(header).not.toHaveAttribute('data-sort-direction')
-      expect(header).toHaveAttribute('aria-sort', 'none')
-
-      header.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      await flush()
-
-      expect(header).toHaveAttribute('data-sort-direction', SortDirection.Asc)
-      expect(header).toHaveAttribute('aria-sort', 'ascending')
+      expect(header).toHaveTextContent('Status')
+      expect(header).toHaveTextContent('Act')
+      expect(header.querySelector('button')).not.toBeNull()
     })
+  })
 
-    test('leaves keyboard sorting on the header and out of the header control', async () => {
+  describe('header interactions', () => {
+    test('sorts on a pointer header activation but not a nested control', async () => {
+      const onActivate = mock()
       const { node } = await render(
         <Table value={ROWS}>
           {Column.Boolean({
             field: 'status',
-            headerContent: <input aria-label="Mark all complete" type="checkbox" />,
-            title: 'Status',
+            title: (
+              <>
+                <span>Status</span>
+                <button type="button" onClick={onActivate}>Act</button>
+              </>
+            ),
+          })}
+        </Table>,
+      )
+
+      const header = headerFor(node, 'status')
+      const control = (): HTMLButtonElement => header.querySelector('button') as HTMLButtonElement
+
+      control().click()
+      await flush()
+      expect(onActivate).toHaveBeenCalledTimes(1)
+      expect(header).toHaveAttribute('aria-sort', 'none')
+
+      header.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flush()
+      expect(header).toHaveAttribute('aria-sort', 'ascending')
+      expect(onActivate).toHaveBeenCalledTimes(1)
+
+      control().click()
+      await flush()
+      expect(onActivate).toHaveBeenCalledTimes(2)
+      expect(header).toHaveAttribute('aria-sort', 'ascending')
+    })
+
+    test('sorts on a keyboard header activation but not a nested control', async () => {
+      const { node } = await render(
+        <Table value={ROWS}>
+          {Column.Boolean({
+            field: 'status',
+            title: (
+              <>
+                <span>Status</span>
+                <input aria-label="Toggle status" type="checkbox" />
+              </>
+            ),
           })}
         </Table>,
       )
@@ -116,57 +135,63 @@ describe('Table', () => {
 
       input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ' }))
       await flush()
-      expect(header).not.toHaveAttribute('data-sort-direction')
+      expect(header).toHaveAttribute('aria-sort', 'none')
 
       header.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
       await flush()
-      expect(header).toHaveAttribute('data-sort-direction', SortDirection.Asc)
+      expect(header).toHaveAttribute('aria-sort', 'ascending')
 
       header.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ' ' }))
       await flush()
-      expect(header).toHaveAttribute('data-sort-direction', SortDirection.Desc)
+      expect(header).toHaveAttribute('aria-sort', 'descending')
     })
 
-    test('updates checked and disabled state on rerender without duplicating the control', async () => {
+    test('updates a rich title and preserves sort state on rerender', async () => {
       const onChange = mock()
 
-      const table = (checked: boolean, disabled = false): React.ReactElement => (
+      const table = (checked: boolean, label: string, disabled = false): React.ReactElement => (
         <Table value={ROWS}>
           {Column.Boolean({
             field: 'status',
-            headerContent: (
-              <input
-                aria-label="Mark all complete"
-                checked={checked}
-                disabled={disabled}
-                type="checkbox"
-                onChange={onChange}
-              />
+            title: (
+              <>
+                <span>{label}</span>
+                <input
+                  aria-label="Toggle status"
+                  checked={checked}
+                  disabled={disabled}
+                  type="checkbox"
+                  onChange={onChange}
+                />
+              </>
             ),
-            title: 'Status',
           })}
         </Table>
       )
 
-      const rendered = await render(table(false))
-      expect(headerFor(rendered.node, 'status').querySelectorAll('input')).toHaveLength(1)
-
-      await rendered.update(table(true))
+      const rendered = await render(table(false, 'Status'))
       const header = headerFor(rendered.node, 'status')
-      const input = header.querySelector('input') as HTMLInputElement
-      expect(header.querySelectorAll('input')).toHaveLength(1)
+
+      header.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flush()
+      expect(header).toHaveAttribute('aria-sort', 'ascending')
+
+      await rendered.update(table(true, 'Updated'))
+      const updatedHeader = headerFor(rendered.node, 'status')
+      expect(updatedHeader).toHaveAttribute('aria-sort', 'ascending')
+      expect(updatedHeader).toHaveTextContent('Updated')
+
+      const input = updatedHeader.querySelector('input') as HTMLInputElement
+      expect(updatedHeader.querySelectorAll('input')).toHaveLength(1)
       expect(input.checked).toBe(true)
-      expect(input.disabled).toBe(false)
 
       input.click()
       await flush()
       expect(onChange).toHaveBeenCalledTimes(1)
-      expect(header).not.toHaveAttribute('data-sort-direction')
+      expect(updatedHeader).toHaveAttribute('aria-sort', 'ascending')
 
-      await rendered.update(table(true, true))
-      expect(header.querySelectorAll('input')).toHaveLength(1)
-      expect(input.checked).toBe(true)
-      expect(input.disabled).toBe(true)
+      await rendered.update(table(true, 'Updated', true))
+      expect((updatedHeader.querySelector('input') as HTMLInputElement).disabled).toBe(true)
     })
 
     test('takes indeterminate state from the owning consumer', async () => {
@@ -174,21 +199,25 @@ describe('Table', () => {
         <Table value={ROWS}>
           {Column.Boolean({
             field: 'status',
-            headerContent: (
-              <CheckboxEditor
-                label="Mark all complete"
-                value={null}
-                onChange={() => undefined}
-              />
+            title: (
+              <>
+                <span>Status</span>
+                <CheckboxEditor
+                  label="Mark all complete"
+                  value={null}
+                  onChange={() => undefined}
+                />
+              </>
             ),
-            title: 'Status',
           })}
         </Table>,
       )
 
-      const input = headerFor(node, 'status').querySelector('input') as HTMLInputElement
+      const header = headerFor(node, 'status')
+      const input = header.querySelector('input') as HTMLInputElement
       expect(input.checked).toBe(false)
       expect(input.indeterminate).toBe(true)
+      expect(input).toHaveAttribute('aria-checked', 'mixed')
       expect(input).toHaveAttribute('aria-label', 'Mark all complete')
     })
   })

@@ -12,6 +12,29 @@ import { ColumnType } from './Column'
 
 import './HeaderCell.styles.ts'
 
+/**
+ * Native elements and explicit ARIA roles that own their own activation. A
+ * click or keydown from one of these belongs to the control, not to the column
+ * header's sort behavior.
+ */
+const INTERACTIVE_SELECTOR = [
+  'a',
+  'button',
+  'input',
+  'label',
+  'select',
+  'textarea',
+  '[contenteditable="true"]',
+  '[role="button"]',
+  '[role="checkbox"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[role="radio"]',
+  '[role="switch"]',
+  '[role="tab"]',
+].join(', ')
+
 export class HeaderCell<TRow, TField extends PathOf<TRow>>
   extends Editor<ColumnProps<TRow, TField>, HTMLTableCellElement, ColumnProps<TRow, TField>> {
   static displayName = 'Table.HeaderCell'
@@ -20,10 +43,9 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
   }
 
   get attributes() {
-    const { headerContent, sortable, sortDirection } = this.current
+    const { sortable, sortDirection } = this.current
     return {
       ...super.attributes,
-      'aria-label': headerContent === undefined || headerContent === null ? undefined : this.displayTitle,
       'aria-sort': sortable ? this.ariaSort : undefined,
       'data-align': this.current.align,
       'data-field': this.current.field,
@@ -41,9 +63,22 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
 
   get tag(): keyof React.JSX.IntrinsicElements { return 'th' }
 
-  private get displayTitle(): string {
+  /**
+   * The declared title, or the field name as a stable textual fallback.
+   * @returns The title content to render.
+   */
+  private get displayTitle(): React.ReactNode {
     const { field, title } = this.current
-    return title || String(field)
+    return title === undefined || title === null || title === '' ? String(field) : title
+  }
+
+  /**
+   * Whether the title carries React content rather than plain text.
+   * @returns True when the title needs rich layout.
+   */
+  private get richTitle(): boolean {
+    const { title } = this.current
+    return title !== undefined && title !== null && typeof title !== 'string'
   }
 
   private get ariaSort(): 'ascending' | 'descending' | 'none' {
@@ -54,7 +89,23 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
     }
   }
 
-  private handleSort = () => {
+  /**
+   * Whether an event came from a control inside the title. React events bubble
+   * through the header cell, so the header must defer to the control rather
+   * than suppressing the event on the way to its owner.
+   * @param target - The event target.
+   * @returns True when the target is, or is inside, an interactive control.
+   */
+  private isInteractiveTarget(target: EventTarget | null): boolean {
+    return target instanceof Element && target.closest(INTERACTIVE_SELECTOR) !== null
+  }
+
+  private handleSort = (event: React.MouseEvent<HTMLTableCellElement>): void => {
+    if (this.isInteractiveTarget(event.target)) return
+    this.sort()
+  }
+
+  private sort = (): void => {
     const { sortable, sortDirection } = this.current
     if (!sortable) return
 
@@ -74,43 +125,18 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
   }
 
   /**
-   * Sort from the keyboard without letting an interactive control inside
-   * `headerContent` trigger the column's sort.
+   * Sort from the keyboard only when the header cell itself has focus, leaving
+   * Enter and Space to controls nested in a rich title.
    * @param event - The keydown event on the header cell.
    */
   private handleSortKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
     this.props.onKeyDown?.(event)
     if (event.defaultPrevented || !this.current.sortable) return
+    if (event.target !== event.currentTarget) return
     if (event.key !== Keyboard.Enter && event.key !== Keyboard.Space) return
 
     event.preventDefault()
-    this.handleSort()
-  }
-
-  /**
-   * Keep pointer and keyboard events from an interactive header control out of
-   * the header cell's own sort handling.
-   * @param event - The event bubbling from the header content.
-   */
-  private stopHeaderContentPropagation = (event: React.SyntheticEvent): void => {
-    event.stopPropagation()
-  }
-
-  private get header(): React.ReactNode {
-    const { headerContent } = this.current
-    if (headerContent === undefined || headerContent === null) {
-      return <span className="title">{this.displayTitle}</span>
-    }
-
-    return (
-      <div
-        className="header-content"
-        onClick={this.stopHeaderContentPropagation}
-        onKeyDown={this.stopHeaderContentPropagation}
-      >
-        {headerContent}
-      </div>
-    )
+    this.sort()
   }
 
   content(): React.ReactNode {
@@ -118,10 +144,15 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
 
     return super.content(
       <div className="content">
-        {this.header}
+        <span
+          className="title"
+          data-rich-title={this.richTitle ? 'true' : undefined}
+        >
+          {this.displayTitle}
+        </span>
         {sortable && (
           <Sort
-            aria-label={`Sort by ${this.displayTitle}`}
+            aria-hidden="true"
             direction={sortDirection || undefined}
             sortBy={sortDirection ? this.sortBy : SortBy.None}
           />

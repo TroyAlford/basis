@@ -21,19 +21,20 @@ style('basis:table-header-cell', css`
       justify-content: space-between;
       padding: var(--basis-table-header-cell-padding);
 
-      > .header-content {
-        align-items: center;
-        display: flex;
-        flex: 1;
-        min-width: 0;
-      }
-
       > .title {
         flex: 1;
         overflow: hidden;
         text-overflow: ellipsis;
         user-select: none;
         white-space: nowrap;
+        &[data-rich-title="true"] {
+          align-items: center;
+          display: flex;
+          gap: 0.5em;
+          overflow: visible;
+          text-overflow: clip;
+          white-space: normal;
+        }
       }
 
       > .sort.icon[data-sort-by="${SortBy.None}"] {
@@ -59,13 +60,13 @@ style('basis:table-header-cell', css`
     &[data-align="${TextAlign.Right}"] > .content > .title {
       text-align: right;
     }
-    &[data-align="${TextAlign.Center}"] > .content > .header-content {
+    &[data-align="${TextAlign.Center}"] > .content > .title[data-rich-title="true"] {
       justify-content: center;
     }
-    &[data-align="${TextAlign.Left}"] > .content > .header-content {
+    &[data-align="${TextAlign.Left}"] > .content > .title[data-rich-title="true"] {
       justify-content: flex-start;
     }
-    &[data-align="${TextAlign.Right}"] > .content > .header-content {
+    &[data-align="${TextAlign.Right}"] > .content > .title[data-rich-title="true"] {
       justify-content: flex-end;
     }
   }

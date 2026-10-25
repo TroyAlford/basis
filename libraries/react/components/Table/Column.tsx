@@ -29,16 +29,11 @@ export interface ColumnProps<TRow = unknown, TField extends PathOf<TRow> = PathO
   enum?: Record<string, string | number>,
   field: TField,
   header?: boolean,
-  /**
-   * Declarative React content for the column header, replacing the default
-   * title text. `title` remains the column's accessible name and sort label.
-   */
-  headerContent?: React.ReactNode,
   pin?: Pin,
   sortBy?: SortBy,
   sortDirection?: SortDirection | null,
   sortable?: boolean,
-  title?: string,
+  title?: React.ReactNode,
   type?: ColumnType,
   width?: string | number,
 }
