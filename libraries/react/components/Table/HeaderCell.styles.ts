@@ -27,7 +27,7 @@ style('basis:table-header-cell', css`
         text-overflow: ellipsis;
         user-select: none;
         white-space: nowrap;
-        &[data-rich-title="true"] {
+        &[data-rich-title] {
           align-items: center;
           display: flex;
           gap: 0.5em;
@@ -60,13 +60,13 @@ style('basis:table-header-cell', css`
     &[data-align="${TextAlign.Right}"] > .content > .title {
       text-align: right;
     }
-    &[data-align="${TextAlign.Center}"] > .content > .title[data-rich-title="true"] {
+    &[data-align="${TextAlign.Center}"] > .content > .title[data-rich-title] {
       justify-content: center;
     }
-    &[data-align="${TextAlign.Left}"] > .content > .title[data-rich-title="true"] {
+    &[data-align="${TextAlign.Left}"] > .content > .title[data-rich-title] {
       justify-content: flex-start;
     }
-    &[data-align="${TextAlign.Right}"] > .content > .title[data-rich-title="true"] {
+    &[data-align="${TextAlign.Right}"] > .content > .title[data-rich-title] {
       justify-content: flex-end;
     }
   }

@@ -149,7 +149,7 @@ export class HeaderCell<TRow, TField extends PathOf<TRow>>
       <div className="content">
         <span
           className="title"
-          data-rich-title={this.richTitle ? 'true' : undefined}
+          data-rich-title={this.richTitle ? '' : undefined}
         >
           {this.displayTitle}
         </span>
