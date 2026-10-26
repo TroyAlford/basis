@@ -314,7 +314,7 @@ Development HMR needs Bun's dev-server bundler to load Basis's modules. `bun ins
 
 `version` is the authoritative release version from the strict semver release tag that command-center injects as `VERSION`. The exact deployed checkout is a separate `GIT_SHA`, and `package.json.version` is never the source.
 
-While the initial build is pending it responds `503 { "status": "starting", ... }`, and after a failed build `503 { "status": "error", "error": "...", ... }`, so a verifier can never observe a healthy process for an application that did not build. `server.ready()` resolves when the build succeeds and rejects when it fails, for processes that signal readiness directly. Bun version and uptime are additive diagnostics. The API is `/api/health`; `/health` is a normal SPA path, so an application that wants a human-readable health page can render it at `/health` and call `/api/health` for its data. The server surface shares the React contract from `basis/react`, and its runtime dependencies are declared by Basis.
+While the initial build is pending it responds `503 { "status": "starting", ... }`, and after a failed build `503 { "status": "error", "error": "...", ... }`, so a verifier can never observe a healthy process for an application that did not build. `server.ready()` resolves when the build succeeds and rejects when it fails, for processes that signal readiness directly. Bun version and uptime are additive diagnostics. The API is `/api/health`. The server surface shares the React contract from `basis/react`, and its runtime dependencies are declared by Basis.
 
 `@basis/server` is still maturing; the supported public surface is the `Server` class, its `ServerOptions`, and the `APIRoute` and `HealthOptions` types.
 

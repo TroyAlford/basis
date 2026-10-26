@@ -108,8 +108,6 @@ While the build is pending it responds `503 { "status": "starting", ... }`, and 
 
 `server.ready()` resolves when the initial build succeeds and rejects when it fails, for processes that prefer to signal readiness directly. In production the process stays up and keeps reporting the failure on `/api/health` rather than crashing, so command-center can observe and act on it.
 
-There is no root health route. `/health` is a normal SPA path and falls through to the application shell; a deployment verifier probes `/api/health`. An application that wants a human-readable health page can render it at `/health` and call `/api/health` for its data.
-
 ## API routes
 
 ```ts
