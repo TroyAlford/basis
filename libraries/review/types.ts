@@ -27,6 +27,17 @@ export type ExecutionProfile =
  */
 export type ReviewDisposition = 'abstain' | 'finding' | 'no_finding' | 'question'
 
+/** Binary result used to scan a review report. */
+export type ReviewResult = 'fail' | 'pass'
+
+/** Result and reason code used when reporting a reviewer outcome. */
+export interface ReviewOutcomeSummary {
+  /** Reviewer outcome category, used as the reason code. */
+  reasonCode: string,
+  /** Binary pass/fail result. */
+  result: ReviewResult,
+}
+
 /** Data a reviewer needs assembled before it can adjudicate. */
 export type ContextRequirement =
   | 'changed-files'
