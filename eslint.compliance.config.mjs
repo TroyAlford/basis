@@ -1,3 +1,3 @@
-import { createComplianceConfig } from './consumer/eslint'
+import { createComplianceConfig } from './libraries/eslint-plugin/compliance'
 
 export default createComplianceConfig()

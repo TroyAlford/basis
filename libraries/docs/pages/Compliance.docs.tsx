@@ -9,7 +9,7 @@ export class ComplianceDocs extends DocumentationPage<Record<string, never>> {
         <section>
           <h1>Component compliance</h1>
           <p>Basis UI is class-based. Every application component extends the Basis <Link to="/components/Component">Component</Link> or <Link to="/components/Editor">Editor</Link> hierarchy, directly or indirectly. React function components, <code>React.FC</code> / <code>React.FunctionComponent</code>, <code>memo</code> and <code>forwardRef</code> function components, and React hooks are outside the contract.</p>
-          <p>The Basis root <code>Component</code> is the single deliberate boundary onto <code>React.Component</code>. Application code does not extend React's base class directly.</p>
+          <p>The Basis root <code>Component</code> is the deliberate boundary onto <code>React.Component</code>. A few low-level framework primitives whose children cannot satisfy the <code>Component</code> prop contract — currently <code>Await</code> for promise children and <code>Route</code> for render-function children — carry explicit, justified inline exceptions. Application code does not extend React's base class directly.</p>
         </section>
         <section>
           <h2>One policy, two entry points</h2>

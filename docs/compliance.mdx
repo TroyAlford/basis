@@ -4,7 +4,7 @@ title: Component compliance
 
 # Component compliance
 
-Basis UI is class-based. Every application component must directly or indirectly extend the `Component` or `Editor` hierarchy from `basis/react`. React function components, `React.FC` / `React.FunctionComponent`, `memo` and `forwardRef` function components, and React hooks are outside the contract. The single exception is the Basis root `Component` itself, which is the deliberate boundary onto `React.Component`.
+Basis UI is class-based. Every application component must directly or indirectly extend the `Component` or `Editor` hierarchy from `basis/react`. React function components, `React.FC` / `React.FunctionComponent`, `memo` and `forwardRef` function components, and React hooks are outside the contract. The Basis root `Component` is the deliberate boundary onto `React.Component`. A few low-level framework primitives whose children cannot satisfy the `Component` prop contract — currently `Await` for promise children and `Route` for render-function children — carry explicit, justified inline exceptions; application code does not extend React's base class directly.
 
 The rule follows syntax, imports, scope bindings, and JSX references. It rejects a function when it is exported as a PascalCase component that renders JSX or when it is used as a JSX component type. It does not ban functions that merely return React content, so pure helpers and ordinary domain functions remain valid.
 
