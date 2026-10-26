@@ -111,6 +111,52 @@ export class Example {
 `)).toEqual(['customHook', 'reactHook'])
   })
 
+  test('rejects an imported custom hook used as Basis component state', () => {
+    expect(messageIds(`
+import { Component } from 'basis/react'
+import { useRemoteData } from './useRemoteData'
+export class Page extends Component {
+  value = useRemoteData()
+}
+`)).toEqual(['customHook'])
+  })
+
+  test('rejects a local genuine hook called from a Basis component method', () => {
+    expect(messageIds(`
+import { Component } from 'basis/react'
+import { useState } from 'react'
+function useThing() { return useState(0) }
+export class Page extends Component {
+  content() {
+    const value = useThing()
+    return <span>{value}</span>
+  }
+}
+`)).toEqual(['customHook', 'reactHook'])
+  })
+
+  test('allows an imported pure useX helper inside a Basis component method', () => {
+    expect(messageIds(`
+import { Component } from 'basis/react'
+import { useDiscount } from './pricing'
+export class Pricing extends Component {
+  content() {
+    const price = useDiscount('A')
+    return <span>{price}</span>
+  }
+}
+`)).toEqual([])
+  })
+
+  test('allows an imported pure useX helper in an ordinary class field', () => {
+    expect(messageIds(`
+import { useDiscount } from './pricing'
+class Config {
+  value = useDiscount('A')
+}
+`)).toEqual([])
+  })
+
   test('allows a pure useX utility in an ordinary domain module', () => {
     expect(messageIds(`
 function useDiscount(code: string): string { return code.trim() }
@@ -332,6 +378,14 @@ export class Legacy extends Component {
     expect(messageIds(`
 import * as React from 'react'
 export class Legacy extends React.PureComponent {}
+`)).toEqual(['reactClassBase'])
+  })
+
+  test('rejects a class extending a locally aliased React.Component', () => {
+    expect(messageIds(`
+import * as React from 'react'
+const Root = React.Component
+export class Legacy extends Root {}
 `)).toEqual(['reactClassBase'])
   })
 

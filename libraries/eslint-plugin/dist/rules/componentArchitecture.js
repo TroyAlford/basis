@@ -202,28 +202,10 @@ const resolveFunction = (context, node, seen = new Set()) => {
     }
     return null;
 };
-// Whether a superclass is React's own Component or PureComponent.
+// Whether a superclass resolves to React's own Component or PureComponent.
 const reactClassBase = (context, node) => {
-    const expression = unwrapExpression(node);
-    if (!isObject(expression))
-        return null;
-    if (nodeType(expression) === 'MemberExpression') {
-        const property = memberProperty(expression);
-        if (!property || !REACT_CLASS_BASES.has(property))
-            return null;
-        const object = reactExport(context, expression.object);
-        return object === '*' || object === 'default' ? property : null;
-    }
-    if (nodeType(expression) === 'Identifier' && typeof expression.name === 'string') {
-        const variable = findVariable(context.sourceCode.getScope(expression), expression.name);
-        if (!variable)
-            return null;
-        const imported = importInfo(variable);
-        if (imported?.source !== REACT_SOURCE || imported.kind !== 'named')
-            return null;
-        return REACT_CLASS_BASES.has(imported.imported) ? imported.imported : null;
-    }
-    return null;
+    const resolved = reactExport(context, node);
+    return resolved && REACT_CLASS_BASES.has(resolved) ? resolved : null;
 };
 // Whether a function contains JSX outside of nested functions and classes.
 const containsJsx = (node, root, seen = new Set()) => {
@@ -478,7 +460,7 @@ const functionIdentifier = (node) => {
     return null;
 };
 /**
- * Whether a function is a React component or custom hook by name or JSX output.
+ * Whether a function is a React component or custom hook by binding name.
  * @param node The candidate function node.
  * @returns Whether the function is component or hook context.
  */
@@ -492,7 +474,7 @@ const isComponentOrHookFunction = (node) => {
     if (type !== 'ArrowFunctionExpression' && type !== 'FunctionDeclaration' && type !== 'FunctionExpression') {
         return false;
     }
-    return rendersJsx(node);
+    return isDefaultExport(node) && rendersJsx(node);
 };
 /**
  * Whether a call site is inside a component or custom-hook function.
@@ -505,6 +487,74 @@ const isInsideComponentOrHook = (context, node) => {
     for (let index = ancestors.length - 1; index >= 0; index -= 1) {
         if (isComponentOrHookFunction(ancestors[index]))
             return true;
+    }
+    return false;
+};
+/**
+ * Whether a class directly extends the Basis component hierarchy.
+ * @param context The rule context used for scope resolution.
+ * @param node The class node to inspect.
+ * @param seen Classes already visited in this resolution.
+ * @returns Whether the class is a Basis component.
+ */
+const isBasisComponentClass = (context, node, seen = new Set()) => {
+    if (!isObject(node) || seen.has(node))
+        return false;
+    seen.add(node);
+    const type = nodeType(node);
+    if (type !== 'ClassDeclaration' && type !== 'ClassExpression')
+        return false;
+    const superClass = unwrapExpression(node.superClass);
+    if (!isObject(superClass))
+        return false;
+    if (nodeType(superClass) === 'Identifier' && typeof superClass.name === 'string') {
+        const variable = findVariable(context.sourceCode.getScope(superClass), superClass.name);
+        if (!variable)
+            return false;
+        const imported = importInfo(variable);
+        if (imported) {
+            if (imported.source === 'basis/react')
+                return true;
+            return imported.source.startsWith('.') && (/(?:^|\/)(?:Component|Editor)\/(?:Component|Editor)(?:\.[cm]?[jt]sx?)?$/.test(imported.source));
+        }
+        for (const definition of variable.defs) {
+            if (definition.type === 'ClassName')
+                return isBasisComponentClass(context, definition.node, seen);
+            if (definition.type === 'Variable' && definition.node.init) {
+                if (isBasisComponentClass(context, definition.node.init, seen))
+                    return true;
+            }
+        }
+    }
+    return false;
+};
+/**
+ * Whether a call is a direct instance field initializer on a Basis component.
+ * @param context The rule context used to read ancestors.
+ * @param node The call expression node.
+ * @returns Whether the call initializes Basis component state.
+ */
+const isBasisComponentMember = (context, node) => {
+    const ancestors = context.sourceCode.getAncestors(node);
+    for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+        const ancestor = ancestors[index];
+        const type = nodeType(ancestor);
+        if (type === 'ArrowFunctionExpression'
+            || type === 'FunctionDeclaration'
+            || type === 'FunctionExpression'
+            || type === 'MethodDefinition') {
+            return false;
+        }
+        if (type !== 'PropertyDefinition' || !isObject(ancestor) || ancestor.static === true)
+            continue;
+        for (let outer = index - 1; outer >= 0; outer -= 1) {
+            const owner = ancestors[outer];
+            const ownerType = nodeType(owner);
+            if (ownerType === 'ClassDeclaration' || ownerType === 'ClassExpression') {
+                return isBasisComponentClass(context, owner);
+            }
+        }
+        return false;
     }
     return false;
 };
@@ -766,8 +816,10 @@ export const componentArchitecture = {
                 return;
             const fn = resolveFunction(context, node.callee);
             const localHook = fn ? containsHookCall(context, fn.body, fn) : false;
-            if (localHook || isInsideComponentOrHook(context, node))
+            const stateHook = isBasisComponentMember(context, node);
+            if (localHook || stateHook || isInsideComponentOrHook(context, node)) {
                 reporter.hook(node, exposedName, true);
+            }
         };
         return {
             CallExpression: checkCall,
