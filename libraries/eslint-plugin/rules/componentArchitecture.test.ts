@@ -89,6 +89,23 @@ export class Example {
 `)).toEqual(['customHook'])
   })
 
+  test('rejects a locally declared custom hook in React source', () => {
+    expect(messageIds(`
+import { useState } from 'react'
+function useThing() { return useState(0) }
+export class Example {
+  value = useThing()
+}
+`)).toEqual(['customHook', 'reactHook'])
+  })
+
+  test('allows a pure useX utility in an ordinary domain module', () => {
+    expect(messageIds(`
+function useDiscount(code: string): string { return code.trim() }
+export const discounted = useDiscount('A')
+`, 'discount.ts')).toEqual([])
+  })
+
   test('allows ordinary helpers and class methods that start with use', () => {
     expect(messageIds(`
 const useful = (): number => 1
@@ -157,6 +174,41 @@ export default function () {
 `)).toEqual(['functionComponent'])
   })
 
+  test('rejects an arrow component exported through a named export specifier', () => {
+    expect(messageIds(`
+const Hello = () => <p>Hello</p>
+export { Hello }
+`)).toEqual(['functionComponent'])
+  })
+
+  test('rejects a function component exported through a named export specifier', () => {
+    expect(messageIds(`
+function Hello() { return <p>Hello</p> }
+export { Hello }
+`)).toEqual(['functionComponent'])
+  })
+
+  test('rejects an aliased named export of a function component', () => {
+    expect(messageIds(`
+const Hello = () => <p>Hello</p>
+export { Hello as Greeting }
+`)).toEqual(['functionComponent'])
+  })
+
+  test('rejects a default export identifier pointing at a function component', () => {
+    expect(messageIds(`
+const Hello = () => <p>Hello</p>
+export default Hello
+`)).toEqual(['functionComponent'])
+  })
+
+  test('allows a lowercase helper exported through a named export specifier', () => {
+    expect(messageIds(`
+const renderLabel = (value: string) => <span>{value}</span>
+export { renderLabel }
+`)).toEqual([])
+  })
+
   test('rejects a local function used as a JSX component type', () => {
     expect(messageIds(`
 const Hello = ({ name }: { name: string }) => <p>Hello {name}</p>
@@ -173,6 +225,45 @@ export class Example {
   content() { return <Hello /> }
 }
 `)).toEqual(['functionComponent'])
+  })
+
+  test('rejects a local object property used as a JSX member component type', () => {
+    expect(messageIds(`
+const Views = { Card: () => <p>Card</p> }
+export class Page {
+  content() { return <Views.Card /> }
+}
+`)).toEqual(['functionComponent'])
+  })
+
+  test('rejects a nested local object property used as a JSX member component type', () => {
+    expect(messageIds(`
+const Views = { Cards: { Card: () => <p>Card</p> } }
+export class Page {
+  content() { return <Views.Cards.Card /> }
+}
+`)).toEqual(['functionComponent'])
+  })
+
+  test('allows a local class object property used as a JSX member component type', () => {
+    expect(messageIds(`
+import { Component } from 'basis/react'
+class Card extends Component {}
+const Views = { Card }
+export class Page extends Component {
+  content() { return <Views.Card /> }
+}
+`)).toEqual([])
+  })
+
+  test('allows an imported class object property used as a JSX member component type', () => {
+    expect(messageIds(`
+import { Card } from 'basis/react'
+const Views = { Card }
+export class Page {
+  content() { return <Views.Card /> }
+}
+`)).toEqual([])
   })
 })
 

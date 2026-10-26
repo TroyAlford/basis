@@ -79,6 +79,9 @@ const REACT_WRAPPERS: ReadonlySet<string> = new Set(['forwardRef', 'memo'])
 // The conventional custom-hook name shape.
 const HOOK_NAME = /^use[A-Z0-9]/
 
+// JSX nodes that establish React source context.
+const JSX_TYPES: ReadonlySet<string> = new Set(['JSXElement', 'JSXFragment'])
+
 // Test, snapshot, and end-to-end lanes that may use React testing mechanics.
 const TEST_FILE = /\.(?:test|spec|screenshot|e2e)\.[cm]?[jt]sx?$/i
 
@@ -99,6 +102,14 @@ const isObject = (value: unknown): value is Record<string, unknown> => (
 const nodeType = (node: unknown): string | null => (
   isObject(node) && typeof node.type === 'string' ? node.type : null
 )
+
+// Read an identifier or string-literal name.
+const identifierName = (node: unknown): string | null => {
+  if (!isObject(node)) return null
+  if (nodeType(node) === 'Identifier' && typeof node.name === 'string') return node.name
+  if (nodeType(node) === 'Literal' && typeof node.value === 'string') return node.value
+  return null
+}
 
 // Whether a name is a PascalCase component-like identifier.
 const isPascalCase = (name: string): boolean => /^[A-Z]/.test(name)
@@ -303,6 +314,30 @@ const containsJsx = (node: unknown, root?: unknown, seen: Set<object> = new Set(
   return false
 }
 
+// Whether any node in a tree has one of the given types.
+const containsType = (
+  node: unknown,
+  types: ReadonlySet<string>,
+  seen: Set<object> = new Set(),
+): boolean => {
+  if (!isObject(node)) return false
+  if (seen.has(node)) return false
+  seen.add(node)
+
+  const type = nodeType(node)
+  if (type && types.has(type)) return true
+
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'comments' || key === 'loc' || key === 'parent' || key === 'range' || key === 'tokens') continue
+    if (Array.isArray(value)) {
+      if (value.some(entry => containsType(entry, types, seen))) return true
+      continue
+    }
+    if (containsType(value, types, seen)) return true
+  }
+  return false
+}
+
 // Whether a function's body renders JSX.
 const rendersJsx = (node: FunctionNode): boolean => containsJsx(node.body, node)
 
@@ -393,6 +428,113 @@ const resolveVariableFunction = (
   return null
 }
 
+/**
+ * Read a JSX name as a root-plus-property path.
+ * @param node A `JSXIdentifier` or `JSXMemberExpression` node.
+ * @returns The path (for example `['Views', 'Card']`), or `null`.
+ */
+const jsxMemberPath = (node: unknown): string[] | null => {
+  if (!isObject(node)) return null
+  const type = nodeType(node)
+
+  if (type === 'JSXIdentifier' && typeof node.name === 'string') return [node.name]
+  if (type !== 'JSXMemberExpression') return null
+
+  const objectPath = jsxMemberPath(node.object)
+  const property = node.property
+  if (!objectPath || !isObject(property) || typeof property.name !== 'string') return null
+  return [...objectPath, property.name]
+}
+
+/**
+ * Read an object literal's static property value.
+ * @param node The candidate object expression.
+ * @param key The property name to find.
+ * @returns The property value, or `undefined`.
+ */
+const objectPropertyValue = (node: unknown, key: string): unknown => {
+  if (!isObject(node) || nodeType(node) !== 'ObjectExpression' || !Array.isArray(node.properties)) {
+    return undefined
+  }
+
+  for (const property of node.properties) {
+    if (!isObject(property) || nodeType(property) !== 'Property' || property.computed) continue
+    if (identifierName(property.key) === key) return property.value
+  }
+  return undefined
+}
+
+/**
+ * Resolve a property path through local object aliases to a function node.
+ * @param context The rule context used for scope resolution.
+ * @param node The current object or alias expression.
+ * @param path The remaining property path.
+ * @param index The current path index.
+ * @param seen Variables already visited in this resolution.
+ * @returns The function node, or `null`.
+ */
+const resolveObjectPath = (
+  context: Rule.RuleContext,
+  node: unknown,
+  path: readonly string[],
+  index: number,
+  seen: Set<Scope.Variable>,
+): FunctionNode | null => {
+  if (index >= path.length) {
+    if (isReactWrapperCall(context, node)) return null
+    return resolveFunction(context, node)
+  }
+
+  const expression = unwrapExpression(node)
+  if (!isObject(expression)) return null
+
+  if (nodeType(expression) === 'ObjectExpression') {
+    const key = path[index]
+    if (key === undefined) return null
+    const value = objectPropertyValue(expression, key)
+    return value === undefined ? null : resolveObjectPath(context, value, path, index + 1, seen)
+  }
+
+  if (nodeType(expression) === 'Identifier' && typeof expression.name === 'string') {
+    const variable = findVariable(context.sourceCode.getScope(expression as unknown as ESTree.Node), expression.name)
+    if (!variable || seen.has(variable)) return null
+    seen.add(variable)
+
+    for (const definition of variable.defs) {
+      if (definition.type === 'Variable' && definition.node.init) {
+        return resolveObjectPath(context, definition.node.init, path, index, seen)
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Resolve a JSX member target such as `Views.Card` to a local function.
+ * @param context The rule context used for scope resolution.
+ * @param variable The variable bound to the member's root object.
+ * @param path The property path below the root.
+ * @param seen Variables already visited in this resolution.
+ * @returns The function node, or `null`.
+ */
+const resolveMemberFunction = (
+  context: Rule.RuleContext,
+  variable: Scope.Variable,
+  path: readonly string[],
+  seen: Set<Scope.Variable> = new Set(),
+): FunctionNode | null => {
+  if (seen.has(variable)) return null
+  seen.add(variable)
+
+  for (const definition of variable.defs) {
+    if (definition.type !== 'Variable' || !definition.node.init) continue
+    const fn = resolveObjectPath(context, definition.node.init, path, 0, seen)
+    if (fn) return fn
+  }
+  return null
+}
+
 // Read a class's declared name.
 const className = (node: ClassNode): string => (
   node.id?.type === 'Identifier' ? node.id.name : 'anonymous'
@@ -426,6 +568,53 @@ const isExported = (node: unknown): boolean => {
     parent = parent.parent
   }
   return false
+}
+
+/**
+ * Collect same-file named exports and default-export identifiers.
+ * @param program The Program node being linted.
+ * @param exports The local-name-to-export-name map to populate.
+ */
+const collectNamedExports = (program: unknown, exports: Map<string, string>): void => {
+  if (!isObject(program) || !Array.isArray(program.body)) return
+
+  for (const statement of program.body) {
+    if (!isObject(statement)) continue
+    const type = nodeType(statement)
+
+    if (type === 'ExportNamedDeclaration' && !statement.source && Array.isArray(statement.specifiers)) {
+      for (const specifier of statement.specifiers) {
+        if (!isObject(specifier) || nodeType(specifier) !== 'ExportSpecifier') continue
+        const local = identifierName(specifier.local)
+        const exported = identifierName(specifier.exported)
+        if (local && exported) exports.set(local, exported)
+      }
+    }
+
+    if (type === 'ExportDefaultDeclaration') {
+      const local = identifierName(statement.declaration)
+      if (local) exports.set(local, 'default')
+    }
+  }
+}
+
+/**
+ * Whether a module has a runtime import or re-export from React.
+ * @param program The Program node being linted.
+ * @returns Whether React is part of the module's runtime context.
+ */
+const importsReact = (program: unknown): boolean => {
+  if (!isObject(program) || !Array.isArray(program.body)) return false
+
+  return program.body.some(statement => {
+    if (!isObject(statement)) return false
+    const type = nodeType(statement)
+    if (type !== 'ExportAllDeclaration' && type !== 'ExportNamedDeclaration' && type !== 'ImportDeclaration') {
+      return false
+    }
+    if (statement.importKind === 'type' || statement.exportKind === 'type') return false
+    return isObject(statement.source) && statement.source.value === REACT_SOURCE
+  })
 }
 
 // The rule's shared report helpers.
@@ -472,6 +661,8 @@ export const componentArchitecture: Rule.RuleModule = {
     if (isSkippedFile(context.physicalFilename || context.filename)) return {}
 
     const reporter = createReporter(context)
+    const namedExports = new Map<string, string>()
+    let hasReactEvidence = false
 
     const reportFunction = (node: FunctionNode, name: string): void => {
       reporter.component(node, name)
@@ -479,7 +670,7 @@ export const componentArchitecture: Rule.RuleModule = {
 
     const checkFunctionDeclaration = (node: ESTree.FunctionDeclaration): void => {
       const name = functionName(node)
-      if (!isExported(node)) return
+      if (!isExported(node) && !namedExports.has(name)) return
       if (!isPascalCase(name) && name !== 'default') return
       if (!rendersJsx(node)) return
       reportFunction(node, name)
@@ -493,11 +684,13 @@ export const componentArchitecture: Rule.RuleModule = {
     }
 
     const checkVariableDeclarator = (node: ESTree.VariableDeclarator): void => {
-      if (!isExported(node) || !isPascalCase(functionName(node))) return
+      const name = functionName(node)
+      if (!isExported(node) && !namedExports.has(name)) return
+      if (!isPascalCase(name)) return
       if (isReactWrapperCall(context, node.init) || hasReactFunctionType(context, node.id)) return
       const fn = resolveFunction(context, node.init)
       if (!fn || !rendersJsx(fn)) return
-      reportFunction(fn, functionName(node))
+      reportFunction(fn, name)
     }
 
     const checkClass = (node: ClassNode): void => {
@@ -513,15 +706,31 @@ export const componentArchitecture: Rule.RuleModule = {
     const checkJsxComponent = (node: unknown): void => {
       if (!isObject(node)) return
       const name = node.name
-      if (!isObject(name) || nodeType(name) !== 'JSXIdentifier' || typeof name.name !== 'string') return
-      if (!isPascalCase(name.name)) return
+      if (!isObject(name)) return
 
-      const variable = findVariable(context.sourceCode.getScope(node as unknown as ESTree.Node), name.name)
+      if (nodeType(name) === 'JSXIdentifier' && typeof name.name === 'string') {
+        if (!isPascalCase(name.name)) return
+
+        const variable = findVariable(context.sourceCode.getScope(node as unknown as ESTree.Node), name.name)
+        if (!variable) return
+
+        const fn = resolveVariableFunction(context, variable)
+        if (fn) reportFunction(fn, name.name)
+        return
+      }
+
+      if (nodeType(name) !== 'JSXMemberExpression') return
+
+      const path = jsxMemberPath(name)
+      if (!path || path.length < 2) return
+      const [root, ...propertyPath] = path
+      if (root === undefined) return
+
+      const variable = findVariable(context.sourceCode.getScope(node as unknown as ESTree.Node), root)
       if (!variable) return
 
-      const fn = resolveVariableFunction(context, variable)
-      if (!fn) return
-      reportFunction(fn, name.name)
+      const fn = resolveMemberFunction(context, variable, propertyPath)
+      if (fn) reportFunction(fn, propertyPath.join('.'))
     }
 
     const checkTypeReference = (node: unknown): void => {
@@ -546,14 +755,15 @@ export const componentArchitecture: Rule.RuleModule = {
 
       if (nodeType(node.callee) === 'Identifier') {
         const name = (node.callee as ESTree.Identifier).name
-        if (HOOK_NAME.test(name)) {
-          reporter.hook(node, name, true)
+        const variable = findVariable(context.sourceCode.getScope(node.callee as unknown as ESTree.Node), name)
+        const imported = variable ? importInfo(variable) : null
+
+        if (imported && HOOK_NAME.test(imported.imported)) {
+          reporter.hook(node, imported.imported, true)
           return
         }
 
-        const variable = findVariable(context.sourceCode.getScope(node.callee as unknown as ESTree.Node), name)
-        const imported = variable ? importInfo(variable) : null
-        if (imported && HOOK_NAME.test(imported.imported)) reporter.hook(node, imported.imported, true)
+        if (HOOK_NAME.test(name) && hasReactEvidence) reporter.hook(node, name, true)
       }
     }
 
@@ -564,6 +774,10 @@ export const componentArchitecture: Rule.RuleModule = {
       ExportDefaultDeclaration: checkDefaultExport,
       FunctionDeclaration: checkFunctionDeclaration,
       JSXOpeningElement: checkJsxComponent,
+      Program(program: ESTree.Program) {
+        collectNamedExports(program, namedExports)
+        hasReactEvidence = importsReact(program) || containsType(program, JSX_TYPES)
+      },
       TSTypeReference: checkTypeReference,
       VariableDeclarator: checkVariableDeclarator,
     } as Rule.RuleListener

@@ -47,6 +47,8 @@ const REACT_CLASS_BASES = new Set(['Component', 'PureComponent']);
 const REACT_WRAPPERS = new Set(['forwardRef', 'memo']);
 // The conventional custom-hook name shape.
 const HOOK_NAME = /^use[A-Z0-9]/;
+// JSX nodes that establish React source context.
+const JSX_TYPES = new Set(['JSXElement', 'JSXFragment']);
 // Test, snapshot, and end-to-end lanes that may use React testing mechanics.
 const TEST_FILE = /\.(?:test|spec|screenshot|e2e)\.[cm]?[jt]sx?$/i;
 // Directories that are not application component source.
@@ -60,6 +62,16 @@ const SKIPPED_DIRECTORY = new RegExp([
 const isObject = (value) => (typeof value === 'object' && value !== null);
 // Read a node's string `type`.
 const nodeType = (node) => (isObject(node) && typeof node.type === 'string' ? node.type : null);
+// Read an identifier or string-literal name.
+const identifierName = (node) => {
+    if (!isObject(node))
+        return null;
+    if (nodeType(node) === 'Identifier' && typeof node.name === 'string')
+        return node.name;
+    if (nodeType(node) === 'Literal' && typeof node.value === 'string')
+        return node.value;
+    return null;
+};
 // Whether a name is a PascalCase component-like identifier.
 const isPascalCase = (name) => /^[A-Z]/.test(name);
 // Whether a file is out of the rule's default application-source scope.
@@ -245,6 +257,29 @@ const containsJsx = (node, root, seen = new Set()) => {
     }
     return false;
 };
+// Whether any node in a tree has one of the given types.
+const containsType = (node, types, seen = new Set()) => {
+    if (!isObject(node))
+        return false;
+    if (seen.has(node))
+        return false;
+    seen.add(node);
+    const type = nodeType(node);
+    if (type && types.has(type))
+        return true;
+    for (const [key, value] of Object.entries(node)) {
+        if (key === 'comments' || key === 'loc' || key === 'parent' || key === 'range' || key === 'tokens')
+            continue;
+        if (Array.isArray(value)) {
+            if (value.some(entry => containsType(entry, types, seen)))
+                return true;
+            continue;
+        }
+        if (containsType(value, types, seen))
+            return true;
+    }
+    return false;
+};
 // Whether a function's body renders JSX.
 const rendersJsx = (node) => containsJsx(node.body, node);
 /**
@@ -332,6 +367,102 @@ const resolveVariableFunction = (context, variable, seen = new Set()) => {
     }
     return null;
 };
+/**
+ * Read a JSX name as a root-plus-property path.
+ * @param node A `JSXIdentifier` or `JSXMemberExpression` node.
+ * @returns The path (for example `['Views', 'Card']`), or `null`.
+ */
+const jsxMemberPath = (node) => {
+    if (!isObject(node))
+        return null;
+    const type = nodeType(node);
+    if (type === 'JSXIdentifier' && typeof node.name === 'string')
+        return [node.name];
+    if (type !== 'JSXMemberExpression')
+        return null;
+    const objectPath = jsxMemberPath(node.object);
+    const property = node.property;
+    if (!objectPath || !isObject(property) || typeof property.name !== 'string')
+        return null;
+    return [...objectPath, property.name];
+};
+/**
+ * Read an object literal's static property value.
+ * @param node The candidate object expression.
+ * @param key The property name to find.
+ * @returns The property value, or `undefined`.
+ */
+const objectPropertyValue = (node, key) => {
+    if (!isObject(node) || nodeType(node) !== 'ObjectExpression' || !Array.isArray(node.properties)) {
+        return undefined;
+    }
+    for (const property of node.properties) {
+        if (!isObject(property) || nodeType(property) !== 'Property' || property.computed)
+            continue;
+        if (identifierName(property.key) === key)
+            return property.value;
+    }
+    return undefined;
+};
+/**
+ * Resolve a property path through local object aliases to a function node.
+ * @param context The rule context used for scope resolution.
+ * @param node The current object or alias expression.
+ * @param path The remaining property path.
+ * @param index The current path index.
+ * @param seen Variables already visited in this resolution.
+ * @returns The function node, or `null`.
+ */
+const resolveObjectPath = (context, node, path, index, seen) => {
+    if (index >= path.length) {
+        if (isReactWrapperCall(context, node))
+            return null;
+        return resolveFunction(context, node);
+    }
+    const expression = unwrapExpression(node);
+    if (!isObject(expression))
+        return null;
+    if (nodeType(expression) === 'ObjectExpression') {
+        const key = path[index];
+        if (key === undefined)
+            return null;
+        const value = objectPropertyValue(expression, key);
+        return value === undefined ? null : resolveObjectPath(context, value, path, index + 1, seen);
+    }
+    if (nodeType(expression) === 'Identifier' && typeof expression.name === 'string') {
+        const variable = findVariable(context.sourceCode.getScope(expression), expression.name);
+        if (!variable || seen.has(variable))
+            return null;
+        seen.add(variable);
+        for (const definition of variable.defs) {
+            if (definition.type === 'Variable' && definition.node.init) {
+                return resolveObjectPath(context, definition.node.init, path, index, seen);
+            }
+        }
+    }
+    return null;
+};
+/**
+ * Resolve a JSX member target such as `Views.Card` to a local function.
+ * @param context The rule context used for scope resolution.
+ * @param variable The variable bound to the member's root object.
+ * @param path The property path below the root.
+ * @param seen Variables already visited in this resolution.
+ * @returns The function node, or `null`.
+ */
+const resolveMemberFunction = (context, variable, path, seen = new Set()) => {
+    if (seen.has(variable))
+        return null;
+    seen.add(variable);
+    for (const definition of variable.defs) {
+        if (definition.type !== 'Variable' || !definition.node.init)
+            continue;
+        const fn = resolveObjectPath(context, definition.node.init, path, 0, seen);
+        if (fn)
+            return fn;
+    }
+    return null;
+};
 // Read a class's declared name.
 const className = (node) => (node.id?.type === 'Identifier' ? node.id.name : 'anonymous');
 // Read a function declaration or variable's component name.
@@ -361,6 +492,55 @@ const isExported = (node) => {
         parent = parent.parent;
     }
     return false;
+};
+/**
+ * Collect same-file named exports and default-export identifiers.
+ * @param program The Program node being linted.
+ * @param exports The local-name-to-export-name map to populate.
+ */
+const collectNamedExports = (program, exports) => {
+    if (!isObject(program) || !Array.isArray(program.body))
+        return;
+    for (const statement of program.body) {
+        if (!isObject(statement))
+            continue;
+        const type = nodeType(statement);
+        if (type === 'ExportNamedDeclaration' && !statement.source && Array.isArray(statement.specifiers)) {
+            for (const specifier of statement.specifiers) {
+                if (!isObject(specifier) || nodeType(specifier) !== 'ExportSpecifier')
+                    continue;
+                const local = identifierName(specifier.local);
+                const exported = identifierName(specifier.exported);
+                if (local && exported)
+                    exports.set(local, exported);
+            }
+        }
+        if (type === 'ExportDefaultDeclaration') {
+            const local = identifierName(statement.declaration);
+            if (local)
+                exports.set(local, 'default');
+        }
+    }
+};
+/**
+ * Whether a module has a runtime import or re-export from React.
+ * @param program The Program node being linted.
+ * @returns Whether React is part of the module's runtime context.
+ */
+const importsReact = (program) => {
+    if (!isObject(program) || !Array.isArray(program.body))
+        return false;
+    return program.body.some(statement => {
+        if (!isObject(statement))
+            return false;
+        const type = nodeType(statement);
+        if (type !== 'ExportAllDeclaration' && type !== 'ExportNamedDeclaration' && type !== 'ImportDeclaration') {
+            return false;
+        }
+        if (statement.importKind === 'type' || statement.exportKind === 'type')
+            return false;
+        return isObject(statement.source) && statement.source.value === REACT_SOURCE;
+    });
 };
 // Build the reporters bound to one rule context and its already-reported nodes.
 const createReporter = (context) => {
@@ -393,12 +573,14 @@ export const componentArchitecture = {
         if (isSkippedFile(context.physicalFilename || context.filename))
             return {};
         const reporter = createReporter(context);
+        const namedExports = new Map();
+        let hasReactEvidence = false;
         const reportFunction = (node, name) => {
             reporter.component(node, name);
         };
         const checkFunctionDeclaration = (node) => {
             const name = functionName(node);
-            if (!isExported(node))
+            if (!isExported(node) && !namedExports.has(name))
                 return;
             if (!isPascalCase(name) && name !== 'default')
                 return;
@@ -415,14 +597,17 @@ export const componentArchitecture = {
             reportFunction(declaration, 'default');
         };
         const checkVariableDeclarator = (node) => {
-            if (!isExported(node) || !isPascalCase(functionName(node)))
+            const name = functionName(node);
+            if (!isExported(node) && !namedExports.has(name))
+                return;
+            if (!isPascalCase(name))
                 return;
             if (isReactWrapperCall(context, node.init) || hasReactFunctionType(context, node.id))
                 return;
             const fn = resolveFunction(context, node.init);
             if (!fn || !rendersJsx(fn))
                 return;
-            reportFunction(fn, functionName(node));
+            reportFunction(fn, name);
         };
         const checkClass = (node) => {
             const base = reactClassBase(context, node.superClass);
@@ -438,17 +623,33 @@ export const componentArchitecture = {
             if (!isObject(node))
                 return;
             const name = node.name;
-            if (!isObject(name) || nodeType(name) !== 'JSXIdentifier' || typeof name.name !== 'string')
+            if (!isObject(name))
                 return;
-            if (!isPascalCase(name.name))
+            if (nodeType(name) === 'JSXIdentifier' && typeof name.name === 'string') {
+                if (!isPascalCase(name.name))
+                    return;
+                const variable = findVariable(context.sourceCode.getScope(node), name.name);
+                if (!variable)
+                    return;
+                const fn = resolveVariableFunction(context, variable);
+                if (fn)
+                    reportFunction(fn, name.name);
                 return;
-            const variable = findVariable(context.sourceCode.getScope(node), name.name);
+            }
+            if (nodeType(name) !== 'JSXMemberExpression')
+                return;
+            const path = jsxMemberPath(name);
+            if (!path || path.length < 2)
+                return;
+            const [root, ...propertyPath] = path;
+            if (root === undefined)
+                return;
+            const variable = findVariable(context.sourceCode.getScope(node), root);
             if (!variable)
                 return;
-            const fn = resolveVariableFunction(context, variable);
-            if (!fn)
-                return;
-            reportFunction(fn, name.name);
+            const fn = resolveMemberFunction(context, variable, propertyPath);
+            if (fn)
+                reportFunction(fn, propertyPath.join('.'));
         };
         const checkTypeReference = (node) => {
             const name = typeReferenceName(context, node);
@@ -470,14 +671,14 @@ export const componentArchitecture = {
             }
             if (nodeType(node.callee) === 'Identifier') {
                 const name = node.callee.name;
-                if (HOOK_NAME.test(name)) {
-                    reporter.hook(node, name, true);
-                    return;
-                }
                 const variable = findVariable(context.sourceCode.getScope(node.callee), name);
                 const imported = variable ? importInfo(variable) : null;
-                if (imported && HOOK_NAME.test(imported.imported))
+                if (imported && HOOK_NAME.test(imported.imported)) {
                     reporter.hook(node, imported.imported, true);
+                    return;
+                }
+                if (HOOK_NAME.test(name) && hasReactEvidence)
+                    reporter.hook(node, name, true);
             }
         };
         return {
@@ -487,6 +688,10 @@ export const componentArchitecture = {
             ExportDefaultDeclaration: checkDefaultExport,
             FunctionDeclaration: checkFunctionDeclaration,
             JSXOpeningElement: checkJsxComponent,
+            Program(program) {
+                collectNamedExports(program, namedExports);
+                hasReactEvidence = importsReact(program) || containsType(program, JSX_TYPES);
+            },
             TSTypeReference: checkTypeReference,
             VariableDeclarator: checkVariableDeclarator,
         };
