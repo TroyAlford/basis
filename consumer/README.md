@@ -44,6 +44,16 @@ Every ESLint plugin the config imports is declared by Basis itself, so consumers
 
 The config also adds Basis rules of its own. `@basis/no-jsx-line-breaks` keeps inline JSX — text, embedded expressions, and inlined elements — on one line, opening and closing tags included, because the renderer word-wraps; block content and whitespace-sensitive elements stay structured. `@basis/no-jsx-space-injection` then replaces a `{' '}`, the old way to hold a space across a wrapped line, with a literal space once the element is on one line. Both autofix, so `basis format` applies them and `basis lint` reports them. JSX lines are exempt from `max-len`, which is a code-length rule, not a prose one.
 
+`@basis/component-architecture` enforces the Basis React invariant: application components extend the Basis `Component` or `Editor` hierarchy. It rejects React hooks (including aliased and namespace-qualified calls and custom `use*` hooks), `React.FC` / `FunctionComponent` types, `memo` and `forwardRef` function components, functions used as JSX component types, and classes extending `React.Component` or `React.PureComponent`. The Basis root `Component` is the deliberate boundary; a few low-level framework primitives whose children cannot satisfy the `Component` prop contract carry explicit, documented inline exceptions. The rule is deterministic and has no autofix, because converting a function component into a class is a design change.
+
+`basis compliance` runs that same architecture rule in a focused, report-only configuration. It does not replace `basis lint` or `basis check`; it is the discoverable, non-formatting architectural gate, and it always applies the Basis-owned policy even when the repository carries its own ESLint config.
+
+```bash
+bunx basis compliance
+```
+
+Application source is in scope. Test, screenshot, end-to-end, fixture, generated, and dependency files are out of scope by default so React testing mechanics remain available. A deliberate migration boundary can disable the rule for a path through `createConfig({ overrides })` or with a justified inline `eslint-disable`; see [Component compliance](../docs/compliance.mdx).
+
 ## CSS linting
 
 Component CSS lives in `*.styles.ts` as `css` tagged template literals. Basis lints it with Stylelint through the `postcss-styled-syntax` custom syntax, so the embedded stylesheet is parsed as real CSS (including nesting and `${...}` interpolations) rather than matched as text.
@@ -324,6 +334,7 @@ import { STANDARD_REVIEW_MANIFEST, composeReviewPolicy } from 'basis/review'
 bunx basis doctor     # validate the surface and that owned patches are active
 bunx basis lint       # report the TypeScript/JSX, CSS, and Markdown policies
 bunx basis format     # apply every autofix across the same policies
+bunx basis compliance # report the class-based component architecture policy
 bunx basis typecheck
 bunx basis check
 bunx basis docs check # validate the docs/ tree (front-matter, fences, links)

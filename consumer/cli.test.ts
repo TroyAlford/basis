@@ -56,6 +56,25 @@ const FIXED_MD = `# Notes
 A paragraph that wraps across lines.
 `
 
+const ARCHITECTURE_VIOLATION = `import { useState } from 'react'
+
+export const Hello = ({ name }: { name: string }) => {
+  const [value] = useState(0)
+  return <p>{name}{value}</p>
+}
+`
+
+const ARCHITECTURE_FIXED = `import { Component } from 'basis/react'
+
+export class Hello extends Component<{ name: string }> {
+  static displayName = 'Hello'
+
+  content() {
+    return <p>{this.props.name}</p>
+  }
+}
+`
+
 /** A throwaway consumer fixture spanning every lint surface. */
 interface Fixture {
   /** The fixture directory. */
@@ -92,6 +111,27 @@ const makeFixture = (options: { config?: boolean } = {}): Fixture => {
 }
 
 /**
+ * Creates a clean consumer fixture containing only package metadata and an
+ * optional ESLint config, so an architecture test is not diluted by the dirty
+ * fixture files used by the lint/format suite.
+ * @param options Fixture options.
+ * @param options.config Optional repository ESLint config source.
+ * @returns The fixture directory.
+ */
+const makeComponentFixture = (options: { config?: string } = {}): string => {
+  const { config } = options
+  const dir = tempDirectory('basis-cli')
+  symlinkSync(join(import.meta.dir, '..', 'node_modules'), join(dir, 'node_modules'), 'dir')
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({
+    dependencies: { basis: '^1.0.0' },
+    name: 'fixture',
+    type: 'module',
+  }))
+  if (config) writeFileSync(join(dir, 'eslint.config.mjs'), config)
+  return dir
+}
+
+/**
  * Runs a Basis CLI command in a fixture directory.
  * @param args Arguments for the CLI, including the command.
  * @param cwd Working directory for the CLI.
@@ -107,6 +147,9 @@ const run = (args: string[], cwd: string): number => {
   return result.exitCode
 }
 
+/** CLI fixtures install a plugin stack, so their lint passes exceed Bun's default test timeout. */
+const CLI_TIMEOUT = 15_000
+
 describe('basis lint and format', () => {
   test('leaves dirty files untouched without formatting', () => {
     const { dir, markdown, target } = makeFixture()
@@ -117,7 +160,7 @@ describe('basis lint and format', () => {
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
-  })
+  }, CLI_TIMEOUT)
 
   test('applies every fixable rule across surfaces in a single run', () => {
     const { dir, markdown, target } = makeFixture()
@@ -131,7 +174,7 @@ describe('basis lint and format', () => {
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
-  })
+  }, CLI_TIMEOUT)
 
   test('lints and formats with no repository ESLint config', () => {
     const { dir, markdown, target } = makeFixture({ config: false })
@@ -146,5 +189,65 @@ describe('basis lint and format', () => {
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
-  })
+  }, CLI_TIMEOUT)
+})
+
+describe('basis lint architecture enforcement', () => {
+  test('fails the normal lint policy for a function component and passes after conversion', () => {
+    const dir = makeComponentFixture()
+    const component = join(dir, 'Hello.tsx')
+    try {
+      writeFileSync(component, ARCHITECTURE_VIOLATION)
+      expect(run(['lint'], dir)).not.toBe(0)
+
+      writeFileSync(component, ARCHITECTURE_FIXED)
+      expect(run(['lint'], dir)).toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, CLI_TIMEOUT)
+})
+
+describe('basis compliance', () => {
+  test('reports architecture violations without a repository ESLint config', () => {
+    const { dir } = makeFixture({ config: false })
+    const component = join(dir, 'Hello.tsx')
+    try {
+      writeFileSync(component, ARCHITECTURE_VIOLATION)
+      expect(run(['compliance'], dir)).not.toBe(0)
+
+      writeFileSync(component, ARCHITECTURE_FIXED)
+      expect(run(['compliance'], dir)).toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, CLI_TIMEOUT)
+
+  test('ignores test and fixture source by default', () => {
+    const dir = makeComponentFixture()
+    try {
+      writeFileSync(join(dir, 'Hello.test.tsx'), ARCHITECTURE_VIOLATION)
+      expect(run(['compliance'], dir)).toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, CLI_TIMEOUT)
+
+  test('stays authoritative when the repository config disables the rule', () => {
+    const dir = makeComponentFixture({
+      config: [
+        `import { createConfig } from '${join(import.meta.dir, 'eslint.ts')}'`,
+        'export default createConfig({',
+        "  overrides: [{ files: ['**/*.tsx'], rules: { '@basis/component-architecture': 'off' } }],",
+        '})',
+        '',
+      ].join('\n'),
+    })
+    try {
+      writeFileSync(join(dir, 'Hello.tsx'), ARCHITECTURE_VIOLATION)
+      expect(run(['compliance'], dir)).not.toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, CLI_TIMEOUT)
 })

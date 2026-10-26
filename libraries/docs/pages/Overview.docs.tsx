@@ -47,7 +47,7 @@ export class OverviewDocs extends DocumentationPage<Record<string, never>> {
               </div>
             `)}
           </p>
-          <p>Prefer hooks in your app code? No problem. Hooks and classes interact well, and you can always mix-and-match, leveraging classes for some things and hooks for others.</p>
+          <p>Application components follow the same rule: extend <code>Component</code> (or <code>Editor</code>) rather than writing function components or hooks. The <Router.Link to="/compliance">Component compliance</Router.Link> page explains the enforced invariant, the <code>basis compliance</code> command, and the deliberate escape hatches.</p>
         </section>
         <section>
           <h3>Styling & Theming</h3>

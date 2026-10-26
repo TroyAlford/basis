@@ -1,15 +1,11 @@
 /* eslint-disable @basis/no-default-export */
 import eslint from '@eslint/js'
-import pluginStylistic from '@stylistic/eslint-plugin'
 import type { ESLint } from 'eslint'
-import pluginImportNewlines from 'eslint-plugin-import-newlines'
 import pluginJSDoc from 'eslint-plugin-jsdoc'
-import pluginPerfectionist from 'eslint-plugin-perfectionist'
-import pluginImportSort from 'eslint-plugin-simple-import-sort'
-import pluginSortDestructureKeys from 'eslint-plugin-sort-destructure-keys'
 import type { ConfigWithExtends } from 'typescript-eslint'
 import pluginTypescript from 'typescript-eslint'
-import pluginBasis from './rules'
+import { IGNORE_PATTERNS } from './ignores'
+import { plugins } from './plugins'
 
 /** Plugin options */
 interface PluginOptions {
@@ -32,17 +28,7 @@ const plugin = (options: PluginOptions): ConfigWithExtends => {
       sourceType: 'module',
     },
     plugins: {
-      '@basis': pluginBasis,
-      '@import-newlines': pluginImportNewlines,
-      '@jsdoc': pluginJSDoc,
-      '@stylistic': pluginStylistic as unknown,
-      '@stylistic/js': pluginStylistic as unknown,
-      '@stylistic/jsx': pluginStylistic as unknown,
-      '@stylistic/ts': pluginStylistic as unknown,
-      '@typescript-eslint': pluginTypescript.plugin,
-      'perfectionist': pluginPerfectionist,
-      'simple-import-sort': pluginImportSort,
-      'sort-destructure-keys': pluginSortDestructureKeys,
+      ...plugins,
     },
     rules,
     settings: {
@@ -53,16 +39,15 @@ const plugin = (options: PluginOptions): ConfigWithExtends => {
   return config
 }
 
-const IGNORE_PATHS = ['node_modules', '.cache', '.playwright-local', 'build', 'dist', 'test-results']
-
 export default pluginTypescript.config(
-  { ignores: IGNORE_PATHS.flatMap(path => [`${path}/**`, `**/${path}/**`]) },
+  { ignores: IGNORE_PATTERNS },
   eslint.configs.recommended,
   pluginJSDoc.configs['flat/recommended-typescript-error'],
   ...pluginTypescript.configs.strict,
   ...pluginTypescript.configs.stylistic,
   plugin({
     rules: {
+      '@basis/component-architecture': 'error',
       '@basis/import-extensions': 'error',
       '@basis/no-default-export': 'error',
       '@basis/no-extraneous-dependencies': 'error',

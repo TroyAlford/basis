@@ -9,7 +9,10 @@ interface State {
   loaded: boolean,
 }
 
+// eslint-disable-next-line @basis/component-architecture -- Promise children do not fit the Component props contract.
 export class Await extends React.Component<Props, State> {
+  static displayName = 'Await'
+
   #resolveToken = 0
 
   state: State = {

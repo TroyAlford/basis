@@ -1,4 +1,5 @@
 /* eslint-disable @basis/no-default-export */
+import { componentArchitecture } from './componentArchitecture'
 import { importExtensions } from './importExtensions'
 import { noMixedTypeImports } from './no-mixed-type-imports'
 import { noObjectPadding } from './no-object-padding'
@@ -12,6 +13,7 @@ import { sortStringEnum } from './sortStringEnum'
 
 export default {
   rules: {
+    'component-architecture': componentArchitecture,
     'import-extensions': importExtensions,
     'no-default-export': noDefaultExport,
     'no-extraneous-dependencies': noExtraneousDependencies,

@@ -1,4 +1,5 @@
-import * as React from 'react'
+import type * as React from 'react'
+import { Component } from '../Component/Component'
 
 /** Props for the Redirect component */
 interface Props {
@@ -9,11 +10,13 @@ interface Props {
 /**
  * A component that performs a client-side redirect when mounted
  */
-export class Redirect extends React.Component<Props> {
-  componentDidMount(): void {
+export class Redirect extends Component<Props> {
+  static displayName = 'Redirect'
+
+  override componentDidMount(): void {
     const { to } = this.props
     window.history.replaceState({}, '', to)
   }
 
-  render(): React.ReactNode { return null }
+  override render(): React.ReactNode { return null }
 }

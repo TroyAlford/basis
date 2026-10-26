@@ -1,0 +1,64 @@
+---
+title: Component compliance
+---
+
+# Component compliance
+
+Basis UI is class-based. Every application component must directly or indirectly extend the `Component` or `Editor` hierarchy from `basis/react`. React function components, `React.FC` / `React.FunctionComponent`, `memo` and `forwardRef` function components, and React hooks are outside the contract. The Basis root `Component` is the deliberate boundary onto `React.Component`. A few low-level framework primitives whose children cannot satisfy the `Component` prop contract — currently `Await` for promise children and `Route` for render-function children — carry explicit, justified inline exceptions; application code does not extend React's base class directly.
+
+The rule follows syntax, imports, scope bindings, and JSX references. It rejects a function when it is exported as a PascalCase component that renders JSX or when it is used as a JSX component type. It does not ban functions that merely return React content, so pure helpers and ordinary domain functions remain valid.
+
+## One policy, two entry points
+
+`basis/eslint` enables `@basis/component-architecture`, so `basis lint` and `basis check` enforce the architecture alongside the rest of the Basis policy. `basis compliance` runs the same rule implementation in a focused, report-only configuration for repositories that want an architectural gate without the formatting and lint suite.
+
+```bash
+bunx basis compliance
+```
+
+The rule has no autofix. Converting a function component into a class is a design change, and an automated rewrite would be unsafe. Diagnostics name the prohibited pattern and the supported replacement.
+
+## Scope
+
+Application component source is in scope. The rule deliberately excludes:
+
+- `*.test.*`, `*.spec.*`, `*.screenshot.*`, and `*.e2e.*` files, because React testing mechanics legitimately use function components and hooks;
+- `testing`, `test`, `tests`, `__tests__`, `fixtures`, and `__fixtures__` directories for the same reason;
+- dependencies, generated output, caches, and test artifacts (`node_modules`, `dist`, `build`, `coverage`, `.cache`, `test-results`).
+
+The same scope applies to `basis lint`, `basis check`, and `basis compliance`, because all three run the same rule.
+
+## Migration and escape hatches
+
+Adopt the Basis config explicitly in a consumer repository:
+
+```js
+// eslint.config.mjs
+import { createConfig } from 'basis/eslint'
+
+export default createConfig()
+```
+
+A repository that must temporarily exempt a path can turn the rule off for that path in its own config:
+
+```js
+import { createConfig } from 'basis/eslint'
+
+export default createConfig({
+  overrides: [
+    {
+      files: ['src/legacy/**'],
+      rules: { '@basis/component-architecture': 'off' },
+    },
+  ],
+})
+```
+
+For a single deliberate boundary, use an inline disable with a reason:
+
+```ts
+// eslint-disable-next-line @basis/component-architecture -- Deliberate React boundary for this bridge.
+export class Bridge extends React.Component {}
+```
+
+`basis compliance` always applies the Basis-owned configuration, so a repository config that disables the rule does not weaken that command. Inline disables still work because they name the same rule. Use either escape hatch deliberately and remove it when the migration completes.

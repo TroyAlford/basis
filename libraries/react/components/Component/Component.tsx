@@ -98,6 +98,7 @@ const nativeAttributes = (props: object, owned: ReadonlySet<string>): Record<str
  * @template Element The root element type of the component.
  * @template State The state of the component.
  */
+// eslint-disable-next-line @basis/component-architecture -- Root Basis boundary; non-ReactNode primitives excepted.
 export abstract class Component<
   /** The props of the component. */
   Props = object,

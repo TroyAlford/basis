@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { Pin, Section, SortDirection, TextAlign, TypedTable } from 'basis/react'
+import { Component, Pin, Section, SortDirection, TextAlign, TypedTable } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 import { TableHeaderExample } from '../components/TableHeaderExample'
@@ -62,7 +62,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
         <Section title="Basic Usage">
           <p>The simplest way to use the Table component is with the <code>TypedTable.of()</code> factory function, which provides type-safe column creation methods:</p>
           {Code.format(`
-            import { TypedTable } from 'basis/react'
+            import { Component, TypedTable } from 'basis/react'
 
             interface User {
               id: number
@@ -71,17 +71,25 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
               active: boolean
             }
 
-            function UserTable({ data }: { data: User[] }) {
-              const { Column, Table } = TypedTable.of<User>()
+            interface UserTableProps {
+              data: User[]
+            }
 
-              return (
-                <Table value={data}>
-                  {Column.Number({ field: 'id', title: 'ID' })}
-                  {Column.Text({ field: 'name', title: 'Name' })}
-                  {Column.Text({ field: 'email', title: 'Email' })}
-                  {Column.Boolean({ field: 'active', title: 'Status' })}
-                </Table>
-              )
+            class UserTable extends Component<UserTableProps> {
+              static displayName = 'UserTable'
+
+              override render(): React.ReactNode {
+                const { Column, Table } = TypedTable.of<User>()
+
+                return (
+                  <Table readOnly initialValue={this.props.data}>
+                    {Column.Number({ field: 'id', title: 'ID' })}
+                    {Column.Text({ field: 'name', title: 'Name' })}
+                    {Column.Text({ field: 'email', title: 'Email' })}
+                    {Column.Boolean({ field: 'active', title: 'Status' })}
+                  </Table>
+                )
+              }
             }
           `)}
         </Section>
@@ -264,23 +272,25 @@ enum UserRole {
 // Demo components
 /**
  * UserTable component - demonstrates nested data access
- * @param root0 - The data to display
- * @param root0.data - The data to display
- * @returns The UserTable component
  */
-function UserTable({ data }: { data: User[] }) {
-  const { Column, Table } = TypedTable.of<User>()
+class UserTable extends Component<{ data: User[] }> {
+  static displayName = 'UserTable'
 
-  return (
-    <Table readOnly initialValue={data}>
-      {Column.Number({ align: TextAlign.Center, field: 'id', header: true, pin: Pin.Left, title: 'ID' })}
-      {Column.Text({ field: 'name', pin: Pin.Left, sortDirection: SortDirection.Asc, title: 'Name' })}
-      {Column.Text({ field: 'email', title: 'Email' })}
-      {Column.Enum({ enum: UserRole, field: 'role', title: 'Role' })}
-      {Column.Date({ field: 'lastLogin', title: 'Last Login' })}
-      {Column.DateTime({ field: 'lastUpdated', title: 'Last Updated' })}
-      {Column.Boolean({ field: 'active', title: 'Status' })}
-      {Column.Text({ field: 'profile.bio', title: 'Bio' })}
-    </Table>
-  )
+  override render(): React.ReactNode {
+    const { data } = this.props
+    const { Column, Table } = TypedTable.of<User>()
+
+    return (
+      <Table readOnly initialValue={data}>
+        {Column.Number({ align: TextAlign.Center, field: 'id', header: true, pin: Pin.Left, title: 'ID' })}
+        {Column.Text({ field: 'name', pin: Pin.Left, sortDirection: SortDirection.Asc, title: 'Name' })}
+        {Column.Text({ field: 'email', title: 'Email' })}
+        {Column.Enum({ enum: UserRole, field: 'role', title: 'Role' })}
+        {Column.Date({ field: 'lastLogin', title: 'Last Login' })}
+        {Column.DateTime({ field: 'lastUpdated', title: 'Last Updated' })}
+        {Column.Boolean({ field: 'active', title: 'Status' })}
+        {Column.Text({ field: 'profile.bio', title: 'Bio' })}
+      </Table>
+    )
+  }
 }
