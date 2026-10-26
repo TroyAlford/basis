@@ -101,6 +101,8 @@ Selectors used to **interact** with the application are not themselves the probl
 
 Do not prove the same contract redundantly at multiple layers unless the higher layer adds distinct confidence. A screenshot plus private-DOM assertions for the same visual detail is duplicate proof, not stronger proof. Exact DOM or SVG structure is valid only when that structure is itself a public or semantic primitive contract. Exact geometry measurements are valid when dimensions, clipping, or print geometry are themselves requirements. Do not demand screenshots for nonvisual domain behavior.
 
+This category is about the assertion surface. Important domain rules proven only through a browser test are `expensive-critical-coverage`, even when that test reads persisted fields.
+
 Do not recommend adding `data-testid`, production classes, or other hooks merely to preserve an implementation-coupled assertion.
 
 Coverage is evidence, not the goal. Confidence is the goal; do not turn a coverage percentage into the reviewer.
@@ -276,7 +278,7 @@ test('editing a record persists every field', async () => {
 
 Most of this browser assertion proves transformation rules through the editor and persisted model, while a model test could prove the same rules more cheaply.
 
-Expected: `finding / implementation-coupled-assertion`
+Expected: `finding / expensive-critical-coverage`
 
 Expected review feedback:
 
