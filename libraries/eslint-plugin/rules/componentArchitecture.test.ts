@@ -74,19 +74,31 @@ export class Example {
   test('rejects a custom hook call', () => {
     expect(messageIds(`
 import { useRemoteData } from './useRemoteData'
-export class Example {
-  value = useRemoteData()
+export function Example() {
+  const value = useRemoteData()
+  return <p>{value}</p>
 }
-`)).toEqual(['customHook'])
+`)).toEqual(['customHook', 'functionComponent'])
   })
 
   test('rejects an aliased custom hook import', () => {
     expect(messageIds(`
 import { useRemoteData as load } from './useRemoteData'
-export class Example {
-  value = load()
+export function Example() {
+  const value = load()
+  return <p>{value}</p>
 }
-`)).toEqual(['customHook'])
+`)).toEqual(['customHook', 'functionComponent'])
+  })
+
+  test('rejects a local pure useX call inside a component', () => {
+    expect(messageIds(`
+function useDiscount(code: string): string { return code.trim() }
+export function Example() {
+  const value = useDiscount('A')
+  return <p>{value}</p>
+}
+`)).toEqual(['customHook', 'functionComponent'])
   })
 
   test('rejects a locally declared custom hook in React source', () => {
@@ -104,6 +116,22 @@ export class Example {
 function useDiscount(code: string): string { return code.trim() }
 export const discounted = useDiscount('A')
 `, 'discount.ts')).toEqual([])
+  })
+
+  test('allows an imported pure useX utility without React context', () => {
+    expect(messageIds(`
+import { useDiscount } from './pricing'
+export const discounted = useDiscount('A')
+`, 'discount.ts')).toEqual([])
+  })
+
+  test('allows a local pure useX helper with unrelated JSX', () => {
+    expect(messageIds(`
+function useDiscount(code: string): string { return code.trim() }
+const label = (value: string) => <span>{value}</span>
+export const discounted = useDiscount('A')
+export { label }
+`, 'pricing.tsx')).toEqual([])
   })
 
   test('allows ordinary helpers and class methods that start with use', () => {
@@ -199,6 +227,20 @@ export { Hello as Greeting }
     expect(messageIds(`
 const Hello = () => <p>Hello</p>
 export default Hello
+`)).toEqual(['functionComponent'])
+  })
+
+  test('rejects an arrow helper exported under an uppercase component alias', () => {
+    expect(messageIds(`
+const renderLabel = () => <span>Hello</span>
+export { renderLabel as Hello }
+`)).toEqual(['functionComponent'])
+  })
+
+  test('rejects a function helper exported under an uppercase component alias', () => {
+    expect(messageIds(`
+function renderLabel() { return <span>Hello</span> }
+export { renderLabel as Hello }
 `)).toEqual(['functionComponent'])
   })
 

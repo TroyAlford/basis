@@ -79,9 +79,6 @@ const REACT_WRAPPERS: ReadonlySet<string> = new Set(['forwardRef', 'memo'])
 // The conventional custom-hook name shape.
 const HOOK_NAME = /^use[A-Z0-9]/
 
-// JSX nodes that establish React source context.
-const JSX_TYPES: ReadonlySet<string> = new Set(['JSXElement', 'JSXFragment'])
-
 // Test, snapshot, and end-to-end lanes that may use React testing mechanics.
 const TEST_FILE = /\.(?:test|spec|screenshot|e2e)\.[cm]?[jt]sx?$/i
 
@@ -314,30 +311,6 @@ const containsJsx = (node: unknown, root?: unknown, seen: Set<object> = new Set(
   return false
 }
 
-// Whether any node in a tree has one of the given types.
-const containsType = (
-  node: unknown,
-  types: ReadonlySet<string>,
-  seen: Set<object> = new Set(),
-): boolean => {
-  if (!isObject(node)) return false
-  if (seen.has(node)) return false
-  seen.add(node)
-
-  const type = nodeType(node)
-  if (type && types.has(type)) return true
-
-  for (const [key, value] of Object.entries(node)) {
-    if (key === 'comments' || key === 'loc' || key === 'parent' || key === 'range' || key === 'tokens') continue
-    if (Array.isArray(value)) {
-      if (value.some(entry => containsType(entry, types, seen))) return true
-      continue
-    }
-    if (containsType(value, types, seen)) return true
-  }
-  return false
-}
-
 // Whether a function's body renders JSX.
 const rendersJsx = (node: FunctionNode): boolean => containsJsx(node.body, node)
 
@@ -535,6 +508,136 @@ const resolveMemberFunction = (
   return null
 }
 
+/**
+ * Whether a function declaration is the direct default export.
+ * @param node The function or class declaration node.
+ * @returns Whether its parent is `ExportDefaultDeclaration`.
+ */
+const isDefaultExport = (node: unknown): boolean => {
+  const parent = (node as ASTNode | undefined)?.parent
+  return parent?.type === 'ExportDefaultDeclaration'
+}
+
+/**
+ * Read the name a function is bound to, including variable, property, and
+ * method bindings.
+ * @param node A function node.
+ * @returns The bound name, or `null` for an anonymous function.
+ */
+const functionIdentifier = (node: unknown): string | null => {
+  if (!isObject(node)) return null
+  const type = nodeType(node)
+  if (type !== 'ArrowFunctionExpression' && type !== 'FunctionDeclaration' && type !== 'FunctionExpression') {
+    return null
+  }
+
+  if (type !== 'ArrowFunctionExpression') {
+    const id = identifierName(node.id)
+    if (id) return id
+  }
+
+  const parent = node.parent
+  if (!isObject(parent)) return null
+  const parentType = nodeType(parent)
+
+  if (parentType === 'VariableDeclarator' || parentType === 'AssignmentExpression') {
+    return identifierName(parentType === 'VariableDeclarator' ? parent.id : parent.left)
+  }
+
+  if (parentType === 'MethodDefinition' || parentType === 'Property' || parentType === 'PropertyDefinition') {
+    return identifierName(parent.key)
+  }
+
+  return null
+}
+
+/**
+ * Whether a function is a React component or custom hook by name or JSX output.
+ * @param node The candidate function node.
+ * @returns Whether the function is component or hook context.
+ */
+const isComponentOrHookFunction = (node: unknown): boolean => {
+  const name = functionIdentifier(node)
+  if (name && (HOOK_NAME.test(name) || isPascalCase(name))) return true
+  if (!isObject(node)) return false
+  const type = nodeType(node)
+  if (type !== 'ArrowFunctionExpression' && type !== 'FunctionDeclaration' && type !== 'FunctionExpression') {
+    return false
+  }
+  return rendersJsx(node as unknown as FunctionNode)
+}
+
+/**
+ * Whether a call site is inside a component or custom-hook function.
+ * @param context The rule context used to read ancestors.
+ * @param node The call expression node.
+ * @returns Whether a component or hook encloses the call.
+ */
+const isInsideComponentOrHook = (context: Rule.RuleContext, node: unknown): boolean => {
+  const ancestors = context.sourceCode.getAncestors(node as unknown as ESTree.Node)
+  for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+    if (isComponentOrHookFunction(ancestors[index])) return true
+  }
+  return false
+}
+
+/**
+ * Read the name of a called expression without resolving its module.
+ * @param context The rule context used for React alias resolution.
+ * @param callee The call target.
+ * @returns The React export or local call name, or `null`.
+ */
+const callName = (context: Rule.RuleContext, callee: unknown): string | null => {
+  const react = reactExport(context, callee)
+  if (react) return react
+  if (nodeType(callee) === 'Identifier') return identifierName(callee)
+  if (nodeType(callee) === 'MemberExpression') return memberProperty(callee)
+  return null
+}
+
+/**
+ * Whether a function body calls a React or custom hook.
+ * @param context The rule context used for React alias resolution.
+ * @param node The node to inspect.
+ * @param root The function whose body is being inspected.
+ * @param seen Nodes already visited.
+ * @returns Whether a hook call exists outside nested functions.
+ */
+const containsHookCall = (
+  context: Rule.RuleContext,
+  node: unknown,
+  root?: unknown,
+  seen: Set<object> = new Set(),
+): boolean => {
+  if (!isObject(node)) return false
+  if (seen.has(node)) return false
+  seen.add(node)
+
+  const type = nodeType(node)
+  if (node !== root && (
+    type === 'ArrowFunctionExpression'
+    || type === 'FunctionDeclaration'
+    || type === 'FunctionExpression'
+  )) {
+    return false
+  }
+
+  if (type === 'CallExpression') {
+    const name = callName(context, node.callee)
+    if (name && (REACT_HOOKS.has(name) || HOOK_NAME.test(name))) return true
+  }
+
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'comments' || key === 'loc' || key === 'parent' || key === 'range' || key === 'tokens') continue
+    if (Array.isArray(value)) {
+      if (value.some(entry => containsHookCall(context, entry, root, seen))) return true
+      continue
+    }
+    if (containsHookCall(context, value, root, seen)) return true
+  }
+  return false
+}
+
 // Read a class's declared name.
 const className = (node: ClassNode): string => (
   node.id?.type === 'Identifier' ? node.id.name : 'anonymous'
@@ -598,25 +701,6 @@ const collectNamedExports = (program: unknown, exports: Map<string, string>): vo
   }
 }
 
-/**
- * Whether a module has a runtime import or re-export from React.
- * @param program The Program node being linted.
- * @returns Whether React is part of the module's runtime context.
- */
-const importsReact = (program: unknown): boolean => {
-  if (!isObject(program) || !Array.isArray(program.body)) return false
-
-  return program.body.some(statement => {
-    if (!isObject(statement)) return false
-    const type = nodeType(statement)
-    if (type !== 'ExportAllDeclaration' && type !== 'ExportNamedDeclaration' && type !== 'ImportDeclaration') {
-      return false
-    }
-    if (statement.importKind === 'type' || statement.exportKind === 'type') return false
-    return isObject(statement.source) && statement.source.value === REACT_SOURCE
-  })
-}
-
 // The rule's shared report helpers.
 interface Reporter {
   /** Report a function component declaration or JSX use. */
@@ -662,18 +746,27 @@ export const componentArchitecture: Rule.RuleModule = {
 
     const reporter = createReporter(context)
     const namedExports = new Map<string, string>()
-    let hasReactEvidence = false
 
     const reportFunction = (node: FunctionNode, name: string): void => {
       reporter.component(node, name)
     }
 
+    const exposedComponentName = (localName: string, exportedName?: string): string | null => {
+      if (isPascalCase(localName)) return localName
+      if (exportedName && (isPascalCase(exportedName) || exportedName === 'default')) return exportedName
+      if (localName === 'default') return localName
+      return null
+    }
+
     const checkFunctionDeclaration = (node: ESTree.FunctionDeclaration): void => {
       const name = functionName(node)
       if (!isExported(node) && !namedExports.has(name)) return
-      if (!isPascalCase(name) && name !== 'default') return
-      if (!rendersJsx(node)) return
-      reportFunction(node, name)
+      const componentName = exposedComponentName(
+        name,
+        isDefaultExport(node) ? 'default' : namedExports.get(name),
+      )
+      if (!componentName || !rendersJsx(node)) return
+      reportFunction(node, componentName)
     }
 
     const checkDefaultExport = (node: ESTree.ExportDefaultDeclaration): void => {
@@ -686,11 +779,12 @@ export const componentArchitecture: Rule.RuleModule = {
     const checkVariableDeclarator = (node: ESTree.VariableDeclarator): void => {
       const name = functionName(node)
       if (!isExported(node) && !namedExports.has(name)) return
-      if (!isPascalCase(name)) return
+      const componentName = exposedComponentName(name, namedExports.get(name))
+      if (!componentName) return
       if (isReactWrapperCall(context, node.init) || hasReactFunctionType(context, node.id)) return
       const fn = resolveFunction(context, node.init)
       if (!fn || !rendersJsx(fn)) return
-      reportFunction(fn, name)
+      reportFunction(fn, componentName)
     }
 
     const checkClass = (node: ClassNode): void => {
@@ -748,23 +842,22 @@ export const componentArchitecture: Rule.RuleModule = {
         return
       }
 
-      if (exportName && REACT_HOOKS.has(exportName)) {
-        reporter.hook(node, exportName, false)
+      if (exportName && (REACT_HOOKS.has(exportName) || HOOK_NAME.test(exportName))) {
+        reporter.hook(node, exportName, !REACT_HOOKS.has(exportName))
         return
       }
 
-      if (nodeType(node.callee) === 'Identifier') {
-        const name = (node.callee as ESTree.Identifier).name
-        const variable = findVariable(context.sourceCode.getScope(node.callee as unknown as ESTree.Node), name)
-        const imported = variable ? importInfo(variable) : null
+      if (nodeType(node.callee) !== 'Identifier') return
 
-        if (imported && HOOK_NAME.test(imported.imported)) {
-          reporter.hook(node, imported.imported, true)
-          return
-        }
+      const name = (node.callee as ESTree.Identifier).name
+      const variable = findVariable(context.sourceCode.getScope(node.callee as unknown as ESTree.Node), name)
+      const imported = variable ? importInfo(variable) : null
+      const exposedName = imported?.imported ?? name
+      if (!HOOK_NAME.test(exposedName)) return
 
-        if (HOOK_NAME.test(name) && hasReactEvidence) reporter.hook(node, name, true)
-      }
+      const fn = resolveFunction(context, node.callee)
+      const localHook = fn ? containsHookCall(context, fn.body, fn) : false
+      if (localHook || isInsideComponentOrHook(context, node)) reporter.hook(node, exposedName, true)
     }
 
     return {
@@ -776,7 +869,6 @@ export const componentArchitecture: Rule.RuleModule = {
       JSXOpeningElement: checkJsxComponent,
       Program(program: ESTree.Program) {
         collectNamedExports(program, namedExports)
-        hasReactEvidence = importsReact(program) || containsType(program, JSX_TYPES)
       },
       TSTypeReference: checkTypeReference,
       VariableDeclarator: checkVariableDeclarator,
