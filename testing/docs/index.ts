@@ -3,8 +3,8 @@
  *
  * The docs site is a Bun HTML entry (`bun ./libraries/docs/index.html`), so the
  * fixture serves it with Bun's native HTML bundler rather than Basis Server.
- * `HOST`/`PORT` are injected by `startApplication`; `/health` is the readiness
- * probe and `/*` falls back to the bundle for client-side routes.
+ * `HOST`/`PORT` are injected by `startApplication`; `/api/health` is the
+ * readiness probe and `/*` falls back to the bundle for client-side routes.
  */
 import index from '../../libraries/docs/index.html'
 
@@ -14,6 +14,6 @@ Bun.serve({
   port: Number(process.env.PORT ?? 0),
   routes: {
     '/*': index,
-    '/health': () => new Response('ok'),
+    '/api/health': () => new Response('ok'),
   },
 })

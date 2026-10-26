@@ -54,7 +54,7 @@ export interface ServerOptions {
   /** Port to bind. Defaults to `PORT`, then `80`. Use `0` for an ephemeral port. */
   port?: number,
   /**
-   * Release version reported by `/health` and embedded as runtime context.
+   * Release version reported by `/api/health` and embedded as runtime context.
    * Defaults to `VERSION`, then `development`. Alforge supplies this as the
    * authoritative release version from the strict semver release tag (for
    * example `0.6.1`); the exact deployed checkout is a separate `GIT_SHA`, and
@@ -73,7 +73,7 @@ export interface ServerOptions {
  * Refresh. A changed module is replaced in place — no document reload — and
  * only falls back to a reload when nothing accepts the update.
  * Production builds once, bundles the installed dependency graph, serves the
- * SPA and its assets, reports the release version on `/health`, and shuts down
+ * SPA and its assets, reports the release version on `/api/health`, and shuts down
  * gracefully on SIGINT/SIGTERM.
  *
  * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
@@ -165,7 +165,7 @@ export class Server {
   /**
    * Resolves once the application's initial build succeeds, or rejects when it
    * fails. A managed process can await this before signalling readiness;
-   * `/health` stays `503` until the same point.
+   * `/api/health` stays `503` until the same point.
    * @returns A promise that settles when the app is built and ready.
    */
   ready(): Promise<void> {
@@ -175,9 +175,9 @@ export class Server {
   /**
    * Processes an API request.
    *
-   * Templates match the route under `/api`, and additionally the first path
-   * segment at the root, so conventional endpoints such as `/health` and
-   * `/api/health` both resolve.
+   * API templates match only under `/api`. Root paths are the application's
+   * SPA surface, so a template such as `art` matches `/api/art` but never
+   * claims `/art`; non-API root paths fall through to the SPA shell.
    * @param uri - The URI to handle.
    * @param request - The incoming request.
    * @returns The API response, or `null` when no template matches.
@@ -221,7 +221,7 @@ export class Server {
    * @returns The event-stream response, a `405`, or `null` when no template matches.
    */
   async handleSse(uri: URI, request: Request): Promise<Response | null> {
-    for (const target of this.#targets(uri)) {
+    for (const target of this.#sseTargets(uri)) {
       if (!target) continue
 
       for (const [template, handler] of this.#sse.entries()) {
@@ -399,7 +399,7 @@ export class Server {
    *
    * Managed deployments inject `VERSION` (the authoritative release version,
    * for example `0.6.1`) and `GIT_SHA` (the exact deployed checkout). This
-   * server echoes `VERSION` on `/health` and embeds all three platform facts
+   * server echoes `VERSION` on `/api/health` and embeds all three platform facts
    * into the SPA shell as client runtime context.
    *
    * Lifecycle output (startup, shutdown, build failures, HMR) is written
@@ -411,7 +411,7 @@ export class Server {
    * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
-   * @param options.version - The release version reported by `/health`.
+   * @param options.version - The release version reported by `/api/health`.
    * @returns The server.
    */
   start = ({
@@ -736,10 +736,10 @@ export class Server {
   }
 
   /**
-   * Build the development shell once so `/health` reflects a real build.
+   * Build the development shell once so `/api/health` reflects a real build.
    *
    * Development compiles lazily on the first request, so `ready()` and
-   * `/health` stay `starting` until one build has actually succeeded. A failed
+   * `/api/health` stay `starting` until one build has actually succeeded. A failed
    * build reports `error` rather than a healthy process.
    */
   #warmDevelopment(): void {
@@ -868,12 +868,26 @@ export class Server {
   }
 
   /**
-   * The route targets a URI can match, matching the API convention: the route
-   * under `/api`, or the first path segment at the root.
+   * The route targets an API URI can match.
+   *
+   * APIs live exclusively under `/api`; the root is the SPA surface, so an API
+   * template never claims a root path.
    * @param uri - The parsed URI.
    * @returns Candidate template targets.
    */
   #targets(uri: URI): string[] {
+    return uri.type === 'api' ? [uri.route] : []
+  }
+
+  /**
+   * The route targets an SSE URI can match.
+   *
+   * SSE streams are a server facility rather than an API or an SPA route, so
+   * both the `/api` form and a root-level route remain available.
+   * @param uri - The parsed URI.
+   * @returns Candidate template targets.
+   */
+  #sseTargets(uri: URI): string[] {
     return uri.type === 'api' ? [uri.route] : uri.route ? [] : [uri.type]
   }
 

@@ -119,10 +119,44 @@ describe('Server.api route context', () => {
       isLogger: context.logger === server.logger,
     }))
 
-    const uri = parseURI('http://localhost/whoami')
-    const response = await server.handleAPI(uri, new Request('http://localhost/whoami'))
+    const uri = parseURI('http://localhost/api/whoami')
+    const response = await server.handleAPI(uri, new Request('http://localhost/api/whoami'))
 
     expect(await response?.json()).toEqual({ hasRequest: true, isLogger: true })
+  })
+})
+
+describe('Server API boundary', () => {
+  test('an API template matches under /api but never claims the root SPA path', async () => {
+    const server = new Server().api([HttpVerb.Get], 'art', () => new Response('api'))
+    const request = (path: string): Request => new Request(`http://localhost${path}`)
+
+    const api = await server.handleAPI(parseURI('http://localhost/api/art'), request('/api/art'))
+    expect(await api?.text()).toBe('api')
+
+    expect(await server.handleAPI(parseURI('http://localhost/art'), request('/art'))).toBeNull()
+
+    const root = await server.handle(request('/art'))
+    expect(root?.headers.get('content-type')).toContain('text/html')
+  })
+
+  test('serves health only under /api and leaves the root path to the SPA', async () => {
+    const server = new Server()
+    const request = (path: string): Request => new Request(`http://localhost${path}`)
+
+    const api = await server.handleAPI(parseURI('http://localhost/api/health'), request('/api/health'))
+    expect(api?.status).toBe(503)
+    expect(await api?.json()).toMatchObject({ status: 'starting' })
+
+    /*
+     * `/health` is not an API. The API table leaves it alone, and the root
+     * path falls through to the SPA shell like every other non-API path.
+     */
+    expect(await server.handleAPI(parseURI('http://localhost/health'), request('/health'))).toBeNull()
+    expect(await server.handleAPI(parseURI('http://localhost/ping'), request('/ping'))).toBeNull()
+
+    const root = await server.handle(request('/health'))
+    expect(root?.headers.get('content-type')).toContain('text/html')
   })
 })
 

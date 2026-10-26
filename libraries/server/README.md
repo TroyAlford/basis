@@ -34,7 +34,7 @@ new Server()
 | `hostname`    | `HOST`, then `127.0.0.1`      | Interface to bind.                                          |
 | `logger`      | a standard Basis `Logger`     | Sink for server/HMR lifecycle output.                       |
 | `port`        | `PORT`, then `80`             | Port to bind. `0` binds an ephemeral port.                  |
-| `version`     | `VERSION`, then `development` | Release version reported by `/health`.                      |
+| `version`     | `VERSION`, then `development` | Release version reported by `/api/health`.                  |
 
 ## Logging
 
@@ -57,7 +57,7 @@ Development runs on Bun's dev server, so updates apply to the running page inste
 - a module that derives state from imported components (for example a route registry) should call `import.meta.hot.accept()` so it re-evaluates and rebuilds that state; an edit with no accepting boundary falls back to a reload;
 - styles registered through `style()` reconcile in place by id, so style edits apply without duplication;
 - the request's runtime facts are still embedded into the shell the client boots from;
-- `/health` stays `503 starting` until the first development build succeeds, and reports `503 error` when it fails, so development readiness is honest rather than optimistic;
+- `/api/health` stays `503 starting` until the first development build succeeds, and reports `503 error` when it fails, so development readiness is honest rather than optimistic;
 - dependencies (including React) are bundled by Bun, so no CDN is required; the `/modules` proxy route remains available for explicit module requests but is not used by the default build.
 
 Bun's dev server loads bundler plugins from `bunfig.toml`, so a consuming app registers Basis's SASS and Markdown loaders with:
@@ -96,7 +96,7 @@ new Server().root(import.meta.dir).main('./Application.tsx').start()
 
 ## Readiness and health
 
-`/health` (also `/api/health`) is the managed-application readiness contract. It only responds `200` once the initial build has succeeded:
+`/api/health` is the managed-application readiness API. It only responds `200` once the initial build has succeeded:
 
 ```json
 { "status": "ok", "version": "0.6.1" }
@@ -106,7 +106,7 @@ new Server().root(import.meta.dir).main('./Application.tsx').start()
 
 While the build is pending it responds `503 { "status": "starting", ... }`, and after a failed build `503 { "status": "error", "error": "...", ... }`. A deployment verifier therefore never sees a healthy process for an application that did not build. Bun version and uptime are additive diagnostics on the ready response.
 
-`server.ready()` resolves when the initial build succeeds and rejects when it fails, for processes that prefer to signal readiness directly. In production the process stays up and keeps reporting the failure on `/health` rather than crashing, so command-center can observe and act on it.
+`server.ready()` resolves when the initial build succeeds and rejects when it fails, for processes that prefer to signal readiness directly. In production the process stays up and keeps reporting the failure on `/api/health` rather than crashing, so command-center can observe and act on it.
 
 ## API routes
 
@@ -120,7 +120,7 @@ server.api([HttpVerb.Get], 'hello/:name', ({ name }, { logger, request }) => {
 })
 ```
 
-Templates match the route under `/api` (`/api/hello/world`) and, for root-level paths, the first path segment (so built-in `/health` and `/ping` resolve). Every handler receives the request and the server's logger.
+Templates match only the route under `/api` (`/api/hello/world`). Root paths are the SPA surface, so a template named `art` matches `/api/art` but never claims `/art`; `/ping` is `/api/ping`, not a root route. Every handler receives the request and the server's logger.
 
 ## Favicon and icons
 

@@ -119,7 +119,7 @@ test('renders the application', async () => {
 })
 ```
 
-Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`, not the default test command. `useApplication({ entry })` spawns the entry on a free loopback port and waits for readiness on `/health`. It is **run-scoped**: memoised per `(cwd, entry)` on `globalThis`, so every test file in the run shares one server (concurrent callers await the same boot instead of racing), and the testing preload stops it exactly once when the run ends — success, failure, thrown error, or `SIGINT`/`SIGTERM`. No test file needs `afterAll` or `finally`, and the server boots once per run rather than once per file.
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`, not the default test command. `useApplication({ entry })` spawns the entry on a free loopback port and waits for readiness on `/api/health`. It is **run-scoped**: memoised per `(cwd, entry)` on `globalThis`, so every test file in the run shares one server (concurrent callers await the same boot instead of racing), and the testing preload stops it exactly once when the run ends — success, failure, thrown error, or `SIGINT`/`SIGTERM`. No test file needs `afterAll` or `finally`, and the server boots once per run rather than once per file.
 
 `startApplication({ entry })` is the low-level primitive behind it, with the same shape but a per-call lifecycle (`stop()` is idempotent). Use it only when a test needs a dedicated server of its own.
 

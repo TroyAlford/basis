@@ -14,7 +14,7 @@ export interface StartApplicationOptions {
   entry: string,
   /** Extra environment for the server process. */
   env?: Record<string, string>,
-  /** HTTP path polled for readiness. Defaults to `/health`. */
+  /** HTTP path polled for readiness. Defaults to `/api/health`. */
   readyPath?: string,
   /** Readiness timeout in milliseconds. Defaults to `30000`. */
   timeoutMs?: number,
@@ -121,7 +121,7 @@ async function waitForReady(url: string, timeoutMs: number, output: () => string
 export async function startApplication(
   options: StartApplicationOptions,
 ): Promise<ApplicationHandle> {
-  const { cwd = process.cwd(), entry, env = {}, readyPath = '/health', timeoutMs = 30_000 } = options
+  const { cwd = process.cwd(), entry, env = {}, readyPath = '/api/health', timeoutMs = 30_000 } = options
   const port = await freePort()
   const proc = Bun.spawn([process.execPath, entry], {
     cwd,

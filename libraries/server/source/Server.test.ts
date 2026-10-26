@@ -106,7 +106,7 @@ const startServer = async (
 }
 
 /**
- * Polls `/health` until it satisfies the predicate.
+ * Polls `/api/health` until it satisfies the predicate.
  * @param base The server origin.
  * @param predicate The condition the health response must satisfy.
  * @returns The matching response and parsed body.
@@ -119,7 +119,7 @@ const waitForHealth = async (
   let last: { body: HealthBody, response: Response } | null = null
 
   while (Date.now() < deadline) {
-    const response = await Bun.fetch(`${base}/health`)
+    const response = await Bun.fetch(`${base}/api/health`)
     const body = await response.json() as HealthBody
     last = { body, response }
     if (predicate(response, body)) return last
@@ -149,10 +149,9 @@ describe('Server production mode', () => {
     expect(response.headers.get('content-type')).toContain('application/json')
     expect(body).toMatchObject({ status: 'ok', version: 'test-version' })
 
-    // The endpoint stays reachable under its namespaced route too.
-    const namespaced = await Bun.fetch(`${base}/api/health`)
-    expect(namespaced.status).toBe(200)
-    expect(await namespaced.json()).toMatchObject({ status: 'ok', version: 'test-version' })
+    // `/health` is a root SPA path, not an API.
+    const spaHealth = await Bun.fetch(`${base}/health`)
+    expect(spaHealth.headers.get('content-type')).toContain('text/html')
 
     const ui = await Bun.fetch(base)
     const html = await ui.text()
@@ -355,7 +354,7 @@ describe('Server SSE idle streams', () => {
     await server.handle(new Request('http://localhost/events'))
     expect(server.keepAlives).toEqual([0])
 
-    await server.handle(new Request('http://localhost/health'))
+    await server.handle(new Request('http://localhost/api/health'))
     expect(server.keepAlives).toEqual([0])
   })
 

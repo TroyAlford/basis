@@ -78,7 +78,7 @@ const waitForManagedHealth = async (base: string): Promise<{ status?: string, ve
   let last: { status?: string, version?: string } = {}
 
   while (Date.now() < deadline) {
-    const response = await fetch(`${base}/health`)
+    const response = await fetch(`${base}/api/health`)
     last = await response.json() as { status?: string, version?: string }
     if (response.status === 200 && last.status === 'ok') return last
     await Bun.sleep(100)
@@ -154,7 +154,7 @@ const main = async (): Promise<void> => {
     const base = `http://127.0.0.1:${server.port}`
 
     const health = await waitForManagedHealth(base)
-    assert(health.version === 'consumer-version', 'managed /health reports the release version')
+    assert(health.version === 'consumer-version', 'managed /api/health reports the release version')
 
     const html = await fetch(base).then(response => response.text())
     assert(html.includes('/scripts/index.js'), 'managed server serves the SPA shell')
