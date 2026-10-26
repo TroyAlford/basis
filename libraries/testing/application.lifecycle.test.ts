@@ -30,7 +30,7 @@ const APP_SOURCE = [
   'Bun.serve({',
   "  hostname: process.env.HOST ?? '127.0.0.1',",
   '  port: Number(process.env.PORT ?? 0),',
-  "  routes: { '/health': () => new Response('ok') },",
+  "  routes: { '/api/health': () => new Response('ok') },",
   '})',
   '',
   'const stop = (): void => {',

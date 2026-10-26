@@ -54,7 +54,7 @@ export interface ServerOptions {
   /** Port to bind. Defaults to `PORT`, then `80`. Use `0` for an ephemeral port. */
   port?: number,
   /**
-   * Release version reported by `/health` and embedded as runtime context.
+   * Release version reported by `/api/health` and embedded as runtime context.
    * Defaults to `VERSION`, then `development`. Alforge supplies this as the
    * authoritative release version from the strict semver release tag (for
    * example `0.6.1`); the exact deployed checkout is a separate `GIT_SHA`, and
@@ -73,7 +73,7 @@ export interface ServerOptions {
  * Refresh. A changed module is replaced in place — no document reload — and
  * only falls back to a reload when nothing accepts the update.
  * Production builds once, bundles the installed dependency graph, serves the
- * SPA and its assets, reports the release version on `/health`, and shuts down
+ * SPA and its assets, reports the release version on `/api/health`, and shuts down
  * gracefully on SIGINT/SIGTERM.
  *
  * Beyond `api` routes, the server owns first-class SSE (`sse`), WebSocket
@@ -87,7 +87,6 @@ export class Server {
   #assets: string | null = null
   #builder: Builder | null = null
   #development = true
-  #endpoints = new Map<string, (context: RouteContext) => Response | Promise<Response>>()
   #entrypoints: [string, string][] = []
   #favIcon: ResolvedFavIcon | null = null
   #favIconInput: FavIconInput | null = null
@@ -109,7 +108,6 @@ export class Server {
 
   constructor() {
     this.api([HttpVerb.Get], 'health', () => this.#health())
-    this.endpoint('/health', () => this.#health())
     this.api([HttpVerb.Get], 'ping', ping)
   }
 
@@ -167,7 +165,7 @@ export class Server {
   /**
    * Resolves once the application's initial build succeeds, or rejects when it
    * fails. A managed process can await this before signalling readiness;
-   * `/health` stays `503` until the same point.
+   * `/api/health` stays `503` until the same point.
    * @returns A promise that settles when the app is built and ready.
    */
   ready(): Promise<void> {
@@ -179,8 +177,7 @@ export class Server {
    *
    * API templates match only under `/api`. Root paths are the application's
    * SPA surface, so a template such as `art` matches `/api/art` but never
-   * claims `/art`. Non-API root paths are served by an explicit
-   * {@link Server.endpoint} registration or fall through to the SPA shell.
+   * claims `/art`; non-API root paths fall through to the SPA shell.
    * @param uri - The URI to handle.
    * @param request - The incoming request.
    * @returns The API response, or `null` when no template matches.
@@ -202,23 +199,6 @@ export class Server {
     }
 
     return null
-  }
-
-  /**
-   * Processes an explicit, non-API endpoint request.
-   *
-   * Endpoints are registered by exact path and are not part of the `/api`
-   * namespace, so they can own a root platform path such as `/health` without
-   * weakening the API boundary or shadowing other SPA routes.
-   * @param uri - The URI to handle.
-   * @param request - The incoming request.
-   * @returns The endpoint response, or `null` when no endpoint matches.
-   */
-  async handleEndpoint(uri: URI, request: Request): Promise<Response | null> {
-    const handler = this.#endpoints.get(uri.path)
-    if (!handler) return null
-
-    return await handler({ logger: this.#logger, request })
   }
 
   /**
@@ -419,7 +399,7 @@ export class Server {
    *
    * Managed deployments inject `VERSION` (the authoritative release version,
    * for example `0.6.1`) and `GIT_SHA` (the exact deployed checkout). This
-   * server echoes `VERSION` on `/health` and embeds all three platform facts
+   * server echoes `VERSION` on `/api/health` and embeds all three platform facts
    * into the SPA shell as client runtime context.
    *
    * Lifecycle output (startup, shutdown, build failures, HMR) is written
@@ -431,7 +411,7 @@ export class Server {
    * @param options.idleTimeout - HTTP idle timeout in seconds (`idleTimeout` for `Bun.serve`).
    * @param options.logger - Log sink for lifecycle output.
    * @param options.port - The port to bind.
-   * @param options.version - The release version reported by `/health`.
+   * @param options.version - The release version reported by `/api/health`.
    * @returns The server.
    */
   start = ({
@@ -634,22 +614,6 @@ export class Server {
   }
 
   /**
-   * Adds an explicit, non-API endpoint by exact path.
-   *
-   * Endpoints are not templates and do not live under `/api`; they exist for
-   * platform-facing root paths that are neither an API nor part of the SPA
-   * (for example a readiness endpoint). The handler receives the request and
-   * the server's logger.
-   * @param pathname - The exact request path to handle, for example `/health`.
-   * @param handler - The handler for the endpoint.
-   * @returns The server.
-   */
-  endpoint(pathname: string, handler: (context: RouteContext) => Response | Promise<Response>): Server {
-    this.#endpoints.set(pathname.startsWith('/') ? pathname : `/${pathname}`, handler)
-    return this
-  }
-
-  /**
    * Adds an API route to the server.
    * @param verbs - The HTTP methods to handle.
    * @param template - The template URI to handle.
@@ -772,10 +736,10 @@ export class Server {
   }
 
   /**
-   * Build the development shell once so `/health` reflects a real build.
+   * Build the development shell once so `/api/health` reflects a real build.
    *
    * Development compiles lazily on the first request, so `ready()` and
-   * `/health` stay `starting` until one build has actually succeeded. A failed
+   * `/api/health` stay `starting` until one build has actually succeeded. A failed
    * build reports `error` rather than a healthy process.
    */
   #warmDevelopment(): void {
@@ -858,9 +822,6 @@ export class Server {
 
     const api = await this.handleAPI(uri, request)
     if (api) return api
-
-    const endpoint = await this.handleEndpoint(uri, request)
-    if (endpoint) return endpoint
 
     const mounted = await this.handleMount(uri)
     if (mounted) return mounted

@@ -140,7 +140,7 @@ describe('Server API boundary', () => {
     expect(root?.headers.get('content-type')).toContain('text/html')
   })
 
-  test('serves health under /api and through an explicit non-API root endpoint', async () => {
+  test('serves health only under /api and leaves the root path to the SPA', async () => {
     const server = new Server()
     const request = (path: string): Request => new Request(`http://localhost${path}`)
 
@@ -150,27 +150,13 @@ describe('Server API boundary', () => {
 
     /*
      * `/health` is not an API. The API table leaves it alone, and the root
-     * platform endpoint registered explicitly in the constructor owns it.
+     * path falls through to the SPA shell like every other non-API path.
      */
     expect(await server.handleAPI(parseURI('http://localhost/health'), request('/health'))).toBeNull()
     expect(await server.handleAPI(parseURI('http://localhost/ping'), request('/ping'))).toBeNull()
 
     const root = await server.handle(request('/health'))
-    expect(root?.status).toBe(503)
-    expect(root?.headers.get('content-type')).toContain('application/json')
-    expect(await root?.json()).toMatchObject({ status: 'starting' })
-  })
-
-  test('registers explicit endpoints by exact path', async () => {
-    const server = new Server().endpoint('ready', ({ logger }) => Response.json({
-      isLogger: logger === server.logger,
-    }))
-    const request = (path: string): Request => new Request(`http://localhost${path}`)
-
-    const ready = await server.handleEndpoint(parseURI('http://localhost/ready'), request('/ready'))
-    expect(await ready?.json()).toEqual({ isLogger: true })
-
-    expect(await server.handleEndpoint(parseURI('http://localhost/readiness'), request('/readiness'))).toBeNull()
+    expect(root?.headers.get('content-type')).toContain('text/html')
   })
 })
 
