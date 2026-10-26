@@ -96,7 +96,7 @@ new Server().root(import.meta.dir).main('./Application.tsx').start()
 
 ## Readiness and health
 
-`/health` (also `/api/health`) is the managed-application readiness contract. It only responds `200` once the initial build has succeeded:
+`/health` is the managed-application readiness endpoint, and `/api/health` is the same health payload as an API route. The root endpoint is an explicit non-API registration, not an API template. It only responds `200` once the initial build has succeeded:
 
 ```json
 { "status": "ok", "version": "0.6.1" }
@@ -120,7 +120,13 @@ server.api([HttpVerb.Get], 'hello/:name', ({ name }, { logger, request }) => {
 })
 ```
 
-Templates match the route under `/api` (`/api/hello/world`) and, for root-level paths, the first path segment (so built-in `/health` and `/ping` resolve). Every handler receives the request and the server's logger.
+Templates match only the route under `/api` (`/api/hello/world`). Root paths are the SPA surface, so a template named `art` matches `/api/art` but never claims `/art`; `/ping` is `/api/ping`, not a root route. Every handler receives the request and the server's logger.
+
+Platform-level root paths that are not APIs register as explicit endpoints by exact path. The built-in readiness endpoint uses the same surface:
+
+```ts
+server.endpoint('/ready', () => new Response('ready'))
+```
 
 ## Favicon and icons
 

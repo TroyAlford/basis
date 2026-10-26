@@ -87,6 +87,7 @@ export class Server {
   #assets: string | null = null
   #builder: Builder | null = null
   #development = true
+  #endpoints = new Map<string, (context: RouteContext) => Response | Promise<Response>>()
   #entrypoints: [string, string][] = []
   #favIcon: ResolvedFavIcon | null = null
   #favIconInput: FavIconInput | null = null
@@ -108,6 +109,7 @@ export class Server {
 
   constructor() {
     this.api([HttpVerb.Get], 'health', () => this.#health())
+    this.endpoint('/health', () => this.#health())
     this.api([HttpVerb.Get], 'ping', ping)
   }
 
@@ -175,9 +177,10 @@ export class Server {
   /**
    * Processes an API request.
    *
-   * Templates match the route under `/api`, and additionally the first path
-   * segment at the root, so conventional endpoints such as `/health` and
-   * `/api/health` both resolve.
+   * API templates match only under `/api`. Root paths are the application's
+   * SPA surface, so a template such as `art` matches `/api/art` but never
+   * claims `/art`. Non-API root paths are served by an explicit
+   * {@link Server.endpoint} registration or fall through to the SPA shell.
    * @param uri - The URI to handle.
    * @param request - The incoming request.
    * @returns The API response, or `null` when no template matches.
@@ -202,6 +205,23 @@ export class Server {
   }
 
   /**
+   * Processes an explicit, non-API endpoint request.
+   *
+   * Endpoints are registered by exact path and are not part of the `/api`
+   * namespace, so they can own a root platform path such as `/health` without
+   * weakening the API boundary or shadowing other SPA routes.
+   * @param uri - The URI to handle.
+   * @param request - The incoming request.
+   * @returns The endpoint response, or `null` when no endpoint matches.
+   */
+  async handleEndpoint(uri: URI, request: Request): Promise<Response | null> {
+    const handler = this.#endpoints.get(uri.path)
+    if (!handler) return null
+
+    return await handler({ logger: this.#logger, request })
+  }
+
+  /**
    * Handles a request against the registered static mounts.
    * @param uri - The URI to handle.
    * @returns The mounted response, or `null` when no mount claims the path.
@@ -221,7 +241,7 @@ export class Server {
    * @returns The event-stream response, a `405`, or `null` when no template matches.
    */
   async handleSse(uri: URI, request: Request): Promise<Response | null> {
-    for (const target of this.#targets(uri)) {
+    for (const target of this.#sseTargets(uri)) {
       if (!target) continue
 
       for (const [template, handler] of this.#sse.entries()) {
@@ -614,6 +634,22 @@ export class Server {
   }
 
   /**
+   * Adds an explicit, non-API endpoint by exact path.
+   *
+   * Endpoints are not templates and do not live under `/api`; they exist for
+   * platform-facing root paths that are neither an API nor part of the SPA
+   * (for example a readiness endpoint). The handler receives the request and
+   * the server's logger.
+   * @param pathname - The exact request path to handle, for example `/health`.
+   * @param handler - The handler for the endpoint.
+   * @returns The server.
+   */
+  endpoint(pathname: string, handler: (context: RouteContext) => Response | Promise<Response>): Server {
+    this.#endpoints.set(pathname.startsWith('/') ? pathname : `/${pathname}`, handler)
+    return this
+  }
+
+  /**
    * Adds an API route to the server.
    * @param verbs - The HTTP methods to handle.
    * @param template - The template URI to handle.
@@ -823,6 +859,9 @@ export class Server {
     const api = await this.handleAPI(uri, request)
     if (api) return api
 
+    const endpoint = await this.handleEndpoint(uri, request)
+    if (endpoint) return endpoint
+
     const mounted = await this.handleMount(uri)
     if (mounted) return mounted
 
@@ -868,12 +907,26 @@ export class Server {
   }
 
   /**
-   * The route targets a URI can match, matching the API convention: the route
-   * under `/api`, or the first path segment at the root.
+   * The route targets an API URI can match.
+   *
+   * APIs live exclusively under `/api`; the root is the SPA surface, so an API
+   * template never claims a root path.
    * @param uri - The parsed URI.
    * @returns Candidate template targets.
    */
   #targets(uri: URI): string[] {
+    return uri.type === 'api' ? [uri.route] : []
+  }
+
+  /**
+   * The route targets an SSE URI can match.
+   *
+   * SSE streams are a server facility rather than an API or an SPA route, so
+   * both the `/api` form and a root-level route remain available.
+   * @param uri - The parsed URI.
+   * @returns Candidate template targets.
+   */
+  #sseTargets(uri: URI): string[] {
     return uri.type === 'api' ? [uri.route] : uri.route ? [] : [uri.type]
   }
 
