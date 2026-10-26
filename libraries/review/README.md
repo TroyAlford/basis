@@ -32,12 +32,23 @@ Front-matter fields:
 | `threshold`        | `{ minimumConfidence, severity }` reporting gate                                      |
 | `verification`     | optional registered check that proves a repair: `{ detector }`                        |
 
+`category` is the stable reason code; `disposition` is the portable outcome it projects to.
+
 A `disposition` is one of `finding`, `question`, `no_finding`, or `abstain`:
 
 - `finding` — enough evidence that something should change;
 - `question` — the author must resolve an ambiguity or explain intent;
 - `no_finding` — the candidate is adequately explained or acceptable;
 - `abstain` — the reviewer cannot perform the review from the available evidence.
+
+Every outcome is reported as a binary result plus its category as the reason code. Only `no_finding` passes; `finding`, `question`, and `abstain` are not passes. `reviewResult(disposition)` and `summarizeOutcome(outcome)` expose that projection:
+
+| Reviewer | Result | Reason code |
+| --- | --- | --- |
+| accidental-complexity | PASS | proportionate |
+| test-strategy | FAIL | implementation-coupled-assertion |
+
+A report is scannable when every reviewer row carries `Result` and `Reason code`, rather than only the reviewer-specific category.
 
 ```md
 ---

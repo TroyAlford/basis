@@ -19,6 +19,9 @@ outcomes:
   - category: missing-system-proof
     disposition: finding
     destructive: false
+  - category: implementation-coupled-assertion
+    disposition: finding
+    destructive: false
   - category: consider-test-seam
     disposition: question
     destructive: false
@@ -63,6 +66,8 @@ Strong smells:
 - mocks reproducing meaningful implementation logic rather than replacing a boundary;
 - integration or end-to-end tests repeatedly proving detailed business rules that could be proven much more cheaply at a lower level;
 - unit tests claiming to prove that real components interoperate while every collaborator is mocked;
+- tests asserting private DOM, SVG, or CSS structure when the contract is model state, observable UI semantics, or screenshot-covered appearance;
+- duplicate cross-layer proof of the same contract without distinct confidence;
 - no real smoke or integration check where the actual risk is deployment, configuration, or wiring;
 - important branches with no affordable deterministic coverage.
 
@@ -73,6 +78,32 @@ Comprehensive confidence does not mean proving the same behavior at every layer.
 - smoke and end-to-end tests -> the assembled, deployed system actually functions.
 
 When the failure is at a real boundary, tests must prove the **observable behavior**, not merely that an attribute, mock, or intermediate variable has the expected value. For UI focus behavior, assert actual DOM focus after keyboard interactions; for event streams, check a real listener receives the event; for commit pinning, assert the executed checkout SHA matches the resolved SHA. Add negative cases that would distinguish the intended contract from a plausible broken implementation.
+
+## Assert the contract, not the implementation shape
+
+Tests should assert the contract they exist to protect, not incidental implementation shape. The DOM is a valid assertion surface when the DOM result **is** the behavior:
+
+- focus after a keyboard interaction;
+- accessible name, role, or state;
+- conditional presence or absence controlled by product logic;
+- permissions hiding or disabling an action;
+- user-visible counts, text, or status.
+
+A DOM assertion is a smell when it merely proxies another contract:
+
+- asserting a private CSS class to prove a visual state renders when a screenshot already covers the appearance;
+- counting SVG or icon nodes to prove appearance;
+- asserting a private data attribute instead of the saved or domain state;
+- asserting raw markup structure when the contract is a persisted choice plus its rendered output;
+- pinning nested DOM shape, class names, or element counts that are not user-visible semantics.
+
+Selectors used to **interact** with the application are not themselves the problem; review what the test asserts. Prefer model or state assertions for domain behavior, screenshots and visual regression for appearance and layout, and semantic or accessibility assertions for interactive UI behavior. Keep browser and end-to-end assertions for wiring and outcomes that cannot be proved lower in the stack.
+
+Do not prove the same contract redundantly at multiple layers unless the higher layer adds distinct confidence. A screenshot plus private-DOM assertions for the same visual detail is duplicate proof, not stronger proof. Exact DOM or SVG structure is valid only when that structure is itself a public or semantic primitive contract. Exact geometry measurements are valid when dimensions, clipping, or print geometry are themselves requirements. Do not demand screenshots for nonvisual domain behavior.
+
+This category is about the assertion surface. Important domain rules proven only through a browser test are `expensive-critical-coverage`, even when that test reads persisted fields.
+
+Do not recommend adding `data-testid`, production classes, or other hooks merely to preserve an implementation-coupled assertion.
 
 Coverage is evidence, not the goal. Confidence is the goal; do not turn a coverage percentage into the reviewer.
 
@@ -184,3 +215,71 @@ Expected: `finding / missing-system-proof`
 Expected review feedback:
 
 > Unit and integration coverage look solid, but there is no smoke test that the assembled application starts with valid configuration and working wiring. That is the risk this change carries; add the smallest real check for it.
+
+### Private DOM structure standing in for a screenshot
+
+```tsx
+test('featured items show a badge', async () => {
+  const { node } = await render(<Item featured />)
+  expect(node.querySelectorAll('.badge-layer')).toHaveLength(1)
+})
+```
+
+If the badge is visual and visual snapshots already cover it, this pins a private class rather than the contract.
+
+Expected: `finding / implementation-coupled-assertion`
+
+Expected review feedback:
+
+> This asserts the private `.badge-layer` structure while the badge's appearance is already covered by screenshots. Keep the semantic decision test at its lowest useful level and leave the rendered appearance to the visual suite; do not add a test hook just to preserve this assertion.
+
+### Conditional presence is observable behavior
+
+```tsx
+test('read-only records do not offer Edit', async () => {
+  const { node } = await render(<RecordView readOnly record={record} />)
+  expect(node.querySelector('[role="button"][aria-label="Edit record"]')).toBeNull()
+})
+```
+
+The conditional absence is itself observable behavior, so the DOM assertion is appropriate.
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### Appearance belongs to the screenshot suite
+
+```tsx
+test('renders the featured treatment', async () => {
+  await matchScreenshot(<Item featured />, 'featured')
+})
+```
+
+Visual regression proves the appearance without requiring knowledge of the internal SVG or class structure.
+
+Expected: `no_finding`
+
+Expected review feedback: none.
+
+### Domain behavior tested through the editor
+
+```ts
+test('editing a record persists every field', async () => {
+  const record = await seedRecord()
+  await app.visit(`/records/${record.id}`, async page => {
+    await page.getByRole('button', { name: 'Edit record' }).click()
+    await page.getByLabel('Name').fill('Updated')
+    // ...twenty more field edits
+    expect(await readRecord(record.id)).toMatchObject({ /* twenty fields */ })
+  })
+})
+```
+
+Most of this browser assertion proves transformation rules through the editor and persisted model, while a model test could prove the same rules more cheaply.
+
+Expected: `finding / expensive-critical-coverage`
+
+Expected review feedback:
+
+> Most of this browser test proves the transformation matrix through the editor and persisted fields. Test the transformation directly, keep one browser assertion that the editor wires the user's action to persistence, and let screenshots prove the rendering.

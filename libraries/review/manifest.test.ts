@@ -60,4 +60,22 @@ describe('standard review manifest', () => {
       'abstain',
     ])
   })
+
+  test('ships the test strategy reviewer with implementation-coupled assertions', () => {
+    const reviewer = STANDARD_REVIEW_MANIFEST.reviewers
+      .find(candidate => candidate.id === 'test-strategy')
+
+    expect(reviewer?.outcomes.map(outcome => outcome.category)).toEqual([
+      'expensive-critical-coverage',
+      'mocked-integration',
+      'missing-system-proof',
+      'implementation-coupled-assertion',
+      'consider-test-seam',
+      'appropriate-test-level',
+      'abstain',
+    ])
+    expect(reviewer?.instructions).toContain('## Assert the contract, not the implementation shape')
+    expect(reviewer?.instructions).toContain('### Private DOM structure standing in for a screenshot')
+    expect(reviewer?.instructions).toContain('### Conditional presence is observable behavior')
+  })
 })

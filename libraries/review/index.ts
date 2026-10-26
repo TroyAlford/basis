@@ -18,6 +18,7 @@ export {
 export { loadOverlayDirectory, loadReviewerDirectory } from './load'
 export { STANDARD_REVIEW_MANIFEST } from './manifest'
 export { parseFrontMatter, parseReviewerOverlaySource, parseReviewerSource } from './markdown'
+export { reviewResult, summarizeOutcome } from './result'
 export { STANDARD_REVIEWERS } from './STANDARD_REVIEWERS'
 export type {
   ContextRequirement,
@@ -31,9 +32,11 @@ export type {
   ReportingThreshold,
   ReviewDisposition,
   ReviewManifest,
+  ReviewOutcomeSummary,
   ReviewerOverlay,
   ReviewerPolicy,
   ReviewerSource,
+  ReviewResult,
   Severity,
   VerificationCheck,
 } from './types'
