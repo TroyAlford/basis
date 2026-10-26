@@ -91,10 +91,10 @@ Tests should assert the contract they exist to protect, not incidental implement
 
 A DOM assertion is a smell when it merely proxies another contract:
 
-- asserting a private CSS class such as `.overlay-piece` to prove a crown renders when a screenshot already covers the visual;
+- asserting a private CSS class to prove a visual state renders when a screenshot already covers the appearance;
 - counting SVG or icon nodes to prove appearance;
-- asserting a private `data-framing` attribute instead of the saved or model state;
-- asserting raw `<image href>` structure when the contract is a persisted art or texture choice plus its visual output;
+- asserting a private data attribute instead of the saved or domain state;
+- asserting raw markup structure when the contract is a persisted choice plus its rendered output;
 - pinning nested DOM shape, class names, or element counts that are not user-visible semantics.
 
 Selectors used to **interact** with the application are not themselves the problem; review what the test asserts. Prefer model or state assertions for domain behavior, screenshots and visual regression for appearance and layout, and semantic or accessibility assertions for interactive UI behavior. Keep browser and end-to-end assertions for wiring and outcomes that cannot be proved lower in the stack.
@@ -217,25 +217,26 @@ Expected review feedback:
 ### Private DOM structure standing in for a screenshot
 
 ```tsx
-test('legendary cards have a crown', async () => {
-  const rendered = await render(<Card card={legendary} />)
-  expect(rendered.root.querySelectorAll('.overlay-piece')).toHaveLength(1)
+test('featured items show a badge', async () => {
+  const { node } = await render(<Item featured />)
+  expect(node.querySelectorAll('.badge-layer')).toHaveLength(1)
 })
 ```
 
-If the crown is visual and visual snapshots already cover it, this pins a private class rather than the contract.
+If the badge is visual and visual snapshots already cover it, this pins a private class rather than the contract.
 
 Expected: `finding / implementation-coupled-assertion`
 
 Expected review feedback:
 
-> This asserts the private `.overlay-piece` structure while the crown's appearance is already covered by screenshots. Keep the semantic decision test at its lowest useful level and leave the rendered appearance to the visual suite; do not add a test hook just to preserve this assertion.
+> This asserts the private `.badge-layer` structure while the badge's appearance is already covered by screenshots. Keep the semantic decision test at its lowest useful level and leave the rendered appearance to the visual suite; do not add a test hook just to preserve this assertion.
 
 ### Conditional presence is observable behavior
 
 ```tsx
-test('read-only cards do not offer Edit', async () => {
-  expect(screen.queryByRole('button', { name: 'Edit card' })).toBeNull()
+test('read-only records do not offer Edit', async () => {
+  const { node } = await render(<RecordView readOnly record={record} />)
+  expect(node.querySelector('[role="button"][aria-label="Edit record"]')).toBeNull()
 })
 ```
 
@@ -248,8 +249,8 @@ Expected review feedback: none.
 ### Appearance belongs to the screenshot suite
 
 ```tsx
-test('prints the legendary treatment', async () => {
-  await matchScreenshot(<Card card={legendary} />, 'legendary')
+test('renders the featured treatment', async () => {
+  await matchScreenshot(<Item featured />, 'featured')
 })
 ```
 
@@ -262,13 +263,13 @@ Expected review feedback: none.
 ### Domain behavior tested through the editor
 
 ```ts
-test('editing a card persists every field', async () => {
-  const card = await seedCard()
-  await app.visit(`/cards/${card.id}`, async page => {
-    await page.getByRole('button', { name: 'Edit card' }).click()
+test('editing a record persists every field', async () => {
+  const record = await seedRecord()
+  await app.visit(`/records/${record.id}`, async page => {
+    await page.getByRole('button', { name: 'Edit record' }).click()
     await page.getByLabel('Name').fill('Updated')
     // ...twenty more field edits
-    expect(await readCard(card.id)).toMatchObject({ /* twenty fields */ })
+    expect(await readRecord(record.id)).toMatchObject({ /* twenty fields */ })
   })
 })
 ```
