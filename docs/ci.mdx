@@ -139,7 +139,7 @@ There is a branch-protection nuance: check runs from a `pull_request_target` wor
 
 ## Reference workflows
 
-- [consumer-ci.yml](./examples/consumer-ci.yml) is the code workflow: a cheap `impact` preflight, a consolidated `quality` job (lint, typecheck, advisory Knip), separate `docs`, `test`, and `visual` jobs, extension points for repository-specific checks, and the single `Required` gate. The Visual job runs `test:screenshots` and `test:e2e` as separately named steps. Every suite job is gated on the exact-head impact decision, so an unaffected suite is never allocated.
+- [consumer-ci.yml](./examples/consumer-ci.yml) is the code workflow: a cheap `impact` preflight, a consolidated `quality` job (lint, compliance, typecheck, advisory Knip), separate `docs`, `test`, and `visual` jobs, extension points for repository-specific checks, and the single `Required` gate. The Visual job runs `test:screenshots` and `test:e2e` as separately named steps. Every suite job is gated on the exact-head impact decision, so an unaffected suite is never allocated.
 - [ci-impact.json](./examples/ci-impact.json) is the reference impact policy. Copy it to `.github/ci-impact.json`; the preflight reads it from the merge base, so merge the policy before enabling impact gating.
 - [consumer-pr-title.yml](./examples/consumer-pr-title.yml) is the metadata workflow: `pull_request_target`, no checkout, gated on Ready.
 - [events/](./examples/events) contains the Draft, Ready, title-edit and re-draft fixtures used by `act`.
@@ -225,7 +225,7 @@ Decision: do not change `libraries/testing/browser.ts`. It already starts one pi
 
 The baseline is the current pilot pull-request loop: six independent code jobs (`lint`, `typecheck`, `test`, `knip`, `session-environment`, `visual`) plus a one-job `Required` on every Draft push, and a separate title job. That is three Draft pushes of (6 code + `Required` + title) plus a promotion push of the same shape: **32 jobs**.
 
-The recipe adds one cheap impact preflight at promotion, consolidates lint, typecheck and advisory Knip into one `quality` job, keeps `docs`, `unit`, and `visual` separate, and runs only the suites the exact-head decision marks needed. Draft pushes run zero jobs.
+The recipe adds one cheap impact preflight at promotion, consolidates lint, compliance, typecheck and advisory Knip into one `quality` job, keeps `docs`, `unit`, and `visual` separate, and runs only the suites the exact-head decision marks needed. Draft pushes run zero jobs.
 
 For a representative cycle of three Draft pushes followed by promotion:
 
@@ -249,6 +249,7 @@ Use this for the pilot and the other consumer organizations. Do the pilot first;
 
 - [ ] Map the repository's current jobs to `impact`, `quality`, `docs`, `test` (unit), and `visual`. Keep suites that currently run in separate processes separate.
 - [ ] Copy the reference workflows and replace the setup action, install command, and check commands with the repository's own. Do not copy consumer-specific setup into Basis or another organization.
+- [ ] Make the class-based component invariant explicit: run `bunx basis compliance` in the quality job (or rely on `basis lint` when the repository uses `basis/eslint`), and document any deliberate migration exemption. See [compliance](./compliance.mdx).
 - [ ] Commit `.github/ci-impact.json` as its own policy change **before** enabling impact gating. The preflight reads the policy from the merge base; a PR that changes the policy is analyzed against the old one, and a missing base policy fails closed.
 - [ ] Set `vars.CI_RUNNER` only if the repository needs a non-default runner; leave it unset to keep `ubuntu-latest`.
 - [ ] Add the `Required` job to branch protection and add `impact` to its `needs`. Pass `impact-decision`, `impact-hash`, `event-action`, and `require-impact: 'true'`. Keep its name stable; remove individual job contexts if `Required` is now the single gate, or keep them as additional contexts.

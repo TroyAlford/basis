@@ -148,3 +148,50 @@ describe('basis lint and format', () => {
     }
   })
 })
+
+describe('basis compliance', () => {
+  test('reports architecture violations without a repository ESLint config', () => {
+    const { dir } = makeFixture({ config: false })
+    const component = join(dir, 'Hello.tsx')
+    try {
+      writeFileSync(component, `import { useState } from 'react'
+
+export const Hello = ({ name }: { name: string }) => {
+  const [value] = useState(0)
+  return <p>{name}{value}</p>
+}
+`)
+      expect(run(['compliance'], dir)).not.toBe(0)
+
+      writeFileSync(component, `import { Component } from 'basis/react'
+
+export class Hello extends Component<{ name: string }> {
+  static displayName = 'Hello'
+
+  content() {
+    return <p>{this.props.name}</p>
+  }
+}
+`)
+      expect(run(['compliance'], dir)).toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test('ignores test and fixture source by default', () => {
+    const { dir } = makeFixture({ config: false })
+    try {
+      writeFileSync(join(dir, 'Hello.test.tsx'), `import { useState } from 'react'
+
+export const Hello = () => {
+  const [value] = useState(0)
+  return <p>{value}</p>
+}
+`)
+      expect(run(['compliance'], dir)).toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+})

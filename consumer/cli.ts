@@ -175,6 +175,21 @@ const runLint = (fix: boolean): number => {
 }
 
 /**
+ * Runs the focused, report-only Basis architecture policy.
+ *
+ * Compliance always uses the Basis-owned configuration so the check is
+ * available and identical even when a consumer repository carries its own
+ * ESLint config. It applies the same `@basis/component-architecture` rule
+ * `basis lint` and `basis check` run, with no formatting rules.
+ * @returns The child process exit code.
+ */
+const runCompliance = (): number => runBin('eslint', 'eslint', [
+  '.',
+  '--config',
+  join(basisDir(), 'eslint.compliance.config.mjs'),
+])
+
+/**
  * Verifies the installed Basis surface and its owned patches.
  * @returns Process exit code (`0` when healthy).
  */
@@ -234,7 +249,10 @@ const doctor = (): number => {
  * Prints usage information for the CLI.
  */
 const usage = (): void => {
-  write('usage: basis <docs build [--out <dir>] [--base <path>]|docs check|doctor|format|lint|typecheck|check>')
+  write([
+    'usage: basis <compliance|docs build [--out <dir>] [--base <path>]',
+    '|docs check|doctor|format|lint|typecheck|check>',
+  ].join(''))
 }
 
 /**
@@ -246,6 +264,7 @@ const main = (): void => {
   if (command === 'doctor') process.exit(doctor())
   if (command === 'lint') process.exit(runLint(false))
   if (command === 'format') process.exit(runLint(true))
+  if (command === 'compliance') process.exit(runCompliance())
   if (command === 'typecheck') process.exit(runBin('@typescript/native', 'tsc', ['--noEmit']))
   if (command === 'check') {
     const lintCode = runLint(false)

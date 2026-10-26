@@ -1,6 +1,7 @@
 import * as React from 'react'
 import type { BasisRuntime } from '../../../utilities'
 import { serializeBasisRuntime } from '../../../utilities'
+import { Component } from '../Component/Component'
 
 /** An explicit script source, for a shell whose scripts are not served names. */
 export interface ScriptSource {
@@ -40,41 +41,43 @@ interface Props {
  * Dependencies (including React) are bundled into the entrypoints in every
  * mode, so the shell loads only the compiled scripts and never a CDN or
  * browser-global build.
- * @param props - The component props.
- * @param props.favicon - Whether to render the standard favicon link.
- * @param props.runtime - Runtime facts embedded for the client.
- * @param props.scripts - Entrypoint names or explicit script sources.
- * @param props.title - The document title.
- * @returns The rendered HTML.
  */
-export const IndexHTML: React.FC<Props> = ({ favicon = true, runtime, scripts = [], title = 'Document' }) => (
-  <html lang="en">
-    <head>
-      <meta charSet="UTF-8" />
-      <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-      {favicon && <link href="/assets/favicon" rel="icon" />}
-      <title>{title}</title>
-      {runtime && (
-        /*
-         * `serializeBasisRuntime` escapes `<`, `>`, and `&`, so this trusted,
-         * server-controlled payload can never terminate the script element.
-         */
-        <script
-          dangerouslySetInnerHTML={{ __html: serializeBasisRuntime(runtime) }}
-          id="basis-runtime"
-          type="application/json"
-        />
-      )}
-      {scripts.map(script => {
-        const source = typeof script === 'string' ? { src: `/scripts/${script}` } : script
-        return source.module
-          ? <script key={source.src} src={source.src} type="module" />
-          : <script key={source.src} defer src={source.src} />
-      })}
-    </head>
-    <body>
-      {/** biome-ignore lint/correctness/useUniqueElementIds: 'root' is always unique */}
-      <div id="root" />
-    </body>
-  </html>
-)
+export class IndexHTML extends Component<Props> {
+  static displayName = 'IndexHTML'
+
+  override render(): React.ReactNode {
+    const { favicon = true, runtime, scripts = [], title = 'Document' } = this.props
+
+    return (
+      <html lang="en">
+        <head>
+          <meta charSet="UTF-8" />
+          <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+          {favicon && <link href="/assets/favicon" rel="icon" />}
+          <title>{title}</title>
+          {runtime && (
+            /*
+             * `serializeBasisRuntime` escapes `<`, `>`, and `&`, so this trusted,
+             * server-controlled payload can never terminate the script element.
+             */
+            <script
+              dangerouslySetInnerHTML={{ __html: serializeBasisRuntime(runtime) }}
+              id="basis-runtime"
+              type="application/json"
+            />
+          )}
+          {scripts.map(script => {
+            const source = typeof script === 'string' ? { src: `/scripts/${script}` } : script
+            return source.module
+              ? <script key={source.src} src={source.src} type="module" />
+              : <script key={source.src} defer src={source.src} />
+          })}
+        </head>
+        <body>
+          {/** biome-ignore lint/correctness/useUniqueElementIds: 'root' is always unique */}
+          <div id="root" />
+        </body>
+      </html>
+    )
+  }
+}

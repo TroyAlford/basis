@@ -16,4 +16,7 @@ interface Props<P = object> {
  * A component for matching a route template against the current URL
  * @template P The type of the route parameters
  */
-export class Route<P> extends React.Component<Props<P>> { }
+// eslint-disable-next-line @basis/component-architecture -- Render-function children cannot use the Component contract.
+export class Route<P> extends React.Component<Props<P>> {
+  static displayName = 'Route'
+}

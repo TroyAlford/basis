@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Component } from '../Component/Component'
 
 /** Props for the Switch component */
 interface Props {
@@ -9,8 +10,10 @@ interface Props {
 /**
  * A component that renders only the first matching route from its children
  */
-export class Switch extends React.Component<Props> {
-  render(): React.ReactNode {
+export class Switch extends Component<Props> {
+  static displayName = 'Switch'
+
+  override render(): React.ReactNode {
     const child = React.Children.toArray(this.props.children)
       .find(c => React.isValidElement(c))
     return (

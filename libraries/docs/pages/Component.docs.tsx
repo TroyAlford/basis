@@ -9,7 +9,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
         <h1>Component</h1>
         <section>
           <p>The Component class provides a foundation for building React components with consistent patterns and reduced boilerplate. It extends React's base Component class with additional functionality that addresses common development needs.</p>
-          <p>While React's Component class is perfectly adequate for many use cases, this extension offers conveniences that can improve developer productivity and code consistency in larger applications.</p>
+          <p>Every Basis application component extends this class (or <code>Editor</code>) directly or indirectly. React's own <code>Component</code> is the implementation boundary used by the Basis root, not an application-level alternative; function components and hooks are outside the contract. See <Link to="/compliance">Component compliance</Link>.</p>
         </section>
         <section>
           <h2>Key Benefits</h2>
@@ -262,12 +262,7 @@ export class ComponentDocs extends DocumentationPage<Record<string, never>> {
             <li><strong>Data Display:</strong> Tables, lists, and data visualization components</li>
             <li><strong>Navigation:</strong> Menus, breadcrumbs, and navigation elements</li>
           </ul>
-          <p>Consider using React.Component directly when:</p>
-          <ul>
-            <li>Building utility components that don't need the full feature set</li>
-            <li>Creating components that must remain lightweight for performance reasons</li>
-            <li>Building components that need to work outside the @basis/react ecosystem</li>
-          </ul>
+          <p>Consider using <code>Editor</code> instead when the component edits a value and needs the controlled/uncontrolled contract, field identity, and consistent change callbacks. React's <code>Component</code> itself remains the internal boundary for the Basis root only; application code extends the Basis hierarchy. <code>@basis/component-architecture</code> enforces that invariant through <code>basis lint</code>, <code>basis check</code>, and <code>basis compliance</code>.</p>
         </section>
       </>
     )

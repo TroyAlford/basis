@@ -47,6 +47,7 @@ The plugin enforces a solid set of base rules that emphasize:
 - **Consistency**: Ensures consistent use of syntax and formatting across the codebase.
 - **Readability**: Promotes code that is easy to read and understand.
 - **Modern Practices**: Encourages the use of modern JavaScript and TypeScript features.
+- **Basis architecture**: `@basis/component-architecture` requires application components to extend the Basis `Component` or `Editor` hierarchy, and rejects React hooks, function component types and wrappers, JSX-used functions, and bare `React.Component` subclasses. The same rule backs `basis compliance`.
 
 For a detailed list of all the rules and their configurations, refer to the source code in the [index.ts](./index.ts).
 

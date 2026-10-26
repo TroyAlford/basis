@@ -117,6 +117,11 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Lint
         run: bun run lint
+      # The class-based component invariant. Also enforced by `basis lint`
+      # when the repository uses `basis/eslint`; the focused command makes the
+      # architectural gate explicit and works alongside a repository config.
+      - name: Compliance
+        run: bunx basis compliance
       # Drop this step when the repository's lint command already runs it.
       - name: Typecheck
         run: bun run typecheck

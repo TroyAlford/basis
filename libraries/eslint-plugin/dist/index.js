@@ -1,13 +1,9 @@
 /* eslint-disable @basis/no-default-export */
 import eslint from '@eslint/js';
-import pluginStylistic from '@stylistic/eslint-plugin';
-import pluginImportNewlines from 'eslint-plugin-import-newlines';
 import pluginJSDoc from 'eslint-plugin-jsdoc';
-import pluginPerfectionist from 'eslint-plugin-perfectionist';
-import pluginImportSort from 'eslint-plugin-simple-import-sort';
-import pluginSortDestructureKeys from 'eslint-plugin-sort-destructure-keys';
 import pluginTypescript from 'typescript-eslint';
-import pluginBasis from './rules/index.js';
+import { IGNORE_PATTERNS } from './ignores.js';
+import { plugins } from './plugins.js';
 /**
  * Creates an ESLint configuration for the basis plugin.
  * @param options - The plugin options.
@@ -21,17 +17,7 @@ const plugin = (options) => {
             sourceType: 'module',
         },
         plugins: {
-            '@basis': pluginBasis,
-            '@import-newlines': pluginImportNewlines,
-            '@jsdoc': pluginJSDoc,
-            '@stylistic': pluginStylistic,
-            '@stylistic/js': pluginStylistic,
-            '@stylistic/jsx': pluginStylistic,
-            '@stylistic/ts': pluginStylistic,
-            '@typescript-eslint': pluginTypescript.plugin,
-            'perfectionist': pluginPerfectionist,
-            'simple-import-sort': pluginImportSort,
-            'sort-destructure-keys': pluginSortDestructureKeys,
+            ...plugins,
         },
         rules,
         settings: {
@@ -42,9 +28,9 @@ const plugin = (options) => {
         config.files = files;
     return config;
 };
-const IGNORE_PATHS = ['node_modules', '.cache', '.playwright-local', 'build', 'dist', 'test-results'];
-export default pluginTypescript.config({ ignores: IGNORE_PATHS.flatMap(path => [`${path}/**`, `**/${path}/**`]) }, eslint.configs.recommended, pluginJSDoc.configs['flat/recommended-typescript-error'], ...pluginTypescript.configs.strict, ...pluginTypescript.configs.stylistic, plugin({
+export default pluginTypescript.config({ ignores: IGNORE_PATTERNS }, eslint.configs.recommended, pluginJSDoc.configs['flat/recommended-typescript-error'], ...pluginTypescript.configs.strict, ...pluginTypescript.configs.stylistic, plugin({
     rules: {
+        '@basis/component-architecture': 'error',
         '@basis/import-extensions': 'error',
         '@basis/no-default-export': 'error',
         '@basis/no-extraneous-dependencies': 'error',

@@ -1,0 +1,531 @@
+/**
+ * Enforces Basis's React architecture contract on application component source.
+ *
+ * Basis UI is class-based: every component extends the Basis `Component`
+ * (or `Editor`) hierarchy, and neither React function components nor React
+ * hooks are supported. The rule detects the prohibited shapes from syntax,
+ * imports, scope bindings, and JSX references rather than by banning every
+ * function that happens to return React content. Pure helpers and ordinary
+ * domain functions therefore remain valid.
+ *
+ * Test, fixture, generated, and dependency files are out of scope by default:
+ * React testing mechanics legitimately use function components and hooks, and
+ * a repository can still opt a path in through its own override.
+ */
+const REACT_SOURCE = 'react';
+// React's built-in hooks, including the React 19 additions.
+const REACT_HOOKS = new Set([
+    'use',
+    'useActionState',
+    'useCallback',
+    'useContext',
+    'useDebugValue',
+    'useDeferredValue',
+    'useEffect',
+    'useFormStatus',
+    'useId',
+    'useImperativeHandle',
+    'useInsertionEffect',
+    'useLayoutEffect',
+    'useMemo',
+    'useOptimistic',
+    'useReducer',
+    'useRef',
+    'useState',
+    'useSyncExternalStore',
+    'useTransition',
+]);
+// React types that declare a function component.
+const REACT_FUNCTION_TYPES = new Set([
+    'FC',
+    'FunctionComponent',
+    'VoidFunctionComponent',
+]);
+// React class bases that bypass the Basis hierarchy.
+const REACT_CLASS_BASES = new Set(['Component', 'PureComponent']);
+// The React wrappers that manufacture function components.
+const REACT_WRAPPERS = new Set(['forwardRef', 'memo']);
+// The conventional custom-hook name shape.
+const HOOK_NAME = /^use[A-Z0-9]/;
+// Test, snapshot, and end-to-end lanes that may use React testing mechanics.
+const TEST_FILE = /\.(?:test|spec|screenshot|e2e)\.[cm]?[jt]sx?$/i;
+// Directories that are not application component source.
+const SKIPPED_DIRECTORY = new RegExp([
+    '(^|[\\\\/])',
+    '(?:__fixtures__|__tests__|fixtures|node_modules|',
+    '\\.cache|build|coverage|dist|test-results|testing|tests?)',
+    '([\\\\/]|$)',
+].join(''), 'i');
+// Whether a node is a non-null object.
+const isObject = (value) => (typeof value === 'object' && value !== null);
+// Read a node's string `type`.
+const nodeType = (node) => (isObject(node) && typeof node.type === 'string' ? node.type : null);
+// Whether a name is a PascalCase component-like identifier.
+const isPascalCase = (name) => /^[A-Z]/.test(name);
+// Whether a file is out of the rule's default application-source scope.
+const isSkippedFile = (filename) => (TEST_FILE.test(filename) || SKIPPED_DIRECTORY.test(filename));
+// Unwrap TypeScript and optional-chain expression wrappers.
+const unwrapExpression = (node) => {
+    let current = node;
+    while (isObject(current)) {
+        const type = nodeType(current);
+        if (type === 'ChainExpression'
+            || type === 'ParenthesizedExpression'
+            || type === 'TSAsExpression'
+            || type === 'TSNonNullExpression'
+            || type === 'TSSatisfiesExpression'
+            || type === 'TSTypeAssertion') {
+            current = current.expression;
+            continue;
+        }
+        break;
+    }
+    return current;
+};
+// Read a member expression's static property name.
+const memberProperty = (node) => {
+    const expression = unwrapExpression(node);
+    if (nodeType(expression) !== 'MemberExpression' || !isObject(expression))
+        return null;
+    const property = expression.property;
+    if (!isObject(property))
+        return null;
+    if (!expression.computed && nodeType(property) === 'Identifier' && typeof property.name === 'string') {
+        return property.name;
+    }
+    if (nodeType(property) === 'Literal' && typeof property.value === 'string')
+        return property.value;
+    return null;
+};
+// Resolve a variable by walking outward through the scope chain.
+const findVariable = (scope, name) => {
+    let current = scope;
+    while (current) {
+        const variable = current.set.get(name);
+        if (variable)
+            return variable;
+        current = current.upper;
+    }
+    return null;
+};
+// Read the import binding behind a variable, if any.
+const importInfo = (variable) => {
+    for (const definition of variable.defs) {
+        if (definition.type !== 'ImportBinding')
+            continue;
+        const source = definition.parent.source.value;
+        if (typeof source !== 'string')
+            continue;
+        if (definition.node.type === 'ImportNamespaceSpecifier') {
+            return { imported: '*', kind: 'namespace', source };
+        }
+        if (definition.node.type === 'ImportDefaultSpecifier') {
+            return { imported: 'default', kind: 'default', source };
+        }
+        if (definition.node.type === 'ImportSpecifier') {
+            const { imported } = definition.node;
+            return {
+                imported: imported.type === 'Identifier' ? imported.name : String(imported.value),
+                kind: 'named',
+                source,
+            };
+        }
+    }
+    return null;
+};
+// Resolve the React export name behind an expression, following local aliases.
+const reactExport = (context, node, seen = new Set()) => {
+    const expression = unwrapExpression(node);
+    if (!isObject(expression))
+        return null;
+    if (nodeType(expression) === 'Identifier' && typeof expression.name === 'string') {
+        const variable = findVariable(context.sourceCode.getScope(expression), expression.name);
+        if (!variable || seen.has(variable))
+            return null;
+        seen.add(variable);
+        const imported = importInfo(variable);
+        if (imported?.source === REACT_SOURCE) {
+            if (imported.kind === 'named')
+                return imported.imported;
+            if (imported.kind === 'default')
+                return 'default';
+            return '*';
+        }
+        for (const definition of variable.defs) {
+            if (definition.type === 'Variable' && definition.node.init) {
+                return reactExport(context, definition.node.init, seen);
+            }
+        }
+        return null;
+    }
+    if (nodeType(expression) === 'MemberExpression') {
+        const property = memberProperty(expression);
+        if (!property)
+            return null;
+        const object = reactExport(context, expression.object, seen);
+        return object === '*' || object === 'default' ? property : null;
+    }
+    return null;
+};
+// Resolve an expression to a locally declared function node.
+const resolveFunction = (context, node, seen = new Set()) => {
+    const expression = unwrapExpression(node);
+    if (!isObject(expression))
+        return null;
+    const type = nodeType(expression);
+    if (type === 'ArrowFunctionExpression'
+        || type === 'FunctionDeclaration'
+        || type === 'FunctionExpression') {
+        return expression;
+    }
+    if (type === 'CallExpression') {
+        const callee = reactExport(context, expression.callee);
+        if (callee && REACT_WRAPPERS.has(callee)) {
+            const [argument] = expression.arguments;
+            return resolveFunction(context, argument, seen);
+        }
+        return null;
+    }
+    if (type === 'Identifier' && typeof expression.name === 'string') {
+        const variable = findVariable(context.sourceCode.getScope(expression), expression.name);
+        return variable ? resolveVariableFunction(context, variable, seen) : null;
+    }
+    return null;
+};
+// Whether a superclass is React's own Component or PureComponent.
+const reactClassBase = (context, node) => {
+    const expression = unwrapExpression(node);
+    if (!isObject(expression))
+        return null;
+    if (nodeType(expression) === 'MemberExpression') {
+        const property = memberProperty(expression);
+        if (!property || !REACT_CLASS_BASES.has(property))
+            return null;
+        const object = reactExport(context, expression.object);
+        return object === '*' || object === 'default' ? property : null;
+    }
+    if (nodeType(expression) === 'Identifier' && typeof expression.name === 'string') {
+        const variable = findVariable(context.sourceCode.getScope(expression), expression.name);
+        if (!variable)
+            return null;
+        const imported = importInfo(variable);
+        if (imported?.source !== REACT_SOURCE || imported.kind !== 'named')
+            return null;
+        return REACT_CLASS_BASES.has(imported.imported) ? imported.imported : null;
+    }
+    return null;
+};
+// Whether a function contains JSX outside of nested functions and classes.
+const containsJsx = (node, root, seen = new Set()) => {
+    if (!isObject(node))
+        return false;
+    if (seen.has(node))
+        return false;
+    seen.add(node);
+    const type = nodeType(node);
+    if (type === 'JSXElement' || type === 'JSXFragment')
+        return true;
+    if (node !== root && (type === 'ArrowFunctionExpression'
+        || type === 'ClassDeclaration'
+        || type === 'ClassExpression'
+        || type === 'FunctionDeclaration'
+        || type === 'FunctionExpression')) {
+        return false;
+    }
+    for (const [key, value] of Object.entries(node)) {
+        if (key === 'comments' || key === 'loc' || key === 'parent' || key === 'range' || key === 'tokens')
+            continue;
+        if (Array.isArray(value)) {
+            if (value.some(entry => containsJsx(entry, root, seen)))
+                return true;
+            continue;
+        }
+        if (containsJsx(value, root, seen))
+            return true;
+    }
+    return false;
+};
+// Whether a function's body renders JSX.
+const rendersJsx = (node) => containsJsx(node.body, node);
+/**
+ * Read the React export name behind a type reference.
+ * @param context The rule context used for scope resolution.
+ * @param node A `TSTypeReference` node.
+ * @returns The React export name, or `null` when the reference is not React's.
+ */
+const typeReferenceName = (context, node) => {
+    if (!isObject(node))
+        return null;
+    const typeName = node.typeName;
+    if (!isObject(typeName))
+        return null;
+    if (nodeType(typeName) === 'Identifier' && typeof typeName.name === 'string') {
+        const variable = findVariable(context.sourceCode.getScope(typeName), typeName.name);
+        const imported = variable ? importInfo(variable) : null;
+        if (imported?.source === REACT_SOURCE && imported.kind === 'named')
+            return imported.imported;
+        return null;
+    }
+    if (nodeType(typeName) === 'TSQualifiedName') {
+        const property = typeName.right;
+        const object = typeName.left;
+        if (!isObject(property) || !isObject(object) || typeof property.name !== 'string')
+            return null;
+        const resolved = reactExport(context, object);
+        return resolved === '*' || resolved === 'default' ? property.name : null;
+    }
+    return null;
+};
+/**
+ * Whether a type annotation declares a React function component type.
+ * @param context The rule context used for scope resolution.
+ * @param node The node that may carry a type annotation.
+ * @returns Whether the annotation is a React function component type.
+ */
+const hasReactFunctionType = (context, node) => {
+    if (!isObject(node))
+        return false;
+    if (nodeType(node) === 'TSTypeReference') {
+        const name = typeReferenceName(context, node);
+        if (name && REACT_FUNCTION_TYPES.has(name))
+            return true;
+    }
+    for (const [key, value] of Object.entries(node)) {
+        if (key === 'comments' || key === 'loc' || key === 'parent' || key === 'range' || key === 'tokens')
+            continue;
+        if (Array.isArray(value)) {
+            if (value.some(entry => hasReactFunctionType(context, entry)))
+                return true;
+            continue;
+        }
+        if (hasReactFunctionType(context, value))
+            return true;
+    }
+    return false;
+};
+// Whether a value is a React wrapper call such as `memo(...)` or `forwardRef(...)`.
+const isReactWrapperCall = (context, node) => {
+    const expression = unwrapExpression(node);
+    if (nodeType(expression) !== 'CallExpression' || !isObject(expression))
+        return false;
+    const name = reactExport(context, expression.callee);
+    return name !== null && REACT_WRAPPERS.has(name);
+};
+/**
+ * Resolve an already-found variable to a locally declared function.
+ * @param context The rule context used for scope resolution.
+ * @param variable The variable to resolve.
+ * @param seen Variables already visited in this resolution.
+ * @returns The function node, or `null`.
+ */
+const resolveVariableFunction = (context, variable, seen = new Set()) => {
+    if (seen.has(variable))
+        return null;
+    seen.add(variable);
+    for (const definition of variable.defs) {
+        if (definition.type === 'FunctionName') {
+            return resolveFunction(context, definition.node, seen);
+        }
+        if (definition.type === 'Variable' && definition.node.init) {
+            return resolveFunction(context, definition.node.init, seen);
+        }
+    }
+    return null;
+};
+// Read a class's declared name.
+const className = (node) => (node.id?.type === 'Identifier' ? node.id.name : 'anonymous');
+// Read a function declaration or variable's component name.
+const functionName = (node) => {
+    if (node.type === 'Identifier')
+        return node.name;
+    if (node.type === 'VariableDeclarator') {
+        return node.id.type === 'Identifier' ? node.id.name : 'anonymous';
+    }
+    const id = node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' ? node.id : null;
+    return id?.type === 'Identifier' ? id.name : 'default';
+};
+// Whether a function declaration or variable declaration is exported.
+const isExported = (node) => {
+    const current = node;
+    let parent = current?.parent;
+    while (parent) {
+        if (parent.type === 'ExportDefaultDeclaration' || parent.type === 'ExportNamedDeclaration')
+            return true;
+        if (parent.type === 'Program'
+            || parent.type === 'BlockStatement'
+            || parent.type === 'FunctionDeclaration'
+            || parent.type === 'FunctionExpression'
+            || parent.type === 'ArrowFunctionExpression') {
+            return false;
+        }
+        parent = parent.parent;
+    }
+    return false;
+};
+// Build the reporters bound to one rule context and its already-reported nodes.
+const createReporter = (context) => {
+    const reported = new WeakSet();
+    const reportOnce = (node, messageId, data) => {
+        if (!isObject(node))
+            return;
+        if (reported.has(node))
+            return;
+        reported.add(node);
+        context.report({ data, messageId, node: node });
+    };
+    return {
+        component(node, name) {
+            reportOnce(node, 'functionComponent', { name });
+        },
+        functionType(node, name) {
+            reportOnce(node, 'reactFunctionType', { name });
+        },
+        hook(node, name, custom) {
+            reportOnce(node, custom ? 'customHook' : 'reactHook', { name });
+        },
+        wrapper(node, name) {
+            reportOnce(node, 'reactWrapper', { name });
+        },
+    };
+};
+export const componentArchitecture = {
+    create(context) {
+        if (isSkippedFile(context.physicalFilename || context.filename))
+            return {};
+        const reporter = createReporter(context);
+        const reportFunction = (node, name) => {
+            reporter.component(node, name);
+        };
+        const checkFunctionDeclaration = (node) => {
+            const name = functionName(node);
+            if (!isExported(node))
+                return;
+            if (!isPascalCase(name) && name !== 'default')
+                return;
+            if (!rendersJsx(node))
+                return;
+            reportFunction(node, name);
+        };
+        const checkDefaultExport = (node) => {
+            const declaration = node.declaration;
+            if (declaration.type !== 'ArrowFunctionExpression' && declaration.type !== 'FunctionExpression')
+                return;
+            if (!rendersJsx(declaration))
+                return;
+            reportFunction(declaration, 'default');
+        };
+        const checkVariableDeclarator = (node) => {
+            if (!isExported(node) || !isPascalCase(functionName(node)))
+                return;
+            if (isReactWrapperCall(context, node.init) || hasReactFunctionType(context, node.id))
+                return;
+            const fn = resolveFunction(context, node.init);
+            if (!fn || !rendersJsx(fn))
+                return;
+            reportFunction(fn, functionName(node));
+        };
+        const checkClass = (node) => {
+            const base = reactClassBase(context, node.superClass);
+            if (!base)
+                return;
+            context.report({
+                data: { base, name: className(node) },
+                messageId: 'reactClassBase',
+                node: node,
+            });
+        };
+        const checkJsxComponent = (node) => {
+            if (!isObject(node))
+                return;
+            const name = node.name;
+            if (!isObject(name) || nodeType(name) !== 'JSXIdentifier' || typeof name.name !== 'string')
+                return;
+            if (!isPascalCase(name.name))
+                return;
+            const variable = findVariable(context.sourceCode.getScope(node), name.name);
+            if (!variable)
+                return;
+            const fn = resolveVariableFunction(context, variable);
+            if (!fn)
+                return;
+            reportFunction(fn, name.name);
+        };
+        const checkTypeReference = (node) => {
+            const name = typeReferenceName(context, node);
+            if (name && REACT_FUNCTION_TYPES.has(name))
+                reporter.functionType(node, name);
+        };
+        const checkCall = (node) => {
+            const exportName = reactExport(context, node.callee);
+            if (exportName && REACT_WRAPPERS.has(exportName)) {
+                const [argument] = node.arguments;
+                const fn = resolveFunction(context, argument);
+                if (fn)
+                    reporter.wrapper(node, exportName);
+                return;
+            }
+            if (exportName && REACT_HOOKS.has(exportName)) {
+                reporter.hook(node, exportName, false);
+                return;
+            }
+            if (nodeType(node.callee) === 'Identifier') {
+                const name = node.callee.name;
+                if (HOOK_NAME.test(name)) {
+                    reporter.hook(node, name, true);
+                    return;
+                }
+                const variable = findVariable(context.sourceCode.getScope(node.callee), name);
+                const imported = variable ? importInfo(variable) : null;
+                if (imported && HOOK_NAME.test(imported.imported))
+                    reporter.hook(node, imported.imported, true);
+            }
+        };
+        return {
+            CallExpression: checkCall,
+            ClassDeclaration: checkClass,
+            ClassExpression: checkClass,
+            ExportDefaultDeclaration: checkDefaultExport,
+            FunctionDeclaration: checkFunctionDeclaration,
+            JSXOpeningElement: checkJsxComponent,
+            TSTypeReference: checkTypeReference,
+            VariableDeclarator: checkVariableDeclarator,
+        };
+    },
+    meta: {
+        docs: {
+            description: 'Enforce the Basis class-based React component architecture.',
+        },
+        messages: {
+            customHook: [
+                'Custom React hook "{{name}}" is not allowed.',
+                ' Basis UI is class-based; move this logic into a Component or Editor subclass',
+                ' and use its state and lifecycle methods.',
+            ].join(''),
+            functionComponent: [
+                '"{{name}}" is used as a function component.',
+                ' Convert it to a class that extends Basis "Component" or "Editor";',
+                ' pure helpers and ordinary domain functions remain allowed.',
+            ].join(''),
+            reactClassBase: [
+                'Class "{{name}}" extends React "{{base}}".',
+                ' Extend Basis "Component" or "Editor" instead;',
+                ' only the Basis root Component may extend React.Component.',
+            ].join(''),
+            reactFunctionType: [
+                'React "{{name}}" is not allowed as a component type.',
+                ' Declare a class that extends Basis "Component" or "Editor" instead.',
+            ].join(''),
+            reactHook: [
+                'React hook "{{name}}" is not allowed.',
+                ' Basis UI is class-based; use Component or Editor state',
+                ' and lifecycle methods instead of hooks.',
+            ].join(''),
+            reactWrapper: [
+                'React "{{name}}" creates a function component.',
+                ' Convert the component to a class that extends Basis "Component" or "Editor" instead.',
+            ].join(''),
+        },
+        schema: [],
+        type: 'problem',
+    },
+};
