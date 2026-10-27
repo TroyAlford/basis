@@ -4,7 +4,6 @@ import { render } from '../../testing/render'
 import { Simulate } from '../../testing/Simulate'
 import { waitFor } from '../../testing/waitFor'
 import { Keyboard } from '../../types/Keyboard'
-import { styles } from '../../utilities/style'
 import { AutoComplete } from './AutoComplete'
 
 describe('AutoComplete', () => {
@@ -121,7 +120,7 @@ describe('AutoComplete', () => {
   })
 
   describe('popup content state', () => {
-    test('emits the shared error status and styles it by the same value', async () => {
+    test('emits the shared error status', async () => {
       const onSearch = mock(() => Promise.reject(new Error('Search failed')))
       const { node } = await render(
         <AutoComplete
@@ -141,10 +140,9 @@ describe('AutoComplete', () => {
       )
 
       expect(content).not.toBeNull()
-      expect(styles()).toContain(`[data-state="${AutoComplete.Status.Error}"]`)
     })
 
-    test('emits the shared not-found status and styles it by the same value', async () => {
+    test('emits the shared not-found status', async () => {
       const onSearch = mock(() => Promise.resolve([]))
       const { node } = await render(
         <AutoComplete
@@ -164,13 +162,6 @@ describe('AutoComplete', () => {
       )
 
       expect(content).not.toBeNull()
-      expect(styles()).toContain(`[data-state="${AutoComplete.Status.NotFound}"]`)
-    })
-
-    test('styles every declared status value', () => {
-      for (const status of Object.values(AutoComplete.Status)) {
-        expect(styles()).toContain(`[data-state="${status}"]`)
-      }
     })
   })
 

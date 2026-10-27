@@ -272,7 +272,7 @@ describe('change-impact action contract', () => {
   test('runs the analyzer from the pinned action path', () => {
     const step = action.runs?.steps?.[0]
     expect(step?.run).toContain('github.action_path')
-    expect(step?.run).toContain('index.ts')
+    expect(step?.run).toContain('main.ts')
   })
 })
 

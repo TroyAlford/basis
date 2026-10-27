@@ -5,8 +5,8 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { ImpactDecision } from '../actions/change-impact/index'
-import { decisionHash } from '../actions/change-impact/index'
+import type { ImpactDecision } from '../actions/change-impact/main'
+import { decisionHash } from '../actions/change-impact/main'
 
 /*
  * Exercise the real reducer script against a fake `gh` on PATH.

@@ -73,7 +73,7 @@ runs:
         CONFIG_PATH: ${{ inputs.config-path }}
         OUTPUT_FILE: ${{ inputs.output-file }}
       run: >-
-        bun "${{ github.action_path }}/index.ts"
+        bun "${{ github.action_path }}/main.ts"
         --base-ref "$BASE_REF"
         --head-sha "$HEAD_SHA"
         --config-path "$CONFIG_PATH"

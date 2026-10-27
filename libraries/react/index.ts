@@ -65,21 +65,14 @@ export { TextAlign } from './types/TextAlign'
 export { resolveElement } from './utilities/resolveElement'
 export { css, style } from './utilities/style'
 
-export type {
-  ApplicationRuntime,
-  ServerEvent,
-  ServerEventsStatus,
-  SubscriptionDefinition,
-  SubscriptionTransport,
-} from './runtime'
-export {
-  BASIS_RUNTIME_ELEMENT_ID,
-  parseServerEvent,
-  readBasisRuntime,
-  ServerEvents,
-  ServerSocket,
-  ServerSubscriptions,
-} from './runtime'
+export type { ApplicationRuntime } from './runtime/ApplicationRuntime'
+export type { ServerEvent, ServerEventsStatus } from './runtime/ServerEvent'
+export { parseServerEvent } from './runtime/ServerEvent'
+export { ServerEvents } from './runtime/ServerEvents'
+export { ServerSocket } from './runtime/ServerSocket'
+export type { SubscriptionDefinition, SubscriptionTransport } from './runtime/ServerSubscriptions'
+export { ServerSubscriptions } from './runtime/ServerSubscriptions'
+export { BASIS_RUNTIME_ELEMENT_ID, readBasisRuntime } from './runtime/readBasisRuntime'
 
 export { Circle } from './icons/parts/Circle'
 export { IconBase } from './icons/IconBase/IconBase'

@@ -16,7 +16,7 @@ const baseRef = process.argv[2] ?? 'upstream/main'
 const start = performance.now()
 const result = Bun.spawnSync([
   process.execPath,
-  join(root, '.github/actions/change-impact/index.ts'),
+  join(root, '.github/actions/change-impact/main.ts'),
   '--cwd',
   root,
   '--base-ref',

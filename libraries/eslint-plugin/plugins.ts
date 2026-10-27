@@ -5,7 +5,7 @@ import pluginPerfectionist from 'eslint-plugin-perfectionist'
 import pluginImportSort from 'eslint-plugin-simple-import-sort'
 import pluginSortDestructureKeys from 'eslint-plugin-sort-destructure-keys'
 import pluginTypescript from 'typescript-eslint'
-import pluginBasis from './rules'
+import pluginBasis from './rules/registry'
 
 /**
  * The plugin registry shared by the full Basis ESLint policy and the focused

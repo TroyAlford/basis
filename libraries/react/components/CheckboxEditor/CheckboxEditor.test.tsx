@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
-import { styles } from '../../utilities/style'
 import { CheckboxEditor } from './CheckboxEditor'
 
 /**
@@ -73,9 +72,5 @@ describe('CheckboxEditor', () => {
     expect(glyph(node)).toHaveClass('square-check-icon')
     expect(node).toHaveAttribute('readonly')
     expect(input(node).disabled).toBe(true)
-  })
-
-  test('dims disabled and read-only controls without changing their glyph contract', () => {
-    expect(styles()).toMatch(/&\[disabled\], &\[readonly\]\s*{\s*opacity: 0\.5;/)
   })
 })

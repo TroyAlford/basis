@@ -36,7 +36,7 @@ describe('testing/docs', () => {
   beforeAll(async () => {
     app = await useApplication({
       cwd: root,
-      entry: './testing/docs/index.ts',
+      entry: './testing/docs/serve.ts',
       timeoutMs: 120_000,
     })
   }, 120_000)

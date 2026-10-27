@@ -33,7 +33,7 @@ interface HealthBody {
 
 const repoRoot = join(import.meta.dir, '..', '..', '..')
 const fixtureRoot = join(repoRoot, 'testing', 'server')
-const fixture = join(fixtureRoot, 'index.ts')
+const fixture = join(fixtureRoot, 'serve.ts')
 const active = new Set<ServerHarness>()
 
 /**
@@ -627,7 +627,7 @@ describe('Server WebSocket routes', () => {
   })
 })
 
-const favIconFixture = join(repoRoot, 'testing', 'favicon', 'index.ts')
+const favIconFixture = join(repoRoot, 'testing', 'favicon', 'serve.ts')
 
 describe('Server favicon', () => {
   test('discovers, serves, and links a favicon at the app root', async () => {

@@ -1,7 +1,7 @@
 import * as postcssStyledSyntax from 'postcss-styled-syntax'
 import type { Config } from 'stylelint'
 import orderPlugins from 'stylelint-order'
-import { basisPlugins } from './rules/index'
+import { basisPlugins } from './rules/registry'
 
 /**
  * The Basis CSS policy, independent of `*.styles.ts` parsing. Exported so tests

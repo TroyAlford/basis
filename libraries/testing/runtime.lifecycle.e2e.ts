@@ -20,7 +20,7 @@ const repoRoot = join(import.meta.dir, '..', '..')
 const preload = join(repoRoot, 'libraries', 'testing', 'bun.ts')
 const testing = join(repoRoot, 'libraries', 'testing', 'index.ts')
 const react = join(repoRoot, 'libraries', 'react', 'index.ts')
-const applicationEntry = './testing/e2e/index.ts'
+const applicationEntry = './testing/e2e/serve.ts'
 
 /** Number of distinct component snapshots the first suite captures. */
 const FIRST_COMPONENTS = 36
