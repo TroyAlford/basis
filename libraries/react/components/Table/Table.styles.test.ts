@@ -42,20 +42,25 @@ describe('Table styles', () => {
   })
 
   test('stacks the sticky header row group above pinned body cells', () => {
+    const css = styles()
+    const table = block('.table.editor.component {')
     const header = block('thead {')
     const pinnable = block('[data-pin] {')
 
     /*
-     * A table row's z-index is not honored consistently across Chromium, so the
-     * header must own its sticky stacking layer at the row group. Pinned body
-     * cells stay at their own lower layer, owned by the Pinnable mixin.
+     * The table scopes its own layers, the row group owns the sticky header,
+     * and the header sits one literal layer above the pinned columns. A table
+     * row's z-index is not honored consistently across Chromium.
      */
+    expect(table).toMatch(/isolation:\s*isolate;/)
     expect(header).toMatch(/position:\s*sticky;/)
     expect(header).toMatch(/top:\s*0;/)
 
-    const headerLayer = Number(/z-index:\s*var\(--basis-table-header-row-z,\s*(\d+)\)/.exec(header)?.[1])
+    const headerLayer = Number(/z-index:\s*(\d+);/.exec(header)?.[1])
     const pinnedLayer = Number(/z-index:\s*(\d+)/.exec(pinnable)?.[1])
 
-    expect(headerLayer).toBeGreaterThan(pinnedLayer)
+    expect(headerLayer).toBe(2)
+    expect(pinnedLayer).toBe(1)
+    expect(css).not.toContain('--basis-table-header-row-z')
   })
 })

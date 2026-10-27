@@ -26,22 +26,51 @@ const TABLE_ROWS: TableRow[] = Array.from({ length: 30 }, (_, index) => ({
 
 const { Column, Table } = TypedTable.of<TableRow>()
 
+/**
+ * A pinned cell whose tooltip opens upward over the sticky header.
+ * @param props - The cell props.
+ * @param props.row - The row being rendered.
+ * @param props.value - The cell value.
+ * @returns The cell content.
+ */
+const TooltipCell = (props: { row: TableRow, value: unknown }): React.ReactElement => (
+  <span style={{ display: 'inline-block' }}>
+    {String(props.value)}
+    {props.row.id === 0 && (
+      <Tooltip visible anchorPoint={AnchorPoint.Top} offset={4}>Above the header</Tooltip>
+    )}
+  </span>
+)
+
+/**
+ * Build the bounded table stage used by the stacking tests.
+ * @param name - The rendered Name column.
+ * @returns The stage content.
+ */
+const tableStage = (name: React.ReactNode): React.ReactNode => (
+  <div style={{ padding: 24 }}>
+    <Table readOnly style={{ maxHeight: '9em', overflow: 'auto', width: '26em' }} value={TABLE_ROWS}>
+      {name}
+      {Column.Text({ field: 'value', title: 'Value' })}
+      {Column.Text({ field: 'actions', pin: Pin.Right, title: 'Actions' })}
+    </Table>
+  </div>
+)
+
 const STAGES: Record<string, React.ReactNode> = {
-  await: (
+  'await': (
     <Await fallback={<span>Loading…</span>}>{Promise.resolve(<span>Loaded content</span>)}</Await>
   ),
-  mermaid: <Mermaid>{'flowchart LR\n  A[Start] --> B[End]'}</Mermaid>,
-  overlay: <OverlayStage />,
-  table: (
-    <div style={{ padding: 24 }}>
-      <Table readOnly style={{ maxHeight: '9em', overflow: 'auto', width: '26em' }} value={TABLE_ROWS}>
-        {Column.Text({ field: 'name', pin: Pin.Left, title: 'Name' })}
-        {Column.Text({ field: 'value', title: 'Value' })}
-        {Column.Text({ field: 'actions', pin: Pin.Right, title: 'Actions' })}
-      </Table>
-    </div>
-  ),
-  tooltip: (
+  'mermaid': <Mermaid>{'flowchart LR\n  A[Start] --> B[End]'}</Mermaid>,
+  'overlay': <OverlayStage />,
+  'table': tableStage(Column.Text({ field: 'name', pin: Pin.Left, title: 'Name' })),
+  'table-tooltip': tableStage(Column.Text({
+    component: TooltipCell,
+    field: 'name',
+    pin: Pin.Left,
+    title: 'Name',
+  })),
+  'tooltip': (
     <div style={{ display: 'inline-block', padding: 80 }}>
       <div style={{ display: 'inline-block', height: 40, position: 'relative', width: 120 }}>
         <Tooltip visible anchorPoint={AnchorPoint.Top}>Tooltip content</Tooltip>

@@ -4,6 +4,7 @@ import { css, style } from '../../utilities/style'
 style('basis:table', css`
   .table.editor.component {
     border-color: var(--basis-table-border-color, var(--basis-color-border-subtle));
+    isolation: isolate;
     overflow: auto;
     padding: 0;
     position: relative;
@@ -18,10 +19,9 @@ style('basis:table', css`
          * Table-row z-index is not honored consistently across Chromium, so
          * the row group owns the sticky layer above pinned body cells.
          */
-        isolation: isolate;
         position: sticky;
         top: 0;
-        z-index: var(--basis-table-header-row-z, 2);
+        z-index: 2;
         tr {
           background-color: var(--basis-table-header-cell-background, var(--basis-color-primary));
           height: var(--basis-table-row-height, 2em);
@@ -60,7 +60,7 @@ style('basis:table', css`
             opacity: 0.2;
             pointer-events: none;
             position: absolute;
-            z-index: var(--basis-table-header-row-z, 2);
+            z-index: 2;
           }
         }
       }

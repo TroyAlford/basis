@@ -1,16 +1,25 @@
-import { expect } from 'bun:test'
+import { afterAll, beforeAll, expect } from 'bun:test'
 import { join } from 'node:path'
-import { test, useApplication } from '../../../testing'
+import type { ApplicationHandle } from '../../../testing'
+import { matchScreenshot, test, useApplication } from '../../../testing'
 
 const ROOT = join(import.meta.dir, '..', '..', '..', '..')
 
-test('keeps the sticky header above pinned body cells while scrolling', async () => {
-  const app = await useApplication({
+let app: ApplicationHandle
+
+beforeAll(async () => {
+  app = await useApplication({
     cwd: ROOT,
     entry: './testing/components/index.ts',
     timeoutMs: 120_000,
   })
+}, 120_000)
 
+afterAll(async () => {
+  await app.stop()
+})
+
+test('keeps the sticky header above pinned body cells while scrolling', async () => {
   const result = await app.visit('/table', async page => {
     const table = page.locator('.table.editor.component')
     await table.waitFor()
@@ -49,9 +58,51 @@ test('keeps the sticky header above pinned body cells while scrolling', async ()
     })
   })
 
-  await app.stop()
-
   expect(result.scrolled).toBe(true)
   expect(result.probes).toEqual([true, true, true])
   expect(result.headerPinned).toBe(true)
+}, 120_000)
+
+test('stacks a pinned-cell tooltip above the sticky header', async () => {
+  const result = await app.visit('/table-tooltip', async page => {
+    const table = page.locator('.table.editor.component')
+    await table.waitFor()
+
+    const tooltip = page.locator('.tooltip.component[data-visible="true"]')
+    await tooltip.waitFor()
+    await page.waitForFunction(() => {
+      const tip = document.querySelector<HTMLElement>('.tooltip.component[data-visible="true"]')
+      return (tip?.getBoundingClientRect().height ?? 0) > 0
+    })
+    await page.waitForTimeout(150)
+
+    const geometry = await page.evaluate(() => {
+      const tip = document.querySelector('.tooltip.component[data-visible="true"]') as HTMLElement
+      const header = document.querySelector('thead') as HTMLElement
+      const tipBox = tip.getBoundingClientRect()
+      const headerBox = header.getBoundingClientRect()
+
+      // Tooltips are pointer-transparent, so enable hit testing for the paint-order check.
+      tip.style.pointerEvents = 'auto'
+      const target = document.elementFromPoint(
+        tipBox.left + (tipBox.width / 2),
+        tipBox.top + (tipBox.height / 2),
+      )
+      tip.style.removeProperty('pointer-events')
+
+      return {
+        onTop: target !== null && (target === tip || tip.contains(target)),
+        overlapsHeader: tipBox.bottom > headerBox.top && tipBox.top < headerBox.bottom,
+      }
+    })
+
+    await matchScreenshot(page.locator('#stage'), 'tooltip above sticky header', {
+      maxDiffPixelRatio: 0.02,
+    })
+
+    return geometry
+  })
+
+  expect(result.overlapsHeader).toBe(true)
+  expect(result.onTop).toBe(true)
 }, 120_000)
