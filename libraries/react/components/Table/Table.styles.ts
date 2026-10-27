@@ -13,13 +13,19 @@ style('basis:table', css`
       border-spacing: 0;
       width: 100%;
 
-      thead tr {
-        background-color: var(--basis-table-header-cell-background, var(--basis-color-primary));
-        height: var(--basis-table-row-height, 2em);
+      thead {
+        /*
+         * Table-row z-index is not honored consistently across Chromium, so
+         * the row group owns the sticky layer above pinned body cells.
+         */
         isolation: isolate;
         position: sticky;
         top: 0;
         z-index: var(--basis-table-header-row-z, 2);
+        tr {
+          background-color: var(--basis-table-header-cell-background, var(--basis-color-primary));
+          height: var(--basis-table-row-height, 2em);
+        }
       }
       
       th, td {

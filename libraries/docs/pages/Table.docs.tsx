@@ -143,6 +143,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             })}
           `)}
           <p>Pinned columns remain visible when scrolling horizontally, making them perfect for identifiers (like names or IDs) or important action columns.</p>
+          <p>A height-bounded table keeps its sticky header above every body row, including left- and right-pinned cells, so the header stays readable while the body scrolls vertically.</p>
           <h4>Column Alignment</h4>
           <p>Control text alignment for each column type. Each column type has sensible defaults, but you can override them:</p>
           {Code.format(`
