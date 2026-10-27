@@ -5,7 +5,7 @@ import { SortBy } from '../../types/SortBy'
 import type { SortDirection } from '../../types/SortDirection'
 import { TextAlign } from '../../types/TextAlign'
 import { Component } from '../Component/Component'
-import type { CellComponent } from './CellContent'
+import type { CellComponent, ColumnDeclaration, ColumnFactory } from './CellContent'
 
 export enum ColumnType {
   Boolean = 'boolean',
@@ -130,6 +130,28 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
       type: ColumnType.Custom,
     }
     return <Column<TRow, TField> {...props} />
+  }
+  /**
+   * Create a reusable custom column factory with its cell component and defaults
+   * already bound. Register it once with {@link TypedTable.extend} and call it
+   * with only the field and per-use options.
+   * @param component - The cell component, usually a {@link CellContent} subclass.
+   * @param defaults - Column options applied before each per-use declaration.
+   * @returns A row-bound column factory.
+   */
+  static custom<TRow extends object>(
+    component: CellComponent<TRow, PathOf<TRow>>,
+    defaults: Partial<Omit<ColumnProps<TRow>, 'component' | 'field' | 'type'>> = {},
+  ): ColumnFactory<TRow> {
+    const factory = <TColumnField extends PathOf<TRow>>(
+      declaration: ColumnDeclaration<TRow, TColumnField>,
+    ) => Column.Custom({
+      ...defaults,
+      ...declaration,
+      component: component as CellComponent<TRow, TColumnField>,
+    })
+
+    return factory as ColumnFactory<TRow>
   }
 
   /*

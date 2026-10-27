@@ -2,7 +2,13 @@ import type * as React from 'react'
 import type { PathOf } from '../../../utilities/types/PathOf'
 import type { TypeAt } from '../../../utilities/types/TypeAt'
 import { Component } from '../Component/Component'
-import type { CellProps } from './Column'
+import type { CellProps, ColumnProps } from './Column'
+
+/**
+ * Type-only brand identifying a reusable column factory's bound row without
+ * expanding its generic signatures.
+ */
+export declare const columnFactoryBrand: unique symbol
 
 /**
  * Type-only brand identifying concrete cell classes without expanding the cell's generics.
@@ -43,3 +49,32 @@ export abstract class CellContent<TRow, TField extends PathOf<TRow> = PathOf<TRo
 
   abstract override content(): React.ReactNode
 }
+
+/**
+ * A reusable custom column factory with its cell component and defaults already
+ * bound. The row it was created for is carried by a type-only brand so
+ * {@link TypedTable.extend} can expose it only on compatible table rows.
+ */
+export interface ColumnFactory<TRow extends object> {
+  <TField extends PathOf<TRow>>(declaration: ColumnDeclaration<TRow, TField>): React.ReactNode,
+  readonly [columnFactoryBrand]: TRow,
+}
+
+/** Structural base accepted by the column registry in `TypedTable.extend`. */
+export interface ColumnFactoryBase {
+  readonly [columnFactoryBrand]: object,
+}
+
+/**
+ * A column declaration accepted by a registered factory. The factory owns the
+ * cell component, so callers cannot replace it.
+ */
+export type ColumnDeclaration<TRow extends object, TField extends PathOf<TRow>> =
+  Omit<ColumnProps<TRow, TField>, 'component'>
+
+/**
+ * Extract the row type a column factory is bound to.
+ */
+export type ColumnFactoryRow<F> = F extends { readonly [columnFactoryBrand]: infer Row }
+  ? Row
+  : never

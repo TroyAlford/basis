@@ -174,6 +174,40 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
           `)}
           <p>Any column factory also accepts <code>component</code> directly. <code>Column.Custom</code> is the clearer choice for a display-only cell; the component replaces the built-in editor for that column.</p>
         </Section>
+        <Section title="Reusable Column Types">
+          <p>Register application-specific column factories once and reuse them through <code>TypedTable.extend</code>. Bind the cell component and any shared defaults with <code>Column.custom</code>, then pass the field and per-use options where the column is declared.</p>
+          {Code.format(`
+            // table-types.ts
+            import { Button, CellContent, Column, TypedTable } from 'basis/react'
+
+            class ActionsCell extends CellContent<User> {
+              static displayName = 'ActionsCell'
+
+              content() {
+                return (
+                  <Button onActivate={() => editUser(this.props.row)}>
+                    Edit
+                  </Button>
+                )
+              }
+            }
+
+            export const AppTable = TypedTable.extend({
+              Actions: Column.custom(ActionsCell, { sortable: false })
+            })
+
+            // user-table.tsx
+            const { Column, Table } = AppTable.of<User>()
+
+            <Table value={users}>
+              {Column.Text({ field: 'name', title: 'Name' })}
+              {Column.Actions({ field: 'id', title: 'Actions' })}
+            </Table>
+          `)}
+          <p>Registered factories keep their row type. A factory created for <code>User</code> is available on <code>AppTable.of&lt;User&gt;()</code> and on rows extending <code>User</code>; it is not offered for an unrelated row. Use <code>Column.custom&lt;User&gt;(...)</code> to pin the row explicitly. When the row is inferred from the cell, <code>.of&lt;Row&gt;()</code> supplies the row type at the call site.</p>
+          <p>A generic cell registers a generic factory. For example, <code>Column.custom(IdCell)</code> with <code>IdCell&lt;TRow extends &#123; id: number &#125;&gt;</code> is available on every <code>.of&lt;Row&gt;()</code> whose row meets that constraint.</p>
+          <p>Built-in column factories remain available on the extended table, and per-use options override the defaults registered with the factory.</p>
+        </Section>
         <Section title="Nested Data Access">
           <p>The Table component supports nested object properties using dot notation in the field path:</p>
           {Code.format(`
@@ -323,6 +357,12 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             <li><code>width?: string | number</code> - Column width</li>
           </ul>
           <p><code>Column.Custom</code> requires <code>component</code> and defaults to left alignment and name sorting.</p>
+          <h4>Typed Table Helpers</h4>
+          <ul>
+            <li><code>TypedTable.of&lt;T&gt;()</code> - The built-in column factories for row <code>T</code></li>
+            <li><code>TypedTable.extend(registry)</code> - Adds reusable column factories to every compatible <code>.of&lt;T&gt;()</code> facade</li>
+            <li><code>Column.custom(component, defaults?)</code> - Binds a cell component and shared defaults into a reusable, row-typed column factory</li>
+          </ul>
         </Section>
       </>
     )
