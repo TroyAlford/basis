@@ -19,6 +19,7 @@ style('basis:table-cell', css`
     `)).join('\n')}
 
     > .text-editor, > .number-editor {
+      background-color: transparent;
       border: none;
       margin: 0;
       padding: 0;
