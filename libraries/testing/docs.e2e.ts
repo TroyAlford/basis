@@ -36,7 +36,7 @@ describe('testing/docs', () => {
   beforeAll(async () => {
     app = await useApplication({
       cwd: root,
-      entry: './testing/docs/index.ts',
+      entry: './testing/docs/serve.ts',
       timeoutMs: 120_000,
     })
   }, 120_000)
@@ -293,6 +293,8 @@ describe('testing/docs', () => {
       const input = search.locator('input')
       const menu = search.locator('.popup-menu')
 
+      // Shiki replaces fallback code blocks asynchronously; let that layout settle first.
+      await waitForHighlightedCode(page)
       await input.click()
       await input.fill('a')
       await page.waitForSelector('.auto-complete .popup-menu .menu-item.component')

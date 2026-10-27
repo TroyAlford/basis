@@ -154,7 +154,7 @@ The `Required` gate receives the decision and hash and accepts a skipped suite o
 ## Local verification
 
 ```bash
-bun .github/actions/change-impact/index.ts \
+bun .github/actions/change-impact/main.ts \
   --base-ref origin/main \
   --head-sha HEAD \
   --config-path .github/ci-impact.json

@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { ChangedFile, ImpactConfig, ImpactDecision } from '../actions/change-impact/index'
-import { analyze, changedFiles, decisionHash } from '../actions/change-impact/index'
+import type { ChangedFile, ImpactConfig, ImpactDecision } from '../actions/change-impact/main'
+import { analyze, changedFiles, decisionHash } from '../actions/change-impact/main'
 
 /*
  * Deterministic matrix for the portable change-impact analyzer.
@@ -18,7 +18,7 @@ import { analyze, changedFiles, decisionHash } from '../actions/change-impact/in
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const configText = readFileSync(join(root, 'docs/examples/ci-impact.json'), 'utf8')
 const config = JSON.parse(configText) as ImpactConfig
-const INDEX = join(root, '.github/actions/change-impact/index.ts')
+const MAIN = join(root, '.github/actions/change-impact/main.ts')
 const CONFIG_PATH = '.github/ci-impact.json'
 const directories: string[] = []
 
@@ -151,7 +151,7 @@ function cli(cwd: string, args: string[] = [], env: Record<string, string> = {})
   output: string,
 } {
   const result = Bun.spawnSync(
-    ['bun', INDEX, '--cwd', cwd, '--config-path', CONFIG_PATH, ...args],
+    ['bun', MAIN, '--cwd', cwd, '--config-path', CONFIG_PATH, ...args],
     {
       env: { ...(process.env as Record<string, string>), ...env },
       stderr: 'pipe',

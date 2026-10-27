@@ -9,7 +9,7 @@ const root = join(import.meta.dir, '..', '..')
 
 const options = {
   cwd: root,
-  entry: './testing/e2e/index.ts',
+  entry: './testing/e2e/serve.ts',
   timeoutMs: 60_000,
 } satisfies StartApplicationOptions
 

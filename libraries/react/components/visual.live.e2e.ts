@@ -21,7 +21,7 @@ const STAGES: [string, string][] = [
 test('captures mounted components', async () => {
   const app = await useApplication({
     cwd: join(import.meta.dir, '..', '..', '..'),
-    entry: './testing/components/index.ts',
+    entry: './testing/components/serve.ts',
     timeoutMs: 120_000,
   })
 

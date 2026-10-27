@@ -4,7 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./index.ts",
-    "./rules": "./rules/index.ts"
+    "./rules": "./rules/registry.ts"
   },
   "dependencies": {
     "postcss": "^8.5.28",

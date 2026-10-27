@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { ReactNode } from 'react'
-import type { ServerEvent } from '../../runtime'
+import type { ServerEvent } from '../../runtime/ServerEvent'
 import { render } from '../../testing/render'
 import { waitFor } from '../../testing/waitFor'
 import { Dialog } from '../OverlayProvider/Dialog'

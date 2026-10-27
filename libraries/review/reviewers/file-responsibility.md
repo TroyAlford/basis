@@ -15,6 +15,9 @@ outcomes:
   - category: move-unit
     disposition: finding
     destructive: false
+  - category: nested-index
+    disposition: finding
+    destructive: false
   - category: clarify-boundary
     disposition: question
     destructive: false
@@ -46,7 +49,7 @@ Look for changes that:
 
 Prefer explicit filenames that reveal what they contain.
 
-Do not introduce nested `index.ts` barrel files as an organizational shortcut. Barrels are acceptable only at a repository or monorepo-module root where they define that module's public surface. Below that boundary, explicit files and imports are easier to discover and reason about.
+Do not introduce `index.*` barrels or entry modules in subfolders. Only a repository or monorepo-module root may use `index.*` to define that module's public surface. Below that boundary, name the file for what it contains (`serve.ts`, `Stage.tsx`, `rules.ts`) and import explicit files; nested `index.*` files hide ownership and are a recurring source of import cycles and accidental public paths.
 
 Do not split tightly coupled implementation details solely to satisfy this rule. If several declarations exist only to implement one coherent unit and have no independent meaning, keeping them together can be clearer.
 
@@ -91,6 +94,38 @@ Expected: `finding / move-unit`
 Expected review feedback:
 
 > `Money` is a reusable concept defined inside the report renderer. Give it its own file so it can be found and reused without importing the renderer.
+
+### A nested index barrel
+
+```ts
+// components/Table/index.ts
+export * from './Table'
+export * from './Cell'
+export * from './HeaderCell'
+```
+
+The barrel exists only to shorten imports and turns the folder's internal structure into an accidental public surface.
+
+Expected: `finding / nested-index`
+
+Expected review feedback:
+
+> This nested index barrel hides which file owns what and becomes an import hub. A module root may define its public surface with `index.*`; below that, import the explicit files.
+
+### A subfolder entry named `index`
+
+```tsx
+// testing/components/index.tsx
+createRoot(container).render(<Stage />)
+```
+
+The filename says nothing about what the module does and invites consumers to import the folder rather than the entry.
+
+Expected: `finding / nested-index`
+
+Expected review feedback:
+
+> Name the entry for what it does (`Stage.tsx`, `serve.ts`) instead of `index.tsx`. Subfolder `index.*` files are indistinguishable from barrels and create accidental import paths.
 
 ### One coherent unit in a long file
 
