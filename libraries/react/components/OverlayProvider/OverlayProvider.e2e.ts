@@ -7,7 +7,7 @@ const root = join(import.meta.dir, '..', '..', '..', '..')
 
 const options = {
   cwd: root,
-  entry: './testing/components/index.ts',
+  entry: './testing/components/serve.ts',
   timeoutMs: 120_000,
 }
 

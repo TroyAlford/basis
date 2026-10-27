@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect } from 'bun:test'
+import { beforeAll, expect } from 'bun:test'
 import { join } from 'node:path'
 import type { ApplicationHandle } from '../../../testing'
 import { matchScreenshot, test, useApplication } from '../../../testing'
@@ -10,33 +10,20 @@ let app: ApplicationHandle
 beforeAll(async () => {
   app = await useApplication({
     cwd: ROOT,
-    entry: './testing/components/index.ts',
+    entry: './testing/components/serve.ts',
     timeoutMs: 120_000,
   })
 }, 120_000)
-
-afterAll(async () => {
-  await app.stop()
-})
 
 test('keeps the sticky header above pinned body cells while scrolling', async () => {
   const result = await app.visit('/table', async page => {
     const table = page.locator('.table.editor.component')
     await table.waitFor()
 
-    /*
-     * Chromium does not honor z-index on table rows consistently. Removing any
-     * row-level layer models the reported failure and proves the header's
-     * guarantee comes from the row group rather than a table row.
-     */
-    await page.addStyleTag({
-      content: 'thead tr { isolation: auto !important; z-index: auto !important; }',
-    })
-
-    await table.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await table.evaluate(element => { element.scrollTop = 60 })
     await page.waitForTimeout(100)
 
-    return table.evaluate(element => {
+    const geometry = await table.evaluate(element => {
       const tableBox = element.getBoundingClientRect()
       const headerRow = element.querySelector('thead tr') as HTMLElement
       const headerBox = headerRow.getBoundingClientRect()
@@ -56,6 +43,12 @@ test('keeps the sticky header above pinned body cells while scrolling', async ()
         scrolled: element.scrollTop > 0,
       }
     })
+
+    await matchScreenshot(page.locator('#stage'), 'scrolled pinned table', {
+      maxDiffPixelRatio: 0.02,
+    })
+
+    return geometry
   })
 
   expect(result.scrolled).toBe(true)
