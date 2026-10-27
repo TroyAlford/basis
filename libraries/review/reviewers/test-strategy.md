@@ -67,6 +67,7 @@ Strong smells:
 - integration or end-to-end tests repeatedly proving detailed business rules that could be proven much more cheaply at a lower level;
 - unit tests claiming to prove that real components interoperate while every collaborator is mocked;
 - tests asserting private DOM, SVG, or CSS structure when the contract is model state, observable UI semantics, or screenshot-covered appearance;
+- tests that parse a stylesheet, inspect a `<style>` element's text, or assert CSS declarations instead of proving rendered behavior;
 - duplicate cross-layer proof of the same contract without distinct confidence;
 - no real smoke or integration check where the actual risk is deployment, configuration, or wiring;
 - important branches with no affordable deterministic coverage.
@@ -98,6 +99,8 @@ A DOM assertion is a smell when it merely proxies another contract:
 - pinning nested DOM shape, class names, or element counts that are not user-visible semantics.
 
 Selectors used to **interact** with the application are not themselves the problem; review what the test asserts. Prefer model or state assertions for domain behavior, screenshots and visual regression for appearance and layout, and semantic or accessibility assertions for interactive UI behavior. Keep browser and end-to-end assertions for wiring and outcomes that cannot be proved lower in the stack.
+
+Stylesheet source is not a contract surface. Asserting that `styles()` contains a declaration, reading a `<style>` element's text, or checking a CSS custom property proves only that a string exists; another declaration can override it and the rendered result can still be wrong. Stylelint owns stylesheet correctness, screenshots own appearance, and DOM or behavior assertions own interaction.
 
 Do not prove the same contract redundantly at multiple layers unless the higher layer adds distinct confidence. A screenshot plus private-DOM assertions for the same visual detail is duplicate proof, not stronger proof. Exact DOM or SVG structure is valid only when that structure is itself a public or semantic primitive contract. Exact geometry measurements are valid when dimensions, clipping, or print geometry are themselves requirements. Do not demand screenshots for nonvisual domain behavior.
 
@@ -232,6 +235,22 @@ Expected: `finding / implementation-coupled-assertion`
 Expected review feedback:
 
 > This asserts the private `.badge-layer` structure while the badge's appearance is already covered by screenshots. Keep the semantic decision test at its lowest useful level and leave the rendered appearance to the visual suite; do not add a test hook just to preserve this assertion.
+
+### Stylesheet text standing in for rendered behavior
+
+```ts
+test('table cells are transparent', () => {
+  expect(styles()).toContain('background-color: transparent')
+})
+```
+
+The assertion proves a declaration exists in the stylesheet string. It does not prove the cell renders transparently, and it passes even when another rule overrides the declaration.
+
+Expected: `finding / implementation-coupled-assertion`
+
+Expected review feedback:
+
+> This asserts stylesheet text, not behavior. It passes while the rendered cell can still be wrong. Capture the rendered state with the visual/screenshot lane, or assert the DOM behavior the user observes; leave stylesheet correctness to Stylelint.
 
 ### Conditional presence is observable behavior
 
