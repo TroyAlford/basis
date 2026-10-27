@@ -1,14 +1,15 @@
 import * as React from 'react'
-import type { TypeAt } from '../../../utilities'
 import type { PathOf } from '../../../utilities/types/PathOf'
 import { Pin } from '../../types/Pin'
 import { SortBy } from '../../types/SortBy'
 import type { SortDirection } from '../../types/SortDirection'
 import { TextAlign } from '../../types/TextAlign'
 import { Component } from '../Component/Component'
+import type { CellComponent } from './CellContent'
 
 export enum ColumnType {
   Boolean = 'boolean',
+  Custom = 'custom',
   Date = 'date',
   DateTime = 'datetime',
   Enum = 'enum',
@@ -25,7 +26,7 @@ export interface CellProps<T, R = unknown, F extends PathOf<R> = PathOf<R>> {
 
 export interface ColumnProps<TRow = unknown, TField extends PathOf<TRow> = PathOf<TRow>> {
   align?: TextAlign,
-  component?: React.ComponentType<CellProps<TypeAt<TRow, TField>, TRow, TField>>,
+  component?: CellComponent<TRow, TField>,
   enum?: Record<string, string | number>,
   field: TField,
   header?: boolean,
@@ -115,6 +116,18 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
       sortBy: SortBy.Name,
       ...declaration,
       type: ColumnType.Text,
+    }
+    return <Column<TRow, TField> {...props} />
+  }
+  static Custom<TRow, TField extends PathOf<TRow> = PathOf<TRow>>(
+    declaration: ColumnProps<TRow, TField> & { component: CellComponent<TRow, TField> },
+  ) {
+    const props = {
+      ...Column.defaultProps,
+      align: TextAlign.Left,
+      sortBy: SortBy.Name,
+      ...declaration,
+      type: ColumnType.Custom,
     }
     return <Column<TRow, TField> {...props} />
   }

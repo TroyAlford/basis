@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { Component, Pin, Section, SortDirection, TextAlign, TypedTable } from 'basis/react'
+import { CellContent, Component, Pin, Section, SortDirection, TextAlign, TypedTable } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 import { TableHeaderExample } from '../components/TableHeaderExample'
@@ -109,6 +109,70 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
             <li>Number, Boolean, Date, and DateTime columns sort by value</li>
             <li>Numbers are right-aligned; Booleans, Dates, and DateTimes are center-aligned</li>
           </ul>
+        </Section>
+        <Section title="Custom Cells">
+          <p>Use <code>Column.Custom</code> when a column needs its own rendering. The cell is a normal Basis class extending <code>CellContent&lt;Row&gt;</code>, so it follows the same class architecture as the rest of the UI and receives typed <code>row</code>, <code>value</code>, <code>field</code>, and <code>column</code> props. The interactive demo above uses a class cell for the name column.</p>
+          {Code.format(`
+            import { CellContent, TypedTable } from 'basis/react'
+
+            interface User {
+              id: number
+              name: string
+              email: string
+            }
+
+            class NameCell extends CellContent<User> {
+              static displayName = 'NameCell'
+
+              content() {
+                const { email, name } = this.props.row
+                return (
+                  <span>
+                    <strong>{name}</strong>
+                    <small>{email}</small>
+                  </span>
+                )
+              }
+            }
+
+            const { Column } = TypedTable.of<User>()
+
+            Column.Custom({ component: NameCell, field: 'name', title: 'Name' })
+          `)}
+          <p>Specify the field as the second generic when the cell needs a precisely typed <code>value</code>:</p>
+          {Code.format(`
+            class StatusCell extends CellContent<User, 'active'> {
+              static displayName = 'StatusCell'
+
+              content() {
+                return this.props.value ? 'Active' : 'Inactive'
+              }
+            }
+          `)}
+          <p>An action cell uses the same contract. It renders the control and leaves the action to its owner:</p>
+          {Code.format(`
+            import { Button, CellContent } from 'basis/react'
+
+            class ActionsCell extends CellContent<User> {
+              static displayName = 'ActionsCell'
+
+              content() {
+                return (
+                  <Button onActivate={() => editUser(this.props.row)}>
+                    Edit
+                  </Button>
+                )
+              }
+            }
+
+            {Column.Custom({
+              component: ActionsCell,
+              field: 'name',
+              sortable: false,
+              title: 'Actions'
+            })}
+          `)}
+          <p>Any column factory also accepts <code>component</code> directly. <code>Column.Custom</code> is the clearer choice for a display-only cell; the component replaces the built-in editor for that column.</p>
         </Section>
         <Section title="Nested Data Access">
           <p>The Table component supports nested object properties using dot notation in the field path:</p>
@@ -249,14 +313,16 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
           <h4>Column Props</h4>
           <ul>
             <li><code>align?: TextAlign</code> - Text alignment (Left, Right, Center)</li>
+            <li><code>component?: CellComponent&lt;TRow, TField&gt;</code> - Custom cell component; accepts a Basis class extending <code>CellContent</code> or a React component with the cell props</li>
             <li><code>enum?: Record&lt;string, string | number&gt;</code> - Enum options for Enum columns</li>
             <li><code>field: PathOf&lt;T&gt;</code> - Path to the data field (supports dot notation)</li>
             <li><code>pin?: Pin</code> - Column pinning position (Left, Right, Unpinned)</li>
             <li><code>sortable?: boolean</code> - Whether the column is sortable (default: true)</li>
             <li><code>title?: ReactNode</code> - Column header content, including interactive controls (defaults to field name)</li>
-            <li><code>type?: ColumnType</code> - Column type (Text, Number, Boolean, Date, DateTime, Enum)</li>
+            <li><code>type?: ColumnType</code> - Column type (Text, Number, Boolean, Date, DateTime, Enum, Custom)</li>
             <li><code>width?: string | number</code> - Column width</li>
           </ul>
+          <p><code>Column.Custom</code> requires <code>component</code> and defaults to left alignment and name sorting.</p>
         </Section>
       </>
     )
@@ -272,6 +338,24 @@ enum UserRole {
 
 // Demo components
 /**
+ * A custom display cell. The public `CellContent` base gives a Basis class cell
+ * typed access to its row, value, field, and column declaration.
+ */
+class UserNameCell extends CellContent<User> {
+  static displayName = 'UserNameCell'
+
+  content() {
+    const { email, name } = this.props.row
+    return (
+      <span style={{ display: 'inline-flex', flexDirection: 'column' }}>
+        <strong>{name}</strong>
+        <small>{email}</small>
+      </span>
+    )
+  }
+}
+
+/**
  * UserTable component - demonstrates nested data access
  */
 class UserTable extends Component<{ data: User[] }> {
@@ -284,7 +368,13 @@ class UserTable extends Component<{ data: User[] }> {
     return (
       <Table readOnly initialValue={data}>
         {Column.Number({ align: TextAlign.Center, field: 'id', header: true, pin: Pin.Left, title: 'ID' })}
-        {Column.Text({ field: 'name', pin: Pin.Left, sortDirection: SortDirection.Asc, title: 'Name' })}
+        {Column.Custom({
+          component: UserNameCell,
+          field: 'name',
+          pin: Pin.Left,
+          sortDirection: SortDirection.Asc,
+          title: 'Name',
+        })}
         {Column.Text({ field: 'email', title: 'Email' })}
         {Column.Enum({ enum: UserRole, field: 'role', title: 'Role' })}
         {Column.Date({ field: 'lastLogin', title: 'Last Login' })}
