@@ -1,21 +1,30 @@
 import type * as React from 'react'
 import type { PathOf } from '../../../utilities/types/PathOf'
-import type { CellComponent, ColumnFactory, ColumnFactoryBase, ColumnFactoryRow } from './CellContent'
-import type { ColumnProps } from './Column'
+import type { CellComponent, ColumnFactory, ColumnFactoryBase, ColumnFactoryRow, ColumnFactoryValue, ComponentColumnDeclaration, CustomColumnDeclaration } from './CellContent'
 import { Column } from './Column'
 import { Table } from './Table'
 
+/** A built-in column factory for a fixed row. */
+type ColumnFactoryMethod<TRow extends object> = <
+  TField extends PathOf<TRow>,
+  C extends CellComponent<TRow, TField> = CellComponent<TRow, TField>,
+>(props: ComponentColumnDeclaration<TRow, TField, C>) => React.ReactNode
+
+/** A custom column factory for a fixed row. */
+type CustomColumnFactoryMethod<TRow extends object> = <
+  TField extends PathOf<TRow>,
+  C extends CellComponent<TRow, TField> = CellComponent<TRow, TField>,
+>(props: CustomColumnDeclaration<TRow, TField, C>) => React.ReactNode
+
 interface TypedTableInterface<TRow extends object> {
   Column: {
-    Boolean: <TField extends PathOf<TRow>>(props: ColumnProps<TRow, TField>) => React.ReactNode,
-    Custom: <TField extends PathOf<TRow>>(
-      props: ColumnProps<TRow, TField> & { component: CellComponent<TRow, TField> },
-    ) => React.ReactNode,
-    Date: <TField extends PathOf<TRow>>(props: ColumnProps<TRow, TField>) => React.ReactNode,
-    DateTime: <TField extends PathOf<TRow>>(props: ColumnProps<TRow, TField>) => React.ReactNode,
-    Enum: <TField extends PathOf<TRow>>(props: ColumnProps<TRow, TField>) => React.ReactNode,
-    Number: <TField extends PathOf<TRow>>(props: ColumnProps<TRow, TField>) => React.ReactNode,
-    Text: <TField extends PathOf<TRow>>(props: ColumnProps<TRow, TField>) => React.ReactNode,
+    Boolean: ColumnFactoryMethod<TRow>,
+    Custom: CustomColumnFactoryMethod<TRow>,
+    Date: ColumnFactoryMethod<TRow>,
+    DateTime: ColumnFactoryMethod<TRow>,
+    Enum: ColumnFactoryMethod<TRow>,
+    Number: ColumnFactoryMethod<TRow>,
+    Text: ColumnFactoryMethod<TRow>,
   },
   Table: React.ComponentType<Table<TRow>['props']>,
 }
@@ -28,7 +37,8 @@ type ColumnRegistry = Record<string, ColumnFactoryBase>
  * appears for that row and its subtypes; an unrelated row does not expose it.
  */
 type CompatibleColumns<TRow extends object, R extends ColumnRegistry> = {
-  [K in keyof R as [TRow] extends [ColumnFactoryRow<R[K]>] ? K : never]: ColumnFactory<TRow>
+  [K in keyof R as [TRow] extends [ColumnFactoryRow<R[K]>] ? K : never]:
+  ColumnFactory<TRow, ColumnFactoryValue<R[K]>>
 }
 
 /** A table facade with the application's registered column factories. */

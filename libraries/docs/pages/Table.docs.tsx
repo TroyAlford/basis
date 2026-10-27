@@ -53,6 +53,10 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
     return (
       <>
         <h1>Table</h1>
+        <Section title="TypedTable">
+          <p><code>TypedTable</code> is the type-safe entry point for tables. <code>TypedTable.of&lt;Row&gt;()</code> fixes the row type and returns a <code>Table</code> component plus the built-in column factories, so a field path drives the value type that a column component must accept.</p>
+          <p><code>TypedTable.extend(registry)</code> adds application-defined column factories to that same facade. Register the application's vocabulary once, then select the row with <code>.of&lt;Row&gt;()</code> wherever a table is declared.</p>
+        </Section>
         <Section title="Interactive Demo">
           <p>The Table component provides a flexible, type-safe way to display tabular data. Built on the Component base class, it offers excellent TypeScript ergonomics with strongly-typed columns and automatic field validation.</p>
           <div style={{ border: '1px solid var(--basis-color-border-subtle)', borderRadius: '4px', overflow: 'hidden' }}>
@@ -112,6 +116,7 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
         </Section>
         <Section title="Custom Cells">
           <p>Use <code>Column.Custom</code> when a column needs its own rendering. The cell is a normal Basis class extending <code>CellContent&lt;Row&gt;</code>, so it follows the same class architecture as the rest of the UI and receives typed <code>row</code>, <code>value</code>, <code>field</code>, and <code>column</code> props. The interactive demo above uses a class cell for the name column.</p>
+          <p><code>Column.Custom</code> (capital C) declares one column in place. <code>Column.custom</code> (lowercase) creates a reusable factory for <code>TypedTable.extend</code>; see <strong>Reusable Column Types</strong> below. The table's internal <code>Cell</code> renderer is not an extension point — extend <code>CellContent</code> for cell content.</p>
           {Code.format(`
             import { CellContent, TypedTable } from 'basis/react'
 
@@ -167,11 +172,12 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
 
             {Column.Custom({
               component: ActionsCell,
-              field: 'name',
+              field: 'id',
               sortable: false,
               title: 'Actions'
             })}
           `)}
+          <p><code>field</code> is still required: it is the column's identity and value lookup, and must be unique within a table. An action cell may use a field whose value it does not render.</p>
           <p>Any column factory also accepts <code>component</code> directly. <code>Column.Custom</code> is the clearer choice for a display-only cell; the component replaces the built-in editor for that column.</p>
         </Section>
         <Section title="Reusable Column Types">
@@ -206,6 +212,22 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
           `)}
           <p>Registered factories keep their row type. A factory created for <code>User</code> is available on <code>AppTable.of&lt;User&gt;()</code> and on rows extending <code>User</code>; it is not offered for an unrelated row. Use <code>Column.custom&lt;User&gt;(...)</code> to pin the row explicitly. When the row is inferred from the cell, <code>.of&lt;Row&gt;()</code> supplies the row type at the call site.</p>
           <p>A generic cell registers a generic factory. For example, <code>Column.custom(IdCell)</code> with <code>IdCell&lt;TRow extends &#123; id: number &#125;&gt;</code> is available on every <code>.of&lt;Row&gt;()</code> whose row meets that constraint.</p>
+          {Code.format(`
+            class IdCell<TRow extends { id: number }> extends CellContent<TRow> {
+              static displayName = 'IdCell'
+
+              content() {
+                return <span>{this.props.row.id}</span>
+              }
+            }
+
+            const GenericTable = TypedTable.extend({
+              Id: Column.custom(IdCell)
+            })
+
+            GenericTable.of<Project>().Column.Id({ field: 'id', title: 'ID' })
+          `)}
+          <p>Registered factories also keep the cell's value type when the row is inferred. A cell declared as <code>CellContent&lt;User, 'id'&gt;</code> is offered only for fields whose value is a number; <code>CellContent&lt;User&gt;</code> accepts any field. A mismatched field is a compile error. Use <code>Column.custom&lt;User&gt;(...)</code> to pin the row explicitly; the factory stays row-safe and accepts any field of that row.</p>
           <p>Built-in column factories remain available on the extended table, and per-use options override the defaults registered with the factory.</p>
         </Section>
         <Section title="Nested Data Access">
@@ -347,21 +369,27 @@ export class TableDocs extends DocumentationPage<Record<string, never>> {
           <h4>Column Props</h4>
           <ul>
             <li><code>align?: TextAlign</code> - Text alignment (Left, Right, Center)</li>
-            <li><code>component?: CellComponent&lt;TRow, TField&gt;</code> - Custom cell component; accepts a Basis class extending <code>CellContent</code> or a React component with the cell props</li>
+            <li><code>component?: CellComponent&lt;TRow, TField&gt;</code> - Custom cell component; accepts a Basis class extending <code>CellContent</code> or a React component with the cell props. Class cells are checked against the row and the declared field value</li>
             <li><code>enum?: Record&lt;string, string | number&gt;</code> - Enum options for Enum columns</li>
-            <li><code>field: PathOf&lt;T&gt;</code> - Path to the data field (supports dot notation)</li>
+            <li><code>field: PathOf&lt;T&gt;</code> - Path to the data field (supports dot notation); also the column's unique identity within a table</li>
             <li><code>pin?: Pin</code> - Column pinning position (Left, Right, Unpinned)</li>
             <li><code>sortable?: boolean</code> - Whether the column is sortable (default: true)</li>
             <li><code>title?: ReactNode</code> - Column header content, including interactive controls (defaults to field name)</li>
             <li><code>type?: ColumnType</code> - Column type (Text, Number, Boolean, Date, DateTime, Enum, Custom)</li>
             <li><code>width?: string | number</code> - Column width</li>
           </ul>
-          <p><code>Column.Custom</code> requires <code>component</code> and defaults to left alignment and name sorting.</p>
+          <p><code>Column.Custom</code> requires <code>component</code> and defaults to left alignment and name sorting. <code>ColumnType</code> is exported from <code>basis/react</code>.</p>
+          <h4>Cell Content</h4>
+          <ul>
+            <li><code>CellContent&lt;Row, Field&gt;</code> - Base class for a custom cell; implement <code>content()</code> and read <code>this.props.row</code>, <code>value</code>, <code>field</code>, or <code>column</code></li>
+            <li><code>CellProps&lt;Value, Row, Field&gt;</code> - The cell props contract</li>
+            <li><code>CellComponent&lt;Row, Field&gt;</code> - The component type accepted by <code>component</code>; class cells must accept the row and field value</li>
+          </ul>
           <h4>Typed Table Helpers</h4>
           <ul>
             <li><code>TypedTable.of&lt;T&gt;()</code> - The built-in column factories for row <code>T</code></li>
             <li><code>TypedTable.extend(registry)</code> - Adds reusable column factories to every compatible <code>.of&lt;T&gt;()</code> facade</li>
-            <li><code>Column.custom(component, defaults?)</code> - Binds a cell component and shared defaults into a reusable, row-typed column factory</li>
+            <li><code>Column.custom(component, defaults?)</code> - Binds a cell component and shared defaults into a reusable, row-typed column factory; the factory preserves the cell's value type</li>
           </ul>
         </Section>
       </>

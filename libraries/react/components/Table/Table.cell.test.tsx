@@ -1,5 +1,5 @@
 import type { CellProps } from 'basis/react'
-import { Button, CellContent, TypedTable } from 'basis/react'
+import { Button, CellContent, Column as StaticColumn, ColumnType, TypedTable } from 'basis/react'
 import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
@@ -46,6 +46,14 @@ class NameValueCell extends CellContent<Person, 'name'> {
   }
 }
 
+class IdValueCell extends CellContent<Person, 'id'> {
+  static displayName = 'IdValueCell'
+
+  content() {
+    return <span>{this.props.value.toFixed()}</span>
+  }
+}
+
 class ActionsPlaceholder extends CellContent<Person> {
   static displayName = 'ActionsPlaceholder'
 
@@ -63,6 +71,10 @@ const ProjectTextCell = ({ value }: CellProps<string, Project, 'title'>): React.
 )
 
 describe('Table custom cells', () => {
+  test('exports the Custom column type', () => {
+    expect(String(ColumnType.Custom)).toBe('custom')
+  })
+
   test('renders a Basis class cell declared through the public contract', async () => {
     const { node } = await render(
       <Table value={PEOPLE}>
@@ -132,6 +144,15 @@ describe('Table custom cells', () => {
     if (compileOnly) {
       Column.Custom({ component: NameValueCell, field: 'name', title: 'Name' })
       Column.Text({ component: NameTextCell, field: 'name', title: 'Name' })
+
+      // @ts-expect-error the cell's number value cannot render the name string
+      Column.Custom({ component: IdValueCell, field: 'name', title: 'Name' })
+
+      // The static factories enforce the same field contract.
+      StaticColumn.Text({ component: NameValueCell, field: 'name', title: 'Name' })
+
+      // @ts-expect-error the cell's number value cannot render the name string
+      StaticColumn.Text({ component: IdValueCell, field: 'name', title: 'Name' })
 
       // @ts-expect-error a component for a different row is rejected
       Column.Text({ component: ProjectTextCell, field: 'name', title: 'Name' })

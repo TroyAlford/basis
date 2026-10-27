@@ -43,12 +43,24 @@ class IdCell<TRow extends { id: number }> extends CellContent<TRow> {
   }
 }
 
+class PersonIdCell extends CellContent<Person, 'id'> {
+  static displayName = 'PersonIdCell'
+
+  content() {
+    return <span>{this.props.value.toFixed()}</span>
+  }
+}
+
 const AppTable = TypedTable.extend({
   Name: Column.custom(PersonNameCell, { sortable: false }),
 })
 
 const GenericTable = TypedTable.extend({
   Id: Column.custom(IdCell),
+})
+
+const IdTable = TypedTable.extend({
+  Id: Column.custom(PersonIdCell),
 })
 
 describe('TypedTable.extend', () => {
@@ -122,6 +134,17 @@ describe('TypedTable.extend', () => {
 
       // @ts-expect-error the row still constrains the field path
       AppTable.of<Person>().Column.Name({ field: 'missing', title: 'Missing' })
+    }
+  })
+
+  test('restricts a registered factory to fields its cell can render', () => {
+    const compileOnly = false as boolean
+
+    if (compileOnly) {
+      IdTable.of<Person>().Column.Id({ field: 'id', title: 'ID' })
+
+      // @ts-expect-error the number cell cannot render the name string
+      IdTable.of<Person>().Column.Id({ field: 'name', title: 'Name' })
     }
   })
 
