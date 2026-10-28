@@ -10,7 +10,7 @@ import { Editor } from '../Editor/Editor'
 import { EnumEditor } from '../EnumEditor/EnumEditor'
 import { NumberEditor } from '../NumberEditor/NumberEditor'
 import { TextEditor } from '../TextEditor/TextEditor'
-import type { ColumnProps } from './Column'
+import type { CellProps, ColumnProps } from './Column'
 import { ColumnType } from './Column'
 
 import './Cell.styles.ts'
@@ -67,7 +67,14 @@ export class Cell<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
     const value = this.current
 
     if (column.component) {
-      const TComponent = column.component
+      /*
+       * Class cells are accepted through a constructor constraint rather than
+       * `React.ComponentType`, so the declared value narrows to the public cell
+       * contract at this single rendering boundary.
+       */
+      const TComponent = column.component as React.ComponentType<
+        CellProps<TypeAt<TRow, TField>, TRow, TField>
+      >
       return super.content(
         <TComponent
           column={column}

@@ -6,9 +6,11 @@ import { SortBy } from '../../types/SortBy'
 import type { SortDirection } from '../../types/SortDirection'
 import { TextAlign } from '../../types/TextAlign'
 import { Component } from '../Component/Component'
+import type { CellClassValueOf, CellComponent, ColumnDeclaration, ColumnFactory, ComponentColumnDeclaration, CustomColumnDeclaration, ValueCompatible } from './CellContent'
 
 export enum ColumnType {
   Boolean = 'boolean',
+  Custom = 'custom',
   Date = 'date',
   DateTime = 'datetime',
   Enum = 'enum',
@@ -25,7 +27,7 @@ export interface CellProps<T, R = unknown, F extends PathOf<R> = PathOf<R>> {
 
 export interface ColumnProps<TRow = unknown, TField extends PathOf<TRow> = PathOf<TRow>> {
   align?: TextAlign,
-  component?: React.ComponentType<CellProps<TypeAt<TRow, TField>, TRow, TField>>,
+  component?: CellComponent<TRow, TField>,
   enum?: Record<string, string | number>,
   field: TField,
   header?: boolean,
@@ -56,7 +58,11 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
   }
 
   // Static column type components
-  static Boolean<TRow, TField extends PathOf<TRow> = PathOf<TRow>>(declaration: ColumnProps<TRow, TField>) {
+  static Boolean<
+    TRow extends object,
+    TField extends PathOf<TRow>,
+    C extends CellComponent<TRow, TField> = CellComponent<TRow, TField>,
+  >(declaration: ComponentColumnDeclaration<TRow, TField, C>) {
     const props = {
       ...Column.defaultProps,
       align: TextAlign.Center,
@@ -66,7 +72,11 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
     }
     return <Column<TRow, TField> {...props} />
   }
-  static Date<TRow, TField extends PathOf<TRow> = PathOf<TRow>>(declaration: ColumnProps<TRow, TField>) {
+  static Date<
+    TRow extends object,
+    TField extends PathOf<TRow>,
+    C extends CellComponent<TRow, TField> = CellComponent<TRow, TField>,
+  >(declaration: ComponentColumnDeclaration<TRow, TField, C>) {
     const props = {
       ...Column.defaultProps,
       align: TextAlign.Center,
@@ -76,7 +86,11 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
     }
     return <Column<TRow, TField> {...props} />
   }
-  static DateTime<TRow, TField extends PathOf<TRow> = PathOf<TRow>>(declaration: ColumnProps<TRow, TField>) {
+  static DateTime<
+    TRow extends object,
+    TField extends PathOf<TRow>,
+    C extends CellComponent<TRow, TField> = CellComponent<TRow, TField>,
+  >(declaration: ComponentColumnDeclaration<TRow, TField, C>) {
     const props = {
       ...Column.defaultProps,
       align: TextAlign.Center,
@@ -86,7 +100,11 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
     }
     return <Column<TRow, TField> {...props} />
   }
-  static Enum<TRow, TField extends PathOf<TRow> = PathOf<TRow>>(declaration: ColumnProps<TRow, TField>) {
+  static Enum<
+    TRow extends object,
+    TField extends PathOf<TRow>,
+    C extends CellComponent<TRow, TField> = CellComponent<TRow, TField>,
+  >(declaration: ComponentColumnDeclaration<TRow, TField, C>) {
     const props = {
       ...Column.defaultProps,
       align: TextAlign.Left,
@@ -96,8 +114,12 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
     }
     return <Column<TRow, TField> {...props} />
   }
-  static Number<TRow, TField extends PathOf<TRow> = PathOf<TRow>>(
-    declaration: ColumnProps<TRow, TField>,
+  static Number<
+    TRow extends object,
+    TField extends PathOf<TRow>,
+    C extends CellComponent<TRow, TField> = CellComponent<TRow, TField>,
+  >(
+    declaration: ComponentColumnDeclaration<TRow, TField, C>,
   ) {
     const props = {
       ...Column.defaultProps,
@@ -108,7 +130,11 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
     }
     return <Column<TRow, TField> {...props} />
   }
-  static Text<TRow, TField extends PathOf<TRow> = PathOf<TRow>>(declaration: ColumnProps<TRow, TField>) {
+  static Text<
+    TRow extends object,
+    TField extends PathOf<TRow>,
+    C extends CellComponent<TRow, TField> = CellComponent<TRow, TField>,
+  >(declaration: ComponentColumnDeclaration<TRow, TField, C>) {
     const props = {
       ...Column.defaultProps,
       align: TextAlign.Left,
@@ -117,6 +143,48 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
       type: ColumnType.Text,
     }
     return <Column<TRow, TField> {...props} />
+  }
+  static Custom<
+    TRow extends object,
+    TField extends PathOf<TRow>,
+    C extends CellComponent<TRow, TField> = CellComponent<TRow, TField>,
+  >(
+    declaration: CustomColumnDeclaration<TRow, TField, C>,
+  ) {
+    const props = {
+      ...Column.defaultProps,
+      align: TextAlign.Left,
+      sortBy: SortBy.Name,
+      ...declaration,
+      type: ColumnType.Custom,
+    }
+    return <Column<TRow, TField> {...props} />
+  }
+  /**
+   * Create a reusable custom column factory with its cell component and defaults
+   * already bound. Register it once with {@link TypedTable.extend} and call it
+   * with only the field and per-use options.
+   * @param component - The cell component, usually a {@link CellContent} subclass.
+   * @param defaults - Column options applied before each per-use declaration.
+   * @returns A row-bound column factory.
+   */
+  static custom<
+    TRow extends object,
+    C extends CellComponent<TRow, PathOf<TRow>> = CellComponent<TRow, PathOf<TRow>>,
+  >(
+    component: C & CellComponent<TRow, PathOf<TRow>>,
+    defaults: Partial<Omit<ColumnProps<TRow>, 'component' | 'field' | 'type'>> = {},
+  ): ColumnFactory<TRow, CellClassValueOf<C>> {
+    const factory = <TColumnField extends PathOf<TRow>>(
+      declaration: ColumnDeclaration<TRow, TColumnField>
+        & ValueCompatible<TypeAt<TRow, TColumnField>, CellClassValueOf<C>>,
+    ) => Column.Custom<TRow, TColumnField>({
+      ...defaults,
+      ...declaration,
+      component: component as CellComponent<TRow, TColumnField>,
+    })
+
+    return factory as ColumnFactory<TRow, CellClassValueOf<C>>
   }
 
   /*
