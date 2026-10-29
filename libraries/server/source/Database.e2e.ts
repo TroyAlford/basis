@@ -241,6 +241,49 @@ describe('Server database lifecycle', () => {
     }
   }, 120_000)
 
+  test('commits and rolls back through pooled Bun transactions', async () => {
+    const service = `basis-e2e-tx-${randomUUID()}`
+    const install = tempDirectory('basis-install-tx-')
+
+    try {
+      const server = startWithInstall(new Server().root(install).database(), install, service)
+      try {
+        await server.ready()
+        await server.db.sql`create table tx_probe (value text)`
+
+        const result = await server.db.tx(async tx => {
+          await tx`insert into tx_probe values ('committed')`
+          return 'callback-result'
+        })
+        expect(result).toBe('callback-result')
+
+        const count = async (): Promise<number | undefined> => {
+          const rows = await server.db.sql<{ count: number }[]>`
+            select count(*)::int as count from tx_probe
+          `
+          return rows[0]?.count
+        }
+        expect(await count()).toBe(1)
+
+        await expect(server.db.tx(async tx => {
+          await tx`insert into tx_probe values ('thrown')`
+          throw new Error('rollback')
+        })).rejects.toThrow('rollback')
+        expect(await count()).toBe(1)
+
+        await expect(server.db.tx(async tx => {
+          await tx`insert into tx_probe values ('failed')`
+          await tx`select * from basis_missing_tx_relation`
+        })).rejects.toMatchObject({ errno: '42P01' })
+        expect(await count()).toBe(1)
+      } finally {
+        await server.shutdown()
+      }
+    } finally {
+      removeService(install)
+    }
+  }, 120_000)
+
   test('reports unhealthy when an external PostgreSQL connection fails', async () => {
     const server = start(new Server().database({
       url: 'postgres://basis:basis@127.0.0.1:1/basis',
@@ -261,6 +304,7 @@ describe('Server database lifecycle', () => {
 
     try {
       await expect(server.db.connect()).rejects.toThrow('No database is configured for this server')
+      await expect(server.db.tx(async () => undefined)).rejects.toThrow('No database is configured for this server')
       expect(() => server.db.sql).toThrow('No database is configured for this server')
     } finally {
       await server.shutdown()

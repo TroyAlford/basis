@@ -73,7 +73,17 @@ const notes = await server.db.sql<{ id: number, title: string }[]>`
 `
 ```
 
-`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Transactions and model/query APIs remain later capabilities.
+`server.db.tx(callback)` delegates to Bun's pooled transaction primitive. The callback receives the transaction-scoped SQL instance; returning commits, while a thrown error or failed query rolls back and rejects:
+
+```ts
+const created = await server.db.tx(async tx => {
+  const [note] = await tx`insert into notes (title) values (${title}) returning id`
+  await tx`insert into audit (note_id) values (${note.id})`
+  return note.id
+})
+```
+
+`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Model/query APIs remain later capabilities.
 
 ## Logging
 
