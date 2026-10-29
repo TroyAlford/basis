@@ -145,6 +145,35 @@ await server.db.tx(async sql => {
 
 `server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Model/query APIs remain later capabilities.
 
+## Canonical model
+
+`Model.load(source)` parses and validates the canonical JSON entity definitions that later database features generate from. JSON is the authority; the loader rejects malformed or ambiguous definitions instead of guessing:
+
+```json
+{
+  "entities": [
+    {
+      "name": "Note",
+      "fields": [
+        { "name": "id", "type": "id", "primaryKey": true },
+        { "name": "title", "type": "string" },
+        { "name": "body", "type": "string" },
+        { "name": "createdAt", "type": "timestamp" }
+      ]
+    }
+  ]
+}
+```
+
+```ts
+import { Model } from 'basis/server'
+
+const model = Model.load(await Bun.file('./model.json').text())
+const note = model.entity('Note')
+```
+
+The minimal vocabulary accepts one or more entities with unique PascalCase names, unique camelCase fields, and exactly one `id` primary key per entity. Field types are `boolean`, `date`, `id`, `number`, `string`, and `timestamp`: `id` is a UUID identifier, `date` is distinct from `timestamp`, and `number` covers integers and floating point values. Field types are an enum so later non-scalar kinds and type-specific hints can extend the vocabulary without changing field identity. Unknown properties, duplicate entity or field names, malformed names, unsupported types, and missing or multiple primary keys all fail validation. This step owns parsing and validation only; physical DDL, queries, relationships, and generated artifacts are later capabilities.
+
 ## Logging
 
 `Server` owns a standard Basis `Logger` and writes its lifecycle output through it: the `listening http://<host>:<port>` startup line, `stopping` on shutdown, build failures, and the development/HMR watcher messages. Applications do not need to construct or configure a logger; use the server's logger for application-specific messages:
