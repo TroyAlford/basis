@@ -10,12 +10,12 @@ describe('docs server entrypoint', () => {
       cwd: import.meta.dir,
       entry: './server.ts',
       env: { NODE_ENV: 'development' },
-      timeoutMs: 60_000,
+      timeoutMs: 15_000,
     })
-  }, 60_000)
+  }, 30_000)
 
   afterAll(async () => {
-    await app.stop()
+    await app?.stop()
   })
 
   test('starts from the repository root and serves the documentation application', async () => {
