@@ -152,13 +152,12 @@ logger.stopwatchStop(stopwatch, 'request handled')
 `basis/configuration` exposes three primitives:
 
 ```ts
-import { Environment, run, secret } from 'basis/configuration'
+import { Environment, run, runAsync, secret } from 'basis/configuration'
 ```
 
 - `Environment` reads typed values from the process environment, which loads the standard dotenv files most-specific first — `.env.<mode>.local`, `.env.local`, `.env.<mode>`, `.env`, where `<mode>` is `NODE_ENV` (default `development`) — with real environment variables winning. `string(key, fallback?)`, `number(key, fallback?)`, and `boolean(key, fallback?)` fall back when unset and throw, naming the key, when a present value is malformed; `required(key)` fails loudly when unset; `enabled(...keys)` computes a topic's `ENABLED` flag. Consumers own their own config policy (defaults, required keys, enabling conditions).
 - `secret(reference)` reads an `op://` reference through the 1Password CLI and returns the value as a string (`JSON.parse` it for structure). The Service Account token comes from `OP_SERVICE_ACCOUNT_TOKEN` and is handed to the `op` child under that name; a missing token fails closed and neither the token nor the value is ever logged or echoed.
-- `run(command, args, options)` is the shared synchronous, shell-free, bounded (`timeoutMs`) subprocess runner, returning captured `{ exitCode, stdout,
-  stderr }` (typed by `RunOptions` and `CommandResult`).
+- `run(command, args, options)` is the shared synchronous, shell-free, bounded (`timeoutMs`) subprocess runner; `runAsync` is its non-blocking counterpart. Both return captured `{ exitCode, stdout, stderr, lines }` (typed by `RunOptions` and `CommandResult`) and also accept a whitespace-tokenized tagged template where interpolated values are discrete arguments.
 
 Internal factories and loading seams — `createSecretReader`, `loadDotenv`, and their types — are not part of the package surface. Non-npm host capabilities are declared as `basis.hostDependencies` (see [Install](#install)), not called.
 

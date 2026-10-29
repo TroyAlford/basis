@@ -1,3 +1,4 @@
+import { run, runAsync } from 'basis/configuration'
 import { Logger } from 'basis/logger'
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
@@ -12,16 +13,7 @@ import { Server } from './Server'
  */
 
 const root = join(import.meta.dir, '..', '..', '..')
-
-/** Docker command result. */
-interface DockerResult {
-  /** Process exit code. */
-  code: number,
-  /** Standard error. */
-  stderr: string,
-  /** Standard output. */
-  stdout: string,
-}
+const silent = new Logger({ silent: true })
 
 /** A container mount from `docker inspect`. */
 interface InspectMount {
@@ -32,28 +24,12 @@ interface InspectMount {
 }
 
 /**
- * Run a Docker CLI command and capture its output.
- * @param args - Arguments after `docker`.
- * @returns The exit code and captured output.
- */
-function docker(args: string[]): DockerResult {
-  const child = Bun.spawnSync(['docker', ...args], { stderr: 'pipe', stdout: 'pipe' })
-  const decoder = new TextDecoder()
-  return {
-    code: child.exitCode ?? -1,
-    stderr: decoder.decode(child.stderr),
-    stdout: decoder.decode(child.stdout),
-  }
-}
-
-/**
  * Find the containers owned by a managed database identity.
  * @param identity - The identity used in the ownership label.
  * @returns The container ids.
  */
-function containers(identity: string): string[] {
-  return docker(['ps', '-aq', '--filter', `label=basis.database=${identity}`])
-    .stdout.trim().split('\n').filter(Boolean)
+function containers(identity: string): readonly string[] {
+  return run`docker ps -aq --filter ${`label=basis.database=${identity}`}`.lines
 }
 
 /**
@@ -61,10 +37,10 @@ function containers(identity: string): string[] {
  * @param identity - The identity used in the ownership label.
  */
 function removeService(identity: string): void {
-  for (const id of containers(identity)) docker(['rm', '-f', id])
-  const volumes = docker(['volume', 'ls', '-q', '--filter', `label=basis.database=${identity}`])
-    .stdout.trim().split('\n').filter(Boolean)
-  for (const volume of volumes) docker(['volume', 'rm', '-f', volume])
+  for (const id of containers(identity)) void run`docker rm -f ${id}`
+  for (const volume of run`docker volume ls -q --filter ${`label=basis.database=${identity}`}`.lines) {
+    void run`docker volume rm -f ${volume}`
+  }
 }
 
 /**
@@ -73,7 +49,7 @@ function removeService(identity: string): void {
  * @returns The host port.
  */
 function portOf(id: string): number {
-  const match = /:(\d+)\s*$/m.exec(docker(['port', id, '5432/tcp']).stdout.trim())
+  const match = /:(\d+)\s*$/m.exec(run`docker port ${id} 5432/tcp`.stdout.trim())
   if (!match) throw new Error(`container ${id} did not publish a port`)
   return Number(match[1])
 }
@@ -101,7 +77,7 @@ function startWithService(server: Server, service: string): Server {
  * @returns The started server.
  */
 function start(server: Server): Server {
-  return server.start({ development: true, hostname: '127.0.0.1', logger: new Logger({ silent: true }), port: 0 })
+  return server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
 }
 
 /**
@@ -133,7 +109,7 @@ interface CredentialInspection {
  * @returns The raw inspect output, password, and file mode.
  */
 async function credentials(id: string): Promise<CredentialInspection> {
-  const raw = docker(['inspect', id]).stdout
+  const raw = run`docker inspect ${id}`.stdout
   const inspect = JSON.parse(raw) as { Mounts: InspectMount[] }[]
   const mount = inspect[0]?.Mounts.find(entry => entry.Destination === '/run/secrets/basis-postgres-password')
   if (!mount) throw new Error('container has no password-file mount')
@@ -177,9 +153,9 @@ describe('Server database lifecycle', () => {
         expect(secret.raw).not.toContain(secret.password)
         expect(secret.raw).not.toContain('"POSTGRES_PASSWORD=')
         expect(secret.raw).not.toContain('basis.password')
-        const volume = docker(['volume', 'ls', '-q', '--filter', `label=basis.database=${serviceA}`]).stdout.trim()
-        expect(volume).not.toBe('')
-        expect(docker(['volume', 'inspect', volume]).stdout).not.toContain(secret.password)
+        const volume = run`docker volume ls -q --filter ${`label=basis.database=${serviceA}`}`.lines[0]
+        expect(volume).toBeTruthy()
+        expect(run`docker volume inspect ${volume}`.stdout).not.toContain(secret.password)
       } finally {
         await a.shutdown()
         await b.shutdown()
@@ -310,21 +286,15 @@ describe('Server database lifecycle', () => {
       console.log(JSON.stringify(body))
       await server.shutdown()
     `
-    const child = Bun.spawn([process.execPath, '-e', script], {
+    const child = await runAsync(process.execPath, ['-e', script], {
       cwd: root,
-      env: { ...Bun.env, PATH: '/nonexistent' },
-      stderr: 'pipe',
-      stdout: 'pipe',
+      env: { PATH: '/nonexistent' },
+      logger: silent,
     })
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ])
 
-    expect(code).toBe(0)
-    expect(stderr).toBe('')
-    const result = JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}') as { error?: string, status?: string }
+    expect(child.exitCode).toBe(0)
+    expect(child.stderr).toBe('')
+    const result = JSON.parse(child.lines.at(-1) ?? '{}') as { error?: string, status?: string }
     expect(result.status).toBe('error')
     expect(result.error).toContain('requires Docker')
   }, 60_000)

@@ -1,3 +1,4 @@
+import { runAsync } from 'basis/configuration'
 import { SQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
@@ -48,42 +49,8 @@ export interface Database {
   readonly sql: SQL,
 }
 
-/** Docker command result. */
-interface DockerResult {
-  /** Process exit code. */
-  code: number,
-  /** Standard error. */
-  stderr: string,
-  /** Standard output. */
-  stdout: string,
-}
-
 /** A managed container's observed state. */
 type ContainerState = 'missing' | 'running' | 'stopped'
-
-/**
- * Run a Docker CLI command and capture its output.
- * @param args - Arguments after `docker`.
- * @returns The exit code and captured output.
- */
-async function docker(args: string[]): Promise<DockerResult> {
-  const executable = Bun.which('docker')
-  if (!executable) throw new Error(DOCKER_REQUIRED)
-
-  const child = Bun.spawn([executable, ...args], { stderr: 'pipe', stdout: 'pipe' })
-  const decoder = new TextDecoder()
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).arrayBuffer(),
-    new Response(child.stderr).arrayBuffer(),
-    child.exited,
-  ])
-
-  return {
-    code,
-    stderr: decoder.decode(stderr),
-    stdout: decoder.decode(stdout),
-  }
-}
 
 /**
  * Extract the published localhost port from `docker port` output.
@@ -290,6 +257,7 @@ class ManagedDatabase implements Database {
 
   /** Reconciles the service, discovers its port, and connects the pool. */
   async #start(): Promise<void> {
+    if (!Bun.which('docker')) throw new Error(DOCKER_REQUIRED)
     const state = await this.#containerState()
     const hasVolume = await this.#volumeExists()
     const secret = await this.#secret(state === 'missing' && !hasVolume)
@@ -298,9 +266,9 @@ class ManagedDatabase implements Database {
     if (state === 'missing') {
       await this.#createContainer(secret.file)
     } else if (state === 'stopped') {
-      const started = await docker(['start', this.#containerName])
-      if (started.code !== 0) {
-        const detail = started.stderr.trim() || `docker start exited with ${started.code}`
+      const started = await runAsync`docker start ${this.#containerName}`
+      if (started.exitCode !== 0) {
+        const detail = started.stderr.trim() || `docker start exited with ${started.exitCode}`
         throw new Error(`PostgreSQL service failed to start: ${detail}`)
       }
     }
@@ -358,8 +326,8 @@ class ManagedDatabase implements Database {
    * @returns Its running state, or `missing`.
    */
   async #containerState(): Promise<ContainerState> {
-    const result = await docker(['inspect', '--format', '{{.State.Running}}', this.#containerName])
-    if (result.code !== 0) return 'missing'
+    const result = await runAsync`docker inspect --format {{.State.Running}} ${this.#containerName}`
+    if (result.exitCode !== 0) return 'missing'
     return result.stdout.trim() === 'true' ? 'running' : 'stopped'
   }
 
@@ -368,18 +336,16 @@ class ManagedDatabase implements Database {
    * @returns `true` when Docker knows the volume.
    */
   async #volumeExists(): Promise<boolean> {
-    return (await docker(['volume', 'inspect', this.#volume])).code === 0
+    return (await runAsync`docker volume inspect ${this.#volume}`).exitCode === 0
   }
 
   /** Create the durable data volume with application ownership labels. */
   async #createVolume(): Promise<void> {
-    const created = await docker([
-      'volume', 'create',
-      '--label', `basis.database=${this.#identity}`,
-      this.#volume,
-    ])
-    if (created.code !== 0) {
-      const detail = created.stderr.trim() || `docker volume create exited with ${created.code}`
+    const created = await runAsync`
+      docker volume create --label ${`basis.database=${this.#identity}`} ${this.#volume}
+    `
+    if (created.exitCode !== 0) {
+      const detail = created.stderr.trim() || `docker volume create exited with ${created.exitCode}`
       throw new Error(`PostgreSQL data volume failed to start: ${detail}`)
     }
   }
@@ -389,30 +355,30 @@ class ManagedDatabase implements Database {
    * @param passwordFile - Host path mounted as the PostgreSQL password file.
    */
   async #createContainer(passwordFile: string): Promise<void> {
-    const run = await docker([
-      'run', '-d', '--pull', 'missing',
-      '--name', this.#containerName,
-      '--label', `basis.database=${this.#identity}`,
-      '-e', `POSTGRES_USER=${MANAGED_NAME}`,
-      '-e', `POSTGRES_PASSWORD_FILE=${PASSWORD_MOUNT}`,
-      '-e', `POSTGRES_DB=${MANAGED_NAME}`,
-      '-v', `${this.#volume}:/var/lib/postgresql/data`,
-      '-v', `${passwordFile}:${PASSWORD_MOUNT}:ro`,
-      '-p', `127.0.0.1::${MANAGED_PORT}`,
-      MANAGED_IMAGE,
-    ])
-    if (run.code === 0) return
+    const run = await runAsync`
+      docker run -d --pull missing
+      --name ${this.#containerName}
+      --label ${`basis.database=${this.#identity}`}
+      -e ${`POSTGRES_USER=${MANAGED_NAME}`}
+      -e ${`POSTGRES_PASSWORD_FILE=${PASSWORD_MOUNT}`}
+      -e ${`POSTGRES_DB=${MANAGED_NAME}`}
+      -v ${`${this.#volume}:/var/lib/postgresql/data`}
+      -v ${`${passwordFile}:${PASSWORD_MOUNT}:ro`}
+      -p ${`127.0.0.1::${MANAGED_PORT}`}
+      ${MANAGED_IMAGE}
+    `
+    if (run.exitCode === 0) return
 
     // Another process may have created the same app-owned service concurrently.
     const state = await this.#containerState()
     if (state === 'missing') {
-      const detail = run.stderr.trim() || `docker run exited with ${run.code}`
+      const detail = run.stderr.trim() || `docker run exited with ${run.exitCode}`
       throw new Error(`PostgreSQL service failed to start: ${detail}`)
     }
     if (state === 'stopped') {
-      const started = await docker(['start', this.#containerName])
-      if (started.code !== 0) {
-        const detail = started.stderr.trim() || `docker start exited with ${started.code}`
+      const started = await runAsync`docker start ${this.#containerName}`
+      if (started.exitCode !== 0) {
+        const detail = started.stderr.trim() || `docker start exited with ${started.exitCode}`
         throw new Error(`PostgreSQL service failed to start: ${detail}`)
       }
     }
@@ -424,7 +390,7 @@ class ManagedDatabase implements Database {
    */
   async #publishedPort(): Promise<number> {
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      const result = await docker(['port', this.#containerName, `${MANAGED_PORT}/tcp`])
+      const result = await runAsync`docker port ${this.#containerName} ${`${MANAGED_PORT}/tcp`}`
       const port = publishedPort(result.stdout)
       if (port !== null) return port
       await Bun.sleep(READY_POLL_MS)
@@ -460,7 +426,7 @@ class ManagedDatabase implements Database {
       await Bun.sleep(READY_POLL_MS)
     }
 
-    const logs = await docker(['logs', this.#containerName])
+    const logs = await runAsync`docker logs ${this.#containerName}`
     throw new Error(
       `PostgreSQL did not accept connections within ${READY_TIMEOUT_MS}ms ` +
       `(${lastError?.message ?? 'no connection'}):\n${logs.stdout}${logs.stderr}`,
