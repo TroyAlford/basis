@@ -191,12 +191,24 @@ export class NullDatabase implements Database {
 }
 
 /**
+ * Resolve the stable managed database identity.
+ *
+ * A deployed service name is authoritative. Without one, the stable
+ * application root produces a per-install identity.
+ * @param root - The stable application root.
+ * @returns The managed database identity.
+ */
+export function managedDatabaseIdentity(root: string): string {
+  return Bun.env.SERVICE_NAME?.trim()
+    || createHash('sha1').update(root).digest('hex').slice(0, 16)
+}
+
+/**
  * A managed local PostgreSQL service and its pool.
  *
- * The service identity is derived from the platform service name and stable
- * application root. Its container, data volume, and host-only password file
- * persist independently of the web server process: this capability only owns
- * the Bun pool, never the database service lifecycle.
+ * Its container, data volume, and host-only password file persist
+ * independently of the web server process: this capability only owns the Bun
+ * pool, never the database service lifecycle.
  */
 class ManagedDatabase implements Database {
   #closed = false
@@ -206,7 +218,6 @@ class ManagedDatabase implements Database {
   #dataRoot: string
   #database: PostgresDatabase | null = null
   #identity: string
-  #service: string
   #volume: string
 
   /**
@@ -215,11 +226,7 @@ class ManagedDatabase implements Database {
    * @param root - The stable application root.
    */
   constructor(root: string) {
-    this.#service = Bun.env.SERVICE_NAME?.trim() || 'basis'
-    this.#identity = createHash('sha1')
-      .update(`${this.#service}\u0000${root}`)
-      .digest('hex')
-      .slice(0, 16)
+    this.#identity = managedDatabaseIdentity(root)
     this.#containerName = `basis-postgres-${this.#identity}`
     this.#volume = this.#containerName
     this.#dataRoot = Bun.env.XDG_DATA_HOME?.trim()
@@ -326,7 +333,7 @@ class ManagedDatabase implements Database {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         throw new Error(
-          `Managed database credentials are missing for "${this.#service}"; ` +
+          `Managed database credentials are missing for "${this.#identity}"; ` +
           'restore the password file or deprovision the database explicitly.',
           { cause: error },
         )
@@ -361,7 +368,6 @@ class ManagedDatabase implements Database {
     const created = await docker([
       'volume', 'create',
       '--label', `basis.database=${this.#identity}`,
-      '--label', `basis.service=${this.#service}`,
       this.#volume,
     ])
     if (created.code !== 0) {
@@ -379,7 +385,6 @@ class ManagedDatabase implements Database {
       'run', '-d', '--pull', 'missing',
       '--name', this.#containerName,
       '--label', `basis.database=${this.#identity}`,
-      '--label', `basis.service=${this.#service}`,
       '-e', `POSTGRES_USER=${MANAGED_NAME}`,
       '-e', `POSTGRES_PASSWORD_FILE=${PASSWORD_MOUNT}`,
       '-e', `POSTGRES_DB=${MANAGED_NAME}`,

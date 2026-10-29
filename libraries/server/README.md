@@ -54,7 +54,7 @@ await server.db.connect()
 await server.shutdown()
 ```
 
-Managed mode is zero-config. Basis derives a stable identity from `SERVICE_NAME` and the application root, so two installations of the same repository do not collide. Docker allocates a loopback port; on every start Basis inspects the existing application-owned service, discovers its published port, and reuses or starts it. A healthy cluster is never replaced. The first start provisions durable storage and a high-entropy password in a host-only `0600` file mounted read-only as `POSTGRES_PASSWORD_FILE`; credentials do not appear in Docker labels, environment values, or arguments.
+Managed mode is zero-config. Basis uses `SERVICE_NAME` as the stable application identity when it is provided; otherwise it hashes the stable application root, so separate installations do not collide. Docker allocates a loopback port; on every start Basis inspects the existing application-owned service, discovers its published port, and reuses or starts it. A healthy cluster is never replaced. The first start provisions durable storage and a high-entropy password in a host-only `0600` file mounted read-only as `POSTGRES_PASSWORD_FILE`; credentials do not appear in Docker labels, environment values, or arguments.
 
 The managed service has an independent lifetime. Starting another server for the same installation attaches a second Bun pool to the same database. Closing a server, crashing it, or redeploying it closes only that process's pool; PostgreSQL and its data keep running. Explicit database maintenance or deletion is a separate operation. Docker is required for managed mode, and `/api/health` reports an error when it is unavailable.
 
