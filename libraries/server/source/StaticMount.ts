@@ -1,3 +1,4 @@
+import { realpath } from 'node:fs/promises'
 import * as path from 'node:path'
 
 /** One configured static mount. */
@@ -28,6 +29,29 @@ export function normalizeMountPrefix(prefix: string): string {
 export function containsInternalStateSegment(value: string): boolean {
   const normalized = path.posix.normalize(value.replace(/\\/g, '/'))
   return normalized.split('/').some(segment => segment.toLowerCase() === '.basis')
+}
+
+/**
+ * Resolve a static file only when its effective target is outside `.basis`.
+ *
+ * Symlinks are followed before the decision, so a public alias cannot reach
+ * Basis-owned internal state.
+ * @param filePath - The lexical file path below an asset or mount root.
+ * @returns The servable file, or null when missing or internal.
+ */
+export async function publicStaticFile(
+  filePath: string,
+): Promise<ReturnType<typeof Bun.file> | null> {
+  let target: string
+  try {
+    target = await realpath(filePath)
+  } catch {
+    return null
+  }
+  if (containsInternalStateSegment(target)) return null
+
+  const file = Bun.file(target)
+  return await file.exists() ? file : null
 }
 
 /**
@@ -101,8 +125,8 @@ export async function serveMount(mount: StaticMount, requestPath: string): Promi
   if (!filePath.startsWith(`${mount.folder}${path.sep}`)) return notFound()
   if (containsInternalStateSegment(mount.folder) || containsInternalStateSegment(filePath)) return notFound()
 
-  const file = Bun.file(filePath)
-  if (!(await file.exists())) return notFound()
+  const file = await publicStaticFile(filePath)
+  if (!file) return notFound()
 
   return new Response(file, { headers: { 'content-type': file.type } })
 }

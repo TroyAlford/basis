@@ -1,6 +1,6 @@
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Server } from './Server'
 import { containsInternalStateSegment, isInternalStatePath, serveMount } from './StaticMount'
@@ -14,6 +14,7 @@ async function fixture(): Promise<string> {
   await mkdir(join(directory, '.basis', 'database'), { recursive: true })
   await writeFile(join(directory, '.basis', 'database', 'password'), 'secret')
   await writeFile(join(directory, 'public.txt'), 'ok')
+  await symlink(join(directory, '.basis', 'database'), join(directory, 'credentials'), 'dir')
   return directory
 }
 
@@ -35,6 +36,9 @@ describe('internal state protection', () => {
     const secret = await serveMount(mount, '/static/.basis/database/password')
     expect(secret?.status).toBe(404)
 
+    const alias = await serveMount(mount, '/static/credentials/password')
+    expect(alias?.status).toBe(404)
+
     const publicFile = await serveMount(mount, '/static/public.txt')
     expect(publicFile?.status).toBe(200)
 
@@ -52,6 +56,7 @@ describe('internal state protection', () => {
       '/assets/.basis/database/password',
       '/assets/%2Ebasis/database/password',
       '/assets/.BASIS/database/password',
+      '/assets/credentials/password',
     ]) {
       const response = await server.handle(new Request(`http://localhost${route}`))
       expect(response?.status).toBe(404)

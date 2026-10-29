@@ -26,7 +26,7 @@ import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
-import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, serveMount } from './StaticMount'
+import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
 
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
@@ -270,8 +270,8 @@ export class Server {
       return Server.NotFound
     }
 
-    const asset = Bun.file(filePath)
-    if (await asset.exists() === false) return Server.NotFound
+    const asset = await publicStaticFile(filePath)
+    if (!asset) return Server.NotFound
 
     const version = asset.lastModified.toString()
 
