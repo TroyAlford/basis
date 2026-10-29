@@ -46,6 +46,8 @@ export interface Database {
   connect(): Promise<void>,
   /** The pooled Bun SQL tagged-template API. */
   readonly sql: SQL,
+  /** Runs a callback inside a pooled Bun transaction. */
+  tx<T>(callback: SQL.TransactionContextCallback<T>): Promise<SQL.ContextCallbackResult<T>>,
 }
 
 /** A managed container's observed state. */
@@ -116,6 +118,17 @@ class PostgresDatabase implements Database {
     }
     return this.#closing
   }
+
+  /**
+   * Runs a callback inside a Bun transaction on this pool.
+   * @param callback - Transaction-scoped work.
+   * @returns The callback result after commit.
+   * @throws {Error} When the pool is closed or the callback fails.
+   */
+  tx<T>(callback: SQL.TransactionContextCallback<T>): Promise<SQL.ContextCallbackResult<T>> {
+    if (this.#closed) return Promise.reject(new Error('Database is closed'))
+    return this.#sql.begin(callback)
+  }
 }
 
 /** The database capability used when a server has no database configured. */
@@ -153,6 +166,16 @@ export class NullDatabase implements Database {
   close(): Promise<void> {
     this.#closed = true
     return Promise.resolve()
+  }
+
+  /**
+   * Rejects because no database is configured.
+   * @param callback - Transaction-scoped work; unused without a database.
+   * @returns A rejected promise naming the missing configuration.
+   */
+  tx<T>(callback: SQL.TransactionContextCallback<T>): Promise<SQL.ContextCallbackResult<T>> {
+    void callback
+    return Promise.reject(new Error('No database is configured for this server'))
   }
 }
 
@@ -209,6 +232,17 @@ class ManagedDatabase implements Database {
   get sql(): SQL {
     if (!this.#database) throw new Error('Managed database is not connected')
     return this.#database.sql
+  }
+
+  /**
+   * Runs a callback inside a pooled Bun transaction.
+   * @param callback - Transaction-scoped work.
+   * @returns The callback result after commit.
+   * @throws {Error} When the managed pool is not connected or the callback fails.
+   */
+  tx<T>(callback: SQL.TransactionContextCallback<T>): Promise<SQL.ContextCallbackResult<T>> {
+    if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
+    return this.#database.tx(callback)
   }
 
   /**

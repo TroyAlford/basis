@@ -73,7 +73,77 @@ const notes = await server.db.sql<{ id: number, title: string }[]>`
 `
 ```
 
-`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Transactions and model/query APIs remain later capabilities.
+### Transactions
+
+`server.db.tx(callback)` establishes one transaction boundary. The callback receives Bun's native transaction-scoped SQL client, conventionally named `sql`. Everything run through that client is one atomic operation:
+
+```ts
+const noteId = await server.db.tx(async sql => {
+  const [note] = await sql`insert into notes (title) values (${title}) returning id`
+  await sql`insert into audit (action, note_id) values ('created', ${note.id})`
+  return note.id
+})
+```
+
+Bun commits automatically when the callback completes successfully, and `db.tx()` resolves with the callback's return value after that commit. Returning early is successful completion and therefore commits.
+
+To abort, throw:
+
+```ts
+try {
+  await server.db.tx(async sql => {
+    await sql`insert into notes (title) values (${title})`
+    throw new Error('do not keep this note')
+  })
+} catch (error) {
+  // The transaction rolled back; no note was inserted.
+}
+```
+
+If an exception escapes the callback—including a failed SQL query—Bun rolls back the transaction and `db.tx()` rejects with that error.
+
+Boundaries worth remembering:
+
+- Queries through the callback's `sql` participate in the transaction. Queries through `server.db.sql` do not automatically join it.
+- Await every transaction query inside the callback. The transaction-scoped client must not be used after the callback completes.
+
+#### Savepoints
+
+Bun's transaction client supports `sql.savepoint(callback)` for a partial rollback inside the outer transaction. Catch the savepoint failure to keep the outer transaction alive:
+
+```ts
+await server.db.tx(async sql => {
+  await sql`insert into notes (title) values (${title})`
+  try {
+    await sql.savepoint(async savepoint => {
+      await savepoint`insert into audit (action) values ('discarded')`
+      throw new Error('discard only this savepoint')
+    })
+  } catch {
+    // Only the savepoint rolled back.
+  }
+  await sql`insert into audit (action) values ('committed')`
+})
+```
+
+#### Query cancellation
+
+Bun queries expose `query.cancel()` to cancel one executing query. This is narrower than aborting a transaction: the query rejects, and the transaction can continue if the error is caught inside the callback. A cancellation error that escapes the transaction callback rolls back the transaction like any other error.
+
+```ts
+await server.db.tx(async sql => {
+  const query = sql`select pg_sleep(30)`.execute()
+  setTimeout(() => query.cancel(), 100)
+  try {
+    await query
+  } catch {
+    // This query was cancelled; the transaction can continue.
+  }
+  await sql`insert into audit (action) values ('continued')`
+})
+```
+
+`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Model/query APIs remain later capabilities.
 
 ## Logging
 
