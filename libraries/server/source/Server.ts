@@ -475,10 +475,6 @@ export class Server {
       const builder = new Builder({
         development,
         logger: this.#logger,
-        onRebuild: () => {
-          this.#readyError = null
-          this.#status = 'ok'
-        },
         root: this.#root,
         watch: false,
       })

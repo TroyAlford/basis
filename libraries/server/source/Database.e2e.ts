@@ -1,5 +1,6 @@
 import { Logger } from 'basis/logger'
 import { describe, expect, test } from 'bun:test'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { Server } from './Server'
 
@@ -9,6 +10,51 @@ import { Server } from './Server'
  */
 
 const root = join(import.meta.dir, '..', '..', '..')
+const USER = 'basis'
+const DATABASE = 'basis'
+
+/** Docker command result. */
+interface DockerResult {
+  /** Process exit code. */
+  code: number,
+  /** Standard error. */
+  stderr: string,
+  /** Standard output. */
+  stdout: string,
+}
+
+/**
+ * Run a Docker CLI command and capture its output.
+ * @param args - Arguments after `docker`.
+ * @returns The exit code and captured output.
+ */
+function docker(args: string[]): DockerResult {
+  const child = Bun.spawnSync(['docker', ...args], { stderr: 'pipe', stdout: 'pipe' })
+  const decoder = new TextDecoder()
+  return {
+    code: child.exitCode ?? -1,
+    stderr: decoder.decode(child.stderr),
+    stdout: decoder.decode(child.stdout),
+  }
+}
+
+/**
+ * Find the running managed container for an application scope.
+ * @param name - The managed database scope.
+ * @returns The container id, or an empty string.
+ */
+function container(name: string): string {
+  return docker(['ps', '-q', '--filter', `label=basis.database=${name}`]).stdout.trim().split('\n')[0] ?? ''
+}
+
+/**
+ * Remove the durable volume for an application scope.
+ * @param name - The managed database scope.
+ */
+function removeVolume(name: string): void {
+  const volume = docker(['volume', 'ls', '-q', '--filter', `label=basis.database=${name}`]).stdout.trim()
+  if (volume) docker(['volume', 'rm', '-f', volume])
+}
 
 /**
  * Build a server with a silent logger.
@@ -31,20 +77,58 @@ async function health(server: Server): Promise<{ error?: string, status?: string
 }
 
 describe('Server database lifecycle', () => {
-  test('starts a managed PostgreSQL container and closes it on shutdown', async () => {
-    const server = start(new Server().database())
+  test('persists managed data across a real restart and closes its pool', async () => {
+    const name = `basis-e2e-${randomUUID()}`
 
     try {
-      await server.ready()
-      expect(server.db.closed).toBe(false)
-      await server.db.connect()
-    } finally {
-      await server.shutdown()
-    }
+      const first = start(new Server().database({ name }))
+      try {
+        await first.ready()
+        expect(first.db.closed).toBe(false)
+        await first.db.connect()
 
-    expect(server.db.closed).toBe(true)
-    await expect(server.db.connect()).rejects.toThrow('Database is closed')
+        const id = container(name)
+        expect(id).not.toBe('')
+        const write = docker([
+          'exec', id, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', USER, '-d', DATABASE,
+          '-c', 'create table basis_restart_probe (id integer primary key); insert into basis_restart_probe values (1)',
+        ])
+        expect(write.code).toBe(0)
+      } finally {
+        await first.shutdown()
+      }
+
+      expect(first.db.closed).toBe(true)
+      await expect(first.db.connect()).rejects.toThrow('Database is closed')
+
+      const second = start(new Server().database({ name }))
+      try {
+        await second.ready()
+        const read = docker([
+          'exec', container(name), 'psql',
+          '-U', USER, '-d', DATABASE, '-tAc', 'select count(*) from basis_restart_probe',
+        ])
+        expect(read.code).toBe(0)
+        expect(read.stdout.trim()).toBe('1')
+      } finally {
+        await second.shutdown()
+      }
+    } finally {
+      removeVolume(name)
+    }
   }, 120_000)
+
+  test('does not leak a container when shutdown races startup', async () => {
+    const name = `basis-e2e-race-${randomUUID()}`
+
+    try {
+      const server = start(new Server().database({ name }))
+      await server.shutdown()
+      expect(container(name)).toBe('')
+    } finally {
+      removeVolume(name)
+    }
+  }, 60_000)
 
   test('reports unhealthy when an external PostgreSQL connection fails', async () => {
     const server = start(new Server().database({

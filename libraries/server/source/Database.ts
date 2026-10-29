@@ -1,9 +1,12 @@
 import { SQL } from 'bun'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { merge } from '../../utilities/functions/merge'
 
+/** The pool options used by every PostgreSQL connection. */
+type PoolOptions = Pick<DatabaseOptions, 'connectionTimeout' | 'idleTimeout' | 'max'>
+
 /** The pool defaults applied before the caller's options. */
-const DEFAULTS: Omit<DatabaseOptions, 'url'> = {
+const DEFAULTS: PoolOptions = {
   connectionTimeout: 10,
   idleTimeout: 30,
   max: 10,
@@ -32,6 +35,12 @@ export interface DatabaseOptions {
   idleTimeout?: number,
   /** Maximum number of connections in the pool. Defaults to 10. */
   max?: number,
+  /**
+   * Stable application scope for a managed database. Its data volume and
+   * credentials persist across restarts. Defaults to `SERVICE_NAME`, then the
+   * process working directory.
+   */
+  name?: string,
   /**
    * External PostgreSQL connection URL. When omitted, the server starts a
    * managed local PostgreSQL container instead.
@@ -106,12 +115,16 @@ class PostgresDatabase implements Database {
   /**
    * Creates the pool.
    * @param options - The connection URL and pool options.
+   * @param options.connectionTimeout - Maximum seconds to establish a connection.
+   * @param options.idleTimeout - Maximum seconds a connection may sit idle.
+   * @param options.max - Maximum number of connections in the pool.
    * @param options.url - The PostgreSQL connection URL.
    */
-  constructor({ url, ...options }: DatabaseOptions & { url: string | URL }) {
+  constructor({ connectionTimeout, idleTimeout, max, url }: DatabaseOptions & { url: string | URL }) {
     const overrides = Object.fromEntries(
-      Object.entries(options).filter(([, value]) => value !== undefined),
-    ) as Omit<DatabaseOptions, 'url'>
+      Object.entries({ connectionTimeout, idleTimeout, max })
+        .filter(([, value]) => value !== undefined),
+    ) as PoolOptions
     this.#sql = new SQL({ ...merge(DEFAULTS, overrides), url })
   }
 
@@ -188,15 +201,23 @@ class ManagedDatabase implements Database {
   #closing: Promise<void> | null = null
   #connecting: Promise<void> | null = null
   #container: string | null = null
+  #containerName: string
   #database: PostgresDatabase | null = null
-  #options: Omit<DatabaseOptions, 'url'>
+  #name: string
+  #options: Omit<DatabaseOptions, 'name' | 'url'>
+  #volume: string
 
   /**
    * Creates the managed database capability. The container starts on
    * {@link connect}.
-   * @param options - Pool options applied to the managed connection.
+   * @param options - Pool options and the stable application scope.
+   * @param options.name - Stable managed database scope.
    */
-  constructor(options: Omit<DatabaseOptions, 'url'>) {
+  constructor({ name, ...options }: Omit<DatabaseOptions, 'url'>) {
+    this.#name = name?.trim() || Bun.env.SERVICE_NAME?.trim() || process.cwd()
+    const identity = createHash('sha1').update(this.#name).digest('hex').slice(0, 16)
+    this.#volume = `basis-postgres-${identity}`
+    this.#containerName = this.#volume
     this.#options = options
   }
 
@@ -239,12 +260,17 @@ class ManagedDatabase implements Database {
 
   /** Starts the container, waits for readiness, and connects the pool. */
   async #start(): Promise<void> {
-    const password = randomUUID()
+    const password = await this.#ensureVolume()
+    await docker(['rm', '-f', this.#containerName])
+
     const run = await docker([
       'run', '-d', '--rm', '--pull', 'missing',
+      '--name', this.#containerName,
+      '--label', `basis.database=${this.#name}`,
       '-e', `POSTGRES_USER=${MANAGED_NAME}`,
       '-e', `POSTGRES_PASSWORD=${password}`,
       '-e', `POSTGRES_DB=${MANAGED_NAME}`,
+      '-v', `${this.#volume}:/var/lib/postgresql/data`,
       '-p', `127.0.0.1::${MANAGED_PORT}`,
       MANAGED_IMAGE,
     ])
@@ -264,6 +290,37 @@ class ManagedDatabase implements Database {
       await this.#removeContainer()
       throw error
     }
+  }
+
+  /**
+   * Resolve the durable data volume and its stable credentials.
+   * @returns The password recorded for this application scope.
+   */
+  async #ensureVolume(): Promise<string> {
+    const inspect = await docker([
+      'volume', 'inspect', '--format', '{{ index .Labels "basis.password" }}', this.#volume,
+    ])
+    if (inspect.code === 0) {
+      const password = inspect.stdout.trim()
+      if (password && password !== '<no value>') return password
+      throw new Error(
+        `Managed database volume "${this.#volume}" exists without credentials; ` +
+        'remove it or restore its basis.password label.',
+      )
+    }
+
+    const password = randomUUID()
+    const create = await docker([
+      'volume', 'create',
+      '--label', `basis.database=${this.#name}`,
+      '--label', `basis.password=${password}`,
+      this.#volume,
+    ])
+    if (create.code !== 0) {
+      const detail = create.stderr.trim() || `docker volume create exited with ${create.code}`
+      throw new Error(`Managed database volume failed to start: ${detail}`)
+    }
+    return password
   }
 
   /**
@@ -304,8 +361,9 @@ class ManagedDatabase implements Database {
     )
   }
 
-  /** Closes the pool and removes the managed container. */
+  /** Waits for in-flight startup, closes the pool, and removes the container. */
   async #stop(): Promise<void> {
+    await this.#connecting?.catch(() => undefined)
     await this.#database?.close()
     this.#database = null
     await this.#removeContainer()
