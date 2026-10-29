@@ -19,14 +19,15 @@ const lint = (code: string, filename = 'fixture.tsx') => lintWithBun({
   rulePath: join(import.meta.dir, 'componentArchitecture.ts'),
 })
 
-const messageIds = (code: string, filename = 'fixture.tsx') => (
-  lint(code, filename).report
-    .split('\n')
-    .filter(line => line.includes('test/component-architecture'))
-    .map(line => MESSAGE_PATTERNS.find(([, pattern]) => line.includes(pattern))?.[0])
-    .filter((id): id is string => id !== undefined)
-    .sort()
-)
+const messageIds = (code: string, filename = 'fixture.tsx') => {
+  const ids = new Set<string>()
+  for (const line of lint(code, filename).report.split('\n')) {
+    if (!line.includes('test/component-architecture')) continue
+    const id = MESSAGE_PATTERNS.find(([, pattern]) => line.includes(pattern))?.[0]
+    if (id !== undefined) ids.add(id)
+  }
+  return [...ids].sort()
+}
 
 describe('componentArchitecture hooks', () => {
   test('rejects a named React hook import', () => {
