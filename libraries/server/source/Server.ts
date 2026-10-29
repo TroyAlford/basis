@@ -90,7 +90,6 @@ export class Server {
   #builder: Builder | null = null
   #closing: Promise<void> | null = null
   #database: Database = new NullDatabase()
-  #databaseConfigured = false
   #development = true
   #entrypoints: [string, string][] = []
   #favIcon: ResolvedFavIcon | null = null
@@ -449,9 +448,9 @@ export class Server {
       this.#assets ? [this.#assets] : [],
     )
 
-    const databaseReady = this.#databaseConfigured
-      ? this.#database.connect()
-      : Promise.resolve()
+    const databaseReady = this.#database instanceof NullDatabase
+      ? Promise.resolve()
+      : this.#database.connect()
 
     let routes: Bun.Serve.Routes<SocketData, string> | undefined
 
@@ -471,7 +470,7 @@ export class Server {
 
       this.#readyError = null
       this.#status = 'starting'
-      this.#ready = this.#trackReady(databaseReady)
+      this.#ready = databaseReady
     } else {
       const builder = new Builder({
         development,
@@ -522,7 +521,10 @@ export class Server {
     process.on('SIGTERM', this.#handleSignal)
 
     // Development builds lazily; prove one build before reporting healthy.
-    if (development && routes) this.#warmDevelopment(databaseReady)
+    if (development) {
+      if (routes) this.#warmDevelopment(databaseReady)
+      else this.#ready = this.#trackReady(databaseReady)
+    }
 
     this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
 
@@ -616,7 +618,6 @@ export class Server {
    */
   database(options: DatabaseOptions = {}): Server {
     this.#database = createDatabase(options)
-    this.#databaseConfigured = true
     return this
   }
 

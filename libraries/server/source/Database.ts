@@ -68,12 +68,12 @@ async function docker(args: string[]): Promise<DockerResult> {
   const executable = Bun.which('docker')
   if (!executable) throw new Error(DOCKER_REQUIRED)
 
-  const process = Bun.spawn([executable, ...args], { stderr: 'pipe', stdout: 'pipe' })
+  const child = Bun.spawn([executable, ...args], { stderr: 'pipe', stdout: 'pipe' })
   const decoder = new TextDecoder()
   const [stdout, stderr, code] = await Promise.all([
-    new Response(process.stdout).arrayBuffer(),
-    new Response(process.stderr).arrayBuffer(),
-    process.exited,
+    new Response(child.stdout).arrayBuffer(),
+    new Response(child.stderr).arrayBuffer(),
+    child.exited,
   ])
 
   return {
@@ -109,7 +109,10 @@ class PostgresDatabase implements Database {
    * @param options.url - The PostgreSQL connection URL.
    */
   constructor({ url, ...options }: DatabaseOptions & { url: string | URL }) {
-    this.#sql = new SQL({ ...merge(DEFAULTS, options), url })
+    const overrides = Object.fromEntries(
+      Object.entries(options).filter(([, value]) => value !== undefined),
+    ) as Omit<DatabaseOptions, 'url'>
+    this.#sql = new SQL({ ...merge(DEFAULTS, overrides), url })
   }
 
   /**
