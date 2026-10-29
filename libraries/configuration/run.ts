@@ -131,12 +131,18 @@ export async function runAsync(
   const timer = options.timeoutMs === undefined
     ? null
     : setTimeout(() => child.kill(), options.timeoutMs)
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ])
-  if (timer !== null) clearTimeout(timer)
+  let exitCode: number
+  let stderr: string
+  let stdout: string
+  try {
+    [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+  } finally {
+    if (timer !== null) clearTimeout(timer)
+  }
   const captured: CommandResult = {
     exitCode,
     lines: normalizeLines(stdout),
