@@ -85,13 +85,13 @@ function portOf(id: string): number {
  * @returns The started server.
  */
 function startWithService(server: Server, service: string): Server {
-  const previous = process.env.SERVICE_NAME
-  process.env.SERVICE_NAME = service
+  const previous = Bun.env.SERVICE_NAME
+  Bun.env.SERVICE_NAME = service
   try {
     return start(server)
   } finally {
-    if (previous === undefined) delete process.env.SERVICE_NAME
-    else process.env.SERVICE_NAME = previous
+    if (previous === undefined) delete Bun.env.SERVICE_NAME
+    else Bun.env.SERVICE_NAME = previous
   }
 }
 
@@ -146,8 +146,8 @@ async function credentials(id: string): Promise<CredentialInspection> {
 describe('Server database lifecycle', () => {
   test('supports independent installs, durable restart, and same-install reconnection', async () => {
     const dataHome = tempDirectory('basis-db-data-')
-    const previousData = process.env.XDG_DATA_HOME
-    process.env.XDG_DATA_HOME = dataHome
+    const previousData = Bun.env.XDG_DATA_HOME
+    Bun.env.XDG_DATA_HOME = dataHome
     const serviceA = `basis-e2e-a-${randomUUID()}`
     const serviceB = `basis-e2e-b-${randomUUID()}`
     const rootA = tempDirectory('basis-install-a-')
@@ -222,8 +222,8 @@ describe('Server database lifecycle', () => {
         await bAgain.shutdown()
       }
     } finally {
-      if (previousData === undefined) delete process.env.XDG_DATA_HOME
-      else process.env.XDG_DATA_HOME = previousData
+      if (previousData === undefined) delete Bun.env.XDG_DATA_HOME
+      else Bun.env.XDG_DATA_HOME = previousData
       removeService(serviceA)
       removeService(serviceB)
     }
@@ -231,8 +231,8 @@ describe('Server database lifecycle', () => {
 
   test('exposes Bun SQL parameterization and error semantics', async () => {
     const dataHome = tempDirectory('basis-db-data-')
-    const previousData = process.env.XDG_DATA_HOME
-    process.env.XDG_DATA_HOME = dataHome
+    const previousData = Bun.env.XDG_DATA_HOME
+    Bun.env.XDG_DATA_HOME = dataHome
     const service = `basis-e2e-sql-${randomUUID()}`
     const install = tempDirectory('basis-install-')
 
@@ -254,8 +254,8 @@ describe('Server database lifecycle', () => {
         await server.shutdown()
       }
     } finally {
-      if (previousData === undefined) delete process.env.XDG_DATA_HOME
-      else process.env.XDG_DATA_HOME = previousData
+      if (previousData === undefined) delete Bun.env.XDG_DATA_HOME
+      else Bun.env.XDG_DATA_HOME = previousData
       removeService(service)
     }
   }, 120_000)
@@ -312,7 +312,7 @@ describe('Server database lifecycle', () => {
     `
     const child = Bun.spawn([process.execPath, '-e', script], {
       cwd: root,
-      env: { ...process.env, PATH: '/nonexistent' },
+      env: { ...Bun.env, PATH: '/nonexistent' },
       stderr: 'pipe',
       stdout: 'pipe',
     })
