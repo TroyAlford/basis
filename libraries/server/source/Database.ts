@@ -56,6 +56,8 @@ export interface Database {
   readonly closed: boolean,
   /** Establishes the database connection. */
   connect(): Promise<void>,
+  /** The pooled Bun SQL tagged-template API. */
+  readonly sql: SQL,
 }
 
 /** Docker command result. */
@@ -137,6 +139,14 @@ class PostgresDatabase implements Database {
   }
 
   /**
+   * The pooled Bun SQL tagged-template API.
+   * @returns The underlying Bun SQL instance.
+   */
+  get sql(): SQL {
+    return this.#sql
+  }
+
+  /**
    * Establishes the pool's initial connection.
    * @returns A promise that resolves once the connection is established.
    * @throws {Error} When the server is unreachable or the pool is closed.
@@ -169,6 +179,14 @@ export class NullDatabase implements Database {
    */
   get closed(): boolean {
     return this.#closed
+  }
+
+  /**
+   * Throws because no database is configured.
+   * @throws {Error} Always, naming the missing configuration.
+   */
+  get sql(): SQL {
+    throw new Error('No database is configured for this server')
   }
 
   /**
@@ -227,6 +245,16 @@ class ManagedDatabase implements Database {
    */
   get closed(): boolean {
     return this.#closed
+  }
+
+  /**
+   * The pooled Bun SQL tagged-template API.
+   * @returns The connected pool's Bun SQL instance.
+   * @throws {Error} Before the managed database is connected or after close.
+   */
+  get sql(): SQL {
+    if (!this.#database) throw new Error('Managed database is not connected')
+    return this.#database.sql
   }
 
   /**

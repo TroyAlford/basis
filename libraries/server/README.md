@@ -62,7 +62,16 @@ Pass `url` to use an external PostgreSQL server instead. `DatabaseOptions` also 
 
 `server.db` always returns a database capability. Without `database()`, it is a `NullDatabase` whose calls fail with a clear configuration error, so callers do not need optional chaining. `connect()` establishes a real connection and rejects when PostgreSQL is unreachable, and `close()` is idempotent. The pool is never a module global, so two servers never share one.
 
-`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Query, transaction, and model APIs are not part of this capability yet.
+`server.db.sql` is the pooled Bun SQL tagged-template API. Interpolations are parameters, and results and errors are Bun's own:
+
+```ts
+const owner = 'Troy'
+const notes = await server.db.sql<{ id: number, title: string }[]>`
+  select id, title from notes where owner = ${owner}
+`
+```
+
+`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Transactions and model/query APIs remain later capabilities.
 
 ## Logging
 

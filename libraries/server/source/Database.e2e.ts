@@ -10,8 +10,6 @@ import { Server } from './Server'
  */
 
 const root = join(import.meta.dir, '..', '..', '..')
-const USER = 'basis'
-const DATABASE = 'basis'
 
 /** Docker command result. */
 interface DockerResult {
@@ -86,14 +84,8 @@ describe('Server database lifecycle', () => {
         await first.ready()
         expect(first.db.closed).toBe(false)
         await first.db.connect()
-
-        const id = container(name)
-        expect(id).not.toBe('')
-        const write = docker([
-          'exec', id, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', USER, '-d', DATABASE,
-          '-c', 'create table basis_restart_probe (id integer primary key); insert into basis_restart_probe values (1)',
-        ])
-        expect(write.code).toBe(0)
+        await first.db.sql`create table basis_restart_probe (id integer primary key)`
+        await first.db.sql`insert into basis_restart_probe values (1)`
       } finally {
         await first.shutdown()
       }
@@ -104,14 +96,37 @@ describe('Server database lifecycle', () => {
       const second = start(new Server().database({ name }))
       try {
         await second.ready()
-        const read = docker([
-          'exec', container(name), 'psql',
-          '-U', USER, '-d', DATABASE, '-tAc', 'select count(*) from basis_restart_probe',
-        ])
-        expect(read.code).toBe(0)
-        expect(read.stdout.trim()).toBe('1')
+        const rows = await second.db.sql<{ count: number }[]>`
+          select count(*)::int as count from basis_restart_probe
+        `
+        expect(rows[0]?.count).toBe(1)
       } finally {
         await second.shutdown()
+      }
+    } finally {
+      removeVolume(name)
+    }
+  }, 120_000)
+
+  test('exposes Bun SQL parameterization and error semantics', async () => {
+    const name = `basis-e2e-sql-${randomUUID()}`
+
+    try {
+      const server = start(new Server().database({ name }))
+      try {
+        await server.ready()
+        const injected = "Robert'); drop table users; --"
+        const rows = await server.db.sql<{ text: string, value: number }[]>`
+          select ${injected} as text, ${7} as value
+        `
+        expect(rows[0]?.text).toBe(injected)
+        expect(rows[0]?.value).toBe(7)
+
+        const failure = await server.db.sql`select * from basis_missing_relation`
+          .catch((error: unknown) => error)
+        expect(failure).toMatchObject({ errno: '42P01' })
+      } finally {
+        await server.shutdown()
       }
     } finally {
       removeVolume(name)
@@ -151,6 +166,7 @@ describe('Server database lifecycle', () => {
 
     try {
       await expect(server.db.connect()).rejects.toThrow('No database is configured for this server')
+      expect(() => server.db.sql).toThrow('No database is configured for this server')
     } finally {
       await server.shutdown()
     }
