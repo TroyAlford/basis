@@ -15,8 +15,8 @@ import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
-import type { DatabaseOptions } from './Database'
-import { Database } from './Database'
+import type { Database, DatabaseOptions } from './Database'
+import { createDatabase, NullDatabase } from './Database'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
 import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
@@ -89,7 +89,8 @@ export class Server {
   #assets: string | null = null
   #builder: Builder | null = null
   #closing: Promise<void> | null = null
-  #database: Database | null = null
+  #database: Database = new NullDatabase()
+  #databaseConfigured = false
   #development = true
   #entrypoints: [string, string][] = []
   #favIcon: ResolvedFavIcon | null = null
@@ -152,11 +153,14 @@ export class Server {
   }
 
   /**
-   * The server-owned PostgreSQL pool, when {@link database} configured one.
-   * @returns The database capability, or `undefined` when none is configured.
+   * The server-owned database capability.
+   *
+   * A server always has a database capability. When {@link database} has not
+   * configured one, this is a {@link NullDatabase} whose calls fail gracefully.
+   * @returns The database capability.
    */
-  get db(): Database | undefined {
-    return this.#database ?? undefined
+  get db(): Database {
+    return this.#database
   }
 
   /**
@@ -445,6 +449,10 @@ export class Server {
       this.#assets ? [this.#assets] : [],
     )
 
+    const databaseReady = this.#databaseConfigured
+      ? this.#database.connect()
+      : Promise.resolve()
+
     let routes: Bun.Serve.Routes<SocketData, string> | undefined
 
     if (development) {
@@ -463,7 +471,7 @@ export class Server {
 
       this.#readyError = null
       this.#status = 'starting'
-      this.#ready = Promise.resolve()
+      this.#ready = this.#trackReady(databaseReady)
     } else {
       const builder = new Builder({
         development,
@@ -483,17 +491,9 @@ export class Server {
       this.#builder = builder
       this.#readyError = null
       this.#status = 'starting'
-      this.#ready = builder.initialBuild()
-        .then(() => undefined)
-        .catch((error: unknown) => {
-          const failure = error instanceof Error ? error : new Error(String(error))
-          this.#readyError = failure
-          this.#status = 'error'
-          this.#logger.error(`build failed: ${failure.message}`)
-          throw failure
-        })
-      // Avoid an unhandled rejection when a caller never awaits `ready()`.
-      void this.#ready.catch(() => undefined)
+      this.#ready = this.#trackReady(
+        Promise.all([builder.initialBuild(), databaseReady]).then(() => undefined),
+      )
     }
 
     this.#server = Bun.serve({
@@ -522,7 +522,7 @@ export class Server {
     process.on('SIGTERM', this.#handleSignal)
 
     // Development builds lazily; prove one build before reporting healthy.
-    if (development && routes) this.#warmDevelopment()
+    if (development && routes) this.#warmDevelopment(databaseReady)
 
     this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
 
@@ -549,7 +549,7 @@ export class Server {
     this.#server = null
 
     if (!this.#closing) {
-      const closing = this.#database?.close() ?? Promise.resolve()
+      const closing = this.#database.close()
       void closing.catch((error: unknown) => {
         const failure = error instanceof Error ? error : new Error(String(error))
         this.#logger.error(`database close failed: ${failure.message}`)
@@ -605,16 +605,18 @@ export class Server {
   }
 
   /**
-   * Configures the server-owned PostgreSQL pool.
+   * Configures the server-owned PostgreSQL capability.
    *
-   * The pool is created with Bun's native SQL client. The server owns its
-   * lifecycle: {@link stop} starts closing it and {@link shutdown} waits for
-   * that close to finish.
-   * @param options - The PostgreSQL connection URL and pool options.
+   * With no `url`, the server starts a managed local PostgreSQL container on
+   * `start`, assigns it an ephemeral port, and waits for it before reporting
+   * healthy. Passing a `url` uses an external PostgreSQL server instead. The
+   * server owns the pool lifecycle in both cases.
+   * @param options - Pool options and an optional external PostgreSQL URL.
    * @returns The server.
    */
-  database(options: DatabaseOptions): Server {
-    this.#database = new Database(options)
+  database(options: DatabaseOptions = {}): Server {
+    this.#database = createDatabase(options)
+    this.#databaseConfigured = true
     return this
   }
 
@@ -784,27 +786,43 @@ export class Server {
   }
 
   /**
-   * Build the development shell once so `/api/health` reflects a real build.
-   *
-   * Development compiles lazily on the first request, so `ready()` and
-   * `/api/health` stay `starting` until one build has actually succeeded. A failed
-   * build reports `error` rather than a healthy process.
+   * Tracks the combined startup readiness of the build and database.
+   * @param readiness - The pending startup work.
+   * @returns The tracked readiness promise.
    */
-  #warmDevelopment(): void {
-    this.#ready = fetch(this.#devShellURL())
-      .then(response => {
-        if (!response.ok) throw new Error(`development build failed (${response.status})`)
+  #trackReady(readiness: Promise<void>): Promise<void> {
+    const tracked = readiness
+      .then(() => {
+        this.#readyError = null
         this.#status = 'ok'
       })
       .catch((error: unknown) => {
         const failure = error instanceof Error ? error : new Error(String(error))
         this.#readyError = failure
         this.#status = 'error'
-        this.#logger.error(`build failed: ${failure.message}`)
+        this.#logger.error(`startup failed: ${failure.message}`)
         throw failure
       })
     // Avoid an unhandled rejection when a caller never awaits `ready()`.
-    void this.#ready.catch(() => undefined)
+    void tracked.catch(() => undefined)
+    return tracked
+  }
+
+  /**
+   * Build the development shell once so `/api/health` reflects a real build.
+   *
+   * Development compiles lazily on the first request, so `ready()` and
+   * `/api/health` stay `starting` until one build has actually succeeded. A failed
+   * build reports `error` rather than a healthy process.
+   * @param databaseReady - The pending database startup.
+   */
+  #warmDevelopment(databaseReady: Promise<void>): void {
+    const buildReady = fetch(this.#devShellURL()).then(response => {
+      if (!response.ok) throw new Error(`development build failed (${response.status})`)
+    })
+    this.#ready = this.#trackReady(
+      Promise.all([buildReady, databaseReady]).then(() => undefined),
+    )
   }
 
   /**

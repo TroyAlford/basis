@@ -38,7 +38,7 @@ new Server()
 
 ## Database
 
-`server.database(options)` configures one Bun-native PostgreSQL pool owned by the server:
+`server.database()` configures one server-owned PostgreSQL capability backed by Bun's native SQL pool:
 
 ```ts
 import { Server } from 'basis/server'
@@ -46,17 +46,21 @@ import { Server } from 'basis/server'
 const server = new Server()
   .root(import.meta.dir)
   .main('./Application.tsx')
-  .database({ url: Bun.env.DATABASE_URL! })
+  .database()
   .start()
 
-await server.db?.connect()
+await server.db.connect()
 // ...
 await server.shutdown()
 ```
 
-`DatabaseOptions` accepts the PostgreSQL `url` plus the Bun pool's `max`, `idleTimeout`, and `connectionTimeout`. `server.db` exposes that pool; `connect()` establishes a real connection and rejects when PostgreSQL is unreachable, and `close()` is idempotent. The pool is never a module global, so two servers never share one.
+With no `url`, the server starts a managed local PostgreSQL container, assigns it an ephemeral host port, and waits for it before reporting healthy. The managed database requires Docker; an application that uses it should declare `"docker"` in `basis.hostDependencies` so install fails early when the host cannot provide it. The server also reports `503 error` from `/api/health` if Docker is unavailable at startup.
 
-`server.stop()` keeps its synchronous contract and starts pool teardown. `server.shutdown()` waits for pool, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Query, transaction, and model APIs are not part of this capability yet.
+Pass `url` to use an external PostgreSQL server instead. `DatabaseOptions` also accepts the pool's `max`, `idleTimeout`, and `connectionTimeout`, defaulting to `10`, `30`, and `10` seconds respectively.
+
+`server.db` always returns a database capability. Without `database()`, it is a `NullDatabase` whose calls fail with a clear configuration error, so callers do not need optional chaining. `connect()` establishes a real connection and rejects when PostgreSQL is unreachable, and `close()` is idempotent. The pool is never a module global, so two servers never share one.
+
+`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Query, transaction, and model APIs are not part of this capability yet.
 
 ## Logging
 
