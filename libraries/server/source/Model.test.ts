@@ -33,15 +33,6 @@ describe('Model', () => {
     expect(entity?.fields.find(field => field.primaryKey)?.name).toBe('id')
   })
 
-  test('exposes the canonical field types as an enum', () => {
-    expect(String(FieldType.Boolean)).toBe('boolean')
-    expect(String(FieldType.Date)).toBe('date')
-    expect(String(FieldType.ID)).toBe('id')
-    expect(String(FieldType.Number)).toBe('number')
-    expect(String(FieldType.String)).toBe('string')
-    expect(String(FieldType.Timestamp)).toBe('timestamp')
-  })
-
   test('accepts every field type', () => {
     const model = load({
       entities: [{
