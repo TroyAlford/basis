@@ -93,7 +93,7 @@ describe('Basis Code CI', () => {
   })
 
   test('skips every code job on drafts and has no edit skip path', () => {
-    for (const id of ['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install', 'required']) {
+    for (const id of ['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install', 'canary', 'required']) {
       const job = code.jobs?.[id]
       expect(job).toBeDefined()
       expect(job?.if).toContain('!github.event.pull_request.draft')
@@ -104,7 +104,7 @@ describe('Basis Code CI', () => {
 
   test('keeps the five code jobs and their core commands', () => {
     const eslint = code.jobs?.eslint?.steps ?? []
-    expect(eslint.some(step => step.run?.includes('bun ./node_modules/eslint/bin/eslint.js'))).toBe(true)
+    expect(eslint.some(step => step.run?.includes('bun ./consumer/lint-es.ts'))).toBe(true)
     expect(eslint.some(step => step.run?.includes('stylelint'))).toBe(true)
     expect(eslint.some(step => step.run === 'bun run lint:md')).toBe(true)
     expect(eslint.some(step => step.run === 'bun test consumer/cli.test.ts')).toBe(true)

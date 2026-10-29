@@ -1,5 +1,4 @@
 import type { Linter } from 'eslint'
-import pluginTypescript from 'typescript-eslint'
 import { IGNORE_PATTERNS } from './ignores'
 import { plugins } from './plugins'
 
@@ -15,12 +14,12 @@ import { plugins } from './plugins'
  * @returns A flat ESLint configuration array.
  */
 export const createComplianceConfig = (): Linter.Config[] => ([
-  { ignores: IGNORE_PATTERNS },
+  { ignores: [...IGNORE_PATTERNS, 'libraries/linter-css/syntax/**'] },
   {
     files: ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx'],
     languageOptions: {
       ecmaVersion: 'latest',
-      parser: pluginTypescript.parser,
+      parser: '@typescript-eslint/parser',
       parserOptions: {
         ecmaFeatures: { jsx: true },
         ecmaVersion: 'latest',

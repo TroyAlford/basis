@@ -1,37 +1,31 @@
-import parser from '@typescript-eslint/parser'
 import { describe, expect, test } from 'bun:test'
-import { Linter } from 'eslint'
-import { componentArchitecture } from './componentArchitecture'
+import { join } from 'node:path'
+import { lintWithBun } from './testUtils'
 
-const CONFIG: Linter.Config = {
-  files: ['**/*.ts', '**/*.tsx'],
-  languageOptions: {
-    parser,
-    parserOptions: {
-      ecmaFeatures: { jsx: true },
-      ecmaVersion: 'latest',
-      sourceType: 'module',
-    },
-  },
-  plugins: {
-    test: {
-      rules: {
-        'component-architecture': componentArchitecture,
-      },
-    },
-  },
-  rules: {
-    'test/component-architecture': 'error',
-  },
-}
+const MESSAGE_PATTERNS: [string, string][] = [
+  ['customHook', 'Custom React hook'],
+  ['functionComponent', 'is used as a function component'],
+  ['reactClassBase', 'extends React'],
+  ['reactFunctionType', 'not allowed as a component type'],
+  ['reactHook', 'React hook'],
+  ['reactWrapper', 'creates a function component'],
+]
 
-const lint = (code: string, filename = 'fixture.tsx') => {
-  const linter = new Linter()
-  return linter.verify(code, [CONFIG], { filename })
-}
+const lint = (code: string, filename = 'fixture.tsx') => lintWithBun({
+  code,
+  filename,
+  ruleExport: 'componentArchitecture',
+  ruleName: 'component-architecture',
+  rulePath: join(import.meta.dir, 'componentArchitecture.ts'),
+})
 
 const messageIds = (code: string, filename = 'fixture.tsx') => (
-  lint(code, filename).map(message => message.messageId).sort()
+  lint(code, filename).report
+    .split('\n')
+    .filter(line => line.includes('test/component-architecture'))
+    .map(line => MESSAGE_PATTERNS.find(([, pattern]) => line.includes(pattern))?.[0])
+    .filter((id): id is string => id !== undefined)
+    .sort()
 )
 
 describe('componentArchitecture hooks', () => {

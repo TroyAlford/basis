@@ -155,11 +155,7 @@ const runLint = (fix: boolean): number => {
  * `basis lint` and `basis check` run, with no formatting rules.
  * @returns The child process exit code.
  */
-const runCompliance = (): number => runBin('eslint', 'eslint', [
-  '.',
-  '--config',
-  join(basisDir(), 'eslint.compliance.config.mjs'),
-])
+const runCompliance = (): number => runBunLint(false, join(basisDir(), 'eslint.compliance.config.mjs'))
 
 /**
  * Reports whether the running Bun can type check through `bun --check`.

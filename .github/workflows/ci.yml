@@ -85,8 +85,9 @@ jobs:
   canary:
     # Informational until `bun lint` is in a stable release. This job runs the
     # same toolchain on the current canary so lint, tests, and the consumer
-    # contract are visible while the stable jobs are blocked on Bun 1.4.4.
-    if: github.event.action != 'edited'
+    # contract are visible while the stable jobs are blocked on a stable Bun
+    # release with `bun lint`.
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

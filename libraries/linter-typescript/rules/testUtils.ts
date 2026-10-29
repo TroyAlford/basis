@@ -1,6 +1,6 @@
 import { tempDirectory } from 'basis/testing'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 /** Options for a fixture lint run. */
 export interface BunLintOptions {
@@ -52,6 +52,7 @@ export const lintWithBun = (options: BunLintOptions): BunLintResult => {
   if (!existsSync(join(root, 'package.json'))) {
     writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'fixture', private: true, type: 'module' }))
   }
+  mkdirSync(dirname(fixture), { recursive: true })
   writeFileSync(fixture, code)
   writeFileSync(config, [
     `import { ${ruleExport} } from '${rulePath}'`,

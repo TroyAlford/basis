@@ -68,9 +68,10 @@ const eslintConfigPath = (): string => (
  * script and points `--cwd` at the real project, preserving config and ignore
  * resolution without deferring to the consumer's script.
  * @param fix - Whether to apply the linter's fixes.
+ * @param configPath - The ESLint config path to run.
  * @returns The child process exit code.
  */
-export const runBunLint = (fix: boolean): number => {
+export const runBunLint = (fix: boolean, configPath: string = eslintConfigPath()): number => {
   if (!requireBunLint()) return 1
 
   const scratch = mkdtempSync(join(tmpdir(), 'basis-lint-'))
@@ -87,7 +88,7 @@ export const runBunLint = (fix: boolean): number => {
       '--cwd',
       process.cwd(),
       '--config',
-      eslintConfigPath(),
+      configPath,
       ...(fix ? ['--fix'] : []),
       '.',
     ], {
