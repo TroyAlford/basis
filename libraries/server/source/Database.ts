@@ -2,7 +2,6 @@ import { runAsync } from 'basis/configuration'
 import { SQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 /** The pool defaults used by every managed or external connection. */
@@ -185,7 +184,6 @@ class ManagedDatabase implements Database {
   #closing: Promise<void> | null = null
   #connecting: Promise<void> | null = null
   #containerName: string
-  #dataRoot: string
   #database: PostgresDatabase | null = null
   #identity: string
   #root: string
@@ -201,8 +199,6 @@ class ManagedDatabase implements Database {
     this.#identity = managedDatabaseIdentity(this.#root)
     this.#containerName = `basis-postgres-${this.#identity}`
     this.#volume = this.#containerName
-    this.#dataRoot = Bun.env.XDG_DATA_HOME?.trim()
-      || join(Bun.env.HOME?.trim() || homedir(), '.local', 'share')
   }
 
   /**
@@ -282,7 +278,7 @@ class ManagedDatabase implements Database {
    * @returns The password and its host file path.
    */
   async #secret(create: boolean): Promise<{ file: string, password: string }> {
-    const directory = join(this.#dataRoot, 'basis', 'databases', this.#identity)
+    const directory = join(this.#root, '.basis', 'database', this.#identity)
     await mkdir(directory, { mode: 0o700, recursive: true })
     await chmod(directory, 0o700)
     const file = join(directory, 'password')
@@ -328,6 +324,10 @@ class ManagedDatabase implements Database {
       --filter ${`name=^/${this.#containerName}$`}
       --format {{.State}}
     `
+    if (result.exitCode !== 0) {
+      const detail = result.stderr.trim() || `docker ps exited with ${result.exitCode}`
+      throw new Error(`PostgreSQL service discovery failed: ${detail}`)
+    }
     if (result.lines.length === 0) return 'missing'
     return result.lines[0] === 'running' ? 'running' : 'stopped'
   }
@@ -340,6 +340,10 @@ class ManagedDatabase implements Database {
     const result = await runAsync`
       docker volume ls -q --filter ${`name=^${this.#volume}$`}
     `
+    if (result.exitCode !== 0) {
+      const detail = result.stderr.trim() || `docker volume ls exited with ${result.exitCode}`
+      throw new Error(`PostgreSQL volume discovery failed: ${detail}`)
+    }
     return result.lines.length > 0
   }
 

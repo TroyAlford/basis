@@ -101,6 +101,8 @@ interface CredentialInspection {
   password: string,
   /** Raw container inspect output. */
   raw: string,
+  /** Host path of the password file. */
+  source: string,
 }
 
 /**
@@ -116,14 +118,11 @@ async function credentials(id: string): Promise<CredentialInspection> {
   const password = (await readFile(mount.Source, 'utf8')).trim()
   const mode = (await stat(mount.Source)).mode & 0o777
   const directoryMode = (await stat(dirname(mount.Source))).mode & 0o777
-  return { directoryMode, mode, password, raw }
+  return { directoryMode, mode, password, raw, source: mount.Source }
 }
 
 describe('Server database lifecycle', () => {
   test('supports independent installs, durable restart, and same-install reconnection', async () => {
-    const dataHome = tempDirectory('basis-db-data-')
-    const previousData = Bun.env.XDG_DATA_HOME
-    Bun.env.XDG_DATA_HOME = dataHome
     const service = `basis-e2e-${randomUUID()}`
     const rootA = tempDirectory('basis-install-a-')
     const rootB = tempDirectory('basis-install-b-')
@@ -148,6 +147,7 @@ describe('Server database lifecycle', () => {
         await b.db.sql`insert into install_probe values ('B')`
 
         const secret = await credentials(aId)
+        expect(secret.source.startsWith(join(rootA, '.basis', 'database'))).toBe(true)
         expect(secret.directoryMode).toBe(0o700)
         expect(secret.mode).toBe(0o600)
         expect(secret.raw).not.toContain(secret.password)
@@ -198,17 +198,12 @@ describe('Server database lifecycle', () => {
         await bAgain.shutdown()
       }
     } finally {
-      if (previousData === undefined) delete Bun.env.XDG_DATA_HOME
-      else Bun.env.XDG_DATA_HOME = previousData
       removeService(rootA)
       removeService(rootB)
     }
   }, 180_000)
 
   test('exposes Bun SQL parameterization and error semantics', async () => {
-    const dataHome = tempDirectory('basis-db-data-')
-    const previousData = Bun.env.XDG_DATA_HOME
-    Bun.env.XDG_DATA_HOME = dataHome
     const service = `basis-e2e-sql-${randomUUID()}`
     const install = tempDirectory('basis-install-')
 
@@ -230,8 +225,6 @@ describe('Server database lifecycle', () => {
         await server.shutdown()
       }
     } finally {
-      if (previousData === undefined) delete Bun.env.XDG_DATA_HOME
-      else Bun.env.XDG_DATA_HOME = previousData
       removeService(install)
     }
   }, 120_000)
