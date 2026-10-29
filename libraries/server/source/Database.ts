@@ -170,9 +170,11 @@ export class NullDatabase implements Database {
 
   /**
    * Rejects because no database is configured.
+   * @param callback - Transaction-scoped work; unused without a database.
    * @returns A rejected promise naming the missing configuration.
    */
-  tx<T>(): Promise<SQL.ContextCallbackResult<T>> {
+  tx<T>(callback: SQL.TransactionContextCallback<T>): Promise<SQL.ContextCallbackResult<T>> {
+    void callback
     return Promise.reject(new Error('No database is configured for this server'))
   }
 }
