@@ -29,7 +29,7 @@ interface InspectMount {
  * @returns The container ids.
  */
 function containers(install: string): readonly string[] {
-  return run`docker ps -aq --filter ${`label=basis.root=${install}`}`.lines
+  return run`docker ps -aq --filter ${`label=basis.install=${install}`}`.lines
 }
 
 /**
@@ -38,7 +38,7 @@ function containers(install: string): readonly string[] {
  */
 function removeService(install: string): void {
   for (const id of containers(install)) void run`docker rm -f ${id}`
-  for (const volume of run`docker volume ls -q --filter ${`label=basis.root=${install}`}`.lines) {
+  for (const volume of run`docker volume ls -q --filter ${`label=basis.install=${install}`}`.lines) {
     void run`docker volume rm -f ${volume}`
   }
 }
@@ -55,19 +55,24 @@ function portOf(id: string): number {
 }
 
 /**
- * Start a server with a temporary SERVICE_NAME, which fixes its managed identity.
+ * Start a server from a specific installation directory.
  * @param server - The configured server.
- * @param service - The service name for this installation.
+ * @param install - The installation working/checkout directory.
+ * @param service - Optional SERVICE_NAME to prove it does not affect identity.
  * @returns The started server.
  */
-function startWithService(server: Server, service: string): Server {
-  const previous = Bun.env.SERVICE_NAME
-  Bun.env.SERVICE_NAME = service
+function startWithInstall(server: Server, install: string, service?: string): Server {
+  const previousCwd = process.cwd()
+  const previousService = Bun.env.SERVICE_NAME
+  process.chdir(install)
+  if (service === undefined) delete Bun.env.SERVICE_NAME
+  else Bun.env.SERVICE_NAME = service
   try {
     return start(server)
   } finally {
-    if (previous === undefined) delete Bun.env.SERVICE_NAME
-    else Bun.env.SERVICE_NAME = previous
+    process.chdir(previousCwd)
+    if (previousService === undefined) delete Bun.env.SERVICE_NAME
+    else Bun.env.SERVICE_NAME = previousService
   }
 }
 
@@ -124,18 +129,21 @@ async function credentials(id: string): Promise<CredentialInspection> {
 describe('Server database lifecycle', () => {
   test('supports independent installs, durable restart, and same-install reconnection', async () => {
     const service = `basis-e2e-${randomUUID()}`
-    const rootA = tempDirectory('basis-install-a-')
-    const rootB = tempDirectory('basis-install-b-')
+    const installA = tempDirectory('basis-checkout-a-')
+    const installB = tempDirectory('basis-checkout-b-')
+    const assetsA1 = tempDirectory('basis-assets-a1-')
+    const assetsA2 = tempDirectory('basis-assets-a2-')
+    const assetsB = tempDirectory('basis-assets-b-')
 
     try {
-      // Same SERVICE_NAME, distinct roots: each installation remains independent.
-      const a = startWithService(new Server().root(rootA).database(), service)
-      const b = startWithService(new Server().root(rootB).database(), service)
+      // Same SERVICE_NAME, distinct checkout cwd: each installation remains independent.
+      const a = startWithInstall(new Server().root(assetsA1).database(), installA, service)
+      const b = startWithInstall(new Server().root(assetsB).database(), installB, service)
 
       try {
         await Promise.all([a.ready(), b.ready()])
-        const aId = containers(rootA)[0]
-        const bId = containers(rootB)[0]
+        const aId = containers(installA)[0]
+        const bId = containers(installB)[0]
         if (!aId) throw new Error('installation A did not start its database')
         if (!bId) throw new Error('installation B did not start its database')
         expect(aId).not.toBe(bId)
@@ -147,13 +155,13 @@ describe('Server database lifecycle', () => {
         await b.db.sql`insert into install_probe values ('B')`
 
         const secret = await credentials(aId)
-        expect(secret.source.startsWith(join(rootA, '.basis', 'database'))).toBe(true)
+        expect(secret.source.startsWith(join(dirname(installA), '.basis', 'database'))).toBe(true)
         expect(secret.directoryMode).toBe(0o700)
         expect(secret.mode).toBe(0o600)
         expect(secret.raw).not.toContain(secret.password)
         expect(secret.raw).not.toContain('"POSTGRES_PASSWORD=')
         expect(secret.raw).not.toContain('basis.password')
-        const volume = run`docker volume ls -q --filter ${`label=basis.root=${rootA}`}`.lines[0]
+        const volume = run`docker volume ls -q --filter ${`label=basis.install=${installA}`}`.lines[0]
         expect(volume).toBeTruthy()
         expect(run`docker volume inspect ${volume}`.stdout).not.toContain(secret.password)
       } finally {
@@ -162,26 +170,27 @@ describe('Server database lifecycle', () => {
       }
 
       // Closing pools does not stop or deprovision either application service.
-      expect(containers(rootA)).toHaveLength(1)
-      expect(containers(rootB)).toHaveLength(1)
+      expect(containers(installA)).toHaveLength(1)
+      expect(containers(installB)).toHaveLength(1)
 
-      const bAgain = startWithService(new Server().root(rootB).database(), service)
+      const bAgain = startWithInstall(new Server().root(assetsB).database(), installB, `${service}-b`)
       try {
         await bAgain.ready()
         expect(await bAgain.db.sql<{ value: string }[]>`select value from install_probe`)
           .toEqual([{ value: 'B' }])
 
-        const aAgain = startWithService(new Server().root(rootA).database(), service)
+        // Same checkout, changed SERVICE_NAME and asset root: same database.
+        const aAgain = startWithInstall(new Server().root(assetsA2).database(), installA, `${service}-next`)
         try {
           await aAgain.ready()
           expect(await aAgain.db.sql<{ value: string }[]>`select value from install_probe`)
             .toEqual([{ value: 'A' }])
 
           // A second process for the same installation attaches to the same service.
-          const aTwin = startWithService(new Server().root(rootA).database(), service)
+          const aTwin = startWithInstall(new Server().root(assetsA1).database(), installA, `${service}-twin`)
           try {
             await aTwin.ready()
-            expect(containers(rootA)).toHaveLength(1)
+            expect(containers(installA)).toHaveLength(1)
             expect(await aTwin.db.sql<{ value: string }[]>`select value from install_probe`)
               .toEqual([{ value: 'A' }])
           } finally {
@@ -198,8 +207,8 @@ describe('Server database lifecycle', () => {
         await bAgain.shutdown()
       }
     } finally {
-      removeService(rootA)
-      removeService(rootB)
+      removeService(installA)
+      removeService(installB)
     }
   }, 180_000)
 
@@ -208,7 +217,7 @@ describe('Server database lifecycle', () => {
     const install = tempDirectory('basis-install-')
 
     try {
-      const server = startWithService(new Server().root(install).database(), service)
+      const server = startWithInstall(new Server().root(install).database(), install, service)
       try {
         await server.ready()
         const injected = "Robert'); drop table users; --"

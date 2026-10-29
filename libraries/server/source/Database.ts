@@ -2,7 +2,7 @@ import { runAsync } from 'basis/configuration'
 import { SQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 /** The pool defaults used by every managed or external connection. */
 const POOL_DEFAULTS = {
@@ -159,17 +159,13 @@ export class NullDatabase implements Database {
 /**
  * Resolve the stable per-installation managed database identity.
  *
- * The deployment name and normalized application root both contribute when a
- * service name is present; otherwise the normalized root alone identifies the
- * installation.
- * @param root - The stable application root.
+ * The normalized application working/checkout directory is the only identity
+ * input; service names and asset roots do not move the database.
+ * @param installation - The application working/checkout directory.
  * @returns The hashed managed database identity.
  */
-export function managedDatabaseIdentity(root: string): string {
-  const normalized = resolve(root)
-  const service = Bun.env.SERVICE_NAME?.trim()
-  const material = service ? `${service}\u0000${normalized}` : normalized
-  return createHash('sha1').update(material).digest('hex').slice(0, 16)
+export function managedDatabaseIdentity(installation: string): string {
+  return createHash('sha1').update(resolve(installation)).digest('hex').slice(0, 16)
 }
 
 /**
@@ -186,17 +182,13 @@ class ManagedDatabase implements Database {
   #containerName: string
   #database: PostgresDatabase | null = null
   #identity: string
-  #root: string
+  #installation: string
   #volume: string
 
-  /**
-   * Creates the managed database capability. The service starts on
-   * {@link connect}.
-   * @param root - The stable application root.
-   */
-  constructor(root: string) {
-    this.#root = resolve(root)
-    this.#identity = managedDatabaseIdentity(this.#root)
+  /** Creates the managed database capability. The service starts on {@link connect}. */
+  constructor() {
+    this.#installation = resolve(process.cwd())
+    this.#identity = managedDatabaseIdentity(this.#installation)
     this.#containerName = `basis-postgres-${this.#identity}`
     this.#volume = this.#containerName
   }
@@ -278,7 +270,7 @@ class ManagedDatabase implements Database {
    * @returns The password and its host file path.
    */
   async #secret(create: boolean): Promise<{ file: string, password: string }> {
-    const directory = join(this.#root, '.basis', 'database', this.#identity)
+    const directory = join(dirname(this.#installation), '.basis', 'database', this.#identity)
     await mkdir(directory, { mode: 0o700, recursive: true })
     await chmod(directory, 0o700)
     const file = join(directory, 'password')
@@ -352,7 +344,7 @@ class ManagedDatabase implements Database {
     const created = await runAsync`
       docker volume create
       --label ${`basis.database=${this.#identity}`}
-      --label ${`basis.root=${this.#root}`}
+      --label ${`basis.install=${this.#installation}`}
       ${this.#volume}
     `
     if (created.exitCode !== 0) {
@@ -370,7 +362,7 @@ class ManagedDatabase implements Database {
       docker run -d --pull missing
       --name ${this.#containerName}
       --label ${`basis.database=${this.#identity}`}
-      --label ${`basis.root=${this.#root}`}
+      --label ${`basis.install=${this.#installation}`}
       -e ${`POSTGRES_USER=${MANAGED_NAME}`}
       -e ${`POSTGRES_PASSWORD_FILE=${PASSWORD_MOUNT}`}
       -e ${`POSTGRES_DB=${MANAGED_NAME}`}
@@ -456,10 +448,9 @@ class ManagedDatabase implements Database {
 /**
  * Create the database capability for a server.
  * @param options - An optional external PostgreSQL URL.
- * @param root - The stable application root used for managed identity.
  * @returns The managed or external database capability.
  */
-export function createDatabase(options: DatabaseOptions = {}, root: string): Database {
+export function createDatabase(options: DatabaseOptions = {}): Database {
   if (options.url) return new PostgresDatabase(options.url)
-  return new ManagedDatabase(root)
+  return new ManagedDatabase()
 }

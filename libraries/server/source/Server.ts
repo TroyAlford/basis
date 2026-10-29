@@ -450,7 +450,7 @@ export class Server {
     )
 
     if (this.#databaseOptions) {
-      this.#database = createDatabase(this.#databaseOptions, this.#root)
+      this.#database = createDatabase(this.#databaseOptions)
     }
     const databaseReady = this.#database instanceof NullDatabase
       ? Promise.resolve()

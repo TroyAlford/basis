@@ -9,19 +9,20 @@ afterEach(() => {
 })
 
 describe('managedDatabaseIdentity', () => {
-  test('combines SERVICE_NAME and the normalized application root', () => {
-    Bun.env.SERVICE_NAME = 'mtg_prod'
+  test('is stable for the same normalized installation directory', () => {
     const identity = managedDatabaseIdentity('/srv/apps/a')
     expect(identity).toBe(managedDatabaseIdentity('/srv/apps/a/'))
-    expect(identity).not.toBe(managedDatabaseIdentity('/srv/apps/b'))
     expect(identity).toMatch(/^[a-f0-9]{16}$/)
   })
 
-  test('falls back to a stable per-root hash when SERVICE_NAME is absent', () => {
-    delete Bun.env.SERVICE_NAME
+  test('separates different installation directories', () => {
+    expect(managedDatabaseIdentity('/srv/apps/a'))
+      .not.toBe(managedDatabaseIdentity('/srv/apps/b'))
+  })
+
+  test('ignores SERVICE_NAME', () => {
     const identity = managedDatabaseIdentity('/srv/apps/a')
-    expect(identity).toBe(managedDatabaseIdentity('/srv/apps/a'))
-    expect(identity).not.toBe(managedDatabaseIdentity('/srv/apps/b'))
-    expect(identity).toMatch(/^[a-f0-9]{16}$/)
+    Bun.env.SERVICE_NAME = 'mtg_prod'
+    expect(managedDatabaseIdentity('/srv/apps/a')).toBe(identity)
   })
 })

@@ -1,5 +1,4 @@
 **/.DS_Store
-.basis/database/
 **/.playwright-local/**
 **/coverage
 **/dist/**
