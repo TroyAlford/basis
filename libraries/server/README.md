@@ -54,11 +54,11 @@ await server.db.connect()
 await server.shutdown()
 ```
 
-With no `url`, the server starts a managed local PostgreSQL container, assigns it an ephemeral host port, and waits for it before reporting healthy. Managed data lives in a named Docker volume keyed by `name`, and the generated credentials are stored on that volume, so a restart reuses the same cluster and rows survive. `name` defaults to `SERVICE_NAME`, then the process working directory. Shutdown removes the container but keeps the volume; remove that volume explicitly to reset the application database.
+Managed mode is zero-config. Basis derives a stable identity from `SERVICE_NAME` and the application root, so two installations of the same repository do not collide. Docker allocates a loopback port; on every start Basis inspects the existing application-owned service, discovers its published port, and reuses or starts it. A healthy cluster is never replaced. The first start provisions durable storage and a high-entropy password in a host-only `0600` file mounted read-only as `POSTGRES_PASSWORD_FILE`; credentials do not appear in Docker labels, environment values, or arguments.
 
-The managed database requires Docker; an application that uses it should declare `"docker"` in `basis.hostDependencies` so install fails early when the host cannot provide it. The server also reports `503 error` from `/api/health` if Docker is unavailable at startup.
+The managed service has an independent lifetime. Starting another server for the same installation attaches a second Bun pool to the same database. Closing a server, crashing it, or redeploying it closes only that process's pool; PostgreSQL and its data keep running. Explicit database maintenance or deletion is a separate operation. Docker is required for managed mode, and `/api/health` reports an error when it is unavailable.
 
-Pass `url` to use an external PostgreSQL server instead. `DatabaseOptions` also accepts the pool's `max`, `idleTimeout`, and `connectionTimeout`, defaulting to `10`, `30`, and `10` seconds respectively.
+Pass `url` to use an explicit external PostgreSQL server instead; that is the only database option. Pool defaults are internal (`connectionTimeout` 10, `idleTimeout` 30, `max` 10).
 
 `server.db` always returns a database capability. Without `database()`, it is a `NullDatabase` whose calls fail with a clear configuration error, so callers do not need optional chaining. `connect()` establishes a real connection and rejects when PostgreSQL is unreachable, and `close()` is idempotent. The pool is never a module global, so two servers never share one.
 

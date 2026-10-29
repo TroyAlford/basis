@@ -1,11 +1,13 @@
 import { Logger } from 'basis/logger'
+import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { Server } from './Server'
 
 /*
- * Real PostgreSQL lifecycle. The suite owns Docker containers through the
+ * Real PostgreSQL lifecycle. The suite owns Docker services through the
  * server capability; it never replaces the database boundary with a mock.
  */
 
@@ -19,6 +21,14 @@ interface DockerResult {
   stderr: string,
   /** Standard output. */
   stdout: string,
+}
+
+/** A container mount from `docker inspect`. */
+interface InspectMount {
+  /** Mount destination inside the container. */
+  Destination: string,
+  /** Host source path. */
+  Source: string,
 }
 
 /**
@@ -37,21 +47,52 @@ function docker(args: string[]): DockerResult {
 }
 
 /**
- * Find the running managed container for an application scope.
- * @param name - The managed database scope.
- * @returns The container id, or an empty string.
+ * Find the containers owned by an application service.
+ * @param service - The service name used in the ownership label.
+ * @returns The container ids.
  */
-function container(name: string): string {
-  return docker(['ps', '-q', '--filter', `label=basis.database=${name}`]).stdout.trim().split('\n')[0] ?? ''
+function containers(service: string): string[] {
+  return docker(['ps', '-aq', '--filter', `label=basis.service=${service}`])
+    .stdout.trim().split('\n').filter(Boolean)
 }
 
 /**
- * Remove the durable volume for an application scope.
- * @param name - The managed database scope.
+ * Remove the containers and durable volume for an application service.
+ * @param service - The service name used in the ownership label.
  */
-function removeVolume(name: string): void {
-  const volume = docker(['volume', 'ls', '-q', '--filter', `label=basis.database=${name}`]).stdout.trim()
-  if (volume) docker(['volume', 'rm', '-f', volume])
+function removeService(service: string): void {
+  for (const id of containers(service)) docker(['rm', '-f', id])
+  const volumes = docker(['volume', 'ls', '-q', '--filter', `label=basis.service=${service}`])
+    .stdout.trim().split('\n').filter(Boolean)
+  for (const volume of volumes) docker(['volume', 'rm', '-f', volume])
+}
+
+/**
+ * Read the published loopback port for a container.
+ * @param id - The container id.
+ * @returns The host port.
+ */
+function portOf(id: string): number {
+  const match = /:(\d+)\s*$/m.exec(docker(['port', id, '5432/tcp']).stdout.trim())
+  if (!match) throw new Error(`container ${id} did not publish a port`)
+  return Number(match[1])
+}
+
+/**
+ * Start a server with a temporary SERVICE_NAME, which fixes its managed identity.
+ * @param server - The configured server.
+ * @param service - The service name for this installation.
+ * @returns The started server.
+ */
+function startWithService(server: Server, service: string): Server {
+  const previous = process.env.SERVICE_NAME
+  process.env.SERVICE_NAME = service
+  try {
+    return start(server)
+  } finally {
+    if (previous === undefined) delete process.env.SERVICE_NAME
+    else process.env.SERVICE_NAME = previous
+  }
 }
 
 /**
@@ -74,45 +115,128 @@ async function health(server: Server): Promise<{ error?: string, status?: string
   return await response.json() as { error?: string, status?: string }
 }
 
+/** Inspected credential material and its access controls. */
+interface CredentialInspection {
+  /** Password directory mode. */
+  directoryMode: number,
+  /** Password file mode. */
+  mode: number,
+  /** The password value, for leak checks only. */
+  password: string,
+  /** Raw container inspect output. */
+  raw: string,
+}
+
+/**
+ * Inspect a container's password mount and metadata.
+ * @param id - The container id.
+ * @returns The raw inspect output, password, and file mode.
+ */
+async function credentials(id: string): Promise<CredentialInspection> {
+  const raw = docker(['inspect', id]).stdout
+  const inspect = JSON.parse(raw) as { Mounts: InspectMount[] }[]
+  const mount = inspect[0]?.Mounts.find(entry => entry.Destination === '/run/secrets/basis-postgres-password')
+  if (!mount) throw new Error('container has no password-file mount')
+  const password = (await readFile(mount.Source, 'utf8')).trim()
+  const mode = (await stat(mount.Source)).mode & 0o777
+  const directoryMode = (await stat(dirname(mount.Source))).mode & 0o777
+  return { directoryMode, mode, password, raw }
+}
+
 describe('Server database lifecycle', () => {
-  test('persists managed data across a real restart and closes its pool', async () => {
-    const name = `basis-e2e-${randomUUID()}`
+  test('supports independent installs, durable restart, and same-install reconnection', async () => {
+    const dataHome = tempDirectory('basis-db-data-')
+    const previousData = process.env.XDG_DATA_HOME
+    process.env.XDG_DATA_HOME = dataHome
+    const service = `basis-e2e-${randomUUID()}`
+    const rootA = tempDirectory('basis-install-a-')
+    const rootB = tempDirectory('basis-install-b-')
 
     try {
-      const first = start(new Server().database({ name }))
+      // Same SERVICE_NAME, distinct application roots: the installs must not collide.
+      const a = startWithService(new Server().root(rootA).database(), service)
+      const b = startWithService(new Server().root(rootB).database(), service)
+
       try {
-        await first.ready()
-        expect(first.db.closed).toBe(false)
-        await first.db.connect()
-        await first.db.sql`create table basis_restart_probe (id integer primary key)`
-        await first.db.sql`insert into basis_restart_probe values (1)`
+        await Promise.all([a.ready(), b.ready()])
+        const ids = containers(service)
+        expect(ids).toHaveLength(2)
+        expect(new Set(ids.map(portOf)).size).toBe(2)
+        const [aId] = ids
+        if (!aId) throw new Error('the managed installations did not start their databases')
+
+        await a.db.sql`create table install_probe (value text)`
+        await a.db.sql`insert into install_probe values ('A')`
+        await b.db.sql`create table install_probe (value text)`
+        await b.db.sql`insert into install_probe values ('B')`
+
+        const secret = await credentials(aId)
+        expect(secret.directoryMode).toBe(0o700)
+        expect(secret.mode).toBe(0o600)
+        expect(secret.raw).not.toContain(secret.password)
+        expect(secret.raw).not.toContain('"POSTGRES_PASSWORD=')
+        expect(secret.raw).not.toContain('basis.password')
+        const volumes = docker(['volume', 'ls', '-q', '--filter', `label=basis.service=${service}`]).stdout.trim()
+        expect(volumes.split('\n').filter(Boolean)).toHaveLength(2)
+        for (const volume of volumes.split('\n').filter(Boolean)) {
+          expect(docker(['volume', 'inspect', volume]).stdout).not.toContain(secret.password)
+        }
       } finally {
-        await first.shutdown()
+        await a.shutdown()
+        await b.shutdown()
       }
 
-      expect(first.db.closed).toBe(true)
-      await expect(first.db.connect()).rejects.toThrow('Database is closed')
+      // Closing pools does not stop or deprovision either application service.
+      expect(containers(service)).toHaveLength(2)
 
-      const second = start(new Server().database({ name }))
+      const bAgain = startWithService(new Server().root(rootB).database(), service)
       try {
-        await second.ready()
-        const rows = await second.db.sql<{ count: number }[]>`
-          select count(*)::int as count from basis_restart_probe
-        `
-        expect(rows[0]?.count).toBe(1)
+        await bAgain.ready()
+        expect(await bAgain.db.sql<{ value: string }[]>`select value from install_probe`)
+          .toEqual([{ value: 'B' }])
+
+        const aAgain = startWithService(new Server().root(rootA).database(), service)
+        try {
+          await aAgain.ready()
+          expect(await aAgain.db.sql<{ value: string }[]>`select value from install_probe`)
+            .toEqual([{ value: 'A' }])
+
+          // A second process for the same installation attaches to the same service.
+          const aTwin = startWithService(new Server().root(rootA).database(), service)
+          try {
+            await aTwin.ready()
+            expect(containers(service)).toHaveLength(2)
+            expect(await aTwin.db.sql<{ value: string }[]>`select value from install_probe`)
+              .toEqual([{ value: 'A' }])
+          } finally {
+            await aTwin.shutdown()
+          }
+        } finally {
+          await aAgain.shutdown()
+        }
+
+        // The other installation stayed available through A's restart.
+        expect(await bAgain.db.sql<{ value: string }[]>`select value from install_probe`)
+          .toEqual([{ value: 'B' }])
       } finally {
-        await second.shutdown()
+        await bAgain.shutdown()
       }
     } finally {
-      removeVolume(name)
+      if (previousData === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = previousData
+      removeService(service)
     }
-  }, 120_000)
+  }, 180_000)
 
   test('exposes Bun SQL parameterization and error semantics', async () => {
-    const name = `basis-e2e-sql-${randomUUID()}`
+    const dataHome = tempDirectory('basis-db-data-')
+    const previousData = process.env.XDG_DATA_HOME
+    process.env.XDG_DATA_HOME = dataHome
+    const service = `basis-e2e-sql-${randomUUID()}`
+    const install = tempDirectory('basis-install-')
 
     try {
-      const server = start(new Server().database({ name }))
+      const server = startWithService(new Server().root(install).database(), service)
       try {
         await server.ready()
         const injected = "Robert'); drop table users; --"
@@ -129,25 +253,14 @@ describe('Server database lifecycle', () => {
         await server.shutdown()
       }
     } finally {
-      removeVolume(name)
+      if (previousData === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = previousData
+      removeService(service)
     }
   }, 120_000)
 
-  test('does not leak a container when shutdown races startup', async () => {
-    const name = `basis-e2e-race-${randomUUID()}`
-
-    try {
-      const server = start(new Server().database({ name }))
-      await server.shutdown()
-      expect(container(name)).toBe('')
-    } finally {
-      removeVolume(name)
-    }
-  }, 60_000)
-
   test('reports unhealthy when an external PostgreSQL connection fails', async () => {
     const server = start(new Server().database({
-      connectionTimeout: 1,
       url: 'postgres://basis:basis@127.0.0.1:1/basis',
     }))
 

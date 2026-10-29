@@ -90,6 +90,7 @@ export class Server {
   #builder: Builder | null = null
   #closing: Promise<void> | null = null
   #database: Database = new NullDatabase()
+  #databaseOptions: DatabaseOptions | null = null
   #development = true
   #entrypoints: [string, string][] = []
   #favIcon: ResolvedFavIcon | null = null
@@ -448,6 +449,9 @@ export class Server {
       this.#assets ? [this.#assets] : [],
     )
 
+    if (this.#databaseOptions) {
+      this.#database = createDatabase(this.#databaseOptions, this.#root)
+    }
     const databaseReady = this.#database instanceof NullDatabase
       ? Promise.resolve()
       : this.#database.connect()
@@ -605,15 +609,16 @@ export class Server {
   /**
    * Configures the server-owned PostgreSQL capability.
    *
-   * With no `url`, the server starts a managed local PostgreSQL container on
-   * `start`, assigns it an ephemeral port, and waits for it before reporting
-   * healthy. Passing a `url` uses an external PostgreSQL server instead. The
-   * server owns the pool lifecycle in both cases.
-   * @param options - Pool options and an optional external PostgreSQL URL.
+   * With no `url`, the server reconciles its application-scoped managed
+   * PostgreSQL service on `start`, discovers its Docker-allocated loopback
+   * port, and connects the pool before reporting healthy. Passing a `url` uses
+   * an explicit external PostgreSQL server instead. The server owns the pool
+   * lifecycle in both cases; the managed database service outlives it.
+   * @param options - An optional external PostgreSQL URL.
    * @returns The server.
    */
   database(options: DatabaseOptions = {}): Server {
-    this.#database = createDatabase(options)
+    this.#databaseOptions = options
     return this
   }
 
