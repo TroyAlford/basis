@@ -143,11 +143,11 @@ await server.db.tx(async sql => {
 })
 ```
 
-`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Model/query APIs remain later capabilities.
+`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Query and relationship APIs remain later capabilities.
 
-## Canonical model
+## Canonical entities
 
-`Model.load(source)` parses and validates the canonical JSON entity definitions that later database features generate from. JSON is the authority; the loader rejects malformed or ambiguous definitions instead of guessing:
+`EntityDefinitions.load(source)` parses and validates the canonical JSON entity definitions that later database features generate from. JSON is the authority; the loader rejects malformed or ambiguous definitions instead of guessing:
 
 ```json
 {
@@ -166,10 +166,10 @@ await server.db.tx(async sql => {
 ```
 
 ```ts
-import { Model } from 'basis/server'
+import { EntityDefinitions } from 'basis/server'
 
-const model = Model.load(await Bun.file('./model.json').text())
-const note = model.entity('Note')
+const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
+const note = entities.entity('Note')
 ```
 
 The minimal vocabulary accepts one or more entities with unique PascalCase names, unique camelCase fields, and exactly one `id` primary key per entity. Field types are `boolean`, `date`, `id`, `number`, `string`, and `timestamp`: `id` is a UUID identifier, `date` is distinct from `timestamp`, and `number` covers integers and floating point values. Field types are an enum so later non-scalar kinds and type-specific hints can extend the vocabulary without changing field identity. Unknown properties, duplicate entity or field names, malformed names, unsupported types, and missing or multiple primary keys all fail validation. This step owns parsing and validation only; physical DDL, queries, relationships, and generated artifacts are later capabilities.

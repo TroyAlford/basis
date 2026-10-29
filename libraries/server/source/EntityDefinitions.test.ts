@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test'
-import { FieldType, Model } from './Model'
+import { EntityDefinitions, FieldType } from './EntityDefinitions'
 
 /**
- * Load a model value through its canonical JSON representation.
+ * Load entity definitions through their canonical JSON representation.
  * @param value - Parsed JSON input.
- * @returns The validated model.
+ * @returns The validated entity definitions.
  */
-function load(value: unknown): Model {
-  return Model.load(JSON.stringify(value))
+function load(value: unknown): EntityDefinitions {
+  return EntityDefinitions.load(JSON.stringify(value))
 }
 
-/** A valid minimal model with one entity and its primary key. */
+/** A valid minimal entity document with its primary key. */
 const note = {
   entities: [{
     fields: [
@@ -23,10 +23,10 @@ const note = {
   }],
 }
 
-describe('Model', () => {
+describe('EntityDefinitions', () => {
   test('loads one entity with an ID and scalar fields', () => {
-    const model = load(note)
-    const entity = model.entity('Note')
+    const entities = load(note)
+    const entity = entities.entity('Note')
 
     expect(entity?.name).toBe('Note')
     expect(entity?.fields.map(field => field.name)).toEqual(['id', 'title', 'body', 'createdAt'])
@@ -34,7 +34,7 @@ describe('Model', () => {
   })
 
   test('accepts every field type', () => {
-    const model = load({
+    const entities = load({
       entities: [{
         fields: [
           { name: 'id', primaryKey: true, type: 'id' },
@@ -48,7 +48,7 @@ describe('Model', () => {
       }],
     })
 
-    expect(model.entity('Note')?.fields.map(field => field.type)).toEqual([
+    expect(entities.entity('Note')?.fields.map(field => field.type)).toEqual([
       FieldType.ID,
       FieldType.Boolean,
       FieldType.Date,
@@ -68,7 +68,7 @@ describe('Model', () => {
   })
 
   test('rejects malformed JSON', () => {
-    expect(() => Model.load('{')).toThrow('Invalid model JSON')
+    expect(() => EntityDefinitions.load('{')).toThrow('Invalid entity JSON')
   })
 
   test('rejects a missing or empty entity list', () => {
@@ -115,7 +115,8 @@ describe('Model', () => {
   })
 
   test('rejects unknown properties so typos cannot become schema vocabulary', () => {
-    expect(() => load({ entities: note.entities, futureThing: true })).toThrow('unknown model property "futureThing"')
+    expect(() => load({ entities: note.entities, futureThing: true }))
+      .toThrow('unknown top-level property "futureThing"')
     expect(() => load({
       entities: [{
         fields: [{ name: 'id', primaryKey: true, type: 'id', unique: true }],

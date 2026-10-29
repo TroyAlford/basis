@@ -1,5 +1,5 @@
 /**
- * Field types supported by the minimal canonical model.
+ * Field types supported by the minimal canonical entity definitions.
  *
  * An enum keeps field identity distinct from type-specific hints and leaves
  * room for later non-scalar kinds without changing the field definition shape.
@@ -38,28 +38,28 @@ export interface EntityDefinition {
 }
 
 /** Parsed and validated canonical entity definitions. */
-export class Model {
+export class EntityDefinitions {
   /** Entities in their declared order. */
   readonly entities: readonly EntityDefinition[]
 
   /**
-   * Parse and validate canonical model JSON.
+   * Parse and validate canonical entity JSON.
    * @param source - Canonical JSON text.
-   * @returns The validated model.
+   * @returns The validated entity definitions.
    * @throws {Error} When the JSON or entity definitions are invalid.
    */
-  static load(source: string): Model {
+  static load(source: string): EntityDefinitions {
     let value: unknown
     try {
       value = JSON.parse(source)
     } catch (error) {
-      throw new Error('Invalid model JSON', { cause: error })
+      throw new Error('Invalid entity JSON', { cause: error })
     }
-    return new Model(parseModel(value))
+    return new EntityDefinitions(parseEntities(value))
   }
 
   /**
-   * Creates a model from already-validated definitions.
+   * Creates entity definitions from already-validated definitions.
    * @param entities - Validated entity definitions.
    */
   private constructor(entities: readonly EntityDefinition[]) {
@@ -77,13 +77,13 @@ export class Model {
 }
 
 /**
- * Validate the parsed model root.
+ * Validate the parsed entity document root.
  * @param value - Parsed JSON value.
  * @returns Validated entities.
  */
-function parseModel(value: unknown): readonly EntityDefinition[] {
-  if (!isRecord(value)) throw invalid('model must be an object')
-  assertKnownKeys(value, ['entities'], 'model')
+function parseEntities(value: unknown): readonly EntityDefinition[] {
+  if (!isRecord(value)) throw invalid('entity definitions must be an object')
+  assertKnownKeys(value, ['entities'], 'top-level')
 
   const entities = value.entities
   if (!Array.isArray(entities) || entities.length === 0) {
@@ -162,7 +162,7 @@ function parseField(entityName: string, value: unknown): FieldDefinition {
   }
 }
 
-/** Scalar type names accepted by the model. */
+/** Field type names accepted by the entity definitions. */
 const FIELD_TYPES = new Set<string>(Object.values(FieldType))
 
 /**
@@ -175,7 +175,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Reject properties outside the model vocabulary.
+ * Reject properties outside the entity vocabulary.
  * @param value - Object being validated.
  * @param allowed - Accepted keys.
  * @param context - Label used in diagnostics.
@@ -191,10 +191,10 @@ function assertKnownKeys(
 }
 
 /**
- * Build an invalid-model error.
+ * Build an invalid-entity error.
  * @param message - Specific validation failure.
  * @returns The error to throw.
  */
 function invalid(message: string): Error {
-  return new Error(`Invalid model: ${message}`)
+  return new Error(`Invalid entity definitions: ${message}`)
 }
