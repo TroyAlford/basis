@@ -22,4 +22,9 @@ describe('managedDatabaseIdentity', () => {
     expect(identity).not.toBe(managedDatabaseIdentity('/srv/apps/b'))
     expect(identity).toMatch(/^[a-f0-9]{16}$/)
   })
+
+  test('rejects a SERVICE_NAME that is not Docker-safe', () => {
+    process.env.SERVICE_NAME = 'mtg/prod'
+    expect(() => managedDatabaseIdentity('/srv/apps/a')).toThrow('Docker-safe identifier')
+  })
 })

@@ -197,10 +197,18 @@ export class NullDatabase implements Database {
  * application root produces a per-install identity.
  * @param root - The stable application root.
  * @returns The managed database identity.
+ * @throws {Error} When `SERVICE_NAME` is not safe as a Docker resource name.
  */
 export function managedDatabaseIdentity(root: string): string {
-  return Bun.env.SERVICE_NAME?.trim()
-    || createHash('sha1').update(root).digest('hex').slice(0, 16)
+  const service = Bun.env.SERVICE_NAME?.trim()
+  if (!service) return createHash('sha1').update(root).digest('hex').slice(0, 16)
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(service)) {
+    throw new Error(
+      'SERVICE_NAME must be a Docker-safe identifier: letters, digits, ".", "_", or "-", ' +
+      'starting with a letter or digit.',
+    )
+  }
+  return service
 }
 
 /**
