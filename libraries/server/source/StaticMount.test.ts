@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Server } from './Server'
-import { isInternalStatePath, serveMount } from './StaticMount'
+import { containsInternalStateSegment, isInternalStatePath, serveMount } from './StaticMount'
 
 /**
  * Build a static root containing public content and private Basis state.
@@ -24,6 +24,8 @@ describe('internal state protection', () => {
     expect(isInternalStatePath('.BASIS/database/password')).toBe(true)
     expect(isInternalStatePath('nested/.basis/database/password')).toBe(true)
     expect(isInternalStatePath('public/file.txt')).toBe(false)
+    expect(containsInternalStateSegment('/srv/app/.basis/database/password')).toBe(true)
+    expect(containsInternalStateSegment('/srv/app/public.txt')).toBe(false)
   })
 
   test('static mounts never serve .basis state', async () => {
@@ -35,6 +37,11 @@ describe('internal state protection', () => {
 
     const publicFile = await serveMount(mount, '/static/public.txt')
     expect(publicFile?.status).toBe(200)
+
+    // Mounting the internal directory directly must not expose its contents.
+    const privateMount = { allow: null, folder: join(directory, '.basis'), prefix: '/secret' }
+    const privateFile = await serveMount(privateMount, '/secret/database/password')
+    expect(privateFile?.status).toBe(404)
   })
 
   test('assets never serve .basis state', async () => {
@@ -52,5 +59,10 @@ describe('internal state protection', () => {
 
     const publicFile = await server.handle(new Request('http://localhost/assets/public.txt'))
     expect(publicFile?.status).toBe(307)
+
+    // Pointing the asset root at the internal directory must not expose it.
+    const privateAssets = new Server().assets(join(directory, '.basis'))
+    const privateFile = await privateAssets.handle(new Request('http://localhost/assets/database/password'))
+    expect(privateFile?.status).toBe(404)
   })
 })

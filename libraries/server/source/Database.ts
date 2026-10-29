@@ -265,11 +265,11 @@ class ManagedDatabase implements Database {
   }
 
   /**
-   * Ensure Git never stages the installation's internal state.
-   * @param stateRoot - The installation-local `.basis` directory.
+   * Ensure Git never stages the installation's database state.
+   * @param directory - The installation-local `.basis/database` directory.
    */
-  async #protectState(stateRoot: string): Promise<void> {
-    const ignore = join(stateRoot, '.gitignore')
+  async #protectState(directory: string): Promise<void> {
+    const ignore = join(directory, '.gitignore')
     try {
       const handle = await open(ignore, 'wx', 0o644)
       try {
@@ -292,9 +292,9 @@ class ManagedDatabase implements Database {
     const directory = join(stateRoot, 'database')
     await mkdir(stateRoot, { mode: 0o700, recursive: true })
     await chmod(stateRoot, 0o700)
-    await this.#protectState(stateRoot)
     await mkdir(directory, { mode: 0o700, recursive: true })
     await chmod(directory, 0o700)
+    await this.#protectState(directory)
     const file = join(directory, 'password')
 
     if (create) {

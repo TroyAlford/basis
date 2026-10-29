@@ -21,6 +21,16 @@ export function normalizeMountPrefix(prefix: string): string {
 }
 
 /**
+ * Whether any segment of a path is Basis-owned internal state.
+ * @param value - A relative or absolute path.
+ * @returns `true` when a `.basis` segment is present.
+ */
+export function containsInternalStateSegment(value: string): boolean {
+  const normalized = path.posix.normalize(value.replace(/\\/g, '/'))
+  return normalized.split('/').some(segment => segment.toLowerCase() === '.basis')
+}
+
+/**
  * Whether a static request targets Basis-owned internal state.
  *
  * `.basis` is never public, regardless of which folder an asset or mount
@@ -46,7 +56,7 @@ export function isInternalStatePath(route: string): boolean {
     return true
   }
 
-  return normalized.split('/').some(segment => segment.toLowerCase() === '.basis')
+  return containsInternalStateSegment(normalized)
 }
 
 /**
@@ -89,6 +99,7 @@ export async function serveMount(mount: StaticMount, requestPath: string): Promi
 
   const filePath = path.join(mount.folder, relative)
   if (!filePath.startsWith(`${mount.folder}${path.sep}`)) return notFound()
+  if (containsInternalStateSegment(mount.folder) || containsInternalStateSegment(filePath)) return notFound()
 
   const file = Bun.file(filePath)
   if (!(await file.exists())) return notFound()
