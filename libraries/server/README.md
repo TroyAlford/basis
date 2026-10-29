@@ -36,6 +36,34 @@ new Server()
 | `port`        | `PORT`, then `80`             | Port to bind. `0` binds an ephemeral port.                  |
 | `version`     | `VERSION`, then `development` | Release version reported by `/api/health`.                  |
 
+## Database
+
+`server.database()` configures one server-owned PostgreSQL capability backed by Bun's native SQL pool:
+
+```ts
+import { Server } from 'basis/server'
+
+const server = new Server()
+  .root(import.meta.dir)
+  .main('./Application.tsx')
+  .database()
+  .start()
+
+await server.db.connect()
+// ...
+await server.shutdown()
+```
+
+With no `url`, the server starts a managed local PostgreSQL container, assigns it an ephemeral host port, and waits for it before reporting healthy. Managed data lives in a named Docker volume keyed by `name`, and the generated credentials are stored on that volume, so a restart reuses the same cluster and rows survive. `name` defaults to `SERVICE_NAME`, then the process working directory. Shutdown removes the container but keeps the volume; remove that volume explicitly to reset the application database.
+
+The managed database requires Docker; an application that uses it should declare `"docker"` in `basis.hostDependencies` so install fails early when the host cannot provide it. The server also reports `503 error` from `/api/health` if Docker is unavailable at startup.
+
+Pass `url` to use an external PostgreSQL server instead. `DatabaseOptions` also accepts the pool's `max`, `idleTimeout`, and `connectionTimeout`, defaulting to `10`, `30`, and `10` seconds respectively.
+
+`server.db` always returns a database capability. Without `database()`, it is a `NullDatabase` whose calls fail with a clear configuration error, so callers do not need optional chaining. `connect()` establishes a real connection and rejects when PostgreSQL is unreachable, and `close()` is idempotent. The pool is never a module global, so two servers never share one.
+
+`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Query, transaction, and model APIs are not part of this capability yet.
+
 ## Logging
 
 `Server` owns a standard Basis `Logger` and writes its lifecycle output through it: the `listening http://<host>:<port>` startup line, `stopping` on shutdown, build failures, and the development/HMR watcher messages. Applications do not need to construct or configure a logger; use the server's logger for application-specific messages:

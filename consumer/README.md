@@ -306,6 +306,8 @@ Development HMR needs Bun's dev-server bundler to load Basis's modules. `bun ins
 
 `start` options are `development`, `hostname`, `port`, and `version`; each falls back to `NODE_ENV`, `HOST`, `PORT`, and `VERSION`. A managed process should bind loopback and the deployment-assigned port, and pass the release version.
 
+`server.database()` configures one server-owned Bun PostgreSQL capability, exposed as `server.db`. With no URL it starts a managed local PostgreSQL container, assigns an ephemeral port, and waits for readiness; an external `url` is also supported. Managed data and credentials live in a durable application-scoped volume keyed by `name` (defaulting to `SERVICE_NAME`, then the working directory), so rows survive server restarts; shutdown removes the container but keeps the volume. Managed use requires Docker, which the application should declare in `basis.hostDependencies`; the server reports unhealthy when Docker is unavailable. `connect()` proves the connection and `shutdown()` waits for the database and server to close; `stop()` remains synchronous and starts that teardown. Without configuration, `server.db` is a `NullDatabase` that fails gracefully instead of returning `undefined`.
+
 `/api/health` reports the managed-application contract only once the application is built and ready:
 
 ```json
@@ -316,7 +318,7 @@ Development HMR needs Bun's dev-server bundler to load Basis's modules. `bun ins
 
 While the initial build is pending it responds `503 { "status": "starting", ... }`, and after a failed build `503 { "status": "error", "error": "...", ... }`, so a verifier can never observe a healthy process for an application that did not build. `server.ready()` resolves when the build succeeds and rejects when it fails, for processes that signal readiness directly. Bun version and uptime are additive diagnostics. The API is `/api/health`. The server surface shares the React contract from `basis/react`, and its runtime dependencies are declared by Basis.
 
-`@basis/server` is still maturing; the supported public surface is the `Server` class, its `ServerOptions`, and the `APIRoute` and `HealthOptions` types.
+`@basis/server` is still maturing; the supported public surface is the `Server` class, its `ServerOptions`, `Database`, `DatabaseOptions`, `NullDatabase`, and the `APIRoute` and `HealthOptions` types.
 
 Only the deliberately supported surfaces above are exported. Internal workspaces are not exposed just because they exist.
 
