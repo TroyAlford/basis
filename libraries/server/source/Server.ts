@@ -26,7 +26,7 @@ import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
-import { normalizeMountPrefix, serveMount } from './StaticMount'
+import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
 
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
@@ -90,6 +90,7 @@ export class Server {
   #builder: Builder | null = null
   #closing: Promise<void> | null = null
   #database: Database = new NullDatabase()
+  #databaseOptions: DatabaseOptions | null = null
   #development = true
   #entrypoints: [string, string][] = []
   #favIcon: ResolvedFavIcon | null = null
@@ -262,10 +263,15 @@ export class Server {
    * @returns The asset response.
    */
   async handleAsset(uri: URI): Promise<Response> {
-    if (!this.#assets) return Server.NotFound
+    if (!this.#assets || isInternalStatePath(uri.route)) return Server.NotFound
 
-    const asset = Bun.file(path.join(this.#assets, uri.route))
-    if (await asset.exists() === false) return Server.NotFound
+    const filePath = path.join(this.#assets, uri.route)
+    if (containsInternalStateSegment(this.#assets) || containsInternalStateSegment(filePath)) {
+      return Server.NotFound
+    }
+
+    const asset = await publicStaticFile(filePath)
+    if (!asset) return Server.NotFound
 
     const version = asset.lastModified.toString()
 
@@ -448,6 +454,9 @@ export class Server {
       this.#assets ? [this.#assets] : [],
     )
 
+    if (this.#databaseOptions) {
+      this.#database = createDatabase(this.#databaseOptions)
+    }
     const databaseReady = this.#database instanceof NullDatabase
       ? Promise.resolve()
       : this.#database.connect()
@@ -605,15 +614,16 @@ export class Server {
   /**
    * Configures the server-owned PostgreSQL capability.
    *
-   * With no `url`, the server starts a managed local PostgreSQL container on
-   * `start`, assigns it an ephemeral port, and waits for it before reporting
-   * healthy. Passing a `url` uses an external PostgreSQL server instead. The
-   * server owns the pool lifecycle in both cases.
-   * @param options - Pool options and an optional external PostgreSQL URL.
+   * With no `url`, the server reconciles its application-scoped managed
+   * PostgreSQL service on `start`, discovers its Docker-allocated loopback
+   * port, and connects the pool before reporting healthy. Passing a `url` uses
+   * an explicit external PostgreSQL server instead. The server owns the pool
+   * lifecycle in both cases; the managed database service outlives it.
+   * @param options - An optional external PostgreSQL URL.
    * @returns The server.
    */
   database(options: DatabaseOptions = {}): Server {
-    this.#database = createDatabase(options)
+    this.#databaseOptions = options
     return this
   }
 

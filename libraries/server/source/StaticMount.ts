@@ -1,3 +1,4 @@
+import { realpath } from 'node:fs/promises'
 import * as path from 'node:path'
 
 /** One configured static mount. */
@@ -18,6 +19,68 @@ export interface StaticMount {
 export function normalizeMountPrefix(prefix: string): string {
   const collapsed = `/${prefix}`.replace(/\/+/g, '/').replace(/\/+$/, '')
   return collapsed.length === 0 ? '/' : collapsed
+}
+
+/**
+ * Whether any segment of a path is Basis-owned internal state.
+ * @param value - A relative or absolute path.
+ * @returns `true` when a `.basis` segment is present.
+ */
+export function containsInternalStateSegment(value: string): boolean {
+  const normalized = path.posix.normalize(value.replace(/\\/g, '/'))
+  return normalized.split('/').some(segment => segment.toLowerCase() === '.basis')
+}
+
+/**
+ * Resolve a static file only when its effective target is outside `.basis`.
+ *
+ * Symlinks are followed before the decision, so a public alias cannot reach
+ * Basis-owned internal state.
+ * @param filePath - The lexical file path below an asset or mount root.
+ * @returns The servable file, or null when missing or internal.
+ */
+export async function publicStaticFile(
+  filePath: string,
+): Promise<ReturnType<typeof Bun.file> | null> {
+  let target: string
+  try {
+    target = await realpath(filePath)
+  } catch {
+    return null
+  }
+  if (containsInternalStateSegment(target)) return null
+
+  const file = Bun.file(target)
+  return await file.exists() ? file : null
+}
+
+/**
+ * Whether a static request targets Basis-owned internal state.
+ *
+ * `.basis` is never public, regardless of which folder an asset or mount
+ * serves. The check rejects traversal and encoded separators as well.
+ * @param route - The request path below a static root.
+ * @returns `true` when the path must not be served.
+ */
+export function isInternalStatePath(route: string): boolean {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(route)
+  } catch {
+    return true
+  }
+
+  const normalized = path.posix.normalize(decoded.replace(/\\/g, '/'))
+  if (
+    decoded.includes('\0')
+    || path.posix.isAbsolute(normalized)
+    || normalized === '..'
+    || normalized.startsWith('../')
+  ) {
+    return true
+  }
+
+  return containsInternalStateSegment(normalized)
 }
 
 /**
@@ -43,6 +106,7 @@ export async function serveMount(mount: StaticMount, requestPath: string): Promi
   const relative = path.normalize(decoded)
   if (
     decoded.length === 0
+    || isInternalStatePath(decoded)
     || decoded.includes('\0')
     || path.isAbsolute(relative)
     || relative === '..'
@@ -59,9 +123,10 @@ export async function serveMount(mount: StaticMount, requestPath: string): Promi
 
   const filePath = path.join(mount.folder, relative)
   if (!filePath.startsWith(`${mount.folder}${path.sep}`)) return notFound()
+  if (containsInternalStateSegment(mount.folder) || containsInternalStateSegment(filePath)) return notFound()
 
-  const file = Bun.file(filePath)
-  if (!(await file.exists())) return notFound()
+  const file = await publicStaticFile(filePath)
+  if (!file) return notFound()
 
   return new Response(file, { headers: { 'content-type': file.type } })
 }

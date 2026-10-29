@@ -152,13 +152,12 @@ logger.stopwatchStop(stopwatch, 'request handled')
 `basis/configuration` exposes three primitives:
 
 ```ts
-import { Environment, run, secret } from 'basis/configuration'
+import { Environment, run, runAsync, secret } from 'basis/configuration'
 ```
 
 - `Environment` reads typed values from the process environment, which loads the standard dotenv files most-specific first — `.env.<mode>.local`, `.env.local`, `.env.<mode>`, `.env`, where `<mode>` is `NODE_ENV` (default `development`) — with real environment variables winning. `string(key, fallback?)`, `number(key, fallback?)`, and `boolean(key, fallback?)` fall back when unset and throw, naming the key, when a present value is malformed; `required(key)` fails loudly when unset; `enabled(...keys)` computes a topic's `ENABLED` flag. Consumers own their own config policy (defaults, required keys, enabling conditions).
 - `secret(reference)` reads an `op://` reference through the 1Password CLI and returns the value as a string (`JSON.parse` it for structure). The Service Account token comes from `OP_SERVICE_ACCOUNT_TOKEN` and is handed to the `op` child under that name; a missing token fails closed and neither the token nor the value is ever logged or echoed.
-- `run(command, args, options)` is the shared synchronous, shell-free, bounded (`timeoutMs`) subprocess runner, returning captured `{ exitCode, stdout,
-  stderr }` (typed by `RunOptions` and `CommandResult`).
+- `run(command, args, options)` is the shared synchronous, shell-free, bounded (`timeoutMs`) subprocess runner; `runAsync` is its non-blocking counterpart. Both return captured `{ exitCode, stdout, stderr, lines }` (typed by `RunOptions` and `CommandResult`) and also accept a whitespace-tokenized tagged template where interpolated values are discrete arguments.
 
 Internal factories and loading seams — `createSecretReader`, `loadDotenv`, and their types — are not part of the package surface. Non-npm host capabilities are declared as `basis.hostDependencies` (see [Install](#install)), not called.
 
@@ -306,7 +305,7 @@ Development HMR needs Bun's dev-server bundler to load Basis's modules. `bun ins
 
 `start` options are `development`, `hostname`, `port`, and `version`; each falls back to `NODE_ENV`, `HOST`, `PORT`, and `VERSION`. A managed process should bind loopback and the deployment-assigned port, and pass the release version.
 
-`server.database()` configures one server-owned Bun PostgreSQL capability, exposed as `server.db`. With no URL it starts a managed local PostgreSQL container, assigns an ephemeral port, and waits for readiness; an external `url` is also supported. Managed data and credentials live in a durable application-scoped volume keyed by `name` (defaulting to `SERVICE_NAME`, then the working directory), so rows survive server restarts; shutdown removes the container but keeps the volume. Managed use requires Docker, which the application should declare in `basis.hostDependencies`; the server reports unhealthy when Docker is unavailable. `connect()` proves the connection and `shutdown()` waits for the database and server to close; `stop()` remains synchronous and starts that teardown. Without configuration, `server.db` is a `NullDatabase` that fails gracefully instead of returning `undefined`.
+`server.database()` configures one server-owned Bun PostgreSQL capability, exposed as `server.db`. Managed mode is zero-config: Basis keys the database to the normalized application working/checkout directory (`cwd`), lets Docker allocate a loopback port, and reconciles an existing application-owned service instead of replacing it. `SERVICE_NAME` is logging/provenance and `Server.root` is entrypoint/asset resolution; neither moves the database. Each checkout gets independent durable data and credentials; a second process for the same checkout attaches to the same service. The password lives inside the installation at `.basis/database/password`, consumed through `POSTGRES_PASSWORD_FILE`, not in Docker metadata. Basis writes `.basis/database/.gitignore` automatically; static assets/mounts reject `.basis` paths and symlink aliases that resolve into `.basis`. Closing or redeploying the server closes only its Bun pool; PostgreSQL and its data keep running. Pass `url` only to use an explicit external server. Docker is required for managed mode, and unhealthy startup is reported through `/api/health`. `server.db.sql` is the pooled Bun SQL tagged-template API: interpolations are parameters and Bun's result/error semantics pass through unchanged. Without configuration, `server.db` is a `NullDatabase` that fails gracefully instead of returning `undefined`.
 
 `/api/health` reports the managed-application contract only once the application is built and ready:
 

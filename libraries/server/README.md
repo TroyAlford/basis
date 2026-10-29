@@ -54,15 +54,26 @@ await server.db.connect()
 await server.shutdown()
 ```
 
-With no `url`, the server starts a managed local PostgreSQL container, assigns it an ephemeral host port, and waits for it before reporting healthy. Managed data lives in a named Docker volume keyed by `name`, and the generated credentials are stored on that volume, so a restart reuses the same cluster and rows survive. `name` defaults to `SERVICE_NAME`, then the process working directory. Shutdown removes the container but keeps the volume; remove that volume explicitly to reset the application database.
+Managed mode is zero-config. Basis keys the database to the normalized application working/checkout directory—the directory Command Center already uses as the process `cwd`. `SERVICE_NAME` remains logging/provenance, and `Server.root` remains entrypoint/asset resolution; neither changes the database identity. Two checkouts stay isolated, while a restart of the same checkout reconnects even if its service name or asset root changes.
 
-The managed database requires Docker; an application that uses it should declare `"docker"` in `basis.hostDependencies` so install fails early when the host cannot provide it. The server also reports `503 error` from `/api/health` if Docker is unavailable at startup.
+Docker allocates a loopback port; on every start Basis inspects the existing application-owned service, discovers its published port, and reuses or starts it. A healthy cluster is never replaced. The first start provisions durable storage and a high-entropy password inside the installation at `.basis/database/password`: a `0700` directory with a `0600` file, mounted read-only as `POSTGRES_PASSWORD_FILE`. Basis writes `.basis/database/.gitignore` automatically so ordinary `git add .` cannot stage it. Static assets and mounts reject `.basis` paths, including symlink aliases whose effective target resolves into `.basis`. Credentials do not appear in Docker labels, environment values, or arguments.
 
-Pass `url` to use an external PostgreSQL server instead. `DatabaseOptions` also accepts the pool's `max`, `idleTimeout`, and `connectionTimeout`, defaulting to `10`, `30`, and `10` seconds respectively.
+The managed service has an independent lifetime. Starting another server for the same installation attaches a second Bun pool to the same database. Closing a server, crashing it, or redeploying it closes only that process's pool; PostgreSQL and its data keep running. Explicit database maintenance or deletion is a separate operation. Docker is required for managed mode, and `/api/health` reports an error when it is unavailable.
+
+Pass `url` to use an explicit external PostgreSQL server instead; that is the only database option. Pool defaults are internal (`connectionTimeout` 10, `idleTimeout` 30, `max` 10).
 
 `server.db` always returns a database capability. Without `database()`, it is a `NullDatabase` whose calls fail with a clear configuration error, so callers do not need optional chaining. `connect()` establishes a real connection and rejects when PostgreSQL is unreachable, and `close()` is idempotent. The pool is never a module global, so two servers never share one.
 
-`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Query, transaction, and model APIs are not part of this capability yet.
+`server.db.sql` is the pooled Bun SQL tagged-template API. Interpolations are parameters, and results and errors are Bun's own:
+
+```ts
+const owner = 'Troy'
+const notes = await server.db.sql<{ id: number, title: string }[]>`
+  select id, title from notes where owner = ${owner}
+`
+```
+
+`server.stop()` keeps its synchronous contract and starts database teardown. `server.shutdown()` waits for database, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Transactions and model/query APIs remain later capabilities.
 
 ## Logging
 

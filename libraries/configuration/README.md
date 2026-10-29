@@ -4,13 +4,13 @@ Configuration and host-integration primitives shared by first-party applications
 
 ## Public surface
 
-Three primitives, plus the types a consumer must name to call `run`:
+Three primitives, plus the types a consumer must name to call the subprocess runners:
 
-| Export                               | Kind                                     |
-| ------------------------------------ | ---------------------------------------- |
-| `Environment`                        | Typed reads over the process environment |
-| `secret`                             | 1Password secret reads                   |
-| `run`, `RunOptions`, `CommandResult` | Bounded subprocess runner                |
+| Export                                               | Kind                                     |
+| ---------------------------------------------------- | ---------------------------------------- |
+| `Environment`                                        | Typed reads over the process environment |
+| `secret`                                             | 1Password secret reads                   |
+| `run`, `runAsync`, `RunOptions`, `CommandResult`     | Bounded subprocess runners               |
 
 Everything else is internal implementation and is deliberately not re-exported: the dotenv loading seam (`loadDotenv`), the secret reader factory (`createSecretReader`) and its injection seams, and their types. Consumers own their configuration policy — defaults, required keys, and enabling conditions — over Basis's value-reading substrate; there is no `createConfiguration`.
 
@@ -59,4 +59,10 @@ const settings = JSON.parse(secret('op://Vault/item/settings'))
 
 ## Subprocesses
 
-`run(command, args, options)` is the single bounded runner the ecosystem shares: synchronous, shell-free (an explicit argv), with `cwd`, environment overrides, `timeoutMs`, and a Basis `Logger`. It returns `{ exitCode, stdout, stderr }` and logs the command line and any failure, so applications stop reimplementing it.
+`run(command, args, options)` and `runAsync(command, args, options)` are the bounded runners the ecosystem shares: shell-free explicit argv, with `cwd`, environment overrides, `timeoutMs`, and a Basis `Logger`. Both return `{ exitCode, stdout, stderr, lines }`, where `lines` is normalized stdout (empty output is `[]`, with no trailing empty line), and both log the command line and any failure. Use `run` for synchronous configuration/install work and `runAsync` where a long-running server must not block its event loop, such as managed database provisioning.
+
+Both runners also accept a whitespace-tokenized tagged template. Interpolated values become discrete arguments, never shell text:
+
+```ts
+const rows = await runAsync`docker ps -q --filter ${`label=basis.database=${identity}`}`
+```
