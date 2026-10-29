@@ -26,7 +26,7 @@ import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
-import { normalizeMountPrefix, serveMount } from './StaticMount'
+import { isInternalStatePath, normalizeMountPrefix, serveMount } from './StaticMount'
 
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
@@ -263,7 +263,7 @@ export class Server {
    * @returns The asset response.
    */
   async handleAsset(uri: URI): Promise<Response> {
-    if (!this.#assets) return Server.NotFound
+    if (!this.#assets || isInternalStatePath(uri.route)) return Server.NotFound
 
     const asset = Bun.file(path.join(this.#assets, uri.route))
     if (await asset.exists() === false) return Server.NotFound

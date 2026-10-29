@@ -2,7 +2,7 @@ import { runAsync } from 'basis/configuration'
 import { SQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
 /** The pool defaults used by every managed or external connection. */
 const POOL_DEFAULTS = {
@@ -265,12 +265,34 @@ class ManagedDatabase implements Database {
   }
 
   /**
+   * Ensure Git never stages the installation's internal state.
+   * @param stateRoot - The installation-local `.basis` directory.
+   */
+  async #protectState(stateRoot: string): Promise<void> {
+    const ignore = join(stateRoot, '.gitignore')
+    try {
+      const handle = await open(ignore, 'wx', 0o644)
+      try {
+        await handle.writeFile('*\n')
+      } finally {
+        await handle.close()
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+  }
+
+  /**
    * Resolve the persistent password file, creating it only for a new service.
    * @param create - Whether a missing file may be initialized.
    * @returns The password and its host file path.
    */
   async #secret(create: boolean): Promise<{ file: string, password: string }> {
-    const directory = join(dirname(this.#installation), '.basis', 'database', this.#identity)
+    const stateRoot = join(this.#installation, '.basis')
+    const directory = join(stateRoot, 'database')
+    await mkdir(stateRoot, { mode: 0o700, recursive: true })
+    await chmod(stateRoot, 0o700)
+    await this.#protectState(stateRoot)
     await mkdir(directory, { mode: 0o700, recursive: true })
     await chmod(directory, 0o700)
     const file = join(directory, 'password')

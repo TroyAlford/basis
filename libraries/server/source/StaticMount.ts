@@ -21,6 +21,35 @@ export function normalizeMountPrefix(prefix: string): string {
 }
 
 /**
+ * Whether a static request targets Basis-owned internal state.
+ *
+ * `.basis` is never public, regardless of which folder an asset or mount
+ * serves. The check rejects traversal and encoded separators as well.
+ * @param route - The request path below a static root.
+ * @returns `true` when the path must not be served.
+ */
+export function isInternalStatePath(route: string): boolean {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(route)
+  } catch {
+    return true
+  }
+
+  const normalized = path.posix.normalize(decoded.replace(/\\/g, '/'))
+  if (
+    decoded.includes('\0')
+    || path.posix.isAbsolute(normalized)
+    || normalized === '..'
+    || normalized.startsWith('../')
+  ) {
+    return true
+  }
+
+  return normalized.split('/').some(segment => segment.toLowerCase() === '.basis')
+}
+
+/**
  * Serve a file from a static mount when the request path is beneath it.
  *
  * The mount owns traversal protection, allow-list enforcement, content type,
@@ -43,6 +72,7 @@ export async function serveMount(mount: StaticMount, requestPath: string): Promi
   const relative = path.normalize(decoded)
   if (
     decoded.length === 0
+    || isInternalStatePath(decoded)
     || decoded.includes('\0')
     || path.isAbsolute(relative)
     || relative === '..'

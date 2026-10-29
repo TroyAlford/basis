@@ -134,6 +134,7 @@ describe('Server database lifecycle', () => {
     const assetsA1 = tempDirectory('basis-assets-a1-')
     const assetsA2 = tempDirectory('basis-assets-a2-')
     const assetsB = tempDirectory('basis-assets-b-')
+    run('git', ['init', '-q'], { cwd: installA, logger: silent })
 
     try {
       // Same SERVICE_NAME, distinct checkout cwd: each installation remains independent.
@@ -155,9 +156,11 @@ describe('Server database lifecycle', () => {
         await b.db.sql`insert into install_probe values ('B')`
 
         const secret = await credentials(aId)
-        expect(secret.source.startsWith(join(dirname(installA), '.basis', 'database'))).toBe(true)
+        expect(secret.source.startsWith(join(installA, '.basis', 'database'))).toBe(true)
         expect(secret.directoryMode).toBe(0o700)
         expect(secret.mode).toBe(0o600)
+        run('git', ['add', '.'], { cwd: installA, logger: silent })
+        expect(run('git', ['status', '--porcelain'], { cwd: installA, logger: silent }).stdout).toBe('')
         expect(secret.raw).not.toContain(secret.password)
         expect(secret.raw).not.toContain('"POSTGRES_PASSWORD=')
         expect(secret.raw).not.toContain('basis.password')
