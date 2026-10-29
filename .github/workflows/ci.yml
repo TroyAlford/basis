@@ -3,7 +3,9 @@ name: Code CI
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main]
+    # `epic/*` branches validate intermediate work under the same code checks
+    # before their coordinated release PR targets `main`.
+    branches: [main, 'epic/*']
 
 permissions:
   contents: read

@@ -78,9 +78,9 @@ const code = loadWorkflow('.github/workflows/ci.yml')
 const metadata = loadWorkflow('.github/workflows/pr-metadata.yml')
 
 describe('Basis Code CI', () => {
-  test('runs only the code events and never metadata edits', () => {
+  test('runs only the code events on main and epic branches', () => {
     expect(code.name).toBe('Code CI')
-    expect(code.on?.pull_request?.branches).toEqual(['main'])
+    expect(code.on?.pull_request?.branches).toEqual(['main', 'epic/*'])
     expect(code.on?.pull_request?.types).toEqual([
       'opened',
       'synchronize',
