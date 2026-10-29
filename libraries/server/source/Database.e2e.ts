@@ -24,21 +24,21 @@ interface InspectMount {
 }
 
 /**
- * Find the containers owned by a managed database identity.
- * @param identity - The identity used in the ownership label.
+ * Find the containers owned by a managed application root.
+ * @param install - The application root used in the ownership label.
  * @returns The container ids.
  */
-function containers(identity: string): readonly string[] {
-  return run`docker ps -aq --filter ${`label=basis.database=${identity}`}`.lines
+function containers(install: string): readonly string[] {
+  return run`docker ps -aq --filter ${`label=basis.root=${install}`}`.lines
 }
 
 /**
- * Remove the containers and durable volume for a managed database identity.
- * @param identity - The identity used in the ownership label.
+ * Remove the containers and durable volume for a managed application root.
+ * @param install - The application root used in the ownership label.
  */
-function removeService(identity: string): void {
-  for (const id of containers(identity)) void run`docker rm -f ${id}`
-  for (const volume of run`docker volume ls -q --filter ${`label=basis.database=${identity}`}`.lines) {
+function removeService(install: string): void {
+  for (const id of containers(install)) void run`docker rm -f ${id}`
+  for (const volume of run`docker volume ls -q --filter ${`label=basis.root=${install}`}`.lines) {
     void run`docker volume rm -f ${volume}`
   }
 }
@@ -124,19 +124,19 @@ describe('Server database lifecycle', () => {
     const dataHome = tempDirectory('basis-db-data-')
     const previousData = Bun.env.XDG_DATA_HOME
     Bun.env.XDG_DATA_HOME = dataHome
-    const serviceA = `basis-e2e-a-${randomUUID()}`
-    const serviceB = `basis-e2e-b-${randomUUID()}`
+    const service = `basis-e2e-${randomUUID()}`
     const rootA = tempDirectory('basis-install-a-')
     const rootB = tempDirectory('basis-install-b-')
 
     try {
-      const a = startWithService(new Server().root(rootA).database(), serviceA)
-      const b = startWithService(new Server().root(rootB).database(), serviceB)
+      // Same SERVICE_NAME, distinct roots: each installation remains independent.
+      const a = startWithService(new Server().root(rootA).database(), service)
+      const b = startWithService(new Server().root(rootB).database(), service)
 
       try {
         await Promise.all([a.ready(), b.ready()])
-        const aId = containers(serviceA)[0]
-        const bId = containers(serviceB)[0]
+        const aId = containers(rootA)[0]
+        const bId = containers(rootB)[0]
         if (!aId) throw new Error('installation A did not start its database')
         if (!bId) throw new Error('installation B did not start its database')
         expect(aId).not.toBe(bId)
@@ -153,7 +153,7 @@ describe('Server database lifecycle', () => {
         expect(secret.raw).not.toContain(secret.password)
         expect(secret.raw).not.toContain('"POSTGRES_PASSWORD=')
         expect(secret.raw).not.toContain('basis.password')
-        const volume = run`docker volume ls -q --filter ${`label=basis.database=${serviceA}`}`.lines[0]
+        const volume = run`docker volume ls -q --filter ${`label=basis.root=${rootA}`}`.lines[0]
         expect(volume).toBeTruthy()
         expect(run`docker volume inspect ${volume}`.stdout).not.toContain(secret.password)
       } finally {
@@ -162,26 +162,26 @@ describe('Server database lifecycle', () => {
       }
 
       // Closing pools does not stop or deprovision either application service.
-      expect(containers(serviceA)).toHaveLength(1)
-      expect(containers(serviceB)).toHaveLength(1)
+      expect(containers(rootA)).toHaveLength(1)
+      expect(containers(rootB)).toHaveLength(1)
 
-      const bAgain = startWithService(new Server().root(rootB).database(), serviceB)
+      const bAgain = startWithService(new Server().root(rootB).database(), service)
       try {
         await bAgain.ready()
         expect(await bAgain.db.sql<{ value: string }[]>`select value from install_probe`)
           .toEqual([{ value: 'B' }])
 
-        const aAgain = startWithService(new Server().root(rootA).database(), serviceA)
+        const aAgain = startWithService(new Server().root(rootA).database(), service)
         try {
           await aAgain.ready()
           expect(await aAgain.db.sql<{ value: string }[]>`select value from install_probe`)
             .toEqual([{ value: 'A' }])
 
           // A second process for the same installation attaches to the same service.
-          const aTwin = startWithService(new Server().root(rootA).database(), serviceA)
+          const aTwin = startWithService(new Server().root(rootA).database(), service)
           try {
             await aTwin.ready()
-            expect(containers(serviceA)).toHaveLength(1)
+            expect(containers(rootA)).toHaveLength(1)
             expect(await aTwin.db.sql<{ value: string }[]>`select value from install_probe`)
               .toEqual([{ value: 'A' }])
           } finally {
@@ -200,8 +200,8 @@ describe('Server database lifecycle', () => {
     } finally {
       if (previousData === undefined) delete Bun.env.XDG_DATA_HOME
       else Bun.env.XDG_DATA_HOME = previousData
-      removeService(serviceA)
-      removeService(serviceB)
+      removeService(rootA)
+      removeService(rootB)
     }
   }, 180_000)
 
@@ -232,7 +232,7 @@ describe('Server database lifecycle', () => {
     } finally {
       if (previousData === undefined) delete Bun.env.XDG_DATA_HOME
       else Bun.env.XDG_DATA_HOME = previousData
-      removeService(service)
+      removeService(install)
     }
   }, 120_000)
 

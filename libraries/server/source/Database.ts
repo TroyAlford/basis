@@ -3,7 +3,7 @@ import { SQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 /** The pool defaults used by every managed or external connection. */
 const POOL_DEFAULTS = {
@@ -158,24 +158,19 @@ export class NullDatabase implements Database {
 }
 
 /**
- * Resolve the stable managed database identity.
+ * Resolve the stable per-installation managed database identity.
  *
- * A deployed service name is authoritative. Without one, the stable
- * application root produces a per-install identity.
+ * The deployment name and normalized application root both contribute when a
+ * service name is present; otherwise the normalized root alone identifies the
+ * installation.
  * @param root - The stable application root.
- * @returns The managed database identity.
- * @throws {Error} When `SERVICE_NAME` is not safe as a Docker resource name.
+ * @returns The hashed managed database identity.
  */
 export function managedDatabaseIdentity(root: string): string {
+  const normalized = resolve(root)
   const service = Bun.env.SERVICE_NAME?.trim()
-  if (!service) return createHash('sha1').update(root).digest('hex').slice(0, 16)
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(service)) {
-    throw new Error(
-      'SERVICE_NAME must be a Docker-safe identifier: letters, digits, ".", "_", or "-", ' +
-      'starting with a letter or digit.',
-    )
-  }
-  return service
+  const material = service ? `${service}\u0000${normalized}` : normalized
+  return createHash('sha1').update(material).digest('hex').slice(0, 16)
 }
 
 /**
@@ -193,6 +188,7 @@ class ManagedDatabase implements Database {
   #dataRoot: string
   #database: PostgresDatabase | null = null
   #identity: string
+  #root: string
   #volume: string
 
   /**
@@ -201,7 +197,8 @@ class ManagedDatabase implements Database {
    * @param root - The stable application root.
    */
   constructor(root: string) {
-    this.#identity = managedDatabaseIdentity(root)
+    this.#root = resolve(root)
+    this.#identity = managedDatabaseIdentity(this.#root)
     this.#containerName = `basis-postgres-${this.#identity}`
     this.#volume = this.#containerName
     this.#dataRoot = Bun.env.XDG_DATA_HOME?.trim()
@@ -326,9 +323,13 @@ class ManagedDatabase implements Database {
    * @returns Its running state, or `missing`.
    */
   async #containerState(): Promise<ContainerState> {
-    const result = await runAsync`docker inspect --format {{.State.Running}} ${this.#containerName}`
-    if (result.exitCode !== 0) return 'missing'
-    return result.stdout.trim() === 'true' ? 'running' : 'stopped'
+    const result = await runAsync`
+      docker ps -a
+      --filter ${`name=^/${this.#containerName}$`}
+      --format {{.State}}
+    `
+    if (result.lines.length === 0) return 'missing'
+    return result.lines[0] === 'running' ? 'running' : 'stopped'
   }
 
   /**
@@ -336,13 +337,19 @@ class ManagedDatabase implements Database {
    * @returns `true` when Docker knows the volume.
    */
   async #volumeExists(): Promise<boolean> {
-    return (await runAsync`docker volume inspect ${this.#volume}`).exitCode === 0
+    const result = await runAsync`
+      docker volume ls -q --filter ${`name=^${this.#volume}$`}
+    `
+    return result.lines.length > 0
   }
 
   /** Create the durable data volume with application ownership labels. */
   async #createVolume(): Promise<void> {
     const created = await runAsync`
-      docker volume create --label ${`basis.database=${this.#identity}`} ${this.#volume}
+      docker volume create
+      --label ${`basis.database=${this.#identity}`}
+      --label ${`basis.root=${this.#root}`}
+      ${this.#volume}
     `
     if (created.exitCode !== 0) {
       const detail = created.stderr.trim() || `docker volume create exited with ${created.exitCode}`
@@ -359,6 +366,7 @@ class ManagedDatabase implements Database {
       docker run -d --pull missing
       --name ${this.#containerName}
       --label ${`basis.database=${this.#identity}`}
+      --label ${`basis.root=${this.#root}`}
       -e ${`POSTGRES_USER=${MANAGED_NAME}`}
       -e ${`POSTGRES_PASSWORD_FILE=${PASSWORD_MOUNT}`}
       -e ${`POSTGRES_DB=${MANAGED_NAME}`}

@@ -9,10 +9,12 @@ afterEach(() => {
 })
 
 describe('managedDatabaseIdentity', () => {
-  test('uses SERVICE_NAME when present', () => {
+  test('combines SERVICE_NAME and the normalized application root', () => {
     Bun.env.SERVICE_NAME = 'mtg_prod'
-    expect(managedDatabaseIdentity('/srv/apps/a')).toBe('mtg_prod')
-    expect(managedDatabaseIdentity('/srv/apps/b')).toBe('mtg_prod')
+    const identity = managedDatabaseIdentity('/srv/apps/a')
+    expect(identity).toBe(managedDatabaseIdentity('/srv/apps/a/'))
+    expect(identity).not.toBe(managedDatabaseIdentity('/srv/apps/b'))
+    expect(identity).toMatch(/^[a-f0-9]{16}$/)
   })
 
   test('falls back to a stable per-root hash when SERVICE_NAME is absent', () => {
@@ -21,10 +23,5 @@ describe('managedDatabaseIdentity', () => {
     expect(identity).toBe(managedDatabaseIdentity('/srv/apps/a'))
     expect(identity).not.toBe(managedDatabaseIdentity('/srv/apps/b'))
     expect(identity).toMatch(/^[a-f0-9]{16}$/)
-  })
-
-  test('rejects a SERVICE_NAME that is not Docker-safe', () => {
-    Bun.env.SERVICE_NAME = 'mtg/prod'
-    expect(() => managedDatabaseIdentity('/srv/apps/a')).toThrow('Docker-safe identifier')
   })
 })
