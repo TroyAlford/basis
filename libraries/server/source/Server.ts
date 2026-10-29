@@ -15,6 +15,8 @@ import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { Builder } from './Builder'
+import type { DatabaseOptions } from './Database'
+import { Database } from './Database'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
 import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
@@ -86,6 +88,8 @@ export class Server {
   #apis = new Map<string, APIRoute>()
   #assets: string | null = null
   #builder: Builder | null = null
+  #closing: Promise<void> | null = null
+  #database: Database | null = null
   #development = true
   #entrypoints: [string, string][] = []
   #favIcon: ResolvedFavIcon | null = null
@@ -145,6 +149,14 @@ export class Server {
    */
   get port(): number | undefined {
     return this.#server?.port
+  }
+
+  /**
+   * The server-owned PostgreSQL pool, when {@link database} configured one.
+   * @returns The database capability, or `undefined` when none is configured.
+   */
+  get db(): Database | undefined {
+    return this.#database ?? undefined
   }
 
   /**
@@ -518,7 +530,10 @@ export class Server {
   }
 
   /**
-   * Stops the server and its build watcher.
+   * Stops the server, its build watcher, and its database pool.
+   *
+   * Pool teardown is asynchronous; {@link shutdown} waits for it. This method
+   * keeps its synchronous contract for existing callers.
    * @returns The server.
    */
   stop = (): Server => {
@@ -533,7 +548,26 @@ export class Server {
     this.#server?.stop()
     this.#server = null
 
+    if (!this.#closing) {
+      const closing = this.#database?.close() ?? Promise.resolve()
+      void closing.catch((error: unknown) => {
+        const failure = error instanceof Error ? error : new Error(String(error))
+        this.#logger.error(`database close failed: ${failure.message}`)
+      })
+      this.#closing = closing
+    }
+
     return this
+  }
+
+  /**
+   * Stops the server and waits for asynchronous teardown, including the
+   * server-owned database pool.
+   * @returns A promise that settles when teardown finishes.
+   */
+  async shutdown(): Promise<void> {
+    this.stop()
+    await this.#closing
   }
 
   /**
@@ -567,6 +601,20 @@ export class Server {
     this.api([HttpVerb.Get], 'oauth/login', () => flow.login())
     this.api([HttpVerb.Get], 'oauth/callback', (_params, { request }) => flow.callback(request))
     this.api([HttpVerb.Get], 'oauth/logout', (_params, { request }) => flow.logout(request))
+    return this
+  }
+
+  /**
+   * Configures the server-owned PostgreSQL pool.
+   *
+   * The pool is created with Bun's native SQL client. The server owns its
+   * lifecycle: {@link stop} starts closing it and {@link shutdown} waits for
+   * that close to finish.
+   * @param options - The PostgreSQL connection URL and pool options.
+   * @returns The server.
+   */
+  database(options: DatabaseOptions): Server {
+    this.#database = new Database(options)
     return this
   }
 
@@ -891,10 +939,9 @@ export class Server {
     return uri.type === 'api' ? [uri.route] : uri.route ? [] : [uri.type]
   }
 
-  /** Handles process shutdown signals by stopping and exiting cleanly. */
+  /** Handles process shutdown signals by stopping, closing the pool, and exiting cleanly. */
   #handleSignal = (): void => {
-    this.stop()
-    process.exit(0)
+    void this.shutdown().finally(() => process.exit(0))
   }
 
   /**

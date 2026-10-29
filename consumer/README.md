@@ -306,6 +306,8 @@ Development HMR needs Bun's dev-server bundler to load Basis's modules. `bun ins
 
 `start` options are `development`, `hostname`, `port`, and `version`; each falls back to `NODE_ENV`, `HOST`, `PORT`, and `VERSION`. A managed process should bind loopback and the deployment-assigned port, and pass the release version.
 
+`server.database({ url, ...options })` configures one server-owned Bun PostgreSQL pool, exposed as `server.db`. `connect()` proves the connection and `shutdown()` waits for the pool and server to close; `stop()` remains synchronous and starts that teardown.
+
 `/api/health` reports the managed-application contract only once the application is built and ready:
 
 ```json
@@ -316,7 +318,7 @@ Development HMR needs Bun's dev-server bundler to load Basis's modules. `bun ins
 
 While the initial build is pending it responds `503 { "status": "starting", ... }`, and after a failed build `503 { "status": "error", "error": "...", ... }`, so a verifier can never observe a healthy process for an application that did not build. `server.ready()` resolves when the build succeeds and rejects when it fails, for processes that signal readiness directly. Bun version and uptime are additive diagnostics. The API is `/api/health`. The server surface shares the React contract from `basis/react`, and its runtime dependencies are declared by Basis.
 
-`@basis/server` is still maturing; the supported public surface is the `Server` class, its `ServerOptions`, and the `APIRoute` and `HealthOptions` types.
+`@basis/server` is still maturing; the supported public surface is the `Server` class, its `ServerOptions`, `Database`, `DatabaseOptions`, and the `APIRoute` and `HealthOptions` types.
 
 Only the deliberately supported surfaces above are exported. Internal workspaces are not exposed just because they exist.
 

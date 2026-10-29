@@ -36,6 +36,28 @@ new Server()
 | `port`        | `PORT`, then `80`             | Port to bind. `0` binds an ephemeral port.                  |
 | `version`     | `VERSION`, then `development` | Release version reported by `/api/health`.                  |
 
+## Database
+
+`server.database(options)` configures one Bun-native PostgreSQL pool owned by the server:
+
+```ts
+import { Server } from 'basis/server'
+
+const server = new Server()
+  .root(import.meta.dir)
+  .main('./Application.tsx')
+  .database({ url: Bun.env.DATABASE_URL! })
+  .start()
+
+await server.db?.connect()
+// ...
+await server.shutdown()
+```
+
+`DatabaseOptions` accepts the PostgreSQL `url` plus the Bun pool's `max`, `idleTimeout`, and `connectionTimeout`. `server.db` exposes that pool; `connect()` establishes a real connection and rejects when PostgreSQL is unreachable, and `close()` is idempotent. The pool is never a module global, so two servers never share one.
+
+`server.stop()` keeps its synchronous contract and starts pool teardown. `server.shutdown()` waits for pool, build watcher, and HTTP teardown; `SIGINT`/`SIGTERM` use that graceful path before exiting. Query, transaction, and model APIs are not part of this capability yet.
+
 ## Logging
 
 `Server` owns a standard Basis `Logger` and writes its lifecycle output through it: the `listening http://<host>:<port>` startup line, `stopping` on shutdown, build failures, and the development/HMR watcher messages. Applications do not need to construct or configure a logger; use the server's logger for application-specific messages:
