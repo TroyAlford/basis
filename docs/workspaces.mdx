@@ -1,0 +1,15 @@
+---
+title: Workspaces
+---
+
+# Workspaces
+
+`@basis/workspaces` is an internal workspace-management tool for the Basis monorepo and similarly structured first-party repositories. It is not a supported consumer import.
+
+It discovers workspaces, tracks dependency relationships, runs filtered builds, and provides the internal `workspace` / `ws` command used by maintainers. The root development scripts use it to build the workspace graph and to keep package manifests and licenses consistent.
+
+```bash
+bun run workspace build-all
+```
+
+Consumers do not need this package: they consume Basis through the root facade and a pinned Git tag. If you are working inside the Basis repository, see [Contributing](./contributing.mdx) for the supported development commands.

@@ -1,0 +1,28 @@
+---
+title: CLI
+---
+
+# CLI
+
+`basis/cli` is the `basis` command. It supplies repository tooling without requiring consumers to assemble the underlying ESLint, Stylelint, Markdown, TypeScript, or documentation stacks.
+
+```bash
+bunx basis lint
+bunx basis format
+bunx basis typecheck
+bunx basis check
+bunx basis compliance
+bunx basis doctor
+bunx basis docs check
+bunx basis docs build
+```
+
+- `lint` reports the full Basis policy.
+- `format` applies every autofix the policy supports.
+- `typecheck` runs the TypeScript native compiler.
+- `check` runs the repository's validation set.
+- `compliance` runs the class-based architecture rule in a focused, report-only configuration.
+- `doctor` verifies the installed consumer/runtime setup.
+- `docs check` validates a docs tree; `docs build` writes the static documentation site.
+
+The CLI is a facade over the same code and policy exported through `basis/eslint`, `basis/stylelint`, `basis/markdown`, and `basis/tsconfig/*`. It does not replace repository-specific scripts or add a second configuration system.

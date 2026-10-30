@@ -8,9 +8,10 @@ Guidance for humans and coding agents working in this repository.
 
 ## Documentation
 
-- **Keep docs in the same change as the code.** Whenever you add or change public API surface, default behavior, or user-visible component behavior, update the matching documentation page under `libraries/docs/pages/` (files named `*.docs.tsx`).
-- **What counts:** new or renamed props, enum values, column types, static helpers on components, sorting or alignment rules, and similar contract changes.
-- **Goal:** A reader browsing the docs app should see the current behavior without relying on the PR description alone.
+- **Keep docs in the same change as the code.** The documentation site is the authoritative reference for every public Basis surface. Add or update the matching `docs/*.md(x)` article (or `libraries/docs/pages/*.docs.tsx` interactive component page) whenever public API surface, default behavior, lifecycle, or user-visible component behavior changes.
+- **What counts:** new or renamed package exports, props, enum values, column types, static helpers, configuration, commands, lifecycle rules, sorting or alignment rules, and similar contract changes across `basis/react`, `basis/server`, `basis/configuration`, `basis/logger`, `basis/oauth`, `basis/review`, `basis/testing`, and the CLI/tooling surfaces.
+- **READMEs are front doors.** Root, `consumer/`, and workspace READMEs provide the description, minimal quick start, and links to the relevant site page. Do not grow them into parallel API inventories.
+- **Goal:** A reader browsing the docs site should see the current behavior without relying on the PR description or a long README.
 
 ## `@basis/react` components
 

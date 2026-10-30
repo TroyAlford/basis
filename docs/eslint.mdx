@@ -1,0 +1,28 @@
+---
+title: ESLint
+---
+
+# ESLint
+
+`basis/eslint` is the shared flat ESLint configuration. The internal `@basis/eslint-plugin` implements Basis-owned rules; consumers do not install or enumerate the plugin stack.
+
+```js
+// eslint.config.mjs
+export { default } from 'basis/eslint'
+```
+
+Extend the policy with the provided factory instead of replacing it:
+
+```js
+import { createConfig } from 'basis/eslint'
+
+export default createConfig({
+  overrides: [
+    { files: ['src/vendor/**'], rules: { 'no-console': 'off' } },
+  ],
+})
+```
+
+The policy includes repository conventions such as import ordering, JSDoc requirements, class-based React architecture, and the no-paragraph-line-breaks documentation rule. `@basis/component-architecture` is the rule that rejects function components, hooks, `React.FC` types, and direct `React.Component` subclasses in application source while leaving tests, fixtures, and generated files outside its scope.
+
+`basis lint` applies the full policy; `basis format` applies the autofixes. `basis compliance` runs the architecture rule alone and always uses the Basis-owned configuration.
