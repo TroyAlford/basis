@@ -117,6 +117,23 @@ describe('buildDocs', () => {
 })
 
 describe('navigation', () => {
+  test('sorts generic documentation roots by title', () => {
+    const Component = (): React.ReactNode => null
+    const root = fixture({ 'docs/index.mdx': '# Home\n' })
+    const site = discoverDocs({
+      pages: [
+        { component: Component, path: '/zeta', title: 'Zeta' },
+        { component: Component, path: '/alpha', title: 'Alpha' },
+      ],
+      root: join(root, 'docs'),
+      route: '/',
+    })
+    const alpha = site.modules.get('/alpha')
+    if (!alpha) throw new Error('missing /alpha module')
+    const html = moduleToHTML(site, alpha, '/alpha')
+    expect(html.indexOf('href="/alpha"')).toBeLessThan(html.indexOf('href="/zeta"'))
+  })
+
   test('nests a page module under its declared parent', () => {
     const Component = (): React.ReactNode => null
     const root = fixture({ 'docs/index.mdx': '# Home\n' })

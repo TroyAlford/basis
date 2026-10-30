@@ -193,7 +193,11 @@ function buildNavigation(site: DocsSite): DocumentationEntry[] {
       title: page.title,
     })
   }
-  return buildDocumentationNavigation(routes)
+  /*
+   * Generic consumer docs retain their established title-sorted roots; Basis
+   * passes explicit navigation and therefore bypasses this default.
+   */
+  return buildDocumentationNavigation(routes).sort((a, b) => a.title.localeCompare(b.title))
 }
 
 /**
