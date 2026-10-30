@@ -102,6 +102,15 @@ describe('mdxToHTML', () => {
     expect(html).toContain('<svg')
     expect(html).not.toContain('esm.sh/mermaid')
   })
+
+  test('preserves fenced code language and bootstraps syntax highlighting', async () => {
+    const root = fixture({ 'docs/index.mdx': '# Home\n\n```ts\nconst answer = 42\n```\n' })
+    const site = discoverDocs({ root: join(root, 'docs') })
+    const html = await mdxToHTML(site, page(site, ''))
+    expect(html).toContain('class="language-ts"')
+    expect(html).toContain('const answer = 42')
+    expect(html).toContain("import('https://esm.sh/shiki@3.0.0')")
+  })
 })
 
 describe('buildDocs', () => {

@@ -38,14 +38,12 @@ import { MarkdownLintingDocs } from './pages/MarkdownLinting.docs.tsx'
 import { MenuDocs } from './pages/Menu.docs.tsx'
 import { MermaidDocs } from './pages/Mermaid.docs.tsx'
 import { MixinsDocs } from './pages/Mixins.docs.tsx'
-import { MoonPhaseDocs } from './pages/MoonPhase.docs.tsx'
 import { NotificationDocs } from './pages/Notification.docs.tsx'
 import { NumberEditorDocs } from './pages/NumberEditor.docs.tsx'
 import { OptionGroupDocs } from './pages/OptionGroup.docs.tsx'
 import { OverlayProviderDocs } from './pages/OverlayProvider.docs.tsx'
 import { OverviewDocs } from './pages/Overview.docs.tsx'
 import { RouterDocs } from './pages/Router.docs.tsx'
-import { RouterGuardDocs } from './pages/RouterGuardDocs.docs.tsx'
 import { TableDocs } from './pages/Table.docs.tsx'
 import { TagDocs } from './pages/Tag.docs.tsx'
 import { TagsEditorDocs } from './pages/TagsEditor.docs.tsx'
@@ -240,12 +238,6 @@ export const routes = [
     title: 'Icons',
   }),
   docs({
-    component: MoonPhaseDocs,
-    parent: '/icons',
-    path: '/icons/MoonPhase',
-    title: 'Icons/MoonPhase',
-  }),
-  docs({
     component: MixinsDocs,
     parent: 'section:react-foundations',
     path: '/mixins',
@@ -256,12 +248,6 @@ export const routes = [
     parent: 'section:react-foundations',
     path: '/components/router',
     title: 'Router',
-  }),
-  docs({
-    component: RouterGuardDocs,
-    parent: '/components/router',
-    path: '/components/router/guard-demo',
-    title: 'Router/Guard Demo',
   }),
   docs({
     component: ThemeDocs,

@@ -24,7 +24,6 @@ const EXISTING = [
   '/components/option-group',
   '/components/overlay-provider',
   '/components/router',
-  '/components/router/guard-demo',
   '/components/table',
   '/components/tag',
   '/components/tags-editor',
@@ -38,7 +37,6 @@ const EXISTING = [
   '/engineering-principles',
   '/guides',
   '/icons',
-  '/icons/MoonPhase',
   '/markdown-linting',
   '/mixins',
   '/reference',
@@ -46,11 +44,13 @@ const EXISTING = [
 ]
 
 describe('docs routes', () => {
-  test('keeps every existing deep link and the new monorepo pages', () => {
+  test('keeps every canonical deep link and the new monorepo pages', () => {
     const pages = routes.filter(route => !route.section).map(route => route.path)
 
     expect(new Set(pages).size).toBe(pages.length)
     for (const path of EXISTING) expect(pages).toContain(path)
+    expect(pages).not.toContain('/components/router/guard-demo')
+    expect(pages).not.toContain('/icons/MoonPhase')
 
     expect(pages).toContain('/react')
     expect(pages).toContain('/installation')

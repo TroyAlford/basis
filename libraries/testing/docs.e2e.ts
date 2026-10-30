@@ -26,7 +26,10 @@ const NETWORK = { allow: ['esm.sh'] }
 async function waitForHighlightedCode(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const codes = Array.from(document.querySelectorAll('.code.component'))
-    return codes.length > 0 && codes.every(code => code.querySelector('pre.shiki') !== null)
+    const fences = document.querySelectorAll('.documentation-shell main pre:not(.shiki) > code')
+    return codes.length > 0
+      && codes.every(code => code.querySelector('pre.shiki') !== null)
+      && fences.length === 0
   }, undefined, { timeout: 30_000 })
 }
 
@@ -110,6 +113,14 @@ describe('testing/docs', () => {
       expect(await page.evaluate(() => (
         getComputedStyle(document.body).getPropertyValue('--basis-color-background').trim()
       ))).toBe('#080a0dff')
+    })
+  }, 60_000)
+
+  test('highlights Markdown code fences', async () => {
+    await app.visit('/server/database', { ...NETWORK }, async page => {
+      await page.waitForSelector('.documentation-shell main pre.shiki')
+      expect(await page.locator('.documentation-shell main pre.shiki').count()).toBeGreaterThan(2)
+      expect(await page.locator('.documentation-shell main pre:not(.shiki) > code').count()).toBe(0)
     })
   }, 60_000)
 

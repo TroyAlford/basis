@@ -62,6 +62,29 @@ export interface DocsSite {
 
 /** A Markdown inline link to a document. */
 const DOC_LINK = /\]\(([^)\s]+\.mdx?)(#[^)]*)?\)/g
+
+/**
+ * Browser bootstrap for static pages: Markdown fences and unhydrated Code
+ * components are plain code until Shiki replaces them with highlighted markup.
+ * The script only loads the runtime when the page actually contains code.
+ */
+const CODE_HIGHLIGHT = `
+const blocks = document.querySelectorAll('.documentation-shell main pre:not(.shiki) > code, .code.component > code')
+if (blocks.length > 0) {
+  const { codeToHtml } = await import('https://esm.sh/shiki@3.0.0')
+  for (const code of blocks) {
+    const root = code.closest('.code.component')
+    const language = code.className.match(/(?:^|\\s)language-([\\w-]+)/)?.[1] ?? root?.dataset.codeLanguage ?? 'text'
+    const theme = root?.dataset.codeTheme ?? 'github-dark-high-contrast'
+    try {
+      const html = await codeToHtml(code.textContent ?? '', { lang: language, theme })
+      const target = code.parentElement?.tagName === 'PRE' ? code.parentElement : code
+      target.outerHTML = html
+    } catch {
+      /* Keep the readable source when highlighting is unavailable. */
+    }
+  }
+}`
 type MdxContent = React.ComponentType<{
   components?: { pre?: React.ComponentType<React.HTMLAttributes<HTMLPreElement>> },
 }>
@@ -231,6 +254,7 @@ function layout(site: DocsSite, active: string, content: React.ReactNode, title:
     `<style>${styles()}</style>`,
     '</head><body>',
     body,
+    `<script type="module">${CODE_HIGHLIGHT}</script>`,
     '</body></html>',
   ].join('')
 }

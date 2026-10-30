@@ -28,6 +28,23 @@ function loadShiki(): Promise<Shiki> {
   return runtime
 }
 
+/**
+ * Highlight source to Shiki HTML in the browser.
+ * @param code - Source to highlight.
+ * @param language - Shiki language id.
+ * @param theme - Shiki theme id.
+ * @returns Highlighted HTML, or null when no document is available.
+ */
+export async function highlight(
+  code: string,
+  language = 'tsx',
+  theme = 'github-dark-high-contrast',
+): Promise<string | null> {
+  if (typeof globalThis.document === 'undefined') return null
+  const { codeToHtml } = await loadShiki()
+  return codeToHtml(code, { lang: language, theme })
+}
+
 export class Code extends Component<Props> {
   static displayName = 'Code'
   static defaultProps: Props = {
@@ -77,13 +94,9 @@ export class Code extends Component<Props> {
   }
 
   async renderCode() {
-    if (typeof globalThis.document === 'undefined') return <code>{this.code}</code>
-    const { codeToHtml } = await loadShiki()
-    const html = await codeToHtml(this.code, {
-      lang: this.props.language,
-      theme: this.props.theme,
-    })
-
-    return <code dangerouslySetInnerHTML={{ __html: html }} />
+    const html = await highlight(this.code, this.props.language, this.props.theme)
+    return html === null
+      ? <code>{this.code}</code>
+      : <code dangerouslySetInnerHTML={{ __html: html }} />
   }
 }

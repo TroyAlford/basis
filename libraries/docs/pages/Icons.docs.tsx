@@ -1,7 +1,7 @@
 import type { IconProps } from 'basis/react'
-import { Button, css, EnumEditor, NumberEditor, Router, style, TextEditor } from 'basis/react'
+import { Button, css, EnumEditor, NumberEditor, style, TextEditor } from 'basis/react'
 import * as Icons from 'basis/react/icons'
-import type { ComponentType, ReactNode } from 'react'
+import type { ComponentType, CSSProperties, ReactNode } from 'react'
 import { IconBase } from '../../react/icons/IconBase/IconBase'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
@@ -14,6 +14,12 @@ interface State {
   filterText: string,
   iconColor: string,
   iconFilled: boolean,
+  moonColor: string,
+  moonDay: number,
+  moonFilled: boolean,
+  moonPeriod: number,
+  moonSecondary: string,
+  moonTilt: number,
   overlayColor: string,
   overlayFilled: boolean,
   overlayIcon: string,
@@ -32,6 +38,12 @@ export class IconsDocs extends DocumentationPage<State> {
       filterText: '',
       iconColor: '',
       iconFilled: false,
+      moonColor: '#336699',
+      moonDay: 3.5,
+      moonFilled: true,
+      moonPeriod: 28,
+      moonSecondary: '#11111144',
+      moonTilt: 28.5,
       overlayColor: '#66aa66',
       overlayFilled: false,
       overlayIcon: 'Plus',
@@ -137,6 +149,86 @@ export class IconsDocs extends DocumentationPage<State> {
       </div>
     </div>
   )
+
+  renderMoonPhaseSection = () => {
+    const { moonColor, moonDay, moonFilled, moonPeriod, moonSecondary, moonTilt } = this.current
+
+    return (
+      <div className="moon-phase-section">
+        <div className="moon-controls">
+          <h3>Moon Phase Controls</h3>
+          <div className="moon-controls-grid">
+            <div className="control-group">
+              <label>Primary Color</label>
+              <input
+                className="color-input"
+                type="color"
+                value={moonColor}
+                onChange={event => void this.handleField(event.target.value, 'moonColor')}
+              />
+            </div>
+            <div className="control-group">
+              <label>Secondary Color</label>
+              <input
+                className="color-input"
+                type="color"
+                value={moonSecondary}
+                onChange={event => void this.handleField(event.target.value, 'moonSecondary')}
+              />
+            </div>
+            <div className="control-group">
+              <label>Filled</label>
+              <Button
+                className={moonFilled ? 'primary' : 'secondary'}
+                onActivate={() => void this.handleField(!moonFilled, 'moonFilled')}
+              >
+                {moonFilled ? 'Filled' : 'Outline'}
+              </Button>
+            </div>
+            <div className="control-group">
+              <label>Moon Day: {moonDay}</label>
+              <NumberEditor
+                value={moonDay}
+                onChange={value => void this.handleField(value, 'moonDay')}
+              />
+            </div>
+            <div className="control-group">
+              <label>Moon Period: {moonPeriod}</label>
+              <NumberEditor
+                value={moonPeriod}
+                onChange={value => void this.handleField(value, 'moonPeriod')}
+              />
+            </div>
+            <div className="control-group">
+              <label>Moon Tilt: {moonTilt}</label>
+              <NumberEditor
+                step={0.1}
+                value={moonTilt}
+                onChange={value => void this.handleField(value, 'moonTilt')}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="moon-display">
+          <div
+            className="moon-demo-container"
+            style={{
+              '--basis-icon-color': moonColor,
+              '--basis-icon-color-secondary': moonSecondary,
+            } as CSSProperties}
+          >
+            <Icons.MoonPhase
+              day={moonDay}
+              filled={moonFilled}
+              period={moonPeriod}
+              tilt={moonTilt}
+            />
+          </div>
+          <span className="moon-phase-name">Moon Phase</span>
+        </div>
+      </div>
+    )
+  }
 
   content() {
     const {
@@ -272,7 +364,82 @@ export class IconsDocs extends DocumentationPage<State> {
           <Zoom.In />
           <Zoom.Out />
         `)}
-        <p>For detailed information about the Moon Phase component, see the<Router.Link to="/icons/MoonPhase">MoonPhase documentation</Router.Link>.</p>
+        <h2>MoonPhase</h2>
+        <p>The <code>MoonPhase</code> icon dynamically renders different lunar phases based on <code>day</code>, <code>period</code>, and <code>tilt</code>. Use it for astronomical data, calendar systems, or any interface that benefits from lunar phase visualization.</p>
+        {this.renderMoonPhaseSection()}
+        <h3>Parameters</h3>
+        <p>The component accepts three key parameters that control its appearance:</p>
+        <ul>
+          <li><strong>day</strong> - The current day in the lunar cycle (0-28)</li>
+          <li><strong>period</strong> - The total length of the lunar cycle (typically 28 days)</li>
+          <li><strong>tilt</strong> - The rotation angle of the moon phase (0-1)</li>
+        </ul>
+        <h3>Usage Examples</h3>
+        <h4>Basic Usage</h4>
+        {Code.format(`
+          import { MoonPhase } from 'basis/react'
+
+          // Show different moon phases
+          <MoonPhase day={0} period={28} tilt={0} />      // New moon
+          <MoonPhase day={7} period={28} tilt={0} />      // First quarter
+          <MoonPhase day={14} period={28} tilt={0} />     // Full moon
+          <MoonPhase day={21} period={28} tilt={0} />     // Last quarter
+        `)}
+        <h4>With Custom Tilt</h4>
+        {Code.format(`
+          import { MoonPhase } from 'basis/react'
+
+          // With custom tilt for different orientations
+          <MoonPhase day={14} period={28} tilt={0.3} />
+          <MoonPhase day={7} period={28} tilt={0.7} />
+        `)}
+        <h4>Different Periods</h4>
+        {Code.format(`
+          import { MoonPhase } from 'basis/react'
+
+          // Custom lunar periods
+          <MoonPhase day={10} period={30} tilt={0} />    // 30-day cycle
+          <MoonPhase day={5} period={14} tilt={0} />     // 14-day cycle
+        `)}
+        <h3>Phase Calculation</h3>
+        <p>The component automatically calculates the lunar phase based on the day and period parameters:</p>
+        <ul>
+          <li><strong>New Moon</strong> - day = 0 or day = period</li>
+          <li><strong>Waxing Crescent</strong> - 0 &lt; day &lt; period/4</li>
+          <li><strong>First Quarter</strong> - day = period/4</li>
+          <li><strong>Waxing Gibbous</strong> - period/4 &lt; day &lt; period/2</li>
+          <li><strong>Full Moon</strong> - day = period/2</li>
+          <li><strong>Waning Gibbous</strong> - period/2 &lt; day &lt; 3*period/4</li>
+          <li><strong>Last Quarter</strong> - day = 3*period/4</li>
+          <li><strong>Waning Crescent</strong> - 3*period/4 &lt; day &lt; period</li>
+        </ul>
+        <h3>Styling</h3>
+        <p>The Moon Phase component supports all standard icon styling options, plus duotone support:</p>
+        {Code.format(`
+          // CSS custom properties
+          .moon-container {
+            --basis-icon-color: #000000;              // Primary color (moon phase)
+            --basis-icon-color-secondary: #11111144;  // Secondary color (background circle)
+            --basis-icon-size: 48px;
+          }
+
+          // Component props
+          <MoonPhase
+            day={14}
+            period={28}
+            tilt={0}
+            disabled={false}
+            onClick={() => console.log('Moon clicked!')}
+          />
+        `)}
+        <h3>Use Cases</h3>
+        <ul>
+          <li><strong>Calendar Applications</strong> - Display lunar phases in date pickers</li>
+          <li><strong>Astronomy Apps</strong> - Show current moon phase for stargazing</li>
+          <li><strong>Weather Applications</strong> - Include lunar data in weather displays</li>
+          <li><strong>Gaming</strong> - Dynamic moon phases for day/night cycles</li>
+          <li><strong>Educational Tools</strong> - Teach lunar cycle concepts</li>
+        </ul>
         <h2>Icon Styling</h2>
         <p>Icons are styled using CSS custom properties. All icons inherit from <code>IconBase</code> and support the following styling options:</p>
         <ul>
