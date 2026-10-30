@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
-import { selectSQL } from './EntityDefinitions'
+import { FieldType, selectSQL } from './EntityDefinitions'
 
 /** The pool defaults used by every managed or external connection. */
 const POOL_DEFAULTS = {
@@ -144,7 +144,26 @@ class PostgresDatabase implements Database {
   async query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]> {
     if (this.#closed) throw new Error('Database is closed')
     if (!this.#entities) throw new Error('No entity definitions are configured for this database')
-    return await this.#sql.unsafe<T[]>(selectSQL(this.#entities, entity, options.fields))
+
+    const definition = this.#entities.entity(entity)
+    if (!definition) throw new Error(`Unknown entity "${entity}"`)
+    const rows = await this.#sql.unsafe<T[]>(selectSQL(this.#entities, entity, options.fields))
+    const snowflakes = new Set(
+      definition.fields
+        .filter(field => options.fields.includes(field.name) && field.type === FieldType.Snowflake)
+        .map(field => field.name),
+    )
+
+    for (const row of rows as Record<string, unknown>[]) {
+      for (const field of snowflakes) {
+        const value = row[field]
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
+          row[field] = BigInt(value)
+        }
+      }
+    }
+
+    return rows
   }
 
   /**

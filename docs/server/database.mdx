@@ -74,7 +74,7 @@ const notes = await server.db.query<{ id: string, title: string }>('Note', {
 })
 ```
 
-`fields` is required and must be a non-empty list of the named entity's root fields. Unknown entities and fields fail before any SQL runs; the validated names are quoted as identifiers. This step intentionally supports scalar root projections only — relationships, filters, ordering, and pagination arrive in later steps.
+`fields` is required and must be a non-empty list of the named entity's root fields. Unknown entities and fields fail before any SQL runs; the validated names are quoted as identifiers. Snowflake values are hydrated to exact `bigint` values in `db.query` results; raw `db.sql` keeps Bun's native PostgreSQL `BIGINT` string decoding. This step intentionally supports scalar root projections only — relationships, filters, ordering, and pagination arrive in later steps.
 
 ## `db.sql`
 

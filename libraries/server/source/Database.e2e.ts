@@ -371,12 +371,20 @@ describe('Server database lifecycle', () => {
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values (gen_random_uuid(), 'kept', true, 1.5, '2026-01-02', now())
         `
-        await server.db.sql`insert into "Account" ("id", "name") values (${'123456789012345678'}, ${'Troy'})`
+        await server.db.sql`insert into "Account" ("id", "name") values (${'9223372036854775807'}, ${'Troy'})`
         await entities.createTables(server.db.sql)
         expect(await server.db.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
           .toEqual([{ count: 1 }])
         expect(await server.db.sql<{ id: string }[]>`select id::text as id from "Account"`)
-          .toEqual([{ id: '123456789012345678' }])
+          .toEqual([{ id: '9223372036854775807' }])
+        expect(await server.db.sql<{ id: string }[]>`select id from "Account"`)
+          .toEqual([{ id: '9223372036854775807' }])
+
+        const account = await server.db.query<{ id: bigint, name: string }>('Account', {
+          fields: ['id', 'name'],
+        })
+        expect(account).toEqual([{ id: 9223372036854775807n, name: 'Troy' }])
+        expect(typeof account[0]?.id).toBe('bigint')
 
         expect(await server.db.query<{ score: number, title: string }>('Note', {
           fields: ['title', 'score'],
