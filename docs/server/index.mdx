@@ -50,6 +50,22 @@ API templates are served under `/api`; root paths remain the SPA surface. Handle
 
 `sse(route, handler)` registers a GET event stream and owns framing, disconnect cleanup, and a bounded buffer. `socket(route, handlers)` registers a WebSocket route with the same `open`/`message`/`close` lifecycle used by the server's own HMR transport.
 
+```ts
+server.mount('/vendor', './vendor', { allow: ['chart.js'] })
+
+server.sse('events', (params, { logger }, channel) => {
+  const timer = setInterval(() => channel.send('snapshot', currentState()), 2_000)
+  channel.onClose(() => clearInterval(timer))
+})
+
+server.socket('room/:id', {
+  open: socket => socket.publish('joined', { id: socket.params.id }),
+  message: (socket, data) => socket.publish('echo', String(data)),
+})
+```
+
+`mount` rejects traversal and Basis-owned `.basis` state, including symlink targets. SSE buffers are bounded, so a client that stops reading drops frames rather than growing memory without limit.
+
 ## Logging and runtime context
 
 `Server` owns a standard Basis logger and writes lifecycle output through it. Read it with `server.logger`, or inject a custom logger through `start({ logger })`. Runtime facts (`SERVICE_NAME`, `VERSION`, `GIT_SHA`) are embedded into the SPA shell; `server.runtime` exposes the same facts to the host.

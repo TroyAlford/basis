@@ -8,6 +8,42 @@ title: Database & Transactions
 
 Pass `url` only when using an explicit external PostgreSQL server. Managed state and credentials live inside the installation under `.basis/database/`; Basis writes a local ignore file and static serving never exposes `.basis`.
 
+## Canonical entities
+
+`EntityDefinitions.load(source)` parses and validates the canonical JSON entity definitions. JSON is the authority; the loader does not create tables, initialize a schema, or run migrations.
+
+```json
+{
+  "entities": [
+    {
+      "name": "Note",
+      "fields": [
+        { "name": "id", "type": "id", "primaryKey": true },
+        { "name": "title", "type": "string" },
+        { "name": "published", "type": "boolean" },
+        { "name": "createdAt", "type": "timestamp" }
+      ]
+    },
+    {
+      "name": "User",
+      "fields": [
+        { "name": "id", "type": "string", "primaryKey": true },
+        { "name": "name", "type": "string" }
+      ]
+    }
+  ]
+}
+```
+
+```ts
+import { EntityDefinitions, FieldType } from 'basis/server'
+
+const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
+const note = entities.entity('Note')
+```
+
+Entities use PascalCase names and unique camelCase fields. Exactly one primary key is required; it may use `FieldType.ID` (UUID) or `FieldType.String` (for VARCHAR-style keys). Field types are `boolean`, `date`, `id`, `number`, `string`, and `timestamp`; `date` and `timestamp` are distinct, and `number` covers integer and floating point values. Duplicate entity/field names, malformed names, unsupported types, missing or multiple primary keys, malformed JSON, and unknown properties fail validation with a clear error.
+
 ## `db.sql`
 
 `server.db.sql` is the pooled Bun SQL tagged-template API. Interpolations are parameters and results and errors are Bun's own.

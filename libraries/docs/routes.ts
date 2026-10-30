@@ -6,6 +6,7 @@ import CliDoc from '../../docs/cli.mdx'
 import ComplianceDoc from '../../docs/compliance.mdx'
 import ConfigurationDoc from '../../docs/configuration.mdx'
 import ContributingDoc from '../../docs/contributing.mdx'
+import EngineeringPrinciplesDoc from '../../docs/engineering-principles.mdx'
 import EslintDoc from '../../docs/eslint.mdx'
 import GuidesDoc from '../../docs/guides.mdx'
 import HomeDoc from '../../docs/index.mdx'
@@ -30,7 +31,6 @@ import { CssLintingDocs } from './pages/CssLinting.docs.tsx'
 import { DialogDocs } from './pages/Dialog.docs.tsx'
 import { DropdownMenuDocs } from './pages/DropdownMenu.docs.tsx'
 import { EditorDocs } from './pages/Editor.docs.tsx'
-import { EngineeringPrinciplesDocs } from './pages/EngineeringPrinciples.docs.tsx'
 import { EnumEditorDocs } from './pages/EnumEditor.docs.tsx'
 import { IconsDocs } from './pages/Icons.docs.tsx'
 import { ImageDocs } from './pages/Image.docs.tsx'
@@ -478,7 +478,8 @@ export const routes = [
     title: 'Architecture',
   }),
   docs({
-    component: EngineeringPrinciplesDocs,
+    component: EngineeringPrinciplesDoc,
+    markdown: true,
     parent: 'section:engineering',
     path: '/engineering-principles',
     title: 'Engineering Principles',

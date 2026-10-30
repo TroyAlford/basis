@@ -1,6 +1,6 @@
 import { evaluate } from '@mdx-js/mdx'
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import * as React from 'react'
 import * as runtime from 'react/jsx-runtime'
 import { renderToString } from 'react-dom/server'
@@ -11,8 +11,9 @@ import { DOCUMENTATION_FONTS_URL } from '../../react/components/Documentation/ty
 import { Mermaid } from '../../react/components/Mermaid/Mermaid'
 import { themeStyles } from '../../react/components/Theme/Theme'
 import { styles } from '../../react/utilities/style'
+import { resolveDocsHref } from '../../utilities/functions/docsLink'
 import type { DocsDocument } from './globDocs'
-import { globDocs, routePath } from './globDocs'
+import { globDocs } from './globDocs'
 
 /** A React documentation page module, rendered alongside the Markdown tree. */
 export interface DocsPageModule {
@@ -113,10 +114,8 @@ function escapeHtml(value: string): string {
  */
 function rewriteLinks(markdown: string, page: DocsPage, site: DocsSite): string {
   return markdown.replace(DOC_LINK, (match, target: string, anchor = '') => {
-    const resolved = resolve(dirname(page.source), target)
-    const relativeFile = relative(site.source, resolved)
-    if (relativeFile.startsWith('..')) return match
-    return `](${pageHref(site.route, routePath(relativeFile))}${anchor ?? ''})`
+    const href = resolveDocsHref(page.source, target, site.source, site.route)
+    return href === null ? match : `](${href}${anchor ?? ''})`
   })
 }
 

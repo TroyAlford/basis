@@ -10,18 +10,22 @@ Basis is a Bun-first monorepo for class-based React UI, the Basis application se
 bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
 ```
 
-This site is the authoritative reference for the monorepo. Root and package READMEs are concise entry points; use the sections below for package contracts and usage.
+## Why this shape
+
+Basis optimizes for working software first, then for code that stays readable and maintainable. The monorepo bundles the runtime, UI, testing, and review surfaces because they share one owner and one release: a consumer pins one Git tag instead of coordinating a matrix of independently versioned packages.
+
+The architecture favors emergent reuse over speculative abstraction, one authoritative owner over duplicate registries, and local repository idiom over fashionable layers. The same philosophy becomes the small, versioned reviewer policies used to review changes. Read [Engineering Principles](./engineering-principles.mdx) for the full reasoning behind correctness, simplicity, ownership, test confidence, and architectural judgment.
 
 ## Start here
 
 - [Installation](./installation.mdx) — pinned install, trusted dependencies, first imports, host capabilities.
-- [Guides](./guides.mdx) — task-oriented consumer and maintainer guidance.
+- [Guides](./guides.mdx) — a first-use walkthrough and task-oriented guidance.
 - [Reference](./reference.mdx) — documented package surfaces and public-vs-internal import rules.
 
 ## Server and core libraries
 
 - [Server](./server/index.mdx) — lifecycle, API routes, assets/mounts, health, SSE, sockets.
-- [Database & Transactions](./server/database.mdx) — managed PostgreSQL, `db.sql`, `db.tx`, savepoints, cancellation.
+- [Database & Transactions](./server/database.mdx) — managed PostgreSQL, canonical entities, `db.sql`, `db.tx`, savepoints, cancellation.
 - [Configuration](./configuration.mdx) — environment, secrets, `run`, `runAsync`.
 - [Logging](./logging.mdx) — shared logger and server lifecycle output.
 - [OAuth](./oauth.mdx) — identity cookies and server integration.
@@ -29,7 +33,7 @@ This site is the authoritative reference for the monorepo. Root and package READ
 
 ## React
 
-React overview, components, editors, icons, mixins, router, and theme live under the React section of the navigation. Component pages include interactive examples and the shared class-based component contract. Start with the [Component guide](./guides.mdx) for repository conventions, then explore the component pages.
+The React overview, components, editors, icons, mixins, router, and theme are available from the React sections of the navigation. Component pages include interactive examples and the shared class-based component contract. Engineering principles are not React-specific; they apply across the monorepo.
 
 ## Developer tooling
 
@@ -44,7 +48,7 @@ React overview, components, editors, icons, mixins, router, and theme live under
 ## Engineering and project
 
 - [Architecture](./architecture.mdx) — system shape and invariants.
-- Engineering Principles — philosophy and review guidance, available from the live site navigation.
+- [Engineering Principles](./engineering-principles.mdx) — philosophy and architectural judgment.
 - [Portable CI contract](./ci.mdx) — reusable GitHub Actions pattern.
 - [Contributing](./contributing.mdx) — repository workflow.
 - [Component compliance](./compliance.mdx) — class-based architecture policy.
