@@ -79,6 +79,12 @@ style('basis:documentation', css`
       grid-area: main;
       overflow: auto;
       padding: var(--basis-unit-md);
+
+      > .content {
+        margin-inline: auto;
+        max-width: 8.5in;
+        min-width: 0;
+      }
     }
     main {
       :where(p, li) {

@@ -131,7 +131,9 @@ export class Documentation extends Component<Props> {
           <h1>{icon}{title}</h1>
           <div className="entries">{this.#renderEntries(navigation)}</div>
         </nav>
-        <main>{children}</main>
+        <main>
+          <div className="content">{children}</div>
+        </main>
       </>
     )
   }
