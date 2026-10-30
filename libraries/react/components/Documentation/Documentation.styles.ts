@@ -61,6 +61,7 @@ style('basis:documentation', css`
           font-size: var(--basis-font-size-sm);
           font-weight: 600;
           letter-spacing: 0.04em;
+          margin: 0;
           padding: var(--basis-unit-md) var(--basis-unit-md) var(--basis-unit-xs);
           text-transform: uppercase;
         }

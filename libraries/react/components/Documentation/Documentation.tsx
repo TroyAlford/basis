@@ -115,7 +115,7 @@ export class Documentation extends Component<Props> {
    * @returns The heading or link.
    */
   #renderEntry(entry: DocumentationEntry, active: string | undefined): React.ReactNode {
-    if (entry.section) return <span className="section-title">{entry.title}</span>
+    if (entry.section) return <h2 className="section-title">{entry.title}</h2>
     return (
       <Link active={active === undefined ? undefined : entry.href === active} to={entry.href}>
         {entry.title}
