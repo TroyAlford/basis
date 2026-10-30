@@ -248,6 +248,8 @@ export abstract class Component<
    */
   content(children?: React.ReactNode): React.ReactNode {
     if (!React.isValidElement(children)) return children
+    // Fragments cannot carry DOM or ARIA props, so mixins must not clone them.
+    if (children.type === React.Fragment) return children
     return this.mixins.reduce((content, mixin) => (
       mixin.content?.(content, this) ?? content
     ), children)
