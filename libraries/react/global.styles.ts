@@ -11,8 +11,15 @@ import './prose.styles.ts'
 style('basis:global', css`
   @import url('${BASIS_FONTS_URL}');
 
-  html {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html, body {
     font-family: 'Ubuntu', sans-serif;
+    margin: 0;
+    overflow: hidden;
+    padding: 0;
   }
 
   /*

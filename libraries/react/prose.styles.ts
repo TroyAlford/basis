@@ -8,16 +8,6 @@ import { css, style } from './utilities/style'
  * should look the same without that container opting in.
  */
 style('basis:prose', css`
-  *, *::before, *::after {
-    box-sizing: border-box;
-  }
-
-  html, body {
-    margin: 0;
-    overflow: hidden;
-    padding: 0;
-  }
-
   h1, h2, h3, h4, h5, h6 {
     margin: 0;
     padding: 0;
@@ -71,13 +61,13 @@ style('basis:prose', css`
 `)
 
 style('basis:prose:spacing', css`
-  :is(
+  :where(.content, article, aside, section) > :is(
     h1, h2, h3, h4, h5, h6,
-    p, ul, ol, dl, blockquote, pre, table, figure, section
+    p, ul, ol, dl, blockquote, pre, figure
   ) {
     + :is(
     h1, h2, h3, h4, h5, h6,
-    p, ul, ol, dl, blockquote, pre, table, figure, section
+    p, ul, ol, dl, blockquote, pre, figure
   ) {
       margin-top: .5em;
     }
