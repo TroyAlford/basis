@@ -1,56 +1,21 @@
 ---
-title: Basis documentation
+title: Why Basis
 ---
 
-# Basis documentation
+# Why Basis
 
-Basis is a Bun-first monorepo for class-based React UI, the Basis application server, configuration, logging, OAuth, testing, review policy, and repository tooling. It is consumed as a pinned Git dependency, not from npm.
+Basis exists to build working software that stays readable and maintainable after the first release. Correctness comes first; architecture, abstractions, type systems, tests, and tooling exist to serve correctness and comprehension, not to provide ceremony around it.
 
-```bash
-bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
-```
+This repository is a deliberately cohesive system within its chosen scope. It is not designed to interoperate with every runtime, framework, or deployment model, and it does not treat extensibility as a default virtue. Where an outside capability is actually needed, it is added deliberately and owned; speculative adapters and configuration for every possible ecosystem are not part of the design.
 
-## Why this shape
+The monorepo is one implementation of those judgments. The React component hierarchy, server, configuration, logging, OAuth, testing, review policy, and CLI share conventions, ownership, and a coordinated release because that lets the whole system stay coherent. Coherence is the point; universal compatibility is not.
 
-Basis optimizes for working software first, then for code that stays readable and maintainable. The monorepo bundles the runtime, UI, testing, and review surfaces because they share one owner and one release: a consumer pins one Git tag instead of coordinating a matrix of independently versioned packages.
-
-The architecture favors emergent reuse over speculative abstraction, one authoritative owner over duplicate registries, and local repository idiom over fashionable layers. The same philosophy becomes the small, versioned reviewer policies used to review changes. Read [Engineering Principles](./engineering-principles.mdx) for the full reasoning behind correctness, simplicity, ownership, test confidence, and architectural judgment.
+The source is open so others may use all of Basis, one package, one component, or one idea; they may modify it or disagree with it. Using any part does not require adopting every Basis convention or enforcement policy. The [Engineering Principles](./engineering-principles.mdx) explain the reasoning in detail, and [Architecture](./architecture.mdx) describes how the integrated system is put together.
 
 ## Start here
 
-- [Installation](./installation.mdx) — pinned install, trusted dependencies, first imports, host capabilities.
+- [Installation](./installation.mdx) — pinned Git install, trusted dependencies, first imports, host capabilities.
 - [Guides](./guides.mdx) — a first-use walkthrough and task-oriented guidance.
 - [Reference](./reference.mdx) — documented package surfaces and public-vs-internal import rules.
 
-## Server and core libraries
-
-- [Server](./server/index.mdx) — lifecycle, API routes, assets/mounts, health, SSE, sockets.
-- [Database & Transactions](./server/database.mdx) — managed PostgreSQL, canonical entities, `db.sql`, `db.tx`, savepoints, cancellation.
-- [Configuration](./configuration.mdx) — environment, secrets, `run`, `runAsync`.
-- [Logging](./logging.mdx) — shared logger and server lifecycle output.
-- [OAuth](./oauth.mdx) — identity cookies and server integration.
-- [Utilities](./utilities.mdx) — internal utility map and supported consumer equivalents.
-
-## React
-
-The React overview, components, editors, icons, mixins, router, and theme are available from the React sections of the navigation. Component pages include interactive examples and the shared class-based component contract. Engineering principles are not React-specific; they apply across the monorepo.
-
-## Developer tooling
-
-- [CLI](./cli.mdx) — `basis lint`, `format`, `typecheck`, `check`, `compliance`, `doctor`, and docs commands.
-- [ESLint](./eslint.mdx) — shared policy and component architecture rule.
-- [TypeScript](./typescript.mdx) — presets and native typecheck entry points.
-- [Build Plugins & Serve](./build-plugins.mdx) — Bun development plugins.
-- [Testing & Visual Snapshots](./testing.md) — test lanes, browser runtime, and snapshots.
-- [Code Review](./review.mdx) — shared reviewer policy.
-- [Workspaces](./workspaces.mdx) — internal monorepo tooling.
-
-## Engineering and project
-
-- [Architecture](./architecture.mdx) — system shape and invariants.
-- [Engineering Principles](./engineering-principles.mdx) — philosophy and architectural judgment.
-- [Portable CI contract](./ci.mdx) — reusable GitHub Actions pattern.
-- [Contributing](./contributing.mdx) — repository workflow.
-- [Component compliance](./compliance.mdx) — class-based architecture policy.
-
-Validate this tree with `bun run docs:check`; build the static site with `bun run docs:build`.
+The package catalog and supported import surfaces live in [Reference](./reference.mdx); this page is the reason for the system, not a feature inventory.

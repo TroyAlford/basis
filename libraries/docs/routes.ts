@@ -105,17 +105,31 @@ function docs(route: {
 export const routes = [
   docs({
     component: HomeDoc,
-    path: 'section:home',
+    path: 'section:philosophy',
     section: true,
-    title: 'Home',
+    title: 'Philosophy',
   }),
   docs({
     component: HomeDoc,
     default: true,
     markdown: true,
-    parent: 'section:home',
+    parent: 'section:philosophy',
     path: '/',
-    title: 'Overview',
+    title: 'Why Basis',
+  }),
+  docs({
+    component: EngineeringPrinciplesDoc,
+    markdown: true,
+    parent: 'section:philosophy',
+    path: '/engineering-principles',
+    title: 'Engineering Principles',
+  }),
+  docs({
+    component: ArchitectureDoc,
+    markdown: true,
+    parent: 'section:philosophy',
+    path: '/architecture',
+    title: 'Architecture',
   }),
 
   docs({
@@ -393,7 +407,7 @@ export const routes = [
     component: HomeDoc,
     path: 'section:developer-tooling',
     section: true,
-    title: 'Developer Tooling',
+    title: 'Development & Tooling',
   }),
   docs({
     component: CliDoc,
@@ -465,36 +479,16 @@ export const routes = [
   }),
 
   docs({
-    component: HomeDoc,
-    path: 'section:engineering',
-    section: true,
-    title: 'Engineering & Project',
-  }),
-  docs({
-    component: ArchitectureDoc,
-    markdown: true,
-    parent: 'section:engineering',
-    path: '/architecture',
-    title: 'Architecture',
-  }),
-  docs({
-    component: EngineeringPrinciplesDoc,
-    markdown: true,
-    parent: 'section:engineering',
-    path: '/engineering-principles',
-    title: 'Engineering Principles',
-  }),
-  docs({
     component: CiDoc,
     markdown: true,
-    parent: 'section:engineering',
+    parent: 'section:developer-tooling',
     path: '/ci',
     title: 'Portable CI contract',
   }),
   docs({
     component: ContributingDoc,
     markdown: true,
-    parent: 'section:engineering',
+    parent: 'section:developer-tooling',
     path: '/contributing',
     title: 'Contributing',
   }),

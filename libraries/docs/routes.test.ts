@@ -78,13 +78,12 @@ describe('docs routes', () => {
     })))
 
     expect(navigation.map(entry => entry.title)).toEqual([
-      'Home',
+      'Philosophy',
       'Getting Started',
       'Server & Core Libraries',
       'React Foundations',
       'React Components',
-      'Developer Tooling',
-      'Engineering & Project',
+      'Development & Tooling',
     ])
     expect(navigation.every(entry => entry.section)).toBe(true)
   })
