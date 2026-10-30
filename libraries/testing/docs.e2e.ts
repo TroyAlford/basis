@@ -124,9 +124,11 @@ describe('testing/docs', () => {
       ...NETWORK,
       init: page => page.on('pageerror', error => pageErrors.push(error.message)),
     }, async page => {
-      await page.waitForSelector('.documentation-shell main pre.shiki')
+      await page.waitForFunction(() => (
+        document.querySelectorAll('.documentation-shell main pre.shiki').length > 0
+        && document.querySelectorAll('.documentation-shell main pre:not(.shiki) > code').length === 0
+      ))
       expect(await page.locator('.documentation-shell main pre.shiki').count()).toBeGreaterThan(0)
-      expect(await page.locator('.documentation-shell main pre:not(.shiki) > code').count()).toBe(0)
 
       await page.locator('nav.links a', { hasText: 'Icons' }).click()
       await page.waitForFunction(() => document.querySelector('main h1')?.textContent === 'Icons')

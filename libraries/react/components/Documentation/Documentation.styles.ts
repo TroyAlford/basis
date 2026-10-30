@@ -79,53 +79,15 @@ style('basis:documentation', css`
       grid-area: main;
       overflow: auto;
       padding: var(--basis-unit-md);
-
       > .content {
         margin-inline: auto;
         max-width: 8.5in;
         min-width: 0;
       }
     }
-    main {
-      :where(p, li) {
-        text-align: justify;
-      }
-      :where(h1, h2, h3, h4, h5, h6) {
-        margin: 0;
-        padding: 0;
-      }
-      a, a:visited {
-        color: var(--basis-color-primary);
-      }
+    .content {
       h1 {
         border-bottom: 2px solid var(--basis-color-primary);
-      }
-      :not(pre):not(.code.component) > code {
-        color: var(--basis-color-success);
-        font-family: 'Fira Code', monospace;
-        font-variant-ligatures: contextual;
-        font-weight: 500;
-      }
-      pre {
-        background-color: var(--basis-color-surface-code) !important;
-        border-radius: var(--basis-radius-md);
-        margin: 0;
-        overflow-x: auto;
-        padding: var(--basis-unit-md);
-        code {
-          color: inherit;
-          font-family: 'Fira Code', monospace;
-          font-variant-ligatures: contextual;
-        }
-      }
-      :where(p) {
-        margin: 0;
-        &:first-child {
-          margin-top: 0;
-        }
-        &:last-child {
-          margin-bottom: 0;
-        }
       }
       select, input:not(.value):not([type='checkbox']):not([type='radio']):not([type='range']) {
         background-color: var(--basis-color-surface);
@@ -139,32 +101,6 @@ style('basis:documentation', css`
       }
       input:not(.value):not([type='checkbox']):not([type='radio']):not([type='range']) {
         padding: .25em .5em;
-      }
-      :where(ol, dl, blockquote, table, figure) {
-        margin: 0;
-      }
-      :where(ul) {
-        list-style: disc;
-        margin: 0;
-        padding-left: 0;
-        > li {
-          margin: .5em 0 0 2em;
-        }
-      }
-      :where(
-        h1, h2, h3, h4, h5, h6,
-        p, ul, ol, dl, blockquote, pre, table, figure, section
-      ) + :where(
-        h1, h2, h3, h4, h5, h6,
-        p, ul, ol, dl, blockquote, pre, table, figure, section
-      ) {
-        margin-top: .5em;
-      }
-      b, strong {
-        font-weight: 600;
-      }
-      i, em {
-        font-style: italic;
       }
     }
   }
