@@ -67,11 +67,41 @@ export class Layout extends ApplicationBase {
 
       try {
         const html = await highlight(code.textContent ?? '', language)
-        if (html && pre.isConnected) pre.outerHTML = html
+        if (html && pre.isConnected) this.applyHighlight(pre, code, html)
       } catch {
         /* Leave the readable source in place when the highlighter is unavailable. */
       }
     }
+  }
+
+  /**
+   * Apply Shiki markup without replacing React-owned host nodes. Replacing the
+   * fence with `outerHTML` leaves React's fiber pointing at a detached node,
+   * which breaks removal on the next route change.
+   * @param pre - The React-owned pre element.
+   * @param code - The React-owned code element.
+   * @param html - Shiki HTML for the fence.
+   */
+  private applyHighlight(pre: HTMLElement, code: HTMLElement, html: string): void {
+    const template = document.createElement('template')
+    template.innerHTML = html
+
+    const shikiPre = template.content.firstElementChild
+    const shikiCode = shikiPre?.querySelector('code')
+    if (!(shikiPre instanceof HTMLElement) || !(shikiCode instanceof HTMLElement)) return
+
+    for (const attribute of Array.from(shikiPre.attributes)) {
+      pre.setAttribute(attribute.name, attribute.value)
+    }
+
+    /*
+     * Keep React's text node in the tree, but empty it before moving Shiki's
+     * token nodes into the code element.
+     */
+    for (const child of Array.from(code.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE) child.nodeValue = ''
+    }
+    for (const child of Array.from(shikiCode.childNodes)) code.appendChild(child)
   }
 
   protected layout(content: ReactNode): ReactNode {

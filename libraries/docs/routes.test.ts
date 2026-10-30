@@ -2,7 +2,10 @@ import { buildDocumentationNavigation } from 'basis/react'
 import { describe, expect, test } from 'bun:test'
 import { routes } from './routes'
 
-/** Routes that existed before the monorepo documentation foundation. */
+/**
+ * Routes that must remain addressable after the monorepo documentation
+ * foundation. Demo-only routes folded into their parent pages are excluded.
+ */
 const EXISTING = [
   '/',
   '/architecture',
