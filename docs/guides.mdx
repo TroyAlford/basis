@@ -15,6 +15,7 @@ bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
 Create a class-based React component:
 
 ```tsx
+// Hello.tsx
 import { Component } from 'basis/react'
 
 interface Props {
@@ -30,9 +31,23 @@ export class Hello extends Component<Props> {
 }
 ```
 
+Create the browser entrypoint that mounts it:
+
+```tsx
+// Application.tsx
+import { createRoot } from 'react-dom/client'
+import { Hello } from './Hello'
+
+const container = document.getElementById('root')
+if (container) {
+  createRoot(container).render(<Hello name="Basis" />)
+}
+```
+
 Serve it with the Basis server:
 
 ```ts
+// serve.ts
 import { Server } from 'basis/server'
 
 new Server()
@@ -41,7 +56,7 @@ new Server()
   .start({ port: 3000 })
 ```
 
-The development entrypoint is normally `Application.tsx`, which mounts `Hello` into the document root. See [Server](./server/index.mdx) for assets, API routes, SSE, sockets, and lifecycle.
+Run `bun serve.ts` and open the served URL. See [Server](./server/index.mdx) for assets, API routes, SSE, sockets, and lifecycle.
 
 Add the database capability when the application needs PostgreSQL:
 
@@ -63,7 +78,9 @@ preload = ["basis/testing/bun"]
 ```
 
 ```tsx
-import { expect, render, test } from 'basis/testing'
+// Hello.test.tsx
+import { expect, test } from 'bun:test'
+import { render } from 'basis/testing'
 import { Hello } from './Hello'
 
 test('renders a greeting', async () => {
