@@ -50,21 +50,6 @@ style('basis:prose', css`
     }
   }
 
-  :where(
-    h1, h2, h3, h4, h5, h6,
-    p, ul, ol, dl, blockquote, pre, table, figure, section
-  ) {
-    + :is(
-      h1, h2, h3, h4, h5, h6,
-      p, ul, ol, dl, blockquote, pre, table, figure, section
-    ) {
-      margin-top: .5em;
-    }
-    + :is(h1, h2, h3, h4, h5, h6) {
-      padding-top: .5em;
-    }
-  }
-
   b, strong {
     font-weight: 600;
   }
@@ -76,5 +61,22 @@ style('basis:prose', css`
   :is(a):link,
   :is(a):visited {
     color: var(--basis-color-primary);
+  }
+`)
+
+style('basis:prose:spacing', css`
+  :is(
+    h1, h2, h3, h4, h5, h6,
+    p, ul, ol, dl, blockquote, pre, table, figure, section
+  ) {
+    + :is(
+    h1, h2, h3, h4, h5, h6,
+    p, ul, ol, dl, blockquote, pre, table, figure, section
+  ) {
+      margin-top: .5em;
+    }
+    + :is(h1, h2, h3, h4, h5, h6) {
+      padding-top: .5em;
+    }
   }
 `)

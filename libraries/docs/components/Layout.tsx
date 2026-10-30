@@ -94,14 +94,7 @@ export class Layout extends ApplicationBase {
       pre.setAttribute(attribute.name, attribute.value)
     }
 
-    /*
-     * Keep React's text node in the tree, but empty it before moving Shiki's
-     * token nodes into the code element.
-     */
-    for (const child of Array.from(code.childNodes)) {
-      if (child.nodeType === Node.TEXT_NODE) child.nodeValue = ''
-    }
-    for (const child of Array.from(shikiCode.childNodes)) code.appendChild(child)
+    code.innerHTML = shikiCode.innerHTML
   }
 
   protected layout(content: ReactNode): ReactNode {
