@@ -376,6 +376,28 @@ describe('Server database lifecycle', () => {
         await entities.createTables(server.db.sql)
         expect(await server.db.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
           .toEqual([{ count: 1 }])
+
+        await server.db.sql`create schema later`
+        await server.db.sql`create table later."Shadow" (marker text)`
+        const shadow = EntityDefinitions.load(JSON.stringify({
+          entities: [{
+            fields: [
+              { name: 'id', primaryKey: true, type: 'string' },
+              { name: 'label', type: 'string' },
+            ],
+            name: 'Shadow',
+          }],
+        }))
+        await server.db.tx(async transaction => {
+          await transaction`set local search_path to public, later`
+          await shadow.createTables(transaction)
+        })
+        expect(await server.db.sql<{ tableSchema: string }[]>`
+          select table_schema as "tableSchema"
+          from information_schema.tables
+          where table_name = ${'Shadow'}
+          order by table_schema
+        `).toEqual([{ tableSchema: 'later' }, { tableSchema: 'public' }])
       } finally {
         await server.shutdown()
       }

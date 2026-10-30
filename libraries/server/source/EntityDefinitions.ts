@@ -80,7 +80,7 @@ export class EntityDefinitions {
   /**
    * Deterministic PostgreSQL DDL for the declared entities, in declaration
    * order. Identifiers are quoted; user values never enter these statements.
-   * @returns One idempotent `CREATE TABLE` statement per entity.
+   * @returns One deterministic `CREATE TABLE` statement per entity.
    */
   get ddl(): readonly string[] {
     return this.entities.map(createTable)
@@ -90,14 +90,20 @@ export class EntityDefinitions {
    * Create the declared tables in an explicitly empty/fresh database.
    *
    * This is a one-way creation path, not a migration planner. Existing tables
-   * are left untouched.
+   * in the current schema are left untouched; an unexpected creation conflict
+   * fails visibly rather than being silently accepted.
    * @param sql - The connected Bun SQL client.
    * @returns A promise that resolves after every table statement succeeds.
    */
   async createTables(sql: SQL): Promise<void> {
     for (const entity of this.entities) {
       const rows = await sql<{ present: boolean }[]>`
-        select to_regclass(${quoteIdentifier(entity.name)}) is not null as present
+        select exists (
+          select 1
+          from pg_catalog.pg_tables
+          where schemaname = current_schema()
+            and tablename = ${entity.name}
+        ) as present
       `
       if (rows[0]?.present) continue
       await sql.unsafe(createTable(entity)).simple()
@@ -200,7 +206,7 @@ function createTable(entity: EntityDefinition): string {
   const columns = entity.fields.map(field => (
     `${quoteIdentifier(field.name)} ${columnType(field)}${field.primaryKey ? ' PRIMARY KEY' : ' NOT NULL'}`
   ))
-  return `CREATE TABLE IF NOT EXISTS ${quoteIdentifier(entity.name)} (\n${columns.join(',\n')}\n)`
+  return `CREATE TABLE ${quoteIdentifier(entity.name)} (\n${columns.join(',\n')}\n)`
 }
 
 /**

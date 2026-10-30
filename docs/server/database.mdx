@@ -55,7 +55,7 @@ await entities.createTables(server.db.sql)
 
 `createTables` creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared field order for columns. `id` maps to `uuid`, `string` to `text` (or `varchar(255)` for a string primary key), `number` to `double precision`, `date` to `date`, `timestamp` to `timestamptz`, and `boolean` to `boolean`. Every column is `NOT NULL`; exactly one primary key is required.
 
-The statements are deterministic and available through `entities.ddl`. Existing tables are skipped, so applying the same definitions again is safe. This is a fresh-database creation path, not a migration planner: changing an existing table's columns requires a reviewed migration in a later step.
+The statements are deterministic and available through `entities.ddl`. Existing tables in the current schema are skipped, so applying the same definitions again is safe; the existence check and creation both target `current_schema()`, and an unexpected concurrent creation conflict fails rather than being silently accepted. This is a fresh-database creation path, not a migration planner: changing an existing table's columns requires a reviewed migration in a later step.
 
 ## `db.sql`
 
