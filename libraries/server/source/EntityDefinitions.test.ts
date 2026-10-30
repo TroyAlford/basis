@@ -58,13 +58,27 @@ describe('EntityDefinitions', () => {
     ])
   })
 
-  test('requires the primary key to use the ID type', () => {
+  test('accepts a UUID ID or a string primary key', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'string' },
+          { name: 'name', type: 'string' },
+        ],
+        name: 'User',
+      }],
+    })
+
+    expect(entities.entity('User')?.fields[0]?.type).toBe(FieldType.String)
+  })
+
+  test('rejects a primary key with a non-identity type', () => {
     expect(() => load({
       entities: [{
-        fields: [{ name: 'id', primaryKey: true, type: 'string' }],
+        fields: [{ name: 'id', primaryKey: true, type: 'number' }],
         name: 'Note',
       }],
-    })).toThrow('primary key "Note.id" must be type id')
+    })).toThrow('primary key "Note.id" must be type id or string')
   })
 
   test('rejects malformed JSON', () => {

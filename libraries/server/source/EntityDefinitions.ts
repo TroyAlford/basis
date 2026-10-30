@@ -128,8 +128,8 @@ function parseEntity(value: unknown): EntityDefinition {
     throw invalid(`entity "${value.name}" must define exactly one primary key`)
   }
   const primaryKey = primaryKeys[0] as FieldDefinition
-  if (primaryKey.type !== FieldType.ID) {
-    throw invalid(`primary key "${value.name}.${primaryKey.name}" must be type id`)
+  if (primaryKey.type !== FieldType.ID && primaryKey.type !== FieldType.String) {
+    throw invalid(`primary key "${value.name}.${primaryKey.name}" must be type id or string`)
   }
 
   return { fields, name: value.name }
