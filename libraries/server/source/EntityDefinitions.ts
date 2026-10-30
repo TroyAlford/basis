@@ -117,6 +117,32 @@ export class EntityDefinitions {
 }
 
 /**
+ * Build a parameter-free, explicit root-field projection for one entity.
+ * @param entities - Validated entity definitions.
+ * @param entityName - Exact entity name.
+ * @param fields - Root scalar fields to project, in output order.
+ * @returns A quoted PostgreSQL `SELECT` statement.
+ * @throws {Error} When the entity or a requested field is unknown.
+ */
+export function selectSQL(
+  entities: EntityDefinitions,
+  entityName: string,
+  fields: readonly string[],
+): string {
+  const entity = entities.entity(entityName)
+  if (!entity) throw new Error(`Unknown entity "${entityName}"`)
+  if (fields.length === 0) throw new Error('Query fields must be a non-empty array')
+
+  const known = new Set(entity.fields.map(field => field.name))
+  const columns = fields.map(field => {
+    if (!known.has(field)) throw new Error(`Unknown field "${entityName}.${field}"`)
+    return quoteIdentifier(field)
+  })
+
+  return `SELECT ${columns.join(', ')} FROM ${quoteIdentifier(entity.name)}`
+}
+
+/**
  * Validate the parsed entity document root.
  * @param value - Parsed JSON value.
  * @returns Validated entities.

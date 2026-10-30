@@ -3,6 +3,8 @@ import { SQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import type { EntityDefinitions } from './EntityDefinitions'
+import { selectSQL } from './EntityDefinitions'
 
 /** The pool defaults used by every managed or external connection. */
 const POOL_DEFAULTS = {
@@ -29,11 +31,19 @@ const PASSWORD_MOUNT = '/run/secrets/basis-postgres-password'
 
 /** Options for a server-owned database capability. */
 export interface DatabaseOptions {
+  /** Canonical entity definitions used to validate and build `db.query`. */
+  entities?: EntityDefinitions,
   /**
    * External PostgreSQL connection URL. When omitted, the server manages a
    * local PostgreSQL service with an application-scoped identity.
    */
   url?: string | URL,
+}
+
+/** Options for a root entity query. */
+export interface QueryOptions {
+  /** Root scalar fields to project, in output order. */
+  fields: readonly string[],
 }
 
 /** A server-owned database capability. */
@@ -44,6 +54,8 @@ export interface Database {
   readonly closed: boolean,
   /** Establishes the database pool's connection. */
   connect(): Promise<void>,
+  /** Projects root scalar fields from one canonical entity. */
+  query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]>,
   /** The pooled Bun SQL tagged-template API. */
   readonly sql: SQL,
   /** Runs a callback inside a pooled Bun transaction. */
@@ -71,13 +83,16 @@ function publishedPort(output: string): number | null {
 class PostgresDatabase implements Database {
   #closed = false
   #closing: Promise<void> | null = null
+  #entities: EntityDefinitions | undefined
   #sql: SQL
 
   /**
    * Creates the pool.
    * @param url - The PostgreSQL connection URL.
+   * @param entities - Canonical definitions used for entity queries.
    */
-  constructor(url: string | URL) {
+  constructor(url: string | URL, entities?: EntityDefinitions) {
+    this.#entities = entities
     this.#sql = new SQL({ ...POOL_DEFAULTS, url })
   }
 
@@ -117,6 +132,19 @@ class PostgresDatabase implements Database {
       this.#closing = this.#sql.close()
     }
     return this.#closing
+  }
+
+  /**
+   * Project root scalar fields from one entity.
+   * @param entity - Exact canonical entity name.
+   * @param options - Fields to project.
+   * @returns The selected rows.
+   * @throws {Error} When no definitions are configured, the pool is closed, or the query is invalid.
+   */
+  async query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]> {
+    if (this.#closed) throw new Error('Database is closed')
+    if (!this.#entities) throw new Error('No entity definitions are configured for this database')
+    return await this.#sql.unsafe<T[]>(selectSQL(this.#entities, entity, options.fields))
   }
 
   /**
@@ -170,6 +198,18 @@ export class NullDatabase implements Database {
 
   /**
    * Rejects because no database is configured.
+   * @param entity - Entity name; unused without a database.
+   * @param options - Query options; unused without a database.
+   * @returns A rejected promise naming the missing configuration.
+   */
+  query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]> {
+    void entity
+    void options
+    return Promise.reject(new Error('No database is configured for this server'))
+  }
+
+  /**
+   * Rejects because no database is configured.
    * @param callback - Transaction-scoped work; unused without a database.
    * @returns A rejected promise naming the missing configuration.
    */
@@ -204,12 +244,17 @@ class ManagedDatabase implements Database {
   #connecting: Promise<void> | null = null
   #containerName: string
   #database: PostgresDatabase | null = null
+  #entities: EntityDefinitions | undefined
   #identity: string
   #installation: string
   #volume: string
 
-  /** Creates the managed database capability. The service starts on {@link connect}. */
-  constructor() {
+  /**
+   * Creates the managed database capability. The service starts on {@link connect}.
+   * @param entities - Canonical definitions used for entity queries.
+   */
+  constructor(entities?: EntityDefinitions) {
+    this.#entities = entities
     this.#installation = resolve(process.cwd())
     this.#identity = managedDatabaseIdentity(this.#installation)
     this.#containerName = `basis-postgres-${this.#identity}`
@@ -232,6 +277,18 @@ class ManagedDatabase implements Database {
   get sql(): SQL {
     if (!this.#database) throw new Error('Managed database is not connected')
     return this.#database.sql
+  }
+
+  /**
+   * Projects root scalar fields from one entity.
+   * @param entity - Exact canonical entity name.
+   * @param options - Fields to project.
+   * @returns The selected rows.
+   * @throws {Error} When the managed pool is not connected or the query is invalid.
+   */
+  query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]> {
+    if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
+    return this.#database.query<T>(entity, options)
   }
 
   /**
@@ -469,7 +526,7 @@ class ManagedDatabase implements Database {
     while (Date.now() < deadline) {
       if (this.#closed) throw new Error('Database is closed')
 
-      const database = new PostgresDatabase(url)
+      const database = new PostgresDatabase(url, this.#entities)
       try {
         await database.connect()
         if (this.#closed) {
@@ -507,6 +564,6 @@ class ManagedDatabase implements Database {
  * @returns The managed or external database capability.
  */
 export function createDatabase(options: DatabaseOptions = {}): Database {
-  if (options.url) return new PostgresDatabase(options.url)
-  return new ManagedDatabase()
+  if (options.url) return new PostgresDatabase(options.url, options.entities)
+  return new ManagedDatabase(options.entities)
 }

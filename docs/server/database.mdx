@@ -57,6 +57,25 @@ await entities.createTables(server.db.sql)
 
 The statements are deterministic and available through `entities.ddl`. Existing tables in the current schema are skipped, so applying the same definitions again is safe; the existence check and creation both target `current_schema()`, and an unexpected concurrent creation conflict fails rather than being silently accepted. This is a fresh-database creation path, not a migration planner: changing an existing table's columns requires a reviewed migration in a later step.
 
+## `db.query`
+
+Attach the same canonical definitions to the database capability, then project root scalar fields from one entity:
+
+```ts
+import { EntityDefinitions, Server } from 'basis/server'
+
+const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
+const server = new Server()
+  .database({ entities })
+  .start()
+
+const notes = await server.db.query<{ id: string, title: string }>('Note', {
+  fields: ['id', 'title'],
+})
+```
+
+`fields` is required and must be a non-empty list of the named entity's root fields. Unknown entities and fields fail before any SQL runs; the validated names are quoted as identifiers. This step intentionally supports scalar root projections only — relationships, filters, ordering, and pagination arrive in later steps.
+
 ## `db.sql`
 
 `server.db.sql` is the pooled Bun SQL tagged-template API. Interpolations are parameters and results and errors are Bun's own.
