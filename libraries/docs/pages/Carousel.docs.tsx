@@ -13,7 +13,7 @@ export class CarouselDocs extends DocumentationPage {
             align={Carousel.Align.Center}
             altText="Kitten carousel - click to open lightbox, use arrows to navigate"
             size={Carousel.Size.Contain}
-            style={{ height: `${CSS.px(300)}`, width: `${CSS.px(400)}` }}
+            style={{ height: '300px', width: '400px' }}
             images={[
               imageURL(400, 300),
               imageURL(300, 300),

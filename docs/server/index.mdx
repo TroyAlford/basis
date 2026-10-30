@@ -1,0 +1,67 @@
+---
+title: Server
+---
+
+# Server
+
+`basis/server` provides the Bun application server used by Basis apps. One `Server` runs either a development server with Bun HMR or a deterministic production server that builds once and serves the SPA and assets.
+
+```ts
+import { Server } from 'basis/server'
+
+const server = new Server()
+  .root(import.meta.dir)
+  .main('./Application.tsx')
+  .start({
+    development: Bun.env.NODE_ENV !== 'production',
+    hostname: Bun.env.HOST ?? '127.0.0.1',
+    port: Number(Bun.env.PORT ?? 80),
+    version: Bun.env.VERSION ?? 'development',
+  })
+```
+
+`root` resolves relative entrypoints and assets, `main` registers the browser entrypoint, and `assets` serves a static directory. `start` binds the HTTP server; `stop` keeps its synchronous contract, while `shutdown()` waits for the build watcher and owned capabilities such as the database pool.
+
+## Lifecycle
+
+Development delegates to Bun's dev server, which owns the module graph, file watching, HMR, and React Fast Refresh. Production builds once, bundles the dependency graph, serves the bundle and assets, and handles `SIGINT`/`SIGTERM` through graceful shutdown.
+
+`/api/health` is the readiness API. It stays `503 starting` until the initial build and any configured database pool are ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
+
+## API routes
+
+```ts
+import { HttpVerb, Server } from 'basis/server'
+
+new Server()
+  .api([HttpVerb.Get], 'hello/:name', ({ name }, { logger }) => {
+    logger.info(`hello ${name}`)
+    return new Response(`Hello, ${name}`)
+  })
+```
+
+API templates are served under `/api`; root paths remain the SPA surface. Handlers receive the matched params, the request, and the server logger.
+
+## Static files
+
+`assets(folder)` serves a fixed asset directory. `mount(prefix, folder, { allow })` serves an allow-listed directory under a URL prefix. Both reject missing files, traversal, and Basis-owned `.basis` state, including symlink aliases, so internal credentials cannot be served as static content.
+
+## Live transports
+
+`sse(route, handler)` registers a GET event stream and owns framing, disconnect cleanup, and a bounded buffer. `socket(route, handlers)` registers a WebSocket route with the same `open`/`message`/`close` lifecycle used by the server's own HMR transport.
+
+## Logging and runtime context
+
+`Server` owns a standard Basis logger and writes lifecycle output through it. Read it with `server.logger`, or inject a custom logger through `start({ logger })`. Runtime facts (`SERVICE_NAME`, `VERSION`, `GIT_SHA`) are embedded into the SPA shell; `server.runtime` exposes the same facts to the host.
+
+## Favicon and icons
+
+Every server serves `/assets/favicon`. Configure a file, `Bun.file`, or an icon class with `server.favicon(input, options)`. Without configuration it discovers `favicon.*` in the working directory, app root, and assets folder, eventually falling back to the Basis mark. `server.icons({ Name: IconClass })` registers standalone SVGs at `/icons/{Name}.svg`.
+
+## Embedding
+
+`server.handle(request)` dispatches one request through the same routes used by a bound server, for hosts that mount Basis inside another fetch handler. SSE responses opt out of the HTTP idle timeout automatically.
+
+## Database
+
+`server.database()` configures the zero-config managed PostgreSQL capability. See [Database & Transactions](./database.mdx) for pool lifecycle, `db.sql`, transactions, health, and managed storage.

@@ -4,34 +4,49 @@ title: Basis documentation
 
 # Basis documentation
 
-This directory is the canonical source for durable Basis documentation: plain Markdown (and MDX where interactivity is needed) that lives with the code and is independent of how it is published.
+Basis is a Bun-first monorepo for class-based React UI, the Basis application server, configuration, logging, OAuth, testing, review policy, and repository tooling. It is consumed as a pinned Git dependency, not from npm.
 
-## Responsibilities
-
-- **`README.md`** is the human and GitHub front door: what Basis is, how to consume it, and where to start.
-- **`AGENTS.md`** is the coding-agent front door: it directs agents to read the README and this documentation before planning or changing code, and to treat documented invariants as constraints.
-- **`docs/`** (this tree) holds durable architectural, operational, developer, and consumer knowledge. Directory names describe content, not publication mechanism.
-
-## Layout
-
-```text
-docs/
-  index.mdx
-  architecture.mdx
-  ci.mdx
-  compliance.mdx
-  contributing.mdx
-  guides.mdx
-  reference.mdx
+```bash
+bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
 ```
 
-- [architecture](./architecture.mdx) — the system's shape and the invariants that must not be broken silently.
-- [ci](./ci.mdx) — the portable, locally validated GitHub Actions contract, reference workflows, and migration checklist.
-- [compliance](./compliance.mdx) — the class-based component invariant, its lint and compliance entry points, scope, and escape hatches.
-- [contributing](./contributing.mdx) — how to work in this repository.
-- [guides](./guides.mdx) — task-oriented guidance for consumers and maintainers.
-- [reference](./reference.mdx) — precise contracts and lookup material.
+This site is the authoritative reference for the monorepo. Root and package READMEs are concise entry points; use the sections below for package contracts and usage.
 
-## Publication
+## Start here
 
-The same source is projected to one or both targets without duplicating content: a live documentation app served through the Basis Server, and a static build suitable for GitHub Pages. A repository may enable either, both, or neither while keeping this source organization. Validate the tree with `basis docs check`, and build the static site with `basis docs build`.
+- [Installation](./installation.mdx) — pinned install, trusted dependencies, first imports, host capabilities.
+- [Guides](./guides.mdx) — task-oriented consumer and maintainer guidance.
+- [Reference](./reference.mdx) — documented package surfaces and public-vs-internal import rules.
+
+## Server and core libraries
+
+- [Server](./server/index.mdx) — lifecycle, API routes, assets/mounts, health, SSE, sockets.
+- [Database & Transactions](./server/database.mdx) — managed PostgreSQL, `db.sql`, `db.tx`, savepoints, cancellation.
+- [Configuration](./configuration.mdx) — environment, secrets, `run`, `runAsync`.
+- [Logging](./logging.mdx) — shared logger and server lifecycle output.
+- [OAuth](./oauth.mdx) — identity cookies and server integration.
+- [Utilities](./utilities.mdx) — internal utility map and supported consumer equivalents.
+
+## React
+
+React overview, components, editors, icons, mixins, router, and theme live under the React section of the navigation. Component pages include interactive examples and the shared class-based component contract. Start with the [Component guide](./guides.mdx) for repository conventions, then explore the component pages.
+
+## Developer tooling
+
+- [CLI](./cli.mdx) — `basis lint`, `format`, `typecheck`, `check`, `compliance`, `doctor`, and docs commands.
+- [ESLint](./eslint.mdx) — shared policy and component architecture rule.
+- [TypeScript](./typescript.mdx) — presets and native typecheck entry points.
+- [Build Plugins & Serve](./build-plugins.mdx) — Bun development plugins.
+- [Testing & Visual Snapshots](./testing.md) — test lanes, browser runtime, and snapshots.
+- [Code Review](./review.mdx) — shared reviewer policy.
+- [Workspaces](./workspaces.mdx) — internal monorepo tooling.
+
+## Engineering and project
+
+- [Architecture](./architecture.mdx) — system shape and invariants.
+- Engineering Principles — philosophy and review guidance, available from the live site navigation.
+- [Portable CI contract](./ci.mdx) — reusable GitHub Actions pattern.
+- [Contributing](./contributing.mdx) — repository workflow.
+- [Component compliance](./compliance.mdx) — class-based architecture policy.
+
+Validate this tree with `bun run docs:check`; build the static site with `bun run docs:build`.

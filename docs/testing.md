@@ -1,8 +1,8 @@
 ---
-title: Visual snapshots
+title: Testing & Visual Snapshots
 ---
 
-# Visual snapshots
+# Testing & Visual Snapshots
 
 Snapshot tests pin the rendered output of a component or an application page to a committed PNG. `basis/testing` exposes one async helper, `matchScreenshot(subject, hint?, options?)`, with the same shape as Bun's `toMatchSnapshot`: a missing snapshot is written, a changed snapshot throws (the diff is kept in memory and nothing is written to disk), and `--update-snapshots` (or `UPDATE_SNAPSHOTS=1`) rewrites it. The subject is a React element, a Playwright `Page`, or a `Locator`.
 

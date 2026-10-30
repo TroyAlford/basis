@@ -9,18 +9,22 @@ import './Documentation.styles.ts'
 export interface DocumentationEntry {
   /** Nested navigation entries. */
   children?: DocumentationEntry[],
-  /** Absolute link target. */
+  /** Stable key and optional link target. */
   href: string,
+  /** Render a non-clickable section heading instead of a link. */
+  section?: boolean,
   /** Display title. */
   title: string,
 }
 
 /** A flat documentation route, before it is nested for navigation. */
 export interface DocumentationRoute {
-  /** Absolute link target. */
+  /** Absolute link target or stable section key. */
   href: string,
   /** The href of the parent entry, for nesting. */
   parent?: string,
+  /** Render a non-clickable section heading instead of a link. */
+  section?: boolean,
   /** Display title. */
   title: string,
 }
@@ -32,12 +36,19 @@ export interface DocumentationRoute {
  * This is the one place the documentation tree is shaped: the docs app and the
  * static documentation build both feed their routes through it, so navigation
  * nests the same way everywhere.
+ * The caller owns the order; this function never sorts.
  * @param routes - The routes, in their intended sibling order.
- * @returns The navigation entries, with the roots sorted by title.
+ * @returns The navigation entries in their declared order.
  */
 export function buildDocumentationNavigation(routes: readonly DocumentationRoute[]): DocumentationEntry[] {
   const entries = new Map<string, DocumentationEntry>()
-  for (const route of routes) entries.set(route.href, { href: route.href, title: route.title })
+  for (const route of routes) {
+    entries.set(route.href, {
+      href: route.href,
+      ...(route.section ? { section: true } : {}),
+      title: route.title,
+    })
+  }
 
   const roots: DocumentationEntry[] = []
   for (const route of routes) {
@@ -48,7 +59,7 @@ export function buildDocumentationNavigation(routes: readonly DocumentationRoute
     else roots.push(entry)
   }
 
-  return roots.sort((a, b) => a.title.localeCompare(b.title))
+  return roots
 }
 
 interface Props {
@@ -88,14 +99,27 @@ export class Documentation extends Component<Props> {
     return (
       <ul>
         {entries.map(entry => (
-          <li key={entry.href}>
-            <Link active={active === undefined ? undefined : entry.href === active} to={entry.href}>
-              {entry.title}
-            </Link>
+          <li key={entry.href} className={entry.section ? 'section' : undefined}>
+            {this.#renderEntry(entry, active)}
             {entry.children && entry.children.length > 0 ? this.#renderEntries(entry.children) : null}
           </li>
         ))}
       </ul>
+    )
+  }
+
+  /**
+   * Render a section heading or a page link.
+   * @param entry - The navigation entry.
+   * @param active - The active route for a static render.
+   * @returns The heading or link.
+   */
+  #renderEntry(entry: DocumentationEntry, active: string | undefined): React.ReactNode {
+    if (entry.section) return <span className="section-title">{entry.title}</span>
+    return (
+      <Link active={active === undefined ? undefined : entry.href === active} to={entry.href}>
+        {entry.title}
+      </Link>
     )
   }
 

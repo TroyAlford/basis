@@ -68,6 +68,32 @@ describe('mdxToHTML', () => {
     expect(html).toContain('href="/docs"')
   })
 
+  test('uses explicit ordered navigation with section headings', async () => {
+    const root = fixture({ 'docs/guide.mdx': '# Guide\n', 'docs/index.mdx': '# Home\n' })
+    const site = discoverDocs({
+      navigation: [
+        {
+          children: [
+            { href: '/', title: 'Home' },
+            { href: '/guide', title: 'Guide' },
+          ],
+          href: 'section:start',
+          section: true,
+          title: 'Start',
+        },
+      ],
+      root: join(root, 'docs'),
+      route: '/',
+    })
+    const html = await mdxToHTML(site, page(site, ''))
+    const section = html.indexOf('section-title">Start')
+    const home = html.indexOf('href="/"')
+    const guide = html.indexOf('href="/guide"')
+    expect(section).toBeGreaterThan(-1)
+    expect(home).toBeGreaterThan(section)
+    expect(guide).toBeGreaterThan(home)
+  })
+
   test('renders Mermaid fences to SVG at build time', async () => {
     const root = fixture({ 'docs/index.mdx': '# Home\n\n```mermaid\nflowchart TD\n  A-->B\n```\n' })
     const site = discoverDocs({ root: join(root, 'docs') })

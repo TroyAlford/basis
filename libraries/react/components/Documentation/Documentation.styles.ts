@@ -55,6 +55,15 @@ style('basis:documentation', css`
             color: var(--basis-color-primary);
           }
         }
+        > .section-title {
+          color: var(--basis-color-foreground-muted);
+          display: block;
+          font-size: var(--basis-font-size-sm);
+          font-weight: 600;
+          letter-spacing: 0.04em;
+          padding: var(--basis-unit-md) var(--basis-unit-md) var(--basis-unit-xs);
+          text-transform: uppercase;
+        }
         > ul > li {
           padding-left: var(--basis-unit-md);
         }

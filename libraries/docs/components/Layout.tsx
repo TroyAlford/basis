@@ -12,7 +12,9 @@ export class Layout extends ApplicationBase {
   static displayName = 'Layout'
 
   protected get routes(): Record<string, { component: ComponentType<unknown> }> {
-    return Object.fromEntries(routes.map(route => [route.path, { component: route.component }]))
+    return Object.fromEntries(
+      routes.filter(route => !route.section).map(route => [route.path, { component: route.component }]),
+    )
   }
 
   /**
@@ -23,6 +25,7 @@ export class Layout extends ApplicationBase {
     return buildDocumentationNavigation(routes.map(route => ({
       href: route.path,
       parent: route.parent,
+      section: route.section,
       title: route.title.split('/').pop() ?? route.title,
     })))
   }

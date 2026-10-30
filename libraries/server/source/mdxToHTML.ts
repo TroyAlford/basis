@@ -28,6 +28,8 @@ export interface DocsPageModule {
 
 /** Options for the documentation site. */
 export interface DocsOptions {
+  /** Explicit ordered navigation, when a host owns the site structure. */
+  navigation?: DocumentationEntry[],
   /** React page modules served alongside the Markdown/MDX tree. */
   pages?: DocsPageModule[],
   /** Absolute path to the documentation source tree. */
@@ -45,6 +47,8 @@ export type DocsPage = DocsDocument
 export interface DocsSite {
   /** React page modules keyed by their served path. */
   modules: Map<string, DocsPageModule>,
+  /** Explicit ordered navigation, when supplied by the host. */
+  navigation?: DocumentationEntry[],
   /** Markdown/MDX pages keyed by route path relative to the prefix. */
   pages: Map<string, DocsPage>,
   /** URL prefix without a trailing slash, or `/` when the docs are the site. */
@@ -166,16 +170,16 @@ export function discoverDocs(options: DocsOptions): DocsSite {
     modules.set(pageHref(route, page.path.replace(/^\/+|\/+$/g, '')), page)
   }
 
-  return { modules, pages, route, source, title: options.title ?? 'Documentation' }
+  return { modules, navigation: options.navigation, pages, route, source, title: options.title ?? 'Documentation' }
 }
 
 /**
  * Build the navigation tree from the Markdown/MDX pages and React modules,
  * nesting modules under the parent named by their declared `parent` path.
  * @param site - The resolved site.
- * @returns Sorted navigation entries.
+ * @returns Navigation entries.
  */
-function navigation(site: DocsSite): DocumentationEntry[] {
+function buildNavigation(site: DocsSite): DocumentationEntry[] {
   const modulePaths = new Set(site.modules.keys())
   const routes: DocumentationRoute[] = []
   for (const page of site.pages.values()) {
@@ -209,7 +213,7 @@ function navigation(site: DocsSite): DocumentationEntry[] {
 function layout(site: DocsSite, active: string, content: React.ReactNode, title: string): string {
   const page = React.createElement(
     Documentation,
-    { active, navigation: navigation(site), title: site.title },
+    { active, navigation: site.navigation ?? buildNavigation(site), title: site.title },
     content,
   )
   const body = renderToString(page)

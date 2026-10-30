@@ -1,362 +1,74 @@
 # Consuming Basis
 
-The Basis repository is the distribution artifact. There is no npm/JSR publish step and no consumer build step: Bun resolves the source directly from a pinned Git tag.
-
-## Install
+Basis is distributed as a pinned Git dependency. Bun resolves the source directly from the released tag; there is no npm/JSR publish step and no consumer build step.
 
 ```bash
 bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
 ```
 
-`--trust` records `basis` in the consumer's `trustedDependencies` so Basis's install hook can apply the transitive patches Basis owns. The hook is deterministic, idempotent, exact-version validated, and only touches packages Basis declares. Consumers never copy patch files or `patchedDependencies` entries, and never add their own browser provisioning: `basis/testing` snapshot capture runs Chromium inside Docker and the install hook provisions no browser.
+Use a released tag rather than a branch. `--trust` records Basis in `trustedDependencies` so its install hook can apply Basis-owned patches and validate declared host capabilities.
 
-Basis requires Bun `>=1.4.0`. Bun only honors root-level `patchedDependencies`, which is why the trusted hook exists.
+The documentation site built from [`docs/`](../docs/index.mdx) is the authoritative reference. This README is the front door: install, first imports, and links.
 
-Some capabilities the host must provide are not npm packages. Declare the ones your application needs as static deployment metadata in the root `package.json`:
+## Supported imports
+
+```ts
+import { Button, Theme } from 'basis/react'
+import { Server } from 'basis/server'
+import { Environment, run, runAsync } from 'basis/configuration'
+import { Logger } from 'basis/logger'
+import { Identity } from 'basis/oauth'
+import { matchScreenshot, test, useApplication } from 'basis/testing'
+```
+
+Supported surfaces are `basis/cli`, `basis/configuration`, `basis/eslint`, `basis/logger`, `basis/markdown`, `basis/oauth`, `basis/react`, `basis/react/icons`, `basis/review`, `basis/serve`, `basis/server`, `basis/stylelint`, `basis/testing`, `basis/testing/bun`, and `basis/tsconfig/*`. Internal workspaces are not consumer imports; see [Reference](../docs/reference.mdx).
+
+## Host capabilities and patches
+
+Declare non-npm host capabilities in the application root:
 
 ```json
-{ "basis": { "hostDependencies": ["docker", "nginx", "op", "lego"] } }
+{ "basis": { "hostDependencies": ["docker"] } }
 ```
 
-The install hook resolves each declared capability on `PATH` and, for the known capabilities (`docker`, `nginx`, `pm2`, `op`, `lego`, `opencode`), runs its version command to prove it is runnable, not merely present. Anything missing, present-but-broken, or malformed fails `bun install` loudly, naming it, so a host that cannot run the application never completes an install that looks successful. An unknown name falls back to `PATH` presence. Basis mandates no specific binary; omit the field when there are none. This is package metadata, not an API — application source never calls it.
+The install hook resolves each declared capability on `PATH` and fails loudly when it is missing or broken. Basis-owned patches live in the package and are applied by that hook; consumers never copy patch files or add their own `patchedDependencies` entries. See [Installation](../docs/installation.mdx).
 
-## ESLint
-
-`basis lint` supplies the Basis ESLint config when a repository has no `eslint.config.*` of its own, so the command works with no setup. Create the config only to adopt Basis's policy explicitly or to extend it:
-
-```js
-// eslint.config.mjs
-export { default } from 'basis/eslint'
-```
-
-`basis/eslint` is the shared flat config. Append repository-specific policy with the factory:
-
-```js
-// eslint.config.mjs
-import { createConfig } from 'basis/eslint'
-
-export default createConfig({
-  overrides: [{ files: ['src/index.ts'], rules: { 'no-console': 'off' } }],
-})
-```
-
-Every ESLint plugin the config imports is declared by Basis itself, so consumers do not enumerate or install the plugin stack.
-
-The config also adds Basis rules of its own. `@basis/no-jsx-line-breaks` keeps inline JSX — text, embedded expressions, and inlined elements — on one line, opening and closing tags included, because the renderer word-wraps; block content and whitespace-sensitive elements stay structured. `@basis/no-jsx-space-injection` then replaces a `{' '}`, the old way to hold a space across a wrapped line, with a literal space once the element is on one line. Both autofix, so `basis format` applies them and `basis lint` reports them. JSX lines are exempt from `max-len`, which is a code-length rule, not a prose one.
-
-`@basis/component-architecture` enforces the Basis React invariant: application components extend the Basis `Component` or `Editor` hierarchy. It rejects React hooks (including aliased and namespace-qualified calls and custom `use*` hooks), `React.FC` / `FunctionComponent` types, `memo` and `forwardRef` function components, functions used as JSX component types, and classes extending `React.Component` or `React.PureComponent`. The Basis root `Component` is the deliberate boundary; a few low-level framework primitives whose children cannot satisfy the `Component` prop contract carry explicit, documented inline exceptions. The rule is deterministic and has no autofix, because converting a function component into a class is a design change.
-
-`basis compliance` runs that same architecture rule in a focused, report-only configuration. It does not replace `basis lint` or `basis check`; it is the discoverable, non-formatting architectural gate, and it always applies the Basis-owned policy even when the repository carries its own ESLint config.
-
-```bash
-bunx basis compliance
-```
-
-Application source is in scope. Test, screenshot, end-to-end, fixture, generated, and dependency files are out of scope by default so React testing mechanics remain available. A deliberate migration boundary can disable the rule for a path through `createConfig({ overrides })` or with a justified inline `eslint-disable`; see [Component compliance](../docs/compliance.mdx).
-
-## CSS linting
-
-Component CSS lives in `*.styles.ts` as `css` tagged template literals. Basis lints it with Stylelint through the `postcss-styled-syntax` custom syntax, so the embedded stylesheet is parsed as real CSS (including nesting and `${...}` interpolations) rather than matched as text.
-
-The supported zero-config route is the CLI, which runs the ESLint, CSS, and Markdown policies together:
+## Lint, format, and typecheck
 
 ```bash
 bunx basis lint
 bunx basis format
+bunx basis typecheck
+bunx basis check
 ```
 
-`basis lint` reports every policy; `basis format` applies every autofix they support in a single pass.
+`basis lint` uses the Basis policy when the repository has no ESLint config. Add `export { default } from 'basis/eslint'` to adopt or extend it explicitly. Markdown and `*.styles.ts` coverage is part of the same CLI. See [CLI](../docs/cli.mdx), [ESLint](../docs/eslint.mdx), and [TypeScript](../docs/typescript.mdx).
 
-To run Stylelint directly, point it at the Basis config:
-
-```bash
-bunx stylelint "**/*.styles.ts" --config ./node_modules/basis/stylelint.config.mjs --allow-empty-input
-```
-
-A consumer can also adopt the shared config from their own Stylelint configuration:
-
-```js
-// stylelint.config.mjs
-export { default } from 'basis/stylelint'
-```
-
-`basis/stylelint` exports the ready configuration as its default export and a `createConfig` factory for appending repository-specific rule settings or overrides:
-
-```js
-import { createConfig } from 'basis/stylelint'
-
-export default createConfig({
-  rules: { 'basis/no-state-classes': [true, { ignore: ['open'] }] },
-})
-```
-
-The policy enforces correctness (parse validity, unknown properties, malformed selectors, accidental duplicates, lowercase type selectors), deterministic ordering (custom properties, then ordinary declarations, then nested selector blocks; safely autofixable), nesting guardrails, and Basis selector semantics. The deterministic state rule owns one claim — a state class name is transient state and should not be a class — and never prescribes ARIA or a role, because CSS cannot know an element's real accessibility semantics. It recommends genuinely CSS-native state (`:hover`, `:focus`, `:focus-visible`, `[hidden]`), neutral `data-*` for application state (for example `.active` → `[data-active]`, `.selected` → `[data-selected]`), and, for `disabled`/`checked`/`invalid`/ `read-only`, the native semantic when the element supports it, otherwise `data-*`. Structural, component, and mixin classes (`.button.component`, `.table.editor.component`, `.value`, `.prefix`, `.suffix`) remain valid. Choosing an existing genuine native/ARIA semantic as the better selector is the `component-style-semantics` reviewer's job.
-
-Stylelint, the custom syntax, and every plugin are declared by Basis, so consumers never enumerate the CSS lint dependency or configuration graph.
-
-## Markdown linting
-
-Basis lints Markdown and MDX with the shared remark/unified stack (`remark-lint` rules, all MIT). The policy keeps each paragraph on one source line — the renderer word-wraps — forbids more than one blank line between blocks, and numbers ordered lists sequentially. YAML front-matter and MDX are preserved, and `basis format` applies the canonical serialization in addition to the rules' autofixes.
-
-The supported zero-config route is the CLI:
-
-```bash
-bunx basis lint   # report the Markdown and MDX policies
-bunx basis format # apply the canonical serialization and autofixes
-```
-
-A consumer can also adopt the shared configuration from their own unified pipeline:
-
-```ts
-import { createMarkdownConfig } from 'basis/markdown'
-```
-
-`basis/markdown` exposes the Markdown policy. The ESLint and Stylelint policies stay available through `basis/eslint` and `basis/stylelint`. Basis owns the parser, the off-the-shelf rules, and the serialization settings, so consumers never enumerate them.
-
-## TypeScript
-
-```json
-{
-  "extends": "basis/tsconfig/bun.json"
-}
-```
-
-Presets: `basis/tsconfig/base.json`, `basis/tsconfig/bun.json`, `basis/tsconfig/react.json`. They contain no Basis-monorepo path mappings.
-
-Basis targets TypeScript 7 (the native compiler). Since TS 7 ships no programmatic API, the workspace installs it side-by-side:
-
-- `@typescript/native` (aliased to `typescript@^7`) provides the native `tsc` that `basis typecheck` / `basis check` run.
-- `typescript` is aliased to `@typescript/typescript6` so tooling that needs the TypeScript 6 API (notably typescript-eslint) keeps working.
-
-The presets target TS 6/7 and so omit options removed in that release (for example `downlevelIteration`).
-
-## Logger
-
-`basis/logger` exports the shared `Logger` and its `ILogger` / `LoggerOptions` types. Basis owns the logger's dependencies (for example `chalk`), so consumers do not install them:
-
-```ts
-import { Logger } from 'basis/logger'
-
-const logger = new Logger({ prefix: '[app]', logFilePath: '/tmp/app.log', maxLogLines: 5000 })
-
-logger.info('server listening')
-const stopwatch = logger.stopwatchStart()
-// ...
-logger.stopwatchStop(stopwatch, 'request handled')
-```
-
-`LoggerOptions` supports `prefix`, `silent`, `logFilePath`, and `maxLogLines`. Use `withPrefix` to derive a scoped view, and the `stopwatchStart` / `stopwatchSplit` / `stopwatchStop` helpers to measure durations.
-
-## Configuration
-
-`basis/configuration` exposes three primitives:
-
-```ts
-import { Environment, run, runAsync, secret } from 'basis/configuration'
-```
-
-- `Environment` reads typed values from the process environment, which loads the standard dotenv files most-specific first — `.env.<mode>.local`, `.env.local`, `.env.<mode>`, `.env`, where `<mode>` is `NODE_ENV` (default `development`) — with real environment variables winning. `string(key, fallback?)`, `number(key, fallback?)`, and `boolean(key, fallback?)` fall back when unset and throw, naming the key, when a present value is malformed; `required(key)` fails loudly when unset; `enabled(...keys)` computes a topic's `ENABLED` flag. Consumers own their own config policy (defaults, required keys, enabling conditions).
-- `secret(reference)` reads an `op://` reference through the 1Password CLI and returns the value as a string (`JSON.parse` it for structure). The Service Account token comes from `OP_SERVICE_ACCOUNT_TOKEN` and is handed to the `op` child under that name; a missing token fails closed and neither the token nor the value is ever logged or echoed.
-- `run(command, args, options)` is the shared synchronous, shell-free, bounded (`timeoutMs`) subprocess runner; `runAsync` is its non-blocking counterpart. Both return captured `{ exitCode, stdout, stderr, lines }` (typed by `RunOptions` and `CommandResult`) and also accept a whitespace-tokenized tagged template where interpolated values are discrete arguments.
-
-Internal factories and loading seams — `createSecretReader`, `loadDotenv`, and their types — are not part of the package surface. Non-npm host capabilities are declared as `basis.hostDependencies` (see [Install](#install)), not called.
-
-## OAuth and identity
-
-`basis/oauth` owns the shared cross-subdomain identity cookie as one capability, `Identity`:
-
-```ts
-import { Identity } from 'basis/oauth'
-
-const identity = new Identity({
-  public: 'op://Vault/OAuth/client-id',
-  secret: 'op://Vault/OAuth/client-secret',
-  scope: Identity.Scope.Domain, // optional; default Identity.Scope.Subdomain
-})
-```
-
-- `identity.set(request, headers, userId)` signs a user in; `set(..., null)` signs out, clearing the cookie at the same scope. `identity.get(request)` returns the verified user id, or `null`.
-- The cookie is `HttpOnly`, `Secure`, `SameSite=Lax`, and host-only by default with a 30-day lifetime. `Identity.Scope.Domain` shares it with the parent domain and its descendants by removing the request's current subdomain (`auth.example.co.uk` → `example.co.uk`); a two-label host degrades to host-only. There is no public-suffix list.
-- The value is the user id sealed with AES-256-GCM (versioned, base64url). Credentials may be `op://` references, resolved lazily through `basis/configuration`. A user id and a secret are never logged.
-
-`basis/server` builds on it: `server.oauth(options)` mounts a provider-agnostic authorization-code flow at `/api/oauth/login`, `/api/oauth/callback`, and `/api/oauth/logout`. Configuring it (or `server.identity(identity)`) embeds the verified user id as `runtime.identity` in the SPA shell, so a consumer frontend reads it from its standard runtime context without a fetch of its own. See `libraries/oauth/README.md`.
-
-## React runtime
-
-`basis/react` exposes the supported React component library:
-
-```tsx
-import { AutoComplete, Button, Theme } from 'basis/react'
-```
-
-`basis/react` also re-exports the icon set, but a few icon names collide with component names (the `Table` icon and the `Table` component, for example). Import those from the dedicated subpath:
-
-```tsx
-import { Table } from 'basis/react/icons'
-```
-
-Basis owns the React runtime contract. React and ReactDOM are pinned at `^19.3.0` in Basis's manifest, and Basis also declares the React type packages (`@types/react`, `@types/react-dom`) and its other runtime dependencies (`@floating-ui/dom`). A consumer that pins the same React range resolves one deduplicated React runtime rather than a copy per package.
-
-Components are consumed directly from source — there is no Basis build step. The surface is self-contained: internal imports resolve through package-relative paths, so `basis/react` never needs Basis-workspace path aliases, a consumer resolver plugin, or `node_modules/basis/libraries/*` imports.
-
-## Testing
-
-`basis/testing` is the single test surface: the shared `render`, `Simulate`, and `waitFor` helpers, the shared `test`/`it`/`describe` (which track the current test name for snapshot keys), the `matchScreenshot` visual helper, and browser-backed snapshots. Add the preload to `bunfig.toml`:
-
-```toml
-[test]
-preload = ["basis/testing/bun"]
-```
-
-It registers happy-dom and the browser lifecycle. A plain `bun test` runs the fast `.test`/`.spec` lane; the opt-in screenshot and end-to-end lanes run only when a script names their files explicitly. A file's suffix selects its lane:
-
-| Suffix                                                  | Purpose                                                                                | Default `bun test`? | Canonical command  |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------- | ------------------ |
-| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests                        | Yes                 | `bun test`         |
-| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level `matchScreenshot` visual contracts; no application mount               | No                  | `test:screenshots` |
-| `*.e2e.ts` / `*.e2e.tsx`                                | `useApplication().visit()` feature journeys in a real browser; may capture screenshots | No                  | `test:e2e`         |
-
-```json
-{
-  "scripts": {
-    "test": "bun test",
-    "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
-    "test:e2e": "bun test ./source/e2e/*.e2e.ts",
-    "test:all": "bun run test && bun run test:screenshots && bun run test:e2e"
-  }
-}
-```
-
-Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots` and `test:e2e` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
-
-The preload also isolates the process temp directory: `os.tmpdir()` points at a run-scoped directory the preload removes when the run ends, so a fixture — or a dependency — that writes temp files cannot leak them.
-
-For a fixture that wants a named directory, `tempDirectory(prefix)` from `basis/testing` creates a fresh directory under that same isolated root:
-
-```ts
-import { tempDirectory } from 'basis/testing'
-
-const directory = tempDirectory('my-fixture')
-```
-
-Plain `mkdtemp(os.tmpdir())` is captured identically, so no per-repo or per-file configuration is needed.
-
-`matchScreenshot(subject, hint?, options?)` is an ordinary async function, not a custom matcher: Bun drives async matchers synchronously, which makes the Playwright calls inside them far slower than the same calls awaited normally.
-
-```tsx
-// Button.screenshot.tsx
-import { Button } from 'basis/react'
-import { matchScreenshot, test } from 'basis/testing'
-
-test('renders a button', async () => {
-  await matchScreenshot(<Button>Save</Button>)
-})
-```
-
-It accepts a React element, a Playwright `Page`, or a `Locator`, and throws with the diff details on a mismatch. Run it with `bun run test:screenshots`; mounted component tests that assert behavior stay in `*.test.tsx`.
-
-Snapshot capture runs Chromium inside the pinned Playwright container (see [libraries/testing/README.md](../libraries/testing/README.md)); it never downloads or launches a host Chromium, so `bun install` provisions no browser and no `playwright install-deps` step is needed. The only host capability snapshots need is a running Docker daemon.
-
-`matchScreenshot` never modifies or deletes a committed baseline unless the run explicitly updates (`--update-snapshots` / `UPDATE_SNAPSHOTS=1`). A capture or comparison failure leaves baselines untouched.
-
-### Application tests
-
-Boot the app **once for the whole run** with `useApplication`. The preload stops it when the run ends, so no test file needs its own `beforeAll`/`afterAll`:
-
-```tsx
-// Deck.e2e.ts
-import { matchScreenshot, test, useApplication } from 'basis/testing'
-
-test('renders the deck builder', async () => {
-  const app = await useApplication({ entry: './src/serve.ts' })
-
-  await app.visit('/deck', async page => {
-    await matchScreenshot(page.locator('.deck-builder'))
-  })
-})
-```
-
-Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Every file shares one server per `(cwd, entry)`; the first caller boots it and concurrent callers await the same boot. `visit` still gives a deterministic page (fresh browser context, stubbed network, per-visit `init`), but **server-side state is shared across the run** — a test that needs a clean server boots its own with the low-level `startApplication`.
-
-`useApplication` is lazy by default. To boot before the suite and fail fast on a broken server, add a second preload that calls it (`await useApplication(...)`) through the same registry — see the testing README for the eager pattern.
-
-## Server runtime
-
-`basis/server` exposes the Bun application server:
+## Server and database
 
 ```ts
 import { Server } from 'basis/server'
 
 new Server()
   .root(import.meta.dir)
-  .assets('./assets')
   .main('./Application.tsx')
-  .start({
-    development: Bun.env.NODE_ENV !== 'production',
-    hostname: Bun.env.HOST ?? '127.0.0.1',
-    port: Number(Bun.env.PORT ?? 80),
-    version: Bun.env.VERSION ?? 'development',
-  })
+  .database()
+  .start()
 ```
 
-One server supports two explicit modes. Development delegates to Bun's dev server: it generates and serves the SPA shell through an HTML route so Bun owns live compilation, file watching, and hot updates. Edits apply without a full-page reload — Bun's dev server Fast-Refreshes function components, and the `basis/serve` plugin registers every class component (all of Basis's UI) so Bun's runtime refreshes the changed component in place, leaving the surrounding page and layout chrome (navigation, theme) untouched. A module that derives state from imported components (for example a route registry) must call `import.meta.hot.accept()` so it rebuilds that state; an update with no accepting boundary falls back to a reload. Production builds once, bundles the installed application/Basis dependency graph (so serving never needs a third-party CDN), serves the SPA and its assets, and shuts down gracefully on `SIGINT`/`SIGTERM`.
+`server.database()` is zero-config and creates the managed PostgreSQL capability; pass `{ url }` only for an explicit external server. `server.db.sql` is Bun's pooled tagged-template API, and `server.db.tx(async sql => ...)` owns a transaction boundary. See [Server](../docs/server/index.mdx) and [Database & Transactions](../docs/server/database.mdx).
 
-Development HMR needs Bun's dev-server bundler to load Basis's modules. `bun install` registers the plugin in your `bunfig.toml` automatically, inside a fenced block it owns (`# >>> basis:development-server >>>` … `# <<< basis:development-server <<<`), so re-installing is idempotent and your own comments and formatting are untouched. If the file cannot be edited safely (for example it already declares `[serve.static]` elsewhere), the install fails loudly with the line to add.
+## Testing
 
-`start` options are `development`, `hostname`, `port`, and `version`; each falls back to `NODE_ENV`, `HOST`, `PORT`, and `VERSION`. A managed process should bind loopback and the deployment-assigned port, and pass the release version.
+Add the preload to `bunfig.toml`:
 
-`server.database()` configures one server-owned Bun PostgreSQL capability, exposed as `server.db`. Managed mode is zero-config: Basis keys the database to the normalized application working/checkout directory (`cwd`), lets Docker allocate a loopback port, and reconciles an existing application-owned service instead of replacing it. `SERVICE_NAME` is logging/provenance and `Server.root` is entrypoint/asset resolution; neither moves the database. Each checkout gets independent durable data and credentials; a second process for the same checkout attaches to the same service. The password lives inside the installation at `.basis/database/password`, consumed through `POSTGRES_PASSWORD_FILE`, not in Docker metadata. Basis writes `.basis/database/.gitignore` automatically; static assets/mounts reject `.basis` paths and symlink aliases that resolve into `.basis`. Closing or redeploying the server closes only its Bun pool; PostgreSQL and its data keep running. Pass `url` only to use an explicit external server. Docker is required for managed mode, and unhealthy startup is reported through `/api/health`. `server.db.sql` is the pooled Bun SQL tagged-template API: interpolations are parameters and Bun's result/error semantics pass through unchanged. `server.db.tx(async sql => { ... })` establishes one transaction boundary; the `sql` callback parameter is Bun's transaction-scoped client. Return to commit, throw to roll back, and await all transaction work inside the callback. Queries through `server.db.sql` outside that client do not join the transaction. Bun's `sql.savepoint(callback)` supports partial rollback, and `query.cancel()` cancels one query; a cancellation error escaping the callback rolls the transaction back. Without configuration, `server.db` is a `NullDatabase` that fails gracefully instead of returning `undefined`.
-
-`EntityDefinitions.load(source)` parses and validates the canonical JSON entity definitions used by the database layer: unique PascalCase entities, unique camelCase fields, exactly one primary key typed `id` (UUID) or `string`, and the field types `boolean`, `date`, `id`, `number`, `string`, and `timestamp`. Field types are an enum, leaving room for later non-scalar kinds and type-specific hints. Malformed, duplicate, and unknown-property definitions fail rather than being guessed.
-
-`/api/health` reports the managed-application contract only once the application is built and ready:
-
-```json
-{ "status": "ok", "version": "0.6.1" }
+```toml
+[test]
+preload = ["basis/testing/bun"]
 ```
 
-`version` is the authoritative release version from the strict semver release tag that command-center injects as `VERSION`. The exact deployed checkout is a separate `GIT_SHA`, and `package.json.version` is never the source.
+A test file's suffix selects its lane: `*.test.ts(x)` runs by default; `*.screenshot.tsx` and `*.e2e.ts` are opt-in lanes run by the repository scripts. `basis/testing` provides `render`, `Simulate`, `waitFor`, `matchScreenshot`, and `useApplication`. See [Testing & Visual Snapshots](../docs/testing.md).
 
-While the initial build is pending it responds `503 { "status": "starting", ... }`, and after a failed build `503 { "status": "error", "error": "...", ... }`, so a verifier can never observe a healthy process for an application that did not build. `server.ready()` resolves when the build succeeds and rejects when it fails, for processes that signal readiness directly. Bun version and uptime are additive diagnostics. The API is `/api/health`. The server surface shares the React contract from `basis/react`, and its runtime dependencies are declared by Basis.
+## Documentation
 
-`@basis/server` is still maturing; the supported public surface is the `Server` class, its `ServerOptions`, `Database`, `DatabaseOptions`, `NullDatabase`, `EntityDefinitions`, `FieldType`, `EntityDefinition`, `FieldDefinition`, and the `APIRoute` and `HealthOptions` types.
-
-Only the deliberately supported surfaces above are exported. Internal workspaces are not exposed just because they exist.
-
-## Review policy
-
-```ts
-import { STANDARD_REVIEW_MANIFEST, composeReviewPolicy } from 'basis/review'
-```
-
-`basis/review` exposes the shared, versioned reviewer policy (see `libraries/review/README.md`). Reviewers are authored as Markdown documents with YAML front-matter; resolve the repository's effective policy by composing the standard manifest with the Markdown overlays under `.basis/reviewers/` (`loadOverlayDirectory`), addressed by stable id. Basis owns the policy only — running detectors, calling models, and publishing reviews belong to the consumer.
-
-## CLI
-
-```bash
-bunx basis doctor     # validate the surface and that owned patches are active
-bunx basis lint       # report the TypeScript/JSX, CSS, and Markdown policies
-bunx basis format     # apply every autofix across the same policies
-bunx basis compliance # report the class-based component architecture policy
-bunx basis typecheck
-bunx basis check
-bunx basis docs check # validate the docs/ tree (front-matter, fences, links)
-bunx basis docs build # project the docs/ tree to a static site
-```
-
-`basis lint` and `basis format` need no setup: Stylelint and Markdown are always configured by Basis, and when a repository has no `eslint.config.*` Basis supplies its own. A repository's own ESLint config wins when present. `basis lint` reports every surface; `basis format` applies the fixes each surface supports in a single pass, including the Markdown serialization that resolves blank-line spacing. A follow-up `basis lint` reports nothing fixable that the first run did not already resolve; rulings without a safe transformation (for example JSDoc contracts and `max-len`) still require a manual edit. `basis check` runs `basis lint` before it typechecks.
-
-`basis docs check` validates the canonical `docs/` tree — front-matter, code fences, and repository-relative links — and `basis docs build` projects it to a static site suitable for GitHub Pages (`--out` defaults to `docs-dist`, `--base` prefixes links for a project Pages site, and `--title` sets the shell heading). Both read an optional `basis.docs.source` from `package.json`, defaulting to `docs`.
-
-## Patches
-
-Basis currently owns **no** patches, so a normal install applies nothing. The mechanism remains in place for future Basis-owned patches: patch files live in `patches/` and are declared in the root `patchedDependencies` map, which is the manifest the install hook reads.
-
-Bun applies `patchedDependencies` during install, and only from the install root: a dependency's patches are never applied transitively, and there is no standalone Bun command that applies an existing patch file. The trusted install hook therefore applies Basis's exact patch files with `git apply` once the dependencies are on disk:
-
-- every patch is matched by exact `name@version`;
-- every installed copy of that exact version is patched;
-- already-applied patches are detected and skipped, so installs are idempotent;
-- a patch that no longer matches the installed source, or a missing expected version, fails the install loudly.
-
-Git is required (consumers install Basis from Git, and Bun's own patch tooling also depends on Git). Consumers never copy patch files or `patchedDependencies`.
+Use the documentation site as the package API and usage reference. The canonical source is [`docs/`](../docs/index.mdx). In the Basis repository, validate it with `bun run docs:check` and build it with `bun run docs:build`; consumers can use `basis docs check` and `basis docs build` for their own trees.

@@ -1,0 +1,38 @@
+---
+title: Utilities
+---
+
+# Utilities
+
+`@basis/utilities` is an **internal workspace**, not a supported Git-dependency import. Consumer-facing equivalents are exposed through supported surfaces such as `basis/logger` and `basis/react`. This page is an honest map for maintainers of what the internal index contains; do not import `@basis/utilities` from an application.
+
+## String and naming
+
+`kebabCase`, `pascalCase`, `snakeCase`, `titleCase`, `deburr`, `unique`, and `classNames` handle common naming and class composition. `dataAttributes` and `classNames` are used heavily by the React component hierarchy.
+
+```ts
+import { kebabCase, titleCase } from '@basis/utilities'
+
+kebabCase('MoonPhase') // 'moon-phase'
+titleCase('model-first database') // 'Model First Database'
+```
+
+## Numbers, time, and bytes
+
+`clamp`, `formatBytes`, `formatMilliseconds`, `formatNumber`, `parseMilliseconds`, and `Milliseconds` cover bounded values and display formatting. `getLocale` resolves the active locale.
+
+## Objects and paths
+
+`clone`, `deepEquals`, `get`, `set`, `isNil`, and `isRefObject` provide small object/path primitives. `sortBy` provides stable typed sorting. The internal `merge` helper used by Basis components is not exported from the public index.
+
+## Async and identity
+
+`AbortablePromise` provides cancellation-aware waiting. `hash` and `randomHash` create deterministic or random identifiers. `noop` is the shared no-op.
+
+## URI and runtime
+
+`parseURI`, `parseTemplateURI`, `match`, and `matchTemplateURI` power server routing. `HttpVerb` enumerates HTTP methods. `BasisRuntime` helpers (`EMPTY_BASIS_RUNTIME`, `parseBasisRuntime`, `serializeBasisRuntime`) carry server facts into the SPA shell.
+
+## Types
+
+The index exports `BasisRuntime`, `FrontMatterParts`, `ILogger`, `LoggerContext`, `LoggerOptions`, `PathOf`, `Primitive`, `TypeAt`, and `URI`. `Logger` and its types are also available through the supported `basis/logger` surface.

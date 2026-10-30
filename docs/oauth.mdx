@@ -1,0 +1,33 @@
+---
+title: OAuth
+---
+
+# OAuth
+
+`basis/oauth` exports the shared cross-subdomain identity capability, `Identity`, and `basis/server` mounts a provider-agnostic OAuth flow on top of it.
+
+```ts
+import { Identity } from 'basis/oauth'
+
+const identity = new Identity({
+  public: 'op://Vault/OAuth/client-id',
+  secret: 'op://Vault/OAuth/client-secret',
+  scope: Identity.Scope.Domain, // optional; defaults to Subdomain
+})
+```
+
+`identity.set(request, headers, userId)` signs a user in; `set(..., null)` signs out. `identity.get(request)` returns the verified user id or `null`. The cookie is `HttpOnly`, `Secure`, `SameSite=Lax`, and host-only by default, with a 30-day lifetime. `Identity.Scope.Domain` shares it with the parent domain where applicable.
+
+## Server integration
+
+```ts
+server.oauth({
+  session: identity,
+  redirectUri: 'https://example.com/api/oauth/callback',
+  authorize: (state, credentials) => provider.authorizeUrl(state, credentials, redirectUri),
+  exchange: (code, credentials) => provider.exchange(code, credentials, redirectUri),
+  identity: accessToken => provider.userId(accessToken),
+})
+```
+
+This mounts `/api/oauth/login`, `/api/oauth/callback`, and `/api/oauth/logout`, owns the CSRF state cookie and redirects, and verifies the session capability. Credentials remain in the `Identity`; provider details stay in the callbacks. Configuring OAuth or `server.identity(identity)` embeds the verified user id in the SPA runtime context.
