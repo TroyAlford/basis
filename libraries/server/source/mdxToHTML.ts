@@ -1,6 +1,6 @@
 import { evaluate } from '@mdx-js/mdx'
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import * as React from 'react'
 import * as runtime from 'react/jsx-runtime'
 import { renderToString } from 'react-dom/server'
@@ -11,8 +11,9 @@ import { DOCUMENTATION_FONTS_URL } from '../../react/components/Documentation/ty
 import { Mermaid } from '../../react/components/Mermaid/Mermaid'
 import { themeStyles } from '../../react/components/Theme/Theme'
 import { styles } from '../../react/utilities/style'
+import { resolveDocsHref } from '../../utilities/functions/docsLink'
 import type { DocsDocument } from './globDocs'
-import { globDocs, routePath } from './globDocs'
+import { globDocs } from './globDocs'
 
 /** A React documentation page module, rendered alongside the Markdown tree. */
 export interface DocsPageModule {
@@ -28,6 +29,8 @@ export interface DocsPageModule {
 
 /** Options for the documentation site. */
 export interface DocsOptions {
+  /** Explicit ordered navigation, when a host owns the site structure. */
+  navigation?: DocumentationEntry[],
   /** React page modules served alongside the Markdown/MDX tree. */
   pages?: DocsPageModule[],
   /** Absolute path to the documentation source tree. */
@@ -45,6 +48,8 @@ export type DocsPage = DocsDocument
 export interface DocsSite {
   /** React page modules keyed by their served path. */
   modules: Map<string, DocsPageModule>,
+  /** Explicit ordered navigation, when supplied by the host. */
+  navigation?: DocumentationEntry[],
   /** Markdown/MDX pages keyed by route path relative to the prefix. */
   pages: Map<string, DocsPage>,
   /** URL prefix without a trailing slash, or `/` when the docs are the site. */
@@ -57,6 +62,29 @@ export interface DocsSite {
 
 /** A Markdown inline link to a document. */
 const DOC_LINK = /\]\(([^)\s]+\.mdx?)(#[^)]*)?\)/g
+
+/**
+ * Browser bootstrap for static pages: Markdown fences and unhydrated Code
+ * components are plain code until Shiki replaces them with highlighted markup.
+ * The script only loads the runtime when the page actually contains code.
+ */
+const CODE_HIGHLIGHT = `
+const blocks = document.querySelectorAll('.documentation-shell main pre:not(.shiki) > code, .code.component > code')
+if (blocks.length > 0) {
+  const { codeToHtml } = await import('https://esm.sh/shiki@3.0.0')
+  for (const code of blocks) {
+    const root = code.closest('.code.component')
+    const language = code.className.match(/(?:^|\\s)language-([\\w-]+)/)?.[1] ?? root?.dataset.codeLanguage ?? 'text'
+    const theme = root?.dataset.codeTheme ?? 'github-dark-high-contrast'
+    try {
+      const html = await codeToHtml(code.textContent ?? '', { lang: language, theme })
+      const target = code.parentElement?.tagName === 'PRE' ? code.parentElement : code
+      target.outerHTML = html
+    } catch {
+      /* Keep the readable source when highlighting is unavailable. */
+    }
+  }
+}`
 type MdxContent = React.ComponentType<{
   components?: { pre?: React.ComponentType<React.HTMLAttributes<HTMLPreElement>> },
 }>
@@ -109,10 +137,8 @@ function escapeHtml(value: string): string {
  */
 function rewriteLinks(markdown: string, page: DocsPage, site: DocsSite): string {
   return markdown.replace(DOC_LINK, (match, target: string, anchor = '') => {
-    const resolved = resolve(dirname(page.source), target)
-    const relativeFile = relative(site.source, resolved)
-    if (relativeFile.startsWith('..')) return match
-    return `](${pageHref(site.route, routePath(relativeFile))}${anchor ?? ''})`
+    const href = resolveDocsHref(page.source, target, site.source, site.route)
+    return href === null ? match : `](${href}${anchor ?? ''})`
   })
 }
 
@@ -166,16 +192,16 @@ export function discoverDocs(options: DocsOptions): DocsSite {
     modules.set(pageHref(route, page.path.replace(/^\/+|\/+$/g, '')), page)
   }
 
-  return { modules, pages, route, source, title: options.title ?? 'Documentation' }
+  return { modules, navigation: options.navigation, pages, route, source, title: options.title ?? 'Documentation' }
 }
 
 /**
  * Build the navigation tree from the Markdown/MDX pages and React modules,
  * nesting modules under the parent named by their declared `parent` path.
  * @param site - The resolved site.
- * @returns Sorted navigation entries.
+ * @returns Navigation entries.
  */
-function navigation(site: DocsSite): DocumentationEntry[] {
+function buildNavigation(site: DocsSite): DocumentationEntry[] {
   const modulePaths = new Set(site.modules.keys())
   const routes: DocumentationRoute[] = []
   for (const page of site.pages.values()) {
@@ -190,7 +216,11 @@ function navigation(site: DocsSite): DocumentationEntry[] {
       title: page.title,
     })
   }
-  return buildDocumentationNavigation(routes)
+  /*
+   * Generic consumer docs retain their established title-sorted roots; Basis
+   * passes explicit navigation and therefore bypasses this default.
+   */
+  return buildDocumentationNavigation(routes).sort((a, b) => a.title.localeCompare(b.title))
 }
 
 /**
@@ -209,7 +239,7 @@ function navigation(site: DocsSite): DocumentationEntry[] {
 function layout(site: DocsSite, active: string, content: React.ReactNode, title: string): string {
   const page = React.createElement(
     Documentation,
-    { active, navigation: navigation(site), title: site.title },
+    { active, navigation: site.navigation ?? buildNavigation(site), title: site.title },
     content,
   )
   const body = renderToString(page)
@@ -224,6 +254,7 @@ function layout(site: DocsSite, active: string, content: React.ReactNode, title:
     `<style>${styles()}</style>`,
     '</head><body>',
     body,
+    `<script type="module">${CODE_HIGHLIGHT}</script>`,
     '</body></html>',
   ].join('')
 }

@@ -1,37 +1,21 @@
 ---
-title: Basis documentation
+title: Why Basis
 ---
 
-# Basis documentation
+# Why Basis
 
-This directory is the canonical source for durable Basis documentation: plain Markdown (and MDX where interactivity is needed) that lives with the code and is independent of how it is published.
+Basis exists to build working software that stays readable and maintainable after the first release. Correctness comes first; architecture, abstractions, type systems, tests, and tooling exist to serve correctness and comprehension, not to provide ceremony around it.
 
-## Responsibilities
+This repository is a deliberately cohesive system within its chosen scope. It is not designed to interoperate with every runtime, framework, or deployment model, and it does not treat extensibility as a default virtue. Where an outside capability is actually needed, it is added deliberately and owned; speculative adapters and configuration for every possible ecosystem are not part of the design.
 
-- **`README.md`** is the human and GitHub front door: what Basis is, how to consume it, and where to start.
-- **`AGENTS.md`** is the coding-agent front door: it directs agents to read the README and this documentation before planning or changing code, and to treat documented invariants as constraints.
-- **`docs/`** (this tree) holds durable architectural, operational, developer, and consumer knowledge. Directory names describe content, not publication mechanism.
+The monorepo is one implementation of those judgments. The React component hierarchy, server, configuration, logging, OAuth, testing, review policy, and CLI share conventions, ownership, and a coordinated release because that lets the whole system stay coherent. Coherence is the point; universal compatibility is not.
 
-## Layout
+The source is open so others may use all of Basis, one package, one component, or one idea; they may modify it or disagree with it. Using any part does not require adopting every Basis convention or enforcement policy. The [Engineering Principles](./engineering-principles.mdx) explain the reasoning in detail, and [Architecture](./architecture.mdx) describes how the integrated system is put together.
 
-```text
-docs/
-  index.mdx
-  architecture.mdx
-  ci.mdx
-  compliance.mdx
-  contributing.mdx
-  guides.mdx
-  reference.mdx
-```
+## Start here
 
-- [architecture](./architecture.mdx) — the system's shape and the invariants that must not be broken silently.
-- [ci](./ci.mdx) — the portable, locally validated GitHub Actions contract, reference workflows, and migration checklist.
-- [compliance](./compliance.mdx) — the class-based component invariant, its lint and compliance entry points, scope, and escape hatches.
-- [contributing](./contributing.mdx) — how to work in this repository.
-- [guides](./guides.mdx) — task-oriented guidance for consumers and maintainers.
-- [reference](./reference.mdx) — precise contracts and lookup material.
+- [Installation](./installation.mdx) — pinned Git install, trusted dependencies, first imports, host capabilities.
+- [Guides](./guides.mdx) — a first-use walkthrough and task-oriented guidance.
+- [Reference](./reference.mdx) — documented package surfaces and public-vs-internal import rules.
 
-## Publication
-
-The same source is projected to one or both targets without duplicating content: a live documentation app served through the Basis Server, and a static build suitable for GitHub Pages. A repository may enable either, both, or neither while keeping this source organization. Validate the tree with `basis docs check`, and build the static site with `basis docs build`.
+The package catalog and supported import surfaces live in [Reference](./reference.mdx); this page is the reason for the system, not a feature inventory.

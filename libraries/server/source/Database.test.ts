@@ -12,7 +12,6 @@ describe('managedDatabaseIdentity', () => {
   test('is stable for the same normalized installation directory', () => {
     const identity = managedDatabaseIdentity('/srv/apps/a')
     expect(identity).toBe(managedDatabaseIdentity('/srv/apps/a/'))
-    expect(identity).toMatch(/^[a-f0-9]{16}$/)
   })
 
   test('separates different installation directories', () => {

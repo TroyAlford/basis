@@ -1,0 +1,127 @@
+---
+title: Database & Transactions
+---
+
+# Database & Transactions
+
+`server.database()` gives the server one owned PostgreSQL capability, exposed as `server.db`. Managed mode is zero-config: Basis keys the database to the normalized application working directory, lets Docker allocate a loopback port, reconciles an existing app-owned service, and waits for the pool before reporting healthy. The service and its data outlive any one web-server process.
+
+Pass `url` only when using an explicit external PostgreSQL server. Managed state and credentials live inside the installation under `.basis/database/`; Basis writes a local ignore file and static serving never exposes `.basis`.
+
+## Canonical entities
+
+`EntityDefinitions.load(source)` parses and validates the canonical JSON entity definitions. JSON is the authority; the loader does not create tables, initialize a schema, or run migrations.
+
+```json
+{
+  "entities": [
+    {
+      "name": "Note",
+      "fields": [
+        { "name": "id", "type": "id", "primaryKey": true },
+        { "name": "title", "type": "string" },
+        { "name": "published", "type": "boolean" },
+        { "name": "createdAt", "type": "timestamp" }
+      ]
+    },
+    {
+      "name": "User",
+      "fields": [
+        { "name": "id", "type": "string", "primaryKey": true },
+        { "name": "name", "type": "string" }
+      ]
+    }
+  ]
+}
+```
+
+```ts
+import { EntityDefinitions, FieldType } from 'basis/server'
+
+const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
+const note = entities.entity('Note')
+```
+
+Entities use PascalCase names and unique camelCase fields. Exactly one primary key is required; it may use `FieldType.ID` (UUID) or `FieldType.String` (for VARCHAR-style keys). Field types are `boolean`, `date`, `id`, `number`, `string`, and `timestamp`; `date` and `timestamp` are distinct, and `number` covers integer and floating point values. Duplicate entity/field names, malformed names, unsupported types, missing or multiple primary keys, malformed JSON, and unknown properties fail validation with a clear error.
+
+## `db.sql`
+
+`server.db.sql` is the pooled Bun SQL tagged-template API. Interpolations are parameters and results and errors are Bun's own.
+
+```ts
+const owner = 'Troy'
+const notes = await server.db.sql<{ id: string, title: string }[]>`
+  select id, title from notes where owner = ${owner}
+`
+```
+
+## `db.tx`
+
+`server.db.tx(callback)` establishes one transaction boundary. The callback receives Bun's native transaction-scoped SQL client, conventionally named `sql`. Everything run through that client is one atomic operation:
+
+```ts
+const noteId = await server.db.tx(async sql => {
+  const [note] = await sql`insert into notes (title) values (${title}) returning id`
+  await sql`insert into audit (action, note_id) values ('created', ${note.id})`
+  return note.id
+})
+```
+
+Bun commits when the callback completes successfully, and `db.tx()` resolves with the callback's return value after commit. Returning early commits. Throw to abort:
+
+```ts
+try {
+  await server.db.tx(async sql => {
+    await sql`insert into notes (title) values (${title})`
+    throw new Error('do not keep this note')
+  })
+} catch {
+  // The transaction rolled back.
+}
+```
+
+A thrown error or failed query that escapes the callback rolls back and rejects. Await every query inside the callback; the transaction-scoped client must not be used after it completes. Queries through `server.db.sql` do not automatically join the transaction; use the callback's `sql`.
+
+### Savepoints
+
+`sql.savepoint(callback)` provides partial rollback inside the outer transaction. Catching the savepoint failure leaves the outer transaction usable:
+
+```ts
+await server.db.tx(async sql => {
+  await sql`insert into notes (title) values (${title})`
+  try {
+    await sql.savepoint(async savepoint => {
+      await savepoint`insert into audit (action) values ('discarded')`
+      throw new Error('discard only this savepoint')
+    })
+  } catch {
+    // Only the savepoint rolled back.
+  }
+  await sql`insert into audit (action) values ('committed')`
+})
+```
+
+### Query cancellation
+
+`query.cancel()` cancels one executing query. A cancellation that reaches the PostgreSQL server aborts the current transaction; catching the error alone does not make that transaction usable. Recover with a rollback or a savepoint, or let the error escape `db.tx()` so the transaction rolls back.
+
+```ts
+await server.db.tx(async sql => {
+  try {
+    await sql.savepoint(async savepoint => {
+      const query = savepoint`select pg_sleep(30)`.execute()
+      setTimeout(() => query.cancel(), 100)
+      await query
+    })
+  } catch {
+    // The savepoint rolled back; the outer transaction continues.
+  }
+  await sql`insert into audit (action) values ('continued')`
+})
+```
+
+## Lifecycle and ownership
+
+The server owns each process's pool and closes it on shutdown. In managed mode Docker owns the container and durable data volume; stopping or redeploying the web server does not stop PostgreSQL. Different installation directories are isolated, and a second process for the same installation attaches to the same service.
+
+Docker is required for managed mode. An unavailable Docker daemon or failed connection makes startup report `503 error` on `/api/health`.

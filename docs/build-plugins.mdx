@@ -1,0 +1,16 @@
+---
+title: Build Plugins & Serve
+---
+
+# Build Plugins & Serve
+
+`basis/serve` registers Basis's Bun dev-server loaders so an application served through `basis/server` can import SASS/LESS-style assets and Markdown/MDX modules. The install hook adds the plugin section to the consumer's `bunfig.toml` automatically.
+
+```toml
+[serve.static]
+plugins = ["basis/serve"]
+```
+
+The internal `@basis/bun-plugins` workspace implements the loaders, including SASS compilation, asset handling, Markdown transformation, and the development React refresh registration. It is not a consumer import.
+
+The plugin section is optional for an application with no SASS or Markdown sources; keeping it is harmless. The install hook is idempotent and fails loudly if it cannot safely update an existing `[serve.static]` configuration. The basis server's production build does not require the development plugin.

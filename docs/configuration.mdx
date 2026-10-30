@@ -1,0 +1,48 @@
+---
+title: Configuration
+---
+
+# Configuration
+
+`basis/configuration` owns three primitives: typed environment reads, 1Password secret reads, and the shared bounded subprocess runners. Consumers own their configuration policy.
+
+## Environment
+
+`Environment` reads typed values from standard dotenv files, most-specific first: `.env.<mode>.local`, `.env.local`, `.env.<mode>`, `.env`, where mode is `NODE_ENV` (default `development`). Real environment variables win.
+
+```ts
+import { Environment } from 'basis/configuration'
+
+const env = new Environment()
+
+env.string('HOST', '127.0.0.1')
+env.number('PORT', 80)
+env.boolean('DEBUG')
+env.required('DATABASE_URL')
+env.enabled('OP_SERVICE_ACCOUNT_TOKEN')
+```
+
+Unset values use the fallback; malformed present values throw naming the key; `required` fails when unset. Loading is lazy and only occurs when an `Environment` is constructed.
+
+## Secrets
+
+`secret(reference)` reads an `op://` reference through the 1Password CLI and returns the value as a string. The Service Account token comes from `OP_SERVICE_ACCOUNT_TOKEN`. A missing token fails closed before a child process starts. Neither the token nor the value is logged.
+
+```ts
+import { secret } from 'basis/configuration'
+
+const token = secret('op://Vault/item/field')
+const settings = JSON.parse(secret('op://Vault/item/settings'))
+```
+
+## Subprocesses
+
+`run(command, args, options)` is synchronous; `runAsync` is its non-blocking counterpart. Both use explicit argv, support `cwd`, environment overlays, `timeoutMs`, and a Basis `Logger`, and return `{ exitCode, stdout, stderr, lines }`. `lines` is normalized stdout with no trailing empty line.
+
+Both also accept a whitespace-tokenized tagged template. Interpolated values become discrete arguments, never shell text:
+
+```ts
+const services = await runAsync`docker ps --filter ${`label=basis.install=${install}`}`
+```
+
+Use `run` for synchronous configuration or install work and `runAsync` when a server must keep its event loop free.

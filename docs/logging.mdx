@@ -1,0 +1,28 @@
+---
+title: Logging
+---
+
+# Logging
+
+`basis/logger` exports the shared `Logger` and its `ILogger` / `LoggerOptions` types. Basis owns its runtime dependencies, so applications do not install the logger's supporting packages.
+
+```ts
+import { Logger } from 'basis/logger'
+
+const logger = new Logger({ prefix: '[app]', silent: false })
+
+logger.info('server listening')
+const stopwatch = logger.stopwatchStart()
+// ...
+logger.stopwatchStop(stopwatch, 'request handled')
+```
+
+`LoggerOptions` supports `prefix`, `silent`, `logFilePath`, and `maxLogLines`. Use `withPrefix` for a scoped view and the stopwatch helpers to measure durations. Records include a UTC ISO-8601 timestamp, level, and runtime context read from the environment (`SERVICE_NAME`, `VERSION`, `GIT_SHA`). Output is colorized; `NO_COLOR` or `silent` disables it.
+
+`Server` owns a logger and uses it for lifecycle output. Read it with `server.logger`, or inject a custom logger through `start({ logger })` to redirect or silence it.
+
+```ts
+const server = new Server().root(import.meta.dir).main('./Application.tsx')
+server.start()
+server.logger.info('background worker ready')
+```

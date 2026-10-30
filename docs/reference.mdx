@@ -4,4 +4,43 @@ title: Reference
 
 # Reference
 
-Precise contracts and lookup material. Each package's README remains the source of truth for its own surface; this section collects cross-cutting reference material as it accrues.
+This page is the index of documented package surfaces. The documentation site is authoritative; package READMEs are brief entry points.
+
+## Public consumer surfaces
+
+The root `package.json` exposes these supported imports:
+
+```text
+basis/cli
+basis/configuration
+basis/eslint
+basis/logger
+basis/markdown
+basis/oauth
+basis/react
+basis/react/icons
+basis/review
+basis/serve
+basis/server
+basis/stylelint
+basis/testing
+basis/testing/bun
+basis/tsconfig/base.json
+basis/tsconfig/bun.json
+basis/tsconfig/react.json
+```
+
+Each documented surface has a page in the navigation: [CLI](./cli.mdx), [Configuration](./configuration.mdx), [ESLint](./eslint.mdx), [Logging](./logging.mdx), [OAuth](./oauth.mdx), [Server](./server/index.mdx), [Database & Transactions](./server/database.mdx), [Build Plugins & Serve](./build-plugins.mdx), [Testing & Visual Snapshots](./testing.md), [Code Review](./review.mdx), and [TypeScript](./typescript.mdx). The server database page also documents `EntityDefinitions`, `EntityDefinition`, `FieldDefinition`, and the `FieldType` enum. React components, editors, icons, mixins, router, and theme are documented under React.
+
+## Internal workspaces
+
+`@basis/utilities`, `@basis/workspaces`, `@basis/bun-plugins`, `@basis/eslint-plugin`, and the implementation workspaces behind the facades are internal. An internal workspace path is not a consumer import just because it exists in the repository. Internal code imports public surfaces by their consumer names where possible and internal workspaces package-relatively; consumers resolve the published facade through `exports` alone.
+
+## Import rules
+
+- Import only a supported surface listed above.
+- Do not import `node_modules/basis/libraries/*` or rely on monorepo path aliases.
+- Do not add a second configuration framework around Basis-owned policy.
+- Host capabilities are declared as `basis.hostDependencies` metadata, not called as an imperative API.
+
+See [Architecture](./architecture.mdx) for the invariants behind these rules.
