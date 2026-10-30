@@ -1,70 +1,34 @@
-# Project Overview
+# Basis
 
-This monorepo provides a suite of development tools and utilities designed specifically for the Bun ecosystem.
-
-## Consuming Basis
-
-The repository is the distribution artifact: consumers pin it as a Git dependency and import its stable source surfaces (`basis/react`, `basis/server`, `basis/logger`, `basis/review`, `basis/configuration`, `basis/eslint`, `basis/markdown`, and `basis/tsconfig/*`). See [consumer/README.md](./consumer/README.md) for the React/server runtime contract, plus the lint, TypeScript, CLI, and patch contract.
+Basis is a Bun-first monorepo: class-based React components, the Basis application server, configuration, logging, OAuth, testing, review policy, and repository tooling. It is consumed as a pinned Git dependency, not from npm.
 
 ```bash
 bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
 ```
 
-## Workspaces
+## Documentation
 
-### [@basis/workspaces](./libraries/workspaces)
+The documentation site is the authoritative reference for every public surface. Start with:
 
-CLI tools and utilities for managing monorepo workspaces. Features include:
+- [Installation](./docs/installation.mdx) — pinned install, trusted dependencies, first imports, host capabilities.
+- [Server](./docs/server/index.mdx) — lifecycle, API routes, assets, health, SSE, sockets.
+- [Reference](./docs/reference.mdx) — supported imports and internal-workspace boundaries.
+- [Architecture](./docs/architecture.mdx) — system shape and invariants.
 
-- Workspace discovery and management
-- Dependency tracking
-- Build system with license handling
-- Change detection
-
-### [@basis/eslint-plugin](./libraries/eslint-plugin)
-
-Custom ESLint rules for maintaining code quality:
-
-- Type import organization
-- Object formatting rules
-- Additional TypeScript-specific rules
-
-### [@basis/bun-plugins](./libraries/bun-plugins)
-
-Build plugins for the Bun runtime:
-
-- SASS/SCSS compilation
-- Global variable injection
-- Asset handling
-
-### [@basis/utilities](./libraries/utilities)
-
-Common utility functions:
-
-- Formatting helpers
-- Type utilities
-- Shared logger with an optional bounded file sink
-- Development tools
+Root, `consumer/`, and workspace READMEs are front doors. They describe the package and link to the site rather than duplicating its API inventory.
 
 ## Development
 
-This project uses Bun for package management and building. To get started:
-
 ```bash
-# Install dependencies
 bun install
-
-# Build all packages
-bun ws build-all
-
-# Run tests
+bun run build
 bun test
+bun run docs:check
+bun run docs:build
 ```
 
-## Documentation
+The docs app lives in [`libraries/docs`](./libraries/docs). The durable documentation source is [`docs/`](./docs/index.mdx). [`AGENTS.md`](./AGENTS.md) is the coding-agent entry point.
 
-Start with this README, then read the durable documentation under [`docs/`](./docs/index.mdx). [`AGENTS.md`](./AGENTS.md) directs coding agents to read both before planning or changing code. Component behavior is showcased in the docs app under [`libraries/docs`](./libraries/docs). Validate the docs tree with `bun run docs:check`, and project it to a static site with `bun run docs:build`.
+## CI
 
-## CI recipe
-
-Basis publishes a portable, locally validated GitHub Actions pattern for low-cost pull-request checks: Draft events allocate no hosted jobs, promotion runs only the suites the exact change can affect, and one required gate rejects skipped, cancelled, stale, missing, or unevidenced work. Start with [`docs/ci.mdx`](./docs/ci.mdx); the reference workflows and impact policy live under [`docs/examples`](./docs/examples), and `bun run ci:verify` runs the static contract tests plus an optional `act` dry-run without contacting GitHub Actions.
+Basis publishes a portable, locally validated GitHub Actions pattern for low-cost pull-request checks. Start with [`docs/ci.mdx`](./docs/ci.mdx); reference workflows live under [`docs/examples`](./docs/examples), and `bun run ci:verify` runs the static contract tests plus an optional `act` dry-run without contacting GitHub Actions.

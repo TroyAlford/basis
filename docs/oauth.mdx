@@ -1,0 +1,64 @@
+---
+title: OAuth
+---
+
+# OAuth
+
+`basis/oauth` exports the shared cross-subdomain identity capability, `Identity`, and `basis/server` mounts a provider-agnostic OAuth flow on top of it.
+
+```ts
+import { Identity } from 'basis/oauth'
+
+const identity = new Identity({
+  provider: 'github',
+  public: 'op://Vault/OAuth/client-id',
+  secret: 'op://Vault/OAuth/client-secret',
+  scope: Identity.Scope.Domain, // optional; defaults to Subdomain
+})
+```
+
+`provider` names the cookie (`auth.github`, `auth.discord`), so host-only cookies from different providers cannot collide. `identity.set(request, headers, userId)` signs a user in; `set(..., null)` signs out. `identity.get(request)` returns the verified user id or `null`. The cookie is `HttpOnly`, `Secure`, `SameSite=Lax`, and host-only by default, with a 30-day lifetime. `Identity.Scope.Domain` shares it with the parent domain where applicable.
+
+## Server integration
+
+Declare the redirect URI locally and close over it from the provider helpers. `server.oauth` mounts `/api/oauth/login`, `/api/oauth/callback`, and `/api/oauth/logout`, owns the CSRF state cookie and redirects, and verifies the session capability:
+
+```ts
+const redirectUri = 'https://example.com/api/oauth/callback'
+
+const github = {
+  authorize: (state: string, clientId: string) =>
+    `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`,
+  exchange: async (code: string, credentials: { public: string, secret: string }) => {
+    const response = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        client_id: credentials.public,
+        client_secret: credentials.secret,
+        code,
+        redirect_uri: redirectUri,
+      }),
+    })
+    const body = await response.json() as { access_token?: string }
+    return body.access_token ?? null
+  },
+  userId: async (token: string) => {
+    const response = await fetch('https://api.github.com/user', {
+      headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json' },
+    })
+    if (!response.ok) return null
+    const body = await response.json() as { id?: number }
+    return body.id === undefined ? null : String(body.id)
+  },
+}
+
+server.oauth({
+  session: identity,
+  authorize: (state, credentials) => github.authorize(state, credentials.public),
+  exchange: (code, credentials) => github.exchange(code, credentials),
+  identity: token => github.userId(token),
+})
+```
+
+`OAuthOptions` also supports `logger`, `returnTo`, and `stateMaxAgeSeconds`. Provider-specific endpoints, scopes, and error handling stay in the callback helpers; the flow itself remains provider-agnostic. Configuring OAuth or `server.identity(identity)` embeds the verified user id in the SPA runtime context.

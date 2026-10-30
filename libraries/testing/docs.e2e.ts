@@ -16,17 +16,22 @@ const root = join(import.meta.dir, '..', '..')
 const NETWORK = { allow: ['esm.sh'] }
 
 /**
- * Wait until every Code example on the page has been highlighted by Shiki.
+ * Wait until every Code example and Markdown fence on the page has been
+ * highlighted by Shiki.
  *
- * `Code` renders a plain fallback until its Shiki runtime resolves, so waiting
- * for only the first highlighted block can catch a later one still unhighlighted,
- * which shortens the page and changes the full-page snapshot.
+ * Code examples and fences render plain fallbacks until their Shiki runtime
+ * resolves, so waiting for only the first highlighted block can catch a later
+ * one still unhighlighted, which shortens the page and changes the full-page
+ * snapshot.
  * @param page - The docs page to wait on.
  */
 async function waitForHighlightedCode(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const codes = Array.from(document.querySelectorAll('.code.component'))
-    return codes.length > 0 && codes.every(code => code.querySelector('pre.shiki') !== null)
+    const fences = document.querySelectorAll('.documentation-shell main pre:not(.shiki) > code')
+    return codes.length > 0
+      && codes.every(code => code.querySelector('pre.shiki') !== null)
+      && fences.length === 0
   }, undefined, { timeout: 30_000 })
 }
 
@@ -111,6 +116,24 @@ describe('testing/docs', () => {
         getComputedStyle(document.body).getPropertyValue('--basis-color-background').trim()
       ))).toBe('#080a0dff')
     })
+  }, 60_000)
+
+  test('highlights Markdown code fences and navigates away cleanly', async () => {
+    const pageErrors: string[] = []
+    await app.visit('/guides', {
+      ...NETWORK,
+      init: page => page.on('pageerror', error => pageErrors.push(error.message)),
+    }, async page => {
+      await page.waitForFunction(() => (
+        document.querySelectorAll('.documentation-shell main pre.shiki').length > 0
+        && document.querySelectorAll('.documentation-shell main pre:not(.shiki) > code').length === 0
+      ))
+      expect(await page.locator('.documentation-shell main pre.shiki').count()).toBeGreaterThan(0)
+
+      await page.locator('nav.links a', { hasText: 'Icons' }).click()
+      await page.waitForFunction(() => document.querySelector('main h1')?.textContent === 'Icons')
+    })
+    expect(pageErrors).toEqual([])
   }, 60_000)
 
   test('keeps the docs title fixed above a scrolling navigation and shows its icon', async () => {

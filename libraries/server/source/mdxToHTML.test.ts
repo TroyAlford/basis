@@ -68,6 +68,32 @@ describe('mdxToHTML', () => {
     expect(html).toContain('href="/docs"')
   })
 
+  test('uses explicit ordered navigation with section headings', async () => {
+    const root = fixture({ 'docs/guide.mdx': '# Guide\n', 'docs/index.mdx': '# Home\n' })
+    const site = discoverDocs({
+      navigation: [
+        {
+          children: [
+            { href: '/', title: 'Home' },
+            { href: '/guide', title: 'Guide' },
+          ],
+          href: 'section:start',
+          section: true,
+          title: 'Start',
+        },
+      ],
+      root: join(root, 'docs'),
+      route: '/',
+    })
+    const html = await mdxToHTML(site, page(site, ''))
+    const section = html.indexOf('section-title">Start')
+    const home = html.indexOf('href="/"')
+    const guide = html.indexOf('href="/guide"')
+    expect(section).toBeGreaterThan(-1)
+    expect(home).toBeGreaterThan(section)
+    expect(guide).toBeGreaterThan(home)
+  })
+
   test('renders Mermaid fences to SVG at build time', async () => {
     const root = fixture({ 'docs/index.mdx': '# Home\n\n```mermaid\nflowchart TD\n  A-->B\n```\n' })
     const site = discoverDocs({ root: join(root, 'docs') })
@@ -75,6 +101,14 @@ describe('mdxToHTML', () => {
     expect(html).toContain('mermaid-diagram component')
     expect(html).toContain('<svg')
     expect(html).not.toContain('esm.sh/mermaid')
+  })
+
+  test('preserves fenced code language metadata', async () => {
+    const root = fixture({ 'docs/index.mdx': '# Home\n\n```ts\nconst answer = 42\n```\n' })
+    const site = discoverDocs({ root: join(root, 'docs') })
+    const html = await mdxToHTML(site, page(site, ''))
+    expect(html).toContain('class="language-ts"')
+    expect(html).toContain('const answer = 42')
   })
 })
 
@@ -91,6 +125,23 @@ describe('buildDocs', () => {
 })
 
 describe('navigation', () => {
+  test('sorts generic documentation roots by title', () => {
+    const Component = (): React.ReactNode => null
+    const root = fixture({ 'docs/index.mdx': '# Home\n' })
+    const site = discoverDocs({
+      pages: [
+        { component: Component, path: '/zeta', title: 'Zeta' },
+        { component: Component, path: '/alpha', title: 'Alpha' },
+      ],
+      root: join(root, 'docs'),
+      route: '/',
+    })
+    const alpha = site.modules.get('/alpha')
+    if (!alpha) throw new Error('missing /alpha module')
+    const html = moduleToHTML(site, alpha, '/alpha')
+    expect(html.indexOf('href="/alpha"')).toBeLessThan(html.indexOf('href="/zeta"'))
+  })
+
   test('nests a page module under its declared parent', () => {
     const Component = (): React.ReactNode => null
     const root = fixture({ 'docs/index.mdx': '# Home\n' })

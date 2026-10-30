@@ -104,8 +104,8 @@ export class Image extends Component<Props, HTMLDivElement, State> {
     await this.setState({ error: false, loading: true })
     const image = await loadImage(src)
     if (this.props.size === Size.Natural && image) {
-      this.rootNode.style.height = `${CSS.px(image.height)}`
-      this.rootNode.style.width = `${CSS.px(image.width)}`
+      this.rootNode.style.height = `${image.height}px`
+      this.rootNode.style.width = `${image.width}px`
     }
     await this.setState({ error: !image, loading: false })
   }

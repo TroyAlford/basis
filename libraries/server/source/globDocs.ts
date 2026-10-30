@@ -2,6 +2,7 @@ import type { Dirent } from 'node:fs'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, relative } from 'node:path'
 import { splitFrontMatter } from '../../utilities'
+import { routePathFor } from '../../utilities/functions/docsLink'
 
 /** A validation problem found in the docs tree. */
 export interface DocsIssue {
@@ -79,11 +80,7 @@ function collect(directory: string): string[] {
  * @param relativeFile - Source path relative to the docs root.
  * @returns The route path (empty for an index document).
  */
-export function routePath(relativeFile: string): string {
-  const segments = relativeFile.replace(/\.mdx?$/i, '').split(/[\\/]/)
-  if (segments[segments.length - 1] === 'index') segments.pop()
-  return segments.join('/')
-}
+export const routePath = routePathFor
 
 /**
  * Split a document's front-matter from its body and validate the pairs.

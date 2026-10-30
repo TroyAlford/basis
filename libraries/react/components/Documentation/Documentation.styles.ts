@@ -55,6 +55,16 @@ style('basis:documentation', css`
             color: var(--basis-color-primary);
           }
         }
+        > .section-title {
+          color: var(--basis-color-foreground-muted);
+          display: block;
+          font-size: var(--basis-font-size-sm);
+          font-weight: 600;
+          letter-spacing: 0.04em;
+          margin: 0;
+          padding: var(--basis-unit-md) var(--basis-unit-md) var(--basis-unit-xs);
+          text-transform: uppercase;
+        }
         > ul > li {
           padding-left: var(--basis-unit-md);
         }
@@ -69,25 +79,19 @@ style('basis:documentation', css`
       grid-area: main;
       overflow: auto;
       padding: var(--basis-unit-md);
+      > .content {
+        margin-inline: auto;
+        max-width: 8.5in;
+        min-width: 0;
+      }
     }
-    main {
+    .content {
+      > h1 + section,
+      > section + section {
+        margin-top: .5em;
+      }
       h1 {
         border-bottom: 2px solid var(--basis-color-primary);
-      }
-      code {
-        color: var(--basis-color-success);
-        font-family: 'Fira Code', monospace;
-        font-variant-ligatures: contextual;
-        font-weight: 500;
-      }
-      p {
-        margin: 0;
-        &:first-child {
-          margin-top: 0;
-        }
-        &:last-child {
-          margin-bottom: 0;
-        }
       }
       select, input:not(.value):not([type='checkbox']):not([type='radio']):not([type='range']) {
         background-color: var(--basis-color-surface);
@@ -101,20 +105,6 @@ style('basis:documentation', css`
       }
       input:not(.value):not([type='checkbox']):not([type='radio']):not([type='range']) {
         padding: .25em .5em;
-      }
-      ul {
-        list-style: disc;
-        margin: 0;
-        padding-left: 0;
-        > li {
-          margin: 0.25em 0 0 2em;
-        }
-      }
-      b, strong {
-        font-weight: 600;
-      }
-      i, em {
-        font-style: italic;
       }
     }
   }
