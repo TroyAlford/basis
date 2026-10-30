@@ -14,7 +14,7 @@ function load(value: unknown): EntityDefinitions {
 const note = {
   entities: [{
     fields: [
-      { name: 'id', primaryKey: true, type: 'id' },
+      { name: 'id', primaryKey: true, type: 'uuid' },
       { name: 'title', type: 'string' },
       { name: 'body', type: 'string' },
       { name: 'createdAt', type: 'timestamp' },
@@ -24,7 +24,7 @@ const note = {
 }
 
 describe('EntityDefinitions', () => {
-  test('loads one entity with an ID and scalar fields', () => {
+  test('loads one entity with a UUID and scalar fields', () => {
     const entities = load(note)
     const entity = entities.entity('Note')
 
@@ -37,10 +37,11 @@ describe('EntityDefinitions', () => {
     const entities = load({
       entities: [{
         fields: [
-          { name: 'id', primaryKey: true, type: 'id' },
+          { name: 'id', primaryKey: true, type: 'uuid' },
           { name: 'active', type: 'boolean' },
           { name: 'dueOn', type: 'date' },
           { name: 'score', type: 'number' },
+          { name: 'externalId', type: 'snowflake' },
           { name: 'title', type: 'string' },
           { name: 'createdAt', type: 'timestamp' },
         ],
@@ -49,36 +50,46 @@ describe('EntityDefinitions', () => {
     })
 
     expect(entities.entity('Note')?.fields.map(field => field.type)).toEqual([
-      FieldType.ID,
+      FieldType.UUID,
       FieldType.Boolean,
       FieldType.Date,
       FieldType.Number,
+      FieldType.Snowflake,
       FieldType.String,
       FieldType.Timestamp,
     ])
   })
 
-  test('accepts a UUID ID or a string primary key', () => {
-    const entities = load({
+  test('accepts a UUID or snowflake primary key', () => {
+    const uuid = load({
+      entities: [{
+        fields: [{ name: 'id', primaryKey: true, type: 'uuid' }],
+        name: 'Note',
+      }],
+    })
+    const snowflake = load({
       entities: [{
         fields: [
-          { name: 'id', primaryKey: true, type: 'string' },
+          { name: 'id', primaryKey: true, type: 'snowflake' },
           { name: 'name', type: 'string' },
         ],
         name: 'User',
       }],
     })
 
-    expect(entities.entity('User')?.fields[0]?.type).toBe(FieldType.String)
+    expect(uuid.entity('Note')?.fields[0]?.type).toBe(FieldType.UUID)
+    expect(snowflake.entity('User')?.fields[0]?.type).toBe(FieldType.Snowflake)
   })
 
   test('rejects a primary key with a non-identity type', () => {
-    expect(() => load({
-      entities: [{
-        fields: [{ name: 'id', primaryKey: true, type: 'number' }],
-        name: 'Note',
-      }],
-    })).toThrow('primary key "Note.id" must be type id or string')
+    for (const type of ['boolean', 'date', 'number', 'string', 'timestamp']) {
+      expect(() => load({
+        entities: [{
+          fields: [{ name: 'id', primaryKey: true, type }],
+          name: 'Note',
+        }],
+      })).toThrow('primary key "Note.id" must be type uuid or snowflake')
+    }
   })
 
   test('rejects malformed JSON', () => {
@@ -98,7 +109,7 @@ describe('EntityDefinitions', () => {
     expect(() => load({
       entities: [{
         fields: [
-          { name: 'id', primaryKey: true, type: 'id' },
+          { name: 'id', primaryKey: true, type: 'uuid' },
           { name: 'title', type: 'string' },
           { name: 'title', type: 'string' },
         ],
@@ -108,15 +119,17 @@ describe('EntityDefinitions', () => {
   })
 
   test('rejects malformed names, unsupported types, and multiple primary keys', () => {
-    expect(() => load({ entities: [{ fields: [{ name: 'id', primaryKey: true, type: 'id' }], name: 'note' }] }))
+    expect(() => load({ entities: [{ fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'note' }] }))
       .toThrow('entity name must be a PascalCase identifier')
-    expect(() => load({ entities: [{ fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'Note' }] }))
-      .toThrow('unsupported field type "uuid"')
+    expect(() => load({ entities: [{ fields: [{ name: 'id', primaryKey: true, type: 'integer' }], name: 'Note' }] }))
+      .toThrow('unsupported field type "integer"')
+    expect(() => load({ entities: [{ fields: [{ name: 'id', primaryKey: true, type: 'id' }], name: 'Note' }] }))
+      .toThrow('unsupported field type "id"')
     expect(() => load({
       entities: [{
         fields: [
-          { name: 'id', primaryKey: true, type: 'id' },
-          { name: 'other', primaryKey: true, type: 'id' },
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { name: 'other', primaryKey: true, type: 'uuid' },
         ],
         name: 'Note',
       }],
@@ -133,7 +146,7 @@ describe('EntityDefinitions', () => {
       .toThrow('unknown top-level property "futureThing"')
     expect(() => load({
       entities: [{
-        fields: [{ name: 'id', primaryKey: true, type: 'id', unique: true }],
+        fields: [{ name: 'id', primaryKey: true, type: 'uuid', unique: true }],
         name: 'Note',
       }],
     })).toThrow('unknown field property "unique"')

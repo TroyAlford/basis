@@ -1,3 +1,5 @@
+import type { SQL } from 'bun'
+
 /**
  * Field types supported by the minimal canonical entity definitions.
  *
@@ -9,14 +11,19 @@ export enum FieldType {
   Boolean = 'boolean',
   /** Calendar date without a time of day. */
   Date = 'date',
-  /** UUID primary-key identifier. */
-  ID = 'id',
   /** Numeric value, including integers and floating point numbers. */
   Number = 'number',
+  /**
+   * Externally assigned signed 64-bit identifier. Values are exact integers
+   * (`bigint` in TypeScript) and decimal strings at JSON boundaries.
+   */
+  Snowflake = 'snowflake',
   /** Text value. */
   String = 'string',
   /** Instant in time. */
   Timestamp = 'timestamp',
+  /** UUID identifier. */
+  UUID = 'uuid',
 }
 
 /** One scalar field definition. */
@@ -74,6 +81,39 @@ export class EntityDefinitions {
   entity(name: string): EntityDefinition | undefined {
     return this.entities.find(entity => entity.name === name)
   }
+
+  /**
+   * Deterministic PostgreSQL DDL for the declared entities, in declaration
+   * order. Identifiers are quoted; user values never enter these statements.
+   * @returns One deterministic `CREATE TABLE` statement per entity.
+   */
+  get ddl(): readonly string[] {
+    return this.entities.map(createTable)
+  }
+
+  /**
+   * Create the declared tables in an explicitly empty/fresh database.
+   *
+   * This is a one-way creation path, not a migration planner. Existing tables
+   * in the current schema are left untouched; an unexpected creation conflict
+   * fails visibly rather than being silently accepted.
+   * @param sql - The connected Bun SQL client.
+   * @returns A promise that resolves after every table statement succeeds.
+   */
+  async createTables(sql: SQL): Promise<void> {
+    for (const entity of this.entities) {
+      const rows = await sql<{ present: boolean }[]>`
+        select exists (
+          select 1
+          from pg_catalog.pg_tables
+          where schemaname = current_schema()
+            and tablename = ${entity.name}
+        ) as present
+      `
+      if (rows[0]?.present) continue
+      await sql.unsafe(createTable(entity)).simple()
+    }
+  }
 }
 
 /**
@@ -128,8 +168,8 @@ function parseEntity(value: unknown): EntityDefinition {
     throw invalid(`entity "${value.name}" must define exactly one primary key`)
   }
   const primaryKey = primaryKeys[0] as FieldDefinition
-  if (primaryKey.type !== FieldType.ID && primaryKey.type !== FieldType.String) {
-    throw invalid(`primary key "${value.name}.${primaryKey.name}" must be type id or string`)
+  if (primaryKey.type !== FieldType.UUID && primaryKey.type !== FieldType.Snowflake) {
+    throw invalid(`primary key "${value.name}.${primaryKey.name}" must be type uuid or snowflake`)
   }
 
   return { fields, name: value.name }
@@ -160,6 +200,46 @@ function parseField(entityName: string, value: unknown): FieldDefinition {
     primaryKey: value.primaryKey === true,
     type: value.type as FieldType,
   }
+}
+
+/**
+ * Build one entity's idempotent physical table statement.
+ * @param entity - The validated entity.
+ * @returns The PostgreSQL DDL statement.
+ */
+function createTable(entity: EntityDefinition): string {
+  const columns = entity.fields.map(field => (
+    `${quoteIdentifier(field.name)} ${columnType(field)}${field.primaryKey ? ' PRIMARY KEY' : ' NOT NULL'}`
+  ))
+  return `CREATE TABLE ${quoteIdentifier(entity.name)} (\n${columns.join(',\n')}\n)`
+}
+
+/**
+ * Resolve the physical PostgreSQL type for a field.
+ * @param field - The validated field.
+ * @returns The column type declaration.
+ */
+function columnType(field: FieldDefinition): string {
+  switch (field.type) {
+    case FieldType.Boolean: return 'BOOLEAN'
+    case FieldType.Date: return 'DATE'
+    case FieldType.Number: return 'DOUBLE PRECISION'
+    case FieldType.Snowflake: return 'BIGINT'
+    case FieldType.String: return 'TEXT'
+    case FieldType.Timestamp: return 'TIMESTAMPTZ'
+    case FieldType.UUID: return 'UUID'
+    default: throw new Error(`Unsupported field type: ${String(field.type)}`)
+  }
+}
+
+/**
+ * Quote a PostgreSQL identifier. Validated model names contain no quotes, but
+ * quoting at the boundary keeps the DDL safe if the vocabulary expands.
+ * @param identifier - Entity or field name.
+ * @returns The quoted identifier.
+ */
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`
 }
 
 /** Field type names accepted by the entity definitions. */
