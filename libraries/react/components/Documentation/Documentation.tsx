@@ -3,7 +3,6 @@ import { Component } from '../Component/Component'
 import { Link } from '../Router/Link'
 
 import '../../global.styles.ts'
-import '../../prose.styles.ts'
 import './Documentation.styles.ts'
 
 /** A documentation navigation entry. */
