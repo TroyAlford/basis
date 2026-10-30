@@ -297,7 +297,7 @@ describe('Server database lifecycle', () => {
           entities: [
             {
               fields: [
-                { name: 'id', primaryKey: true, type: 'id' },
+                { name: 'id', primaryKey: true, type: 'uuid' },
                 { name: 'title', type: 'string' },
                 { name: 'active', type: 'boolean' },
                 { name: 'score', type: 'number' },
@@ -308,7 +308,7 @@ describe('Server database lifecycle', () => {
             },
             {
               fields: [
-                { name: 'id', primaryKey: true, type: 'string' },
+                { name: 'id', primaryKey: true, type: 'snowflake' },
                 { name: 'name', type: 'string' },
               ],
               name: 'Account',
@@ -355,7 +355,7 @@ describe('Server database lifecycle', () => {
           { columnName: 'score', dataType: 'double precision', isNullable: 'NO', tableName: 'Note' },
           { columnName: 'dueOn', dataType: 'date', isNullable: 'NO', tableName: 'Note' },
           { columnName: 'createdAt', dataType: 'timestamp with time zone', isNullable: 'NO', tableName: 'Note' },
-          { columnName: 'id', dataType: 'character varying', isNullable: 'NO', tableName: 'Account' },
+          { columnName: 'id', dataType: 'bigint', isNullable: 'NO', tableName: 'Account' },
           { columnName: 'name', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
         ])
 
@@ -372,17 +372,19 @@ describe('Server database lifecycle', () => {
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values (gen_random_uuid(), 'kept', true, 1.5, '2026-01-02', now())
         `
-        await server.db.sql`insert into "Account" ("id", "name") values (${'account-1'}, ${'Troy'})`
+        await server.db.sql`insert into "Account" ("id", "name") values (${'123456789012345678'}, ${'Troy'})`
         await entities.createTables(server.db.sql)
         expect(await server.db.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
           .toEqual([{ count: 1 }])
+        expect(await server.db.sql<{ id: string }[]>`select id::text as id from "Account"`)
+          .toEqual([{ id: '123456789012345678' }])
 
         await server.db.sql`create schema later`
         await server.db.sql`create table later."Shadow" (marker text)`
         const shadow = EntityDefinitions.load(JSON.stringify({
           entities: [{
             fields: [
-              { name: 'id', primaryKey: true, type: 'string' },
+              { name: 'id', primaryKey: true, type: 'snowflake' },
               { name: 'label', type: 'string' },
             ],
             name: 'Shadow',

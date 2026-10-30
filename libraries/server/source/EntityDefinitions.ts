@@ -11,14 +11,19 @@ export enum FieldType {
   Boolean = 'boolean',
   /** Calendar date without a time of day. */
   Date = 'date',
-  /** UUID primary-key identifier. */
-  ID = 'id',
   /** Numeric value, including integers and floating point numbers. */
   Number = 'number',
+  /**
+   * Externally assigned signed 64-bit identifier. Values are exact integers
+   * (`bigint` in TypeScript) and decimal strings at JSON boundaries.
+   */
+  Snowflake = 'snowflake',
   /** Text value. */
   String = 'string',
   /** Instant in time. */
   Timestamp = 'timestamp',
+  /** UUID identifier. */
+  UUID = 'uuid',
 }
 
 /** One scalar field definition. */
@@ -163,8 +168,8 @@ function parseEntity(value: unknown): EntityDefinition {
     throw invalid(`entity "${value.name}" must define exactly one primary key`)
   }
   const primaryKey = primaryKeys[0] as FieldDefinition
-  if (primaryKey.type !== FieldType.ID && primaryKey.type !== FieldType.String) {
-    throw invalid(`primary key "${value.name}.${primaryKey.name}" must be type id or string`)
+  if (primaryKey.type !== FieldType.UUID && primaryKey.type !== FieldType.Snowflake) {
+    throw invalid(`primary key "${value.name}.${primaryKey.name}" must be type uuid or snowflake`)
   }
 
   return { fields, name: value.name }
@@ -218,10 +223,11 @@ function columnType(field: FieldDefinition): string {
   switch (field.type) {
     case FieldType.Boolean: return 'BOOLEAN'
     case FieldType.Date: return 'DATE'
-    case FieldType.ID: return 'UUID'
     case FieldType.Number: return 'DOUBLE PRECISION'
-    case FieldType.String: return field.primaryKey ? 'VARCHAR(255)' : 'TEXT'
+    case FieldType.Snowflake: return 'BIGINT'
+    case FieldType.String: return 'TEXT'
     case FieldType.Timestamp: return 'TIMESTAMPTZ'
+    case FieldType.UUID: return 'UUID'
     default: throw new Error(`Unsupported field type: ${String(field.type)}`)
   }
 }

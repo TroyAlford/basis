@@ -18,7 +18,7 @@ Pass `url` only when using an explicit external PostgreSQL server. Managed state
     {
       "name": "Note",
       "fields": [
-        { "name": "id", "type": "id", "primaryKey": true },
+        { "name": "id", "type": "uuid", "primaryKey": true },
         { "name": "title", "type": "string" },
         { "name": "published", "type": "boolean" },
         { "name": "createdAt", "type": "timestamp" }
@@ -27,7 +27,7 @@ Pass `url` only when using an explicit external PostgreSQL server. Managed state
     {
       "name": "User",
       "fields": [
-        { "name": "id", "type": "string", "primaryKey": true },
+        { "name": "id", "type": "snowflake", "primaryKey": true },
         { "name": "name", "type": "string" }
       ]
     }
@@ -42,7 +42,7 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 const note = entities.entity('Note')
 ```
 
-Entities use PascalCase names and unique camelCase fields. Exactly one primary key is required; it may use `FieldType.ID` (UUID) or `FieldType.String` (for VARCHAR-style keys). Field types are `boolean`, `date`, `id`, `number`, `string`, and `timestamp`; `date` and `timestamp` are distinct, and `number` covers integer and floating point values. Duplicate entity/field names, malformed names, unsupported types, missing or multiple primary keys, malformed JSON, and unknown properties fail validation with a clear error.
+Entities use PascalCase names and unique camelCase fields. Exactly one primary key is required; its type must be `FieldType.UUID` (`uuid`) or `FieldType.Snowflake` (`snowflake`). `uuid` maps to PostgreSQL `UUID`; `snowflake` represents an externally assigned signed 64-bit ID and maps to `BIGINT`. Snowflake values are exact integers (`bigint` in TypeScript) and decimal strings at JSON boundaries; Basis does not generate them. Other field types are `boolean`, `date`, `number`, `string`, and `timestamp`; they cannot be primary keys. `date` and `timestamp` are distinct, and `number` covers integer and floating point values. Duplicate entity/field names, malformed names, unsupported types, missing or multiple primary keys, malformed JSON, and unknown properties fail validation with a clear error.
 
 ## Creating physical tables
 
@@ -53,7 +53,7 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 await entities.createTables(server.db.sql)
 ```
 
-`createTables` creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared field order for columns. `id` maps to `uuid`, `string` to `text` (or `varchar(255)` for a string primary key), `number` to `double precision`, `date` to `date`, `timestamp` to `timestamptz`, and `boolean` to `boolean`. Every column is `NOT NULL`; exactly one primary key is required.
+`createTables` creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared field order for columns. `uuid` maps to `UUID`, `snowflake` to `BIGINT`, `string` to `TEXT`, `number` to `DOUBLE PRECISION`, `date` to `DATE`, `timestamp` to `TIMESTAMPTZ`, and `boolean` to `BOOLEAN`. Every column is `NOT NULL`; exactly one primary key is required, and ordinary `string` fields are never primary keys.
 
 The statements are deterministic and available through `entities.ddl`. Existing tables in the current schema are skipped, so applying the same definitions again is safe; the existence check and creation both target `current_schema()`, and an unexpected concurrent creation conflict fails rather than being silently accepted. This is a fresh-database creation path, not a migration planner: changing an existing table's columns requires a reviewed migration in a later step.
 
