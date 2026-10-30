@@ -58,21 +58,18 @@ style('basis:prose', css`
 `)
 
 style('basis:prose:spacing', css`
-  /* stylelint-disable basis/no-avoidable-nesting -- keep the directive's flat prose selectors */
-  :where(
-    h1, h2, h3, h4, h5, h6,
-    p, ul, ol, dl, blockquote, pre, figure
-  ) + :where(
+  :is(
     h1, h2, h3, h4, h5, h6,
     p, ul, ol, dl, blockquote, pre, figure
   ) {
-    margin-top: .5em;
-  }
-
-  :where(
-    h1, h2, h3, h4, h5, h6,
-    p, ul, ol, dl, blockquote, pre, figure
-  ) + :where(h1, h2, h3, h4, h5, h6) {
-    padding-top: .5em;
+    + :is(
+      h1, h2, h3, h4, h5, h6,
+      p, ul, ol, dl, blockquote, pre, figure
+    ) {
+      margin-top: .5em;
+    }
+    + :is(h1, h2, h3, h4, h5, h6) {
+      padding-top: .5em;
+    }
   }
 `)
