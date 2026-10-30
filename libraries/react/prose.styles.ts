@@ -1,11 +1,8 @@
 import { css, style } from './utilities/style'
 
 /**
- * Basis's prose reset: the default treatment for ordinary HTML content.
- *
- * This is intentionally global rather than tied to the documentation shell.
- * Prose can live in an article, aside, section, or any other container and
- * should look the same without that container opting in.
+ * Basis-wide defaults for ordinary semantic HTML content.
+ * Application-wide layout reset belongs in global.styles.ts.
  */
 style('basis:prose', css`
   h1, h2, h3, h4, h5, h6 {
@@ -25,7 +22,7 @@ style('basis:prose', css`
   }
 
   pre {
-    background-color: var(--basis-color-surface-code) !important;
+    background-color: var(--basis-color-surface-code);
     border-radius: var(--basis-radius-md);
     overflow-x: auto;
     padding: var(--basis-unit-md);
@@ -37,11 +34,11 @@ style('basis:prose', css`
     }
   }
 
-  ul {
+  ul:not(.component):not([role]) {
     list-style: disc;
     padding-left: 0;
 
-    > li {
+    > li:not(.component) {
       margin: .5em 0 0 2em;
     }
   }
@@ -61,18 +58,21 @@ style('basis:prose', css`
 `)
 
 style('basis:prose:spacing', css`
-  :where(.content, article, aside, section) > :is(
+  /* stylelint-disable basis/no-avoidable-nesting -- keep the directive's flat prose selectors */
+  :where(
+    h1, h2, h3, h4, h5, h6,
+    p, ul, ol, dl, blockquote, pre, figure
+  ) + :where(
     h1, h2, h3, h4, h5, h6,
     p, ul, ol, dl, blockquote, pre, figure
   ) {
-    + :is(
+    margin-top: .5em;
+  }
+
+  :where(
     h1, h2, h3, h4, h5, h6,
     p, ul, ol, dl, blockquote, pre, figure
-  ) {
-      margin-top: .5em;
-    }
-    + :is(h1, h2, h3, h4, h5, h6) {
-      padding-top: .5em;
-    }
+  ) + :where(h1, h2, h3, h4, h5, h6) {
+    padding-top: .5em;
   }
 `)

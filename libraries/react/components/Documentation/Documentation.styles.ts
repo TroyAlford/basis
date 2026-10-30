@@ -86,6 +86,10 @@ style('basis:documentation', css`
       }
     }
     .content {
+      > h1 + section,
+      > section + section {
+        margin-top: .5em;
+      }
       h1 {
         border-bottom: 2px solid var(--basis-color-primary);
       }
