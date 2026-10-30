@@ -1,3 +1,5 @@
+import type { SQL } from 'bun'
+
 /**
  * Field types supported by the minimal canonical entity definitions.
  *
@@ -73,6 +75,33 @@ export class EntityDefinitions {
    */
   entity(name: string): EntityDefinition | undefined {
     return this.entities.find(entity => entity.name === name)
+  }
+
+  /**
+   * Deterministic PostgreSQL DDL for the declared entities, in declaration
+   * order. Identifiers are quoted; user values never enter these statements.
+   * @returns One idempotent `CREATE TABLE` statement per entity.
+   */
+  get ddl(): readonly string[] {
+    return this.entities.map(createTable)
+  }
+
+  /**
+   * Create the declared tables in an explicitly empty/fresh database.
+   *
+   * This is a one-way creation path, not a migration planner. Existing tables
+   * are left untouched.
+   * @param sql - The connected Bun SQL client.
+   * @returns A promise that resolves after every table statement succeeds.
+   */
+  async createTables(sql: SQL): Promise<void> {
+    for (const entity of this.entities) {
+      const rows = await sql<{ present: boolean }[]>`
+        select to_regclass(${quoteIdentifier(entity.name)}) is not null as present
+      `
+      if (rows[0]?.present) continue
+      await sql.unsafe(createTable(entity)).simple()
+    }
   }
 }
 
@@ -160,6 +189,45 @@ function parseField(entityName: string, value: unknown): FieldDefinition {
     primaryKey: value.primaryKey === true,
     type: value.type as FieldType,
   }
+}
+
+/**
+ * Build one entity's idempotent physical table statement.
+ * @param entity - The validated entity.
+ * @returns The PostgreSQL DDL statement.
+ */
+function createTable(entity: EntityDefinition): string {
+  const columns = entity.fields.map(field => (
+    `${quoteIdentifier(field.name)} ${columnType(field)}${field.primaryKey ? ' PRIMARY KEY' : ' NOT NULL'}`
+  ))
+  return `CREATE TABLE IF NOT EXISTS ${quoteIdentifier(entity.name)} (\n${columns.join(',\n')}\n)`
+}
+
+/**
+ * Resolve the physical PostgreSQL type for a field.
+ * @param field - The validated field.
+ * @returns The column type declaration.
+ */
+function columnType(field: FieldDefinition): string {
+  switch (field.type) {
+    case FieldType.Boolean: return 'BOOLEAN'
+    case FieldType.Date: return 'DATE'
+    case FieldType.ID: return 'UUID'
+    case FieldType.Number: return 'DOUBLE PRECISION'
+    case FieldType.String: return field.primaryKey ? 'VARCHAR(255)' : 'TEXT'
+    case FieldType.Timestamp: return 'TIMESTAMPTZ'
+    default: throw new Error(`Unsupported field type: ${String(field.type)}`)
+  }
+}
+
+/**
+ * Quote a PostgreSQL identifier. Validated model names contain no quotes, but
+ * quoting at the boundary keeps the DDL safe if the vocabulary expands.
+ * @param identifier - Entity or field name.
+ * @returns The quoted identifier.
+ */
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`
 }
 
 /** Field type names accepted by the entity definitions. */

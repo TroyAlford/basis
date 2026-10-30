@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { EntityDefinitions } from './EntityDefinitions'
 import { Server } from './Server'
 
 /*
@@ -276,6 +277,105 @@ describe('Server database lifecycle', () => {
           await tx`select * from basis_missing_tx_relation`
         })).rejects.toMatchObject({ errno: '42P01' })
         expect(await count()).toBe(1)
+      } finally {
+        await server.shutdown()
+      }
+    } finally {
+      removeService(install)
+    }
+  }, 120_000)
+
+  test('creates physical tables from canonical entities and reruns safely', async () => {
+    const service = `basis-e2e-schema-${randomUUID()}`
+    const install = tempDirectory('basis-install-schema-')
+
+    try {
+      const server = startWithInstall(new Server().root(install).database(), install, service)
+      try {
+        await server.ready()
+        const entities = EntityDefinitions.load(JSON.stringify({
+          entities: [
+            {
+              fields: [
+                { name: 'id', primaryKey: true, type: 'id' },
+                { name: 'title', type: 'string' },
+                { name: 'active', type: 'boolean' },
+                { name: 'score', type: 'number' },
+                { name: 'dueOn', type: 'date' },
+                { name: 'createdAt', type: 'timestamp' },
+              ],
+              name: 'Note',
+            },
+            {
+              fields: [
+                { name: 'id', primaryKey: true, type: 'string' },
+                { name: 'name', type: 'string' },
+              ],
+              name: 'Account',
+            },
+          ],
+        }))
+
+        await entities.createTables(server.db.sql)
+
+        const noteColumns = await server.db.sql<{
+          columnName: string,
+          dataType: string,
+          isNullable: string,
+          tableName: string,
+        }[]>`
+          select
+            table_name as "tableName",
+            column_name as "columnName",
+            data_type as "dataType",
+            is_nullable as "isNullable"
+          from information_schema.columns
+          where table_name = ${'Note'}
+          order by ordinal_position
+        `
+        const accountColumns = await server.db.sql<{
+          columnName: string,
+          dataType: string,
+          isNullable: string,
+          tableName: string,
+        }[]>`
+          select
+            table_name as "tableName",
+            column_name as "columnName",
+            data_type as "dataType",
+            is_nullable as "isNullable"
+          from information_schema.columns
+          where table_name = ${'Account'}
+          order by ordinal_position
+        `
+        expect([...noteColumns, ...accountColumns]).toEqual([
+          { columnName: 'id', dataType: 'uuid', isNullable: 'NO', tableName: 'Note' },
+          { columnName: 'title', dataType: 'text', isNullable: 'NO', tableName: 'Note' },
+          { columnName: 'active', dataType: 'boolean', isNullable: 'NO', tableName: 'Note' },
+          { columnName: 'score', dataType: 'double precision', isNullable: 'NO', tableName: 'Note' },
+          { columnName: 'dueOn', dataType: 'date', isNullable: 'NO', tableName: 'Note' },
+          { columnName: 'createdAt', dataType: 'timestamp with time zone', isNullable: 'NO', tableName: 'Note' },
+          { columnName: 'id', dataType: 'character varying', isNullable: 'NO', tableName: 'Account' },
+          { columnName: 'name', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
+        ])
+
+        const primaryKeys = await server.db.sql<{ tableName: string }[]>`
+          select tc.table_name as "tableName"
+          from information_schema.table_constraints tc
+          where tc.constraint_type = 'PRIMARY KEY'
+            and tc.table_name in (${'Note'}, ${'Account'})
+          order by tc.table_name
+        `
+        expect(primaryKeys.map(row => row.tableName)).toEqual(['Account', 'Note'])
+
+        await server.db.sql`
+          insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
+          values (gen_random_uuid(), 'kept', true, 1.5, '2026-01-02', now())
+        `
+        await server.db.sql`insert into "Account" ("id", "name") values (${'account-1'}, ${'Troy'})`
+        await entities.createTables(server.db.sql)
+        expect(await server.db.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
+          .toEqual([{ count: 1 }])
       } finally {
         await server.shutdown()
       }

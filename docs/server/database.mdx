@@ -44,6 +44,19 @@ const note = entities.entity('Note')
 
 Entities use PascalCase names and unique camelCase fields. Exactly one primary key is required; it may use `FieldType.ID` (UUID) or `FieldType.String` (for VARCHAR-style keys). Field types are `boolean`, `date`, `id`, `number`, `string`, and `timestamp`; `date` and `timestamp` are distinct, and `number` covers integer and floating point values. Duplicate entity/field names, malformed names, unsupported types, missing or multiple primary keys, malformed JSON, and unknown properties fail validation with a clear error.
 
+## Creating physical tables
+
+A fresh database is initialized explicitly from the same canonical definitions:
+
+```ts
+const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
+await entities.createTables(server.db.sql)
+```
+
+`createTables` creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared field order for columns. `id` maps to `uuid`, `string` to `text` (or `varchar(255)` for a string primary key), `number` to `double precision`, `date` to `date`, `timestamp` to `timestamptz`, and `boolean` to `boolean`. Every column is `NOT NULL`; exactly one primary key is required.
+
+The statements are deterministic and available through `entities.ddl`. Existing tables are skipped, so applying the same definitions again is safe. This is a fresh-database creation path, not a migration planner: changing an existing table's columns requires a reviewed migration in a later step.
+
 ## `db.sql`
 
 `server.db.sql` is the pooled Bun SQL tagged-template API. Interpolations are parameters and results and errors are Bun's own.
