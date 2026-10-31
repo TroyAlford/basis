@@ -1,6 +1,6 @@
 /* eslint-disable @basis/no-default-export */
 import type { Linter } from 'eslint'
-import basisConfig from '../libraries/eslint-plugin'
+import basisConfig from '../libraries/linter-typescript'
 
 /**
  * Options accepted by {@link createConfig}.

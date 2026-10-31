@@ -4,7 +4,7 @@ title: ESLint
 
 # ESLint
 
-`basis/eslint` is the shared flat ESLint configuration. The internal `@basis/eslint-plugin` implements Basis-owned rules; consumers do not install or enumerate the plugin stack.
+`basis/eslint` is the shared flat ESLint configuration. `basis lint` executes it with Bun's built-in linter, and the internal `@basis/linter-typescript` workspace implements the Basis-owned rules; consumers do not install or enumerate the plugin stack.
 
 ```js
 // eslint.config.mjs
@@ -26,3 +26,5 @@ export default createConfig({
 The policy includes repository conventions such as import ordering, JSDoc requirements, class-based React architecture, and the no-paragraph-line-breaks documentation rule. `@basis/component-architecture` is the rule that rejects function components, hooks, `React.FC` types, and direct `React.Component` subclasses in application source while leaving tests, fixtures, and generated files outside its scope.
 
 `basis lint` applies the full policy; `basis format` applies the autofixes. `basis compliance` runs the architecture rule alone and always uses the Basis-owned configuration.
+
+`basis lint` requires the first stable Bun release that ships `bun lint`; stable 1.4.4 does not include it. The command stops with an upgrade instruction on a runtime without the built-in linter. Installing Basis does not enforce the runtime version by itself.

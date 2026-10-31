@@ -22,8 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
-      - name: Run ESLint
-        run: NODE_NO_WARNINGS=1 bun ./node_modules/eslint/bin/eslint.js
+      - name: Run Bun lint
+        run: bun ./consumer/lint-es.ts
       - name: Run Stylelint
         run: bun ./node_modules/stylelint/bin/stylelint.mjs "**/*.styles.ts" --config ./stylelint.config.mjs --allow-empty-input
       - name: Run Markdown lint
@@ -80,6 +80,34 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/asdf-setup
       - name: Run consumer self-install contract
+        run: bun run test:consumer
+
+  canary:
+    # Informational until `bun lint` is in a stable release. This job runs the
+    # same toolchain on the current canary so lint, tests, and the consumer
+    # contract are visible while the stable jobs are blocked on a stable Bun
+    # release with `bun lint`.
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Bun canary
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Warm the Playwright container image
+        run: |
+          image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
+          docker pull "$image"
+      - name: Run lint
+        run: bun ./consumer/cli.ts lint
+      - name: Run TypeScript check
+        run: bun ./consumer/cli.ts typecheck
+      - name: Run tests
+        run: bun run test
+      - name: Run consumer contract
         run: bun run test:consumer
 
   knip:

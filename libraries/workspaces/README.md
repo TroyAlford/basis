@@ -1,6 +1,6 @@
 # @basis/workspaces
 
-Internal workspace-management CLI for the Basis monorepo. It is not a supported consumer package and is not installed from npm or JSR.
+Internal workspace-management CLI for the Basis monorepo. It is not a supported consumer package.
 
 The authoritative reference is the documentation site's [Workspaces page](../../docs/workspaces.mdx). This README is an internal maintainer front door.
 

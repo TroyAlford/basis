@@ -4,7 +4,7 @@ title: Installation
 
 # Installation
 
-Basis is distributed as a pinned Git dependency. There is no npm or JSR publish step and no consumer build step: Bun resolves the source directly from a released tag.
+Basis is distributed as a pinned Git dependency. There is no package-registry publish step and no consumer build step: Bun resolves the source directly from a released tag.
 
 ```bash
 bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
@@ -25,7 +25,9 @@ The root `package.json` is the public facade. Supported import surfaces are `bas
 
 ## Bun version
 
-Basis installs on Bun 1.4.x. The type-check commands require Bun **1.4.3 or newer**; the package engine records that minimum, but `bun add` does not enforce it. An older runtime installs successfully, then `basis typecheck` and `basis check` stop with an upgrade instruction. Run `bun upgrade` to move to a supported release.
+Basis installs on Bun 1.4.x. The type-check commands require Bun **1.4.3 or newer**. The lint, format, and compliance commands require the first stable Bun release that ships the built-in linter; stable 1.4.4 does not include it.
+
+The package engines record these minimums, but `bun add` does not enforce them. An older runtime installs successfully, then the affected command stops with an upgrade instruction. Run `bun upgrade` to move to a supported release.
 
 ## Host capabilities
 

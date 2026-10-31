@@ -34,7 +34,7 @@ Each documented surface has a page in the navigation: [CLI](./cli.mdx), [Configu
 
 ## Internal workspaces
 
-`@basis/utilities`, `@basis/workspaces`, `@basis/bun-plugins`, `@basis/eslint-plugin`, and the implementation workspaces behind the facades are internal. An internal workspace path is not a consumer import just because it exists in the repository. Internal code imports public surfaces by their consumer names where possible and internal workspaces package-relatively; consumers resolve the published facade through `exports` alone.
+`@basis/utilities`, `@basis/workspaces`, `@basis/bun-plugins`, `@basis/linter-typescript`, `@basis/linter-css`, `@basis/linter-markdown`, `@basis/linter-support`, and the implementation workspaces behind the facades are internal. An internal workspace path is not a consumer import just because it exists in the repository. Internal code imports public surfaces by their consumer names where possible and internal workspaces package-relatively; consumers resolve the published facade through `exports` alone.
 
 ## Import rules
 

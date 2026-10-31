@@ -1,6 +1,6 @@
 # Consuming Basis
 
-Basis is distributed as a pinned Git dependency. Bun resolves the source directly from the released tag; there is no npm/JSR publish step and no consumer build step.
+Basis is distributed as a pinned Git dependency. Bun resolves the source directly from the released tag; there is no package-registry publish step and no consumer build step.
 
 ```bash
 bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
@@ -44,7 +44,7 @@ bunx basis check
 
 `basis lint` uses the Basis policy when the repository has no ESLint config. Add `export { default } from 'basis/eslint'` to adopt or extend it explicitly. Markdown and `*.styles.ts` coverage is part of the same CLI. See [CLI](../docs/cli.mdx), [ESLint](../docs/eslint.mdx), and [TypeScript](../docs/typescript.mdx).
 
-`basis typecheck` runs Bun's built-in TypeScript checker and requires Bun 1.4.3 or newer; an older runtime fails with an upgrade instruction. Installing Basis does not enforce that version by itself. `basis check` runs `basis lint` before it typechecks.
+`basis typecheck` runs Bun's built-in TypeScript checker and requires Bun 1.4.3 or newer. `basis lint` runs Bun's built-in linter and requires the first stable Bun release that ships `bun lint`; stable 1.4.4 does not. Both commands stop with an upgrade instruction when the runtime lacks their command. Installing Basis does not enforce either runtime version by itself; the commands perform the checks. `basis check` runs `basis lint` before it typechecks.
 
 ## Server
 
