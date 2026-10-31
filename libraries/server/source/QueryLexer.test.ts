@@ -53,6 +53,49 @@ describe('QueryLexer', () => {
     ])
   })
 
+  test('maps symbolic comparisons to the same canonical operator identities', () => {
+    const dollar = QueryLexer.tokenize('score $gte 5 $and score $lt 10')
+    const symbolic = QueryLexer.tokenize('score >= 5 $and score < 10')
+
+    expect(symbolic.diagnostics).toEqual([])
+    expect(symbolic.tokens.map(token => token.operator)).toEqual(dollar.tokens.map(token => token.operator))
+    expect(symbolic.tokens[1]?.raw).toBe('>=')
+    expect(symbolic.tokens[5]?.raw).toBe('<')
+    expect(symbolic.tokens[1]?.operator).toBe(Operator.Comparison.GreaterThanOrEqual)
+    expect(symbolic.tokens[5]?.operator).toBe(Operator.Comparison.LessThan)
+  })
+
+  test('tokenizes every symbolic comparison alias', () => {
+    const result = QueryLexer.tokenize('= > >= < <=')
+
+    expect(result.diagnostics).toEqual([])
+    expect(result.tokens.slice(0, -1).map(token => [token.raw, token.operator])).toEqual([
+      ['=', Operator.Comparison.Equal],
+      ['>', Operator.Comparison.GreaterThan],
+      ['>=', Operator.Comparison.GreaterThanOrEqual],
+      ['<', Operator.Comparison.LessThan],
+      ['<=', Operator.Comparison.LessThanOrEqual],
+    ])
+  })
+
+  test('reports unsupported symbolic and dollar operators without splitting them', () => {
+    const result = QueryLexer.tokenize('!= == $between $or')
+
+    expect(result.tokens.map(token => [token.type, token.raw])).toEqual([
+      [TokenType.Unknown, '!='],
+      [TokenType.Unknown, '=='],
+      [TokenType.Unknown, '$between'],
+      [TokenType.Unknown, '$or'],
+      [TokenType.EOF, ''],
+    ])
+    expect(result.diagnostics.map(diagnostic => diagnostic.message)).toEqual([
+      'Unsupported operator "!="',
+      'Unsupported operator "=="',
+      'Unknown operator "$between"',
+      'Unknown operator "$or"',
+    ])
+  })
+
   test('tokenizes booleans, null, signed numbers, decimals, and exponents', () => {
     const result = QueryLexer.tokenize('true false null -3 1.5 2e3 -4.5E-2')
 
@@ -93,6 +136,26 @@ describe('QueryLexer', () => {
     expect(result.diagnostics.map(diagnostic => diagnostic.message)).toEqual([
       'Unknown operator "$between"',
       'Unexpected character "@"',
+    ])
+  })
+
+  test('consumes malformed numeric candidates as one diagnostic token', () => {
+    for (const candidate of ['1e', '1e+', '1.', '01']) {
+      const result = QueryLexer.tokenize(candidate)
+      expect(result.tokens.map(token => [token.type, token.raw])).toEqual([
+        [TokenType.Unknown, candidate],
+        [TokenType.EOF, ''],
+      ])
+      expect(result.diagnostics).toHaveLength(1)
+      expect(result.diagnostics[0]).toMatchObject({ end: candidate.length, start: 0 })
+      expect(result.diagnostics[0]?.message).toBe(`Invalid number literal ${JSON.stringify(candidate)}`)
+    }
+
+    const valid = QueryLexer.tokenize('1e+2 -4.5E-2')
+    expect(valid.diagnostics).toEqual([])
+    expect(valid.tokens.slice(0, -1).map(token => [token.type, token.value])).toEqual([
+      [TokenType.Number, '1e+2'],
+      [TokenType.Number, '-4.5E-2'],
     ])
   })
 

@@ -58,6 +58,11 @@ export interface LexResult {
 const OPERATORS = new Map<string, QueryOperator.Comparison | QueryOperator.Logical>([
   ...Object.values(QueryOperator.Comparison).map(operator => [operator, operator] as const),
   ...Object.values(QueryOperator.Logical).map(operator => [operator, operator] as const),
+  ['=', QueryOperator.Comparison.Equal],
+  ['>', QueryOperator.Comparison.GreaterThan],
+  ['>=', QueryOperator.Comparison.GreaterThanOrEqual],
+  ['<', QueryOperator.Comparison.LessThan],
+  ['<=', QueryOperator.Comparison.LessThanOrEqual],
 ])
 
 /** Whether a character may begin an identifier. */
@@ -94,6 +99,13 @@ export const QueryLexer = {
 
       if (character === '$') {
         const token = operatorToken(source, index, diagnostics)
+        tokens.push(token)
+        index = token.end
+        continue
+      }
+
+      if ('=<>!'.includes(character)) {
+        const token = symbolicOperatorToken(source, index, diagnostics)
         tokens.push(token)
         index = token.end
         continue
@@ -225,18 +237,56 @@ function operatorToken(source: string, start: number, diagnostics: QueryDiagnost
  * @returns The number or unknown token.
  */
 function numberToken(source: string, start: number, diagnostics: QueryDiagnostic[]): Token {
-  const match = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(source.slice(start))
-  if (match) {
-    const raw = match[0]
-    return { end: start + raw.length, raw, start, type: TokenType.Number, value: raw }
+  let end = start
+  if (source[end] === '-') end += 1
+  while (end < source.length && /[0-9]/.test(source[end] as string)) end += 1
+  if (source[end] === '.') {
+    end += 1
+    while (end < source.length && /[0-9]/.test(source[end] as string)) end += 1
+  }
+  if (source[end] === 'e' || source[end] === 'E') {
+    end += 1
+    if (source[end] === '+' || source[end] === '-') end += 1
+    while (end < source.length && /[0-9]/.test(source[end] as string)) end += 1
   }
 
-  let end = start + 1
-  while (end < source.length && /[0-9.eE+-]/.test(source[end] as string)) end += 1
   const raw = source.slice(start, end)
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(raw)) {
+    return { end, raw, start, type: TokenType.Number, value: raw }
+  }
+
   diagnostics.push({
     end,
     message: `Invalid number literal ${JSON.stringify(raw)}`,
+    start,
+  })
+  return { end, raw, start, type: TokenType.Unknown, value: raw }
+}
+
+/**
+ * Read a symbolic comparison operator token.
+ * @param source - Query source.
+ * @param start - Operator offset.
+ * @param diagnostics - Diagnostic sink.
+ * @returns The operator or unknown token.
+ */
+function symbolicOperatorToken(
+  source: string,
+  start: number,
+  diagnostics: QueryDiagnostic[],
+): Token {
+  let end = start + 1
+  while (end < source.length && /[=<>!]/.test(source[end] as string)) end += 1
+  const raw = source.slice(start, end)
+  const operator = OPERATORS.get(raw)
+
+  if (operator) {
+    return { end, operator, raw, start, type: TokenType.Operator, value: raw }
+  }
+
+  diagnostics.push({
+    end,
+    message: `Unsupported operator ${JSON.stringify(raw)}`,
     start,
   })
   return { end, raw, start, type: TokenType.Unknown, value: raw }
