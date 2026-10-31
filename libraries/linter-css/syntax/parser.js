@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { Declaration, Rule } from 'postcss';
 import PostCSSParser from 'postcss/lib/parser';
 import { tokenizer } from './tokenizer.js';

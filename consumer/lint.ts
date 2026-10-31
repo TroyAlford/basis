@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /** Flat ESLint config filenames Bun discovers automatically. */
 const ESLINT_CONFIG_FILES = [
@@ -19,13 +19,15 @@ const ESLINT_CONFIG_FILES = [
 const basisDir = (): string => join(import.meta.dir, '..')
 
 /**
- * Reports whether the running Bun can run the built-in linter.
+ * Explains why the running Bun cannot run the built-in linter.
  *
  * The linter is not part of every stable Bun release yet, so probe the command
- * instead of assuming a version number is sufficient.
- * @returns Whether the linter is available.
+ * instead of assuming a version number is sufficient. The probe runs from a
+ * scratch package with no `lint` script, so a zero exit code means Bun handled
+ * the command itself.
+ * @returns The actionable message, or null when the linter is available.
  */
-export const requireBunLint = (): boolean => {
+export const bunLintUnsupportedReason = (): string | null => {
   const scratch = mkdtempSync(join(tmpdir(), 'basis-lint-probe-'))
 
   try {
@@ -38,16 +40,42 @@ export const requireBunLint = (): boolean => {
       stderr: 'pipe',
       stdout: 'pipe',
     })
-    if (probe.exitCode === 0 && probe.stdout.toString().includes('Usage: bun lint')) return true
+    if (probe.exitCode === 0) return null
   } finally {
     rmSync(scratch, { force: true, recursive: true })
   }
 
-  process.stderr.write(
-    `[basis] lint requires a Bun release with the built-in linter; found ${Bun.version}. ` +
-    'Run `bun upgrade` and retry.\n',
-  )
+  return `[basis] lint requires a Bun release with the built-in linter; found ${Bun.version}. ` +
+    'Run `bun upgrade` and retry.'
+}
+
+/**
+ * Reports whether the running Bun can run the built-in linter.
+ * @returns Whether the linter is available.
+ */
+const requireBunLint = (): boolean => {
+  const reason = bunLintUnsupportedReason()
+  if (reason === null) return true
+  process.stderr.write(`${reason}\n`)
   return false
+}
+
+/**
+ * Finds the nearest ESLint flat config from a directory upward.
+ * @param start - The directory to start at.
+ * @returns Absolute path to the config file, or null when none exists.
+ */
+export const findEslintConfig = (start: string): string | null => {
+  let directory = start
+  for (;;) {
+    for (const name of ESLINT_CONFIG_FILES) {
+      const candidate = join(directory, name)
+      if (existsSync(candidate)) return candidate
+    }
+    const parent = dirname(directory)
+    if (parent === directory) return null
+    directory = parent
+  }
 }
 
 /**
@@ -55,9 +83,7 @@ export const requireBunLint = (): boolean => {
  * @returns Absolute path to the config file.
  */
 const eslintConfigPath = (): string => (
-  ESLINT_CONFIG_FILES
-    .map(name => join(process.cwd(), name))
-    .find(path => existsSync(path)) ?? join(basisDir(), 'eslint.config.mjs')
+  findEslintConfig(process.cwd()) ?? join(basisDir(), 'eslint.config.mjs')
 )
 
 /**

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { bunCheckUnsupportedReason } from './bun-version'
 import { runDocs, runDocsBuild } from './docs'
-import { runBunLint } from './lint'
+import { bunLintUnsupportedReason, runBunLint } from './lint'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
 
@@ -203,6 +203,14 @@ const doctor = (): number => {
   } else {
     failures += 1
     write(unsupportedBun)
+  }
+
+  const unsupportedLint = bunLintUnsupportedReason()
+  if (unsupportedLint === null) {
+    write(`[basis] bun ${Bun.version} lint ok`)
+  } else {
+    failures += 1
+    write(unsupportedLint)
   }
 
   for (const subpath of REQUIRED_EXPORTS) {

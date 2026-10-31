@@ -125,7 +125,7 @@ Presets: `basis/tsconfig/base.json`, `basis/tsconfig/bun.json`, `basis/tsconfig/
 
 Basis type-checks with Bun's built-in TypeScript checker (`bun --check`) and lints with Bun's built-in linter (`bun lint`). It does not install a standalone TypeScript compiler; editors use their own TypeScript language service.
 
-`basis typecheck` requires Bun 1.4.3 or newer. `basis lint` requires the first stable Bun release that ships the built-in linter; stable 1.4.4 ships `bun fmt` but not `bun lint`. Both commands stop with an actionable error when the runtime lacks their command.
+`basis typecheck` requires Bun 1.4.3 or newer. `basis lint` requires the first stable Bun release that ships the built-in linter; stable 1.4.4 ships `bun fmt` but not `bun lint`. Both commands stop with an actionable error when the runtime lacks their command. Installing Basis does not enforce either runtime version by itself; the commands perform the checks.
 
 The ESLint plugin is consumed as source by the linter, so it has no separate TypeScript build.
 

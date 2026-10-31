@@ -21,8 +21,8 @@ export class Stringifier extends PostCSSStringifier {
 	document(node) {
 		// If file has no components return it's original content
 		if (node.nodes.length === 0) {
-			// @ts-ignore -- it will have source, because parser always sets it
-			this.builder(node.source.input.css);
+			const source = /** @type {NonNullable<import("postcss").Document["source"]>} */ (node.source);
+			this.builder(source.input.css);
 
 			return;
 		}
@@ -36,7 +36,6 @@ export class Stringifier extends PostCSSStringifier {
 				content += item;
 			};
 
-			// @ts-ignore
 			let semicolon = /** @type {import("postcss").Root["raws"]["semicolon"]} */ (
 				this.raw(child, 'semicolon')
 			);
@@ -112,28 +111,24 @@ export class Stringifier extends PostCSSStringifier {
 			last -= 1;
 		}
 
-		// @ts-ignore -- PostCSS code
-		let semicolon = this.raw(node, 'semicolon');
+		let semicolon = /** @type {boolean} */ (this.raw(node, 'semicolon'));
 
 		// eslint-disable-next-line unicorn/no-for-loop -- disabling for performance reasons
 		for (let i = 0; i < nodes.length; i++) {
 			let child = nodes[i];
 
-			let before = this.raw(child, 'before');
+			let before = /** @type {string} */ (this.raw(child, 'before'));
 
 			if (before) {
 				// STYLED PATCH {
 				if (child?.source?.start?.offset !== undefined) {
-					// @ts-ignore -- TODO
 					before = this.replaceInterpolations(before, child.source.start.offset);
 				}
 				// } STYLED PATCH
 
-				// @ts-ignore -- PostCSS code
 				this.builder(before);
 			}
 
-			// @ts-ignore -- PostCSS code
 			this.stringify(child, last !== i || semicolon);
 		}
 	}
@@ -147,24 +142,23 @@ export class Stringifier extends PostCSSStringifier {
 
 		this.builder(start + between + '{', node, 'start');
 
+		/** @type {string} */
 		let after;
 
 		if (node.nodes && node.nodes.length) {
 			this.body(node);
-			after = this.raw(node, 'after');
+			after = /** @type {string} */ (this.raw(node, 'after'));
 		} else {
-			after = this.raw(node, 'after', 'emptyBody');
+			after = /** @type {string} */ (this.raw(node, 'after', 'emptyBody'));
 		}
 
 		if (after) {
 			// STYLED PATCH {
 			if (node?.source?.end?.offset !== undefined) {
-				// @ts-ignore -- TODO
 				after = this.replaceInterpolations(after, node.source.end.offset);
 			}
 			// } STYLED PATCH
 
-			// @ts-ignore -- PostCSS code
 			this.builder(after);
 		}
 

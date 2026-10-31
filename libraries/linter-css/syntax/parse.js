@@ -2,7 +2,7 @@ import postcss from 'postcss';
 import { Parser } from './parser.js';
 import { parseTemplates } from './parseTemplates';
 
-/** @typedef {import('./types.d.ts').NodeData} NodeData */
+/** @typedef {import('./parseTemplates').NodeData} NodeData */
 
 /** @type {import('postcss').Parser<import('postcss').Document>} */
 export function parse(css, opts) {
@@ -56,8 +56,7 @@ export function parse(css, opts) {
 
 		parser.parse();
 
-		// @ts-ignore -- Parser types are missing in PostCSS
-		parsedNode = parser.root;
+		parsedNode = /** @type {import('postcss').Root} */ (parser.root);
 
 		if (isComponent(node, foundNodes)) {
 			parsedNode.raws.codeBefore = inputCode.slice(
