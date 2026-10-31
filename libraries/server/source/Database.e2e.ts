@@ -290,32 +290,31 @@ describe('Server database lifecycle', () => {
     const install = tempDirectory('basis-install-schema-')
 
     try {
-      const server = startWithInstall(new Server().root(install).database(), install, service)
+      const entities = EntityDefinitions.load(JSON.stringify({
+        entities: [
+          {
+            fields: [
+              { name: 'id', primaryKey: true, type: 'uuid' },
+              { name: 'title', type: 'string' },
+              { name: 'active', type: 'boolean' },
+              { name: 'score', type: 'number' },
+              { name: 'dueOn', type: 'date' },
+              { name: 'createdAt', type: 'timestamp' },
+            ],
+            name: 'Note',
+          },
+          {
+            fields: [
+              { name: 'id', primaryKey: true, type: 'snowflake' },
+              { name: 'name', type: 'string' },
+            ],
+            name: 'Account',
+          },
+        ],
+      }))
+      const server = startWithInstall(new Server().root(install).database({ entities }), install, service)
       try {
         await server.ready()
-        const entities = EntityDefinitions.load(JSON.stringify({
-          entities: [
-            {
-              fields: [
-                { name: 'id', primaryKey: true, type: 'uuid' },
-                { name: 'title', type: 'string' },
-                { name: 'active', type: 'boolean' },
-                { name: 'score', type: 'number' },
-                { name: 'dueOn', type: 'date' },
-                { name: 'createdAt', type: 'timestamp' },
-              ],
-              name: 'Note',
-            },
-            {
-              fields: [
-                { name: 'id', primaryKey: true, type: 'snowflake' },
-                { name: 'name', type: 'string' },
-              ],
-              name: 'Account',
-            },
-          ],
-        }))
-
         await entities.createTables(server.db.sql)
 
         const noteColumns = await server.db.sql<{
@@ -372,12 +371,30 @@ describe('Server database lifecycle', () => {
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values (gen_random_uuid(), 'kept', true, 1.5, '2026-01-02', now())
         `
-        await server.db.sql`insert into "Account" ("id", "name") values (${'123456789012345678'}, ${'Troy'})`
+        await server.db.sql`insert into "Account" ("id", "name") values (${'9223372036854775807'}, ${'Troy'})`
         await entities.createTables(server.db.sql)
         expect(await server.db.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
           .toEqual([{ count: 1 }])
         expect(await server.db.sql<{ id: string }[]>`select id::text as id from "Account"`)
-          .toEqual([{ id: '123456789012345678' }])
+          .toEqual([{ id: '9223372036854775807' }])
+        expect(await server.db.sql<{ id: string }[]>`select id from "Account"`)
+          .toEqual([{ id: '9223372036854775807' }])
+
+        const account = await server.db.query<{ id: bigint, name: string }>('Account', {
+          fields: ['id', 'name'],
+        })
+        expect(account).toEqual([{ id: 9223372036854775807n, name: 'Troy' }])
+        expect(typeof account[0]?.id).toBe('bigint')
+
+        expect(await server.db.query<{ score: number, title: string }>('Note', {
+          fields: ['title', 'score'],
+        })).toEqual([{ score: 1.5, title: 'kept' }])
+        await expect(server.db.query('Note', { fields: ['missing'] }))
+          .rejects.toThrow('Unknown field "Note.missing"')
+        await expect(server.db.query('Missing', { fields: ['id'] }))
+          .rejects.toThrow('Unknown entity "Missing"')
+        await expect(server.db.query('Note', { fields: [] }))
+          .rejects.toThrow('Query fields must be a non-empty array')
 
         await server.db.sql`create schema later`
         await server.db.sql`create table later."Shadow" (marker text)`
