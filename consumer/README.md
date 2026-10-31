@@ -1,6 +1,6 @@
 # Consuming Basis
 
-Basis is distributed as a pinned Git dependency. Bun resolves the source directly from the released tag; there is no npm/JSR publish step and no consumer build step.
+Basis is distributed as a pinned Git dependency. Bun resolves the source directly from the released tag; there is no package-registry publish step and no consumer build step.
 
 ```bash
 bun add --dev --trust github:TroyAlford/basis#vX.Y.Z

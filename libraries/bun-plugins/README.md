@@ -1,6 +1,6 @@
 # @basis/bun-plugins
 
-Internal Bun build/development plugins for Basis. This workspace is not a supported consumer package and is not installed from npm or JSR; applications configure the supported `basis/serve` facade.
+Internal Bun build/development plugins for Basis. This workspace is not a supported consumer package; applications configure the supported `basis/serve` facade.
 
 The authoritative reference is the documentation site's [Build Plugins & Serve page](../../docs/build-plugins.mdx). This README is an internal maintainer front door.
 
