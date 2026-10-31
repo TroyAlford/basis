@@ -44,6 +44,8 @@ bunx basis check
 
 `basis lint` uses the Basis policy when the repository has no ESLint config. Add `export { default } from 'basis/eslint'` to adopt or extend it explicitly. Markdown and `*.styles.ts` coverage is part of the same CLI. See [CLI](../docs/cli.mdx), [ESLint](../docs/eslint.mdx), and [TypeScript](../docs/typescript.mdx).
 
+`basis typecheck` runs Bun's built-in TypeScript checker and requires Bun 1.4.3 or newer; an older runtime fails with an upgrade instruction. Installing Basis does not enforce that version by itself. `basis check` runs `basis lint` before it typechecks.
+
 ## Server
 
 ```ts

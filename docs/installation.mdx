@@ -23,6 +23,10 @@ import { Logger } from 'basis/logger'
 
 The root `package.json` is the public facade. Supported import surfaces are `basis/cli`, `basis/configuration`, `basis/eslint`, `basis/logger`, `basis/markdown`, `basis/oauth`, `basis/react`, `basis/react/icons`, `basis/review`, `basis/serve`, `basis/server`, `basis/stylelint`, `basis/testing`, `basis/testing/bun`, and `basis/tsconfig/*`. Internal workspace paths are not consumer imports; see [Reference](./reference.mdx) for the ownership rule.
 
+## Bun version
+
+Basis installs on Bun 1.4.x. The type-check commands require Bun **1.4.3 or newer**; the package engine records that minimum, but `bun add` does not enforce it. An older runtime installs successfully, then `basis typecheck` and `basis check` stop with an upgrade instruction. Run `bun upgrade` to move to a supported release.
+
 ## Host capabilities
 
 Non-npm host capabilities are static metadata, not runtime API. Declare only what the application uses:
