@@ -1,3 +1,4 @@
+import { match } from '../../utilities'
 import type { EntityDefinition, EntityDefinitions, FieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
@@ -224,37 +225,46 @@ function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOper
       throw new Error(`Query operand for "${field.name}" must not be null`)
     }
 
-    switch (field.type) {
-      case FieldType.Boolean:
-        if (typeof raw === 'boolean') return raw
-        break
-      case FieldType.Date:
-        if (typeof raw === 'string' && raw.length > 0) return raw
-        break
-      case FieldType.Number:
-        if (typeof raw === 'number' && Number.isFinite(raw)) return raw
-        break
-      case FieldType.Snowflake:
+    return match(field.type)
+      .when(FieldType.Boolean).then(() => (
+        typeof raw === 'boolean' ? raw : invalidOperand(field)
+      ))
+      .when(FieldType.Date).then(() => (
+        typeof raw === 'string' && raw.length > 0 ? raw : invalidOperand(field)
+      ))
+      .when(FieldType.Number).then(() => (
+        typeof raw === 'number' && Number.isFinite(raw) ? raw : invalidOperand(field)
+      ))
+      .when(FieldType.Snowflake).then(() => {
         if (typeof raw === 'bigint') return raw
         if (typeof raw === 'string' && /^-?\d+$/.test(raw)) {
           const value = BigInt(raw)
           if (value >= SNOWFLAKE_MIN && value <= SNOWFLAKE_MAX) return raw
         }
-        break
-      case FieldType.String:
-        if (typeof raw === 'string') return raw
-        break
-      case FieldType.Timestamp:
+        return invalidOperand(field)
+      })
+      .when(FieldType.String).then(() => (
+        typeof raw === 'string' ? raw : invalidOperand(field)
+      ))
+      .when(FieldType.Timestamp).then(() => {
         if (raw instanceof Date && !Number.isNaN(raw.getTime())) return raw
         if (typeof raw === 'string' && raw.length > 0) return raw
-        break
-      case FieldType.UUID:
-        if (typeof raw === 'string' && raw.length > 0) return raw
-        break
-    }
-
-    throw new Error(`Query operand for "${field.name}" is not a valid ${field.type} value`)
+        return invalidOperand(field)
+      })
+      .when(FieldType.UUID).then(() => (
+        typeof raw === 'string' && raw.length > 0 ? raw : invalidOperand(field)
+      ))
+      .else(() => invalidOperand(field))
   }
+}
+
+/**
+ * Throw the standard operand error.
+ * @param field - Field whose operand is invalid.
+ * @throws {Error} Always, naming the invalid operand.
+ */
+function invalidOperand(field: FieldDefinition): never {
+  throw new Error(`Query operand for "${field.name}" is not a valid ${field.type} value`)
 }
 
 /**
