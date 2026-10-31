@@ -407,6 +407,41 @@ describe('Server database lifecycle', () => {
           where: { missing: 'kept' },
         })).rejects.toThrow('Unknown field "Note.missing"')
 
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          limit: 1,
+          orderBy: { direction: 'desc', field: 'score' },
+        })).toEqual([{ title: 'ignored' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          limit: 1,
+          offset: 1,
+          orderBy: { field: 'title' },
+        })).toEqual([{ title: 'kept' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          limit: 1,
+          orderBy: { direction: 'desc', field: 'score' },
+          where: { active: false },
+        })).toEqual([{ title: 'ignored' }])
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          limit: 1,
+        })).rejects.toThrow('Query limit and offset require orderBy')
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          orderBy: { field: 'missing' },
+        })).rejects.toThrow('Unknown field "Note.missing"')
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          orderBy: { direction: 'sideways' as 'asc', field: 'title' },
+        })).rejects.toThrow('Query orderBy direction must be "asc" or "desc"')
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          limit: -1,
+          orderBy: { field: 'title' },
+        })).rejects.toThrow('Query limit must be a non-negative integer')
+
         await expect(server.db.query('Note', { fields: ['missing'] }))
           .rejects.toThrow('Unknown field "Note.missing"')
         await expect(server.db.query('Missing', { fields: ['id'] }))

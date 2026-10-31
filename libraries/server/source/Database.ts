@@ -45,6 +45,17 @@ export interface DatabaseOptions {
 export interface QueryOptions {
   /** Root scalar fields to project, in output order. */
   fields: readonly string[],
+  /** Maximum rows to return; requires `orderBy` for deterministic pagination. */
+  limit?: number,
+  /** Rows to skip; requires `orderBy` for deterministic pagination. */
+  offset?: number,
+  /** Explicit root-field ordering. */
+  orderBy?: {
+    /** Sort direction; defaults to ascending. */
+    direction?: 'asc' | 'desc',
+    /** Root field to sort by. */
+    field: string,
+  },
   /** Root-field equality values, combined with `AND`. */
   where?: Readonly<Record<string, unknown>>,
 }
@@ -148,10 +159,19 @@ class PostgresDatabase implements Database {
     if (this.#closed) throw new Error('Database is closed')
     if (!this.#entities) throw new Error('No entity definitions are configured for this database')
 
+    if ((options.limit !== undefined || options.offset !== undefined) && options.orderBy === undefined) {
+      throw new Error('Query limit and offset require orderBy for deterministic pagination')
+    }
+
     const selection = SQL.select(this.#entities, entity, options.fields)
     const predicate = SQL.where(this.#entities, entity, options.where)
-    const statement = predicate.sql ? `${selection.sql} ${predicate.sql}` : selection.sql
-    const rows = await this.#sql.unsafe<T[]>(statement, [...predicate.values])
+    const ordering = SQL.orderBy(this.#entities, entity, options.orderBy)
+    const pagination = SQL.paginate(options.limit, options.offset, predicate.values.length)
+    const statement = [selection.sql, predicate.sql, ordering.sql, pagination.sql]
+      .filter(clause => clause !== '')
+      .join(' ')
+    const values = [...predicate.values, ...pagination.values]
+    const rows = await this.#sql.unsafe<T[]>(statement, values)
     const snowflakes = new Set(
       selection.fields
         .filter(field => field.type === FieldType.Snowflake)

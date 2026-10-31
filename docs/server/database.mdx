@@ -72,10 +72,13 @@ const server = new Server()
 const notes = await server.db.query<{ id: string, title: string }>('Note', {
   fields: ['id', 'title'],
   where: { title: 'Hello' },
+  orderBy: { field: 'createdAt', direction: 'desc' },
+  limit: 20,
+  offset: 0,
 })
 ```
 
-`fields` is required and must be a non-empty list of the named entity's root fields. `where` uses root-field equality shorthand; multiple keys combine with `AND`, and every value is passed as a SQL parameter. Unknown entities and fields fail before any SQL runs; the validated names are quoted as identifiers. Snowflake values are hydrated to exact `bigint` values in `db.query` results; raw `db.sql` keeps Bun's native PostgreSQL `BIGINT` string decoding. This step intentionally supports scalar root projections only — relationships, filters, ordering, and pagination arrive in later steps.
+`fields` is required and must be a non-empty list of the named entity's root fields. `where` uses root-field equality shorthand; multiple keys combine with `AND`, and every value is passed as a SQL parameter. `orderBy` is an explicit root-field sort, defaulting to ascending; `limit` and `offset` are non-negative integers and require `orderBy` for deterministic pagination. Unknown entities, fields, directions, and invalid limits/offsets fail before any SQL runs; validated identifiers are quoted. Snowflake values are hydrated to exact `bigint` values in `db.query` results; raw `db.sql` keeps Bun's native PostgreSQL `BIGINT` string decoding. This step intentionally supports scalar root projections only — relationships, filters, ordering, and pagination arrive in later steps.
 
 ## `db.sql`
 
