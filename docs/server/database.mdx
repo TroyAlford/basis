@@ -62,7 +62,7 @@ The statements are deterministic and available through `entities.ddl`. Existing 
 Attach the same canonical definitions to the database capability, then project root scalar fields from one entity:
 
 ```ts
-import { EntityDefinitions, Server, SortDirection } from 'basis/server'
+import { EntityDefinitions, Operator, Server, SortDirection } from 'basis/server'
 
 const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
 const server = new Server()
@@ -82,14 +82,17 @@ const notes = await server.db.query<{ id: string, title: string }>('Note', {
 const filtered = await server.db.query<{ id: string, title: string }>('Note', {
   fields: ['id', 'title'],
   where: {
-    score: { $gte: 5, $lt: 10 },
-    $and: [{ active: true }, { title: 'Hello' }],
+    score: {
+      [Operator.Comparison.GreaterThanOrEqual]: 5,
+      [Operator.Comparison.LessThan]: 10,
+    },
+    [Operator.Logical.And]: [{ active: true }, { title: 'Hello' }],
   },
   orderBy: { field: 'score', direction: SortDirection.Descending },
 })
 ```
 
-`fields` is required and must be a non-empty list of the named entity's root fields. `where` accepts shorthand equality (`title: 'Hello'`) and structured comparisons (`score: { $gte: 5, $lt: 10 }`). Supported operators are exactly `$eq`, `$gt`, `$gte`, `$lt`, `$lte`, and `$and`; `$and` takes a non-empty array of where expressions and can nest. Shorthand equality is the same expression as `$eq`, and every value is passed as a SQL parameter. `$eq: null` compiles to `IS NULL`; other operators reject null. Range operators are limited to ordered scalar fields (`string`, `number`, `date`, `timestamp`, and `snowflake`), not `boolean` or `uuid`. Unknown fields, operators, or incompatible field/operator combinations fail before SQL runs.
+`fields` is required and must be a non-empty list of the named entity's root fields. `where` accepts shorthand equality (`title: 'Hello'`) and structured comparisons using the exported `Operator` enums. Supported members are `Operator.Comparison.Equal`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`, and `Operator.Logical.And`; `And` takes a non-empty array of where expressions and can nest. Shorthand equality normalizes to `Operator.Comparison.Equal`, and every value is passed as a SQL parameter. `Equal(null)` compiles to `IS NULL`; other operators reject null. Range operators are limited to ordered scalar fields (`string`, `number`, `date`, `timestamp`, and `snowflake`), not `boolean` or `uuid`. Unknown fields, operators, or incompatible field/operator combinations fail before SQL runs.
 
 `orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, row order is unspecified, so use explicit ordering when paging deterministically. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Snowflake values are hydrated to exact `bigint` values in `db.query` results; raw `db.sql` keeps Bun's native PostgreSQL `BIGINT` string decoding. This step intentionally supports scalar root projections only — relationships and graph projections arrive in later steps.
 

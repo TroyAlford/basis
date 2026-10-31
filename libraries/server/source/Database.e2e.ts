@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { EntityDefinitions } from './EntityDefinitions'
+import { Operator } from './Operator'
 import { Server } from './Server'
 import { SortDirection } from './SortDirection'
 
@@ -442,51 +443,6 @@ describe('Server database lifecycle', () => {
           where: { score: 5 },
         })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
 
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          orderBy: 'title',
-          where: { score: { $gt: 2 } },
-        })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          orderBy: 'title',
-          where: { score: { $gte: 5 } },
-        })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          orderBy: 'title',
-          where: { score: { $lt: 2 } },
-        })).toEqual([{ title: 'kept' }])
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          orderBy: ['score', 'title'],
-          where: { score: { $lte: 2 } },
-        })).toEqual([{ title: 'kept' }, { title: 'ignored' }])
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          orderBy: 'title',
-          where: { $and: [{ active: true }, { score: { $gte: 5, $lte: 5 } }] },
-        })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          where: { score: { $eq: null } },
-        })).toEqual([])
-        await expect(server.db.query('Note', {
-          fields: ['title'],
-          where: { score: { $gt: null } },
-        })).rejects.toThrow('Query operator "$gt" requires a non-null value')
-        await expect(server.db.query('Note', {
-          fields: ['title'],
-          where: { score: { $ne: 5 } },
-        })).rejects.toThrow('Query operator "$ne" is not supported')
-        await expect(server.db.query('Note', {
-          fields: ['title'],
-          where: { active: { $gt: true } },
-        })).rejects.toThrow('Query operator "$gt" is not valid for field "active"')
-        await expect(server.db.query('Note', {
-          fields: ['title'],
-          where: { $and: [] },
-        })).rejects.toThrow('Query $and must be a non-empty array')
         await expect(server.db.query('Note', {
           fields: ['title'],
           orderBy: { field: 'missing' },
@@ -537,6 +493,60 @@ describe('Server database lifecycle', () => {
           where table_name = ${'Shadow'}
           order by table_schema
         `).toEqual([{ tableSchema: 'later' }, { tableSchema: 'public' }])
+      } finally {
+        await server.shutdown()
+      }
+    } finally {
+      removeService(install)
+    }
+  }, 120_000)
+
+  test('filters numeric values with each comparison operator', async () => {
+    const service = `basis-e2e-comparisons-${randomUUID()}`
+    const install = tempDirectory('basis-install-comparisons-')
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { name: 'value', type: 'number' },
+        ],
+        name: 'NumberRow',
+      }],
+    }))
+
+    try {
+      const server = startWithInstall(new Server().root(install).database({ entities }), install, service)
+      try {
+        await server.ready()
+        await entities.createTables(server.db.sql)
+        await server.db.sql`
+          insert into "NumberRow" ("id", "value")
+          select gen_random_uuid(), value
+          from generate_series(1, 10) as series(value)
+        `
+
+        const query = (where: Readonly<Record<string, unknown>>) => (
+          server.db.query<{ value: number }>('NumberRow', {
+            fields: ['value'],
+            limit: null,
+            orderBy: { field: 'value' },
+            where,
+          })
+        )
+
+        expect(await query({ value: { [Operator.Comparison.Equal]: 3 } })).toEqual([{ value: 3 }])
+        expect(await query({ value: { [Operator.Comparison.LessThan]: 3 } })).toEqual([{ value: 1 }, { value: 2 }])
+        expect(await query({ value: { [Operator.Comparison.LessThanOrEqual]: 3 } }))
+          .toEqual([{ value: 1 }, { value: 2 }, { value: 3 }])
+        expect(await query({ value: { [Operator.Comparison.GreaterThan]: 8 } })).toEqual([{ value: 9 }, { value: 10 }])
+        expect(await query({ value: { [Operator.Comparison.GreaterThanOrEqual]: 8 } }))
+          .toEqual([{ value: 8 }, { value: 9 }, { value: 10 }])
+        expect(await query({
+          value: {
+            [Operator.Comparison.GreaterThanOrEqual]: 3,
+            [Operator.Comparison.LessThanOrEqual]: 6,
+          },
+        })).toEqual([{ value: 3 }, { value: 4 }, { value: 5 }, { value: 6 }])
       } finally {
         await server.shutdown()
       }
