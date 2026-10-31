@@ -7,6 +7,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Server } from './Server'
+import { SortDirection } from './SortDirection'
 
 /*
  * Real PostgreSQL lifecycle. The suite owns Docker services through the
@@ -407,12 +408,67 @@ describe('Server database lifecycle', () => {
           where: { missing: 'kept' },
         })).rejects.toThrow('Unknown field "Note.missing"')
 
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          limit: 1,
+          orderBy: { direction: SortDirection.Descending, field: 'score' },
+        })).toEqual([{ title: 'ignored' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          limit: 1,
+          offset: 1,
+          orderBy: { field: 'title' },
+        })).toEqual([{ title: 'kept' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          limit: 1,
+          orderBy: { direction: SortDirection.Descending, field: 'score' },
+          where: { active: false },
+        })).toEqual([{ title: 'ignored' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          limit: 2,
+          orderBy: 'title',
+        })).toEqual([{ title: 'ignored' }, { title: 'kept' }])
+        await server.db.sql`
+          insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
+          values
+            (gen_random_uuid(), 'beta', true, 5, '2026-01-04', now()),
+            (gen_random_uuid(), 'alpha', true, 5, '2026-01-04', now())
+        `
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          orderBy: ['score', { direction: SortDirection.Ascending, field: 'title' }],
+          where: { score: 5 },
+        })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          orderBy: { field: 'missing' },
+        })).rejects.toThrow('Unknown field "Note.missing"')
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          orderBy: { direction: 'sideways' as SortDirection, field: 'title' },
+        })).rejects.toThrow('Query orderBy direction must be "asc" or "desc"')
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          limit: -1,
+          orderBy: { field: 'title' },
+        })).rejects.toThrow('Query limit must be a non-negative integer')
+
         await expect(server.db.query('Note', { fields: ['missing'] }))
           .rejects.toThrow('Unknown field "Note.missing"')
         await expect(server.db.query('Missing', { fields: ['id'] }))
           .rejects.toThrow('Unknown entity "Missing"')
         await expect(server.db.query('Note', { fields: [] }))
           .rejects.toThrow('Query fields must be a non-empty array')
+
+        await server.db.sql`
+          insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
+          select gen_random_uuid(), 'page-' || value, true, value, '2026-01-03', now()
+          from generate_series(1, 30) as series(value)
+        `
+        expect(await server.db.query('Note', { fields: ['title'] })).toHaveLength(25)
+        expect(await server.db.query('Note', { fields: ['title'], limit: null })).toHaveLength(34)
 
         await server.db.sql`create schema later`
         await server.db.sql`create table later."Shadow" (marker text)`

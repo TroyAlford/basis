@@ -5,6 +5,7 @@ import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
+import type { OrderBy } from './SQL'
 import { SQL } from './SQL'
 
 /** The pool defaults used by every managed or external connection. */
@@ -45,6 +46,12 @@ export interface DatabaseOptions {
 export interface QueryOptions {
   /** Root scalar fields to project, in output order. */
   fields: readonly string[],
+  /** Maximum rows to return; defaults to 25, or `null` for unlimited. */
+  limit?: number | null,
+  /** Rows to skip; defaults to 0. */
+  offset?: number,
+  /** Explicit root-field ordering, single or multi-level. */
+  orderBy?: OrderBy,
   /** Root-field equality values, combined with `AND`. */
   where?: Readonly<Record<string, unknown>>,
 }
@@ -150,8 +157,14 @@ class PostgresDatabase implements Database {
 
     const selection = SQL.select(this.#entities, entity, options.fields)
     const predicate = SQL.where(this.#entities, entity, options.where)
-    const statement = predicate.sql ? `${selection.sql} ${predicate.sql}` : selection.sql
-    const rows = await this.#sql.unsafe<T[]>(statement, [...predicate.values])
+    const ordering = SQL.orderBy(this.#entities, entity, options.orderBy)
+    const limit = options.limit === undefined ? 25 : options.limit
+    const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length)
+    const statement = [selection.sql, predicate.sql, ordering.sql, pagination.sql]
+      .filter(clause => clause !== '')
+      .join(' ')
+    const values = [...predicate.values, ...pagination.values]
+    const rows = await this.#sql.unsafe<T[]>(statement, values)
     const snowflakes = new Set(
       selection.fields
         .filter(field => field.type === FieldType.Snowflake)
