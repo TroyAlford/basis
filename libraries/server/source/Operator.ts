@@ -11,8 +11,8 @@ export namespace Operator {
   export enum Comparison {
     /** Inclusive range. */
     Between = '$between',
-    /** Blank/null value. */
-    Blank = '$blank',
+    /** Empty string or null. */
+    Empty = '$empty',
     /** Equal. */
     Equal = '$eq',
     /** Greater than. */
@@ -23,8 +23,6 @@ export namespace Operator {
     LessThan = '$lt',
     /** Less than or equal. */
     LessThanOrEqual = '$lte',
-    /** Nonblank/non-null value. */
-    NotBlank = '$notblank',
     /** Not equal. */
     NotEqual = '$ne',
   }
@@ -33,6 +31,8 @@ export namespace Operator {
   export enum Logical {
     /** All operands must match. */
     And = '$and',
+    /** Negate one operand. */
+    Not = '$not',
     /** Any operand must match. */
     Or = '$or',
   }

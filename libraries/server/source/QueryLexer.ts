@@ -71,6 +71,7 @@ const OPERATORS = new Map<string, QueryOperator.Comparison | QueryOperator.Logic
   ['<=', QueryOperator.Comparison.LessThanOrEqual],
   ['!=', QueryOperator.Comparison.NotEqual],
   ['<>', QueryOperator.Comparison.NotEqual],
+  ['!', QueryOperator.Logical.Not],
 ])
 
 /** Whether a character may begin an identifier. */

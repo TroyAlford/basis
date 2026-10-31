@@ -173,7 +173,7 @@ describe('QueryLexer', () => {
   })
 
   test('recognizes the extended operator vocabulary and between delimiters', () => {
-    assertLex('!= <> $ne $between [1, 5] $blank $notblank $or', [
+    assertLex('!= <> $ne $between [1, 5] $empty $or $not', [
       operator('!=', Operator.Comparison.NotEqual),
       operator('<>', Operator.Comparison.NotEqual),
       operator('$ne', Operator.Comparison.NotEqual),
@@ -183,23 +183,49 @@ describe('QueryLexer', () => {
       comma(),
       number('5'),
       rightBracket(),
-      operator('$blank', Operator.Comparison.Blank),
-      operator('$notblank', Operator.Comparison.NotBlank),
+      operator('$empty', Operator.Comparison.Empty),
       operator('$or', Operator.Logical.Or),
+      operator('$not', Operator.Logical.Not),
     ])
   })
 
+  test('distinguishes lexical unary Not from NotEqual aliases', () => {
+    assertLex('title !$empty', [
+      field('title'),
+      operator('!', Operator.Logical.Not),
+      operator('$empty', Operator.Comparison.Empty),
+    ])
+    assertLex('title $not $empty', [
+      field('title'),
+      operator('$not', Operator.Logical.Not),
+      operator('$empty', Operator.Comparison.Empty),
+    ])
+    for (const source of ['score != 5', 'score <> 5', 'score $ne 5']) {
+      assertLex(source, [
+        field('score'),
+        operator(source.split(' ')[1] as string, Operator.Comparison.NotEqual),
+        number('5'),
+      ])
+    }
+  })
+
   test('reports unsupported operators without splitting them', () => {
-    assertLex('score == 5 $nor 1 $xor 2', [
+    assertLex('score == 5 $blank 1 $notblank 2 $nor 3 $xor 4', [
       field('score'),
       unknown('=='),
       number('5'),
-      unknown('$nor'),
+      unknown('$blank'),
       number('1'),
-      unknown('$xor'),
+      unknown('$notblank'),
       number('2'),
+      unknown('$nor'),
+      number('3'),
+      unknown('$xor'),
+      number('4'),
     ], [
       { message: 'Unsupported operator "=="', raw: '==' },
+      { message: 'Unknown operator "$blank"', raw: '$blank' },
+      { message: 'Unknown operator "$notblank"', raw: '$notblank' },
       { message: 'Unknown operator "$nor"', raw: '$nor' },
       { message: 'Unknown operator "$xor"', raw: '$xor' },
     ])
