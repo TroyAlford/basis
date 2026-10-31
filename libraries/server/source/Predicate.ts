@@ -1,127 +1,131 @@
-import type { EntityDefinition, FieldDefinition } from './EntityDefinitions'
+import type { EntityDefinition } from './EntityDefinitions'
 import { Operator } from './Operator'
 
-/** The kind of one normalized predicate node. */
-export enum PredicateKind {
-  /** A field/value comparison. */
-  Comparison = 'comparison',
-  /** A logical group of child predicates. */
-  Logical = 'logical',
+/** A canonical comparison filter. */
+export interface ComparisonFilter {
+  /** Root entity field name. */
+  readonly field: string,
+  /** Comparison operator identity. */
+  readonly operator: Operator.Comparison,
+  /** Comparison value. */
+  readonly value: unknown,
 }
 
-/** A normalized, validated where expression. */
-export type Predicate =
-  | {
-    readonly field: FieldDefinition,
-    readonly kind: PredicateKind.Comparison,
-    readonly operator: Operator.Comparison,
-    readonly value: unknown,
-  }
-  | {
-    readonly kind: PredicateKind.Logical,
-    readonly operands: readonly Predicate[],
-    readonly operator: Operator.Logical,
-  }
+/** A canonical logical filter group. */
+export interface LogicalFilter {
+  /** Child filters. */
+  readonly filters: readonly Filter[],
+  /** Logical operator identity. */
+  readonly operator: Operator.Logical,
+}
 
-/** The recognized comparison wire values, resolved once from the enum. */
-const COMPARISON_OPERATORS = new Set<string>(Object.values(Operator.Comparison))
+/** A canonical serializable where filter. */
+export type Filter = ComparisonFilter | LogicalFilter
+
+/** Recognized comparison enum values. */
+const COMPARISON_OPERATORS = new Set<Operator.Comparison>(Object.values(Operator.Comparison))
 
 /**
- * Normalize structured where JSON into the semantic predicate tree.
+ * Normalize structured where input into the canonical filter tree.
  *
  * This is the only structured-input normalizer. SQL rendering and parameter
  * binding belong to the SQL construction owner.
  */
 export const Predicate = {
   /**
-   * Normalize a where object.
+   * Normalize a where input.
    * @param entity - Entity whose fields are referenced.
-   * @param where - Shorthand equality, structured comparisons, or logical groups.
-   * @returns The root predicate, or null for an empty where object.
-   * @throws {Error} When the expression shape, field, or operator is invalid.
+   * @param input - A single-field equality shorthand or an explicit filter.
+   * @returns The canonical filter, or null for an empty object.
+   * @throws {Error} When the input shape, field, or operator is invalid.
    */
-  normalize(entity: EntityDefinition, where: Readonly<Record<string, unknown>>): Predicate | null {
-    if (!isPlainRecord(where)) throw new Error('Query where must be a plain object')
-
-    const fields = new Map(entity.fields.map(field => [field.name, field]))
-    const nodes = expression(entity, fields, where)
-    return nodes.length === 0 ? null : nodes.length === 1 ? nodes[0] as Predicate : {
-      kind: PredicateKind.Logical,
-      operands: nodes,
-      operator: Operator.Logical.And,
-    }
+  normalize(entity: EntityDefinition, input: Filter | Readonly<Record<string, unknown>>): Filter | null {
+    if (!isPlainRecord(input)) throw new Error('Query where must be a plain object')
+    if (Object.hasOwn(input, 'operator')) return explicit(entity, input)
+    return shorthand(entity, input)
   },
 }
 
 /**
- * Normalize every entry in one expression object, preserving encounter order.
+ * Normalize a single-field equality shorthand object.
  * @param entity - Entity whose fields are referenced.
- * @param fields - Field lookup for the entity.
- * @param where - Expression object.
- * @returns Predicate nodes in encounter order.
+ * @param input - Shorthand object.
+ * @returns The comparison filter, or null for an empty object.
  */
-function expression(
-  entity: EntityDefinition,
-  fields: ReadonlyMap<string, FieldDefinition>,
-  where: Readonly<Record<string, unknown>>,
-): Predicate[] {
-  const nodes: Predicate[] = []
-
-  for (const [name, value] of Object.entries(where)) {
-    if (name === Operator.Logical.And) {
-      if (!Array.isArray(value) || value.length === 0) {
-        throw new Error(`Query ${Operator.Logical.And} must be a non-empty array`)
-      }
-      const operands = value.map(operand => {
-        if (!isPlainRecord(operand)) throw new Error(`Query ${Operator.Logical.And} operands must be plain objects`)
-        const normalized = Predicate.normalize(entity, operand)
-        if (!normalized) throw new Error(`Query ${Operator.Logical.And} operands must be non-empty objects`)
-        return normalized
-      })
-      nodes.push({ kind: PredicateKind.Logical, operands, operator: Operator.Logical.And })
-      continue
-    }
-
-    if (name.startsWith('$')) throw new Error(`Query operator "${name}" is not supported`)
-
-    const field = fields.get(name)
-    if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
-
-    if (isPlainRecord(value)) {
-      const operators = Object.entries(value)
-      if (operators.length === 0) {
-        throw new Error(`Query condition "${entity.name}.${name}" must include an operator`)
-      }
-      const comparisons = operators.map(([operatorName, operand]) => {
-        if (!COMPARISON_OPERATORS.has(operatorName)) {
-          throw new Error(`Query operator "${operatorName}" is not supported`)
-        }
-        return {
-          field,
-          kind: PredicateKind.Comparison as const,
-          operator: operatorName as Operator.Comparison,
-          value: operand,
-        }
-      })
-      nodes.push(comparisons.length === 1 ? comparisons[0] as Predicate : {
-        kind: PredicateKind.Logical,
-        operands: comparisons,
-        operator: Operator.Logical.And,
-      })
-      continue
-    }
-
-    if (Array.isArray(value)) {
-      throw new Error(`Query condition "${entity.name}.${name}" must be a scalar value`)
-    }
-    if (value === undefined) {
-      throw new Error(`Query condition "${entity.name}.${name}" must not be undefined`)
-    }
-
-    nodes.push({ field, kind: PredicateKind.Comparison, operator: Operator.Comparison.Equal, value })
+function shorthand(entity: EntityDefinition, input: Readonly<Record<string, unknown>>): Filter | null {
+  const entries = Object.entries(input)
+  if (entries.length === 0) return null
+  if (entries.length > 1) {
+    throw new Error(
+      'Query shorthand must contain exactly one field; use Operator.Logical.And with filters for multiple conditions',
+    )
   }
 
-  return nodes
+  const [field, value] = entries[0] as [string, unknown]
+  assertField(entity, field)
+  return { field, operator: Operator.Comparison.Equal, value }
+}
+
+/**
+ * Normalize an explicit operator-tagged filter node.
+ * @param entity - Entity whose fields are referenced.
+ * @param input - Explicit node input.
+ * @returns The canonical filter node.
+ */
+function explicit(entity: EntityDefinition, input: Readonly<Record<string, unknown>>): Filter {
+  const operator = input.operator
+  if (typeof operator !== 'string') throw new Error('Query operator must be a string')
+
+  if (operator === Operator.Logical.And) {
+    assertKeys(input, ['operator', 'filters'])
+    if (!Array.isArray(input.filters) || input.filters.length === 0) {
+      throw new Error(`Query ${Operator.Logical.And} requires a non-empty filters array`)
+    }
+    const filters = input.filters.map(filter => {
+      if (!isPlainRecord(filter)) throw new Error(`Query ${Operator.Logical.And} filters must be plain objects`)
+      const normalized = Predicate.normalize(entity, filter)
+      if (!normalized) throw new Error(`Query ${Operator.Logical.And} filters must be non-empty objects`)
+      return normalized
+    })
+    return { filters, operator: Operator.Logical.And }
+  }
+
+  if (!COMPARISON_OPERATORS.has(operator as Operator.Comparison)) {
+    throw new Error(`Query operator "${operator}" is not supported`)
+  }
+
+  assertKeys(input, ['operator', 'field', 'value'])
+  if (typeof input.field !== 'string') throw new Error('Query comparison field must be a string')
+  assertField(entity, input.field)
+  return {
+    field: input.field,
+    operator: operator as Operator.Comparison,
+    value: input.value,
+  }
+}
+
+/**
+ * Verify that a field belongs to the entity.
+ * @param entity - Entity whose fields are referenced.
+ * @param field - Field name to verify.
+ */
+function assertField(entity: EntityDefinition, field: string): void {
+  if (!entity.fields.some(candidate => candidate.name === field)) {
+    throw new Error(`Unknown field "${entity.name}.${field}"`)
+  }
+}
+
+/**
+ * Require an object's exact keys.
+ * @param value - Object being checked.
+ * @param keys - Required keys.
+ */
+function assertKeys(value: Readonly<Record<string, unknown>>, keys: readonly string[]): void {
+  const actual = Object.keys(value).sort()
+  const expected = [...keys].sort()
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    throw new Error(`Query ${String(value.operator)} requires exactly ${keys.join(', ')}`)
+  }
 }
 
 /**

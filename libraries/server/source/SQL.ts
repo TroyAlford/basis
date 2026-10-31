@@ -1,7 +1,8 @@
 import type { EntityDefinition, EntityDefinitions, FieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
-import { Predicate, PredicateKind } from './Predicate'
+import type { ComparisonFilter, Filter, LogicalFilter } from './Predicate'
+import { Predicate } from './Predicate'
 import { SortDirection } from './SortDirection'
 
 /** A validated ordering clause. */
@@ -149,11 +150,11 @@ const logicalDefinitions = new Map<Operator.Logical, LogicalDefinition>([
 function whereClause(
   entities: EntityDefinitions,
   entityName: string,
-  where: Readonly<Record<string, unknown>> = {},
+  where: Filter | Readonly<Record<string, unknown>> = {},
 ): SQLPredicate {
   const entity = definition(entities, entityName)
-  const predicate = Predicate.normalize(entity, where)
-  if (!predicate) return { sql: '', values: [] }
+  const filter = Predicate.normalize(entity, where)
+  if (!filter) return { sql: '', values: [] }
 
   const values: BoundScalar[] = []
   const bind = (value: BoundScalar): string => {
@@ -161,26 +162,33 @@ function whereClause(
     return `$${values.length}`
   }
 
-  const compile = (node: Predicate): string => {
-    if (node.kind === PredicateKind.Comparison) {
-      const operator = comparisonDefinitions.get(node.operator)
-      if (!operator) throw new Error(`Query operator "${node.operator}" is not supported`)
-      if (!operator.allowedFieldTypes.has(node.field.type)) {
-        throw new Error(`Query operator "${node.operator}" is not valid for field "${entity.name}.${node.field.name}"`)
+  const compile = (node: Filter): string => {
+    const comparison = comparisonDefinitions.get(node.operator as Operator.Comparison)
+    if (comparison) {
+      const comparisonFilter = node as ComparisonFilter
+      const field = entity.fields.find(candidate => candidate.name === comparisonFilter.field)
+      if (!field) throw new Error(`Unknown field "${entity.name}.${comparisonFilter.field}"`)
+      if (!comparison.allowedFieldTypes.has(field.type)) {
+        throw new Error(
+          `Query operator "${comparisonFilter.operator}" is not valid for field "${entity.name}.${field.name}"`,
+        )
       }
-      const operand = operator.validateOperand(node.field, node.value)
-      return operator.build(quoteIdentifier(node.field.name), operand, bind)
+      const operand = comparison.validateOperand(field, comparisonFilter.value)
+      return comparison.build(quoteIdentifier(field.name), operand, bind)
     }
 
-    const operator = logicalDefinitions.get(node.operator)
-    if (!operator) throw new Error(`Query operator "${node.operator}" is not supported`)
-    if (node.operands.length < operator.minimumOperands) {
-      throw new Error(`Query operator "${node.operator}" requires at least ${operator.minimumOperands} operand(s)`)
+    const logical = logicalDefinitions.get(node.operator as Operator.Logical)
+    if (!logical) throw new Error(`Query operator "${node.operator}" is not supported`)
+    const logicalFilter = node as LogicalFilter
+    if (logicalFilter.filters.length < logical.minimumOperands) {
+      throw new Error(
+        `Query operator "${logicalFilter.operator}" requires at least ${logical.minimumOperands} operand(s)`,
+      )
     }
-    return operator.build(node.operands.map(compile))
+    return logical.build(logicalFilter.filters.map(compile))
   }
 
-  return { sql: `WHERE ${compile(predicate)}`, values }
+  return { sql: `WHERE ${compile(filter)}`, values }
 }
 
 /**

@@ -5,6 +5,7 @@ import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
+import type { Filter } from './Predicate'
 import type { OrderBy } from './SQL'
 import { SQL } from './SQL'
 
@@ -52,8 +53,8 @@ export interface QueryOptions {
   offset?: number,
   /** Explicit root-field ordering, single or multi-level. */
   orderBy?: OrderBy,
-  /** Root-field equality shorthand, comparison operators, or `Operator.Logical.And` expressions. */
-  where?: Readonly<Record<string, unknown>>,
+  /** Single-field equality shorthand or an explicit canonical filter tree. */
+  where?: Filter | Readonly<Record<string, unknown>>,
 }
 
 /** A server-owned database capability. */

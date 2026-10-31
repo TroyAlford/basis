@@ -21,13 +21,14 @@ const definitions = EntityDefinitions.load(JSON.stringify({
 const entity = 'Note'
 
 describe('SQL.where', () => {
-  test('normalizes structured comparisons and preserves bound values', () => {
+  test('compiles explicit And comparisons and preserves bound values', () => {
     const predicate = SQL.where(definitions, entity, {
-      score: {
-        [Operator.Comparison.GreaterThanOrEqual]: 3,
-        [Operator.Comparison.LessThan]: 6,
-      },
-      title: "x' OR true --",
+      filters: [
+        { field: 'score', operator: Operator.Comparison.GreaterThanOrEqual, value: 3 },
+        { field: 'score', operator: Operator.Comparison.LessThan, value: 6 },
+        { field: 'title', operator: Operator.Comparison.Equal, value: "x' OR true --" },
+      ],
+      operator: Operator.Logical.And,
     })
 
     expect(predicate.sql).toContain('"score" >= $1')
@@ -39,10 +40,17 @@ describe('SQL.where', () => {
 
   test('preserves nested logical grouping', () => {
     const predicate = SQL.where(definitions, entity, {
-      [Operator.Logical.And]: [
-        { [Operator.Logical.And]: [{ score: { [Operator.Comparison.GreaterThan]: 1 } }, { active: true }] },
+      filters: [
+        {
+          filters: [
+            { field: 'score', operator: Operator.Comparison.GreaterThan, value: 1 },
+            { active: true },
+          ],
+          operator: Operator.Logical.And,
+        },
         { title: 'Hello' },
       ],
+      operator: Operator.Logical.And,
     })
 
     expect(predicate.sql.match(/AND/g)?.length).toBeGreaterThanOrEqual(2)
@@ -56,7 +64,9 @@ describe('SQL.where', () => {
       values: [],
     })
     expect(SQL.where(definitions, entity, {
-      score: { [Operator.Comparison.Equal]: null },
+      field: 'score',
+      operator: Operator.Comparison.Equal,
+      value: null,
     })).toEqual({ sql: 'WHERE "score" IS NULL', values: [] })
   })
 
@@ -69,21 +79,29 @@ describe('SQL.where', () => {
       ['title', 'Hello'],
     ] as const) {
       expect(() => SQL.where(definitions, entity, {
-        [field]: { [Operator.Comparison.GreaterThan]: value },
+        field,
+        operator: Operator.Comparison.GreaterThan,
+        value,
       })).not.toThrow()
     }
 
     expect(() => SQL.where(definitions, entity, {
-      active: { [Operator.Comparison.GreaterThan]: true },
+      field: 'active',
+      operator: Operator.Comparison.GreaterThan,
+      value: true,
     })).toThrow('is not valid for field "Note.active"')
     expect(() => SQL.where(definitions, entity, {
-      id: { [Operator.Comparison.GreaterThan]: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' },
+      field: 'id',
+      operator: Operator.Comparison.GreaterThan,
+      value: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
     })).toThrow('is not valid for field "Note.id"')
   })
 
   test('rejects null ranges and invalid scalar operands', () => {
     expect(() => SQL.where(definitions, entity, {
-      score: { [Operator.Comparison.GreaterThan]: null },
+      field: 'score',
+      operator: Operator.Comparison.GreaterThan,
+      value: null,
     })).toThrow('must not be null')
 
     for (const value of [Number.NaN, Number.POSITIVE_INFINITY, '3']) {
@@ -95,10 +113,15 @@ describe('SQL.where', () => {
     expect(() => SQL.where(definitions, entity, {
       createdAt: new Date('invalid'),
     })).toThrow('not a valid timestamp value')
-    expect(() => SQL.where(definitions, entity, { externalId: 9e18 }))
-      .toThrow('not a valid snowflake value')
+    expect(() => SQL.where(definitions, entity, { externalId: 9e18 })).toThrow('not a valid snowflake value')
     expect(() => SQL.where(definitions, entity, { externalId: '9223372036854775808' }))
       .toThrow('not a valid snowflake value')
+  })
+
+  test('does not parse an operator-looking equality value as syntax', () => {
+    expect(() => SQL.where(definitions, entity, {
+      score: { [Operator.Comparison.GreaterThanOrEqual]: 5 },
+    })).toThrow('not a valid number value')
   })
 
   test('accepts exact Snowflake bigint and decimal-string values', () => {

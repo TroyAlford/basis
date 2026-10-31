@@ -7,6 +7,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
+import type { Filter } from './Predicate'
 import { Server } from './Server'
 import { SortDirection } from './SortDirection'
 
@@ -525,7 +526,7 @@ describe('Server database lifecycle', () => {
           from generate_series(1, 10) as series(value)
         `
 
-        const query = (where: Readonly<Record<string, unknown>>) => (
+        const query = (where: Filter | Readonly<Record<string, unknown>>) => (
           server.db.query<{ value: number }>('NumberRow', {
             fields: ['value'],
             limit: null,
@@ -534,18 +535,21 @@ describe('Server database lifecycle', () => {
           })
         )
 
-        expect(await query({ value: { [Operator.Comparison.Equal]: 3 } })).toEqual([{ value: 3 }])
-        expect(await query({ value: { [Operator.Comparison.LessThan]: 3 } })).toEqual([{ value: 1 }, { value: 2 }])
-        expect(await query({ value: { [Operator.Comparison.LessThanOrEqual]: 3 } }))
+        expect(await query({ field: 'value', operator: Operator.Comparison.Equal, value: 3 })).toEqual([{ value: 3 }])
+        expect(await query({ field: 'value', operator: Operator.Comparison.LessThan, value: 3 }))
+          .toEqual([{ value: 1 }, { value: 2 }])
+        expect(await query({ field: 'value', operator: Operator.Comparison.LessThanOrEqual, value: 3 }))
           .toEqual([{ value: 1 }, { value: 2 }, { value: 3 }])
-        expect(await query({ value: { [Operator.Comparison.GreaterThan]: 8 } })).toEqual([{ value: 9 }, { value: 10 }])
-        expect(await query({ value: { [Operator.Comparison.GreaterThanOrEqual]: 8 } }))
+        expect(await query({ field: 'value', operator: Operator.Comparison.GreaterThan, value: 8 }))
+          .toEqual([{ value: 9 }, { value: 10 }])
+        expect(await query({ field: 'value', operator: Operator.Comparison.GreaterThanOrEqual, value: 8 }))
           .toEqual([{ value: 8 }, { value: 9 }, { value: 10 }])
         expect(await query({
-          value: {
-            [Operator.Comparison.GreaterThanOrEqual]: 3,
-            [Operator.Comparison.LessThanOrEqual]: 6,
-          },
+          filters: [
+            { field: 'value', operator: Operator.Comparison.GreaterThanOrEqual, value: 3 },
+            { field: 'value', operator: Operator.Comparison.LessThanOrEqual, value: 6 },
+          ],
+          operator: Operator.Logical.And,
         })).toEqual([{ value: 3 }, { value: 4 }, { value: 5 }, { value: 6 }])
       } finally {
         await server.shutdown()
