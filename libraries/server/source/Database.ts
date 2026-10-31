@@ -5,6 +5,7 @@ import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
+import type { OrderBy } from './SQL'
 import { SQL } from './SQL'
 
 /** The pool defaults used by every managed or external connection. */
@@ -45,17 +46,12 @@ export interface DatabaseOptions {
 export interface QueryOptions {
   /** Root scalar fields to project, in output order. */
   fields: readonly string[],
-  /** Maximum rows to return; requires `orderBy` for deterministic pagination. */
+  /** Maximum rows to return; defaults to 25. */
   limit?: number,
-  /** Rows to skip; requires `orderBy` for deterministic pagination. */
+  /** Rows to skip; defaults to 0. */
   offset?: number,
-  /** Explicit root-field ordering. */
-  orderBy?: {
-    /** Sort direction; defaults to ascending. */
-    direction?: 'asc' | 'desc',
-    /** Root field to sort by. */
-    field: string,
-  },
+  /** Explicit root-field ordering, single or multi-level. */
+  orderBy?: OrderBy,
   /** Root-field equality values, combined with `AND`. */
   where?: Readonly<Record<string, unknown>>,
 }
@@ -159,14 +155,10 @@ class PostgresDatabase implements Database {
     if (this.#closed) throw new Error('Database is closed')
     if (!this.#entities) throw new Error('No entity definitions are configured for this database')
 
-    if ((options.limit !== undefined || options.offset !== undefined) && options.orderBy === undefined) {
-      throw new Error('Query limit and offset require orderBy for deterministic pagination')
-    }
-
     const selection = SQL.select(this.#entities, entity, options.fields)
     const predicate = SQL.where(this.#entities, entity, options.where)
     const ordering = SQL.orderBy(this.#entities, entity, options.orderBy)
-    const pagination = SQL.paginate(options.limit, options.offset, predicate.values.length)
+    const pagination = SQL.paginate(options.limit ?? 25, options.offset ?? 0, predicate.values.length)
     const statement = [selection.sql, predicate.sql, ordering.sql, pagination.sql]
       .filter(clause => clause !== '')
       .join(' ')

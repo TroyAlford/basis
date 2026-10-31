@@ -1,4 +1,5 @@
 import type { EntityDefinition, EntityDefinitions, FieldDefinition } from './EntityDefinitions'
+import { SortDirection } from './SortDirection'
 
 /** A validated ordering clause. */
 export interface SQLOrder {
@@ -15,12 +16,18 @@ export interface SQLPagination {
 }
 
 /** A root-field sort request. */
-export interface OrderBy {
+export interface OrderByField {
   /** Sort direction; defaults to ascending. */
-  readonly direction?: 'asc' | 'desc',
+  readonly direction?: SortDirection,
   /** Root field to sort by. */
   readonly field: string,
 }
+
+/** A single or multi-level root-field ordering expression. */
+export type OrderBy =
+  | string
+  | OrderByField
+  | readonly (string | OrderByField)[]
 
 /** A validated root projection. */
 export interface SQLSelection {
@@ -114,55 +121,52 @@ function orderByClause(
   orderBy?: OrderBy,
 ): SQLOrder {
   if (orderBy === undefined) return { sql: '' }
-  if (typeof orderBy !== 'object' || orderBy === null) {
-    throw new Error('Query orderBy must be an object')
-  }
 
   const entity = definition(entities, entityName)
-  if (!entity.fields.some(field => field.name === orderBy.field)) {
-    throw new Error(`Unknown field "${entityName}.${orderBy.field}"`)
-  }
+  const entries = Array.isArray(orderBy) ? orderBy : [orderBy]
+  if (entries.length === 0) return { sql: '' }
 
-  const direction = orderBy.direction ?? 'asc'
-  if (direction !== 'asc' && direction !== 'desc') {
-    throw new Error('Query orderBy direction must be "asc" or "desc"')
-  }
+  const clauses = entries.map(entry => {
+    const field = typeof entry === 'string' ? entry : entry.field
+    const direction = typeof entry === 'string' ? SortDirection.Asc : entry.direction ?? SortDirection.Asc
 
-  return { sql: `ORDER BY ${quoteIdentifier(orderBy.field)} ${direction.toUpperCase()}` }
+    if (!entity.fields.some(candidate => candidate.name === field)) {
+      throw new Error(`Unknown field "${entityName}.${field}"`)
+    }
+    if (direction !== SortDirection.Asc && direction !== SortDirection.Desc) {
+      throw new Error('Query orderBy direction must be "asc" or "desc"')
+    }
+
+    return `${quoteIdentifier(field)} ${direction.toUpperCase()}`
+  })
+
+  return { sql: `ORDER BY ${clauses.join(', ')}` }
 }
 
 /**
  * Build a validated parameterized pagination clause.
- * @param limit - Maximum rows to return, when requested.
- * @param offset - Rows to skip, when requested.
+ * @param limit - Maximum rows to return.
+ * @param offset - Rows to skip.
  * @param startIndex - Number of prior parameter values.
  * @returns The quoted pagination clause and its parameter values.
  * @throws {Error} When limit or offset is not a non-negative integer.
  */
 function paginate(
-  limit?: number,
-  offset?: number,
+  limit = 25,
+  offset = 0,
   startIndex = 0,
 ): SQLPagination {
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
+  if (!Number.isInteger(limit) || limit < 0) {
     throw new Error('Query limit must be a non-negative integer')
   }
-  if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
+  if (!Number.isInteger(offset) || offset < 0) {
     throw new Error('Query offset must be a non-negative integer')
   }
 
-  const clauses: string[] = []
-  const values: unknown[] = []
-  if (limit !== undefined) {
-    values.push(limit)
-    clauses.push(`LIMIT $${startIndex + values.length}`)
+  return {
+    sql: `LIMIT $${startIndex + 1} OFFSET $${startIndex + 2}`,
+    values: [limit, offset],
   }
-  if (offset !== undefined) {
-    values.push(offset)
-    clauses.push(`OFFSET $${startIndex + values.length}`)
-  }
-
-  return { sql: clauses.join(' '), values }
 }
 
 /**
