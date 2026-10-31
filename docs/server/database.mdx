@@ -72,7 +72,7 @@ const server = new Server()
 const notes = await server.db.query<{ id: string, title: string }>('Note', {
   fields: ['id', 'title'],
   where: { title: 'Hello' },
-  orderBy: { field: 'createdAt', direction: SortDirection.Desc },
+  orderBy: { field: 'createdAt', direction: SortDirection.Descending },
   limit: 20,
   offset: 0,
 })

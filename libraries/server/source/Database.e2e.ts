@@ -411,7 +411,7 @@ describe('Server database lifecycle', () => {
         expect(await server.db.query<{ title: string }>('Note', {
           fields: ['title'],
           limit: 1,
-          orderBy: { direction: SortDirection.Desc, field: 'score' },
+          orderBy: { direction: SortDirection.Descending, field: 'score' },
         })).toEqual([{ title: 'ignored' }])
         expect(await server.db.query<{ title: string }>('Note', {
           fields: ['title'],
@@ -422,7 +422,7 @@ describe('Server database lifecycle', () => {
         expect(await server.db.query<{ title: string }>('Note', {
           fields: ['title'],
           limit: 1,
-          orderBy: { direction: SortDirection.Desc, field: 'score' },
+          orderBy: { direction: SortDirection.Descending, field: 'score' },
           where: { active: false },
         })).toEqual([{ title: 'ignored' }])
         expect(await server.db.query<{ title: string }>('Note', {
@@ -438,7 +438,7 @@ describe('Server database lifecycle', () => {
         `
         expect(await server.db.query<{ title: string }>('Note', {
           fields: ['title'],
-          orderBy: ['score', { direction: SortDirection.Asc, field: 'title' }],
+          orderBy: ['score', { direction: SortDirection.Ascending, field: 'title' }],
           where: { score: 5 },
         })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
         await expect(server.db.query('Note', {

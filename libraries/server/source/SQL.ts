@@ -128,12 +128,12 @@ function orderByClause(
 
   const clauses = entries.map(entry => {
     const field = typeof entry === 'string' ? entry : entry.field
-    const direction = typeof entry === 'string' ? SortDirection.Asc : entry.direction ?? SortDirection.Asc
+    const direction = typeof entry === 'string' ? SortDirection.Ascending : entry.direction ?? SortDirection.Ascending
 
     if (!entity.fields.some(candidate => candidate.name === field)) {
       throw new Error(`Unknown field "${entityName}.${field}"`)
     }
-    if (direction !== SortDirection.Asc && direction !== SortDirection.Desc) {
+    if (direction !== SortDirection.Ascending && direction !== SortDirection.Descending) {
       throw new Error('Query orderBy direction must be "asc" or "desc"')
     }
 
