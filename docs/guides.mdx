@@ -4,20 +4,87 @@ title: Guides
 
 # Guides
 
-Task-oriented guidance lives here. Start with the consumer contract in [consumer/README.md](https://github.com/TroyAlford/basis/blob/main/consumer/README.md): installing Basis as a pinned Git dependency and importing its runtime surfaces.
+## First use walkthrough
+
+Install Basis as a pinned Git dependency:
+
+```bash
+bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
+```
+
+Create a class-based React component:
+
+```tsx
+// Hello.tsx
+import { Component } from 'basis/react'
+
+interface Props {
+  name: string,
+}
+
+export class Hello extends Component<Props> {
+  static displayName = 'Hello'
+
+  content() {
+    return <p>Hello, {this.props.name}!</p>
+  }
+}
+```
+
+Create the browser entrypoint that mounts it:
+
+```tsx
+// Application.tsx
+import { createRoot } from 'react-dom/client'
+import { Hello } from './Hello'
+
+const container = document.getElementById('root')
+if (container) {
+  createRoot(container).render(<Hello name="Basis" />)
+}
+```
+
+Serve it with the Basis server:
+
+```ts
+// serve.ts
+import { Server } from 'basis/server'
+
+new Server()
+  .root(import.meta.dir)
+  .main('./Application.tsx')
+  .start({ port: 3000 })
+```
+
+Run `bun serve.ts` and open the served URL. See [Server](./server/index.mdx) for assets, API routes, SSE, sockets, and lifecycle.
+
+Add the testing preload to `bunfig.toml` and write a `.test.tsx` file:
+
+```toml
+[test]
+preload = ["basis/testing/bun"]
+```
+
+```tsx
+// Hello.test.tsx
+import { expect, test } from 'bun:test'
+import { render } from 'basis/testing'
+import { Hello } from './Hello'
+
+test('renders a greeting', async () => {
+  const { node } = await render(<Hello name="Basis" />)
+  expect(node.textContent).toContain('Hello, Basis!')
+})
+```
+
+See [Testing & Visual Snapshots](./testing.md) for the lane model and browser-backed tests.
 
 ## Writing documentation
 
-Durable documentation lives in this `docs/` tree as flat `<section>.mdx` files, each with an optional front-matter `title`:
-
-```mdx
----
-title: Runtime architecture
----
-
-# Runtime architecture
-```
+Durable documentation lives in this `docs/` tree as `.md`/`.mdx` articles. The documentation site is authoritative; READMEs are concise front doors.
 
 - `basis docs check` (or `bun run docs:check`) validates front-matter, code fences, and repository-relative links.
-- `basis docs build` (or `bun run docs:build`) projects the tree to a static site for GitHub Pages.
-- Use `.mdx` when a page needs interactivity: a `mermaid` fence renders as a diagram, and component behavior is showcased in the docs app under `libraries/docs/pages/*.docs.tsx`.
+- `basis docs build` (or `bun run docs:build`) projects the site to static HTML for GitHub Pages.
+- Use `.mdx` when a page needs interactivity: a Mermaid fence renders as a diagram, and interactive component examples stay in `libraries/docs/pages/*.docs.tsx`.
+
+Source links between articles (`[Server](./server/index.mdx)`) are resolved to served routes by both the live MDX loader and the static build. Keep canonical links relative to the source tree and let the pipeline translate them.

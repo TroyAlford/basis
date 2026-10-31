@@ -1,0 +1,26 @@
+---
+title: TypeScript
+---
+
+# TypeScript
+
+Basis ships TypeScript presets and a Bun-native typecheck entry point:
+
+```json
+{
+  "extends": "basis/tsconfig/bun.json"
+}
+```
+
+Presets are `basis/tsconfig/base.json`, `basis/tsconfig/bun.json`, and `basis/tsconfig/react.json`. They contain no Basis-monorepo path mappings, so a consumer resolves only its own dependencies and the supported Basis facade.
+
+`basis typecheck` and `basis check` run Bun's built-in TypeScript checker. They require Bun 1.4.3 or newer; an older runtime stops with an upgrade instruction. The presets remain compatible with the TypeScript 6/7 syntax Basis supports.
+
+```bash
+bunx basis typecheck
+bunx basis check
+```
+
+Installing Basis does not enforce the Bun version by itself. The typecheck command performs the check, so an older runtime reports the required version and `bun upgrade` command instead of silently running an unsupported checker.
+
+`typecheck` runs the checker with the repository configuration. `check` includes typecheck plus the repository's broader validation set. The presets target TS 6/7 and omit options removed in that release, such as `downlevelIteration`.

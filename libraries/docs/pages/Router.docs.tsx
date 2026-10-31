@@ -1,8 +1,23 @@
-import { Router } from 'basis/react'
+import { Button, TextEditor } from 'basis/react'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
 
-export class RouterDocs extends DocumentationPage<Record<string, never>> {
+interface GuardState {
+  value: string,
+}
+
+export class RouterDocs extends DocumentationPage<GuardState> {
+  static override defaultProps = {
+    ...DocumentationPage.defaultProps,
+    initialValue: {
+      value: 'clean',
+    },
+  }
+
+  override get dirty(): boolean {
+    return this.current.value !== 'clean'
+  }
+
   content() {
     return (
       <>
@@ -123,9 +138,15 @@ export class RouterDocs extends DocumentationPage<Record<string, never>> {
             <li><strong>Reload or tab close:</strong> uses the browser&apos;s native <code>beforeunload</code> prompt only (not a Basis dialog); the handler sets <code>preventDefault</code> and <code>returnValue</code> when the route is dirty.</li>
           </ul>
           <p><code>Router.navigate()</code> resolves <code>false</code> when navigation is canceled and <code>true</code> when it updates browser history.</p>
-          <p>To test guarded navigation interactively, open the Router Guard Demo, change the editor value, then click another docs navigation link.</p>
+          <h3>Guard Demo</h3>
+          <p>Change the value below, then use the docs navigation to leave this page. Router should show an unsaved-changes confirmation dialog. Internal navigation and Back/Forward use that dialog when an overlay provider exists; reload or closing the tab uses the browser&apos;s native <code>beforeunload</code> prompt instead. <code>onBeforeNavigate</code> on a route component overrides the default dirty behavior when it runs first.</p>
+          <TextEditor
+            value={this.current.value}
+            onChange={value => void this.handleField(value, 'value')}
+          />
+          <p>Dirty: {String(this.dirty)}</p>
           <p>
-            <Router.Link to="/components/router/guard-demo">Open Router Guard Demo</Router.Link>
+            <Button onActivate={() => void this.handleField('clean', 'value')}>Reset to clean</Button>
           </p>
         </section>
         <section>

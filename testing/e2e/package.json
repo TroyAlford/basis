@@ -1,5 +1,5 @@
 {
-  "name": "@basis/testing-e2e",
+  "name": "@basis-fixtures/e2e",
   "dependencies": {
     "@basis/react": "workspace:*",
     "@basis/server": "workspace:*",

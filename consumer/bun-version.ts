@@ -16,31 +16,21 @@ export const parseBunVersion = (version: string): ParsedVersion | null => {
 }
 
 /**
- * Whether a version is at least a minimum version.
- * @param version - The version to test.
- * @param minimum - The minimum accepted version.
- * @returns Whether the version meets the minimum.
- */
-const supportsVersion = (version: string, minimum: string): boolean => {
-  const parsed = parseBunVersion(version)
-  const floor = parseBunVersion(minimum)
-  if (parsed === null || floor === null) return false
-
-  const [major, minor, patch] = parsed
-  const [minimumMajor, minimumMinor, minimumPatch] = floor
-  if (major !== minimumMajor) return major > minimumMajor
-  if (minor !== minimumMinor) return minor > minimumMinor
-  return patch >= minimumPatch
-}
-
-/**
  * Whether a Bun version includes the built-in TypeScript checker.
  * @param version - The Bun version to test.
  * @returns Whether `bun --check` is supported.
  */
-export const supportsBunCheck = (version: string): boolean => (
-  supportsVersion(version, MINIMUM_BUN_FOR_CHECK)
-)
+export const supportsBunCheck = (version: string): boolean => {
+  const parsed = parseBunVersion(version)
+  const minimum = parseBunVersion(MINIMUM_BUN_FOR_CHECK)
+  if (parsed === null || minimum === null) return false
+
+  const [major, minor, patch] = parsed
+  const [minimumMajor, minimumMinor, minimumPatch] = minimum
+  if (major !== minimumMajor) return major > minimumMajor
+  if (minor !== minimumMinor) return minor > minimumMinor
+  return patch >= minimumPatch
+}
 
 /**
  * Explains why the running Bun version cannot type check through `bun --check`.

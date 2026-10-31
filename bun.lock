@@ -223,7 +223,7 @@
       },
     },
     "testing/components": {
-      "name": "@basis/testing-components",
+      "name": "@basis-fixtures/components",
       "dependencies": {
         "@basis/react": "workspace:*",
         "react": "^19",
@@ -231,7 +231,7 @@
       },
     },
     "testing/docs": {
-      "name": "@basis/testing-docs",
+      "name": "@basis-fixtures/docs",
       "dependencies": {
         "@basis/react": "workspace:*",
         "@basis/server": "workspace:*",
@@ -241,7 +241,7 @@
       },
     },
     "testing/e2e": {
-      "name": "@basis/testing-e2e",
+      "name": "@basis-fixtures/e2e",
       "dependencies": {
         "@basis/react": "workspace:*",
         "@basis/server": "workspace:*",
@@ -251,7 +251,7 @@
       },
     },
     "testing/server": {
-      "name": "@basis/testing-server",
+      "name": "@basis-fixtures/server",
       "dependencies": {
         "@basis/react": "workspace:*",
         "@basis/server": "workspace:*",
@@ -289,6 +289,14 @@
 
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
+    "@basis-fixtures/components": ["@basis-fixtures/components@workspace:testing/components"],
+
+    "@basis-fixtures/docs": ["@basis-fixtures/docs@workspace:testing/docs"],
+
+    "@basis-fixtures/e2e": ["@basis-fixtures/e2e@workspace:testing/e2e"],
+
+    "@basis-fixtures/server": ["@basis-fixtures/server@workspace:testing/server"],
+
     "@basis/bun-plugins": ["@basis/bun-plugins@workspace:libraries/bun-plugins"],
 
     "@basis/configuration": ["@basis/configuration@workspace:libraries/configuration"],
@@ -312,14 +320,6 @@
     "@basis/server": ["@basis/server@workspace:libraries/server"],
 
     "@basis/testing": ["@basis/testing@workspace:libraries/testing"],
-
-    "@basis/testing-components": ["@basis/testing-components@workspace:testing/components"],
-
-    "@basis/testing-docs": ["@basis/testing-docs@workspace:testing/docs"],
-
-    "@basis/testing-e2e": ["@basis/testing-e2e@workspace:testing/e2e"],
-
-    "@basis/testing-server": ["@basis/testing-server@workspace:testing/server"],
 
     "@basis/utilities": ["@basis/utilities@workspace:libraries/utilities"],
 

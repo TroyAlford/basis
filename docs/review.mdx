@@ -1,0 +1,15 @@
+---
+title: Code Review
+---
+
+# Code Review
+
+`basis/review` owns the shared, versioned reviewer policy. Reviewers are Markdown documents with YAML front-matter; the effective policy composes the standard manifest with overlays under `.basis/reviewers/`, addressed by stable id.
+
+```ts
+import { loadOverlayDirectory } from 'basis/review'
+```
+
+Basis owns the policy only. Running detectors, calling models, and publishing review results belong to the consuming repository or review controller. Use `basis/review` to resolve the reviewer instructions and policies; do not fork or restate the reviewer set in application code.
+
+The policy is intentionally versioned with Basis so a repository pinned to a release reviews against the same rules as that release. Overlay directories allow a repository to add local reviewer policy without duplicating the standard set.

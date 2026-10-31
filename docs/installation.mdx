@@ -1,0 +1,46 @@
+---
+title: Installation
+---
+
+# Installation
+
+Basis is distributed as a pinned Git dependency. There is no npm or JSR publish step and no consumer build step: Bun resolves the source directly from a released tag.
+
+```bash
+bun add --dev --trust github:TroyAlford/basis#vX.Y.Z
+```
+
+Use a released tag rather than a branch. `--trust` records Basis in `trustedDependencies` so its install hook can apply Basis-owned patches and validate declared host capabilities.
+
+## First imports
+
+```ts
+import { Button, Theme } from 'basis/react'
+import { Server } from 'basis/server'
+import { Environment, run, runAsync } from 'basis/configuration'
+import { Logger } from 'basis/logger'
+```
+
+The root `package.json` is the public facade. Supported import surfaces are `basis/cli`, `basis/configuration`, `basis/eslint`, `basis/logger`, `basis/markdown`, `basis/oauth`, `basis/react`, `basis/react/icons`, `basis/review`, `basis/serve`, `basis/server`, `basis/stylelint`, `basis/testing`, `basis/testing/bun`, and `basis/tsconfig/*`. Internal workspace paths are not consumer imports; see [Reference](./reference.mdx) for the ownership rule.
+
+## Bun version
+
+Basis installs on Bun 1.4.x. The type-check commands require Bun **1.4.3 or newer**. The lint, format, and compliance commands require the first stable Bun release that ships the built-in linter; stable 1.4.4 does not include it.
+
+The package engines record these minimums, but `bun add` does not enforce them. An older runtime installs successfully, then the affected command stops with an upgrade instruction. Run `bun upgrade` to move to a supported release.
+
+## Host capabilities
+
+Non-npm host capabilities are static metadata, not runtime API. Declare only what the application uses:
+
+```json
+{ "basis": { "hostDependencies": ["docker"] } }
+```
+
+The install hook resolves each declared capability on `PATH` and fails loudly when it is missing or broken.
+
+Basis-owned patches live in the package and are declared in its `patchedDependencies` map. The trusted `postinstall` hook applies them to exact `name@version` installs with `git apply`; consumers never copy patch files, add their own `patchedDependencies` entries, or provision a host browser.
+
+## Next
+
+Start with [Guides](./guides.mdx), then read the package page you need from [Reference](./reference.mdx).

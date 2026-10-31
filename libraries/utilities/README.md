@@ -1,77 +1,14 @@
 # @basis/utilities
 
-## Overview
+Internal workspace of shared functions and types used by Basis packages. It is not a supported consumer import; consumers use supported surfaces such as `basis/logger`, `basis/react`, `basis/configuration`, and `basis/server`.
 
-The `@basis/utilities` package offers a collection of utility functions designed to simplify common programming tasks. These functions enhance productivity by providing reusable solutions for various operations, including:
-
-- **Data Manipulation**: Functions for cloning objects, formatting data, and managing data attributes.
-- **String Operations**: Utilities for string formatting, case conversion, and deburring.
-- **Type Handling**: Functions to check for null or undefined values and to perform deep equality checks.
-- **URI Parsing**: Tools for parsing and manipulating URIs and template URIs.
-- **Mathematical Operations**: Functions for formatting bytes and handling time durations.
-
-## Installation
-
-`@basis/utilities` is an internal workspace consumed from the Basis repository. There is no package publish step.
-
-## Usage Example
-
-This package includes various utility functions. Here are a couple of examples:
-
-### Formatting Bytes
+The authoritative map of the internal surface is the documentation site's [Utilities page](../../docs/utilities.mdx). It covers string/naming helpers, formatting, object/path primitives, async primitives, URI/routing helpers, runtime facts, and the exported types.
 
 ```ts
-import { formatBytes } from '@basis/utilities';
-
-const size = formatBytes(1024); // "1.00 KB"
+kebabCase('MoonPhase') // 'moon-phase'
+formatBytes(1024) // '1.00 KB'
 ```
 
-### Cloning Objects
+`Logger` is available here internally and through its supported facade, `basis/logger`. See [Logging](../../docs/logging.mdx) for the public contract.
 
-```ts
-import { clone } from '@basis/utilities';
-
-const original = { a: 1, b: { c: 2 } };
-const copy = clone(original); // Deep clone of the object
-```
-
-### De-duplicating Arrays
-
-```ts
-import { unique } from '@basis/utilities'
-
-unique([1, 2, 1]) // [1, 2]
-unique([{ id: 'a' }, { id: 'a' }], unique.by('id')) // [{ id: 'a' }]
-unique([{ a: 1 }, { a: 1 }], unique.deepEquals) // [{ a: 1 }]
-```
-
-### Pattern Matching with `match`
-
-The `match` function allows for flexible pattern matching against values. Here’s an example:
-
-```ts
-import { match } from '@basis/utilities';
-
-const result = match(5)
-  .when(5).then('five')
-  .when({ min: 0, max: 10 }).then('small number')
-  .else('something else');
-
-console.log(result); // Output: "five"
-```
-
-### Logging
-
-The `Logger` provides timestamped, severity-formatted console output with an optional bounded file sink and stopwatch helpers. It is also exposed through the Basis package facade as `basis/logger`.
-
-```ts
-import { Logger } from '@basis/utilities'
-
-const logger = new Logger({ prefix: '[worker]' })
-logger.info('started')
-
-const stopwatch = logger.stopwatchStart()
-logger.stopwatchStop(stopwatch, 'iteration complete')
-```
-
-`LoggerOptions` supports `prefix`, `silent`, `logFilePath`, and `maxLogLines`. Use `withPrefix` to derive a scoped view that shares the same destination.
+Internal Basis code imports this workspace package-relatively; applications must not depend on `@basis/utilities` or `node_modules/basis/libraries/*` paths.

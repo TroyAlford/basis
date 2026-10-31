@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import * as React from 'react'
 import { render } from '../../testing/render'
 import { CheckboxEditor } from './CheckboxEditor'
@@ -72,5 +72,19 @@ describe('CheckboxEditor', () => {
     expect(glyph(node)).toHaveClass('square-check-icon')
     expect(node).toHaveAttribute('readonly')
     expect(input(node).disabled).toBe(true)
+  })
+
+  test('does not spread mixin props onto its fragment content', async () => {
+    const error = spyOn(console, 'error').mockImplementation(() => undefined)
+
+    try {
+      await render(
+        <CheckboxEditor autoFocus label="Select row" value={false} onChange={() => undefined} />,
+      )
+
+      expect(error).not.toHaveBeenCalled()
+    } finally {
+      error.mockRestore()
+    }
   })
 })

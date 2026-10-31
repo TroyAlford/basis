@@ -125,11 +125,6 @@ style('basis:docs:icons', css`
       }
     }
 
-    .moon-controls h3 {
-      margin-bottom: 16px;
-      margin-top: 0;
-    }
-
     .moon-display {
       align-items: center;
       display: flex;

@@ -100,7 +100,7 @@
     "ci:contract": "bun test ./.github/ci",
     "ci:verify": "bun ./scripts/verify-ci.ts",
     "docs": "bun run start",
-    "docs:build": "bun ./consumer/cli.ts docs build --title Basis",
+    "docs:build": "bun ./libraries/docs/build.ts --title Basis",
     "docs:check": "bun ./consumer/cli.ts docs check",
     "format": "bun ./consumer/cli.ts format",
     "lint": "bun run lint:es && bun run lint:ts && bun run lint:css && bun run lint:md",
