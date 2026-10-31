@@ -9,6 +9,10 @@
 export namespace Operator {
   /** Field comparison operators. */
   export enum Comparison {
+    /** Inclusive range. */
+    Between = '$between',
+    /** Empty string or null. */
+    Empty = '$empty',
     /** Equal. */
     Equal = '$eq',
     /** Greater than. */
@@ -19,11 +23,17 @@ export namespace Operator {
     LessThan = '$lt',
     /** Less than or equal. */
     LessThanOrEqual = '$lte',
+    /** Not equal. */
+    NotEqual = '$ne',
   }
 
   /** Logical expression operators. */
   export enum Logical {
     /** All operands must match. */
     And = '$and',
+    /** Negate one operand. */
+    Not = '$not',
+    /** Any operand must match. */
+    Or = '$or',
   }
 }

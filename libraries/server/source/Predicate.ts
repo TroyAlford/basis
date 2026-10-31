@@ -22,8 +22,14 @@ export interface LogicalFilter {
 /** A canonical serializable where filter. */
 export type Filter = ComparisonFilter | LogicalFilter
 
-/** Recognized comparison enum values. */
-const COMPARISON_OPERATORS = new Set<Operator.Comparison>(Object.values(Operator.Comparison))
+/** Comparison operators implemented by structured filters. */
+const COMPARISON_OPERATORS = new Set<Operator.Comparison>([
+  Operator.Comparison.Equal,
+  Operator.Comparison.GreaterThan,
+  Operator.Comparison.GreaterThanOrEqual,
+  Operator.Comparison.LessThan,
+  Operator.Comparison.LessThanOrEqual,
+])
 
 /**
  * Normalize structured where input into the canonical filter tree.
