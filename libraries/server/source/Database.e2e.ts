@@ -441,6 +441,52 @@ describe('Server database lifecycle', () => {
           orderBy: ['score', { direction: SortDirection.Ascending, field: 'title' }],
           where: { score: 5 },
         })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
+
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          orderBy: 'title',
+          where: { score: { $gt: 2 } },
+        })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          orderBy: 'title',
+          where: { score: { $gte: 5 } },
+        })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          orderBy: 'title',
+          where: { score: { $lt: 2 } },
+        })).toEqual([{ title: 'kept' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          orderBy: ['score', 'title'],
+          where: { score: { $lte: 2 } },
+        })).toEqual([{ title: 'kept' }, { title: 'ignored' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          orderBy: 'title',
+          where: { $and: [{ active: true }, { score: { $gte: 5, $lte: 5 } }] },
+        })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          where: { score: { $eq: null } },
+        })).toEqual([])
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          where: { score: { $gt: null } },
+        })).rejects.toThrow('Query operator "$gt" requires a non-null value')
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          where: { score: { $ne: 5 } },
+        })).rejects.toThrow('Query operator "$ne" is not supported')
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          where: { active: { $gt: true } },
+        })).rejects.toThrow('Query operator "$gt" is not valid for field "active"')
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          where: { $and: [] },
+        })).rejects.toThrow('Query $and must be a non-empty array')
         await expect(server.db.query('Note', {
           fields: ['title'],
           orderBy: { field: 'missing' },

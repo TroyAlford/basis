@@ -1,4 +1,5 @@
 import type { EntityDefinition, EntityDefinitions, FieldDefinition } from './EntityDefinitions'
+import { FieldType } from './EntityDefinitions'
 import { SortDirection } from './SortDirection'
 
 /** A validated ordering clause. */
@@ -72,13 +73,36 @@ function select(
   return { fields: selected, sql: `SELECT ${projection} FROM ${quoteIdentifier(entity.name)}` }
 }
 
+/** A supported comparison operator. */
+type ComparisonOperator = '$eq' | '$gt' | '$gte' | '$lt' | '$lte'
+
+/** One normalized root-field comparison. The expression is an implicit AND. */
+interface Comparison {
+  readonly field: FieldDefinition,
+  readonly operator: ComparisonOperator,
+  readonly value: unknown,
+}
+
+/** Comparison operators that require ordered field types. */
+const RANGE_OPERATORS = new Set<ComparisonOperator>(['$gt', '$gte', '$lt', '$lte'])
+/** Field types that support range comparisons. */
+const RANGE_TYPES = new Set<FieldType>([
+  FieldType.Date,
+  FieldType.Number,
+  FieldType.Snowflake,
+  FieldType.String,
+  FieldType.Timestamp,
+])
+/** Every supported comparison operator. */
+const COMPARISON_OPERATORS = new Set<string>(['$eq', '$gte', '$gt', '$lte', '$lt'])
+
 /**
- * Build parameterized root-field equality predicates.
+ * Build parameterized root-field comparison predicates.
  * @param entities - Validated entity definitions.
  * @param entityName - Exact entity name.
- * @param where - Root-field equality values, combined with `AND`.
+ * @param where - Equality shorthand, operator objects, or `$and` expressions.
  * @returns The quoted `WHERE` clause and its parameter values.
- * @throws {Error} When the entity or predicate field is unknown or a value is nullish.
+ * @throws {Error} When the entity, field, operator, or value is invalid.
  */
 function whereClause(
   entities: EntityDefinitions,
@@ -86,25 +110,131 @@ function whereClause(
   where: Readonly<Record<string, unknown>> = {},
 ): SQLPredicate {
   const entity = definition(entities, entityName)
-  if (typeof where !== 'object' || where === null || Array.isArray(where)) {
-    throw new Error('Query where must be a plain object')
-  }
+  if (!isPlainRecord(where)) throw new Error('Query where must be a plain object')
 
-  const definitions = new Set(entity.fields.map(field => field.name))
+  const comparisons = expression(entity, where)
   const values: unknown[] = []
-  const predicates = Object.entries(where).map(([field, value]) => {
-    if (!definitions.has(field)) throw new Error(`Unknown field "${entityName}.${field}"`)
-    if (value === null || value === undefined) {
-      throw new Error(`Query condition "${entityName}.${field}" must not be null or undefined`)
-    }
-    values.push(value)
-    return `${quoteIdentifier(field)} = $${values.length}`
+  const predicates = comparisons.map(entry => {
+    const column = quoteIdentifier(entry.field.name)
+    if (entry.operator === '$eq' && entry.value === null) return `${column} IS NULL`
+
+    values.push(entry.value)
+    return `${column} ${comparisonOperator(entry.operator)} $${values.length}`
   })
 
   return {
     sql: predicates.length > 0 ? `WHERE ${predicates.join(' AND ')}` : '',
     values,
   }
+}
+
+/**
+ * Normalize supported where syntax into one implicit-AND comparison list.
+ * @param entity - Entity whose fields are referenced.
+ * @param where - Equality shorthand, operator objects, or `$and` expressions.
+ * @returns The normalized comparisons.
+ */
+function expression(
+  entity: EntityDefinition,
+  where: Readonly<Record<string, unknown>>,
+): Comparison[] {
+  if (!isPlainRecord(where)) throw new Error('Query where must be a plain object')
+
+  const fields = new Map(entity.fields.map(field => [field.name, field]))
+  const comparisons: Comparison[] = []
+
+  for (const [name, value] of Object.entries(where)) {
+    if (name === '$and') {
+      if (!Array.isArray(value) || value.length === 0) {
+        throw new Error('Query $and must be a non-empty array')
+      }
+      for (const operand of value) {
+        if (!isPlainRecord(operand)) throw new Error('Query $and operands must be plain objects')
+        comparisons.push(...expression(entity, operand))
+      }
+      continue
+    }
+
+    if (name.startsWith('$')) throw new Error(`Query operator "${name}" is not supported`)
+    const field = fields.get(name)
+    if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
+
+    if (isPlainRecord(value)) {
+      const entries = Object.entries(value)
+      if (entries.length === 0) {
+        throw new Error(`Query condition "${entity.name}.${name}" must include an operator`)
+      }
+      for (const [operator, operand] of entries) {
+        if (!COMPARISON_OPERATORS.has(operator)) {
+          throw new Error(`Query operator "${operator}" is not supported`)
+        }
+        comparisons.push(comparison(field, operator as ComparisonOperator, operand))
+      }
+      continue
+    }
+
+    if (value === undefined) {
+      throw new Error(`Query condition "${entity.name}.${name}" must not be undefined`)
+    }
+    comparisons.push(comparison(field, '$eq', value))
+  }
+
+  return comparisons
+}
+
+/**
+ * Validate one field comparison and its value.
+ * @param field - Field being compared.
+ * @param operator - Comparison operator.
+ * @param value - Comparison value.
+ * @returns The normalized comparison.
+ */
+function comparison(
+  field: FieldDefinition,
+  operator: ComparisonOperator,
+  value: unknown,
+): Comparison {
+  if (value === undefined) {
+    throw new Error(`Query condition "${field.name}" must not be undefined`)
+  }
+  if (value === null) {
+    if (operator !== '$eq') {
+      throw new Error(`Query operator "${operator}" requires a non-null value`)
+    }
+    return { field, operator, value }
+  }
+  if (isPlainRecord(value) || Array.isArray(value)) {
+    throw new Error(`Query condition "${field.name}" must be a scalar value`)
+  }
+  if (RANGE_OPERATORS.has(operator) && !RANGE_TYPES.has(field.type)) {
+    throw new Error(`Query operator "${operator}" is not valid for field "${field.name}"`)
+  }
+  return { field, operator, value }
+}
+
+/**
+ * Map a normalized comparison operator to PostgreSQL syntax.
+ * @param operator - Comparison operator.
+ * @returns The SQL comparison operator.
+ */
+function comparisonOperator(operator: ComparisonOperator): string {
+  switch (operator) {
+    case '$eq': return '='
+    case '$gt': return '>'
+    case '$gte': return '>='
+    case '$lt': return '<'
+    case '$lte': return '<='
+    default: throw new Error(`Unsupported comparison operator: ${operator}`)
+  }
+}
+
+/**
+ * Whether a value is a plain object.
+ * @param value - Candidate value.
+ * @returns `true` for a non-array object.
+ */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**

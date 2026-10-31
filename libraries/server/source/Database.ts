@@ -52,7 +52,7 @@ export interface QueryOptions {
   offset?: number,
   /** Explicit root-field ordering, single or multi-level. */
   orderBy?: OrderBy,
-  /** Root-field equality values, combined with `AND`. */
+  /** Root-field equality shorthand, comparison operators, or `$and` expressions. */
   where?: Readonly<Record<string, unknown>>,
 }
 
