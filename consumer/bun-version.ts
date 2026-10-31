@@ -1,5 +1,5 @@
 /** The first stable Bun release with the built-in TypeScript checker. */
-export const MINIMUM_BUN_FOR_CHECK = '1.4.3'
+const MINIMUM_BUN_FOR_CHECK = '1.4.3'
 
 /** A numeric semantic version. */
 export type ParsedVersion = readonly [major: number, minor: number, patch: number]
