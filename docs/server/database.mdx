@@ -62,7 +62,7 @@ The statements are deterministic and available through `entities.ddl`. Existing 
 Attach the same canonical definitions to the database capability, then project root scalar fields from one entity:
 
 ```ts
-import { EntityDefinitions, Server, SortDirection } from 'basis/server'
+import { EntityDefinitions, Operator, Server, SortDirection } from 'basis/server'
 
 const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
 const server = new Server()
@@ -78,7 +78,24 @@ const notes = await server.db.query<{ id: string, title: string }>('Note', {
 })
 ```
 
-`fields` is required and must be a non-empty list of the named entity's root fields. `where` uses root-field equality shorthand; multiple keys combine with `AND`, and every value is passed as a SQL parameter. `orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, row order is unspecified, so use explicit ordering when paging deterministically. Unknown entities, fields, directions, and invalid limits/offsets fail before any SQL runs; validated identifiers are quoted. Snowflake values are hydrated to exact `bigint` values in `db.query` results; raw `db.sql` keeps Bun's native PostgreSQL `BIGINT` string decoding. This step intentionally supports scalar root projections only — relationships, filters, ordering, and pagination arrive in later steps.
+```ts
+const filtered = await server.db.query<{ id: string, title: string }>('Note', {
+  fields: ['id', 'title'],
+  where: {
+    operator: Operator.Logical.And,
+    filters: [
+      { operator: Operator.Comparison.GreaterThanOrEqual, field: 'score', value: 5 },
+      { operator: Operator.Comparison.LessThan, field: 'score', value: 10 },
+      { operator: Operator.Comparison.Equal, field: 'active', value: true },
+    ],
+  },
+  orderBy: { field: 'score', direction: SortDirection.Descending },
+})
+```
+
+`fields` is required and must be a non-empty list of the named entity's root fields. `where` accepts a single-field equality shorthand (`{ title: 'Hello' }`) or an explicit canonical filter tree using the exported `Operator` enums. A comparison filter has exactly `operator`, `field`, and `value`; a logical filter has exactly `operator: Operator.Logical.And` and a non-empty `filters` array. Shorthand is only equality for one field and normalizes to `Operator.Comparison.Equal`; multiple fields must be expressed explicitly with `And` and `filters`. An operator-looking object inside a field value is equality with that whole object, not operator syntax. Supported members are `Operator.Comparison.Equal`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`, and `Operator.Logical.And`; `And` can nest. Every value is passed as a SQL parameter. `Equal(null)` compiles to `IS NULL`; other operators reject null. Range operators are limited to ordered scalar fields (`string`, `number`, `date`, `timestamp`, and `snowflake`), not `boolean` or `uuid`. Unknown fields, operators, malformed nodes, or incompatible field/operator combinations fail before SQL runs.
+
+`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, row order is unspecified, so use explicit ordering when paging deterministically. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Snowflake values are hydrated to exact `bigint` values in `db.query` results; raw `db.sql` keeps Bun's native PostgreSQL `BIGINT` string decoding. This step intentionally supports scalar root projections only — relationships and graph projections arrive in later steps.
 
 ## `db.sql`
 

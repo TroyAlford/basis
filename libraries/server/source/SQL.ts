@@ -1,4 +1,9 @@
+import { match } from '../../utilities'
 import type { EntityDefinition, EntityDefinitions, FieldDefinition } from './EntityDefinitions'
+import { FieldType } from './EntityDefinitions'
+import { Operator } from './Operator'
+import type { ComparisonFilter, Filter, LogicalFilter } from './Predicate'
+import { Predicate } from './Predicate'
 import { SortDirection } from './SortDirection'
 
 /** A validated ordering clause. */
@@ -72,39 +77,194 @@ function select(
   return { fields: selected, sql: `SELECT ${projection} FROM ${quoteIdentifier(entity.name)}` }
 }
 
+/** A validated scalar value bound into a query. */
+type BoundScalar = string | number | boolean | bigint | Date
+
+/** A per-comparison definition used by the closed operator registry. */
+interface ComparisonDefinition {
+  /** Field types the operator supports. */
+  readonly allowedFieldTypes: ReadonlySet<FieldType>,
+  /** Build the SQL fragment and bind its value. */
+  readonly build: (
+    column: string,
+    operand: BoundScalar | null,
+    bind: (value: BoundScalar) => string,
+  ) => string,
+  /** Validate and normalize the raw operand. */
+  readonly validateOperand: (field: FieldDefinition, raw: unknown) => BoundScalar | null,
+}
+
+/** A per-logical-operator definition used by the closed operator registry. */
+interface LogicalDefinition {
+  /** Build a parenthesized logical group. */
+  readonly build: (children: readonly string[]) => string,
+  /** Minimum number of child predicates. */
+  readonly minimumOperands: number,
+}
+
+/** Signed 64-bit Snowflake bounds. */
+const SNOWFLAKE_MIN = -9223372036854775808n
+const SNOWFLAKE_MAX = 9223372036854775807n
+
+/** All scalar field types support equality. */
+const ALL_FIELD_TYPES = new Set<FieldType>(Object.values(FieldType))
+/** Only ordered scalar field types support range comparisons. */
+const RANGE_FIELD_TYPES = new Set<FieldType>([
+  FieldType.Date,
+  FieldType.Number,
+  FieldType.Snowflake,
+  FieldType.String,
+  FieldType.Timestamp,
+])
+
+/** The complete comparison operator registry. */
+const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>([
+  [Operator.Comparison.Equal, {
+    allowedFieldTypes: ALL_FIELD_TYPES,
+    build: (column, operand, bind) => (operand === null
+      ? `${column} IS NULL`
+      : `${column} = ${bind(operand)}`),
+    validateOperand: scalarValidator(true),
+  }],
+  [Operator.Comparison.GreaterThan, rangeDefinition('>', RANGE_FIELD_TYPES)],
+  [Operator.Comparison.GreaterThanOrEqual, rangeDefinition('>=', RANGE_FIELD_TYPES)],
+  [Operator.Comparison.LessThan, rangeDefinition('<', RANGE_FIELD_TYPES)],
+  [Operator.Comparison.LessThanOrEqual, rangeDefinition('<=', RANGE_FIELD_TYPES)],
+])
+
+/** The complete logical operator registry. */
+const logicalDefinitions = new Map<Operator.Logical, LogicalDefinition>([
+  [Operator.Logical.And, {
+    build: children => `(${children.join(' AND ')})`,
+    minimumOperands: 1,
+  }],
+])
+
 /**
- * Build parameterized root-field equality predicates.
+ * Build parameterized root-field comparison predicates.
  * @param entities - Validated entity definitions.
  * @param entityName - Exact entity name.
- * @param where - Root-field equality values, combined with `AND`.
+ * @param where - Equality shorthand, structured comparisons, or logical groups.
  * @returns The quoted `WHERE` clause and its parameter values.
- * @throws {Error} When the entity or predicate field is unknown or a value is nullish.
+ * @throws {Error} When the entity, field, operator, or value is invalid.
  */
 function whereClause(
   entities: EntityDefinitions,
   entityName: string,
-  where: Readonly<Record<string, unknown>> = {},
+  where: Filter | Readonly<Record<string, unknown>> = {},
 ): SQLPredicate {
   const entity = definition(entities, entityName)
-  if (typeof where !== 'object' || where === null || Array.isArray(where)) {
-    throw new Error('Query where must be a plain object')
-  }
+  const filter = Predicate.normalize(entity, where)
+  if (!filter) return { sql: '', values: [] }
 
-  const definitions = new Set(entity.fields.map(field => field.name))
-  const values: unknown[] = []
-  const predicates = Object.entries(where).map(([field, value]) => {
-    if (!definitions.has(field)) throw new Error(`Unknown field "${entityName}.${field}"`)
-    if (value === null || value === undefined) {
-      throw new Error(`Query condition "${entityName}.${field}" must not be null or undefined`)
-    }
+  const values: BoundScalar[] = []
+  const bind = (value: BoundScalar): string => {
     values.push(value)
-    return `${quoteIdentifier(field)} = $${values.length}`
-  })
-
-  return {
-    sql: predicates.length > 0 ? `WHERE ${predicates.join(' AND ')}` : '',
-    values,
+    return `$${values.length}`
   }
+
+  const compile = (node: Filter): string => {
+    const comparison = comparisonDefinitions.get(node.operator as Operator.Comparison)
+    if (comparison) {
+      const comparisonFilter = node as ComparisonFilter
+      const field = entity.fields.find(candidate => candidate.name === comparisonFilter.field)
+      if (!field) throw new Error(`Unknown field "${entity.name}.${comparisonFilter.field}"`)
+      if (!comparison.allowedFieldTypes.has(field.type)) {
+        throw new Error(
+          `Query operator "${comparisonFilter.operator}" is not valid for field "${entity.name}.${field.name}"`,
+        )
+      }
+      const operand = comparison.validateOperand(field, comparisonFilter.value)
+      return comparison.build(quoteIdentifier(field.name), operand, bind)
+    }
+
+    const logical = logicalDefinitions.get(node.operator as Operator.Logical)
+    if (!logical) throw new Error(`Query operator "${node.operator}" is not supported`)
+    const logicalFilter = node as LogicalFilter
+    if (logicalFilter.filters.length < logical.minimumOperands) {
+      throw new Error(
+        `Query operator "${logicalFilter.operator}" requires at least ${logical.minimumOperands} operand(s)`,
+      )
+    }
+    return logical.build(logicalFilter.filters.map(compile))
+  }
+
+  return { sql: `WHERE ${compile(filter)}`, values }
+}
+
+/**
+ * Create a parameterized range-comparison definition.
+ * @param operator - SQL comparison operator.
+ * @param allowedFieldTypes - Field types that support ordered comparison.
+ * @returns The comparison definition.
+ */
+function rangeDefinition(
+  operator: string,
+  allowedFieldTypes: ReadonlySet<FieldType>,
+): ComparisonDefinition {
+  return {
+    allowedFieldTypes,
+    build: (column, operand, bind) => {
+      if (operand === null) throw new Error(`Query operator "${operator}" requires a non-null value`)
+      return `${column} ${operator} ${bind(operand)}`
+    },
+    validateOperand: scalarValidator(false),
+  }
+}
+
+/**
+ * Create the shared scalar operand validator.
+ * @param allowNull - Whether null equality is valid.
+ * @returns The validator.
+ */
+function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOperand'] {
+  return (field, raw) => {
+    if (raw === undefined) throw new Error(`Query operand for "${field.name}" must not be undefined`)
+    if (raw === null) {
+      if (allowNull) return null
+      throw new Error(`Query operand for "${field.name}" must not be null`)
+    }
+
+    return match(field.type)
+      .when(FieldType.Boolean).then(() => (
+        typeof raw === 'boolean' ? raw : invalidOperand(field)
+      ))
+      .when(FieldType.Date).then(() => (
+        typeof raw === 'string' && raw.length > 0 ? raw : invalidOperand(field)
+      ))
+      .when(FieldType.Number).then(() => (
+        typeof raw === 'number' && Number.isFinite(raw) ? raw : invalidOperand(field)
+      ))
+      .when(FieldType.Snowflake).then(() => {
+        if (typeof raw === 'bigint') return raw
+        if (typeof raw === 'string' && /^-?\d+$/.test(raw)) {
+          const value = BigInt(raw)
+          if (value >= SNOWFLAKE_MIN && value <= SNOWFLAKE_MAX) return raw
+        }
+        return invalidOperand(field)
+      })
+      .when(FieldType.String).then(() => (
+        typeof raw === 'string' ? raw : invalidOperand(field)
+      ))
+      .when(FieldType.Timestamp).then(() => {
+        if (raw instanceof Date && !Number.isNaN(raw.getTime())) return raw
+        if (typeof raw === 'string' && raw.length > 0) return raw
+        return invalidOperand(field)
+      })
+      .when(FieldType.UUID).then(() => (
+        typeof raw === 'string' && raw.length > 0 ? raw : invalidOperand(field)
+      ))
+      .else(() => invalidOperand(field))
+  }
+}
+
+/**
+ * Throw the standard operand error.
+ * @param field - Field whose operand is invalid.
+ * @throws {Error} Always, naming the invalid operand.
+ */
+function invalidOperand(field: FieldDefinition): never {
+  throw new Error(`Query operand for "${field.name}" is not a valid ${field.type} value`)
 }
 
 /**
