@@ -39,6 +39,48 @@ const COMPARISON_OPERATORS = new Set<Operator.Comparison>([
  */
 export const Predicate = {
   /**
+   * Expand a source-level comparison into one canonical filter.
+   * @param field - Root entity field name.
+   * @param lower - Inclusive lower bound, or null for an open bound.
+   * @param upper - Inclusive upper bound, or null for an open bound.
+   * @returns The canonical range filter.
+   * @throws {Error} When both bounds are null.
+   */
+  between(field: string, lower: unknown, upper: unknown): Filter {
+    if (lower === null && upper === null) throw new Error('Between requires at least one non-null bound')
+    const filters: Filter[] = []
+    if (lower !== null) {
+      filters.push({ field, operator: Operator.Comparison.GreaterThanOrEqual, value: lower })
+    }
+    if (upper !== null) {
+      filters.push({ field, operator: Operator.Comparison.LessThanOrEqual, value: upper })
+    }
+    return filters.length === 1 ? filters[0] as Filter : Predicate.logical(Operator.Logical.And, filters)
+  },
+
+  /**
+   * Expand the empty-string comparison into canonical equality nodes.
+   * @param field - Root entity field name.
+   * @returns `Or(Equal(null), Equal(''))`.
+   */
+  empty(field: string): LogicalFilter {
+    return Predicate.logical(Operator.Logical.Or, [
+      { field, operator: Operator.Comparison.Equal, value: null },
+      { field, operator: Operator.Comparison.Equal, value: '' },
+    ])
+  },
+
+  /**
+   * Build a logical filter group.
+   * @param operator - Logical operator identity.
+   * @param filters - Child filters.
+   * @returns The logical filter group.
+   */
+  logical(operator: Operator.Logical, filters: readonly Filter[]): LogicalFilter {
+    return { filters, operator }
+  },
+
+  /**
    * Normalize a where input.
    * @param entity - Entity whose fields are referenced.
    * @param input - A single-field equality shorthand or an explicit filter.
@@ -49,6 +91,25 @@ export const Predicate = {
     if (!isPlainRecord(input)) throw new Error('Query where must be a plain object')
     if (Object.hasOwn(input, 'operator')) return explicit(entity, input)
     return shorthand(entity, input)
+  },
+
+  /**
+   * Negate one filter.
+   * @param filter - Filter to negate.
+   * @returns The one-child `Not` group.
+   */
+  not(filter: Filter): LogicalFilter {
+    return Predicate.logical(Operator.Logical.Not, [filter])
+  },
+
+  /**
+   * Expand a source-level not-equal comparison into `Not(Equal)`.
+   * @param field - Root entity field name.
+   * @param value - Value that must not match.
+   * @returns The canonical negated equality filter.
+   */
+  notEqual(field: string, value: unknown): LogicalFilter {
+    return Predicate.not({ field, operator: Operator.Comparison.Equal, value })
   },
 }
 

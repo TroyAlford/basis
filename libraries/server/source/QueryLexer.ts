@@ -12,6 +12,8 @@ export enum TokenType {
   Field = 'field',
   /** Opening bracket. */
   LeftBracket = 'leftBracket',
+  /** Opening grouping parenthesis. */
+  LeftParen = 'leftParen',
   /** Null literal. */
   Null = 'null',
   /** Number literal, preserving its source spelling. */
@@ -20,6 +22,8 @@ export enum TokenType {
   Operator = 'operator',
   /** Closing bracket. */
   RightBracket = 'rightBracket',
+  /** Closing grouping parenthesis. */
+  RightParen = 'rightParen',
   /** Quoted string literal. */
   String = 'string',
   /** Unrecognized input. */
@@ -120,12 +124,16 @@ export const QueryLexer = {
         continue
       }
 
-      if (character === '[' || character === ']' || character === ',') {
+      if ('[](),'.includes(character)) {
         const type = character === '['
           ? TokenType.LeftBracket
           : character === ']'
             ? TokenType.RightBracket
-            : TokenType.Comma
+            : character === '('
+              ? TokenType.LeftParen
+              : character === ')'
+                ? TokenType.RightParen
+                : TokenType.Comma
         tokens.push({
           end: index + 1,
           raw: character,
