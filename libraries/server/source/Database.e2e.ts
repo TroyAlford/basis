@@ -382,6 +382,7 @@ describe('Server database lifecycle', () => {
 
         const account = await server.db.query<{ id: bigint, name: string }>('Account', {
           fields: ['id', 'name'],
+          where: { id: '9223372036854775807' },
         })
         expect(account).toEqual([{ id: 9223372036854775807n, name: 'Troy' }])
         expect(typeof account[0]?.id).toBe('bigint')
@@ -389,6 +390,23 @@ describe('Server database lifecycle', () => {
         expect(await server.db.query<{ score: number, title: string }>('Note', {
           fields: ['title', 'score'],
         })).toEqual([{ score: 1.5, title: 'kept' }])
+        await server.db.sql`
+          insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
+          values (gen_random_uuid(), 'ignored', false, 2, '2026-01-03', now())
+        `
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          where: { title: 'kept' },
+        })).toEqual([{ title: 'kept' }])
+        expect(await server.db.query<{ title: string }>('Note', {
+          fields: ['title'],
+          where: { title: "kept' OR true --" },
+        })).toEqual([])
+        await expect(server.db.query('Note', {
+          fields: ['title'],
+          where: { missing: 'kept' },
+        })).rejects.toThrow('Unknown field "Note.missing"')
+
         await expect(server.db.query('Note', { fields: ['missing'] }))
           .rejects.toThrow('Unknown field "Note.missing"')
         await expect(server.db.query('Missing', { fields: ['id'] }))
