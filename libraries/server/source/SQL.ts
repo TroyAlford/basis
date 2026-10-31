@@ -145,28 +145,36 @@ function orderByClause(
 
 /**
  * Build a validated parameterized pagination clause.
- * @param limit - Maximum rows to return.
+ * @param limit - Maximum rows to return, or null for unlimited.
  * @param offset - Rows to skip.
  * @param startIndex - Number of prior parameter values.
  * @returns The quoted pagination clause and its parameter values.
  * @throws {Error} When limit or offset is not a non-negative integer.
  */
 function paginate(
-  limit = 25,
+  limit: number | null = 25,
   offset = 0,
   startIndex = 0,
 ): SQLPagination {
-  if (!Number.isInteger(limit) || limit < 0) {
-    throw new Error('Query limit must be a non-negative integer')
+  if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
+    throw new Error('Query limit must be a non-negative integer or null')
   }
   if (!Number.isInteger(offset) || offset < 0) {
     throw new Error('Query offset must be a non-negative integer')
   }
 
-  return {
-    sql: `LIMIT $${startIndex + 1} OFFSET $${startIndex + 2}`,
-    values: [limit, offset],
+  const clauses: string[] = []
+  const values: unknown[] = []
+  if (limit !== null) {
+    values.push(limit)
+    clauses.push(`LIMIT $${startIndex + values.length}`)
   }
+  if (limit !== null || offset > 0) {
+    values.push(offset)
+    clauses.push(`OFFSET $${startIndex + values.length}`)
+  }
+
+  return { sql: clauses.join(' '), values }
 }
 
 /**

@@ -46,8 +46,8 @@ export interface DatabaseOptions {
 export interface QueryOptions {
   /** Root scalar fields to project, in output order. */
   fields: readonly string[],
-  /** Maximum rows to return; defaults to 25. */
-  limit?: number,
+  /** Maximum rows to return; defaults to 25, or `null` for unlimited. */
+  limit?: number | null,
   /** Rows to skip; defaults to 0. */
   offset?: number,
   /** Explicit root-field ordering, single or multi-level. */
@@ -158,7 +158,8 @@ class PostgresDatabase implements Database {
     const selection = SQL.select(this.#entities, entity, options.fields)
     const predicate = SQL.where(this.#entities, entity, options.where)
     const ordering = SQL.orderBy(this.#entities, entity, options.orderBy)
-    const pagination = SQL.paginate(options.limit ?? 25, options.offset ?? 0, predicate.values.length)
+    const limit = options.limit === undefined ? 25 : options.limit
+    const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length)
     const statement = [selection.sql, predicate.sql, ordering.sql, pagination.sql]
       .filter(clause => clause !== '')
       .join(' ')

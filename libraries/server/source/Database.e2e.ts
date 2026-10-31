@@ -468,6 +468,7 @@ describe('Server database lifecycle', () => {
           from generate_series(1, 30) as series(value)
         `
         expect(await server.db.query('Note', { fields: ['title'] })).toHaveLength(25)
+        expect(await server.db.query('Note', { fields: ['title'], limit: null })).toHaveLength(34)
 
         await server.db.sql`create schema later`
         await server.db.sql`create table later."Shadow" (marker text)`
