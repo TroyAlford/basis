@@ -232,7 +232,7 @@
       },
     },
     "testing/components": {
-      "name": "@/components-fixture",
+      "name": "@basis-fixtures/components",
       "dependencies": {
         "@basis/react": "workspace:*",
         "react": "^19",
@@ -240,7 +240,7 @@
       },
     },
     "testing/docs": {
-      "name": "@/docs-fixture",
+      "name": "@basis-fixtures/docs",
       "dependencies": {
         "@basis/react": "workspace:*",
         "@basis/server": "workspace:*",
@@ -250,7 +250,7 @@
       },
     },
     "testing/e2e": {
-      "name": "@/test",
+      "name": "@basis-fixtures/e2e",
       "dependencies": {
         "@basis/react": "workspace:*",
         "@basis/server": "workspace:*",
@@ -260,7 +260,7 @@
       },
     },
     "testing/server": {
-      "name": "@/server-fixture",
+      "name": "@basis-fixtures/server",
       "dependencies": {
         "@basis/react": "workspace:*",
         "@basis/server": "workspace:*",
@@ -277,14 +277,6 @@
     "@types/estree": "1.0.8",
   },
   "packages": {
-    "@/components-fixture": ["@/components-fixture@workspace:testing/components"],
-
-    "@/docs-fixture": ["@/docs-fixture@workspace:testing/docs"],
-
-    "@/server-fixture": ["@/server-fixture@workspace:testing/server"],
-
-    "@/test": ["@/test@workspace:testing/e2e"],
-
     "@babel/code-frame": ["@babel/code-frame@7.29.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.28.5", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw=="],
 
     "@babel/generator": ["@babel/generator@7.29.1", "", { "dependencies": { "@babel/parser": "^7.29.0", "@babel/types": "^7.29.0", "@jridgewell/gen-mapping": "^0.3.12", "@jridgewell/trace-mapping": "^0.3.28", "jsesc": "^3.0.2" } }, "sha512-qsaF+9Qcm2Qv8SRIMMscAvG4O3lJ0F1GuMo5HR/Bp02LopNgnZBC/EkbevHFeGs4ls/oPz9v+Bsmzbkbe+0dUw=="],
@@ -302,6 +294,14 @@
     "@babel/traverse": ["@babel/traverse@7.29.0", "", { "dependencies": { "@babel/code-frame": "^7.29.0", "@babel/generator": "^7.29.0", "@babel/helper-globals": "^7.28.0", "@babel/parser": "^7.29.0", "@babel/template": "^7.28.6", "@babel/types": "^7.29.0", "debug": "^4.3.1" } }, "sha512-4HPiQr0X7+waHfyXPZpWPfWL/J7dcN1mx9gL6WdQVMbPnF3+ZhSMs8tCxN7oHddJE9fhNE7+lxdnlyemKfJRuA=="],
 
     "@babel/types": ["@babel/types@7.29.0", "", { "dependencies": { "@babel/helper-string-parser": "^7.27.1", "@babel/helper-validator-identifier": "^7.28.5" } }, "sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A=="],
+
+    "@basis-fixtures/components": ["@basis-fixtures/components@workspace:testing/components"],
+
+    "@basis-fixtures/docs": ["@basis-fixtures/docs@workspace:testing/docs"],
+
+    "@basis-fixtures/e2e": ["@basis-fixtures/e2e@workspace:testing/e2e"],
+
+    "@basis-fixtures/server": ["@basis-fixtures/server@workspace:testing/server"],
 
     "@basis/bun-plugins": ["@basis/bun-plugins@workspace:libraries/bun-plugins"],
 
