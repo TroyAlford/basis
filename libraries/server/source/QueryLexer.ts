@@ -4,16 +4,22 @@ import { Operator as QueryOperator } from './Operator'
 export enum TokenType {
   /** Boolean literal. */
   Boolean = 'boolean',
+  /** Argument separator. */
+  Comma = 'comma',
   /** End of input. */
   EOF = 'eof',
   /** Rooted field path. */
   Field = 'field',
+  /** Opening bracket. */
+  LeftBracket = 'leftBracket',
   /** Null literal. */
   Null = 'null',
   /** Number literal, preserving its source spelling. */
   Number = 'number',
   /** Comparison or logical operator. */
   Operator = 'operator',
+  /** Closing bracket. */
+  RightBracket = 'rightBracket',
   /** Quoted string literal. */
   String = 'string',
   /** Unrecognized input. */
@@ -63,6 +69,8 @@ const OPERATORS = new Map<string, QueryOperator.Comparison | QueryOperator.Logic
   ['>=', QueryOperator.Comparison.GreaterThanOrEqual],
   ['<', QueryOperator.Comparison.LessThan],
   ['<=', QueryOperator.Comparison.LessThanOrEqual],
+  ['!=', QueryOperator.Comparison.NotEqual],
+  ['<>', QueryOperator.Comparison.NotEqual],
 ])
 
 /** Whether a character may begin an identifier. */
@@ -108,6 +116,23 @@ export const QueryLexer = {
         const token = symbolicOperatorToken(source, index, diagnostics)
         tokens.push(token)
         index = token.end
+        continue
+      }
+
+      if (character === '[' || character === ']' || character === ',') {
+        const type = character === '['
+          ? TokenType.LeftBracket
+          : character === ']'
+            ? TokenType.RightBracket
+            : TokenType.Comma
+        tokens.push({
+          end: index + 1,
+          raw: character,
+          start: index,
+          type,
+          value: character,
+        })
+        index += 1
         continue
       }
 

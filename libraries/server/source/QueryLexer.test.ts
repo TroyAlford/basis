@@ -2,187 +2,259 @@ import { describe, expect, test } from 'bun:test'
 import { Operator } from './Operator'
 import { QueryLexer, TokenType } from './QueryLexer'
 
+/** One expected non-EOF token. */
+interface ExpectedToken {
+  readonly operator?: Operator.Comparison | Operator.Logical,
+  readonly raw: string,
+  readonly type: TokenType,
+  readonly value: string | boolean | null,
+}
+
+/** One expected diagnostic. */
+interface ExpectedDiagnostic {
+  readonly message: string,
+  readonly raw: string,
+  readonly start?: number,
+}
+
+/**
+ * Assert the complete token stream and diagnostics for one source string.
+ * @param source - Lexer input.
+ * @param expected - Expected non-EOF tokens.
+ * @param diagnostics - Expected diagnostics.
+ */
+function assertLex(
+  source: string,
+  expected: readonly ExpectedToken[],
+  diagnostics: readonly ExpectedDiagnostic[] = [],
+): void {
+  const result = QueryLexer.tokenize(source)
+  expect(result.tokens).toHaveLength(expected.length + 1)
+
+  let cursor = 0
+  for (const [index, token] of expected.entries()) {
+    const actual = result.tokens[index]
+    const start = source.indexOf(token.raw, cursor)
+    expect(start).toBeGreaterThan(-1)
+    expect(actual).toMatchObject({
+      end: start + token.raw.length,
+      raw: token.raw,
+      start,
+      type: token.type,
+      value: token.value,
+    })
+    if (token.operator === undefined) expect(actual?.operator).toBeUndefined()
+    else expect(actual?.operator).toBe(token.operator)
+    cursor = start + token.raw.length
+  }
+
+  const eof = result.tokens.at(-1)
+  expect(eof).toMatchObject({
+    end: source.length,
+    raw: '',
+    start: source.length,
+    type: TokenType.EOF,
+    value: null,
+  })
+
+  let diagnosticCursor = 0
+  for (const [index, diagnostic] of diagnostics.entries()) {
+    const start = diagnostic.start ?? source.indexOf(diagnostic.raw, diagnosticCursor)
+    expect(start).toBeGreaterThan(-1)
+    expect(result.diagnostics[index]).toEqual({
+      end: start + diagnostic.raw.length,
+      message: diagnostic.message,
+      start,
+    })
+    diagnosticCursor = start + diagnostic.raw.length
+  }
+  expect(result.diagnostics).toHaveLength(diagnostics.length)
+}
+
+const field = (raw: string): ExpectedToken => ({ raw, type: TokenType.Field, value: raw })
+const number = (raw: string): ExpectedToken => ({ raw, type: TokenType.Number, value: raw })
+const string = (raw: string, value: string): ExpectedToken => ({ raw, type: TokenType.String, value })
+const operator = (
+  raw: string,
+  identity: Operator.Comparison | Operator.Logical,
+): ExpectedToken => ({ operator: identity, raw, type: TokenType.Operator, value: raw })
+const boolean = (raw: string, value: boolean): ExpectedToken => ({ raw, type: TokenType.Boolean, value })
+const nullToken: ExpectedToken = { raw: 'null', type: TokenType.Null, value: null }
+const leftBracket = (): ExpectedToken => ({ raw: '[', type: TokenType.LeftBracket, value: '[' })
+const rightBracket = (): ExpectedToken => ({ raw: ']', type: TokenType.RightBracket, value: ']' })
+const comma = (): ExpectedToken => ({ raw: ',', type: TokenType.Comma, value: ',' })
+const unknown = (raw: string): ExpectedToken => ({ raw, type: TokenType.Unknown, value: raw })
+
 describe('QueryLexer', () => {
-  test('tokenizes fields, operators, strings, and numbers with source spans', () => {
-    const source = 'owner.name $eq "Troy" $and owner.age $gt 35'
-    const result = QueryLexer.tokenize(source)
+  test('maps all comparison alias pairs to one enum identity', () => {
+    const pairs = [
+      ['=', Operator.Comparison.Equal, '$eq'],
+      ['>', Operator.Comparison.GreaterThan, '$gt'],
+      ['>=', Operator.Comparison.GreaterThanOrEqual, '$gte'],
+      ['<', Operator.Comparison.LessThan, '$lt'],
+      ['<=', Operator.Comparison.LessThanOrEqual, '$lte'],
+    ] as const
 
-    expect(result.diagnostics).toEqual([])
-    expect(result.tokens.map(token => token.type)).toEqual([
-      TokenType.Field,
-      TokenType.Operator,
-      TokenType.String,
-      TokenType.Operator,
-      TokenType.Field,
-      TokenType.Operator,
-      TokenType.Number,
-      TokenType.EOF,
-    ])
-    expect(result.tokens.slice(0, -1).map(token => token.raw)).toEqual([
-      'owner.name',
-      '$eq',
-      '"Troy"',
-      '$and',
-      'owner.age',
-      '$gt',
-      '35',
-    ])
-    expect(result.tokens.slice(0, -1).map(token => [token.start, token.end])).toEqual([
-      [0, 10],
-      [11, 14],
-      [15, 21],
-      [22, 26],
-      [27, 36],
-      [37, 40],
-      [41, 43],
-    ])
-    expect(result.tokens[1]?.operator).toBe(Operator.Comparison.Equal)
-    expect(result.tokens[3]?.operator).toBe(Operator.Logical.And)
-    expect(result.tokens[5]?.operator).toBe(Operator.Comparison.GreaterThan)
-    expect(result.tokens[2]?.value).toBe('Troy')
+    for (const [symbol, identity, dollar] of pairs) {
+      assertLex(`score ${symbol} 5 $and score ${dollar} 5`, [
+        field('score'),
+        operator(symbol, identity),
+        number('5'),
+        operator('$and', Operator.Logical.And),
+        field('score'),
+        operator(dollar, identity),
+        number('5'),
+      ])
+    }
   })
 
-  test('tokenizes every supported operator identity', () => {
-    const source = [...Object.values(Operator.Comparison), ...Object.values(Operator.Logical)].join(' ')
-    const result = QueryLexer.tokenize(source)
+  test('tokenizes rooted fields with capitalization and underscores preserved', () => {
+    assertLex(
+      'score owner.score owner.profile.score _metadata.id Score owner.Score Owner.score OWNER.SCORE',
+      [
+        field('score'),
+        field('owner.score'),
+        field('owner.profile.score'),
+        field('_metadata.id'),
+        field('Score'),
+        field('owner.Score'),
+        field('Owner.score'),
+        field('OWNER.SCORE'),
+      ],
+    )
+  })
 
-    expect(result.diagnostics).toEqual([])
-    expect(result.tokens.slice(0, -1).map(token => token.operator)).toEqual([
-      ...Object.values(Operator.Comparison),
-      ...Object.values(Operator.Logical),
+  test('tokenizes mixed expressions with mixed spellings and whitespace', () => {
+    assertLex('score >= 5 $and score $lt 10', [
+      field('score'),
+      operator('>=', Operator.Comparison.GreaterThanOrEqual),
+      number('5'),
+      operator('$and', Operator.Logical.And),
+      field('score'),
+      operator('$lt', Operator.Comparison.LessThan),
+      number('10'),
     ])
-  })
-
-  test('maps symbolic comparisons to the same canonical operator identities', () => {
-    const dollar = QueryLexer.tokenize('score $gte 5 $and score $lt 10')
-    const symbolic = QueryLexer.tokenize('score >= 5 $and score < 10')
-
-    expect(symbolic.diagnostics).toEqual([])
-    expect(symbolic.tokens.map(token => token.operator)).toEqual(dollar.tokens.map(token => token.operator))
-    expect(symbolic.tokens[1]?.raw).toBe('>=')
-    expect(symbolic.tokens[5]?.raw).toBe('<')
-    expect(symbolic.tokens[1]?.operator).toBe(Operator.Comparison.GreaterThanOrEqual)
-    expect(symbolic.tokens[5]?.operator).toBe(Operator.Comparison.LessThan)
-  })
-
-  test('tokenizes every symbolic comparison alias', () => {
-    const result = QueryLexer.tokenize('= > >= < <=')
-
-    expect(result.diagnostics).toEqual([])
-    expect(result.tokens.slice(0, -1).map(token => [token.raw, token.operator])).toEqual([
-      ['=', Operator.Comparison.Equal],
-      ['>', Operator.Comparison.GreaterThan],
-      ['>=', Operator.Comparison.GreaterThanOrEqual],
-      ['<', Operator.Comparison.LessThan],
-      ['<=', Operator.Comparison.LessThanOrEqual],
+    assertLex('owner.Score >= 5 $and owner.profile.age < 10', [
+      field('owner.Score'),
+      operator('>=', Operator.Comparison.GreaterThanOrEqual),
+      number('5'),
+      operator('$and', Operator.Logical.And),
+      field('owner.profile.age'),
+      operator('<', Operator.Comparison.LessThan),
+      number('10'),
+    ])
+    assertLex('score\t>=\n5', [
+      field('score'),
+      operator('>=', Operator.Comparison.GreaterThanOrEqual),
+      number('5'),
+    ])
+    assertLex('score>=5', [
+      field('score'),
+      operator('>=', Operator.Comparison.GreaterThanOrEqual),
+      number('5'),
     ])
   })
 
-  test('reports unsupported symbolic and dollar operators without splitting them', () => {
-    const result = QueryLexer.tokenize('!= == $between $or')
-
-    expect(result.tokens.map(token => [token.type, token.raw])).toEqual([
-      [TokenType.Unknown, '!='],
-      [TokenType.Unknown, '=='],
-      [TokenType.Unknown, '$between'],
-      [TokenType.Unknown, '$or'],
-      [TokenType.EOF, ''],
+  test('preserves literal boundaries, exact integers, and quoted operator text', () => {
+    assertLex('title "$and >= $or" active true missing null max 9223372036854775807', [
+      field('title'),
+      string('"$and >= $or"', '$and >= $or'),
+      field('active'),
+      boolean('true', true),
+      field('missing'),
+      nullToken,
+      field('max'),
+      number('9223372036854775807'),
     ])
-    expect(result.diagnostics.map(diagnostic => diagnostic.message)).toEqual([
-      'Unsupported operator "!="',
-      'Unsupported operator "=="',
-      'Unknown operator "$between"',
-      'Unknown operator "$or"',
-    ])
-  })
-
-  test('tokenizes booleans, null, signed numbers, decimals, and exponents', () => {
-    const result = QueryLexer.tokenize('true false null -3 1.5 2e3 -4.5E-2')
-
-    expect(result.diagnostics).toEqual([])
-    expect(result.tokens.slice(0, -1).map(token => [token.type, token.value])).toEqual([
-      [TokenType.Boolean, true],
-      [TokenType.Boolean, false],
-      [TokenType.Null, null],
-      [TokenType.Number, '-3'],
-      [TokenType.Number, '1.5'],
-      [TokenType.Number, '2e3'],
-      [TokenType.Number, '-4.5E-2'],
+    assertLex('\'one\\nline\' "quote\\"d"', [
+      string('\'one\\nline\'', 'one\nline'),
+      string('"quote\\"d"', 'quote"d'),
     ])
   })
 
-  test('decodes single and double quoted strings and escapes', () => {
-    const result = QueryLexer.tokenize('\'one\\nline\' "two\\tlines" "quote\\"d"')
-
-    expect(result.diagnostics).toEqual([])
-    expect(result.tokens.slice(0, -1).map(token => token.value)).toEqual([
-      'one\nline',
-      'two\tlines',
-      'quote"d',
+  test('recognizes the extended operator vocabulary and between delimiters', () => {
+    assertLex('!= <> $ne $between [1, 5] $blank $notblank $or', [
+      operator('!=', Operator.Comparison.NotEqual),
+      operator('<>', Operator.Comparison.NotEqual),
+      operator('$ne', Operator.Comparison.NotEqual),
+      operator('$between', Operator.Comparison.Between),
+      leftBracket(),
+      number('1'),
+      comma(),
+      number('5'),
+      rightBracket(),
+      operator('$blank', Operator.Comparison.Blank),
+      operator('$notblank', Operator.Comparison.NotBlank),
+      operator('$or', Operator.Logical.Or),
     ])
   })
 
-  test('reports unknown operators and characters while recovering', () => {
-    const result = QueryLexer.tokenize('score $between 1 @ 2')
-
-    expect(result.tokens.map(token => token.type)).toEqual([
-      TokenType.Field,
-      TokenType.Unknown,
-      TokenType.Number,
-      TokenType.Unknown,
-      TokenType.Number,
-      TokenType.EOF,
+  test('reports unsupported operators without splitting them', () => {
+    assertLex('score == 5 $nor 1 $xor 2', [
+      field('score'),
+      unknown('=='),
+      number('5'),
+      unknown('$nor'),
+      number('1'),
+      unknown('$xor'),
+      number('2'),
+    ], [
+      { message: 'Unsupported operator "=="', raw: '==' },
+      { message: 'Unknown operator "$nor"', raw: '$nor' },
+      { message: 'Unknown operator "$xor"', raw: '$xor' },
     ])
-    expect(result.diagnostics.map(diagnostic => diagnostic.message)).toEqual([
-      'Unknown operator "$between"',
-      'Unexpected character "@"',
+  })
+
+  test('keeps operator and keyword matching case-sensitive', () => {
+    assertLex('TRUE Null $EQ', [
+      field('TRUE'),
+      field('Null'),
+      unknown('$EQ'),
+    ], [
+      { message: 'Unknown operator "$EQ"', raw: '$EQ' },
     ])
   })
 
   test('consumes malformed numeric candidates as one diagnostic token', () => {
     for (const candidate of ['1e', '1e+', '1.', '01']) {
-      const result = QueryLexer.tokenize(candidate)
-      expect(result.tokens.map(token => [token.type, token.raw])).toEqual([
-        [TokenType.Unknown, candidate],
-        [TokenType.EOF, ''],
+      assertLex(candidate, [unknown(candidate)], [
+        { message: `Invalid number literal ${JSON.stringify(candidate)}`, raw: candidate },
       ])
-      expect(result.diagnostics).toHaveLength(1)
-      expect(result.diagnostics[0]).toMatchObject({ end: candidate.length, start: 0 })
-      expect(result.diagnostics[0]?.message).toBe(`Invalid number literal ${JSON.stringify(candidate)}`)
     }
 
-    const valid = QueryLexer.tokenize('1e+2 -4.5E-2')
-    expect(valid.diagnostics).toEqual([])
-    expect(valid.tokens.slice(0, -1).map(token => [token.type, token.value])).toEqual([
-      [TokenType.Number, '1e+2'],
-      [TokenType.Number, '-4.5E-2'],
+    assertLex('1e+2 -4.5E-2', [number('1e+2'), number('-4.5E-2')])
+  })
+
+  test('recovers from malformed paths and continues with following valid tokens', () => {
+    assertLex('owner..name score 5', [
+      field('owner'),
+      unknown('.'),
+      unknown('.'),
+      field('name'),
+      field('score'),
+      number('5'),
+    ], [
+      { message: 'Expected a field name after "."', raw: '.', start: 5 },
+      { message: 'Unexpected character "."', raw: '.', start: 5 },
+      { message: 'Unexpected character "."', raw: '.', start: 6 },
     ])
   })
 
-  test('reports unterminated strings and malformed numbers', () => {
-    const stringResult = QueryLexer.tokenize('"unterminated')
-    expect(stringResult.diagnostics[0]?.message).toBe('Unterminated string literal')
-    expect(stringResult.tokens[0]).toMatchObject({ type: TokenType.String, value: 'unterminated' })
-
-    const numberResult = QueryLexer.tokenize('-abc')
-    expect(numberResult.diagnostics[0]?.message).toBe('Invalid number literal "-"')
-    expect(numberResult.tokens[0]?.type).toBe(TokenType.Unknown)
-  })
-
-  test('reports malformed field paths', () => {
-    const result = QueryLexer.tokenize('owner..name')
-    expect(result.diagnostics.map(diagnostic => diagnostic.message)).toContain('Expected a field name after "."')
+  test('reports unterminated strings and unsupported characters', () => {
+    assertLex('"unterminated', [string('"unterminated', 'unterminated')], [
+      { message: 'Unterminated string literal', raw: '"unterminated' },
+    ])
+    assertLex('score @ 5', [field('score'), unknown('@'), number('5')], [
+      { message: 'Unexpected character "@"', raw: '@' },
+    ])
   })
 
   test('returns an EOF token for empty input', () => {
-    expect(QueryLexer.tokenize('')).toEqual({
-      diagnostics: [],
-      tokens: [{ end: 0, raw: '', start: 0, type: TokenType.EOF, value: null }],
-    })
+    assertLex('', [])
   })
 
-  test('preserves raw source for every non-EOF token', () => {
-    const source = 'score $gte 3 $and title "Hello\\nworld"'
+  test('preserves raw source spans for every token', () => {
+    const source = 'owner.Score >= 5 $and title "$gte $and" $between [1, 3]'
     const result = QueryLexer.tokenize(source)
     for (const token of result.tokens.slice(0, -1)) {
       expect(source.slice(token.start, token.end)).toBe(token.raw)
