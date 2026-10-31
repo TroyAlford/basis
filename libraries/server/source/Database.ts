@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
-import { FieldType, selectSQL } from './EntityDefinitions'
+import { FieldType, selectPlan } from './EntityDefinitions'
 
 /** The pool defaults used by every managed or external connection. */
 const POOL_DEFAULTS = {
@@ -44,6 +44,8 @@ export interface DatabaseOptions {
 export interface QueryOptions {
   /** Root scalar fields to project, in output order. */
   fields: readonly string[],
+  /** Root-field equality values, combined with `AND`. */
+  where?: Readonly<Record<string, unknown>>,
 }
 
 /** A server-owned database capability. */
@@ -145,12 +147,11 @@ class PostgresDatabase implements Database {
     if (this.#closed) throw new Error('Database is closed')
     if (!this.#entities) throw new Error('No entity definitions are configured for this database')
 
-    const definition = this.#entities.entity(entity)
-    if (!definition) throw new Error(`Unknown entity "${entity}"`)
-    const rows = await this.#sql.unsafe<T[]>(selectSQL(this.#entities, entity, options.fields))
+    const plan = selectPlan(this.#entities, entity, options.fields, options.where)
+    const rows = await this.#sql.unsafe<T[]>(plan.sql, [...plan.values])
     const snowflakes = new Set(
-      definition.fields
-        .filter(field => options.fields.includes(field.name) && field.type === FieldType.Snowflake)
+      plan.fields
+        .filter(field => field.type === FieldType.Snowflake)
         .map(field => field.name),
     )
 
