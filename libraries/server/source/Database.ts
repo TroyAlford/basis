@@ -1,10 +1,11 @@
 import { runAsync } from 'basis/configuration'
-import { SQL } from 'bun'
+import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
-import { FieldType, selectPlan } from './EntityDefinitions'
+import { FieldType } from './EntityDefinitions'
+import { SQL } from './SQL'
 
 /** The pool defaults used by every managed or external connection. */
 const POOL_DEFAULTS = {
@@ -59,9 +60,9 @@ export interface Database {
   /** Projects root scalar fields from one canonical entity. */
   query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]>,
   /** The pooled Bun SQL tagged-template API. */
-  readonly sql: SQL,
+  readonly sql: BunSQL,
   /** Runs a callback inside a pooled Bun transaction. */
-  tx<T>(callback: SQL.TransactionContextCallback<T>): Promise<SQL.ContextCallbackResult<T>>,
+  tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>>,
 }
 
 /** A managed container's observed state. */
@@ -86,7 +87,7 @@ class PostgresDatabase implements Database {
   #closed = false
   #closing: Promise<void> | null = null
   #entities: EntityDefinitions | undefined
-  #sql: SQL
+  #sql: BunSQL
 
   /**
    * Creates the pool.
@@ -95,7 +96,7 @@ class PostgresDatabase implements Database {
    */
   constructor(url: string | URL, entities?: EntityDefinitions) {
     this.#entities = entities
-    this.#sql = new SQL({ ...POOL_DEFAULTS, url })
+    this.#sql = new BunSQL({ ...POOL_DEFAULTS, url })
   }
 
   /**
@@ -110,7 +111,7 @@ class PostgresDatabase implements Database {
    * The pooled Bun SQL tagged-template API.
    * @returns The underlying Bun SQL instance.
    */
-  get sql(): SQL {
+  get sql(): BunSQL {
     return this.#sql
   }
 
@@ -147,10 +148,12 @@ class PostgresDatabase implements Database {
     if (this.#closed) throw new Error('Database is closed')
     if (!this.#entities) throw new Error('No entity definitions are configured for this database')
 
-    const plan = selectPlan(this.#entities, entity, options.fields, options.where)
-    const rows = await this.#sql.unsafe<T[]>(plan.sql, [...plan.values])
+    const selection = SQL.select(this.#entities, entity, options.fields)
+    const predicate = SQL.where(this.#entities, entity, options.where)
+    const statement = predicate.sql ? `${selection.sql} ${predicate.sql}` : selection.sql
+    const rows = await this.#sql.unsafe<T[]>(statement, [...predicate.values])
     const snowflakes = new Set(
-      plan.fields
+      selection.fields
         .filter(field => field.type === FieldType.Snowflake)
         .map(field => field.name),
     )
@@ -173,7 +176,7 @@ class PostgresDatabase implements Database {
    * @returns The callback result after commit.
    * @throws {Error} When the pool is closed or the callback fails.
    */
-  tx<T>(callback: SQL.TransactionContextCallback<T>): Promise<SQL.ContextCallbackResult<T>> {
+  tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>> {
     if (this.#closed) return Promise.reject(new Error('Database is closed'))
     return this.#sql.begin(callback)
   }
@@ -195,7 +198,7 @@ export class NullDatabase implements Database {
    * Throws because no database is configured.
    * @throws {Error} Always, naming the missing configuration.
    */
-  get sql(): SQL {
+  get sql(): BunSQL {
     throw new Error('No database is configured for this server')
   }
 
@@ -233,7 +236,7 @@ export class NullDatabase implements Database {
    * @param callback - Transaction-scoped work; unused without a database.
    * @returns A rejected promise naming the missing configuration.
    */
-  tx<T>(callback: SQL.TransactionContextCallback<T>): Promise<SQL.ContextCallbackResult<T>> {
+  tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>> {
     void callback
     return Promise.reject(new Error('No database is configured for this server'))
   }
@@ -294,7 +297,7 @@ class ManagedDatabase implements Database {
    * @returns The connected pool's Bun SQL instance.
    * @throws {Error} Before the managed database is connected or after close.
    */
-  get sql(): SQL {
+  get sql(): BunSQL {
     if (!this.#database) throw new Error('Managed database is not connected')
     return this.#database.sql
   }
@@ -317,7 +320,7 @@ class ManagedDatabase implements Database {
    * @returns The callback result after commit.
    * @throws {Error} When the managed pool is not connected or the callback fails.
    */
-  tx<T>(callback: SQL.TransactionContextCallback<T>): Promise<SQL.ContextCallbackResult<T>> {
+  tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>> {
     if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
     return this.#database.tx(callback)
   }

@@ -117,64 +117,6 @@ export class EntityDefinitions {
 }
 
 /**
- * A validated root projection and its parameter values.
- */
-export interface SelectPlan {
-  /** Selected root field definitions, in output order. */
-  readonly fields: readonly FieldDefinition[],
-  /** Quoted PostgreSQL `SELECT` statement. */
-  readonly sql: string,
-  /** Parameter values for the `$1`, `$2`, … placeholders. */
-  readonly values: readonly unknown[],
-}
-
-/**
- * Build a validated root-field projection and equality predicate for one entity.
- * @param entities - Validated entity definitions.
- * @param entityName - Exact entity name.
- * @param fields - Root scalar fields to project, in output order.
- * @param where - Root-field equality values, combined with `AND`.
- * @returns The SQL statement and parameter values.
- * @throws {Error} When the entity, a selected field, or a predicate field is unknown.
- */
-export function selectPlan(
-  entities: EntityDefinitions,
-  entityName: string,
-  fields: readonly string[],
-  where: Readonly<Record<string, unknown>> = {},
-): SelectPlan {
-  const entity = entities.entity(entityName)
-  if (!entity) throw new Error(`Unknown entity "${entityName}"`)
-  if (fields.length === 0) throw new Error('Query fields must be a non-empty array')
-
-  const definitions = new Map(entity.fields.map(field => [field.name, field]))
-  const selected = fields.map(field => {
-    const definition = definitions.get(field)
-    if (!definition) throw new Error(`Unknown field "${entityName}.${field}"`)
-    return definition
-  })
-
-  if (typeof where !== 'object' || where === null || Array.isArray(where)) {
-    throw new Error('Query where must be a plain object')
-  }
-
-  const values: unknown[] = []
-  const predicates = Object.entries(where).map(([field, value]) => {
-    if (!definitions.has(field)) throw new Error(`Unknown field "${entityName}.${field}"`)
-    if (value === null || value === undefined) {
-      throw new Error(`Query condition "${entityName}.${field}" must not be null or undefined`)
-    }
-    values.push(value)
-    return `${quoteIdentifier(field)} = $${values.length}`
-  })
-
-  const projection = selected.map(field => quoteIdentifier(field.name)).join(', ')
-  const table = quoteIdentifier(entity.name)
-  const predicate = predicates.length > 0 ? ` WHERE ${predicates.join(' AND ')}` : ''
-  return { fields: selected, sql: `SELECT ${projection} FROM ${table}${predicate}`, values }
-}
-
-/**
  * Validate the parsed entity document root.
  * @param value - Parsed JSON value.
  * @returns Validated entities.
