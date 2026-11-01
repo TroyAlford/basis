@@ -550,6 +550,10 @@ describe('Server database lifecycle', () => {
       fields: ['id'],
       where: 'owner = "1"',
     })).rejects.toThrow('entity reference; graph projections are not supported yet')
+    await expect(server.db.query('Article', {
+      fields: ['id'],
+      where: 'ownerId = "1"',
+    })).rejects.toThrow('Unknown field "Article.ownerId"')
 
     await expect(server.db.query('Article', {
       fields: ['id'],

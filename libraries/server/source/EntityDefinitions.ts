@@ -1,10 +1,11 @@
 import type { SQL } from 'bun'
 
 /**
- * Field types supported by the minimal canonical entity definitions.
+ * Logical field kinds supported by the canonical entity definitions.
  *
- * An enum keeps field identity distinct from type-specific hints and leaves
- * room for later non-scalar kinds without changing the field definition shape.
+ * `Entity` is the singular reference kind; every other value is a scalar type.
+ * Keeping both in one field shape lets callers discriminate references without
+ * a parallel relationship registry.
  */
 export enum FieldType {
   /** Boolean value. */
