@@ -559,6 +559,172 @@ describe('Server database lifecycle', () => {
     }
   }, 120_000)
 
+  test('matches string and structured predicates with two-valued null semantics', async () => {
+    const service = `basis-e2e-string-${randomUUID()}`
+    const install = tempDirectory('basis-install-string-')
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { name: 'active', type: 'boolean' },
+          { name: 'externalId', type: 'snowflake' },
+          { name: 'rank', type: 'number' },
+          { name: 'score', type: 'number' },
+          { name: 'title', type: 'string' },
+        ],
+        name: 'QueryRow',
+      }],
+    }))
+
+    try {
+      const server = startWithInstall(new Server().root(install).database({ entities }), install, service)
+      try {
+        await server.ready()
+        // Raw nullable DDL exercises NULL semantics while the canonical entity drives query validation.
+        await server.db.sql`
+          create table "QueryRow" (
+            "id" uuid primary key,
+            "active" boolean,
+            "externalId" bigint,
+            "rank" double precision,
+            "score" double precision,
+            "title" text
+          )
+        `
+        await server.db.sql`
+          insert into "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
+          values
+            (gen_random_uuid(), null, ${'9223372036854775807'}, 1, null, null),
+            (gen_random_uuid(), true, null, 2, 0, ''),
+            (gen_random_uuid(), false, null, 3, 5, '   '),
+            (gen_random_uuid(), true, null, 4, 10, 'alpha'),
+            (gen_random_uuid(), false, ${'9223372036854775807'}, 5, null, 'beta')
+        `
+
+        type Where = Filter | Readonly<Record<string, unknown>> | string
+        const query = (where: Where) => server.db.query<{ rank: number }>('QueryRow', {
+          fields: ['rank'],
+          limit: null,
+          orderBy: 'rank',
+          where,
+        })
+        const same = async (source: string, structured: Where): Promise<void> => {
+          expect(await query(source)).toEqual(await query(structured))
+        }
+
+        expect(await query('')).toEqual([{ rank: 1 }, { rank: 2 }, { rank: 3 }, { rank: 4 }, { rank: 5 }])
+        await same('score >= 5 $and score < 10', {
+          filters: [
+            { field: 'score', operator: Operator.Comparison.GreaterThanOrEqual, value: 5 },
+            { field: 'score', operator: Operator.Comparison.LessThan, value: 10 },
+          ],
+          operator: Operator.Logical.And,
+        })
+        expect(await query('score >= 5 $and score < 10')).toEqual([{ rank: 3 }])
+
+        await same('score != 5', {
+          field: 'score',
+          operator: Operator.Comparison.NotEqual,
+          value: 5,
+        })
+        expect(await query('score != 5')).toEqual([{ rank: 1 }, { rank: 2 }, { rank: 4 }, { rank: 5 }])
+
+        await same('score $between [5, 10]', {
+          field: 'score',
+          operator: Operator.Comparison.Between,
+          values: [5, 10],
+        })
+        expect(await query('score $between [5, 10]')).toEqual([{ rank: 3 }, { rank: 4 }])
+        expect(await query('score $between [5, null]')).toEqual([{ rank: 3 }, { rank: 4 }])
+        expect(await query('score $between [null, 5]')).toEqual([{ rank: 2 }, { rank: 3 }])
+
+        await same('title $empty', {
+          field: 'title',
+          operator: Operator.Comparison.Empty,
+        })
+        expect(await query('title $empty')).toEqual([{ rank: 1 }, { rank: 2 }])
+        await same('title !$empty', {
+          filters: [{
+            field: 'title',
+            operator: Operator.Comparison.Empty,
+          }],
+          operator: Operator.Logical.Not,
+        })
+        expect(await query('title !$empty')).toEqual([{ rank: 3 }, { rank: 4 }, { rank: 5 }])
+
+        await same('score = 5 $or score = 10', {
+          filters: [
+            { field: 'score', operator: Operator.Comparison.Equal, value: 5 },
+            { field: 'score', operator: Operator.Comparison.Equal, value: 10 },
+          ],
+          operator: Operator.Logical.Or,
+        })
+        await same('$not (score = 5 $or score = 10)', {
+          filters: [{
+            filters: [
+              { field: 'score', operator: Operator.Comparison.Equal, value: 5 },
+              { field: 'score', operator: Operator.Comparison.Equal, value: 10 },
+            ],
+            operator: Operator.Logical.Or,
+          }],
+          operator: Operator.Logical.Not,
+        })
+        expect(await query('$not (score = 5 $or score = 10)'))
+          .toEqual([{ rank: 1 }, { rank: 2 }, { rank: 5 }])
+        await same('$not score > 5', {
+          filters: [{
+            field: 'score',
+            operator: Operator.Comparison.GreaterThan,
+            value: 5,
+          }],
+          operator: Operator.Logical.Not,
+        })
+        expect(await query('$not score > 5')).toEqual([{ rank: 1 }, { rank: 2 }, { rank: 3 }, { rank: 5 }])
+
+        expect(await query('$not (score = 5 $or score = 10)'))
+          .toEqual(await query('score != 5 $and score != 10'))
+        expect(await query('$not (score = 5 $and title = "   ")'))
+          .toEqual(await query('score != 5 $or title != "   "'))
+
+        await same('score = null', { score: null })
+        expect(await query('score = null')).toEqual([{ rank: 1 }, { rank: 5 }])
+        await same('score != null', {
+          field: 'score',
+          operator: Operator.Comparison.NotEqual,
+          value: null,
+        })
+        expect(await query('score != null')).toEqual([{ rank: 2 }, { rank: 3 }, { rank: 4 }])
+
+        await same('externalId = 9223372036854775807', {
+          field: 'externalId',
+          operator: Operator.Comparison.Equal,
+          value: '9223372036854775807',
+        })
+        expect(await query('externalId = 9223372036854775807')).toEqual([{ rank: 1 }, { rank: 5 }])
+        await same('externalId $between [9223372036854775807, null]', {
+          field: 'externalId',
+          operator: Operator.Comparison.Between,
+          values: ['9223372036854775807', null],
+        })
+        expect(await query('externalId $between [9223372036854775807, null]'))
+          .toEqual([{ rank: 1 }, { rank: 5 }])
+
+        await expect(server.db.query('QueryRow', {
+          fields: ['rank'],
+          where: 'missing = 1',
+        })).rejects.toThrow('Unknown field "QueryRow.missing"')
+        await expect(server.db.query('QueryRow', {
+          fields: ['rank'],
+          where: 'title = "unterminated',
+        })).rejects.toThrow('Invalid where query at 8: Unterminated string literal')
+      } finally {
+        await server.shutdown()
+      }
+    } finally {
+      removeService(install)
+    }
+  }, 120_000)
+
   test('reports unhealthy when an external PostgreSQL connection fails', async () => {
     const server = start(new Server().database({
       url: 'postgres://basis:basis@127.0.0.1:1/basis',

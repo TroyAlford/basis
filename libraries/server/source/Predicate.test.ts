@@ -164,10 +164,113 @@ describe('Predicate.normalize', () => {
     )
   })
 
+  test('normalizes NotEqual into Not(Equal)', () => {
+    expect(normalize({ field: 'score', operator: Operator.Comparison.NotEqual, value: 5 })).toEqual({
+      filters: [{ field: 'score', operator: Operator.Comparison.Equal, value: 5 }],
+      operator: Operator.Logical.Not,
+    })
+    expect(normalize({ field: 'score', operator: Operator.Comparison.NotEqual, value: null })).toEqual({
+      filters: [{ field: 'score', operator: Operator.Comparison.Equal, value: null }],
+      operator: Operator.Logical.Not,
+    })
+  })
+
+  test('normalizes Between into an inclusive And range', () => {
+    expect(normalize({
+      field: 'score',
+      operator: Operator.Comparison.Between,
+      values: [3, 6],
+    })).toEqual({
+      filters: [
+        { field: 'score', operator: Operator.Comparison.GreaterThanOrEqual, value: 3 },
+        { field: 'score', operator: Operator.Comparison.LessThanOrEqual, value: 6 },
+      ],
+      operator: Operator.Logical.And,
+    })
+    expect(normalize({
+      field: 'score',
+      operator: Operator.Comparison.Between,
+      values: [3, null],
+    })).toEqual({
+      field: 'score',
+      operator: Operator.Comparison.GreaterThanOrEqual,
+      value: 3,
+    })
+    expect(normalize({
+      field: 'score',
+      operator: Operator.Comparison.Between,
+      values: [null, 6],
+    })).toEqual({
+      field: 'score',
+      operator: Operator.Comparison.LessThanOrEqual,
+      value: 6,
+    })
+    expect(() => normalize({
+      field: 'score',
+      operator: Operator.Comparison.Between,
+      values: [null, null],
+    })).toThrow('Between requires at least one non-null bound')
+    expect(() => normalize({
+      field: 'score',
+      operator: Operator.Comparison.Between,
+      values: [1],
+    })).toThrow('exactly two values')
+  })
+
+  test('normalizes Empty for string fields', () => {
+    expect(normalize({ field: 'title', operator: Operator.Comparison.Empty })).toEqual({
+      filters: [
+        { field: 'title', operator: Operator.Comparison.Equal, value: null },
+        { field: 'title', operator: Operator.Comparison.Equal, value: '' },
+      ],
+      operator: Operator.Logical.Or,
+    })
+    expect(() => normalize({ field: 'score', operator: Operator.Comparison.Empty }))
+      .toThrow('Query operator "$empty" is not valid for field "Note.score"')
+  })
+
+  test('normalizes Or and unary Not', () => {
+    expect(normalize({
+      filters: [
+        { field: 'score', operator: Operator.Comparison.NotEqual, value: 5 },
+        { field: 'title', operator: Operator.Comparison.Empty },
+      ],
+      operator: Operator.Logical.Or,
+    })).toEqual({
+      filters: [
+        {
+          filters: [{ field: 'score', operator: Operator.Comparison.Equal, value: 5 }],
+          operator: Operator.Logical.Not,
+        },
+        {
+          filters: [
+            { field: 'title', operator: Operator.Comparison.Equal, value: null },
+            { field: 'title', operator: Operator.Comparison.Equal, value: '' },
+          ],
+          operator: Operator.Logical.Or,
+        },
+      ],
+      operator: Operator.Logical.Or,
+    })
+    expect(normalize({
+      filters: [{ field: 'score', operator: Operator.Comparison.Equal, value: 5 }],
+      operator: Operator.Logical.Not,
+    })).toEqual({
+      filters: [{ field: 'score', operator: Operator.Comparison.Equal, value: 5 }],
+      operator: Operator.Logical.Not,
+    })
+    expect(() => normalize({ filters: [], operator: Operator.Logical.Not }))
+      .toThrow('requires exactly one filter')
+    expect(() => normalize({
+      filters: [{ score: 1 }, { score: 2 }],
+      operator: Operator.Logical.Not,
+    })).toThrow('requires exactly one filter')
+  })
+
   test('rejects unknown fields and operators', () => {
     expect(() => normalize({ missing: 1 })).toThrow('Unknown field "Note.missing"')
-    expect(() => normalize({ field: 'score', operator: '$between', value: 1 }))
-      .toThrow('Query operator "$between" is not supported')
+    expect(() => normalize({ field: 'score', operator: '$xor', value: 1 }))
+      .toThrow('Query operator "$xor" is not supported')
   })
 
   test('rejects malformed explicit nodes', () => {
@@ -177,7 +280,14 @@ describe('Predicate.normalize', () => {
       .toThrow('requires exactly operator, field, value')
     expect(() => normalize({ filters: [], operator: Operator.Logical.And }))
       .toThrow('requires a non-empty filters array')
+    expect(() => normalize({ filters: [], operator: Operator.Logical.Or }))
+      .toThrow('requires a non-empty filters array')
     expect(() => normalize({ filters: [{}], operator: Operator.Logical.And }))
       .toThrow('filters must be non-empty objects')
+    expect(() => normalize({
+      field: 'title',
+      operator: Operator.Comparison.Empty,
+      value: 'ignored',
+    })).toThrow('requires exactly operator, field')
   })
 })

@@ -98,6 +98,8 @@ interface ComparisonDefinition {
 interface LogicalDefinition {
   /** Build a parenthesized logical group. */
   readonly build: (children: readonly string[]) => string,
+  /** Maximum number of child predicates, when fixed. */
+  readonly maximumOperands?: number,
   /** Minimum number of child predicates. */
   readonly minimumOperands: number,
 }
@@ -123,7 +125,7 @@ const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>
     allowedFieldTypes: ALL_FIELD_TYPES,
     build: (column, operand, bind) => (operand === null
       ? `${column} IS NULL`
-      : `${column} = ${bind(operand)}`),
+      : `${column} IS NOT DISTINCT FROM ${bind(operand)}`),
     validateOperand: scalarValidator(true),
   }],
   [Operator.Comparison.GreaterThan, rangeDefinition('>', RANGE_FIELD_TYPES)],
@@ -136,6 +138,15 @@ const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>
 const logicalDefinitions = new Map<Operator.Logical, LogicalDefinition>([
   [Operator.Logical.And, {
     build: children => `(${children.join(' AND ')})`,
+    minimumOperands: 1,
+  }],
+  [Operator.Logical.Not, {
+    build: children => `(NOT (${children[0]}))`,
+    maximumOperands: 1,
+    minimumOperands: 1,
+  }],
+  [Operator.Logical.Or, {
+    build: children => `(${children.join(' OR ')})`,
     minimumOperands: 1,
   }],
 ])
@@ -186,6 +197,11 @@ function whereClause(
         `Query operator "${logicalFilter.operator}" requires at least ${logical.minimumOperands} operand(s)`,
       )
     }
+    if (logical.maximumOperands !== undefined && logicalFilter.filters.length > logical.maximumOperands) {
+      throw new Error(
+        `Query operator "${logicalFilter.operator}" requires at most ${logical.maximumOperands} operand(s)`,
+      )
+    }
     return logical.build(logicalFilter.filters.map(compile))
   }
 
@@ -206,7 +222,7 @@ function rangeDefinition(
     allowedFieldTypes,
     build: (column, operand, bind) => {
       if (operand === null) throw new Error(`Query operator "${operator}" requires a non-null value`)
-      return `${column} ${operator} ${bind(operand)}`
+      return `COALESCE(${column} ${operator} ${bind(operand)}, FALSE)`
     },
     validateOperand: scalarValidator(false),
   }
