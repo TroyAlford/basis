@@ -1,10 +1,11 @@
 import { run, runAsync } from 'basis/configuration'
 import { Logger } from 'basis/logger'
 import { tempDirectory } from 'basis/testing'
-import { afterAll, describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { accountDefinition, containers, noteDefinition, numberRowDefinition, removeService, useDatabaseFixture } from '../testing/DatabaseFixture'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
@@ -25,26 +26,6 @@ interface InspectMount {
   Destination: string,
   /** Host source path. */
   Source: string,
-}
-
-/**
- * Find the containers owned by a managed application root.
- * @param install - The application root used in the ownership label.
- * @returns The container ids.
- */
-function containers(install: string): readonly string[] {
-  return run`docker ps -aq --filter ${`label=basis.install=${install}`}`.lines
-}
-
-/**
- * Remove the containers and durable volume for a managed application root.
- * @param install - The application root used in the ownership label.
- */
-function removeService(install: string): void {
-  for (const id of containers(install)) void run`docker rm -f ${id}`
-  for (const volume of run`docker volume ls -q --filter ${`label=basis.install=${install}`}`.lines) {
-    void run`docker volume rm -f ${volume}`
-  }
 }
 
 /**
@@ -130,109 +111,7 @@ async function credentials(id: string): Promise<CredentialInspection> {
   return { directoryMode, mode, password, raw, source: mount.Source }
 }
 
-/*
- * Ordinary database behavior shares one server and managed PostgreSQL service
- * for this file, matching Basis's run-scoped E2E ownership. Direct `server.db`
- * assertions need the in-process server, so this fixture applies the same
- * one-boot-per-run ownership without a child application handle. Lifecycle
- * tests intentionally opt out and create dedicated installations.
- */
-const noteDefinition = {
-  fields: [
-    { name: 'id', primaryKey: true, type: 'uuid' },
-    { name: 'title', type: 'string' },
-    { name: 'active', type: 'boolean' },
-    { name: 'score', type: 'number' },
-    { name: 'dueOn', type: 'date' },
-    { name: 'createdAt', type: 'timestamp' },
-  ],
-  name: 'Note',
-}
-const accountDefinition = {
-  fields: [
-    { name: 'id', primaryKey: true, type: 'snowflake' },
-    { name: 'name', type: 'string' },
-  ],
-  name: 'Account',
-}
-const numberRowDefinition = {
-  fields: [
-    { name: 'id', primaryKey: true, type: 'uuid' },
-    { name: 'value', type: 'number' },
-  ],
-  name: 'NumberRow',
-}
-const queryRowDefinition = {
-  fields: [
-    { name: 'id', primaryKey: true, type: 'uuid' },
-    { name: 'active', type: 'boolean' },
-    { name: 'externalId', type: 'snowflake' },
-    { name: 'rank', type: 'number' },
-    { name: 'score', type: 'number' },
-    { name: 'title', type: 'string' },
-  ],
-  name: 'QueryRow',
-}
-const sharedEntities = EntityDefinitions.load(JSON.stringify({
-  entities: [noteDefinition, accountDefinition, numberRowDefinition, queryRowDefinition],
-}))
-
-/** The shared ordinary-database fixture. */
-interface SharedDatabaseFixture {
-  /** Installation whose managed service is shared. */
-  readonly install: string,
-  /** Started server owning the shared managed service. */
-  readonly server: Server,
-}
-
-let sharedFixture: Promise<SharedDatabaseFixture> | undefined
-let fixtureStarts = 0
-let fixtureStops = 0
-let fixtureUses = 0
-
-/**
- * Start the shared ordinary-database server and managed PostgreSQL service.
- * @returns The running shared fixture.
- */
-async function startSharedDatabase(): Promise<SharedDatabaseFixture> {
-  const service = `basis-e2e-shared-${randomUUID()}`
-  const install = tempDirectory('basis-install-shared-')
-  const server = startWithInstall(new Server().root(install).database({ entities: sharedEntities }), install, service)
-  try {
-    await server.ready()
-    return { install, server }
-  } catch (error) {
-    await server.shutdown()
-    removeService(install)
-    throw error
-  }
-}
-
-/**
- * Acquire the file-scoped ordinary database fixture.
- * @returns The shared fixture, booted once for all ordinary database tests.
- */
-async function sharedDatabase(): Promise<SharedDatabaseFixture> {
-  fixtureUses += 1
-  if (!sharedFixture) {
-    fixtureStarts += 1
-    sharedFixture = startSharedDatabase()
-  }
-  return await sharedFixture
-}
-
 describe('Server database lifecycle', () => {
-  afterAll(async () => {
-    if (!sharedFixture) return
-    const fixture = await sharedFixture.catch(() => undefined)
-    if (!fixture) return
-    await fixture.server.shutdown()
-    removeService(fixture.install)
-    fixtureStops += 1
-    expect(fixtureStarts).toBe(1)
-    expect(fixtureStops).toBe(1)
-  })
-
   test('supports independent installs, durable restart, and same-install reconnection', async () => {
     const service = `basis-e2e-${randomUUID()}`
     const installA = tempDirectory('basis-checkout-a-')
@@ -322,7 +201,7 @@ describe('Server database lifecycle', () => {
   }, 180_000)
 
   test('exposes Bun SQL parameterization and error semantics', async () => {
-    const { server } = await sharedDatabase()
+    const { server } = await useDatabaseFixture('sql')
     const injected = "Robert'); drop table users; --"
     const rows = await server.db.sql<{ text: string, value: number }[]>`
       select ${injected} as text, ${7} as value
@@ -336,7 +215,7 @@ describe('Server database lifecycle', () => {
   }, 120_000)
 
   test('commits and rolls back through pooled Bun transactions', async () => {
-    const { server } = await sharedDatabase()
+    const { server } = await useDatabaseFixture('transactions')
     await server.db.sql`drop table if exists tx_probe`
     await server.db.sql`create table tx_probe (value text)`
 
@@ -371,7 +250,7 @@ describe('Server database lifecycle', () => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [noteDefinition, accountDefinition],
     }))
-    const { server } = await sharedDatabase()
+    const { server } = await useDatabaseFixture('schema')
     await server.db.sql`drop table if exists "Note", "Account"`
     await entities.createTables(server.db.sql)
 
@@ -555,7 +434,7 @@ describe('Server database lifecycle', () => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [numberRowDefinition],
     }))
-    const { server } = await sharedDatabase()
+    const { server } = await useDatabaseFixture('numeric')
     await server.db.sql`drop table if exists "NumberRow"`
     await entities.createTables(server.db.sql)
     await server.db.sql`
@@ -592,7 +471,7 @@ describe('Server database lifecycle', () => {
   }, 120_000)
 
   test('matches string and structured predicates with two-valued null semantics', async () => {
-    const { server } = await sharedDatabase()
+    const { server } = await useDatabaseFixture('string')
     await server.db.sql`drop table if exists "QueryRow"`
     // Raw nullable DDL exercises NULL semantics while the canonical entity drives query validation.
     await server.db.sql`
@@ -732,14 +611,6 @@ describe('Server database lifecycle', () => {
       where: 'title = "unterminated',
     })).rejects.toThrow('Invalid where query at 8: Unterminated string literal')
   }, 120_000)
-
-  test('reuses one managed database for ordinary query suites', async () => {
-    const { server } = await sharedDatabase()
-    expect(server.db.closed).toBe(false)
-    expect(fixtureStarts).toBe(1)
-    expect(fixtureUses).toBeGreaterThanOrEqual(6)
-    expect(fixtureStops).toBe(0)
-  }, 30_000)
 
   test('reports unhealthy when an external PostgreSQL connection fails', async () => {
     const server = start(new Server().database({
