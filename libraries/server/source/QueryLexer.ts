@@ -1,3 +1,4 @@
+import { match } from '../../utilities'
 import { Operator as QueryOperator } from './Operator'
 
 /** The kind of one query-language token. */
@@ -125,15 +126,12 @@ export const QueryLexer = {
       }
 
       if ('[](),'.includes(character)) {
-        const type = character === '['
-          ? TokenType.LeftBracket
-          : character === ']'
-            ? TokenType.RightBracket
-            : character === '('
-              ? TokenType.LeftParen
-              : character === ')'
-                ? TokenType.RightParen
-                : TokenType.Comma
+        const type = match(character)
+          .when('[').then(TokenType.LeftBracket)
+          .when(']').then(TokenType.RightBracket)
+          .when('(').then(TokenType.LeftParen)
+          .when(')').then(TokenType.RightParen)
+          .else(TokenType.Comma)
         tokens.push({
           end: index + 1,
           raw: character,
