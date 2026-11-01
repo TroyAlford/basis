@@ -1,169 +1,150 @@
 import { describe, expect, test } from 'bun:test'
 import { Operator } from './Operator'
 import { TokenType } from './QueryLexer'
+import type { QueryExpression, QueryLiteral } from './QueryParser'
 import { QueryParser } from './QueryParser'
 
+const number = (raw: string): QueryLiteral => ({ kind: 'number', raw, value: raw })
+const string = (raw: string, value: string): QueryLiteral => ({ kind: 'string', raw, value })
+const boolean = (raw: string, value: boolean): QueryLiteral => ({ kind: 'boolean', raw, value })
+const nullLiteral = (raw = 'null'): QueryLiteral => ({ kind: 'null', raw, value: null })
+
+const comparison = (
+  field: string,
+  operator: Operator.Comparison,
+  values: readonly QueryLiteral[],
+): QueryExpression => ({ field, kind: 'comparison', operator, values })
+
+const logical = (
+  operator: Operator.Logical,
+  filters: readonly QueryExpression[],
+): QueryExpression => ({ filters, kind: 'logical', operator })
+
 describe('QueryParser', () => {
-  test('parses comparison aliases into the same canonical filter', () => {
-    expect(QueryParser.parse('score >= 5').filter).toEqual({
-      field: 'score',
-      operator: Operator.Comparison.GreaterThanOrEqual,
-      value: 5n,
-    })
-    expect(QueryParser.parse('score $gte 5').filter).toEqual(QueryParser.parse('score >= 5').filter)
-    expect(QueryParser.parse('title = "Hello"').filter).toEqual({
-      field: 'title',
-      operator: Operator.Comparison.Equal,
-      value: 'Hello',
-    })
+  test('parses comparison aliases into the same transient syntax', () => {
+    expect(QueryParser.parse('score >= 5').expression)
+      .toEqual(comparison('score', Operator.Comparison.GreaterThanOrEqual, [number('5')]))
+    expect(QueryParser.parse('score $gte 5').expression)
+      .toEqual(QueryParser.parse('score >= 5').expression)
+    expect(QueryParser.parse('title = "Hello"').expression)
+      .toEqual(comparison('title', Operator.Comparison.Equal, [string('"Hello"', 'Hello')]))
   })
 
-  test('expands NotEqual into Not(Equal)', () => {
-    const expected = {
-      filters: [{ field: 'score', operator: Operator.Comparison.Equal, value: 5n }],
-      operator: Operator.Logical.Not,
-    }
-    expect(QueryParser.parse('score $ne 5').filter).toEqual(expected)
-    expect(QueryParser.parse('score != 5').filter).toEqual(expected)
-    expect(QueryParser.parse('score <> 5').filter).toEqual(expected)
+  test('preserves source comparison operators without executing them', () => {
+    const expected = comparison('score', Operator.Comparison.NotEqual, [number('5')])
+    expect(QueryParser.parse('score $ne 5').expression).toEqual(expected)
+    expect(QueryParser.parse('score != 5').expression).toEqual(expected)
+    expect(QueryParser.parse('score <> 5').expression).toEqual(expected)
+
+    expect(QueryParser.parse('score $between [1, 5]').expression).toEqual(
+      comparison('score', Operator.Comparison.Between, [number('1'), number('5')]),
+    )
+    expect(QueryParser.parse('score $between [1, null]').expression).toEqual(
+      comparison('score', Operator.Comparison.Between, [number('1'), nullLiteral()]),
+    )
+    expect(QueryParser.parse('score $between [null, 5]').expression).toEqual(
+      comparison('score', Operator.Comparison.Between, [nullLiteral(), number('5')]),
+    )
+    expect(QueryParser.parse('title $empty').expression)
+      .toEqual(comparison('title', Operator.Comparison.Empty, []))
   })
 
-  test('expands Between into an inclusive And range', () => {
-    expect(QueryParser.parse('score $between [1, 5]').filter).toEqual({
-      filters: [
-        { field: 'score', operator: Operator.Comparison.GreaterThanOrEqual, value: 1n },
-        { field: 'score', operator: Operator.Comparison.LessThanOrEqual, value: 5n },
-      ],
-      operator: Operator.Logical.And,
-    })
-    expect(QueryParser.parse('score $between [1, null]').filter).toEqual({
-      field: 'score',
-      operator: Operator.Comparison.GreaterThanOrEqual,
-      value: 1n,
-    })
-    expect(QueryParser.parse('score $between [null, 5]').filter).toEqual({
-      field: 'score',
-      operator: Operator.Comparison.LessThanOrEqual,
-      value: 5n,
-    })
-  })
-
-  test('expands Empty and supports postfix and prefix Not', () => {
-    const empty = {
-      filters: [
-        { field: 'title', operator: Operator.Comparison.Equal, value: null },
-        { field: 'title', operator: Operator.Comparison.Equal, value: '' },
-      ],
-      operator: Operator.Logical.Or,
-    }
-    expect(QueryParser.parse('title $empty').filter).toEqual(empty)
-    expect(QueryParser.parse('title !$empty').filter).toEqual({
-      filters: [empty],
-      operator: Operator.Logical.Not,
-    })
-    expect(QueryParser.parse('title $not $empty').filter).toEqual(QueryParser.parse('title !$empty').filter)
-    expect(QueryParser.parse('$not score > 5').filter).toEqual({
-      filters: [{ field: 'score', operator: Operator.Comparison.GreaterThan, value: 5n }],
-      operator: Operator.Logical.Not,
-    })
+  test('supports postfix and prefix Not', () => {
+    const empty = comparison('title', Operator.Comparison.Empty, [])
+    expect(QueryParser.parse('title !$empty').expression)
+      .toEqual(logical(Operator.Logical.Not, [empty]))
+    expect(QueryParser.parse('title $not $empty').expression)
+      .toEqual(QueryParser.parse('title !$empty').expression)
+    expect(QueryParser.parse('$not score > 5').expression).toEqual(logical(Operator.Logical.Not, [
+      comparison('score', Operator.Comparison.GreaterThan, [number('5')]),
+    ]))
   })
 
   test('combines And and Or expressions with conventional precedence', () => {
-    expect(QueryParser.parse('score > 1 $and score < 5').filter).toEqual({
-      filters: [
-        { field: 'score', operator: Operator.Comparison.GreaterThan, value: 1n },
-        { field: 'score', operator: Operator.Comparison.LessThan, value: 5n },
+    expect(QueryParser.parse('score > 1 $and score < 5').expression).toEqual(logical(
+      Operator.Logical.And,
+      [
+        comparison('score', Operator.Comparison.GreaterThan, [number('1')]),
+        comparison('score', Operator.Comparison.LessThan, [number('5')]),
       ],
-      operator: Operator.Logical.And,
-    })
-    expect(QueryParser.parse('score = 1 $or score = 2 $and active = true').filter).toEqual({
-      filters: [
-        { field: 'score', operator: Operator.Comparison.Equal, value: 1n },
-        {
-          filters: [
-            { field: 'score', operator: Operator.Comparison.Equal, value: 2n },
-            { field: 'active', operator: Operator.Comparison.Equal, value: true },
-          ],
-          operator: Operator.Logical.And,
-        },
-      ],
-      operator: Operator.Logical.Or,
-    })
+    ))
+    expect(QueryParser.parse('score = 1 $or score = 2 $and active = true').expression).toEqual(
+      logical(Operator.Logical.Or, [
+        comparison('score', Operator.Comparison.Equal, [number('1')]),
+        logical(Operator.Logical.And, [
+          comparison('score', Operator.Comparison.Equal, [number('2')]),
+          comparison('active', Operator.Comparison.Equal, [boolean('true', true)]),
+        ]),
+      ]),
+    )
   })
 
   test('honors grouping parentheses around And and Or expressions', () => {
-    expect(QueryParser.parse('(score = 1 $or score = 2) $and active = true').filter).toEqual({
-      filters: [
-        {
-          filters: [
-            { field: 'score', operator: Operator.Comparison.Equal, value: 1n },
-            { field: 'score', operator: Operator.Comparison.Equal, value: 2n },
-          ],
-          operator: Operator.Logical.Or,
-        },
-        { field: 'active', operator: Operator.Comparison.Equal, value: true },
-      ],
-      operator: Operator.Logical.And,
-    })
-    expect(QueryParser.parse('$not (score = 1 $or score = 2)').filter).toEqual({
-      filters: [{
-        filters: [
-          { field: 'score', operator: Operator.Comparison.Equal, value: 1n },
-          { field: 'score', operator: Operator.Comparison.Equal, value: 2n },
-        ],
-        operator: Operator.Logical.Or,
-      }],
-      operator: Operator.Logical.Not,
-    })
+    expect(QueryParser.parse('(score = 1 $or score = 2) $and active = true').expression).toEqual(
+      logical(Operator.Logical.And, [
+        logical(Operator.Logical.Or, [
+          comparison('score', Operator.Comparison.Equal, [number('1')]),
+          comparison('score', Operator.Comparison.Equal, [number('2')]),
+        ]),
+        comparison('active', Operator.Comparison.Equal, [boolean('true', true)]),
+      ]),
+    )
+    expect(QueryParser.parse('$not (score = 1 $or score = 2)').expression).toEqual(
+      logical(Operator.Logical.Not, [
+        logical(Operator.Logical.Or, [
+          comparison('score', Operator.Comparison.Equal, [number('1')]),
+          comparison('score', Operator.Comparison.Equal, [number('2')]),
+        ]),
+      ]),
+    )
   })
 
-  test('preserves literal kinds, exact integers, dotted fields, and escapes', () => {
+  test('preserves literal kind, raw spelling, and dotted field names', () => {
     const source = 'owner.Score = "x\\ny" $and active = false $and missing = null ' +
       '$and max = 9223372036854775807 $and ratio = 1.5 $and quoted = "5"'
-    expect(QueryParser.parse(source).filter)
-      .toEqual({
-        filters: [
-          { field: 'owner.Score', operator: Operator.Comparison.Equal, value: 'x\ny' },
-          { field: 'active', operator: Operator.Comparison.Equal, value: false },
-          { field: 'missing', operator: Operator.Comparison.Equal, value: null },
-          { field: 'max', operator: Operator.Comparison.Equal, value: 9223372036854775807n },
-          { field: 'ratio', operator: Operator.Comparison.Equal, value: 1.5 },
-          { field: 'quoted', operator: Operator.Comparison.Equal, value: '5' },
-        ],
-        operator: Operator.Logical.And,
-      })
+    expect(QueryParser.parse(source).expression)
+      .toEqual(logical(Operator.Logical.And, [
+        comparison('owner.Score', Operator.Comparison.Equal, [string('"x\\ny"', 'x\ny')]),
+        comparison('active', Operator.Comparison.Equal, [boolean('false', false)]),
+        comparison('missing', Operator.Comparison.Equal, [nullLiteral()]),
+        comparison('max', Operator.Comparison.Equal, [number('9223372036854775807')]),
+        comparison('ratio', Operator.Comparison.Equal, [number('1.5')]),
+        comparison('quoted', Operator.Comparison.Equal, [string('"5"', '5')]),
+      ]))
+  })
+
+  test('does not coerce numeric spellings or reject lexically valid numbers', () => {
+    expect(QueryParser.parse('score = 1e999').expression).toEqual(
+      comparison('score', Operator.Comparison.Equal, [number('1e999')]),
+    )
   })
 
   test('returns useful diagnostics for incomplete input', () => {
     expect(QueryParser.parse('score >')).toMatchObject({
       diagnostics: [{ end: 7, message: 'Expected a literal value', start: 7 }],
-      filter: null,
+      expression: null,
     })
     expect(QueryParser.parse('score')).toMatchObject({
       diagnostics: [{ end: 5, message: 'Expected an operator after field', start: 5 }],
-      filter: null,
+      expression: null,
     })
     expect(QueryParser.parse('score > 5 $and')).toMatchObject({
       diagnostics: [{ end: 14, message: 'Expected a field name', start: 14 }],
-      filter: null,
+      expression: null,
     })
     expect(QueryParser.parse('score $between [1, 5')).toMatchObject({
       diagnostics: [{ end: 20, message: 'Expected "]" after range bounds', start: 20 }],
-      filter: null,
+      expression: null,
     })
     expect(QueryParser.parse('(score = 1')).toMatchObject({
       diagnostics: [{ end: 10, message: 'Expected ")" after grouped expression', start: 10 }],
-      filter: null,
-    })
-    expect(QueryParser.parse('score = 1e999')).toMatchObject({
-      diagnostics: [{ end: 13, message: 'Number literal is out of range', start: 8 }],
-      filter: null,
+      expression: null,
     })
   })
 
-  test('does not expose a filter when lexing reports an error', () => {
+  test('does not expose an expression when lexing reports an error', () => {
     const result = QueryParser.parse('title = "unterminated')
-    expect(result.filter).toBeNull()
+    expect(result.expression).toBeNull()
     expect(result.diagnostics).toContainEqual({
       end: 21,
       message: 'Unterminated string literal',
@@ -173,7 +154,7 @@ describe('QueryParser', () => {
 
   test('propagates lexer diagnostics and rejects incomplete expressions', () => {
     const result = QueryParser.parse('score @ 5')
-    expect(result.filter).toBeNull()
+    expect(result.expression).toBeNull()
     expect(result.diagnostics).toEqual([
       { end: 7, message: 'Unexpected character "@"', start: 6 },
       { end: 7, message: 'Expected an operator after field', start: 6 },
@@ -181,7 +162,7 @@ describe('QueryParser', () => {
   })
 
   test('rejects both-null Between bounds', () => {
-    expect(QueryParser.parse('score $between [null, null]').filter).toBeNull()
+    expect(QueryParser.parse('score $between [null, null]').expression).toBeNull()
     expect(QueryParser.parse('score $between [null, null]').diagnostics[0]?.message)
       .toBe('Between requires at least one non-null bound')
   })
@@ -189,7 +170,7 @@ describe('QueryParser', () => {
   test('returns null for empty input', () => {
     expect(QueryParser.parse('')).toEqual({
       diagnostics: [],
-      filter: null,
+      expression: null,
       tokens: [{
         end: 0,
         raw: '',

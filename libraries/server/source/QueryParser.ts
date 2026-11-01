@@ -1,41 +1,88 @@
 import { Operator } from './Operator'
-import type { ComparisonFilter, Filter } from './Predicate'
-import { Predicate } from './Predicate'
 import type { QueryDiagnostic, Token } from './QueryLexer'
 import { QueryLexer, TokenType } from './QueryLexer'
+
+/** Literal categories retained from source syntax. */
+export type QueryLiteralKind = 'boolean' | 'null' | 'number' | 'string'
+
+/**
+ * A transient syntax literal.
+ *
+ * Numbers retain their exact source spelling; canonical typed values are built
+ * later at the field-aware normalization boundary.
+ */
+export interface QueryLiteral {
+  /** Literal category. */
+  readonly kind: QueryLiteralKind,
+  /** Exact source spelling. */
+  readonly raw: string,
+  /** Decoded string or boolean, null for null, and raw spelling for numbers. */
+  readonly value: string | boolean | null,
+}
+
+/** A transient field comparison expression. */
+export interface QueryComparison {
+  /** Root entity field name. */
+  readonly field: string,
+  /** Syntax node discriminator. */
+  readonly kind: 'comparison',
+  /** Comparison operator identity. */
+  readonly operator: Operator.Comparison,
+  /**
+   * Source argument literals in order.
+   *
+   * Comparisons have one value, `Between` has exactly two bounds, and `Empty`
+   * has none.
+   */
+  readonly values: readonly QueryLiteral[],
+}
+
+/** A transient logical expression. */
+export interface QueryLogical {
+  /** Child expressions. */
+  readonly filters: readonly QueryExpression[],
+  /** Syntax node discriminator. */
+  readonly kind: 'logical',
+  /** Logical operator identity. */
+  readonly operator: Operator.Logical,
+}
+
+/** A non-executable query syntax expression. */
+export type QueryExpression = QueryComparison | QueryLogical
 
 /** A parsed query expression and its diagnostics. */
 export interface QueryParseResult {
   /** Lexer and parser diagnostics in source order. */
   readonly diagnostics: readonly QueryDiagnostic[],
-  /** The normalized filter tree, or null when parsing failed or input was empty. */
-  readonly filter: Filter | null,
+  /** The transient syntax tree, or null for empty, failed, or incomplete input. */
+  readonly expression: QueryExpression | null,
   /** Lexer tokens consumed by the parser. */
   readonly tokens: readonly Token[],
 }
 
 /**
- * Parse a string query expression into the canonical filter tree.
+ * Parse a string query expression into a transient syntax tree.
  *
- * Parsing is deliberately separate from entity validation and SQL execution.
- * Invalid or incomplete input returns diagnostics instead of throwing.
+ * Parsing is deliberately separate from entity validation, literal typing, and
+ * SQL execution. Any lexer or parser diagnostic suppresses the expression while
+ * retaining diagnostics and tokens for editor highlighting.
  */
 export const QueryParser = {
   /**
    * Parse query source.
    * @param source - Query expression source.
-   * @returns The normalized filter and all diagnostics.
+   * @returns The syntax expression and all diagnostics.
    */
   parse(source: string): QueryParseResult {
     const lexed = QueryLexer.tokenize(source)
     const parser = new Parser(lexed.tokens, lexed.diagnostics)
-    const filter = parser.parse()
+    const expression = parser.parse()
     const diagnostics = [...parser.diagnostics].sort((left, right) => (
       left.start - right.start || left.end - right.end
     ))
     return {
       diagnostics,
-      filter: diagnostics.length === 0 ? filter : null,
+      expression: diagnostics.length === 0 ? expression : null,
       tokens: lexed.tokens,
     }
   },
@@ -60,25 +107,25 @@ class Parser {
 
   /**
    * Parse the complete expression.
-   * @returns The normalized filter, or null on failure/empty input.
+   * @returns The syntax expression, or null on failure/empty input.
    */
-  parse(): Filter | null {
+  parse(): QueryExpression | null {
     if (this.#peek().type === TokenType.EOF) return null
-    const filter = this.#parseOr()
-    if (!filter) return null
+    const expression = this.#parseOr()
+    if (!expression) return null
     if (this.#peek().type !== TokenType.EOF) {
       this.#error('Unexpected token after expression', this.#peek())
       return null
     }
-    return filter
+    return expression
   }
 
   /**
    * Parse OR-separated expressions.
-   * @returns The combined filter, or null on failure.
+   * @returns The combined expression, or null on failure.
    */
-  #parseOr(): Filter | null {
-    const filters: Filter[] = []
+  #parseOr(): QueryExpression | null {
+    const filters: QueryExpression[] = []
     const first = this.#parseAnd()
     if (!first) return null
     filters.push(first)
@@ -87,15 +134,15 @@ class Parser {
       if (!right) return null
       filters.push(right)
     }
-    return filters.length === 1 ? first : Predicate.logical(Operator.Logical.Or, filters)
+    return filters.length === 1 ? first : logical(Operator.Logical.Or, filters)
   }
 
   /**
    * Parse AND-separated expressions.
-   * @returns The combined filter, or null on failure.
+   * @returns The combined expression, or null on failure.
    */
-  #parseAnd(): Filter | null {
-    const filters: Filter[] = []
+  #parseAnd(): QueryExpression | null {
+    const filters: QueryExpression[] = []
     const first = this.#parsePrimary()
     if (!first) return null
     filters.push(first)
@@ -104,17 +151,17 @@ class Parser {
       if (!right) return null
       filters.push(right)
     }
-    return filters.length === 1 ? first : Predicate.logical(Operator.Logical.And, filters)
+    return filters.length === 1 ? first : logical(Operator.Logical.And, filters)
   }
 
   /**
    * Parse a grouping, unary negation, or field expression.
-   * @returns The parsed filter, or null on failure.
+   * @returns The parsed expression, or null on failure.
    */
-  #parsePrimary(): Filter | null {
+  #parsePrimary(): QueryExpression | null {
     if (this.#matchOperator(Operator.Logical.Not)) {
       const operand = this.#parsePrimary()
-      return operand ? Predicate.not(operand) : null
+      return operand ? logical(Operator.Logical.Not, [operand]) : null
     }
     if (this.#peek().type === TokenType.LeftParen) {
       this.#index += 1
@@ -127,10 +174,10 @@ class Parser {
   }
 
   /**
-   * Parse one field predicate.
-   * @returns The parsed filter, or null on failure.
+   * Parse one field expression.
+   * @returns The parsed expression, or null on failure.
    */
-  #parseField(): Filter | null {
+  #parseField(): QueryExpression | null {
     const field = this.#expect(TokenType.Field, 'Expected a field name')
     if (!field) return null
 
@@ -145,90 +192,71 @@ class Parser {
       return null
     }
 
-    let filter: Filter
+    let values: readonly QueryLiteral[]
     if (operator === Operator.Comparison.Between) {
-      filter = this.#parseBetween(field.value as string)
-      if (!filter) return null
+      const bounds = this.#parseBetween()
+      if (!bounds) return null
+      values = bounds
     } else if (operator === Operator.Comparison.Empty) {
-      filter = Predicate.empty(field.value as string)
+      values = []
     } else {
       const value = this.#parseLiteral()
-      if (value === undefined) return null
-      const comparison: ComparisonFilter = {
-        field: field.value as string,
-        operator,
-        value,
-      }
-      filter = operator === Operator.Comparison.NotEqual
-        ? Predicate.notEqual(comparison.field, comparison.value)
-        : comparison
+      if (!value) return null
+      values = [value]
     }
 
-    for (let count = 0; count < negations; count += 1) filter = Predicate.not(filter)
-    return filter
+    let expression: QueryExpression = {
+      field: field.value as string,
+      kind: 'comparison',
+      operator,
+      values,
+    }
+    for (let count = 0; count < negations; count += 1) {
+      expression = logical(Operator.Logical.Not, [expression])
+    }
+    return expression
   }
 
   /**
    * Parse a bracketed inclusive range.
-   * @param field - Field name.
-   * @returns The range filter, or null on failure.
+   * @returns The two bound literals, or null on failure.
    */
-  #parseBetween(field: string): Filter | null {
+  #parseBetween(): readonly QueryLiteral[] | null {
     if (!this.#expect(TokenType.LeftBracket, 'Expected "[" after $between')) return null
-    const lower = this.#parseBound()
-    if (lower === undefined) return null
+    const lower = this.#parseLiteral()
+    if (!lower) return null
     if (!this.#expect(TokenType.Comma, 'Expected "," between range bounds')) return null
-    const upper = this.#parseBound()
-    if (upper === undefined) return null
+    const upper = this.#parseLiteral()
+    if (!upper) return null
     const closing = this.#expect(TokenType.RightBracket, 'Expected "]" after range bounds')
     if (!closing) return null
 
-    if (lower === null && upper === null) {
+    if (lower.kind === 'null' && upper.kind === 'null') {
       this.#error('Between requires at least one non-null bound', closing)
       return null
     }
-    return Predicate.between(field, lower, upper)
+    return [lower, upper]
   }
 
   /**
-   * Parse a range bound, allowing null.
-   * @returns The parsed bound, or undefined on failure.
+   * Parse one syntax literal.
+   * @returns The literal, or undefined on failure.
    */
-  #parseBound(): unknown {
-    const token = this.#peek()
-    if (token.type === TokenType.Null) {
-      this.#index += 1
-      return null
-    }
-    return this.#parseLiteral()
-  }
-
-  /**
-   * Parse one scalar literal.
-   *
-   * Integer spellings become `bigint` so Snowflake precision survives parsing;
-   * decimal and exponent spellings become finite `number` values.
-   * @returns The parsed value, or undefined on failure.
-   */
-  #parseLiteral(): unknown {
+  #parseLiteral(): QueryLiteral | undefined {
     const token = this.#peek()
     switch (token.type) {
       case TokenType.Boolean:
+        this.#index += 1
+        return { kind: 'boolean', raw: token.raw, value: token.value as boolean }
       case TokenType.Null:
+        this.#index += 1
+        return { kind: 'null', raw: token.raw, value: null }
+      case TokenType.Number:
+        this.#index += 1
+        return { kind: 'number', raw: token.raw, value: token.value as string }
       case TokenType.String:
         this.#index += 1
-        return token.value
-      case TokenType.Number: {
-        this.#index += 1
-        const raw = token.value as string
-        if (/^-?\d+$/.test(raw)) return BigInt(raw)
-        const value = Number(raw)
-        if (!Number.isFinite(value)) {
-          this.#error('Number literal is out of range', token)
-          return undefined
-        }
-        return value
-      }
+        return { kind: 'string', raw: token.raw, value: token.value as string }
       default:
         this.#error('Expected a literal value', token)
         return undefined
@@ -281,4 +309,17 @@ class Parser {
   #error(message: string, token: Token): void {
     this.diagnostics.push({ end: token.end, message, start: token.start })
   }
+}
+
+/**
+ * Build a transient logical expression.
+ * @param operator - Logical operator identity.
+ * @param filters - Child expressions.
+ * @returns The logical syntax expression.
+ */
+function logical(
+  operator: Operator.Logical,
+  filters: readonly QueryExpression[],
+): QueryLogical {
+  return { filters, kind: 'logical', operator }
 }
