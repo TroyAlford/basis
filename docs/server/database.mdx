@@ -61,7 +61,17 @@ await entities.createTables(server.db.sql)
 
 `createTables` creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared logical-field order for columns. Scalar fields use their logical field name; a singular reference field uses its explicit `column` name, derives the column type from the target's primary key, and includes an inline PostgreSQL `REFERENCES` constraint to that key. `uuid` maps to `UUID`, `snowflake` to `BIGINT`, `string` to `TEXT`, `number` to `DOUBLE PRECISION`, `date` to `DATE`, `timestamp` to `TIMESTAMPTZ`, and `boolean` to `BOOLEAN`. Every column is `NOT NULL`; exactly one primary key is required, and ordinary `string` fields are never primary keys.
 
-The statements are deterministic and available through `entities.ddl`, ordered so referenced tables are created before tables that reference them. Existing tables in the current schema are skipped, so applying the same definitions again is safe; the existence check and creation both target `current_schema()`, and an unexpected concurrent creation conflict fails rather than being silently accepted. Cyclic relationships cannot be created with inline foreign keys and fail DDL generation visibly. This is a fresh-database creation path, not a migration planner: changing an existing table's columns or constraints requires a reviewed migration in a later step.
+The statements are deterministic and available through `entities.ddl`: every `CREATE TABLE` runs first in declaration order, followed by `ALTER TABLE ... ADD CONSTRAINT` statements in entity/field order. Constraints are `DEFERRABLE INITIALLY IMMEDIATE`, so normal operations validate immediately while a transaction can explicitly defer validation for mutually dependent inserts:
+
+```ts
+await server.db.tx(async transaction => {
+  await transaction`set constraints all deferred`
+  await transaction`insert into "User" ("id", "carId") values (${userId}, ${carId})`
+  await transaction`insert into "Car" ("id", "userId") values (${carId}, ${userId})`
+})
+```
+
+Cyclic and self-referential schemas are supported. Existing tables in the current schema are skipped, but missing foreign-key constraints are still added; applying the same definitions again is safe. A constraint that cannot be added because existing data violates it, or an existing same-name constraint that does not match the canonical model, fails visibly. The existence checks and DDL target `current_schema()`. This is a fresh-database creation path, not a migration planner: changing an existing table's columns or an existing constraint's definition requires a reviewed migration in a later step.
 
 ## `db.query`
 

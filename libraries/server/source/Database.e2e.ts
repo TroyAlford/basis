@@ -496,15 +496,19 @@ describe('Server database lifecycle', () => {
     await server.db.sql`drop table if exists "User"`
     await entities.createTables(server.db.sql)
 
-    expect(entities.ddl[0]).toContain('CREATE TABLE "User"')
-    expect(entities.ddl[1]).toContain('"userId" BIGINT NOT NULL REFERENCES "User" ("id")')
+    const creates = entities.ddl.filter(statement => statement.startsWith('CREATE TABLE'))
     const constraints = await server.db.sql<{ definition: string }[]>`
       select pg_get_constraintdef(oid) as definition
       from pg_constraint
       where conrelid = '"Post"'::regclass and contype = 'f'
     `
+    expect(creates[0]).toContain('CREATE TABLE "Post"')
+    expect(creates[0]).toContain('"userId" BIGINT NOT NULL')
+    expect(creates[0]).not.toContain('REFERENCES')
+    expect(entities.ddl.find(statement => statement.startsWith('ALTER TABLE')))
+      .toContain('DEFERRABLE INITIALLY IMMEDIATE')
     expect(constraints).toEqual([{
-      definition: 'FOREIGN KEY ("userId") REFERENCES "User"(id)',
+      definition: 'FOREIGN KEY ("userId") REFERENCES "User"(id) DEFERRABLE',
     }])
 
     await server.db.sql`
@@ -528,6 +532,145 @@ describe('Server database lifecycle', () => {
       delete from "User" where "id" = ${'9223372036854775807'}
     `.catch((error: unknown) => error)
     expect(blockedDelete).toMatchObject({ errno: '23503' })
+  }, 120_000)
+
+  test('creates cyclic foreign keys and validates deferred references', async () => {
+    const { server } = await useDatabaseFixture('cyclic-relationships')
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'carId', name: 'car', target: 'CycleCar', type: 'entity' },
+          ],
+          name: 'CycleUser',
+        },
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'userId', name: 'user', target: 'CycleUser', type: 'entity' },
+          ],
+          name: 'CycleCar',
+        },
+      ],
+    }))
+
+    await server.db.sql`drop table if exists "CycleCar"`
+    await server.db.sql`drop table if exists "CycleUser"`
+    await entities.createTables(server.db.sql)
+
+    const constraints = await server.db.sql<{
+      deferrable: boolean,
+      deferred: boolean,
+      definition: string,
+      name: string,
+    }[]>`
+      select
+        conname as name,
+        condeferrable as deferrable,
+        condeferred as deferred,
+        pg_get_constraintdef(oid) as definition
+      from pg_constraint
+      where conrelid in ('"CycleUser"'::regclass, '"CycleCar"'::regclass)
+        and contype = 'f'
+      order by conname
+    `
+    expect(constraints.map(constraint => ({
+      deferrable: constraint.deferrable,
+      deferred: constraint.deferred,
+      name: constraint.name,
+    }))).toEqual([
+      { deferrable: true, deferred: false, name: 'CycleCar_user_fkey' },
+      { deferrable: true, deferred: false, name: 'CycleUser_car_fkey' },
+    ])
+    expect(constraints.every(constraint => constraint.definition.endsWith('DEFERRABLE')))
+      .toBe(true)
+
+    const userId = randomUUID()
+    const carId = randomUUID()
+    await server.db.tx(async transaction => {
+      await transaction`set constraints all deferred`
+      await transaction`
+        insert into "CycleUser" ("id", "carId") values (${userId}, ${carId})
+      `
+      await transaction`
+        insert into "CycleCar" ("id", "userId") values (${carId}, ${userId})
+      `
+    })
+    expect(await server.db.sql<{ count: number }[]>`
+      select count(*)::int as count from "CycleUser"
+    `).toEqual([{ count: 1 }])
+
+    const invalid = await server.db.tx(async transaction => {
+      await transaction`set constraints all deferred`
+      await transaction`
+        insert into "CycleCar" ("id", "userId") values (${randomUUID()}, ${randomUUID()})
+      `
+    }).catch((error: unknown) => error)
+    expect(invalid).toMatchObject({ errno: '23503' })
+
+    await entities.createTables(server.db.sql)
+    expect(await server.db.sql<{ count: number }[]>`
+      select count(*)::int as count
+      from pg_constraint
+      where conrelid in ('"CycleUser"'::regclass, '"CycleCar"'::regclass)
+        and contype = 'f'
+    `).toEqual([{ count: 2 }])
+
+    await server.db.sql`
+      alter table "CycleUser" drop constraint "CycleUser_car_fkey"
+    `
+    await server.db.sql`
+      alter table "CycleUser" add constraint "CycleUser_car_fkey"
+      foreign key ("carId") references "CycleCar" ("id")
+    `
+    await expect(entities.createTables(server.db.sql))
+      .rejects.toThrow('does not match the canonical model')
+
+    await server.db.sql`
+      alter table "CycleUser" drop constraint "CycleUser_car_fkey"
+    `
+    await entities.createTables(server.db.sql)
+    expect(await server.db.sql<{ count: number }[]>`
+      select count(*)::int as count
+      from pg_constraint
+      where conrelid = '"CycleUser"'::regclass and conname = 'CycleUser_car_fkey'
+    `).toEqual([{ count: 1 }])
+  }, 120_000)
+
+  test('enforces self-referential foreign keys', async () => {
+    const { server } = await useDatabaseFixture('self-relationships')
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { column: 'parentId', name: 'parent', target: 'TreeNode', type: 'entity' },
+        ],
+        name: 'TreeNode',
+      }],
+    }))
+
+    await server.db.sql`drop table if exists "TreeNode"`
+    await entities.createTables(server.db.sql)
+
+    const nodeId = randomUUID()
+    await server.db.tx(async transaction => {
+      await transaction`set constraints all deferred`
+      await transaction`
+        insert into "TreeNode" ("id", "parentId") values (${nodeId}, ${nodeId})
+      `
+    })
+    expect(await server.db.sql<{ count: number }[]>`
+      select count(*)::int as count from "TreeNode"
+    `).toEqual([{ count: 1 }])
+
+    const invalid = await server.db.tx(async transaction => {
+      await transaction`set constraints all deferred`
+      await transaction`
+        insert into "TreeNode" ("id", "parentId") values (${randomUUID()}, ${randomUUID()})
+      `
+    }).catch((error: unknown) => error)
+    expect(invalid).toMatchObject({ errno: '23503' })
   }, 120_000)
 
   test('rejects physical reference columns and unfinished graph operations', async () => {

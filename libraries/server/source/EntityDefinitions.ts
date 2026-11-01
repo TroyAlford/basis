@@ -115,27 +115,37 @@ export class EntityDefinitions {
   }
 
   /**
-   * Deterministic PostgreSQL DDL for the declared entities, ordered so each
-   * referenced table exists before its foreign-key table. Identifiers are
+   * Deterministic PostgreSQL DDL for the declared entities.
+   *
+   * Every table and column is created first, in declaration order; foreign-key
+   * constraints are added afterward with `ALTER TABLE`. This supports cyclic
+   * and self-referential references without ordering cycles. Identifiers are
    * quoted; user values never enter these statements.
-   * @returns One deterministic `CREATE TABLE` statement per entity.
-   * @throws {Error} When entity references form a cycle.
+   * @returns The complete ordered DDL sequence.
    */
   get ddl(): readonly string[] {
-    return orderedEntities(this.entities).map(createTable)
+    return [
+      ...this.entities.map(createTable),
+      ...this.entities.flatMap(entity => entity.fields
+        .filter(isReferenceField)
+        .map(field => addConstraint(entity, field))),
+    ]
   }
 
   /**
-   * Create the declared tables in an explicitly empty/fresh database.
+   * Create missing tables, then add missing foreign-key constraints.
    *
-   * This is a one-way creation path, not a migration planner. Existing tables
-   * in the current schema are left untouched; an unexpected creation conflict
-   * fails visibly rather than being silently accepted.
+   * Existing tables are left untouched, but declared constraints are still
+   * reconciled: a missing constraint is added and a mismatched existing
+   * constraint fails visibly. This is a fresh-initialization path, not a
+   * migration planner.
    * @param sql - The connected Bun SQL client.
-   * @returns A promise that resolves after every table statement succeeds.
+   * @returns A promise that resolves after every table and constraint succeeds.
+   * @throws {Error} When a constraint is missing a valid target or an existing
+   *   constraint does not match the canonical model.
    */
   async createTables(sql: SQL): Promise<void> {
-    for (const entity of orderedEntities(this.entities)) {
+    for (const entity of this.entities) {
       const rows = await sql<{ present: boolean }[]>`
         select exists (
           select 1
@@ -146,6 +156,54 @@ export class EntityDefinitions {
       `
       if (rows[0]?.present) continue
       await sql.unsafe(createTable(entity)).simple()
+    }
+
+    for (const entity of this.entities) {
+      for (const field of entity.fields.filter(isReferenceField)) {
+        const name = constraintName(entity, field)
+        const rows = await sql<{
+          deferrable: boolean,
+          deferred: boolean,
+          localColumn: string,
+          targetColumn: string,
+          targetTable: string,
+        }[]>`
+          select
+            con.condeferrable as deferrable,
+            con.condeferred as deferred,
+            local.attname as "localColumn",
+            target.relname as "targetTable",
+            foreign_field.attname as "targetColumn"
+          from pg_catalog.pg_constraint con
+          join pg_catalog.pg_class target on target.oid = con.confrelid
+          join pg_catalog.pg_attribute local
+            on local.attrelid = con.conrelid and local.attnum = con.conkey[1]
+          join pg_catalog.pg_attribute foreign_field
+            on foreign_field.attrelid = con.confrelid and foreign_field.attnum = con.confkey[1]
+          where con.conname = ${name}
+            and con.conrelid = ${quoteIdentifier(entity.name)}::regclass
+            and con.contype = 'f'
+            and cardinality(con.conkey) = 1
+            and cardinality(con.confkey) = 1
+        `
+        const existing = rows[0]
+        if (existing) {
+          if (
+            !existing.deferrable
+            || existing.deferred
+            || existing.localColumn !== field.column
+            || existing.targetTable !== field.target
+            || existing.targetColumn !== field.targetField
+          ) {
+            throw new Error(
+              `Existing foreign key constraint "${name}" on "${entity.name}" ` +
+              'does not match the canonical model',
+            )
+          }
+          continue
+        }
+        await sql.unsafe(addConstraint(entity, field)).simple()
+      }
     }
   }
 }
@@ -351,40 +409,6 @@ function parseField(entityName: string, value: unknown): ParsedField {
 }
 
 /**
- * Order entities so every referenced table precedes its foreign-key table.
- * @param entities - Validated entities in declaration order.
- * @returns Entities in deterministic dependency order.
- * @throws {Error} When entity references form a cycle.
- */
-function orderedEntities(entities: readonly EntityDefinition[]): readonly EntityDefinition[] {
-  const byName = new Map(entities.map(entity => [entity.name, entity]))
-  const ordered: EntityDefinition[] = []
-  const visiting = new Set<string>()
-  const visited = new Set<string>()
-
-  const visit = (entity: EntityDefinition, path: readonly string[]): void => {
-    if (visited.has(entity.name)) return
-    if (visiting.has(entity.name)) {
-      throw invalid(`circular relationship ${[...path, entity.name].join(' -> ')}`)
-    }
-    visiting.add(entity.name)
-    for (const field of entity.fields) {
-      if (field.type !== FieldType.Entity) continue
-      if (field.target === entity.name) continue
-      const target = byName.get(field.target)
-      if (!target) throw invalid(`unknown target entity "${field.target}"`)
-      visit(target, [...path, entity.name])
-    }
-    visiting.delete(entity.name)
-    visited.add(entity.name)
-    ordered.push(entity)
-  }
-
-  for (const entity of entities) visit(entity, [])
-  return ordered
-}
-
-/**
  * Build one entity's idempotent physical table statement.
  * @param entity - The validated entity.
  * @returns The PostgreSQL DDL statement.
@@ -392,13 +416,45 @@ function orderedEntities(entities: readonly EntityDefinition[]): readonly Entity
 function createTable(entity: EntityDefinition): string {
   const columns = entity.fields.map(field => {
     if (field.type === FieldType.Entity) {
-      return `${quoteIdentifier(field.column)} ${columnType(field.targetType)} NOT NULL ` +
-        `REFERENCES ${quoteIdentifier(field.target)} (${quoteIdentifier(field.targetField)})`
+      return `${quoteIdentifier(field.column)} ${columnType(field.targetType)} NOT NULL`
     }
     const nullability = field.primaryKey ? ' PRIMARY KEY' : ' NOT NULL'
     return `${quoteIdentifier(field.name)} ${columnType(field.type)}${nullability}`
   })
   return `CREATE TABLE ${quoteIdentifier(entity.name)} (\n${columns.join(',\n')}\n)`
+}
+
+/**
+ * Build one foreign-key constraint statement.
+ * @param entity - Owning entity.
+ * @param field - Resolved entity-reference field.
+ * @returns The `ALTER TABLE` statement.
+ */
+function addConstraint(entity: EntityDefinition, field: EntityReferenceFieldDefinition): string {
+  return `ALTER TABLE ${quoteIdentifier(entity.name)} ` +
+    `ADD CONSTRAINT ${quoteIdentifier(constraintName(entity, field))} ` +
+    `FOREIGN KEY (${quoteIdentifier(field.column)}) ` +
+    `REFERENCES ${quoteIdentifier(field.target)} (${quoteIdentifier(field.targetField)}) ` +
+    'DEFERRABLE INITIALLY IMMEDIATE'
+}
+
+/**
+ * Build one deterministic foreign-key constraint name.
+ * @param entity - Owning entity.
+ * @param field - Resolved entity-reference field.
+ * @returns The constraint name.
+ */
+function constraintName(entity: EntityDefinition, field: EntityReferenceFieldDefinition): string {
+  return `${entity.name}_${field.name}_fkey`
+}
+
+/**
+ * Whether a field is an entity reference.
+ * @param field - Logical field.
+ * @returns `true` for entity-reference fields.
+ */
+function isReferenceField(field: FieldDefinition): field is EntityReferenceFieldDefinition {
+  return field.type === FieldType.Entity
 }
 
 /**

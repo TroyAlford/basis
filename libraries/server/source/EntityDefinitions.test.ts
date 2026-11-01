@@ -100,10 +100,23 @@ describe('EntityDefinitions', () => {
       targetType: FieldType.Snowflake,
       type: FieldType.Entity,
     })
-    expect(entities.ddl[0]).toContain('CREATE TABLE "User"')
-    expect(entities.ddl[1]).toContain('"ownerId" BIGINT NOT NULL REFERENCES "User" ("id")')
-    expect(entities.ddl[1]).toContain('"lastUpdatedById" BIGINT NOT NULL REFERENCES "User" ("id")')
-    expect(entities.ddl[1]).not.toContain('"owner" BIGINT')
+    const creates = entities.ddl.filter(statement => statement.startsWith('CREATE TABLE'))
+    const constraints = entities.ddl.filter(statement => statement.startsWith('ALTER TABLE'))
+    expect(creates[0]).toContain('CREATE TABLE "Note"')
+    expect(creates[1]).toContain('CREATE TABLE "User"')
+    expect(creates[0]).toContain('"ownerId" BIGINT NOT NULL')
+    expect(creates[0]).toContain('"lastUpdatedById" BIGINT NOT NULL')
+    expect(creates[0]).not.toContain('REFERENCES')
+    expect(constraints).toEqual([
+      expect.stringContaining(
+        'ALTER TABLE "Note" ADD CONSTRAINT "Note_owner_fkey" ' +
+        'FOREIGN KEY ("ownerId") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
+      ),
+      expect.stringContaining(
+        'ALTER TABLE "Note" ADD CONSTRAINT "Note_lastUpdatedBy_fkey" ' +
+        'FOREIGN KEY ("lastUpdatedById") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
+      ),
+    ])
   })
 
   test('leaves undeclared relationship-looking scalars ordinary even when the target exists', () => {
@@ -158,7 +171,8 @@ describe('EntityDefinitions', () => {
       targetType: FieldType.Snowflake,
       type: FieldType.Entity,
     })
-    expect(entities.ddl[1]).toContain('"writer" BIGINT NOT NULL REFERENCES "User" ("id")')
+    expect(entities.ddl.find(statement => statement.startsWith('ALTER TABLE')))
+      .toContain('FOREIGN KEY ("writer") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE')
   })
 
   test('derives the reference column type from a non-id target primary key', () => {
@@ -185,7 +199,8 @@ describe('EntityDefinitions', () => {
       targetField: 'externalId',
       targetType: FieldType.Snowflake,
     })
-    expect(entities.ddl[1]).toContain('REFERENCES "User" ("externalId")')
+    expect(entities.ddl.find(statement => statement.startsWith('ALTER TABLE')))
+      .toContain('REFERENCES "User" ("externalId") DEFERRABLE INITIALLY IMMEDIATE')
   })
 
   test('supports self-referential singular references', () => {
@@ -207,7 +222,11 @@ describe('EntityDefinitions', () => {
       targetField: 'id',
       type: FieldType.Entity,
     })
-    expect(entities.ddl[0]).toContain('"managerId" UUID NOT NULL REFERENCES "User" ("id")')
+    expect(entities.ddl[0]).toContain('"managerId" UUID NOT NULL')
+    expect(entities.ddl[1]).toContain(
+      'ALTER TABLE "User" ADD CONSTRAINT "User_manager_fkey" ' +
+      'FOREIGN KEY ("managerId") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
+    )
   })
 
   test('rejects invalid references and physical column collisions', () => {
@@ -363,27 +382,34 @@ describe('EntityDefinitions', () => {
     })).toThrow('unknown entity property "relationships"')
   })
 
-  test('rejects circular foreign-key DDL', () => {
+  test('supports cyclic references with phased deferrable constraints', () => {
     const entities = load({
       entities: [
         {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
-            { column: 'bId', name: 'b', target: 'B', type: 'entity' },
+            { column: 'carId', name: 'car', target: 'Car', type: 'entity' },
           ],
-          name: 'A',
+          name: 'User',
         },
         {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
-            { column: 'aId', name: 'a', target: 'A', type: 'entity' },
+            { column: 'userId', name: 'user', target: 'User', type: 'entity' },
           ],
-          name: 'B',
+          name: 'Car',
         },
       ],
     })
 
-    expect(() => entities.ddl).toThrow('circular relationship')
+    expect(entities.ddl).toEqual([
+      'CREATE TABLE "User" (\n"id" UUID PRIMARY KEY,\n"carId" UUID NOT NULL\n)',
+      'CREATE TABLE "Car" (\n"id" UUID PRIMARY KEY,\n"userId" UUID NOT NULL\n)',
+      'ALTER TABLE "User" ADD CONSTRAINT "User_car_fkey" FOREIGN KEY ("carId") ' +
+        'REFERENCES "Car" ("id") DEFERRABLE INITIALLY IMMEDIATE',
+      'ALTER TABLE "Car" ADD CONSTRAINT "Car_user_fkey" FOREIGN KEY ("userId") ' +
+        'REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
+    ])
   })
 
   test('accepts a UUID or snowflake primary key', () => {
