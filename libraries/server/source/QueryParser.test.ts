@@ -6,6 +6,26 @@ import { QueryParser } from './QueryParser'
 
 type BareLiteral = Omit<QueryLiteral, 'end' | 'start'>
 
+interface BareComparison {
+  readonly field: string,
+  readonly kind: 'comparison',
+  readonly operator: Operator.Comparison,
+  readonly values: readonly BareLiteral[],
+}
+
+interface BareLogical {
+  readonly filters: readonly BareExpression[],
+  readonly kind: 'logical',
+  readonly operator: Operator.Logical,
+}
+
+interface BareGroup {
+  readonly expression: BareExpression,
+  readonly kind: 'group',
+}
+
+type BareExpression = BareComparison | BareGroup | BareLogical
+
 const number = (raw: string): BareLiteral => ({ kind: 'number', raw, value: raw })
 const string = (raw: string, value: string): BareLiteral => ({ kind: 'string', raw, value })
 const boolean = (raw: string, value: boolean): BareLiteral => ({ kind: 'boolean', raw, value })
@@ -15,14 +35,44 @@ const comparison = (
   field: string,
   operator: Operator.Comparison,
   values: readonly BareLiteral[],
-): object => ({ field, kind: 'comparison', operator, values })
+): BareComparison => ({ field, kind: 'comparison', operator, values })
 
 const logical = (
   operator: Operator.Logical,
-  filters: readonly QueryExpression[],
-): object => ({ filters, kind: 'logical', operator })
+  filters: readonly BareExpression[],
+): BareLogical => ({ filters, kind: 'logical', operator })
 
-const group = (expression: QueryExpression): object => ({ expression, kind: 'group' })
+const group = (expression: BareExpression): BareGroup => ({ expression, kind: 'group' })
+
+/**
+ * Require a parsed comparison node.
+ * @param expression - Parsed expression.
+ * @returns The comparison node.
+ */
+function comparisonNode(expression: QueryExpression | null): QueryComparison {
+  if (expression?.kind !== 'comparison') throw new Error('Expected comparison expression')
+  return expression
+}
+
+/**
+ * Require a parsed group node.
+ * @param expression - Parsed expression.
+ * @returns The group node.
+ */
+function groupNode(expression: QueryExpression | null): QueryGroup {
+  if (expression?.kind !== 'group') throw new Error('Expected group expression')
+  return expression
+}
+
+/**
+ * Require a parsed logical node.
+ * @param expression - Parsed expression.
+ * @returns The logical node.
+ */
+function logicalNode(expression: QueryExpression | null): QueryLogical {
+  if (expression?.kind !== 'logical') throw new Error('Expected logical expression')
+  return expression
+}
 
 /**
  * Remove source offsets for semantic comparisons.
@@ -81,12 +131,12 @@ describe('QueryParser', () => {
   test('supports postfix and prefix Not', () => {
     const empty = comparison('title', Operator.Comparison.Empty, [])
     expect(withoutSpans(QueryParser.parse('title !$empty').expression))
-      .toEqual(logical(Operator.Logical.Not, [empty as QueryExpression]))
+      .toEqual(logical(Operator.Logical.Not, [empty]))
     expect(withoutSpans(QueryParser.parse('title $not $empty').expression))
       .toEqual(withoutSpans(QueryParser.parse('title !$empty').expression))
     expect(withoutSpans(QueryParser.parse('$not score > 5').expression)).toEqual(logical(
       Operator.Logical.Not,
-      [comparison('score', Operator.Comparison.GreaterThan, [number('5')]) as QueryExpression],
+      [comparison('score', Operator.Comparison.GreaterThan, [number('5')])],
     ))
   })
 
@@ -94,17 +144,17 @@ describe('QueryParser', () => {
     expect(withoutSpans(QueryParser.parse('score > 1 $and score < 5').expression)).toEqual(logical(
       Operator.Logical.And,
       [
-        comparison('score', Operator.Comparison.GreaterThan, [number('1')]) as QueryExpression,
-        comparison('score', Operator.Comparison.LessThan, [number('5')]) as QueryExpression,
+        comparison('score', Operator.Comparison.GreaterThan, [number('1')]),
+        comparison('score', Operator.Comparison.LessThan, [number('5')]),
       ],
     ))
     expect(withoutSpans(QueryParser.parse('score = 1 $or score = 2 $and active = true').expression))
       .toEqual(logical(Operator.Logical.Or, [
-        comparison('score', Operator.Comparison.Equal, [number('1')]) as QueryExpression,
+        comparison('score', Operator.Comparison.Equal, [number('1')]),
         logical(Operator.Logical.And, [
-          comparison('score', Operator.Comparison.Equal, [number('2')]) as QueryExpression,
-          comparison('active', Operator.Comparison.Equal, [boolean('true', true)]) as QueryExpression,
-        ]) as QueryExpression,
+          comparison('score', Operator.Comparison.Equal, [number('2')]),
+          comparison('active', Operator.Comparison.Equal, [boolean('true', true)]),
+        ]),
       ]))
   })
 
@@ -112,17 +162,17 @@ describe('QueryParser', () => {
     expect(withoutSpans(QueryParser.parse('(score = 1 $or score = 2) $and active = true').expression))
       .toEqual(logical(Operator.Logical.And, [
         group(logical(Operator.Logical.Or, [
-          comparison('score', Operator.Comparison.Equal, [number('1')]) as QueryExpression,
-          comparison('score', Operator.Comparison.Equal, [number('2')]) as QueryExpression,
-        ]) as QueryExpression) as QueryExpression,
-        comparison('active', Operator.Comparison.Equal, [boolean('true', true)]) as QueryExpression,
+          comparison('score', Operator.Comparison.Equal, [number('1')]),
+          comparison('score', Operator.Comparison.Equal, [number('2')]),
+        ])),
+        comparison('active', Operator.Comparison.Equal, [boolean('true', true)]),
       ]))
     expect(withoutSpans(QueryParser.parse('$not (score = 1 $or score = 2)').expression))
       .toEqual(logical(Operator.Logical.Not, [
         group(logical(Operator.Logical.Or, [
-          comparison('score', Operator.Comparison.Equal, [number('1')]) as QueryExpression,
-          comparison('score', Operator.Comparison.Equal, [number('2')]) as QueryExpression,
-        ]) as QueryExpression) as QueryExpression,
+          comparison('score', Operator.Comparison.Equal, [number('1')]),
+          comparison('score', Operator.Comparison.Equal, [number('2')]),
+        ])),
       ]))
   })
 
@@ -131,12 +181,12 @@ describe('QueryParser', () => {
       '$and max = 9223372036854775807 $and ratio = 1.5 $and quoted = "5"'
     expect(withoutSpans(QueryParser.parse(source).expression))
       .toEqual(logical(Operator.Logical.And, [
-        comparison('owner.Score', Operator.Comparison.Equal, [string('"x\\ny"', 'x\ny')]) as QueryExpression,
-        comparison('active', Operator.Comparison.Equal, [boolean('false', false)]) as QueryExpression,
-        comparison('missing', Operator.Comparison.Equal, [nullLiteral()]) as QueryExpression,
-        comparison('max', Operator.Comparison.Equal, [number('9223372036854775807')]) as QueryExpression,
-        comparison('ratio', Operator.Comparison.Equal, [number('1.5')]) as QueryExpression,
-        comparison('quoted', Operator.Comparison.Equal, [string('"5"', '5')]) as QueryExpression,
+        comparison('owner.Score', Operator.Comparison.Equal, [string('"x\\ny"', 'x\ny')]),
+        comparison('active', Operator.Comparison.Equal, [boolean('false', false)]),
+        comparison('missing', Operator.Comparison.Equal, [nullLiteral()]),
+        comparison('max', Operator.Comparison.Equal, [number('9223372036854775807')]),
+        comparison('ratio', Operator.Comparison.Equal, [number('1.5')]),
+        comparison('quoted', Operator.Comparison.Equal, [string('"5"', '5')]),
       ]))
   })
 
@@ -147,8 +197,7 @@ describe('QueryParser', () => {
 
   test('attaches distinct source ranges to repeated identical predicates', () => {
     const source = 'score = 1 $or score = 1'
-    const expression = QueryParser.parse(source).expression as QueryLogical
-    expect(expression.kind).toBe('logical')
+    const expression = logicalNode(QueryParser.parse(source).expression)
     expect(expression.operator).toBe(Operator.Logical.Or)
     expect(slice(source, expression)).toBe(source)
     expect(expression.filters.map(filter => slice(source, filter)))
@@ -158,35 +207,31 @@ describe('QueryParser', () => {
 
   test('includes grouping delimiters in nested group ranges', () => {
     const source = '(score = 1 $or (score = 2 $and active = true))'
-    const outer = QueryParser.parse(source).expression as QueryGroup
-    expect(outer.kind).toBe('group')
+    const outer = groupNode(QueryParser.parse(source).expression)
     expect(slice(source, outer)).toBe(source)
-    const grouped = outer.expression as QueryLogical
-    expect(grouped.kind).toBe('logical')
+    const grouped = logicalNode(outer.expression)
     expect(slice(source, grouped)).toBe('score = 1 $or (score = 2 $and active = true)')
-    const inner = grouped.filters[1] as QueryGroup
-    expect(inner.kind).toBe('group')
+    const inner = groupNode(grouped.filters[1] ?? null)
     expect(slice(source, inner)).toBe('(score = 2 $and active = true)')
   })
 
   test('covers the full negated expression in Not ranges', () => {
     const prefixSource = '$not (score = 1 $or score = 2)'
-    const prefix = QueryParser.parse(prefixSource).expression as QueryLogical
+    const prefix = logicalNode(QueryParser.parse(prefixSource).expression)
     expect(prefix.operator).toBe(Operator.Logical.Not)
     expect(slice(prefixSource, prefix)).toBe(prefixSource)
-    const groupNode = prefix.filters[0] as QueryGroup
-    expect(slice(prefixSource, groupNode)).toBe('(score = 1 $or score = 2)')
+    const grouped = groupNode(prefix.filters[0] ?? null)
+    expect(slice(prefixSource, grouped)).toBe('(score = 1 $or score = 2)')
 
     const postfixSource = 'title !$empty'
-    const postfix = QueryParser.parse(postfixSource).expression as QueryLogical
+    const postfix = logicalNode(QueryParser.parse(postfixSource).expression)
     expect(postfix.operator).toBe(Operator.Logical.Not)
     expect(slice(postfixSource, postfix)).toBe(postfixSource)
   })
 
   test('covers the comparison and both bounds in Between ranges', () => {
     const source = 'score $between [1, 5]'
-    const expression = QueryParser.parse(source).expression as QueryComparison
-    expect(expression.kind).toBe('comparison')
+    const expression = comparisonNode(QueryParser.parse(source).expression)
     expect(slice(source, expression)).toBe(source)
     expect(expression.values.map(value => source.slice(value.start, value.end)))
       .toEqual(['1', '5'])
