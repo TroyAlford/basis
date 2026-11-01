@@ -137,45 +137,44 @@ async function credentials(id: string): Promise<CredentialInspection> {
  * one-boot-per-run ownership without a child application handle. Lifecycle
  * tests intentionally opt out and create dedicated installations.
  */
-const sharedEntities = EntityDefinitions.load(JSON.stringify({
-  entities: [
-    {
-      fields: [
-        { name: 'id', primaryKey: true, type: 'uuid' },
-        { name: 'title', type: 'string' },
-        { name: 'active', type: 'boolean' },
-        { name: 'score', type: 'number' },
-        { name: 'dueOn', type: 'date' },
-        { name: 'createdAt', type: 'timestamp' },
-      ],
-      name: 'Note',
-    },
-    {
-      fields: [
-        { name: 'id', primaryKey: true, type: 'snowflake' },
-        { name: 'name', type: 'string' },
-      ],
-      name: 'Account',
-    },
-    {
-      fields: [
-        { name: 'id', primaryKey: true, type: 'uuid' },
-        { name: 'value', type: 'number' },
-      ],
-      name: 'NumberRow',
-    },
-    {
-      fields: [
-        { name: 'id', primaryKey: true, type: 'uuid' },
-        { name: 'active', type: 'boolean' },
-        { name: 'externalId', type: 'snowflake' },
-        { name: 'rank', type: 'number' },
-        { name: 'score', type: 'number' },
-        { name: 'title', type: 'string' },
-      ],
-      name: 'QueryRow',
-    },
+const noteDefinition = {
+  fields: [
+    { name: 'id', primaryKey: true, type: 'uuid' },
+    { name: 'title', type: 'string' },
+    { name: 'active', type: 'boolean' },
+    { name: 'score', type: 'number' },
+    { name: 'dueOn', type: 'date' },
+    { name: 'createdAt', type: 'timestamp' },
   ],
+  name: 'Note',
+}
+const accountDefinition = {
+  fields: [
+    { name: 'id', primaryKey: true, type: 'snowflake' },
+    { name: 'name', type: 'string' },
+  ],
+  name: 'Account',
+}
+const numberRowDefinition = {
+  fields: [
+    { name: 'id', primaryKey: true, type: 'uuid' },
+    { name: 'value', type: 'number' },
+  ],
+  name: 'NumberRow',
+}
+const queryRowDefinition = {
+  fields: [
+    { name: 'id', primaryKey: true, type: 'uuid' },
+    { name: 'active', type: 'boolean' },
+    { name: 'externalId', type: 'snowflake' },
+    { name: 'rank', type: 'number' },
+    { name: 'score', type: 'number' },
+    { name: 'title', type: 'string' },
+  ],
+  name: 'QueryRow',
+}
+const sharedEntities = EntityDefinitions.load(JSON.stringify({
+  entities: [noteDefinition, accountDefinition, numberRowDefinition, queryRowDefinition],
 }))
 
 /** The shared ordinary-database fixture. */
@@ -370,26 +369,7 @@ describe('Server database lifecycle', () => {
 
   test('creates physical tables from canonical entities and reruns safely', async () => {
     const entities = EntityDefinitions.load(JSON.stringify({
-      entities: [
-        {
-          fields: [
-            { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'title', type: 'string' },
-            { name: 'active', type: 'boolean' },
-            { name: 'score', type: 'number' },
-            { name: 'dueOn', type: 'date' },
-            { name: 'createdAt', type: 'timestamp' },
-          ],
-          name: 'Note',
-        },
-        {
-          fields: [
-            { name: 'id', primaryKey: true, type: 'snowflake' },
-            { name: 'name', type: 'string' },
-          ],
-          name: 'Account',
-        },
-      ],
+      entities: [noteDefinition, accountDefinition],
     }))
     const { server } = await sharedDatabase()
     await server.db.sql`drop table if exists "Note", "Account"`
@@ -573,13 +553,7 @@ describe('Server database lifecycle', () => {
 
   test('filters numeric values with each comparison operator', async () => {
     const entities = EntityDefinitions.load(JSON.stringify({
-      entities: [{
-        fields: [
-          { name: 'id', primaryKey: true, type: 'uuid' },
-          { name: 'value', type: 'number' },
-        ],
-        name: 'NumberRow',
-      }],
+      entities: [numberRowDefinition],
     }))
     const { server } = await sharedDatabase()
     await server.db.sql`drop table if exists "NumberRow"`
