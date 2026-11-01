@@ -161,6 +161,16 @@ describe('QueryParser', () => {
     })
   })
 
+  test('does not expose a filter when lexing reports an error', () => {
+    const result = QueryParser.parse('title = "unterminated')
+    expect(result.filter).toBeNull()
+    expect(result.diagnostics).toContainEqual({
+      end: 21,
+      message: 'Unterminated string literal',
+      start: 8,
+    })
+  })
+
   test('propagates lexer diagnostics and rejects incomplete expressions', () => {
     const result = QueryParser.parse('score @ 5')
     expect(result.filter).toBeNull()

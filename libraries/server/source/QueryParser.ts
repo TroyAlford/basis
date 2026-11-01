@@ -33,7 +33,11 @@ export const QueryParser = {
     const diagnostics = [...parser.diagnostics].sort((left, right) => (
       left.start - right.start || left.end - right.end
     ))
-    return { diagnostics, filter, tokens: lexed.tokens }
+    return {
+      diagnostics,
+      filter: diagnostics.length === 0 ? filter : null,
+      tokens: lexed.tokens,
+    }
   },
 }
 
