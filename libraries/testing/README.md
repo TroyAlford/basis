@@ -146,6 +146,10 @@ Bun evaluates each preload once before the suite, so the awaited call boots the 
 
 The browser side stays deterministic: `visit(path, options?, fn)` opens a fresh context with the network policy applied, navigates to `url + path`, runs `fn`, then disposes the page. **Server-side state is shared across the run**, so a test that needs a clean server must boot its own with `startApplication`.
 
+### Run-scoped cleanup
+
+`registerRunCleanup(callback)` registers teardown for an in-process resource that needs the same process-wide ownership as `useApplication` but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. It is intended for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
+
 Network is deterministic by default — requests are blocked unless they target loopback or Google Fonts (allowed so text renders the real web type instead of a host-dependent fallback), so a snapshot cannot silently depend on an arbitrary CDN:
 
 - `stubs` fulfils specific external URLs locally (for example a CDN module);

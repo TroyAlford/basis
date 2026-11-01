@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import type { Filter } from './Predicate'
+import { QueryNormalizer } from './QueryNormalizer'
 import type { OrderBy } from './SQL'
 import { SQL } from './SQL'
 
@@ -53,8 +54,8 @@ export interface QueryOptions {
   offset?: number,
   /** Explicit root-field ordering, single or multi-level. */
   orderBy?: OrderBy,
-  /** Single-field equality shorthand or an explicit canonical filter tree. */
-  where?: Filter | Readonly<Record<string, unknown>>,
+  /** Single-field equality shorthand, explicit filter tree, or string query expression. */
+  where?: Filter | Readonly<Record<string, unknown>> | string,
 }
 
 /** A server-owned database capability. */
@@ -156,8 +157,13 @@ class PostgresDatabase implements Database {
     if (this.#closed) throw new Error('Database is closed')
     if (!this.#entities) throw new Error('No entity definitions are configured for this database')
 
+    const definition = this.#entities.entity(entity)
+    if (!definition) throw new Error(`Unknown entity "${entity}"`)
     const selection = SQL.select(this.#entities, entity, options.fields)
-    const predicate = SQL.where(this.#entities, entity, options.where)
+    const where = typeof options.where === 'string'
+      ? QueryNormalizer.normalize(definition, options.where) ?? undefined
+      : options.where
+    const predicate = SQL.where(this.#entities, entity, where)
     const ordering = SQL.orderBy(this.#entities, entity, options.orderBy)
     const limit = options.limit === undefined ? 25 : options.limit
     const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length)

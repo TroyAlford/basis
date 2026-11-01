@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
+import { QueryNormalizer } from './QueryNormalizer'
 import { SQL } from './SQL'
 
 const definitions = EntityDefinitions.load(JSON.stringify({
@@ -19,6 +20,8 @@ const definitions = EntityDefinitions.load(JSON.stringify({
 }))
 
 const entity = 'Note'
+const note = definitions.entity(entity)
+if (!note) throw new Error('missing Note entity')
 
 describe('SQL.where', () => {
   test('compiles explicit And comparisons and preserves bound values', () => {
@@ -31,11 +34,84 @@ describe('SQL.where', () => {
       operator: Operator.Logical.And,
     })
 
-    expect(predicate.sql).toContain('"score" >= $1')
-    expect(predicate.sql).toContain('"score" < $2')
-    expect(predicate.sql).toContain('"title" = $3')
+    expect(predicate.sql).toContain('COALESCE("score" >= $1, FALSE)')
+    expect(predicate.sql).toContain('COALESCE("score" < $2, FALSE)')
+    expect(predicate.sql).toContain('"title" IS NOT DISTINCT FROM $3')
     expect(predicate.sql.startsWith('WHERE (')).toBe(true)
     expect(predicate.values).toEqual([3, 6, "x' OR true --"])
+  })
+
+  test('compiles two-valued equality, ranges, Or, Not, Between, and Empty', () => {
+    expect(SQL.where(definitions, entity, { score: 5 })).toEqual({
+      sql: 'WHERE "score" IS NOT DISTINCT FROM $1',
+      values: [5],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'score',
+      operator: Operator.Comparison.GreaterThan,
+      value: 5,
+    })).toEqual({
+      sql: 'WHERE COALESCE("score" > $1, FALSE)',
+      values: [5],
+    })
+    expect(SQL.where(definitions, entity, {
+      filters: [
+        { field: 'score', operator: Operator.Comparison.Equal, value: 5 },
+        { field: 'title', operator: Operator.Comparison.Equal, value: 'kept' },
+      ],
+      operator: Operator.Logical.Or,
+    })).toEqual({
+      sql: 'WHERE ("score" IS NOT DISTINCT FROM $1 OR "title" IS NOT DISTINCT FROM $2)',
+      values: [5, 'kept'],
+    })
+    expect(SQL.where(definitions, entity, {
+      filters: [{ field: 'score', operator: Operator.Comparison.Equal, value: 5 }],
+      operator: Operator.Logical.Not,
+    })).toEqual({
+      sql: 'WHERE (NOT ("score" IS NOT DISTINCT FROM $1))',
+      values: [5],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'score',
+      operator: Operator.Comparison.NotEqual,
+      value: 5,
+    })).toEqual({
+      sql: 'WHERE (NOT ("score" IS NOT DISTINCT FROM $1))',
+      values: [5],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'score',
+      operator: Operator.Comparison.NotEqual,
+      value: null,
+    })).toEqual({
+      sql: 'WHERE (NOT ("score" IS NULL))',
+      values: [],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'score',
+      operator: Operator.Comparison.Between,
+      values: [3, 6],
+    })).toEqual({
+      sql: 'WHERE (COALESCE("score" >= $1, FALSE) AND COALESCE("score" <= $2, FALSE))',
+      values: [3, 6],
+    })
+    expect(SQL.where(definitions, entity, {
+      field: 'title',
+      operator: Operator.Comparison.Empty,
+    })).toEqual({
+      sql: 'WHERE ("title" IS NULL OR "title" IS NOT DISTINCT FROM $1)',
+      values: [''],
+    })
+    expect(SQL.where(definitions, entity, {
+      filters: [{
+        field: 'title',
+        operator: Operator.Comparison.Empty,
+      }],
+      operator: Operator.Logical.Not,
+    })).toEqual({
+      sql: 'WHERE (NOT (("title" IS NULL OR "title" IS NOT DISTINCT FROM $1)))',
+      values: [''],
+    })
   })
 
   test('preserves nested logical grouping', () => {
@@ -56,6 +132,35 @@ describe('SQL.where', () => {
     expect(predicate.sql.match(/AND/g)?.length).toBeGreaterThanOrEqual(2)
     expect(predicate.sql.startsWith('WHERE (')).toBe(true)
     expect(predicate.values).toEqual([1, true, 'Hello'])
+  })
+
+  test('compiles normalized string expressions to exact parameterized SQL', () => {
+    const where = (source: string) => SQL.where(
+      definitions,
+      entity,
+      QueryNormalizer.normalize(note, source),
+    )
+
+    expect(where('$not (score = 5 $or score = 10)')).toEqual({
+      sql: 'WHERE (NOT (("score" IS NOT DISTINCT FROM $1 OR "score" IS NOT DISTINCT FROM $2)))',
+      values: [5, 10],
+    })
+    expect(where('score $between [3, 6]')).toEqual({
+      sql: 'WHERE (COALESCE("score" >= $1, FALSE) AND COALESCE("score" <= $2, FALSE))',
+      values: [3, 6],
+    })
+    expect(where('title $empty')).toEqual({
+      sql: 'WHERE ("title" IS NULL OR "title" IS NOT DISTINCT FROM $1)',
+      values: [''],
+    })
+    expect(where('score != 5')).toEqual({
+      sql: 'WHERE (NOT ("score" IS NOT DISTINCT FROM $1))',
+      values: [5],
+    })
+    expect(where('score != null')).toEqual({
+      sql: 'WHERE (NOT ("score" IS NULL))',
+      values: [],
+    })
   })
 
   test('maps null equality to IS NULL without binding', () => {

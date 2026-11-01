@@ -1,4 +1,5 @@
-import type { EntityDefinition } from './EntityDefinitions'
+import type { EntityDefinition, FieldDefinition } from './EntityDefinitions'
+import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 
 /** A canonical comparison filter. */
@@ -22,8 +23,8 @@ export interface LogicalFilter {
 /** A canonical serializable where filter. */
 export type Filter = ComparisonFilter | LogicalFilter
 
-/** Comparison operators implemented by structured filters. */
-const COMPARISON_OPERATORS = new Set<Operator.Comparison>([
+/** Primitive comparison operators retained in the canonical filter tree. */
+const BASE_COMPARISON_OPERATORS = new Set<Operator.Comparison>([
   Operator.Comparison.Equal,
   Operator.Comparison.GreaterThan,
   Operator.Comparison.GreaterThanOrEqual,
@@ -32,12 +33,81 @@ const COMPARISON_OPERATORS = new Set<Operator.Comparison>([
 ])
 
 /**
- * Normalize structured where input into the canonical filter tree.
+ * Normalize structured and source-level shorthand into canonical predicates.
  *
- * This is the only structured-input normalizer. SQL rendering and parameter
+ * This is the shared semantic expansion owner. SQL rendering and parameter
  * binding belong to the SQL construction owner.
  */
 export const Predicate = {
+  /**
+   * Expand an inclusive range into primitive comparisons.
+   * @param field - Root entity field name.
+   * @param lower - Inclusive lower bound, or null for an open bound.
+   * @param upper - Inclusive upper bound, or null for an open bound.
+   * @returns The canonical range filter.
+   * @throws {Error} When both bounds are null.
+   */
+  between(field: string, lower: unknown, upper: unknown): Filter {
+    if (lower === null && upper === null) throw new Error('Between requires at least one non-null bound')
+    const filters: Filter[] = []
+    if (lower !== null) {
+      filters.push({ field, operator: Operator.Comparison.GreaterThanOrEqual, value: lower })
+    }
+    if (upper !== null) {
+      filters.push({ field, operator: Operator.Comparison.LessThanOrEqual, value: upper })
+    }
+    return filters.length === 1 ? filters[0] as Filter : Predicate.logical(Operator.Logical.And, filters)
+  },
+
+  /**
+   * Expand the empty-string comparison into canonical equality nodes.
+   * @param entity - Entity whose field is referenced.
+   * @param field - String field definition.
+   * @returns `Or(Equal(null), Equal(''))`.
+   * @throws {Error} When the field is not a string.
+   */
+  empty(entity: EntityDefinition, field: FieldDefinition): LogicalFilter {
+    if (field.type !== FieldType.String) {
+      throw new Error(
+        `Query operator "${Operator.Comparison.Empty}" is not valid for field "${entity.name}.${field.name}"`,
+      )
+    }
+    return Predicate.logical(Operator.Logical.Or, [
+      { field: field.name, operator: Operator.Comparison.Equal, value: null },
+      { field: field.name, operator: Operator.Comparison.Equal, value: '' },
+    ])
+  },
+
+  /**
+   * Require a field from an entity definition.
+   * @param entity - Entity whose fields are referenced.
+   * @param name - Root field name.
+   * @returns The field definition.
+   * @throws {Error} When the field is unknown.
+   */
+  field(entity: EntityDefinition, name: string): FieldDefinition {
+    const field = entity.fields.find(candidate => candidate.name === name)
+    if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
+    return field
+  },
+
+  /**
+   * Build a validated logical filter group.
+   * @param operator - Logical operator identity.
+   * @param filters - Child filters.
+   * @returns The logical filter group.
+   * @throws {Error} When the operator's child count is invalid.
+   */
+  logical(operator: Operator.Logical, filters: readonly Filter[]): LogicalFilter {
+    if (operator === Operator.Logical.Not && filters.length !== 1) {
+      throw new Error(`Query ${Operator.Logical.Not} requires exactly one filter`)
+    }
+    if (operator !== Operator.Logical.Not && filters.length === 0) {
+      throw new Error(`Query ${operator} requires a non-empty filters array`)
+    }
+    return { filters, operator }
+  },
+
   /**
    * Normalize a where input.
    * @param entity - Entity whose fields are referenced.
@@ -49,6 +119,25 @@ export const Predicate = {
     if (!isPlainRecord(input)) throw new Error('Query where must be a plain object')
     if (Object.hasOwn(input, 'operator')) return explicit(entity, input)
     return shorthand(entity, input)
+  },
+
+  /**
+   * Negate one filter.
+   * @param filter - Filter to negate.
+   * @returns The one-child `Not` group.
+   */
+  not(filter: Filter): LogicalFilter {
+    return Predicate.logical(Operator.Logical.Not, [filter])
+  },
+
+  /**
+   * Expand a not-equal comparison into `Not(Equal)`.
+   * @param field - Root entity field name.
+   * @param value - Value that must not match.
+   * @returns The canonical negated equality filter.
+   */
+  notEqual(field: string, value: unknown): LogicalFilter {
+    return Predicate.not({ field, operator: Operator.Comparison.Equal, value })
   },
 }
 
@@ -68,7 +157,7 @@ function shorthand(entity: EntityDefinition, input: Readonly<Record<string, unkn
   }
 
   const [field, value] = entries[0] as [string, unknown]
-  assertField(entity, field)
+  Predicate.field(entity, field)
   return { field, operator: Operator.Comparison.Equal, value }
 }
 
@@ -82,43 +171,85 @@ function explicit(entity: EntityDefinition, input: Readonly<Record<string, unkno
   const operator = input.operator
   if (typeof operator !== 'string') throw new Error('Query operator must be a string')
 
-  if (operator === Operator.Logical.And) {
+  if (operator === Operator.Logical.And || operator === Operator.Logical.Or) {
     assertKeys(input, ['operator', 'filters'])
     if (!Array.isArray(input.filters) || input.filters.length === 0) {
-      throw new Error(`Query ${Operator.Logical.And} requires a non-empty filters array`)
+      throw new Error(`Query ${operator} requires a non-empty filters array`)
     }
-    const filters = input.filters.map(filter => {
-      if (!isPlainRecord(filter)) throw new Error(`Query ${Operator.Logical.And} filters must be plain objects`)
-      const normalized = Predicate.normalize(entity, filter)
-      if (!normalized) throw new Error(`Query ${Operator.Logical.And} filters must be non-empty objects`)
-      return normalized
-    })
-    return { filters, operator: Operator.Logical.And }
+    return Predicate.logical(
+      operator,
+      input.filters.map(filter => child(entity, operator, filter)),
+    )
   }
 
-  if (!COMPARISON_OPERATORS.has(operator as Operator.Comparison)) {
+  if (operator === Operator.Logical.Not) {
+    assertKeys(input, ['operator', 'filters'])
+    if (!Array.isArray(input.filters) || input.filters.length !== 1) {
+      throw new Error(`Query ${Operator.Logical.Not} requires exactly one filter`)
+    }
+    return Predicate.not(child(entity, operator, input.filters[0]))
+  }
+
+  if (operator === Operator.Comparison.NotEqual) {
+    assertKeys(input, ['operator', 'field', 'value'])
+    return Predicate.notEqual(requireField(entity, input).name, input.value)
+  }
+
+  if (operator === Operator.Comparison.Between) {
+    assertKeys(input, ['operator', 'field', 'values'])
+    const definition = requireField(entity, input)
+    if (!Array.isArray(input.values) || input.values.length !== 2) {
+      throw new Error(`Query ${Operator.Comparison.Between} requires exactly two values`)
+    }
+    const [lower, upper] = input.values
+    return Predicate.between(definition.name, lower, upper)
+  }
+
+  if (operator === Operator.Comparison.Empty) {
+    assertKeys(input, ['operator', 'field'])
+    return Predicate.empty(entity, requireField(entity, input))
+  }
+
+  if (!BASE_COMPARISON_OPERATORS.has(operator as Operator.Comparison)) {
     throw new Error(`Query operator "${operator}" is not supported`)
   }
 
   assertKeys(input, ['operator', 'field', 'value'])
-  if (typeof input.field !== 'string') throw new Error('Query comparison field must be a string')
-  assertField(entity, input.field)
+  const definition = requireField(entity, input)
   return {
-    field: input.field,
+    field: definition.name,
     operator: operator as Operator.Comparison,
     value: input.value,
   }
 }
 
 /**
- * Verify that a field belongs to the entity.
+ * Normalize one logical child.
  * @param entity - Entity whose fields are referenced.
- * @param field - Field name to verify.
+ * @param operator - Parent logical operator identity.
+ * @param filter - Child filter input.
+ * @returns The normalized child filter.
  */
-function assertField(entity: EntityDefinition, field: string): void {
-  if (!entity.fields.some(candidate => candidate.name === field)) {
-    throw new Error(`Unknown field "${entity.name}.${field}"`)
-  }
+function child(
+  entity: EntityDefinition,
+  operator: string,
+  filter: unknown,
+): Filter {
+  if (!isPlainRecord(filter)) throw new Error(`Query ${operator} filters must be plain objects`)
+  const normalized = Predicate.normalize(entity, filter)
+  if (!normalized) throw new Error(`Query ${operator} filters must be non-empty objects`)
+  return normalized
+}
+
+/**
+ * Require and return a field named by an explicit filter.
+ * @param entity - Entity whose fields are referenced.
+ * @param input - Explicit node input.
+ * @returns The field definition.
+ */
+function requireField(entity: EntityDefinition, input: Readonly<Record<string, unknown>>): FieldDefinition {
+  if (typeof input.field !== 'string') throw new Error('Query comparison field must be a string')
+  return Predicate.field(entity, input.field)
 }
 
 /**

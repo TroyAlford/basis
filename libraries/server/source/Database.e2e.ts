@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { accountDefinition, containers, noteDefinition, numberRowDefinition, removeService, useDatabaseFixture } from '../testing/DatabaseFixture'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
@@ -25,26 +26,6 @@ interface InspectMount {
   Destination: string,
   /** Host source path. */
   Source: string,
-}
-
-/**
- * Find the containers owned by a managed application root.
- * @param install - The application root used in the ownership label.
- * @returns The container ids.
- */
-function containers(install: string): readonly string[] {
-  return run`docker ps -aq --filter ${`label=basis.install=${install}`}`.lines
-}
-
-/**
- * Remove the containers and durable volume for a managed application root.
- * @param install - The application root used in the ownership label.
- */
-function removeService(install: string): void {
-  for (const id of containers(install)) void run`docker rm -f ${id}`
-  for (const volume of run`docker volume ls -q --filter ${`label=basis.install=${install}`}`.lines) {
-    void run`docker volume rm -f ${volume}`
-  }
 }
 
 /**
@@ -214,118 +195,71 @@ describe('Server database lifecycle', () => {
         await bAgain.shutdown()
       }
     } finally {
-      removeService(installA)
-      removeService(installB)
+      const removed = [removeService(installA), removeService(installB)]
+      expect(removed).toEqual([true, true])
     }
   }, 180_000)
 
   test('exposes Bun SQL parameterization and error semantics', async () => {
-    const service = `basis-e2e-sql-${randomUUID()}`
-    const install = tempDirectory('basis-install-')
+    const { server } = await useDatabaseFixture('sql')
+    const injected = "Robert'); drop table users; --"
+    const rows = await server.db.sql<{ text: string, value: number }[]>`
+      select ${injected} as text, ${7} as value
+    `
+    expect(rows[0]?.text).toBe(injected)
+    expect(rows[0]?.value).toBe(7)
 
-    try {
-      const server = startWithInstall(new Server().root(install).database(), install, service)
-      try {
-        await server.ready()
-        const injected = "Robert'); drop table users; --"
-        const rows = await server.db.sql<{ text: string, value: number }[]>`
-          select ${injected} as text, ${7} as value
-        `
-        expect(rows[0]?.text).toBe(injected)
-        expect(rows[0]?.value).toBe(7)
-
-        const failure = await server.db.sql`select * from basis_missing_relation`
-          .catch((error: unknown) => error)
-        expect(failure).toMatchObject({ errno: '42P01' })
-      } finally {
-        await server.shutdown()
-      }
-    } finally {
-      removeService(install)
-    }
+    const failure = await server.db.sql`select * from basis_missing_relation`
+      .catch((error: unknown) => error)
+    expect(failure).toMatchObject({ errno: '42P01' })
   }, 120_000)
 
   test('commits and rolls back through pooled Bun transactions', async () => {
-    const service = `basis-e2e-tx-${randomUUID()}`
-    const install = tempDirectory('basis-install-tx-')
+    const { server } = await useDatabaseFixture('transactions')
+    await server.db.sql`drop table if exists tx_probe`
+    await server.db.sql`create table tx_probe (value text)`
 
-    try {
-      const server = startWithInstall(new Server().root(install).database(), install, service)
-      try {
-        await server.ready()
-        await server.db.sql`create table tx_probe (value text)`
+    const result = await server.db.tx(async tx => {
+      await tx`insert into tx_probe values ('committed')`
+      return 'callback-result'
+    })
+    expect(result).toBe('callback-result')
 
-        const result = await server.db.tx(async tx => {
-          await tx`insert into tx_probe values ('committed')`
-          return 'callback-result'
-        })
-        expect(result).toBe('callback-result')
-
-        const count = async (): Promise<number | undefined> => {
-          const rows = await server.db.sql<{ count: number }[]>`
-            select count(*)::int as count from tx_probe
-          `
-          return rows[0]?.count
-        }
-        expect(await count()).toBe(1)
-
-        await expect(server.db.tx(async tx => {
-          await tx`insert into tx_probe values ('thrown')`
-          throw new Error('rollback')
-        })).rejects.toThrow('rollback')
-        expect(await count()).toBe(1)
-
-        await expect(server.db.tx(async tx => {
-          await tx`insert into tx_probe values ('failed')`
-          await tx`select * from basis_missing_tx_relation`
-        })).rejects.toMatchObject({ errno: '42P01' })
-        expect(await count()).toBe(1)
-      } finally {
-        await server.shutdown()
-      }
-    } finally {
-      removeService(install)
+    const count = async (): Promise<number | undefined> => {
+      const rows = await server.db.sql<{ count: number }[]>`
+        select count(*)::int as count from tx_probe
+      `
+      return rows[0]?.count
     }
+    expect(await count()).toBe(1)
+
+    await expect(server.db.tx(async tx => {
+      await tx`insert into tx_probe values ('thrown')`
+      throw new Error('rollback')
+    })).rejects.toThrow('rollback')
+    expect(await count()).toBe(1)
+
+    await expect(server.db.tx(async tx => {
+      await tx`insert into tx_probe values ('failed')`
+      await tx`select * from basis_missing_tx_relation`
+    })).rejects.toMatchObject({ errno: '42P01' })
+    expect(await count()).toBe(1)
   }, 120_000)
 
   test('creates physical tables from canonical entities and reruns safely', async () => {
-    const service = `basis-e2e-schema-${randomUUID()}`
-    const install = tempDirectory('basis-install-schema-')
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [noteDefinition, accountDefinition],
+    }))
+    const { server } = await useDatabaseFixture('schema')
+    await server.db.sql`drop table if exists "Note", "Account"`
+    await entities.createTables(server.db.sql)
 
-    try {
-      const entities = EntityDefinitions.load(JSON.stringify({
-        entities: [
-          {
-            fields: [
-              { name: 'id', primaryKey: true, type: 'uuid' },
-              { name: 'title', type: 'string' },
-              { name: 'active', type: 'boolean' },
-              { name: 'score', type: 'number' },
-              { name: 'dueOn', type: 'date' },
-              { name: 'createdAt', type: 'timestamp' },
-            ],
-            name: 'Note',
-          },
-          {
-            fields: [
-              { name: 'id', primaryKey: true, type: 'snowflake' },
-              { name: 'name', type: 'string' },
-            ],
-            name: 'Account',
-          },
-        ],
-      }))
-      const server = startWithInstall(new Server().root(install).database({ entities }), install, service)
-      try {
-        await server.ready()
-        await entities.createTables(server.db.sql)
-
-        const noteColumns = await server.db.sql<{
-          columnName: string,
-          dataType: string,
-          isNullable: string,
-          tableName: string,
-        }[]>`
+    const noteColumns = await server.db.sql<{
+      columnName: string,
+      dataType: string,
+      isNullable: string,
+      tableName: string,
+    }[]>`
           select
             table_name as "tableName",
             column_name as "columnName",
@@ -335,12 +269,12 @@ describe('Server database lifecycle', () => {
           where table_name = ${'Note'}
           order by ordinal_position
         `
-        const accountColumns = await server.db.sql<{
-          columnName: string,
-          dataType: string,
-          isNullable: string,
-          tableName: string,
-        }[]>`
+    const accountColumns = await server.db.sql<{
+      columnName: string,
+      dataType: string,
+      isNullable: string,
+      tableName: string,
+    }[]>`
           select
             table_name as "tableName",
             column_name as "columnName",
@@ -350,213 +284,332 @@ describe('Server database lifecycle', () => {
           where table_name = ${'Account'}
           order by ordinal_position
         `
-        expect([...noteColumns, ...accountColumns]).toEqual([
-          { columnName: 'id', dataType: 'uuid', isNullable: 'NO', tableName: 'Note' },
-          { columnName: 'title', dataType: 'text', isNullable: 'NO', tableName: 'Note' },
-          { columnName: 'active', dataType: 'boolean', isNullable: 'NO', tableName: 'Note' },
-          { columnName: 'score', dataType: 'double precision', isNullable: 'NO', tableName: 'Note' },
-          { columnName: 'dueOn', dataType: 'date', isNullable: 'NO', tableName: 'Note' },
-          { columnName: 'createdAt', dataType: 'timestamp with time zone', isNullable: 'NO', tableName: 'Note' },
-          { columnName: 'id', dataType: 'bigint', isNullable: 'NO', tableName: 'Account' },
-          { columnName: 'name', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
-        ])
+    expect([...noteColumns, ...accountColumns]).toEqual([
+      { columnName: 'id', dataType: 'uuid', isNullable: 'NO', tableName: 'Note' },
+      { columnName: 'title', dataType: 'text', isNullable: 'NO', tableName: 'Note' },
+      { columnName: 'active', dataType: 'boolean', isNullable: 'NO', tableName: 'Note' },
+      { columnName: 'score', dataType: 'double precision', isNullable: 'NO', tableName: 'Note' },
+      { columnName: 'dueOn', dataType: 'date', isNullable: 'NO', tableName: 'Note' },
+      { columnName: 'createdAt', dataType: 'timestamp with time zone', isNullable: 'NO', tableName: 'Note' },
+      { columnName: 'id', dataType: 'bigint', isNullable: 'NO', tableName: 'Account' },
+      { columnName: 'name', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
+    ])
 
-        const primaryKeys = await server.db.sql<{ tableName: string }[]>`
+    const primaryKeys = await server.db.sql<{ tableName: string }[]>`
           select tc.table_name as "tableName"
           from information_schema.table_constraints tc
           where tc.constraint_type = 'PRIMARY KEY'
             and tc.table_name in (${'Note'}, ${'Account'})
           order by tc.table_name
         `
-        expect(primaryKeys.map(row => row.tableName)).toEqual(['Account', 'Note'])
+    expect(primaryKeys.map(row => row.tableName)).toEqual(['Account', 'Note'])
 
-        await server.db.sql`
+    await server.db.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values (gen_random_uuid(), 'kept', true, 1.5, '2026-01-02', now())
         `
-        await server.db.sql`insert into "Account" ("id", "name") values (${'9223372036854775807'}, ${'Troy'})`
-        await entities.createTables(server.db.sql)
-        expect(await server.db.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
-          .toEqual([{ count: 1 }])
-        expect(await server.db.sql<{ id: string }[]>`select id::text as id from "Account"`)
-          .toEqual([{ id: '9223372036854775807' }])
-        expect(await server.db.sql<{ id: string }[]>`select id from "Account"`)
-          .toEqual([{ id: '9223372036854775807' }])
+    await server.db.sql`insert into "Account" ("id", "name") values (${'9223372036854775807'}, ${'Troy'})`
+    await entities.createTables(server.db.sql)
+    expect(await server.db.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
+      .toEqual([{ count: 1 }])
+    expect(await server.db.sql<{ id: string }[]>`select id::text as id from "Account"`)
+      .toEqual([{ id: '9223372036854775807' }])
+    expect(await server.db.sql<{ id: string }[]>`select id from "Account"`)
+      .toEqual([{ id: '9223372036854775807' }])
 
-        const account = await server.db.query<{ id: bigint, name: string }>('Account', {
-          fields: ['id', 'name'],
-          where: { id: '9223372036854775807' },
-        })
-        expect(account).toEqual([{ id: 9223372036854775807n, name: 'Troy' }])
-        expect(typeof account[0]?.id).toBe('bigint')
+    const account = await server.db.query<{ id: bigint, name: string }>('Account', {
+      fields: ['id', 'name'],
+      where: { id: '9223372036854775807' },
+    })
+    expect(account).toEqual([{ id: 9223372036854775807n, name: 'Troy' }])
+    expect(typeof account[0]?.id).toBe('bigint')
 
-        expect(await server.db.query<{ score: number, title: string }>('Note', {
-          fields: ['title', 'score'],
-        })).toEqual([{ score: 1.5, title: 'kept' }])
-        await server.db.sql`
+    expect(await server.db.query<{ score: number, title: string }>('Note', {
+      fields: ['title', 'score'],
+    })).toEqual([{ score: 1.5, title: 'kept' }])
+    await server.db.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values (gen_random_uuid(), 'ignored', false, 2, '2026-01-03', now())
         `
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          where: { title: 'kept' },
-        })).toEqual([{ title: 'kept' }])
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          where: { title: "kept' OR true --" },
-        })).toEqual([])
-        await expect(server.db.query('Note', {
-          fields: ['title'],
-          where: { missing: 'kept' },
-        })).rejects.toThrow('Unknown field "Note.missing"')
+    expect(await server.db.query<{ title: string }>('Note', {
+      fields: ['title'],
+      where: { title: 'kept' },
+    })).toEqual([{ title: 'kept' }])
+    expect(await server.db.query<{ title: string }>('Note', {
+      fields: ['title'],
+      where: { title: "kept' OR true --" },
+    })).toEqual([])
+    await expect(server.db.query('Note', {
+      fields: ['title'],
+      where: { missing: 'kept' },
+    })).rejects.toThrow('Unknown field "Note.missing"')
 
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          limit: 1,
-          orderBy: { direction: SortDirection.Descending, field: 'score' },
-        })).toEqual([{ title: 'ignored' }])
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          limit: 1,
-          offset: 1,
-          orderBy: { field: 'title' },
-        })).toEqual([{ title: 'kept' }])
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          limit: 1,
-          orderBy: { direction: SortDirection.Descending, field: 'score' },
-          where: { active: false },
-        })).toEqual([{ title: 'ignored' }])
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          limit: 2,
-          orderBy: 'title',
-        })).toEqual([{ title: 'ignored' }, { title: 'kept' }])
-        await server.db.sql`
+    expect(await server.db.query<{ title: string }>('Note', {
+      fields: ['title'],
+      limit: 1,
+      orderBy: { direction: SortDirection.Descending, field: 'score' },
+    })).toEqual([{ title: 'ignored' }])
+    expect(await server.db.query<{ title: string }>('Note', {
+      fields: ['title'],
+      limit: 1,
+      offset: 1,
+      orderBy: { field: 'title' },
+    })).toEqual([{ title: 'kept' }])
+    expect(await server.db.query<{ title: string }>('Note', {
+      fields: ['title'],
+      limit: 1,
+      orderBy: { direction: SortDirection.Descending, field: 'score' },
+      where: { active: false },
+    })).toEqual([{ title: 'ignored' }])
+    expect(await server.db.query<{ title: string }>('Note', {
+      fields: ['title'],
+      limit: 2,
+      orderBy: 'title',
+    })).toEqual([{ title: 'ignored' }, { title: 'kept' }])
+    await server.db.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values
             (gen_random_uuid(), 'beta', true, 5, '2026-01-04', now()),
             (gen_random_uuid(), 'alpha', true, 5, '2026-01-04', now())
         `
-        expect(await server.db.query<{ title: string }>('Note', {
-          fields: ['title'],
-          orderBy: ['score', { direction: SortDirection.Ascending, field: 'title' }],
-          where: { score: 5 },
-        })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
+    expect(await server.db.query<{ title: string }>('Note', {
+      fields: ['title'],
+      orderBy: ['score', { direction: SortDirection.Ascending, field: 'title' }],
+      where: { score: 5 },
+    })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
 
-        await expect(server.db.query('Note', {
-          fields: ['title'],
-          orderBy: { field: 'missing' },
-        })).rejects.toThrow('Unknown field "Note.missing"')
-        await expect(server.db.query('Note', {
-          fields: ['title'],
-          orderBy: { direction: 'sideways' as SortDirection, field: 'title' },
-        })).rejects.toThrow('Query orderBy direction must be "asc" or "desc"')
-        await expect(server.db.query('Note', {
-          fields: ['title'],
-          limit: -1,
-          orderBy: { field: 'title' },
-        })).rejects.toThrow('Query limit must be a non-negative integer')
+    await expect(server.db.query('Note', {
+      fields: ['title'],
+      orderBy: { field: 'missing' },
+    })).rejects.toThrow('Unknown field "Note.missing"')
+    await expect(server.db.query('Note', {
+      fields: ['title'],
+      orderBy: { direction: 'sideways' as SortDirection, field: 'title' },
+    })).rejects.toThrow('Query orderBy direction must be "asc" or "desc"')
+    await expect(server.db.query('Note', {
+      fields: ['title'],
+      limit: -1,
+      orderBy: { field: 'title' },
+    })).rejects.toThrow('Query limit must be a non-negative integer')
 
-        await expect(server.db.query('Note', { fields: ['missing'] }))
-          .rejects.toThrow('Unknown field "Note.missing"')
-        await expect(server.db.query('Missing', { fields: ['id'] }))
-          .rejects.toThrow('Unknown entity "Missing"')
-        await expect(server.db.query('Note', { fields: [] }))
-          .rejects.toThrow('Query fields must be a non-empty array')
+    await expect(server.db.query('Note', { fields: ['missing'] }))
+      .rejects.toThrow('Unknown field "Note.missing"')
+    await expect(server.db.query('Missing', { fields: ['id'] }))
+      .rejects.toThrow('Unknown entity "Missing"')
+    await expect(server.db.query('Note', { fields: [] }))
+      .rejects.toThrow('Query fields must be a non-empty array')
 
-        await server.db.sql`
+    await server.db.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           select gen_random_uuid(), 'page-' || value, true, value, '2026-01-03', now()
           from generate_series(1, 30) as series(value)
         `
-        expect(await server.db.query('Note', { fields: ['title'] })).toHaveLength(25)
-        expect(await server.db.query('Note', { fields: ['title'], limit: null })).toHaveLength(34)
+    expect(await server.db.query('Note', { fields: ['title'] })).toHaveLength(25)
+    expect(await server.db.query('Note', { fields: ['title'], limit: null })).toHaveLength(34)
 
-        await server.db.sql`create schema later`
-        await server.db.sql`create table later."Shadow" (marker text)`
-        const shadow = EntityDefinitions.load(JSON.stringify({
-          entities: [{
-            fields: [
-              { name: 'id', primaryKey: true, type: 'snowflake' },
-              { name: 'label', type: 'string' },
-            ],
-            name: 'Shadow',
-          }],
-        }))
-        await server.db.tx(async transaction => {
-          await transaction`set local search_path to public, later`
-          await shadow.createTables(transaction)
-        })
-        expect(await server.db.sql<{ tableSchema: string }[]>`
+    await server.db.sql`create schema later`
+    await server.db.sql`create table later."Shadow" (marker text)`
+    const shadow = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'snowflake' },
+          { name: 'label', type: 'string' },
+        ],
+        name: 'Shadow',
+      }],
+    }))
+    await server.db.tx(async transaction => {
+      await transaction`set local search_path to public, later`
+      await shadow.createTables(transaction)
+    })
+    expect(await server.db.sql<{ tableSchema: string }[]>`
           select table_schema as "tableSchema"
           from information_schema.tables
           where table_name = ${'Shadow'}
           order by table_schema
         `).toEqual([{ tableSchema: 'later' }, { tableSchema: 'public' }])
-      } finally {
-        await server.shutdown()
-      }
-    } finally {
-      removeService(install)
-    }
   }, 120_000)
 
   test('filters numeric values with each comparison operator', async () => {
-    const service = `basis-e2e-comparisons-${randomUUID()}`
-    const install = tempDirectory('basis-install-comparisons-')
     const entities = EntityDefinitions.load(JSON.stringify({
-      entities: [{
-        fields: [
-          { name: 'id', primaryKey: true, type: 'uuid' },
-          { name: 'value', type: 'number' },
-        ],
-        name: 'NumberRow',
-      }],
+      entities: [numberRowDefinition],
     }))
+    const { server } = await useDatabaseFixture('numeric')
+    await server.db.sql`drop table if exists "NumberRow"`
+    await entities.createTables(server.db.sql)
+    await server.db.sql`
+      insert into "NumberRow" ("id", "value")
+      select gen_random_uuid(), value
+      from generate_series(1, 10) as series(value)
+    `
 
-    try {
-      const server = startWithInstall(new Server().root(install).database({ entities }), install, service)
-      try {
-        await server.ready()
-        await entities.createTables(server.db.sql)
-        await server.db.sql`
-          insert into "NumberRow" ("id", "value")
-          select gen_random_uuid(), value
-          from generate_series(1, 10) as series(value)
+    const query = (where: Filter | Readonly<Record<string, unknown>>) => (
+      server.db.query<{ value: number }>('NumberRow', {
+        fields: ['value'],
+        limit: null,
+        orderBy: { field: 'value' },
+        where,
+      })
+    )
+
+    expect(await query({ field: 'value', operator: Operator.Comparison.Equal, value: 3 })).toEqual([{ value: 3 }])
+    expect(await query({ field: 'value', operator: Operator.Comparison.LessThan, value: 3 }))
+      .toEqual([{ value: 1 }, { value: 2 }])
+    expect(await query({ field: 'value', operator: Operator.Comparison.LessThanOrEqual, value: 3 }))
+      .toEqual([{ value: 1 }, { value: 2 }, { value: 3 }])
+    expect(await query({ field: 'value', operator: Operator.Comparison.GreaterThan, value: 8 }))
+      .toEqual([{ value: 9 }, { value: 10 }])
+    expect(await query({ field: 'value', operator: Operator.Comparison.GreaterThanOrEqual, value: 8 }))
+      .toEqual([{ value: 8 }, { value: 9 }, { value: 10 }])
+    expect(await query({
+      filters: [
+        { field: 'value', operator: Operator.Comparison.GreaterThanOrEqual, value: 3 },
+        { field: 'value', operator: Operator.Comparison.LessThanOrEqual, value: 6 },
+      ],
+      operator: Operator.Logical.And,
+    })).toEqual([{ value: 3 }, { value: 4 }, { value: 5 }, { value: 6 }])
+  }, 120_000)
+
+  test('matches string and structured predicates with two-valued null semantics', async () => {
+    const { server } = await useDatabaseFixture('string')
+    await server.db.sql`drop table if exists "QueryRow"`
+    // Raw nullable DDL exercises NULL semantics while the canonical entity drives query validation.
+    await server.db.sql`
+      create table "QueryRow" (
+        "id" uuid primary key,
+        "active" boolean,
+        "externalId" bigint,
+        "rank" double precision,
+        "score" double precision,
+        "title" text
+      )
+    `
+    await server.db.sql`
+          insert into "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
+          values
+            (gen_random_uuid(), null, ${'9223372036854775807'}, 1, null, null),
+            (gen_random_uuid(), true, null, 2, 0, ''),
+            (gen_random_uuid(), false, null, 3, 5, '   '),
+            (gen_random_uuid(), true, null, 4, 10, 'alpha'),
+            (gen_random_uuid(), false, ${'9223372036854775807'}, 5, null, 'beta')
         `
 
-        const query = (where: Filter | Readonly<Record<string, unknown>>) => (
-          server.db.query<{ value: number }>('NumberRow', {
-            fields: ['value'],
-            limit: null,
-            orderBy: { field: 'value' },
-            where,
-          })
-        )
-
-        expect(await query({ field: 'value', operator: Operator.Comparison.Equal, value: 3 })).toEqual([{ value: 3 }])
-        expect(await query({ field: 'value', operator: Operator.Comparison.LessThan, value: 3 }))
-          .toEqual([{ value: 1 }, { value: 2 }])
-        expect(await query({ field: 'value', operator: Operator.Comparison.LessThanOrEqual, value: 3 }))
-          .toEqual([{ value: 1 }, { value: 2 }, { value: 3 }])
-        expect(await query({ field: 'value', operator: Operator.Comparison.GreaterThan, value: 8 }))
-          .toEqual([{ value: 9 }, { value: 10 }])
-        expect(await query({ field: 'value', operator: Operator.Comparison.GreaterThanOrEqual, value: 8 }))
-          .toEqual([{ value: 8 }, { value: 9 }, { value: 10 }])
-        expect(await query({
-          filters: [
-            { field: 'value', operator: Operator.Comparison.GreaterThanOrEqual, value: 3 },
-            { field: 'value', operator: Operator.Comparison.LessThanOrEqual, value: 6 },
-          ],
-          operator: Operator.Logical.And,
-        })).toEqual([{ value: 3 }, { value: 4 }, { value: 5 }, { value: 6 }])
-      } finally {
-        await server.shutdown()
-      }
-    } finally {
-      removeService(install)
+    type Where = Filter | Readonly<Record<string, unknown>> | string
+    const query = (where: Where) => server.db.query<{ rank: number }>('QueryRow', {
+      fields: ['rank'],
+      limit: null,
+      orderBy: 'rank',
+      where,
+    })
+    const same = async (source: string, structured: Where): Promise<void> => {
+      expect(await query(source)).toEqual(await query(structured))
     }
+
+    expect(await query('')).toEqual([{ rank: 1 }, { rank: 2 }, { rank: 3 }, { rank: 4 }, { rank: 5 }])
+    await same('score >= 5 $and score < 10', {
+      filters: [
+        { field: 'score', operator: Operator.Comparison.GreaterThanOrEqual, value: 5 },
+        { field: 'score', operator: Operator.Comparison.LessThan, value: 10 },
+      ],
+      operator: Operator.Logical.And,
+    })
+    expect(await query('score >= 5 $and score < 10')).toEqual([{ rank: 3 }])
+
+    await same('score != 5', {
+      field: 'score',
+      operator: Operator.Comparison.NotEqual,
+      value: 5,
+    })
+    expect(await query('score != 5')).toEqual([{ rank: 1 }, { rank: 2 }, { rank: 4 }, { rank: 5 }])
+
+    await same('score $between [5, 10]', {
+      field: 'score',
+      operator: Operator.Comparison.Between,
+      values: [5, 10],
+    })
+    expect(await query('score $between [5, 10]')).toEqual([{ rank: 3 }, { rank: 4 }])
+    expect(await query('score $between [5, null]')).toEqual([{ rank: 3 }, { rank: 4 }])
+    expect(await query('score $between [null, 5]')).toEqual([{ rank: 2 }, { rank: 3 }])
+
+    await same('title $empty', {
+      field: 'title',
+      operator: Operator.Comparison.Empty,
+    })
+    expect(await query('title $empty')).toEqual([{ rank: 1 }, { rank: 2 }])
+    await same('title !$empty', {
+      filters: [{
+        field: 'title',
+        operator: Operator.Comparison.Empty,
+      }],
+      operator: Operator.Logical.Not,
+    })
+    expect(await query('title !$empty')).toEqual([{ rank: 3 }, { rank: 4 }, { rank: 5 }])
+
+    await same('score = 5 $or score = 10', {
+      filters: [
+        { field: 'score', operator: Operator.Comparison.Equal, value: 5 },
+        { field: 'score', operator: Operator.Comparison.Equal, value: 10 },
+      ],
+      operator: Operator.Logical.Or,
+    })
+    await same('$not (score = 5 $or score = 10)', {
+      filters: [{
+        filters: [
+          { field: 'score', operator: Operator.Comparison.Equal, value: 5 },
+          { field: 'score', operator: Operator.Comparison.Equal, value: 10 },
+        ],
+        operator: Operator.Logical.Or,
+      }],
+      operator: Operator.Logical.Not,
+    })
+    expect(await query('$not (score = 5 $or score = 10)'))
+      .toEqual([{ rank: 1 }, { rank: 2 }, { rank: 5 }])
+    await same('$not score > 5', {
+      filters: [{
+        field: 'score',
+        operator: Operator.Comparison.GreaterThan,
+        value: 5,
+      }],
+      operator: Operator.Logical.Not,
+    })
+    expect(await query('$not score > 5')).toEqual([{ rank: 1 }, { rank: 2 }, { rank: 3 }, { rank: 5 }])
+
+    expect(await query('$not (score = 5 $or score = 10)'))
+      .toEqual(await query('score != 5 $and score != 10'))
+    expect(await query('$not (score = 5 $and title = "   ")'))
+      .toEqual(await query('score != 5 $or title != "   "'))
+
+    await same('score = null', { score: null })
+    expect(await query('score = null')).toEqual([{ rank: 1 }, { rank: 5 }])
+    await same('score != null', {
+      field: 'score',
+      operator: Operator.Comparison.NotEqual,
+      value: null,
+    })
+    expect(await query('score != null')).toEqual([{ rank: 2 }, { rank: 3 }, { rank: 4 }])
+
+    await same('externalId = 9223372036854775807', {
+      field: 'externalId',
+      operator: Operator.Comparison.Equal,
+      value: '9223372036854775807',
+    })
+    expect(await query('externalId = 9223372036854775807')).toEqual([{ rank: 1 }, { rank: 5 }])
+    await same('externalId $between [9223372036854775807, null]', {
+      field: 'externalId',
+      operator: Operator.Comparison.Between,
+      values: ['9223372036854775807', null],
+    })
+    expect(await query('externalId $between [9223372036854775807, null]'))
+      .toEqual([{ rank: 1 }, { rank: 5 }])
+
+    await expect(server.db.query('QueryRow', {
+      fields: ['rank'],
+      where: 'missing = 1',
+    })).rejects.toThrow('Unknown field "QueryRow.missing"')
+    await expect(server.db.query('QueryRow', {
+      fields: ['rank'],
+      where: 'title = "unterminated',
+    })).rejects.toThrow('Invalid where query at 8: Unterminated string literal')
   }, 120_000)
 
   test('reports unhealthy when an external PostgreSQL connection fails', async () => {

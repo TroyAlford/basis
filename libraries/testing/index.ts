@@ -6,6 +6,8 @@ export type {
   VisitOptions,
 } from './application'
 export type { StubResponse } from './network'
+export { registerRunCleanup } from './lifecycle'
+export type { RunCleanup } from './lifecycle'
 export { render } from '../react/testing/render'
 export { Simulate } from '../react/testing/Simulate'
 export { tempDirectory } from './temp'
