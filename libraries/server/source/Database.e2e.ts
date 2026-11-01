@@ -195,8 +195,8 @@ describe('Server database lifecycle', () => {
         await bAgain.shutdown()
       }
     } finally {
-      removeService(installA)
-      removeService(installB)
+      const removed = [removeService(installA), removeService(installB)]
+      expect(removed).toEqual([true, true])
     }
   }, 180_000)
 
