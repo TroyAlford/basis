@@ -12,22 +12,30 @@ export type QueryLiteralKind = 'boolean' | 'null' | 'number' | 'string'
  * later at the field-aware normalization boundary.
  */
 export interface QueryLiteral {
+  /** Exclusive source offset. */
+  readonly end: number,
   /** Literal category. */
   readonly kind: QueryLiteralKind,
   /** Exact source spelling. */
   readonly raw: string,
+  /** Inclusive source offset. */
+  readonly start: number,
   /** Decoded string or boolean, null for null, and raw spelling for numbers. */
   readonly value: string | boolean | null,
 }
 
 /** A transient field comparison expression. */
 export interface QueryComparison {
+  /** Exclusive source offset. */
+  readonly end: number,
   /** Root entity field name. */
   readonly field: string,
   /** Syntax node discriminator. */
   readonly kind: 'comparison',
   /** Comparison operator identity. */
   readonly operator: Operator.Comparison,
+  /** Inclusive source offset. */
+  readonly start: number,
   /**
    * Source argument literals in order.
    *
@@ -39,16 +47,40 @@ export interface QueryComparison {
 
 /** A transient logical expression. */
 export interface QueryLogical {
+  /** Exclusive source offset. */
+  readonly end: number,
   /** Child expressions. */
   readonly filters: readonly QueryExpression[],
   /** Syntax node discriminator. */
   readonly kind: 'logical',
   /** Logical operator identity. */
   readonly operator: Operator.Logical,
+  /** Inclusive source offset. */
+  readonly start: number,
+}
+
+/** An explicitly parenthesized expression, including its delimiters. */
+export interface QueryGroup {
+  /** Exclusive source offset. */
+  readonly end: number,
+  /** Grouped expression. */
+  readonly expression: QueryExpression,
+  /** Syntax node discriminator. */
+  readonly kind: 'group',
+  /** Inclusive source offset. */
+  readonly start: number,
 }
 
 /** A non-executable query syntax expression. */
-export type QueryExpression = QueryComparison | QueryLogical
+export type QueryExpression = QueryComparison | QueryLogical | QueryGroup
+
+/** The bounds parsed from a bracketed range. */
+interface ParsedBetween {
+  /** Exclusive source offset after the closing bracket. */
+  readonly end: number,
+  /** Lower and upper bound literals. */
+  readonly values: readonly QueryLiteral[],
+}
 
 /** A parsed query expression and its diagnostics. */
 export interface QueryParseResult {
@@ -134,7 +166,8 @@ class Parser {
       if (!right) return null
       filters.push(right)
     }
-    return filters.length === 1 ? first : logical(Operator.Logical.Or, filters)
+    if (filters.length === 1) return first
+    return logical(Operator.Logical.Or, filters, first.start, (filters.at(-1) as QueryExpression).end)
   }
 
   /**
@@ -151,7 +184,8 @@ class Parser {
       if (!right) return null
       filters.push(right)
     }
-    return filters.length === 1 ? first : logical(Operator.Logical.And, filters)
+    if (filters.length === 1) return first
+    return logical(Operator.Logical.And, filters, first.start, (filters.at(-1) as QueryExpression).end)
   }
 
   /**
@@ -159,16 +193,19 @@ class Parser {
    * @returns The parsed expression, or null on failure.
    */
   #parsePrimary(): QueryExpression | null {
-    if (this.#matchOperator(Operator.Logical.Not)) {
+    const not = this.#matchOperator(Operator.Logical.Not)
+    if (not) {
       const operand = this.#parsePrimary()
-      return operand ? logical(Operator.Logical.Not, [operand]) : null
+      return operand ? logical(Operator.Logical.Not, [operand], not.start, operand.end) : null
     }
     if (this.#peek().type === TokenType.LeftParen) {
+      const opening = this.#peek()
       this.#index += 1
       const grouped = this.#parseOr()
       if (!grouped) return null
-      if (!this.#expect(TokenType.RightParen, 'Expected ")" after grouped expression')) return null
-      return grouped
+      const closing = this.#expect(TokenType.RightParen, 'Expected ")" after grouped expression')
+      if (!closing) return null
+      return { end: closing.end, expression: grouped, kind: 'group', start: opening.start }
     }
     return this.#parseField()
   }
@@ -192,36 +229,42 @@ class Parser {
       return null
     }
 
+    let end: number
     let values: readonly QueryLiteral[]
     if (operator === Operator.Comparison.Between) {
       const bounds = this.#parseBetween()
       if (!bounds) return null
-      values = bounds
+      end = bounds.end
+      values = bounds.values
     } else if (operator === Operator.Comparison.Empty) {
+      end = token.end
       values = []
     } else {
       const value = this.#parseLiteral()
       if (!value) return null
+      end = value.end
       values = [value]
     }
 
     let expression: QueryExpression = {
+      end,
       field: field.value as string,
       kind: 'comparison',
       operator,
+      start: field.start,
       values,
     }
     for (let count = 0; count < negations; count += 1) {
-      expression = logical(Operator.Logical.Not, [expression])
+      expression = logical(Operator.Logical.Not, [expression], expression.start, expression.end)
     }
     return expression
   }
 
   /**
    * Parse a bracketed inclusive range.
-   * @returns The two bound literals, or null on failure.
+   * @returns The two bounds and end offset, or null on failure.
    */
-  #parseBetween(): readonly QueryLiteral[] | null {
+  #parseBetween(): ParsedBetween | null {
     if (!this.#expect(TokenType.LeftBracket, 'Expected "[" after $between')) return null
     const lower = this.#parseLiteral()
     if (!lower) return null
@@ -235,7 +278,7 @@ class Parser {
       this.#error('Between requires at least one non-null bound', closing)
       return null
     }
-    return [lower, upper]
+    return { end: closing.end, values: [lower, upper] }
   }
 
   /**
@@ -247,16 +290,40 @@ class Parser {
     switch (token.type) {
       case TokenType.Boolean:
         this.#index += 1
-        return { kind: 'boolean', raw: token.raw, value: token.value as boolean }
+        return {
+          end: token.end,
+          kind: 'boolean',
+          raw: token.raw,
+          start: token.start,
+          value: token.value as boolean,
+        }
       case TokenType.Null:
         this.#index += 1
-        return { kind: 'null', raw: token.raw, value: null }
+        return {
+          end: token.end,
+          kind: 'null',
+          raw: token.raw,
+          start: token.start,
+          value: null,
+        }
       case TokenType.Number:
         this.#index += 1
-        return { kind: 'number', raw: token.raw, value: token.value as string }
+        return {
+          end: token.end,
+          kind: 'number',
+          raw: token.raw,
+          start: token.start,
+          value: token.value as string,
+        }
       case TokenType.String:
         this.#index += 1
-        return { kind: 'string', raw: token.raw, value: token.value as string }
+        return {
+          end: token.end,
+          kind: 'string',
+          raw: token.raw,
+          start: token.start,
+          value: token.value as string,
+        }
       default:
         this.#error('Expected a literal value', token)
         return undefined
@@ -290,15 +357,15 @@ class Parser {
   /**
    * Consume a matching operator.
    * @param operator - Operator identity to match.
-   * @returns Whether the operator was consumed.
+   * @returns The consumed token, or null when absent.
    */
-  #matchOperator(operator: Operator.Comparison | Operator.Logical): boolean {
+  #matchOperator(operator: Operator.Comparison | Operator.Logical): Token | null {
     const token = this.#peek()
     if (token.type === TokenType.Operator && token.operator === operator) {
       this.#index += 1
-      return true
+      return token
     }
-    return false
+    return null
   }
 
   /**
@@ -315,11 +382,15 @@ class Parser {
  * Build a transient logical expression.
  * @param operator - Logical operator identity.
  * @param filters - Child expressions.
+ * @param start - Inclusive source offset.
+ * @param end - Exclusive source offset.
  * @returns The logical syntax expression.
  */
 function logical(
   operator: Operator.Logical,
   filters: readonly QueryExpression[],
+  start: number,
+  end: number,
 ): QueryLogical {
-  return { filters, kind: 'logical', operator }
+  return { end, filters, kind: 'logical', operator, start }
 }
