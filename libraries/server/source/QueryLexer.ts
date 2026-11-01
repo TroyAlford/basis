@@ -1,3 +1,4 @@
+import { match } from '../../utilities'
 import { Operator as QueryOperator } from './Operator'
 
 /** The kind of one query-language token. */
@@ -12,6 +13,8 @@ export enum TokenType {
   Field = 'field',
   /** Opening bracket. */
   LeftBracket = 'leftBracket',
+  /** Opening grouping parenthesis. */
+  LeftParen = 'leftParen',
   /** Null literal. */
   Null = 'null',
   /** Number literal, preserving its source spelling. */
@@ -20,6 +23,8 @@ export enum TokenType {
   Operator = 'operator',
   /** Closing bracket. */
   RightBracket = 'rightBracket',
+  /** Closing grouping parenthesis. */
+  RightParen = 'rightParen',
   /** Quoted string literal. */
   String = 'string',
   /** Unrecognized input. */
@@ -120,12 +125,13 @@ export const QueryLexer = {
         continue
       }
 
-      if (character === '[' || character === ']' || character === ',') {
-        const type = character === '['
-          ? TokenType.LeftBracket
-          : character === ']'
-            ? TokenType.RightBracket
-            : TokenType.Comma
+      if ('[](),'.includes(character)) {
+        const type = match(character)
+          .when('[').then(TokenType.LeftBracket)
+          .when(']').then(TokenType.RightBracket)
+          .when('(').then(TokenType.LeftParen)
+          .when(')').then(TokenType.RightParen)
+          .else(TokenType.Comma)
         tokens.push({
           end: index + 1,
           raw: character,

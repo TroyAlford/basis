@@ -82,6 +82,8 @@ const boolean = (raw: string, value: boolean): ExpectedToken => ({ raw, type: To
 const nullToken: ExpectedToken = { raw: 'null', type: TokenType.Null, value: null }
 const leftBracket = (): ExpectedToken => ({ raw: '[', type: TokenType.LeftBracket, value: '[' })
 const rightBracket = (): ExpectedToken => ({ raw: ']', type: TokenType.RightBracket, value: ']' })
+const leftParen = (): ExpectedToken => ({ raw: '(', type: TokenType.LeftParen, value: '(' })
+const rightParen = (): ExpectedToken => ({ raw: ')', type: TokenType.RightParen, value: ')' })
 const comma = (): ExpectedToken => ({ raw: ',', type: TokenType.Comma, value: ',' })
 const unknown = (raw: string): ExpectedToken => ({ raw, type: TokenType.Unknown, value: raw })
 
@@ -186,6 +188,26 @@ describe('QueryLexer', () => {
       operator('$empty', Operator.Comparison.Empty),
       operator('$or', Operator.Logical.Or),
       operator('$not', Operator.Logical.Not),
+    ])
+  })
+
+  test('tokenizes grouping parentheses with exact source spans', () => {
+    assertLex('(score = 1 $or (score = 2 $and active = true))', [
+      leftParen(),
+      field('score'),
+      operator('=', Operator.Comparison.Equal),
+      number('1'),
+      operator('$or', Operator.Logical.Or),
+      leftParen(),
+      field('score'),
+      operator('=', Operator.Comparison.Equal),
+      number('2'),
+      operator('$and', Operator.Logical.And),
+      field('active'),
+      operator('=', Operator.Comparison.Equal),
+      boolean('true', true),
+      rightParen(),
+      rightParen(),
     ])
   })
 
