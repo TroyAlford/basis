@@ -155,18 +155,24 @@ function parseEntities(value: unknown): readonly EntityDefinition[] {
   return seeds.map(seed => resolveEntity(seed, byName))
 }
 
-/** A parsed field before relationships are resolved. */
-interface ParsedField extends FieldDefinition {
-  /** Explicit referenced entity override from canonical JSON. */
-  readonly references?: string,
+/** One forward relationship declaration before resolution. */
+interface ParsedRelationship {
+  /** Local foreign-key field name. */
+  readonly field: string,
+  /** Navigation name on the declaring entity. */
+  readonly name: string,
+  /** Target entity name. */
+  readonly target: string,
 }
 
 /** A parsed entity before its relationships are resolved. */
 interface EntitySeed {
   /** Parsed fields in declaration order. */
-  readonly fields: readonly ParsedField[],
+  readonly fields: readonly FieldDefinition[],
   /** Entity name, in PascalCase. */
   readonly name: string,
+  /** Forward relationship declarations. */
+  readonly relationships: readonly ParsedRelationship[],
 }
 
 /**
@@ -176,7 +182,7 @@ interface EntitySeed {
  */
 function parseEntity(value: unknown): EntitySeed {
   if (!isRecord(value)) throw invalid('entity must be an object')
-  assertKnownKeys(value, ['fields', 'name'], 'entity')
+  assertKnownKeys(value, ['fields', 'name', 'relationships'], 'entity')
 
   if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
     throw invalid('entity name must be a PascalCase identifier')
@@ -197,12 +203,45 @@ function parseEntity(value: unknown): EntitySeed {
   if (primaryKeys.length !== 1) {
     throw invalid(`entity "${value.name}" must define exactly one primary key`)
   }
-  const primaryKey = primaryKeys[0] as ParsedField
+  const primaryKey = primaryKeys[0] as FieldDefinition
   if (primaryKey.type !== FieldType.UUID && primaryKey.type !== FieldType.Snowflake) {
     throw invalid(`primary key "${value.name}.${primaryKey.name}" must be type uuid or snowflake`)
   }
 
-  return { fields, name: value.name }
+  let relationships: readonly ParsedRelationship[] = []
+  if (value.relationships !== undefined) {
+    if (!Array.isArray(value.relationships)) {
+      throw invalid(`entity "${value.name}" relationships must be an array`)
+    }
+    relationships = value.relationships.map(
+      relationship => parseRelationship(value.name as string, relationship),
+    )
+  }
+
+  return { fields, name: value.name, relationships }
+}
+
+/**
+ * Validate one forward relationship declaration.
+ * @param entityName - Owning entity name for diagnostics.
+ * @param value - Parsed relationship candidate.
+ * @returns The relationship declaration.
+ */
+function parseRelationship(entityName: string, value: unknown): ParsedRelationship {
+  if (!isRecord(value)) throw invalid(`relationship in "${entityName}" must be an object`)
+  assertKnownKeys(value, ['field', 'name', 'target'], 'relationship')
+
+  if (typeof value.name !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.name)) {
+    throw invalid(`relationship name must be a camelCase identifier in "${entityName}"`)
+  }
+  if (typeof value.field !== 'string') {
+    throw invalid(`relationship "${entityName}.${value.name}" field must be a string`)
+  }
+  if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+    throw invalid(`relationship "${entityName}.${value.name}" target must be a PascalCase entity name`)
+  }
+
+  return { field: value.field, name: value.name, target: value.target }
 }
 
 /**
@@ -215,90 +254,71 @@ function resolveEntity(
   seed: EntitySeed,
   byName: ReadonlyMap<string, EntitySeed>,
 ): EntityDefinition {
-  const relationships: RelationshipDefinition[] = []
-  for (const field of seed.fields) {
-    const relationship = resolveRelationship(seed.name, field, byName)
-    if (relationship) relationships.push(relationship)
-  }
+  const fieldNames = new Set(seed.fields.map(field => field.name))
+  const relationshipNames = new Set<string>()
+  const boundFields = new Set<string>()
+  const relationships = seed.relationships.map(declaration => {
+    if (relationshipNames.has(declaration.name)) {
+      throw invalid(`duplicate relationship "${seed.name}.${declaration.name}"`)
+    }
+    if (fieldNames.has(declaration.name)) {
+      throw invalid(`relationship "${seed.name}.${declaration.name}" collides with a scalar field`)
+    }
+    if (boundFields.has(declaration.field)) {
+      throw invalid(`relationship field "${seed.name}.${declaration.field}" is bound more than once`)
+    }
+    relationshipNames.add(declaration.name)
+    boundFields.add(declaration.field)
+    return resolveRelationship(seed, declaration, byName)
+  })
 
-  return {
-    fields: seed.fields.map(field => ({
-      name: field.name,
-      primaryKey: field.primaryKey,
-      type: field.type,
-    })),
-    name: seed.name,
-    relationships,
-  }
+  return { fields: seed.fields, name: seed.name, relationships }
 }
 
 /**
- * Resolve one field's conventional or explicitly referenced relationship.
- * @param entityName - Owning entity name.
- * @param field - Parsed field.
+ * Resolve one declared forward relationship.
+ * @param seed - Owning entity seed.
+ * @param declaration - Parsed relationship declaration.
  * @param byName - All parsed entities by name.
- * @returns The relationship, or null when the field is an ordinary scalar.
+ * @returns The validated relationship.
  */
 function resolveRelationship(
-  entityName: string,
-  field: ParsedField,
+  seed: EntitySeed,
+  declaration: ParsedRelationship,
   byName: ReadonlyMap<string, EntitySeed>,
-): RelationshipDefinition | null {
+): RelationshipDefinition {
+  const field = seed.fields.find(candidate => candidate.name === declaration.field)
+  if (!field) {
+    throw invalid(
+      `unknown local field "${seed.name}.${declaration.field}" ` +
+      `for relationship "${seed.name}.${declaration.name}"`,
+    )
+  }
   if (field.primaryKey) {
-    if (field.references !== undefined) {
-      throw invalid(`primary key "${entityName}.${field.name}" cannot declare references`)
-    }
-    return null
+    throw invalid(`relationship field "${seed.name}.${field.name}" cannot be a primary key`)
   }
 
-  const targetName = targetEntityName(entityName, field, byName)
-  if (targetName === undefined) return null
-
-  const target = byName.get(targetName)
+  const target = byName.get(declaration.target)
   if (!target) {
-    throw invalid(`unknown referenced entity "${targetName}" in "${entityName}.${field.name}"`)
+    throw invalid(
+      `unknown target entity "${declaration.target}" for relationship "${seed.name}.${declaration.name}"`,
+    )
   }
   const targetKey = target.fields.find(candidate => candidate.primaryKey)
-  if (!targetKey) throw invalid(`referenced entity "${target.name}" must define a primary key`)
+  if (!targetKey) throw invalid(`target entity "${target.name}" must define a primary key`)
   if (field.type !== targetKey.type) {
     throw invalid(
-      `relationship field "${entityName}.${field.name}" type ${field.type} ` +
+      `relationship field "${seed.name}.${field.name}" type ${field.type} ` +
       `must match primary key "${target.name}.${targetKey.name}" type ${targetKey.type}`,
     )
   }
 
   return {
     field: field.name,
-    name: field.name.slice(0, -2),
+    name: declaration.name,
     targetEntity: target.name,
     targetField: targetKey.name,
   }
-}
-
-/**
- * Resolve a relationship field's target entity from an explicit reference or
- * the conventional `<entity>Id` field name.
- * @param entityName - Owning entity name.
- * @param field - Parsed field.
- * @param byName - All parsed entities by name.
- * @returns The target entity name, or undefined for an ordinary scalar.
- */
-function targetEntityName(
-  entityName: string,
-  field: ParsedField,
-  byName: ReadonlyMap<string, EntitySeed>,
-): string | undefined {
-  if (field.references !== undefined) {
-    if (!field.name.endsWith('Id')) {
-      throw invalid(`relationship field "${entityName}.${field.name}" must end in "Id"`)
-    }
-    return field.references
-  }
-  if (!field.name.endsWith('Id')) return undefined
-
-  const relationship = field.name.slice(0, -2)
-  const inferred = `${relationship.charAt(0).toUpperCase()}${relationship.slice(1)}`
-  return byName.has(inferred) ? inferred : undefined
 }
 
 /**
@@ -307,9 +327,9 @@ function targetEntityName(
  * @param value - Parsed field candidate.
  * @returns The validated field.
  */
-function parseField(entityName: string, value: unknown): ParsedField {
+function parseField(entityName: string, value: unknown): FieldDefinition {
   if (!isRecord(value)) throw invalid(`field "${entityName}" must be an object`)
-  assertKnownKeys(value, ['name', 'primaryKey', 'references', 'type'], 'field')
+  assertKnownKeys(value, ['name', 'primaryKey', 'type'], 'field')
 
   if (typeof value.name !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.name)) {
     throw invalid(`field name must be a camelCase identifier in "${entityName}"`)
@@ -320,14 +340,10 @@ function parseField(entityName: string, value: unknown): ParsedField {
   if (value.primaryKey !== undefined && typeof value.primaryKey !== 'boolean') {
     throw invalid(`field "${entityName}.${value.name}" primaryKey must be a boolean`)
   }
-  if (value.references !== undefined && typeof value.references !== 'string') {
-    throw invalid(`field "${entityName}.${value.name}" references must be a string`)
-  }
 
   return {
     name: value.name,
     primaryKey: value.primaryKey === true,
-    references: value.references as string | undefined,
     type: value.type as FieldType,
   }
 }

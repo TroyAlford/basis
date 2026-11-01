@@ -481,6 +481,7 @@ describe('Server database lifecycle', () => {
             { name: 'title', type: 'string' },
           ],
           name: 'Post',
+          relationships: [{ field: 'userId', name: 'author', target: 'User' }],
         },
         {
           fields: [

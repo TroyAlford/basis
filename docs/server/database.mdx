@@ -21,8 +21,13 @@ Pass `url` only when using an explicit external PostgreSQL server. Managed state
         { "name": "id", "type": "uuid", "primaryKey": true },
         { "name": "title", "type": "string" },
         { "name": "published", "type": "boolean" },
-        { "name": "userId", "type": "snowflake" },
+        { "name": "ownerId", "type": "snowflake" },
+        { "name": "lastUpdatedById", "type": "snowflake" },
         { "name": "createdAt", "type": "timestamp" }
+      ],
+      "relationships": [
+        { "name": "owner", "field": "ownerId", "target": "User" },
+        { "name": "lastUpdatedBy", "field": "lastUpdatedById", "target": "User" }
       ]
     },
     {
@@ -45,7 +50,7 @@ const note = entities.entity('Note')
 
 Entities use PascalCase names and unique camelCase fields. Exactly one primary key is required; its type must be `FieldType.UUID` (`uuid`) or `FieldType.Snowflake` (`snowflake`). `uuid` maps to PostgreSQL `UUID`; `snowflake` represents an externally assigned signed 64-bit ID and maps to `BIGINT`. Snowflake values are exact integers (`bigint` in TypeScript) and decimal strings at JSON boundaries; Basis does not generate them. Other field types are `boolean`, `date`, `number`, `string`, and `timestamp`; they cannot be primary keys. `date` and `timestamp` are distinct, and `number` covers integer and floating point values. Duplicate entity/field names, malformed names, unsupported types, missing or multiple primary keys, malformed JSON, and unknown properties fail validation with a clear error.
 
-A non-primary field whose name ends in `Id` defines a conventional many-to-one relationship when the rest of the name, converted to PascalCase, matches another entity. In the example, `Note.userId` references `User.id`, and the relationship is exposed as `user`. The field type must match the referenced entity's primary-key type. Add `"references": "User"` to an `Id` field to override the inferred target or supply one when the field name does not match an entity. An `Id`-suffixed field with no matching entity and no `references` remains an ordinary scalar field, so names such as `externalId` do not require a relationship. Relationship fields must end in `Id`; primary keys cannot declare `references`; unknown targets and type mismatches fail validation. Resolved relationships are exposed on the entity as `relationships` entries containing `field`, `name`, `targetEntity`, and `targetField`.
+Many-to-one relationships are declared explicitly in each entity's optional `relationships` array. Every entry has a camelCase navigation `name`, the exact local foreign-key `field`, and the target `target` entity. In the example, `Note.owner` uses `Note.ownerId`, while `Note.lastUpdatedBy` independently uses `Note.lastUpdatedById`; both reference `User`, but each is a distinct declared graph edge. There is no relationship inference from field names, suffixes, entity names, or naming conventions: an undeclared field such as `userId` remains an ordinary scalar even when a `User` entity exists. Foreign-key fields do not need an `Id` suffix. The declared field must exist, must not be a primary key, and must have the same type as the target entity's marked primary key. Unknown local fields or targets, duplicate navigation names, navigation names that collide with scalar fields, more than one relationship bound to the same local field, and type mismatches fail validation. Resolved relationships are exposed on the entity as `relationships` entries containing `field`, `name`, `targetEntity`, and `targetField`.
 
 ## Creating physical tables
 
