@@ -21,13 +21,9 @@ Pass `url` only when using an explicit external PostgreSQL server. Managed state
         { "name": "id", "type": "uuid", "primaryKey": true },
         { "name": "title", "type": "string" },
         { "name": "published", "type": "boolean" },
-        { "name": "ownerId", "type": "snowflake" },
-        { "name": "lastUpdatedById", "type": "snowflake" },
+        { "name": "owner", "type": "entity", "target": "User", "column": "ownerId" },
+        { "name": "lastUpdatedBy", "type": "entity", "target": "User", "column": "lastUpdatedById" },
         { "name": "createdAt", "type": "timestamp" }
-      ],
-      "relationships": [
-        { "name": "owner", "field": "ownerId", "target": "User" },
-        { "name": "lastUpdatedBy", "field": "lastUpdatedById", "target": "User" }
       ]
     },
     {
@@ -48,9 +44,11 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 const note = entities.entity('Note')
 ```
 
-Entities use PascalCase names and unique camelCase fields. Exactly one primary key is required; its type must be `FieldType.UUID` (`uuid`) or `FieldType.Snowflake` (`snowflake`). `uuid` maps to PostgreSQL `UUID`; `snowflake` represents an externally assigned signed 64-bit ID and maps to `BIGINT`. Snowflake values are exact integers (`bigint` in TypeScript) and decimal strings at JSON boundaries; Basis does not generate them. Other field types are `boolean`, `date`, `number`, `string`, and `timestamp`; they cannot be primary keys. `date` and `timestamp` are distinct, and `number` covers integer and floating point values. Duplicate entity/field names, malformed names, unsupported types, missing or multiple primary keys, malformed JSON, and unknown properties fail validation with a clear error.
+Entities use PascalCase names and unique camelCase fields. Exactly one primary key is required; its type must be `FieldType.UUID` (`uuid`) or `FieldType.Snowflake` (`snowflake`). `uuid` maps to PostgreSQL `UUID`; `snowflake` represents an externally assigned signed 64-bit ID and maps to `BIGINT`. Snowflake values are exact integers (`bigint` in TypeScript) and decimal strings at JSON boundaries; Basis does not generate them. Other scalar field types are `boolean`, `date`, `number`, `string`, and `timestamp`; they cannot be primary keys. `date` and `timestamp` are distinct, and `number` covers integer and floating point values. Duplicate entity/field names, malformed names, unsupported types, missing or multiple primary keys, malformed JSON, and unknown properties fail validation with a clear error.
 
-Many-to-one relationships are declared explicitly in each entity's optional `relationships` array. Every entry has a camelCase navigation `name`, the exact local foreign-key `field`, and the target `target` entity. In the example, `Note.owner` uses `Note.ownerId`, while `Note.lastUpdatedBy` independently uses `Note.lastUpdatedById`; both reference `User`, but each is a distinct declared graph edge. There is no relationship inference from field names, suffixes, entity names, or naming conventions: an undeclared field such as `userId` remains an ordinary scalar even when a `User` entity exists. Foreign-key fields do not need an `Id` suffix. The declared field must exist, must not be a primary key, and must have the same type as the target entity's marked primary key. Unknown local fields or targets, duplicate navigation names, navigation names that collide with scalar fields, more than one relationship bound to the same local field, and type mismatches fail validation. Resolved relationships are exposed on the entity as `relationships` entries containing `field`, `name`, `targetEntity`, and `targetField`.
+The model is logical-first. A singular entity reference is itself a field in `fields`: `Note.owner` is the logical field, while `ownerId` is only its explicit PostgreSQL storage column. A reference uses `type: "entity"`, an explicit `target` entity, and an explicit `column`. In the example, `Note.owner` and `Note.lastUpdatedBy` are independent logical fields targeting the same `User` entity through different columns. There is no relationship inference from names, suffixes, columns, or entity existence: an undeclared field such as `userId` remains an ordinary scalar even when a `User` entity exists. Reference names and physical column names are independently authored and do not require an `Id` suffix. The target must exist and have an explicitly marked UUID or snowflake primary key; the generated column type comes from that target key. Reference fields cannot be primary keys, and physical column collisions with scalar fields or other references fail validation. Resolved reference fields expose `column`, `target`, `targetField`, and `targetType`.
+
+Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `owner` is not selectable, filterable, or sortable until singular graph projection is implemented, and its physical `ownerId` column is not a logical field. Direct `db.sql` remains physical SQL and may use the generated column normally.
 
 ## Creating physical tables
 
@@ -61,7 +59,7 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 await entities.createTables(server.db.sql)
 ```
 
-`createTables` creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared field order for columns. `uuid` maps to `UUID`, `snowflake` to `BIGINT`, `string` to `TEXT`, `number` to `DOUBLE PRECISION`, `date` to `DATE`, `timestamp` to `TIMESTAMPTZ`, and `boolean` to `BOOLEAN`. Every column is `NOT NULL`; exactly one primary key is required, and ordinary `string` fields are never primary keys. Relationship fields include an inline PostgreSQL `REFERENCES` constraint to the referenced primary key.
+`createTables` creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared logical-field order for columns. Scalar fields use their logical field name; a singular reference field uses its explicit `column` name, derives the column type from the target's primary key, and includes an inline PostgreSQL `REFERENCES` constraint to that key. `uuid` maps to `UUID`, `snowflake` to `BIGINT`, `string` to `TEXT`, `number` to `DOUBLE PRECISION`, `date` to `DATE`, `timestamp` to `TIMESTAMPTZ`, and `boolean` to `BOOLEAN`. Every column is `NOT NULL`; exactly one primary key is required, and ordinary `string` fields are never primary keys.
 
 The statements are deterministic and available through `entities.ddl`, ordered so referenced tables are created before tables that reference them. Existing tables in the current schema are skipped, so applying the same definitions again is safe; the existence check and creation both target `current_schema()`, and an unexpected concurrent creation conflict fails rather than being silently accepted. Cyclic relationships cannot be created with inline foreign keys and fail DDL generation visibly. This is a fresh-database creation path, not a migration planner: changing an existing table's columns or constraints requires a reviewed migration in a later step.
 

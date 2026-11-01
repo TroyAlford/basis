@@ -1,4 +1,4 @@
-import type { EntityDefinition, FieldDefinition } from './EntityDefinitions'
+import type { EntityDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
@@ -95,7 +95,7 @@ function assertValues(node: QueryComparison, count: number): void {
  * @param node - Syntax literal.
  * @returns The typed canonical operand.
  */
-function literal(field: FieldDefinition, node: QueryLiteral): unknown {
+function literal(field: ScalarFieldDefinition, node: QueryLiteral): unknown {
   if (node.kind === 'null') return null
 
   if (field.type === FieldType.Snowflake) {

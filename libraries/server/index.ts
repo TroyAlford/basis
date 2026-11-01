@@ -7,7 +7,13 @@ export { SortDirection } from './source/SortDirection'
 export { FieldType, EntityDefinitions } from './source/EntityDefinitions'
 export { Operator } from './source/Operator'
 export type { ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
-export type { EntityDefinition, FieldDefinition, RelationshipDefinition } from './source/EntityDefinitions'
+export type {
+  EntityDefinition,
+  EntityReferenceFieldDefinition,
+  FieldDefinition,
+  ScalarFieldDefinition,
+  ScalarFieldType,
+} from './source/EntityDefinitions'
 export { OAuth } from './source/OAuth'
 export type { OAuthOptions } from './source/OAuth'
 export type { FavIconInput, IconOptions, IconRegistry } from './source/FavIcon'

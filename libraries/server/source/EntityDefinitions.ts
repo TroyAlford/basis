@@ -11,6 +11,8 @@ export enum FieldType {
   Boolean = 'boolean',
   /** Calendar date without a time of day. */
   Date = 'date',
+  /** Singular reference to another entity. */
+  Entity = 'entity',
   /** Numeric value, including integers and floating point numbers. */
   Number = 'number',
   /**
@@ -26,36 +28,51 @@ export enum FieldType {
   UUID = 'uuid',
 }
 
+/** Field types that represent scalar values. */
+export type ScalarFieldType =
+  | FieldType.Boolean
+  | FieldType.Date
+  | FieldType.Number
+  | FieldType.Snowflake
+  | FieldType.String
+  | FieldType.Timestamp
+  | FieldType.UUID
+
 /** One scalar field definition. */
-export interface FieldDefinition {
+export interface ScalarFieldDefinition {
   /** Field name, in camelCase. */
   readonly name: string,
   /** Whether this field is the entity's single primary key. */
   readonly primaryKey: boolean,
-  /** Logical field type. */
-  readonly type: FieldType,
+  /** Scalar field type. */
+  readonly type: ScalarFieldType,
 }
 
-/** One resolved many-to-one relationship. */
-export interface RelationshipDefinition {
-  /** Local foreign-key field name. */
-  readonly field: string,
-  /** Relationship name used by rooted graph paths. */
+/** One singular entity-reference field. */
+export interface EntityReferenceFieldDefinition {
+  /** Explicit PostgreSQL column name backing the reference. */
+  readonly column: string,
+  /** Logical field name used by entity-rooted queries. */
   readonly name: string,
   /** Referenced entity name. */
-  readonly targetEntity: string,
+  readonly target: string,
   /** Referenced primary-key field name. */
   readonly targetField: string,
+  /** Referenced primary-key scalar type. */
+  readonly targetType: FieldType.Snowflake | FieldType.UUID,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Entity,
 }
+
+/** One logical entity field. */
+export type FieldDefinition = ScalarFieldDefinition | EntityReferenceFieldDefinition
 
 /** One entity definition. */
 export interface EntityDefinition {
-  /** Fields in their declared order. */
+  /** Logical fields in their declared order. */
   readonly fields: readonly FieldDefinition[],
   /** Entity name, in PascalCase. */
   readonly name: string,
-  /** Resolved many-to-one relationships, in field order. */
-  readonly relationships: readonly RelationshipDefinition[],
 }
 
 /** Parsed and validated canonical entity definitions. */
@@ -101,7 +118,7 @@ export class EntityDefinitions {
    * referenced table exists before its foreign-key table. Identifiers are
    * quoted; user values never enter these statements.
    * @returns One deterministic `CREATE TABLE` statement per entity.
-   * @throws {Error} When relationships form a cycle.
+   * @throws {Error} When entity references form a cycle.
    */
   get ddl(): readonly string[] {
     return orderedEntities(this.entities).map(createTable)
@@ -155,34 +172,42 @@ function parseEntities(value: unknown): readonly EntityDefinition[] {
   return seeds.map(seed => resolveEntity(seed, byName))
 }
 
-/** One forward relationship declaration before resolution. */
-interface ParsedRelationship {
-  /** Local foreign-key field name. */
-  readonly field: string,
-  /** Navigation name on the declaring entity. */
+/** A parsed entity-reference field before its target key is resolved. */
+interface ParsedReferenceField {
+  /** Explicit physical column name. */
+  readonly column: string,
+  /** Logical field name. */
   readonly name: string,
-  /** Target entity name. */
+  /** Referenced entity name. */
   readonly target: string,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Entity,
 }
 
-/** A parsed entity before its relationships are resolved. */
+/** A parsed scalar field. */
+type ParsedScalarField = ScalarFieldDefinition
+
+/** A parsed logical field. */
+type ParsedField = ParsedReferenceField | ParsedScalarField
+
+/** A parsed entity before reference targets are resolved. */
 interface EntitySeed {
   /** Parsed fields in declaration order. */
-  readonly fields: readonly FieldDefinition[],
+  readonly fields: readonly ParsedField[],
   /** Entity name, in PascalCase. */
   readonly name: string,
-  /** Forward relationship declarations. */
-  readonly relationships: readonly ParsedRelationship[],
+  /** The entity's explicitly marked scalar primary key. */
+  readonly primaryKey: ParsedScalarField,
 }
 
 /**
  * Validate one entity definition's fields and primary key.
  * @param value - Parsed entity candidate.
- * @returns The entity seed awaiting relationship resolution.
+ * @returns The entity seed awaiting reference resolution.
  */
 function parseEntity(value: unknown): EntitySeed {
   if (!isRecord(value)) throw invalid('entity must be an object')
-  assertKnownKeys(value, ['fields', 'name', 'relationships'], 'entity')
+  assertKnownKeys(value, ['fields', 'name'], 'entity')
 
   if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
     throw invalid('entity name must be a PascalCase identifier')
@@ -199,53 +224,20 @@ function parseEntity(value: unknown): EntitySeed {
     names.add(field.name)
   }
 
-  const primaryKeys = fields.filter(field => field.primaryKey)
+  const primaryKeys = fields.filter(isScalarField).filter(field => field.primaryKey)
   if (primaryKeys.length !== 1) {
     throw invalid(`entity "${value.name}" must define exactly one primary key`)
   }
-  const primaryKey = primaryKeys[0] as FieldDefinition
+  const primaryKey = primaryKeys[0] as ParsedScalarField
   if (primaryKey.type !== FieldType.UUID && primaryKey.type !== FieldType.Snowflake) {
     throw invalid(`primary key "${value.name}.${primaryKey.name}" must be type uuid or snowflake`)
   }
 
-  let relationships: readonly ParsedRelationship[] = []
-  if (value.relationships !== undefined) {
-    if (!Array.isArray(value.relationships)) {
-      throw invalid(`entity "${value.name}" relationships must be an array`)
-    }
-    relationships = value.relationships.map(
-      relationship => parseRelationship(value.name as string, relationship),
-    )
-  }
-
-  return { fields, name: value.name, relationships }
+  return { fields, name: value.name, primaryKey }
 }
 
 /**
- * Validate one forward relationship declaration.
- * @param entityName - Owning entity name for diagnostics.
- * @param value - Parsed relationship candidate.
- * @returns The relationship declaration.
- */
-function parseRelationship(entityName: string, value: unknown): ParsedRelationship {
-  if (!isRecord(value)) throw invalid(`relationship in "${entityName}" must be an object`)
-  assertKnownKeys(value, ['field', 'name', 'target'], 'relationship')
-
-  if (typeof value.name !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.name)) {
-    throw invalid(`relationship name must be a camelCase identifier in "${entityName}"`)
-  }
-  if (typeof value.field !== 'string') {
-    throw invalid(`relationship "${entityName}.${value.name}" field must be a string`)
-  }
-  if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
-    throw invalid(`relationship "${entityName}.${value.name}" target must be a PascalCase entity name`)
-  }
-
-  return { field: value.field, name: value.name, target: value.target }
-}
-
-/**
- * Resolve relationships for one parsed entity.
+ * Resolve reference targets for one parsed entity.
  * @param seed - Entity seed whose fields are validated.
  * @param byName - All parsed entities by name.
  * @returns The validated entity.
@@ -254,71 +246,59 @@ function resolveEntity(
   seed: EntitySeed,
   byName: ReadonlyMap<string, EntitySeed>,
 ): EntityDefinition {
-  const fieldNames = new Set(seed.fields.map(field => field.name))
-  const relationshipNames = new Set<string>()
-  const boundFields = new Set<string>()
-  const relationships = seed.relationships.map(declaration => {
-    if (relationshipNames.has(declaration.name)) {
-      throw invalid(`duplicate relationship "${seed.name}.${declaration.name}"`)
+  const fields = seed.fields.map(field => resolveField(seed.name, field, byName))
+  const columns = new Map<string, string>()
+  for (const field of fields) {
+    const column = field.type === FieldType.Entity ? field.column : field.name
+    const existing = columns.get(column)
+    if (existing) {
+      throw invalid(
+        `physical column "${column}" is declared by both "${seed.name}.${existing}" ` +
+        `and "${seed.name}.${field.name}"`,
+      )
     }
-    if (fieldNames.has(declaration.name)) {
-      throw invalid(`relationship "${seed.name}.${declaration.name}" collides with a scalar field`)
-    }
-    if (boundFields.has(declaration.field)) {
-      throw invalid(`relationship field "${seed.name}.${declaration.field}" is bound more than once`)
-    }
-    relationshipNames.add(declaration.name)
-    boundFields.add(declaration.field)
-    return resolveRelationship(seed, declaration, byName)
-  })
-
-  return { fields: seed.fields, name: seed.name, relationships }
+    columns.set(column, field.name)
+  }
+  return { fields, name: seed.name }
 }
 
 /**
- * Resolve one declared forward relationship.
- * @param seed - Owning entity seed.
- * @param declaration - Parsed relationship declaration.
+ * Resolve one parsed field.
+ * @param entityName - Owning entity name for diagnostics.
+ * @param field - Parsed field.
  * @param byName - All parsed entities by name.
- * @returns The validated relationship.
+ * @returns The resolved logical field.
  */
-function resolveRelationship(
-  seed: EntitySeed,
-  declaration: ParsedRelationship,
+function resolveField(
+  entityName: string,
+  field: ParsedField,
   byName: ReadonlyMap<string, EntitySeed>,
-): RelationshipDefinition {
-  const field = seed.fields.find(candidate => candidate.name === declaration.field)
-  if (!field) {
-    throw invalid(
-      `unknown local field "${seed.name}.${declaration.field}" ` +
-      `for relationship "${seed.name}.${declaration.name}"`,
-    )
-  }
-  if (field.primaryKey) {
-    throw invalid(`relationship field "${seed.name}.${field.name}" cannot be a primary key`)
-  }
+): FieldDefinition {
+  if (field.type !== FieldType.Entity) return field
 
-  const target = byName.get(declaration.target)
+  const target = byName.get(field.target)
   if (!target) {
-    throw invalid(
-      `unknown target entity "${declaration.target}" for relationship "${seed.name}.${declaration.name}"`,
-    )
+    throw invalid(`unknown target entity "${field.target}" for field "${entityName}.${field.name}"`)
   }
-  const targetKey = target.fields.find(candidate => candidate.primaryKey)
-  if (!targetKey) throw invalid(`target entity "${target.name}" must define a primary key`)
-  if (field.type !== targetKey.type) {
-    throw invalid(
-      `relationship field "${seed.name}.${field.name}" type ${field.type} ` +
-      `must match primary key "${target.name}.${targetKey.name}" type ${targetKey.type}`,
-    )
-  }
-
   return {
-    field: field.name,
-    name: declaration.name,
-    targetEntity: target.name,
-    targetField: targetKey.name,
+    column: field.column,
+    name: field.name,
+    target: target.name,
+    targetField: target.primaryKey.name,
+    targetType: target.primaryKey.type as FieldType.Snowflake | FieldType.UUID,
+    type: FieldType.Entity,
   }
+}
+
+/**
+ * Whether a parsed or resolved field is scalar.
+ * @param field - Field candidate.
+ * @returns `true` for scalar fields.
+ */
+function isScalarField(
+  field: FieldDefinition | ParsedField,
+): field is ParsedScalarField | ScalarFieldDefinition {
+  return field.type !== FieldType.Entity
 }
 
 /**
@@ -327,14 +307,35 @@ function resolveRelationship(
  * @param value - Parsed field candidate.
  * @returns The validated field.
  */
-function parseField(entityName: string, value: unknown): FieldDefinition {
+function parseField(entityName: string, value: unknown): ParsedField {
   if (!isRecord(value)) throw invalid(`field "${entityName}" must be an object`)
-  assertKnownKeys(value, ['name', 'primaryKey', 'type'], 'field')
+  if (typeof value.type !== 'string') {
+    throw invalid(`field "${entityName}.${String(value.name)}" type must be a string`)
+  }
+  if (value.type === FieldType.Entity) {
+    assertKnownKeys(value, ['column', 'name', 'target', 'type'], 'field')
+    if (typeof value.name !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.name)) {
+      throw invalid(`field name must be a camelCase identifier in "${entityName}"`)
+    }
+    if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+      throw invalid(`reference field "${entityName}.${value.name}" target must be a PascalCase entity name`)
+    }
+    if (typeof value.column !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.column)) {
+      throw invalid(`reference field "${entityName}.${value.name}" column must be a camelCase identifier`)
+    }
+    return {
+      column: value.column,
+      name: value.name,
+      target: value.target,
+      type: FieldType.Entity,
+    }
+  }
 
+  assertKnownKeys(value, ['name', 'primaryKey', 'type'], 'field')
   if (typeof value.name !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.name)) {
     throw invalid(`field name must be a camelCase identifier in "${entityName}"`)
   }
-  if (typeof value.type !== 'string' || !FIELD_TYPES.has(value.type)) {
+  if (!SCALAR_FIELD_TYPES.has(value.type)) {
     throw invalid(`unsupported field type "${String(value.type)}" in "${entityName}.${value.name}"`)
   }
   if (value.primaryKey !== undefined && typeof value.primaryKey !== 'boolean') {
@@ -344,7 +345,7 @@ function parseField(entityName: string, value: unknown): FieldDefinition {
   return {
     name: value.name,
     primaryKey: value.primaryKey === true,
-    type: value.type as FieldType,
+    type: value.type as ScalarFieldType,
   }
 }
 
@@ -352,7 +353,7 @@ function parseField(entityName: string, value: unknown): FieldDefinition {
  * Order entities so every referenced table precedes its foreign-key table.
  * @param entities - Validated entities in declaration order.
  * @returns Entities in deterministic dependency order.
- * @throws {Error} When relationships form a cycle.
+ * @throws {Error} When entity references form a cycle.
  */
 function orderedEntities(entities: readonly EntityDefinition[]): readonly EntityDefinition[] {
   const byName = new Map(entities.map(entity => [entity.name, entity]))
@@ -366,10 +367,11 @@ function orderedEntities(entities: readonly EntityDefinition[]): readonly Entity
       throw invalid(`circular relationship ${[...path, entity.name].join(' -> ')}`)
     }
     visiting.add(entity.name)
-    for (const relationship of entity.relationships) {
-      if (relationship.targetEntity === entity.name) continue
-      const target = byName.get(relationship.targetEntity)
-      if (!target) throw invalid(`unknown referenced entity "${relationship.targetEntity}"`)
+    for (const field of entity.fields) {
+      if (field.type !== FieldType.Entity) continue
+      if (field.target === entity.name) continue
+      const target = byName.get(field.target)
+      if (!target) throw invalid(`unknown target entity "${field.target}"`)
       visit(target, [...path, entity.name])
     }
     visiting.delete(entity.name)
@@ -387,25 +389,24 @@ function orderedEntities(entities: readonly EntityDefinition[]): readonly Entity
  * @returns The PostgreSQL DDL statement.
  */
 function createTable(entity: EntityDefinition): string {
-  const relationships = new Map(entity.relationships.map(relationship => [relationship.field, relationship]))
   const columns = entity.fields.map(field => {
+    if (field.type === FieldType.Entity) {
+      return `${quoteIdentifier(field.column)} ${columnType(field.targetType)} NOT NULL ` +
+        `REFERENCES ${quoteIdentifier(field.target)} (${quoteIdentifier(field.targetField)})`
+    }
     const nullability = field.primaryKey ? ' PRIMARY KEY' : ' NOT NULL'
-    const column = `${quoteIdentifier(field.name)} ${columnType(field)}${nullability}`
-    const relationship = relationships.get(field.name)
-    if (!relationship) return column
-    return `${column} REFERENCES ${quoteIdentifier(relationship.targetEntity)} ` +
-      `(${quoteIdentifier(relationship.targetField)})`
+    return `${quoteIdentifier(field.name)} ${columnType(field.type)}${nullability}`
   })
   return `CREATE TABLE ${quoteIdentifier(entity.name)} (\n${columns.join(',\n')}\n)`
 }
 
 /**
- * Resolve the physical PostgreSQL type for a field.
- * @param field - The validated field.
+ * Resolve the physical PostgreSQL type for a scalar field.
+ * @param type - Scalar field type.
  * @returns The column type declaration.
  */
-function columnType(field: FieldDefinition): string {
-  switch (field.type) {
+function columnType(type: ScalarFieldType): string {
+  switch (type) {
     case FieldType.Boolean: return 'BOOLEAN'
     case FieldType.Date: return 'DATE'
     case FieldType.Number: return 'DOUBLE PRECISION'
@@ -413,7 +414,7 @@ function columnType(field: FieldDefinition): string {
     case FieldType.String: return 'TEXT'
     case FieldType.Timestamp: return 'TIMESTAMPTZ'
     case FieldType.UUID: return 'UUID'
-    default: throw new Error(`Unsupported field type: ${String(field.type)}`)
+    default: throw new Error(`Unsupported field type: ${String(type)}`)
   }
 }
 
@@ -427,8 +428,16 @@ function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`
 }
 
-/** Field type names accepted by the entity definitions. */
-const FIELD_TYPES = new Set<string>(Object.values(FieldType))
+/** Scalar field type names accepted by the entity definitions. */
+const SCALAR_FIELD_TYPES = new Set<string>([
+  FieldType.Boolean,
+  FieldType.Date,
+  FieldType.Number,
+  FieldType.Snowflake,
+  FieldType.String,
+  FieldType.Timestamp,
+  FieldType.UUID,
+])
 
 /**
  * Whether a value is a plain object.

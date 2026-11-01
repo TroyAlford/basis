@@ -477,11 +477,10 @@ describe('Server database lifecycle', () => {
         {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'userId', type: 'snowflake' },
+            { column: 'userId', name: 'author', target: 'User', type: 'entity' },
             { name: 'title', type: 'string' },
           ],
           name: 'Post',
-          relationships: [{ field: 'userId', name: 'author', target: 'User' }],
         },
         {
           fields: [
@@ -515,6 +514,10 @@ describe('Server database lifecycle', () => {
       insert into "Post" ("id", "userId", "title")
       values (gen_random_uuid(), ${'9223372036854775807'}, ${'Hello'})
     `
+    expect(await server.db.sql<{ userId: string }[]>`
+      select "userId"::text as "userId" from "Post"
+    `).toEqual([{ userId: '9223372036854775807' }])
+
     const invalidInsert = await server.db.sql`
       insert into "Post" ("id", "userId", "title")
       values (gen_random_uuid(), ${'1'}, ${'Invalid'})
@@ -525,6 +528,37 @@ describe('Server database lifecycle', () => {
       delete from "User" where "id" = ${'9223372036854775807'}
     `.catch((error: unknown) => error)
     expect(blockedDelete).toMatchObject({ errno: '23503' })
+  }, 120_000)
+
+  test('rejects physical reference columns and unfinished graph operations', async () => {
+    const { server } = await useDatabaseFixture('reference-boundaries')
+
+    await expect(server.db.query('Article', { fields: ['ownerId'] }))
+      .rejects.toThrow('Unknown field "Article.ownerId"')
+    await expect(server.db.query('Article', { fields: ['owner'] }))
+      .rejects.toThrow('entity reference; graph projections are not supported yet')
+
+    await expect(server.db.query('Article', {
+      fields: ['id'],
+      where: { ownerId: '1' },
+    })).rejects.toThrow('Unknown field "Article.ownerId"')
+    await expect(server.db.query('Article', {
+      fields: ['id'],
+      where: { field: 'owner', operator: Operator.Comparison.Equal, value: '1' },
+    })).rejects.toThrow('entity reference; graph projections are not supported yet')
+    await expect(server.db.query('Article', {
+      fields: ['id'],
+      where: 'owner = "1"',
+    })).rejects.toThrow('entity reference; graph projections are not supported yet')
+
+    await expect(server.db.query('Article', {
+      fields: ['id'],
+      orderBy: 'ownerId',
+    })).rejects.toThrow('Unknown field "Article.ownerId"')
+    await expect(server.db.query('Article', {
+      fields: ['id'],
+      orderBy: 'owner',
+    })).rejects.toThrow('entity reference; graph projections are not supported yet')
   }, 120_000)
 
   test('matches string and structured predicates with two-valued null semantics', async () => {

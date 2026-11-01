@@ -1,4 +1,4 @@
-import type { EntityDefinition, FieldDefinition } from './EntityDefinitions'
+import type { EntityDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 
@@ -66,7 +66,7 @@ export const Predicate = {
    * @returns `Or(Equal(null), Equal(''))`.
    * @throws {Error} When the field is not a string.
    */
-  empty(entity: EntityDefinition, field: FieldDefinition): LogicalFilter {
+  empty(entity: EntityDefinition, field: ScalarFieldDefinition): LogicalFilter {
     if (field.type !== FieldType.String) {
       throw new Error(
         `Query operator "${Operator.Comparison.Empty}" is not valid for field "${entity.name}.${field.name}"`,
@@ -82,12 +82,17 @@ export const Predicate = {
    * Require a field from an entity definition.
    * @param entity - Entity whose fields are referenced.
    * @param name - Root field name.
-   * @returns The field definition.
-   * @throws {Error} When the field is unknown.
+   * @returns The scalar field definition.
+   * @throws {Error} When the field is unknown or is an entity reference.
    */
-  field(entity: EntityDefinition, name: string): FieldDefinition {
+  field(entity: EntityDefinition, name: string): ScalarFieldDefinition {
     const field = entity.fields.find(candidate => candidate.name === name)
     if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
+    if (field.type === FieldType.Entity) {
+      throw new Error(
+        `Query field "${entity.name}.${name}" is an entity reference; graph projections are not supported yet`,
+      )
+    }
     return field
   },
 
@@ -247,7 +252,10 @@ function child(
  * @param input - Explicit node input.
  * @returns The field definition.
  */
-function requireField(entity: EntityDefinition, input: Readonly<Record<string, unknown>>): FieldDefinition {
+function requireField(
+  entity: EntityDefinition,
+  input: Readonly<Record<string, unknown>>,
+): ScalarFieldDefinition {
   if (typeof input.field !== 'string') throw new Error('Query comparison field must be a string')
   return Predicate.field(entity, input.field)
 }

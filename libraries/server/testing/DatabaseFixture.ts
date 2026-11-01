@@ -56,9 +56,35 @@ export const queryRowDefinition = {
   name: 'QueryRow',
 }
 
+/** The User entity used by reference-field query tests. */
+export const userDefinition = {
+  fields: [
+    { name: 'id', primaryKey: true, type: 'snowflake' },
+    { name: 'name', type: 'string' },
+  ],
+  name: 'User',
+}
+
+/** The Article entity used by reference-field query tests. */
+export const articleDefinition = {
+  fields: [
+    { name: 'id', primaryKey: true, type: 'uuid' },
+    { name: 'title', type: 'string' },
+    { column: 'ownerId', name: 'owner', target: 'User', type: 'entity' },
+  ],
+  name: 'Article',
+}
+
 /** Entities available from the shared ordinary database server. */
 export const sharedEntities = EntityDefinitions.load(JSON.stringify({
-  entities: [noteDefinition, accountDefinition, numberRowDefinition, queryRowDefinition],
+  entities: [
+    noteDefinition,
+    accountDefinition,
+    numberRowDefinition,
+    queryRowDefinition,
+    userDefinition,
+    articleDefinition,
+  ],
 }))
 
 /** A started in-process database fixture. */

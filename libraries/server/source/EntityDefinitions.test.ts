@@ -30,10 +30,10 @@ describe('EntityDefinitions', () => {
 
     expect(entity?.name).toBe('Note')
     expect(entity?.fields.map(field => field.name)).toEqual(['id', 'title', 'body', 'createdAt'])
-    expect(entity?.fields.find(field => field.primaryKey)?.name).toBe('id')
+    expect(entity?.fields.find(field => field.type !== FieldType.Entity && field.primaryKey)?.name).toBe('id')
   })
 
-  test('accepts every field type', () => {
+  test('accepts every scalar field type', () => {
     const entities = load({
       entities: [{
         fields: [
@@ -60,21 +60,17 @@ describe('EntityDefinitions', () => {
     ])
   })
 
-  test('resolves explicitly declared many-to-one relationships and orders FK DDL', () => {
+  test('represents logical references as fields and derives physical FK columns', () => {
     const entities = load({
       entities: [
         {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'ownerId', type: 'snowflake' },
-            { name: 'lastUpdatedById', type: 'snowflake' },
+            { column: 'ownerId', name: 'owner', target: 'User', type: 'entity' },
+            { column: 'lastUpdatedById', name: 'lastUpdatedBy', target: 'User', type: 'entity' },
             { name: 'title', type: 'string' },
           ],
           name: 'Note',
-          relationships: [
-            { field: 'ownerId', name: 'owner', target: 'User' },
-            { field: 'lastUpdatedById', name: 'lastUpdatedBy', target: 'User' },
-          ],
         },
         {
           fields: [
@@ -86,13 +82,28 @@ describe('EntityDefinitions', () => {
       ],
     })
 
-    expect(entities.entity('Note')?.relationships).toEqual([
-      { field: 'ownerId', name: 'owner', targetEntity: 'User', targetField: 'id' },
-      { field: 'lastUpdatedById', name: 'lastUpdatedBy', targetEntity: 'User', targetField: 'id' },
-    ])
+    expect(entities.entity('Note')?.fields.map(field => field.name))
+      .toEqual(['id', 'owner', 'lastUpdatedBy', 'title'])
+    expect(entities.entity('Note')?.fields).toContainEqual({
+      column: 'ownerId',
+      name: 'owner',
+      target: 'User',
+      targetField: 'id',
+      targetType: FieldType.Snowflake,
+      type: FieldType.Entity,
+    })
+    expect(entities.entity('Note')?.fields).toContainEqual({
+      column: 'lastUpdatedById',
+      name: 'lastUpdatedBy',
+      target: 'User',
+      targetField: 'id',
+      targetType: FieldType.Snowflake,
+      type: FieldType.Entity,
+    })
     expect(entities.ddl[0]).toContain('CREATE TABLE "User"')
     expect(entities.ddl[1]).toContain('"ownerId" BIGINT NOT NULL REFERENCES "User" ("id")')
     expect(entities.ddl[1]).toContain('"lastUpdatedById" BIGINT NOT NULL REFERENCES "User" ("id")')
+    expect(entities.ddl[1]).not.toContain('"owner" BIGINT')
   })
 
   test('leaves undeclared relationship-looking scalars ordinary even when the target exists', () => {
@@ -115,20 +126,22 @@ describe('EntityDefinitions', () => {
       ],
     })
 
-    expect(entities.entity('Note')?.relationships).toEqual([])
+    expect(entities.entity('Note')?.fields).toEqual([
+      { name: 'id', primaryKey: true, type: FieldType.UUID },
+      { name: 'userId', primaryKey: false, type: FieldType.Snowflake },
+    ])
     expect(entities.ddl.some(ddl => ddl.includes('REFERENCES'))).toBe(false)
   })
 
-  test('accepts declared foreign-key fields without an Id suffix', () => {
+  test('accepts any explicit physical column name for a logical reference', () => {
     const entities = load({
       entities: [
         {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'writer', type: 'snowflake' },
+            { column: 'writer', name: 'author', target: 'User', type: 'entity' },
           ],
           name: 'Note',
-          relationships: [{ field: 'writer', name: 'author', target: 'User' }],
         },
         {
           fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
@@ -137,25 +150,26 @@ describe('EntityDefinitions', () => {
       ],
     })
 
-    expect(entities.entity('Note')?.relationships).toEqual([{
-      field: 'writer',
+    expect(entities.entity('Note')?.fields[1]).toEqual({
+      column: 'writer',
       name: 'author',
-      targetEntity: 'User',
+      target: 'User',
       targetField: 'id',
-    }])
+      targetType: FieldType.Snowflake,
+      type: FieldType.Entity,
+    })
     expect(entities.ddl[1]).toContain('"writer" BIGINT NOT NULL REFERENCES "User" ("id")')
   })
 
-  test('references the target primary key even when it is not named id', () => {
+  test('derives the reference column type from a non-id target primary key', () => {
     const entities = load({
       entities: [
         {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'userId', type: 'snowflake' },
+            { column: 'userId', name: 'user', target: 'User', type: 'entity' },
           ],
           name: 'Note',
-          relationships: [{ field: 'userId', name: 'user', target: 'User' }],
         },
         {
           fields: [
@@ -167,122 +181,101 @@ describe('EntityDefinitions', () => {
       ],
     })
 
-    expect(entities.entity('Note')?.relationships).toEqual([{
-      field: 'userId',
-      name: 'user',
-      targetEntity: 'User',
+    expect(entities.entity('Note')?.fields[1]).toMatchObject({
       targetField: 'externalId',
-    }])
+      targetType: FieldType.Snowflake,
+    })
     expect(entities.ddl[1]).toContain('REFERENCES "User" ("externalId")')
   })
 
-  test('supports self-referential many-to-one relationships', () => {
+  test('supports self-referential singular references', () => {
     const entities = load({
       entities: [{
         fields: [
           { name: 'id', primaryKey: true, type: 'uuid' },
-          { name: 'managerId', type: 'uuid' },
+          { column: 'managerId', name: 'manager', target: 'User', type: 'entity' },
           { name: 'name', type: 'string' },
         ],
         name: 'User',
-        relationships: [{ field: 'managerId', name: 'manager', target: 'User' }],
       }],
     })
 
-    expect(entities.entity('User')?.relationships).toEqual([{
-      field: 'managerId',
+    expect(entities.entity('User')?.fields[1]).toMatchObject({
+      column: 'managerId',
       name: 'manager',
-      targetEntity: 'User',
+      target: 'User',
       targetField: 'id',
-    }])
+      type: FieldType.Entity,
+    })
     expect(entities.ddl[0]).toContain('"managerId" UUID NOT NULL REFERENCES "User" ("id")')
   })
 
-  test('rejects invalid relationship bindings', () => {
-    expect(() => load({
-      entities: [
-        {
-          fields: [
-            { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'ownerId', type: 'snowflake' },
-          ],
-          name: 'Note',
-          relationships: [{ field: 'missing', name: 'owner', target: 'User' }],
-        },
-        {
-          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
-          name: 'User',
-        },
-      ],
-    })).toThrow('unknown local field "Note.missing" for relationship "Note.owner"')
-
-    expect(() => load({
-      entities: [
-        {
-          fields: [
-            { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'ownerId', type: 'snowflake' },
-          ],
-          name: 'Note',
-          relationships: [{ field: 'id', name: 'owner', target: 'User' }],
-        },
-        {
-          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
-          name: 'User',
-        },
-      ],
-    })).toThrow('relationship field "Note.id" cannot be a primary key')
-
+  test('rejects invalid references and physical column collisions', () => {
     expect(() => load({
       entities: [{
         fields: [
           { name: 'id', primaryKey: true, type: 'uuid' },
-          { name: 'ownerId', type: 'snowflake' },
+          { column: 'ownerId', name: 'owner', target: 'Missing', type: 'entity' },
         ],
         name: 'Note',
-        relationships: [{ field: 'ownerId', name: 'owner', target: 'Missing' }],
       }],
-    })).toThrow('unknown target entity "Missing" for relationship "Note.owner"')
+    })).toThrow('unknown target entity "Missing" for field "Note.owner"')
 
     expect(() => load({
       entities: [
         {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'ownerId', type: 'uuid' },
+            { name: 'owner', target: 'User', type: 'entity' },
           ],
           name: 'Note',
-          relationships: [{ field: 'ownerId', name: 'owner', target: 'User' }],
         },
         {
           fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
           name: 'User',
         },
       ],
-    })).toThrow('relationship field "Note.ownerId" type uuid must match primary key "User.id" type snowflake')
-  })
+    })).toThrow('column must be a camelCase identifier')
 
-  test('rejects relationship namespace collisions and duplicate bindings', () => {
     expect(() => load({
       entities: [
         {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'ownerId', type: 'snowflake' },
-            { name: 'editorId', type: 'snowflake' },
+            { column: 'owner_id', name: 'owner', target: 'User', type: 'entity' },
           ],
           name: 'Note',
-          relationships: [
-            { field: 'ownerId', name: 'owner', target: 'User' },
-            { field: 'editorId', name: 'owner', target: 'User' },
-          ],
         },
         {
           fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
           name: 'User',
         },
       ],
-    })).toThrow('duplicate relationship "Note.owner"')
+    })).toThrow('column must be a camelCase identifier')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'ownerId', name: 'owner', target: 'user', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+      ],
+    })).toThrow('target must be a PascalCase entity name')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'ownerId', name: 'Owner', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+      ],
+    })).toThrow('field name must be a camelCase identifier')
 
     expect(() => load({
       entities: [
@@ -290,6 +283,73 @@ describe('EntityDefinitions', () => {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
             { name: 'owner', type: 'string' },
+            { column: 'ownerId', name: 'owner', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
+          name: 'User',
+        },
+      ],
+    })).toThrow('duplicate field "Note.owner"')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'ownerId', type: 'snowflake' },
+            { column: 'ownerId', name: 'owner', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
+          name: 'User',
+        },
+      ],
+    })).toThrow('physical column "ownerId" is declared by both "Note.ownerId" and "Note.owner"')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'ownerId', name: 'owner', target: 'User', type: 'entity' },
+            { column: 'ownerId', name: 'editor', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
+          name: 'User',
+        },
+      ],
+    })).toThrow('physical column "ownerId" is declared by both "Note.owner" and "Note.editor"')
+  })
+
+  test('rejects reference fields used as primary keys and undeclared relationships arrays', () => {
+    expect(() => load({
+      entities: [{
+        fields: [
+          {
+            column: 'ownerId',
+            name: 'owner',
+            primaryKey: true,
+            target: 'User',
+            type: 'entity',
+          },
+        ],
+        name: 'Note',
+      }],
+    })).toThrow('unknown field property "primaryKey"')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
             { name: 'ownerId', type: 'snowflake' },
           ],
           name: 'Note',
@@ -300,72 +360,7 @@ describe('EntityDefinitions', () => {
           name: 'User',
         },
       ],
-    })).toThrow('relationship "Note.owner" collides with a scalar field')
-
-    expect(() => load({
-      entities: [
-        {
-          fields: [
-            { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'ownerId', type: 'snowflake' },
-          ],
-          name: 'Note',
-          relationships: [
-            { field: 'ownerId', name: 'owner', target: 'User' },
-            { field: 'ownerId', name: 'editor', target: 'User' },
-          ],
-        },
-        {
-          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
-          name: 'User',
-        },
-      ],
-    })).toThrow('relationship field "Note.ownerId" is bound more than once')
-  })
-
-  test('rejects malformed relationship declarations', () => {
-    expect(() => load({
-      entities: [{
-        fields: [
-          { name: 'id', primaryKey: true, type: 'uuid' },
-          { name: 'ownerId', type: 'snowflake' },
-        ],
-        name: 'Note',
-        relationships: [{ field: 'ownerId', name: 'Owner', target: 'User' }],
-      }],
-    })).toThrow('relationship name must be a camelCase identifier')
-
-    expect(() => load({
-      entities: [{
-        fields: [
-          { name: 'id', primaryKey: true, type: 'uuid' },
-          { name: 'ownerId', type: 'snowflake' },
-        ],
-        name: 'Note',
-        relationships: [{ field: 'ownerId', name: 'owner', target: 'user' }],
-      }],
-    })).toThrow('target must be a PascalCase entity name')
-
-    expect(() => load({
-      entities: [{
-        fields: [
-          { name: 'id', primaryKey: true, type: 'uuid' },
-          { name: 'ownerId', references: 'User', type: 'snowflake' },
-        ],
-        name: 'Note',
-      }],
-    })).toThrow('unknown field property "references"')
-
-    expect(() => load({
-      entities: [{
-        fields: [
-          { name: 'id', primaryKey: true, type: 'uuid' },
-          { name: 'ownerId', type: 'snowflake' },
-        ],
-        name: 'Note',
-        relationships: { field: 'ownerId', name: 'owner', target: 'User' },
-      }],
-    })).toThrow('relationships must be an array')
+    })).toThrow('unknown entity property "relationships"')
   })
 
   test('rejects circular foreign-key DDL', () => {
@@ -374,18 +369,16 @@ describe('EntityDefinitions', () => {
         {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'bId', type: 'uuid' },
+            { column: 'bId', name: 'b', target: 'B', type: 'entity' },
           ],
           name: 'A',
-          relationships: [{ field: 'bId', name: 'b', target: 'B' }],
         },
         {
           fields: [
             { name: 'id', primaryKey: true, type: 'uuid' },
-            { name: 'aId', type: 'uuid' },
+            { column: 'aId', name: 'a', target: 'A', type: 'entity' },
           ],
           name: 'B',
-          relationships: [{ field: 'aId', name: 'a', target: 'A' }],
         },
       ],
     })

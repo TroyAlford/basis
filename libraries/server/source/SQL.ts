@@ -1,5 +1,5 @@
 import { match } from '../../utilities'
-import type { EntityDefinition, EntityDefinitions, FieldDefinition } from './EntityDefinitions'
+import type { EntityDefinition, EntityDefinitions, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { ComparisonFilter, Filter, LogicalFilter } from './Predicate'
@@ -36,8 +36,8 @@ export type OrderBy =
 
 /** A validated root projection. */
 export interface SQLSelection {
-  /** Selected root field definitions, in output order. */
-  readonly fields: readonly FieldDefinition[],
+  /** Selected root scalar field definitions, in output order. */
+  readonly fields: readonly ScalarFieldDefinition[],
   /** Quoted PostgreSQL `SELECT` clause. */
   readonly sql: string,
 }
@@ -66,13 +66,7 @@ function select(
   const entity = definition(entities, entityName)
   if (fields.length === 0) throw new Error('Query fields must be a non-empty array')
 
-  const definitions = new Map(entity.fields.map(field => [field.name, field]))
-  const selected = fields.map(field => {
-    const selectedField = definitions.get(field)
-    if (!selectedField) throw new Error(`Unknown field "${entityName}.${field}"`)
-    return selectedField
-  })
-
+  const selected = fields.map(field => scalarField(entity, field))
   const projection = selected.map(field => quoteIdentifier(field.name)).join(', ')
   return { fields: selected, sql: `SELECT ${projection} FROM ${quoteIdentifier(entity.name)}` }
 }
@@ -91,7 +85,7 @@ interface ComparisonDefinition {
     bind: (value: BoundScalar) => string,
   ) => string,
   /** Validate and normalize the raw operand. */
-  readonly validateOperand: (field: FieldDefinition, raw: unknown) => BoundScalar | null,
+  readonly validateOperand: (field: ScalarFieldDefinition, raw: unknown) => BoundScalar | null,
 }
 
 /** A per-logical-operator definition used by the closed operator registry. */
@@ -109,7 +103,15 @@ const SNOWFLAKE_MIN = -9223372036854775808n
 const SNOWFLAKE_MAX = 9223372036854775807n
 
 /** All scalar field types support equality. */
-const ALL_FIELD_TYPES = new Set<FieldType>(Object.values(FieldType))
+const ALL_FIELD_TYPES = new Set<FieldType>([
+  FieldType.Boolean,
+  FieldType.Date,
+  FieldType.Number,
+  FieldType.Snowflake,
+  FieldType.String,
+  FieldType.Timestamp,
+  FieldType.UUID,
+])
 /** Only ordered scalar field types support range comparisons. */
 const RANGE_FIELD_TYPES = new Set<FieldType>([
   FieldType.Date,
@@ -178,8 +180,7 @@ function whereClause(
     const comparison = comparisonDefinitions.get(node.operator as Operator.Comparison)
     if (comparison) {
       const comparisonFilter = node as ComparisonFilter
-      const field = entity.fields.find(candidate => candidate.name === comparisonFilter.field)
-      if (!field) throw new Error(`Unknown field "${entity.name}.${comparisonFilter.field}"`)
+      const field = scalarField(entity, comparisonFilter.field)
       if (!comparison.allowedFieldTypes.has(field.type)) {
         throw new Error(
           `Query operator "${comparisonFilter.operator}" is not valid for field "${entity.name}.${field.name}"`,
@@ -279,7 +280,7 @@ function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOper
  * @param field - Field whose operand is invalid.
  * @throws {Error} Always, naming the invalid operand.
  */
-function invalidOperand(field: FieldDefinition): never {
+function invalidOperand(field: ScalarFieldDefinition): never {
   throw new Error(`Query operand for "${field.name}" is not a valid ${field.type} value`)
 }
 
@@ -303,17 +304,15 @@ function orderByClause(
   if (entries.length === 0) return { sql: '' }
 
   const clauses = entries.map(entry => {
-    const field = typeof entry === 'string' ? entry : entry.field
+    const name = typeof entry === 'string' ? entry : entry.field
     const direction = typeof entry === 'string' ? SortDirection.Ascending : entry.direction ?? SortDirection.Ascending
+    const field = scalarField(entity, name)
 
-    if (!entity.fields.some(candidate => candidate.name === field)) {
-      throw new Error(`Unknown field "${entityName}.${field}"`)
-    }
     if (direction !== SortDirection.Ascending && direction !== SortDirection.Descending) {
       throw new Error('Query orderBy direction must be "asc" or "desc"')
     }
 
-    return `${quoteIdentifier(field)} ${direction.toUpperCase()}`
+    return `${quoteIdentifier(field.name)} ${direction.toUpperCase()}`
   })
 
   return { sql: `ORDER BY ${clauses.join(', ')}` }
@@ -359,6 +358,24 @@ function paginate(
  * validated entity metadata.
  */
 export const SQL = { orderBy: orderByClause, paginate, select, where: whereClause }
+
+/**
+ * Require a selectable scalar field from an entity.
+ * @param entity - Entity whose fields are referenced.
+ * @param name - Logical field name.
+ * @returns The scalar field definition.
+ * @throws {Error} When the field is unknown or is an entity reference.
+ */
+function scalarField(entity: EntityDefinition, name: string): ScalarFieldDefinition {
+  const field = entity.fields.find(candidate => candidate.name === name)
+  if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
+  if (field.type === FieldType.Entity) {
+    throw new Error(
+      `Query field "${entity.name}.${name}" is an entity reference; graph projections are not supported yet`,
+    )
+  }
+  return field
+}
 
 /**
  * Require an entity from validated definitions.
