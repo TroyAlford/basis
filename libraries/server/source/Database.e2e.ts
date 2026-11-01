@@ -470,6 +470,62 @@ describe('Server database lifecycle', () => {
     })).toEqual([{ value: 3 }, { value: 4 }, { value: 5 }, { value: 6 }])
   }, 120_000)
 
+  test('creates and enforces many-to-one foreign keys', async () => {
+    const { server } = await useDatabaseFixture('relationships')
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'userId', type: 'snowflake' },
+            { name: 'title', type: 'string' },
+          ],
+          name: 'Post',
+        },
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'snowflake' },
+            { name: 'name', type: 'string' },
+          ],
+          name: 'User',
+        },
+      ],
+    }))
+
+    await server.db.sql`drop table if exists "Post"`
+    await server.db.sql`drop table if exists "User"`
+    await entities.createTables(server.db.sql)
+
+    expect(entities.ddl[0]).toContain('CREATE TABLE "User"')
+    expect(entities.ddl[1]).toContain('"userId" BIGINT NOT NULL REFERENCES "User" ("id")')
+    const constraints = await server.db.sql<{ definition: string }[]>`
+      select pg_get_constraintdef(oid) as definition
+      from pg_constraint
+      where conrelid = '"Post"'::regclass and contype = 'f'
+    `
+    expect(constraints).toEqual([{
+      definition: 'FOREIGN KEY ("userId") REFERENCES "User"(id)',
+    }])
+
+    await server.db.sql`
+      insert into "User" ("id", "name") values (${'9223372036854775807'}, ${'Ada'})
+    `
+    await server.db.sql`
+      insert into "Post" ("id", "userId", "title")
+      values (gen_random_uuid(), ${'9223372036854775807'}, ${'Hello'})
+    `
+    const invalidInsert = await server.db.sql`
+      insert into "Post" ("id", "userId", "title")
+      values (gen_random_uuid(), ${'1'}, ${'Invalid'})
+    `.catch((error: unknown) => error)
+    expect(invalidInsert).toMatchObject({ errno: '23503' })
+
+    const blockedDelete = await server.db.sql`
+      delete from "User" where "id" = ${'9223372036854775807'}
+    `.catch((error: unknown) => error)
+    expect(blockedDelete).toMatchObject({ errno: '23503' })
+  }, 120_000)
+
   test('matches string and structured predicates with two-valued null semantics', async () => {
     const { server } = await useDatabaseFixture('string')
     await server.db.sql`drop table if exists "QueryRow"`

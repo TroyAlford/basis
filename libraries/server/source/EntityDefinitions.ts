@@ -36,12 +36,26 @@ export interface FieldDefinition {
   readonly type: FieldType,
 }
 
+/** One resolved many-to-one relationship. */
+export interface RelationshipDefinition {
+  /** Local foreign-key field name. */
+  readonly field: string,
+  /** Relationship name used by rooted graph paths. */
+  readonly name: string,
+  /** Referenced entity name. */
+  readonly targetEntity: string,
+  /** Referenced primary-key field name. */
+  readonly targetField: string,
+}
+
 /** One entity definition. */
 export interface EntityDefinition {
   /** Fields in their declared order. */
   readonly fields: readonly FieldDefinition[],
   /** Entity name, in PascalCase. */
   readonly name: string,
+  /** Resolved many-to-one relationships, in field order. */
+  readonly relationships: readonly RelationshipDefinition[],
 }
 
 /** Parsed and validated canonical entity definitions. */
@@ -83,12 +97,14 @@ export class EntityDefinitions {
   }
 
   /**
-   * Deterministic PostgreSQL DDL for the declared entities, in declaration
-   * order. Identifiers are quoted; user values never enter these statements.
+   * Deterministic PostgreSQL DDL for the declared entities, ordered so each
+   * referenced table exists before its foreign-key table. Identifiers are
+   * quoted; user values never enter these statements.
    * @returns One deterministic `CREATE TABLE` statement per entity.
+   * @throws {Error} When relationships form a cycle.
    */
   get ddl(): readonly string[] {
-    return this.entities.map(createTable)
+    return orderedEntities(this.entities).map(createTable)
   }
 
   /**
@@ -101,7 +117,7 @@ export class EntityDefinitions {
    * @returns A promise that resolves after every table statement succeeds.
    */
   async createTables(sql: SQL): Promise<void> {
-    for (const entity of this.entities) {
+    for (const entity of orderedEntities(this.entities)) {
       const rows = await sql<{ present: boolean }[]>`
         select exists (
           select 1
@@ -130,21 +146,35 @@ function parseEntities(value: unknown): readonly EntityDefinition[] {
     throw invalid('entities must be a non-empty array')
   }
 
-  const names = new Set<string>()
-  const parsed = entities.map(parseEntity)
-  for (const entity of parsed) {
-    if (names.has(entity.name)) throw invalid(`duplicate entity "${entity.name}"`)
-    names.add(entity.name)
+  const seeds = entities.map(parseEntity)
+  const byName = new Map<string, EntitySeed>()
+  for (const seed of seeds) {
+    if (byName.has(seed.name)) throw invalid(`duplicate entity "${seed.name}"`)
+    byName.set(seed.name, seed)
   }
-  return parsed
+  return seeds.map(seed => resolveEntity(seed, byName))
+}
+
+/** A parsed field before relationships are resolved. */
+interface ParsedField extends FieldDefinition {
+  /** Explicit referenced entity override from canonical JSON. */
+  readonly references?: string,
+}
+
+/** A parsed entity before its relationships are resolved. */
+interface EntitySeed {
+  /** Parsed fields in declaration order. */
+  readonly fields: readonly ParsedField[],
+  /** Entity name, in PascalCase. */
+  readonly name: string,
 }
 
 /**
- * Validate one entity definition.
+ * Validate one entity definition's fields and primary key.
  * @param value - Parsed entity candidate.
- * @returns The validated entity.
+ * @returns The entity seed awaiting relationship resolution.
  */
-function parseEntity(value: unknown): EntityDefinition {
+function parseEntity(value: unknown): EntitySeed {
   if (!isRecord(value)) throw invalid('entity must be an object')
   assertKnownKeys(value, ['fields', 'name'], 'entity')
 
@@ -167,7 +197,7 @@ function parseEntity(value: unknown): EntityDefinition {
   if (primaryKeys.length !== 1) {
     throw invalid(`entity "${value.name}" must define exactly one primary key`)
   }
-  const primaryKey = primaryKeys[0] as FieldDefinition
+  const primaryKey = primaryKeys[0] as ParsedField
   if (primaryKey.type !== FieldType.UUID && primaryKey.type !== FieldType.Snowflake) {
     throw invalid(`primary key "${value.name}.${primaryKey.name}" must be type uuid or snowflake`)
   }
@@ -176,14 +206,110 @@ function parseEntity(value: unknown): EntityDefinition {
 }
 
 /**
+ * Resolve relationships for one parsed entity.
+ * @param seed - Entity seed whose fields are validated.
+ * @param byName - All parsed entities by name.
+ * @returns The validated entity.
+ */
+function resolveEntity(
+  seed: EntitySeed,
+  byName: ReadonlyMap<string, EntitySeed>,
+): EntityDefinition {
+  const relationships: RelationshipDefinition[] = []
+  for (const field of seed.fields) {
+    const relationship = resolveRelationship(seed.name, field, byName)
+    if (relationship) relationships.push(relationship)
+  }
+
+  return {
+    fields: seed.fields.map(field => ({
+      name: field.name,
+      primaryKey: field.primaryKey,
+      type: field.type,
+    })),
+    name: seed.name,
+    relationships,
+  }
+}
+
+/**
+ * Resolve one field's conventional or explicitly referenced relationship.
+ * @param entityName - Owning entity name.
+ * @param field - Parsed field.
+ * @param byName - All parsed entities by name.
+ * @returns The relationship, or null when the field is an ordinary scalar.
+ */
+function resolveRelationship(
+  entityName: string,
+  field: ParsedField,
+  byName: ReadonlyMap<string, EntitySeed>,
+): RelationshipDefinition | null {
+  if (field.primaryKey) {
+    if (field.references !== undefined) {
+      throw invalid(`primary key "${entityName}.${field.name}" cannot declare references`)
+    }
+    return null
+  }
+
+  const targetName = targetEntityName(entityName, field, byName)
+  if (targetName === undefined) return null
+
+  const target = byName.get(targetName)
+  if (!target) {
+    throw invalid(`unknown referenced entity "${targetName}" in "${entityName}.${field.name}"`)
+  }
+  const targetKey = target.fields.find(candidate => candidate.primaryKey)
+  if (!targetKey) throw invalid(`referenced entity "${target.name}" must define a primary key`)
+  if (field.type !== targetKey.type) {
+    throw invalid(
+      `relationship field "${entityName}.${field.name}" type ${field.type} ` +
+      `must match primary key "${target.name}.${targetKey.name}" type ${targetKey.type}`,
+    )
+  }
+
+  return {
+    field: field.name,
+    name: field.name.slice(0, -2),
+    targetEntity: target.name,
+    targetField: targetKey.name,
+  }
+}
+
+/**
+ * Resolve a relationship field's target entity from an explicit reference or
+ * the conventional `<entity>Id` field name.
+ * @param entityName - Owning entity name.
+ * @param field - Parsed field.
+ * @param byName - All parsed entities by name.
+ * @returns The target entity name, or undefined for an ordinary scalar.
+ */
+function targetEntityName(
+  entityName: string,
+  field: ParsedField,
+  byName: ReadonlyMap<string, EntitySeed>,
+): string | undefined {
+  if (field.references !== undefined) {
+    if (!field.name.endsWith('Id')) {
+      throw invalid(`relationship field "${entityName}.${field.name}" must end in "Id"`)
+    }
+    return field.references
+  }
+  if (!field.name.endsWith('Id')) return undefined
+
+  const relationship = field.name.slice(0, -2)
+  const inferred = `${relationship.charAt(0).toUpperCase()}${relationship.slice(1)}`
+  return byName.has(inferred) ? inferred : undefined
+}
+
+/**
  * Validate one field definition.
  * @param entityName - Owning entity name for diagnostics.
  * @param value - Parsed field candidate.
  * @returns The validated field.
  */
-function parseField(entityName: string, value: unknown): FieldDefinition {
+function parseField(entityName: string, value: unknown): ParsedField {
   if (!isRecord(value)) throw invalid(`field "${entityName}" must be an object`)
-  assertKnownKeys(value, ['name', 'primaryKey', 'type'], 'field')
+  assertKnownKeys(value, ['name', 'primaryKey', 'references', 'type'], 'field')
 
   if (typeof value.name !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.name)) {
     throw invalid(`field name must be a camelCase identifier in "${entityName}"`)
@@ -194,12 +320,49 @@ function parseField(entityName: string, value: unknown): FieldDefinition {
   if (value.primaryKey !== undefined && typeof value.primaryKey !== 'boolean') {
     throw invalid(`field "${entityName}.${value.name}" primaryKey must be a boolean`)
   }
+  if (value.references !== undefined && typeof value.references !== 'string') {
+    throw invalid(`field "${entityName}.${value.name}" references must be a string`)
+  }
 
   return {
     name: value.name,
     primaryKey: value.primaryKey === true,
+    references: value.references as string | undefined,
     type: value.type as FieldType,
   }
+}
+
+/**
+ * Order entities so every referenced table precedes its foreign-key table.
+ * @param entities - Validated entities in declaration order.
+ * @returns Entities in deterministic dependency order.
+ * @throws {Error} When relationships form a cycle.
+ */
+function orderedEntities(entities: readonly EntityDefinition[]): readonly EntityDefinition[] {
+  const byName = new Map(entities.map(entity => [entity.name, entity]))
+  const ordered: EntityDefinition[] = []
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+
+  const visit = (entity: EntityDefinition, path: readonly string[]): void => {
+    if (visited.has(entity.name)) return
+    if (visiting.has(entity.name)) {
+      throw invalid(`circular relationship ${[...path, entity.name].join(' -> ')}`)
+    }
+    visiting.add(entity.name)
+    for (const relationship of entity.relationships) {
+      if (relationship.targetEntity === entity.name) continue
+      const target = byName.get(relationship.targetEntity)
+      if (!target) throw invalid(`unknown referenced entity "${relationship.targetEntity}"`)
+      visit(target, [...path, entity.name])
+    }
+    visiting.delete(entity.name)
+    visited.add(entity.name)
+    ordered.push(entity)
+  }
+
+  for (const entity of entities) visit(entity, [])
+  return ordered
 }
 
 /**
@@ -208,9 +371,15 @@ function parseField(entityName: string, value: unknown): FieldDefinition {
  * @returns The PostgreSQL DDL statement.
  */
 function createTable(entity: EntityDefinition): string {
-  const columns = entity.fields.map(field => (
-    `${quoteIdentifier(field.name)} ${columnType(field)}${field.primaryKey ? ' PRIMARY KEY' : ' NOT NULL'}`
-  ))
+  const relationships = new Map(entity.relationships.map(relationship => [relationship.field, relationship]))
+  const columns = entity.fields.map(field => {
+    const nullability = field.primaryKey ? ' PRIMARY KEY' : ' NOT NULL'
+    const column = `${quoteIdentifier(field.name)} ${columnType(field)}${nullability}`
+    const relationship = relationships.get(field.name)
+    if (!relationship) return column
+    return `${column} REFERENCES ${quoteIdentifier(relationship.targetEntity)} ` +
+      `(${quoteIdentifier(relationship.targetField)})`
+  })
   return `CREATE TABLE ${quoteIdentifier(entity.name)} (\n${columns.join(',\n')}\n)`
 }
 
