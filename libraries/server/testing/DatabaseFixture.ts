@@ -183,8 +183,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
     return { entities: sharedEntities, install, server, service }
   } catch (error) {
     await server.shutdown()
-    removeService(install)
-    scope.serviceRemoved = true
+    scope.serviceRemoved = removeService(install)
     throw error
   }
 }
@@ -230,8 +229,11 @@ function removeManagedService(
   service: { readonly install: string, readonly service: string },
 ): void {
   if (scope.serviceRemoved) return
+  if (!removeService(service.install)) {
+    record(`remove-failed ${service.service} ${service.install} ${process.pid}`)
+    return
+  }
   scope.serviceRemoved = true
-  removeService(service.install)
   record(`stop ${service.service} ${service.install} ${process.pid}`)
 }
 
@@ -261,12 +263,31 @@ export function containers(install: string): readonly string[] {
 }
 
 /**
- * Remove the containers and durable volume for a managed installation.
+ * Remove the containers and durable volume for a managed installation and
+ * verify that the ownership labels no longer resolve to resources.
  * @param install - The installation root used in the ownership label.
+ * @returns `true` only after both Docker removals succeed and absence is verified.
  */
-export function removeService(install: string): void {
-  for (const id of containers(install)) void run`docker rm -f ${id}`
-  for (const volume of run`docker volume ls -q --filter ${`label=basis.install=${install}`}`.lines) {
-    void run`docker volume rm -f ${volume}`
+export function removeService(install: string): boolean {
+  let succeeded = true
+
+  const containerList = run`docker ps -aq --filter ${`label=basis.install=${install}`}`
+  if (containerList.exitCode !== 0) succeeded = false
+  for (const id of containerList.lines) {
+    if (run`docker rm -f ${id}`.exitCode !== 0) succeeded = false
   }
+
+  const volumeList = run`docker volume ls -q --filter ${`label=basis.install=${install}`}`
+  if (volumeList.exitCode !== 0) succeeded = false
+  for (const volume of volumeList.lines) {
+    if (run`docker volume rm -f ${volume}`.exitCode !== 0) succeeded = false
+  }
+
+  const remainingContainers = run`docker ps -aq --filter ${`label=basis.install=${install}`}`
+  const remainingVolumes = run`docker volume ls -q --filter ${`label=basis.install=${install}`}`
+  return succeeded
+    && remainingContainers.exitCode === 0
+    && remainingContainers.lines.length === 0
+    && remainingVolumes.exitCode === 0
+    && remainingVolumes.lines.length === 0
 }

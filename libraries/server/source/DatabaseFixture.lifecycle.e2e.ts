@@ -1,3 +1,4 @@
+import { run as runCommand } from 'basis/configuration'
 import { tempDirectory, waitFor } from 'basis/testing'
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -97,16 +98,48 @@ function activity(path: string): Activity {
 }
 
 /**
+ * Whether a process id is still alive.
+ * @param pid - Process id to check.
+ * @returns `true` when the process exists.
+ */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Assert that the fixture installation owns no Docker resources.
+ * @param events - Observed fixture activity.
+ */
+function expectRemoved(events: Activity): void {
+  const start = events.starts[0]
+  if (!start) throw new Error('fixture never started')
+  const install = start.split(' ')[2]
+  const containers = runCommand`docker ps -aq --filter ${`label=basis.install=${install}`}`
+  const volumes = runCommand`docker volume ls -q --filter ${`label=basis.install=${install}`}`
+  expect(containers.exitCode).toBe(0)
+  expect(containers.lines).toEqual([])
+  expect(volumes.exitCode).toBe(0)
+  expect(volumes.lines).toEqual([])
+}
+
+/**
  * Run `bun test` in a fixture directory.
  * @param target - The fixture to run.
  * @param args - Extra test file arguments.
  * @param signal - Optional signal to send after the fixture starts.
+ * @param readyTimeoutMs - How long to wait for a signal target to start.
  * @returns The exit code and observed activity.
  */
 async function run(
   target: Fixture,
   args: string[] = [],
   signal?: NodeJS.Signals,
+  readyTimeoutMs = 60_000,
 ): Promise<{ activity: Activity, code: number, output: string }> {
   const proc = Bun.spawn([process.execPath, 'test', ...args], {
     cwd: target.dir,
@@ -117,12 +150,28 @@ async function run(
   const stdout = new Response(proc.stdout).text()
   const stderr = new Response(proc.stderr).text()
 
-  if (signal) {
-    await waitFor(() => activity(target.activity).starts.length > 0, { timeout: 60_000 })
-    proc.kill(signal)
+  let code: number | null = null
+  try {
+    if (signal) {
+      await waitFor(() => activity(target.activity).starts.length > 0, { timeout: readyTimeoutMs })
+      proc.kill(signal)
+    }
+    code = await proc.exited
+  } finally {
+    if (code === null) {
+      proc.kill('SIGTERM')
+      const exited = await Promise.race([
+        proc.exited.then(() => true),
+        Bun.sleep(2_000).then(() => false),
+      ])
+      if (!exited) {
+        proc.kill('SIGKILL')
+        await proc.exited
+      }
+    }
   }
 
-  const code = await proc.exited
+  if (code === null) throw new Error('child test process did not exit')
   return {
     activity: activity(target.activity),
     code,
@@ -144,6 +193,7 @@ describe('database fixture lifecycle', () => {
     expect(result.activity.starts).toHaveLength(1)
     expect(result.activity.stops).toHaveLength(1)
     expect(result.activity.starts[0]?.split(' ')[1]).toBe(result.activity.stops[0]?.split(' ')[1])
+    expectRemoved(result.activity)
   }, 120_000)
 
   test('tears down after a failing test', async () => {
@@ -156,7 +206,27 @@ describe('database fixture lifecycle', () => {
     expect(result.activity.cleanups).toHaveLength(1)
     expect(result.activity.starts).toHaveLength(1)
     expect(result.activity.stops).toHaveLength(1)
+    expectRemoved(result.activity)
   }, 120_000)
+
+  test('reaps a child that never starts the fixture', async () => {
+    const target = fixture({
+      'a.test.ts': [
+        "import { test } from 'bun:test'",
+        "import { writeFileSync } from 'node:fs'",
+        '',
+        "test('stall', async () => {",
+        "  writeFileSync('child.pid', String(process.pid))",
+        '  await Bun.sleep(10_000)',
+        '}, 20_000)',
+      ].join('\n'),
+    })
+    const pidFile = join(target.dir, 'child.pid')
+
+    await expect(run(target, [], 'SIGTERM', 5_000)).rejects.toThrow('waitFor')
+    const pid = Number(readFileSync(pidFile, 'utf8'))
+    expect(isAlive(pid)).toBe(false)
+  }, 30_000)
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     test(`tears down on ${signal}`, async () => {
@@ -168,6 +238,7 @@ describe('database fixture lifecycle', () => {
       expect(result.activity.cleanups).toHaveLength(1)
       expect(result.activity.starts).toHaveLength(1)
       expect(result.activity.stops).toHaveLength(1)
+      expectRemoved(result.activity)
     }, 120_000)
   }
 })
