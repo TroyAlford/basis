@@ -165,6 +165,19 @@ describe('Server database lifecycle', () => {
         expect(aId).not.toBe(bId)
         expect(portOf(aId)).not.toBe(portOf(bId))
 
+        expect(await a.db.sql<{ present: boolean }[]>`
+          select exists (
+            select 1 from pg_extension where extname = 'pg_trgm'
+          ) as present
+        `).toEqual([{ present: false }])
+        await EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
+          .createTables(a.db.sql)
+        expect(await a.db.sql<{ present: boolean }[]>`
+          select exists (
+            select 1 from pg_extension where extname = 'pg_trgm'
+          ) as present
+        `).toEqual([{ present: true }])
+
         await a.db.sql`create table install_probe (value text)`
         await a.db.sql`insert into install_probe values ('A')`
         await b.db.sql`create table install_probe (value text)`
@@ -459,12 +472,6 @@ describe('Server database lifecycle', () => {
   }, 120_000)
 
   isolatedTest('creates and indexes the universal identity root', async database => {
-    expect(await database.sql<{ present: boolean }[]>`
-      select exists (
-        select 1 from pg_extension where extname = 'pg_trgm'
-      ) as present
-    `).toEqual([{ present: false }])
-
     const entities = EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
     await entities.createTables(database.sql)
 
