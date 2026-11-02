@@ -62,17 +62,26 @@ export function normalizeSQL(sql: string): string {
   let normalized = ''
   let pendingSpace = false
   let quote: '"' | "'" | null = null
+  let backslashEscapes = false
 
   for (let index = 0; index < sql.length; index += 1) {
     const character = sql[index] as string
     if (quote) {
       normalized += character
+      if (backslashEscapes && character === '\\') {
+        if (index + 1 < sql.length) {
+          normalized += sql[index + 1]
+          index += 1
+        }
+        continue
+      }
       if (character === quote) {
         if (sql[index + 1] === quote) {
           normalized += sql[index + 1]
           index += 1
         } else {
           quote = null
+          backslashEscapes = false
         }
       }
       continue
@@ -82,6 +91,7 @@ export function normalizeSQL(sql: string): string {
       normalized += separator(normalized, pendingSpace, character)
       pendingSpace = false
       quote = character
+      backslashEscapes = character === "'" && /(?:[Ee]|U&)$/.test(normalized)
       normalized += character
       continue
     }
@@ -102,13 +112,25 @@ export function normalizeSQL(sql: string): string {
     if (character === '/' && sql[index + 1] === '*') {
       normalized += separator(normalized, pendingSpace, character)
       pendingSpace = false
-      const end = sql.indexOf('*/', index + 2)
-      if (end === -1) {
+      let depth = 1
+      let end = index + 2
+      while (end < sql.length && depth > 0) {
+        if (sql.startsWith('/*', end)) {
+          depth += 1
+          end += 2
+        } else if (sql.startsWith('*/', end)) {
+          depth -= 1
+          end += 2
+        } else {
+          end += 1
+        }
+      }
+      if (depth > 0) {
         normalized += sql.slice(index)
         break
       }
-      normalized += sql.slice(index, end + 2)
-      index = end + 1
+      normalized += sql.slice(index, end)
+      index = end - 1
       continue
     }
 

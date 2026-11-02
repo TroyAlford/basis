@@ -30,6 +30,20 @@ describe('toMatchSQL', () => {
       .toMatchSQL('SELECT 1 -- ignored\nFROM demo')
   })
 
+  test('preserves escaped quotes inside escape strings', () => {
+    expect(String.raw`SELECT E'a\'  b'`)
+      .not.toMatchSQL(String.raw`SELECT E'a\' b'`)
+    expect(String.raw`SELECT
+      E'a\'  b'`).toMatchSQL(String.raw`SELECT E'a\'  b'`)
+  })
+
+  test('preserves nested block-comment contents', () => {
+    expect('SELECT /* outer /* inner */ a  b */ 1')
+      .not.toMatchSQL('SELECT /* outer /* inner */ a b */ 1')
+    expect('SELECT\n  /* outer /* inner */ a  b */\n  1')
+      .toMatchSQL('SELECT /* outer /* inner */ a  b */ 1')
+  })
+
   test('compares ordered statement arrays', () => {
     const statements = [
       'CREATE TABLE "A" ("id" UUID)',
