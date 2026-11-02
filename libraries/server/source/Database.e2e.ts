@@ -22,6 +22,28 @@ import { SortDirection } from './SortDirection'
 
 expect.extend({ toMatchSQL })
 
+/** The universal identity root DDL included in every complete schema. */
+const identityDdl = [
+  'CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public',
+  `CREATE TABLE "Entity" (
+    "id" TEXT PRIMARY KEY,
+    "displayName" TEXT NOT NULL,
+    "entity" TEXT NOT NULL,
+    CONSTRAINT "Entity_id_format_check" CHECK (
+      CASE
+        WHEN "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN TRUE
+        WHEN "id" ~ '^(0|-?[1-9][0-9]*)$' AND length("id") <= 20
+          THEN "id"::numeric BETWEEN -9223372036854775808 AND 9223372036854775807
+        ELSE FALSE
+      END
+    )
+  )`,
+  `CREATE INDEX IF NOT EXISTS "Entity_displayName_id_idx"
+    ON "Entity" ("displayName" ASC, "id" ASC)`,
+  `CREATE INDEX IF NOT EXISTS "Entity_displayName_trgm_idx"
+    ON "Entity" USING GIN ("displayName" public.gin_trgm_ops)`,
+]
+
 const root = join(import.meta.dir, '..', '..', '..')
 const silent = new Logger({ silent: true })
 
@@ -461,6 +483,106 @@ describe('Server database lifecycle', () => {
         `).toEqual([{ tableSchema: 'later' }, { tableSchema: 'public' }])
   }, 120_000)
 
+  isolatedTest('creates and indexes the universal identity root', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
+    await entities.createTables(database.sql)
+
+    expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
+      select
+        column_name as "columnName",
+        data_type as "dataType",
+        is_nullable as "isNullable"
+      from information_schema.columns
+      where table_schema = current_schema() and table_name = 'Entity'
+      order by ordinal_position
+    `).toEqual([
+      { columnName: 'id', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'displayName', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'entity', dataType: 'text', isNullable: 'NO' },
+    ])
+
+    expect(await database.sql<{ indexName: string }[]>`
+      select indexname as "indexName"
+      from pg_indexes
+      where schemaname = current_schema()
+        and tablename = 'Entity'
+        and indexname like 'Entity_displayName%'
+      order by indexname
+    `).toEqual([
+      { indexName: 'Entity_displayName_id_idx' },
+      { indexName: 'Entity_displayName_trgm_idx' },
+    ])
+    expect(await database.sql<{ present: boolean }[]>`
+      select exists (
+        select 1 from pg_extension where extname = 'pg_trgm'
+      ) as present
+    `).toEqual([{ present: true }])
+
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values
+        ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'UUID entity', 'Note'),
+        ('0', 'Zero snowflake', 'Note'),
+        ('-9223372036854775808', 'Minimum snowflake', 'Note'),
+        ('9223372036854775807', 'Maximum snowflake', 'Note')
+    `
+    const duplicate = await database.captureError(async db => {
+      await db.sql`
+        insert into "Entity" ("id", "displayName", "entity")
+        values ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Duplicate', 'Note')
+      `
+    })
+    expect(duplicate).toMatchObject({ errno: '23505' })
+
+    for (const id of [
+      'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11',
+      '01',
+      '-0',
+      '9223372036854775808',
+      '-9223372036854775809',
+      'not-an-identity',
+    ]) {
+      const invalid = await database.captureError(async db => {
+        await db.sql`
+          insert into "Entity" ("id", "displayName", "entity")
+          values (${id}, 'Invalid', 'Note')
+        `
+      })
+      expect(invalid).toMatchObject({ errno: '23514' })
+    }
+
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      select
+        value::text,
+        'item-' || lpad(value::text, 6, '0') || '-' || md5(value::text),
+        case when value % 2 = 0 then 'Note' else 'Book' end
+      from generate_series(1, 100_000) as series(value)
+    `
+    await database.sql`analyze "Entity"`
+
+    const sortedPlan = await database.sql<Record<string, string>[]>`
+      explain (format text)
+      select "id"
+      from "Entity"
+      where "displayName" >= 'item-050000-' and "displayName" < 'item-060000-'
+      order by "displayName" asc, "id" asc
+      limit 20
+    `
+    expect(sortedPlan.map(row => Object.values(row).join('\n')).join('\n'))
+      .toContain('Entity_displayName_id_idx')
+
+    const trigramPlan = await database.sql<Record<string, string>[]>`
+      explain (format text)
+      select "id"
+      from "Entity"
+      where "displayName" ilike '%item-042000-%'
+      limit 20
+    `
+    expect(trigramPlan.map(row => Object.values(row).join('\n')).join('\n'))
+      .toContain('Entity_displayName_trgm_idx')
+  }, 120_000)
+
   isolatedTest('filters numeric values with each comparison operator', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [numberRowDefinition],
@@ -523,6 +645,7 @@ describe('Server database lifecycle', () => {
     await entities.createTables(database.sql)
 
     expect(entities.ddl).toMatchSQL([
+      ...identityDdl,
       `CREATE TABLE "Post" (
         "id" UUID PRIMARY KEY,
         "userId" BIGINT NOT NULL,

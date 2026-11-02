@@ -13,6 +13,28 @@ function load(value: unknown): EntityDefinitions {
   return EntityDefinitions.load(JSON.stringify(value))
 }
 
+/** The universal identity root DDL included in every complete schema. */
+const identityDdl = [
+  'CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public',
+  `CREATE TABLE "Entity" (
+    "id" TEXT PRIMARY KEY,
+    "displayName" TEXT NOT NULL,
+    "entity" TEXT NOT NULL,
+    CONSTRAINT "Entity_id_format_check" CHECK (
+      CASE
+        WHEN "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN TRUE
+        WHEN "id" ~ '^(0|-?[1-9][0-9]*)$' AND length("id") <= 20
+          THEN "id"::numeric BETWEEN -9223372036854775808 AND 9223372036854775807
+        ELSE FALSE
+      END
+    )
+  )`,
+  `CREATE INDEX IF NOT EXISTS "Entity_displayName_id_idx"
+    ON "Entity" ("displayName" ASC, "id" ASC)`,
+  `CREATE INDEX IF NOT EXISTS "Entity_displayName_trgm_idx"
+    ON "Entity" USING GIN ("displayName" public.gin_trgm_ops)`,
+]
+
 /** A valid minimal entity document with its primary key. */
 const note = {
   entities: [{
@@ -104,6 +126,7 @@ describe('EntityDefinitions', () => {
       type: FieldType.Entity,
     })
     expect(entities.ddl).toMatchSQL([
+      ...identityDdl,
       `CREATE TABLE "Note" (
         "id" UUID PRIMARY KEY,
         "ownerId" BIGINT NOT NULL,
@@ -176,6 +199,7 @@ describe('EntityDefinitions', () => {
       type: FieldType.Entity,
     })
     expect(entities.ddl).toMatchSQL([
+      ...identityDdl,
       `CREATE TABLE "Note" (
         "id" UUID PRIMARY KEY,
         "writer" BIGINT NOT NULL
@@ -212,6 +236,7 @@ describe('EntityDefinitions', () => {
       targetType: FieldType.Snowflake,
     })
     expect(entities.ddl).toMatchSQL([
+      ...identityDdl,
       `CREATE TABLE "Note" (
         "id" UUID PRIMARY KEY,
         "userId" BIGINT NOT NULL
@@ -246,6 +271,7 @@ describe('EntityDefinitions', () => {
       type: FieldType.Entity,
     })
     expect(entities.ddl).toMatchSQL([
+      ...identityDdl,
       `CREATE TABLE "User" (
         "id" UUID PRIMARY KEY,
         "managerId" UUID NOT NULL,
@@ -431,6 +457,7 @@ describe('EntityDefinitions', () => {
     })
 
     expect(entities.ddl).toMatchSQL([
+      ...identityDdl,
       `CREATE TABLE "User" (
         "id" UUID PRIMARY KEY,
         "carId" UUID NOT NULL
@@ -527,6 +554,15 @@ describe('EntityDefinitions', () => {
   test('rejects definitions without a primary key', () => {
     expect(() => load({ entities: [{ fields: [{ name: 'title', type: 'string' }], name: 'Note' }] }))
       .toThrow('exactly one primary key')
+  })
+
+  test('reserves the Entity name for the universal identity root', () => {
+    expect(() => load({
+      entities: [{
+        fields: [{ name: 'id', primaryKey: true, type: 'uuid' }],
+        name: 'Entity',
+      }],
+    })).toThrow('entity name "Entity" is reserved for the universal identity root')
   })
 
   test('rejects unknown properties so typos cannot become schema vocabulary', () => {

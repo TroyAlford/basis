@@ -1,5 +1,31 @@
 import type { SQL } from 'bun'
 
+/** Enable PostgreSQL trigram search for universal display names. */
+const IDENTITY_EXTENSION_DDL = 'CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public'
+
+/** The universal entity identity root. */
+const IDENTITY_TABLE_DDL = `CREATE TABLE "Entity" (
+  "id" TEXT PRIMARY KEY,
+  "displayName" TEXT NOT NULL,
+  "entity" TEXT NOT NULL,
+  CONSTRAINT "Entity_id_format_check" CHECK (
+    CASE
+      WHEN "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN TRUE
+      WHEN "id" ~ '^(0|-?[1-9][0-9]*)$' AND length("id") <= 20
+        THEN "id"::numeric BETWEEN -9223372036854775808 AND 9223372036854775807
+      ELSE FALSE
+    END
+  )
+)`
+
+/** Deterministic B-tree and trigram indexes for the identity root. */
+const IDENTITY_INDEX_DDLS = [
+  `CREATE INDEX IF NOT EXISTS "Entity_displayName_id_idx"
+    ON "Entity" ("displayName" ASC, "id" ASC)`,
+  `CREATE INDEX IF NOT EXISTS "Entity_displayName_trgm_idx"
+    ON "Entity" USING GIN ("displayName" public.gin_trgm_ops)`,
+]
+
 /**
  * Logical field kinds supported by the canonical entity definitions.
  *
@@ -125,6 +151,9 @@ export class EntityDefinitions {
    */
   get ddl(): readonly string[] {
     return [
+      IDENTITY_EXTENSION_DDL,
+      IDENTITY_TABLE_DDL,
+      ...IDENTITY_INDEX_DDLS,
       ...this.entities.map(createTable),
       ...this.entities.flatMap(entity => entity.fields
         .filter(isReferenceField)
@@ -133,7 +162,8 @@ export class EntityDefinitions {
   }
 
   /**
-   * Create missing tables, then add missing foreign-key constraints.
+   * Create the universal identity root and missing entity tables, then add
+   * missing foreign-key constraints.
    *
    * Existing tables are left untouched, but declared constraints are still
    * reconciled: a missing constraint is added and a mismatched existing
@@ -145,6 +175,18 @@ export class EntityDefinitions {
    *   constraint does not match the canonical model.
    */
   async createTables(sql: SQL): Promise<void> {
+    await sql.unsafe(IDENTITY_EXTENSION_DDL).simple()
+    const identity = await sql<{ present: boolean }[]>`
+      select exists (
+        select 1
+        from pg_catalog.pg_tables
+        where schemaname = current_schema()
+          and tablename = 'Entity'
+      ) as present
+    `
+    if (!identity[0]?.present) await sql.unsafe(IDENTITY_TABLE_DDL).simple()
+    for (const index of IDENTITY_INDEX_DDLS) await sql.unsafe(index).simple()
+
     for (const entity of this.entities) {
       const rows = await sql<{ present: boolean }[]>`
         select exists (
@@ -281,6 +323,9 @@ function parseEntity(value: unknown): EntitySeed {
 
   if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
     throw invalid('entity name must be a PascalCase identifier')
+  }
+  if (value.name === 'Entity') {
+    throw invalid('entity name "Entity" is reserved for the universal identity root')
   }
 
   if (!Array.isArray(value.fields) || value.fields.length === 0) {

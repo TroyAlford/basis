@@ -205,6 +205,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
 
   try {
     await server.ready()
+    await server.db.sql.unsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public').simple()
     record(`start ${service} ${install} ${process.pid}`)
     return { entities: sharedEntities, install, server, service }
   } catch (error) {
