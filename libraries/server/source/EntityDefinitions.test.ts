@@ -59,6 +59,86 @@ function snowflakeCheck(table: string, column: string): string {
 }
 
 /**
+ * Quote a PostgreSQL identifier for expected DDL.
+ * @param value - Identifier.
+ * @returns The quoted identifier.
+ */
+function quote(value: string): string {
+  return `"${value}"`
+}
+
+/**
+ * Build expected commit-time MTI lifecycle DDL.
+ * @param leaves - Concrete entity names and their primary-key columns.
+ * @returns Expected function and trigger statements.
+ */
+function lifecycleDdl(leaves: readonly { key: string, name: string }[]): readonly string[] {
+  const leafChecks = leaves.map(({ key, name }) => `when '${name}' then
+        if not exists (select 1 from ${quote(name)} where ${quote(key)} = new."id") then
+          raise exception 'incomplete root row % for entity %', new."id", new."entity";
+        end if;`)
+  const validateRoot = `create or replace function "Entity_validate_leaf"() returns trigger language plpgsql as $$
+begin
+  case new."entity"
+    ${leafChecks.join('\n    ')}
+    else
+      raise exception 'unknown concrete entity %', new."entity";
+  end case;
+  return new;
+end
+$$`
+  const validateLeafRow =
+    'create or replace function "Entity_validate_leaf_row"() ' +
+    `returns trigger language plpgsql as $$
+declare
+  key text;
+  root_entity text;
+begin
+  if tg_op = 'DELETE' then
+    key := to_jsonb(old)->>tg_argv[0];
+    if exists (select 1 from "Entity" where "id" = key) then
+      raise exception 'deleting leaf row % would leave an incomplete root row', key;
+    end if;
+    return old;
+  end if;
+  key := to_jsonb(new)->>tg_argv[0];
+  select "entity" into root_entity from "Entity" where "id" = key;
+  if root_entity is distinct from tg_table_name then
+    raise exception 'leaf row % must match root entity %, found %',
+      key, tg_table_name, coalesce(root_entity, '<missing>');
+  end if;
+  return new;
+end
+$$`
+  const immutableLeaf = `create or replace function "Entity_leaf_immutable"() returns trigger language plpgsql as $$
+begin
+  if new."entity" is distinct from old."entity" then
+    raise exception 'leaf discriminator for root row % is immutable', old."id";
+  end if;
+  return new;
+end
+$$`
+  return [
+    validateRoot,
+    'drop trigger if exists "Entity_leaf_check" on "Entity"',
+    'create constraint trigger "Entity_leaf_check" after insert or update on "Entity" ' +
+    'deferrable initially deferred for each row execute function "Entity_validate_leaf"()',
+    validateLeafRow,
+    ...leaves.flatMap(({ key, name }) => [
+      `drop trigger if exists ${quote(`${name}_leaf_check`)} on ${quote(name)}`,
+      `create constraint trigger ${quote(`${name}_leaf_check`)} ` +
+      `after insert or update or delete on ${quote(name)} ` +
+      'deferrable initially deferred for each row execute function "Entity_validate_leaf_row"' +
+      `('${key}')`,
+    ]),
+    immutableLeaf,
+    'drop trigger if exists "Entity_leaf_immutable" on "Entity"',
+    'create trigger "Entity_leaf_immutable" before update of "entity" on "Entity" ' +
+    'for each row execute function "Entity_leaf_immutable"()',
+  ]
+}
+
+/**
  * Build the universal identity root DDL included in every complete schema.
  * @param leaves - Concrete leaf entity names accepted by the root.
  * @returns Ordered identity-root SQL statements.
@@ -180,6 +260,7 @@ describe('EntityDefinitions', () => {
       `alter table "IdentityRow" add constraint "IdentityRow_Entity_mti_fkey"
         foreign key ("id") references "Entity" ("id")
         deferrable initially immediate`,
+      ...lifecycleDdl([{ key: 'id', name: 'IdentityRow' }]),
     ])
   })
 
@@ -249,6 +330,7 @@ describe('EntityDefinitions', () => {
       `alter table "Note" add constraint "Note_lastUpdatedBy_fkey"
         foreign key ("lastUpdatedById") references "User" ("id")
         deferrable initially immediate`,
+      ...lifecycleDdl([{ key: 'id', name: 'Note' }, { key: 'id', name: 'User' }]),
     ])
   })
 
@@ -324,6 +406,7 @@ describe('EntityDefinitions', () => {
       `alter table "Note" add constraint "Note_author_fkey"
         foreign key ("writer") references "User" ("id")
         deferrable initially immediate`,
+      ...lifecycleDdl([{ key: 'id', name: 'Note' }, { key: 'id', name: 'User' }]),
     ])
   })
 
@@ -372,6 +455,7 @@ describe('EntityDefinitions', () => {
       `alter table "Note" add constraint "Note_user_fkey"
         foreign key ("userId") references "User" ("externalId")
         deferrable initially immediate`,
+      ...lifecycleDdl([{ key: 'id', name: 'Note' }, { key: 'externalId', name: 'User' }]),
     ])
   })
 
@@ -408,6 +492,7 @@ describe('EntityDefinitions', () => {
       `alter table "User" add constraint "User_manager_fkey"
         foreign key ("managerId") references "User" ("id")
         deferrable initially immediate`,
+      ...lifecycleDdl([{ key: 'id', name: 'User' }]),
     ])
   })
 
@@ -608,6 +693,7 @@ describe('EntityDefinitions', () => {
       `alter table "Car" add constraint "Car_user_fkey"
         foreign key ("userId") references "User" ("id")
         deferrable initially immediate`,
+      ...lifecycleDdl([{ key: 'id', name: 'User' }, { key: 'id', name: 'Car' }]),
     ])
   })
 
@@ -831,6 +917,7 @@ describe('EntityDefinitions', () => {
       `alter table "Novel" add constraint "Novel_Book_mti_fkey"
         foreign key ("id") references "Book" ("id")
         deferrable initially immediate`,
+      ...lifecycleDdl([{ key: 'id', name: 'SystemUser' }, { key: 'id', name: 'Novel' }]),
     ])
   })
 

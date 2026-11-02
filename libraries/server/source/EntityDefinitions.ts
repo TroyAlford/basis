@@ -234,6 +234,7 @@ export class EntityDefinitions {
       ...this.entities.flatMap(entity => entity.fields
         .filter(isReferenceField)
         .map(field => addConstraint(entity, field))),
+      ...lifecycleStatements(this.entities),
     ]
   }
 
@@ -261,8 +262,10 @@ export class EntityDefinitions {
             and tablename = ${table.name}
         ) as present
       `
-      if (!rows[0]?.present) await sql.unsafe(createTable(table)).simple()
+      const created = !rows[0]?.present
+      if (created) await sql.unsafe(createTable(table)).simple()
       for (const index of table.indexes ?? []) {
+        if (!created && await indexExists(sql, index.name)) continue
         await sql.unsafe(createIndex(table, index)).simple()
       }
     }
@@ -291,7 +294,93 @@ export class EntityDefinitions {
         )
       }
     }
+
+    for (const statement of lifecycleStatements(this.entities)) {
+      await sql.unsafe(statement).simple()
+    }
   }
+}
+
+/**
+ * Build commit-time triggers that keep MTI root/leaf chains complete.
+ * @param entities - Validated entity definitions.
+ * @returns Function and trigger DDL in dependency order.
+ */
+function lifecycleStatements(entities: readonly EntityDefinition[]): readonly string[] {
+  const concrete = entities.filter(entity => !entity.abstract)
+  const leafChecks = concrete.map(entity => {
+    const key = quoteIdentifier(primaryKeyField(entity).name)
+    return `when ${quoteLiteral(entity.name)} then
+        if not exists (select 1 from ${quoteIdentifier(entity.name)} where ${key} = new."id") then
+          raise exception 'incomplete root row % for entity %', new."id", new."entity";
+        end if;`
+  })
+  const validateRoot = `create or replace function "Entity_validate_leaf"() returns trigger language plpgsql as $$
+begin
+  case new."entity"
+    ${leafChecks.join('\n    ')}
+    else
+      raise exception 'unknown concrete entity %', new."entity";
+  end case;
+  return new;
+end
+$$`
+  const validateLeafRow =
+    'create or replace function "Entity_validate_leaf_row"() ' +
+    `returns trigger language plpgsql as $$
+declare
+  key text;
+  root_entity text;
+begin
+  if tg_op = 'DELETE' then
+    key := to_jsonb(old)->>tg_argv[0];
+    if exists (select 1 from "Entity" where "id" = key) then
+      raise exception 'deleting leaf row % would leave an incomplete root row', key;
+    end if;
+    return old;
+  end if;
+  key := to_jsonb(new)->>tg_argv[0];
+  select "entity" into root_entity from "Entity" where "id" = key;
+  if root_entity is distinct from tg_table_name then
+    raise exception 'leaf row % must match root entity %, found %',
+      key, tg_table_name, coalesce(root_entity, '<missing>');
+  end if;
+  return new;
+end
+$$`
+  const immutableLeaf = `create or replace function "Entity_leaf_immutable"() returns trigger language plpgsql as $$
+begin
+  if new."entity" is distinct from old."entity" then
+    raise exception 'leaf discriminator for root row % is immutable', old."id";
+  end if;
+  return new;
+end
+$$`
+  const rootTrigger = 'Entity_leaf_check'
+  const immutableTrigger = 'Entity_leaf_immutable'
+  return [
+    validateRoot,
+    `drop trigger if exists ${quoteIdentifier(rootTrigger)} on "Entity"`,
+    `create constraint trigger ${quoteIdentifier(rootTrigger)} ` +
+    'after insert or update on "Entity" deferrable initially deferred ' +
+    'for each row execute function "Entity_validate_leaf"()',
+    validateLeafRow,
+    ...concrete.flatMap(entity => {
+      const name = `${entity.name}_leaf_check`
+      return [
+        `drop trigger if exists ${quoteIdentifier(name)} on ${quoteIdentifier(entity.name)}`,
+        `create constraint trigger ${quoteIdentifier(name)} ` +
+        `after insert or update or delete on ${quoteIdentifier(entity.name)} ` +
+        'deferrable initially deferred for each row execute function "Entity_validate_leaf_row"' +
+        `(${quoteLiteral(primaryKeyField(entity).name)})`,
+      ]
+    }),
+    immutableLeaf,
+    `drop trigger if exists ${quoteIdentifier(immutableTrigger)} on "Entity"`,
+    `create trigger ${quoteIdentifier(immutableTrigger)} ` +
+    'before update of "entity" on "Entity" for each row ' +
+    'execute function "Entity_leaf_immutable"()',
+  ]
 }
 
 /**
@@ -887,6 +976,22 @@ function columnType(type: ScalarFieldType): string {
  */
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`
+}
+
+/**
+ * Whether an index exists in the current schema.
+ * @param sql - Connected SQL client.
+ * @param name - Index name.
+ * @returns `true` when present.
+ */
+async function indexExists(sql: SQL, name: string): Promise<boolean> {
+  const rows = await sql<{ present: boolean }[]>`
+    select exists (
+      select 1 from pg_catalog.pg_indexes
+      where schemaname = current_schema() and indexname = ${name}
+    ) as present
+  `
+  return rows[0]?.present === true
 }
 
 /**
