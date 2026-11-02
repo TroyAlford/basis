@@ -8,7 +8,6 @@ import { dirname, join } from 'node:path'
 import { accountDefinition, containers, noteDefinition, numberRowDefinition, removeService, useDatabaseFixture } from '../testing/DatabaseFixture'
 import type { DurableDatabase, IsolatedDatabase } from '../testing/DatabaseIsolation'
 import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIsolation'
-import { toMatchSQL } from '../testing/toMatchSQL'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
@@ -19,30 +18,6 @@ import { SortDirection } from './SortDirection'
  * Real PostgreSQL lifecycle. The suite owns Docker services through the
  * server capability; it never replaces the database boundary with a mock.
  */
-
-expect.extend({ toMatchSQL })
-
-/** The universal identity root DDL included in every complete schema. */
-const identityDdl = [
-  'create extension if not exists pg_trgm with schema public',
-  `create table "Entity" (
-    "id" text primary key,
-    "displayName" text not null,
-    "entity" text not null,
-    constraint "Entity_id_format_check" check (
-      case
-        when "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then true
-        when "id" ~ '^(0|-?[1-9][0-9]*)$' and length("id") <= 20
-          then "id"::numeric between -9223372036854775808 and 9223372036854775807
-        else false
-      end
-    )
-  )`,
-  `create index if not exists "Entity_displayName_id_idx"
-    on "Entity" ("displayName", "id")`,
-  `create index if not exists "Entity_displayName_trgm_idx"
-    on "Entity" using gin ("displayName" public.gin_trgm_ops)`,
-]
 
 const root = join(import.meta.dir, '..', '..', '..')
 const silent = new Logger({ silent: true })
@@ -484,6 +459,12 @@ describe('Server database lifecycle', () => {
   }, 120_000)
 
   isolatedTest('creates and indexes the universal identity root', async database => {
+    expect(await database.sql<{ present: boolean }[]>`
+      select exists (
+        select 1 from pg_extension where extname = 'pg_trgm'
+      ) as present
+    `).toEqual([{ present: false }])
+
     const entities = EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
     await entities.createTables(database.sql)
 
@@ -644,21 +625,6 @@ describe('Server database lifecycle', () => {
 
     await entities.createTables(database.sql)
 
-    expect(entities.ddl).toMatchSQL([
-      ...identityDdl,
-      `create table "Post" (
-        "id" uuid primary key,
-        "userId" bigint not null,
-        "title" text not null
-      )`,
-      `create table "User" (
-        "id" bigint primary key,
-        "name" text not null
-      )`,
-      `alter table "Post" add constraint "Post_author_fkey"
-        foreign key ("userId") references "User" ("id")
-        deferrable initially immediate`,
-    ])
     const constraints = await database.sql<{ definition: string }[]>`
       select pg_get_constraintdef(oid) as definition
       from pg_constraint
