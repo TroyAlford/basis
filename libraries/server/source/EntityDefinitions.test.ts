@@ -30,10 +30,10 @@ describe('EntityDefinitions', () => {
 
     expect(entity?.name).toBe('Note')
     expect(entity?.fields.map(field => field.name)).toEqual(['id', 'title', 'body', 'createdAt'])
-    expect(entity?.fields.find(field => field.primaryKey)?.name).toBe('id')
+    expect(entity?.fields.find(field => field.type !== FieldType.Entity && field.primaryKey)?.name).toBe('id')
   })
 
-  test('accepts every field type', () => {
+  test('accepts every scalar field type', () => {
     const entities = load({
       entities: [{
         fields: [
@@ -57,6 +57,358 @@ describe('EntityDefinitions', () => {
       FieldType.Snowflake,
       FieldType.String,
       FieldType.Timestamp,
+    ])
+  })
+
+  test('represents logical references as fields and derives physical FK columns', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'ownerId', name: 'owner', target: 'User', type: 'entity' },
+            { column: 'lastUpdatedById', name: 'lastUpdatedBy', target: 'User', type: 'entity' },
+            { name: 'title', type: 'string' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'snowflake' },
+            { name: 'name', type: 'string' },
+          ],
+          name: 'User',
+        },
+      ],
+    })
+
+    expect(entities.entity('Note')?.fields.map(field => field.name))
+      .toEqual(['id', 'owner', 'lastUpdatedBy', 'title'])
+    expect(entities.entity('Note')?.fields).toContainEqual({
+      column: 'ownerId',
+      name: 'owner',
+      target: 'User',
+      targetField: 'id',
+      targetType: FieldType.Snowflake,
+      type: FieldType.Entity,
+    })
+    expect(entities.entity('Note')?.fields).toContainEqual({
+      column: 'lastUpdatedById',
+      name: 'lastUpdatedBy',
+      target: 'User',
+      targetField: 'id',
+      targetType: FieldType.Snowflake,
+      type: FieldType.Entity,
+    })
+    const creates = entities.ddl.filter(statement => statement.startsWith('CREATE TABLE'))
+    const constraints = entities.ddl.filter(statement => statement.startsWith('ALTER TABLE'))
+    expect(creates[0]).toContain('CREATE TABLE "Note"')
+    expect(creates[1]).toContain('CREATE TABLE "User"')
+    expect(creates[0]).toContain('"ownerId" BIGINT NOT NULL')
+    expect(creates[0]).toContain('"lastUpdatedById" BIGINT NOT NULL')
+    expect(creates[0]).not.toContain('REFERENCES')
+    expect(constraints).toEqual([
+      expect.stringContaining(
+        'ALTER TABLE "Note" ADD CONSTRAINT "Note_owner_fkey" ' +
+        'FOREIGN KEY ("ownerId") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
+      ),
+      expect.stringContaining(
+        'ALTER TABLE "Note" ADD CONSTRAINT "Note_lastUpdatedBy_fkey" ' +
+        'FOREIGN KEY ("lastUpdatedById") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
+      ),
+    ])
+  })
+
+  test('leaves undeclared relationship-looking scalars ordinary even when the target exists', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'userId', type: 'snowflake' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'snowflake' },
+            { name: 'name', type: 'string' },
+          ],
+          name: 'User',
+        },
+      ],
+    })
+
+    expect(entities.entity('Note')?.fields).toEqual([
+      { name: 'id', primaryKey: true, type: FieldType.UUID },
+      { name: 'userId', primaryKey: false, type: FieldType.Snowflake },
+    ])
+    expect(entities.ddl.some(ddl => ddl.includes('REFERENCES'))).toBe(false)
+  })
+
+  test('accepts any explicit physical column name for a logical reference', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'writer', name: 'author', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
+          name: 'User',
+        },
+      ],
+    })
+
+    expect(entities.entity('Note')?.fields[1]).toEqual({
+      column: 'writer',
+      name: 'author',
+      target: 'User',
+      targetField: 'id',
+      targetType: FieldType.Snowflake,
+      type: FieldType.Entity,
+    })
+    expect(entities.ddl.find(statement => statement.startsWith('ALTER TABLE')))
+      .toContain('FOREIGN KEY ("writer") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE')
+  })
+
+  test('derives the reference column type from a non-id target primary key', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'userId', name: 'user', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [
+            { name: 'externalId', primaryKey: true, type: 'snowflake' },
+            { name: 'name', type: 'string' },
+          ],
+          name: 'User',
+        },
+      ],
+    })
+
+    expect(entities.entity('Note')?.fields[1]).toMatchObject({
+      targetField: 'externalId',
+      targetType: FieldType.Snowflake,
+    })
+    expect(entities.ddl.find(statement => statement.startsWith('ALTER TABLE')))
+      .toContain('REFERENCES "User" ("externalId") DEFERRABLE INITIALLY IMMEDIATE')
+  })
+
+  test('supports self-referential singular references', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { column: 'managerId', name: 'manager', target: 'User', type: 'entity' },
+          { name: 'name', type: 'string' },
+        ],
+        name: 'User',
+      }],
+    })
+
+    expect(entities.entity('User')?.fields[1]).toMatchObject({
+      column: 'managerId',
+      name: 'manager',
+      target: 'User',
+      targetField: 'id',
+      type: FieldType.Entity,
+    })
+    expect(entities.ddl[0]).toContain('"managerId" UUID NOT NULL')
+    expect(entities.ddl[1]).toContain(
+      'ALTER TABLE "User" ADD CONSTRAINT "User_manager_fkey" ' +
+      'FOREIGN KEY ("managerId") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
+    )
+  })
+
+  test('rejects invalid references and physical column collisions', () => {
+    expect(() => load({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { column: 'ownerId', name: 'owner', target: 'Missing', type: 'entity' },
+        ],
+        name: 'Note',
+      }],
+    })).toThrow('unknown target entity "Missing" for field "Note.owner"')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'owner', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
+          name: 'User',
+        },
+      ],
+    })).toThrow('column must be a camelCase identifier')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'owner_id', name: 'owner', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
+          name: 'User',
+        },
+      ],
+    })).toThrow('column must be a camelCase identifier')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'ownerId', name: 'owner', target: 'user', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+      ],
+    })).toThrow('target must be a PascalCase entity name')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'ownerId', name: 'Owner', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+      ],
+    })).toThrow('field name must be a camelCase identifier')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'owner', type: 'string' },
+            { column: 'ownerId', name: 'owner', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
+          name: 'User',
+        },
+      ],
+    })).toThrow('duplicate field "Note.owner"')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'ownerId', type: 'snowflake' },
+            { column: 'ownerId', name: 'owner', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
+          name: 'User',
+        },
+      ],
+    })).toThrow('physical column "ownerId" is declared by both "Note.ownerId" and "Note.owner"')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'ownerId', name: 'owner', target: 'User', type: 'entity' },
+            { column: 'ownerId', name: 'editor', target: 'User', type: 'entity' },
+          ],
+          name: 'Note',
+        },
+        {
+          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
+          name: 'User',
+        },
+      ],
+    })).toThrow('physical column "ownerId" is declared by both "Note.owner" and "Note.editor"')
+  })
+
+  test('rejects reference fields used as primary keys and undeclared relationships arrays', () => {
+    expect(() => load({
+      entities: [{
+        fields: [
+          {
+            column: 'ownerId',
+            name: 'owner',
+            primaryKey: true,
+            target: 'User',
+            type: 'entity',
+          },
+        ],
+        name: 'Note',
+      }],
+    })).toThrow('unknown field property "primaryKey"')
+
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'ownerId', type: 'snowflake' },
+          ],
+          name: 'Note',
+          relationships: [{ field: 'ownerId', name: 'owner', target: 'User' }],
+        },
+        {
+          fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }],
+          name: 'User',
+        },
+      ],
+    })).toThrow('unknown entity property "relationships"')
+  })
+
+  test('supports cyclic references with phased deferrable constraints', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'carId', name: 'car', target: 'Car', type: 'entity' },
+          ],
+          name: 'User',
+        },
+        {
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'userId', name: 'user', target: 'User', type: 'entity' },
+          ],
+          name: 'Car',
+        },
+      ],
+    })
+
+    expect(entities.ddl).toEqual([
+      'CREATE TABLE "User" (\n"id" UUID PRIMARY KEY,\n"carId" UUID NOT NULL\n)',
+      'CREATE TABLE "Car" (\n"id" UUID PRIMARY KEY,\n"userId" UUID NOT NULL\n)',
+      'ALTER TABLE "User" ADD CONSTRAINT "User_car_fkey" FOREIGN KEY ("carId") ' +
+        'REFERENCES "Car" ("id") DEFERRABLE INITIALLY IMMEDIATE',
+      'ALTER TABLE "Car" ADD CONSTRAINT "Car_user_fkey" FOREIGN KEY ("userId") ' +
+        'REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
     ])
   })
 
