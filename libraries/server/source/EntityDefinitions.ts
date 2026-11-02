@@ -1,61 +1,51 @@
 import type { SQL } from 'bun'
 
-/** Enable PostgreSQL trigram search for universal display names. */
+/** Enable PostgreSQL trigram search for universal names. */
 const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with schema public'
 
 /**
- * Logical field kinds supported by the canonical entity definitions.
+ * Canonical field types.
  *
- * `Entity` is the singular reference kind; every other value is a scalar type.
- * Keeping both in one field shape lets callers discriminate references without
- * a parallel relationship registry.
+ * `Entity` is the singular reference kind. `ID` is the universal identity
+ * field type; concrete UUID/Snowflake variants are selected by `format`.
  */
 export enum FieldType {
   /** Boolean value. */
-  Boolean = 'boolean',
+  Boolean = 'Boolean',
   /** Calendar date without a time of day. */
-  Date = 'date',
+  Date = 'Date',
   /** Singular reference to another entity. */
-  Entity = 'entity',
+  Entity = 'Entity',
+  /** Universal text identity. */
+  ID = 'ID',
   /** Numeric value, including integers and floating point numbers. */
-  Number = 'number',
-  /**
-   * Externally assigned signed 64-bit identity format. Values are canonical
-   * decimal strings; exact bigint inputs normalize to canonical text.
-   */
-  Snowflake = 'snowflake',
+  Number = 'Number',
   /** Text value. */
-  String = 'string',
+  String = 'String',
   /** Instant in time. */
-  Timestamp = 'timestamp',
-  /** Canonical lowercase UUID identity format. */
-  UUID = 'uuid',
+  Timestamp = 'Timestamp',
 }
 
 /** Field types that represent scalar values. */
 export type ScalarFieldType =
   | FieldType.Boolean
   | FieldType.Date
+  | FieldType.ID
   | FieldType.Number
-  | FieldType.Snowflake
   | FieldType.String
   | FieldType.Timestamp
-  | FieldType.UUID
+
+/** Supported canonical identity formats. */
+export type IdentityFormat = 'Snowflake' | 'UUID'
 
 /** One scalar field definition. */
 export interface ScalarFieldDefinition {
+  /** Canonical format for an ID field. */
+  readonly format?: IdentityFormat,
   /** Field name, in camelCase. */
   readonly name: string,
-  /** Whether this field is the entity's single primary key. */
-  readonly primaryKey: boolean,
   /** Scalar field type. */
   readonly type: ScalarFieldType,
-}
-
-/** A primary-key scalar whose logical type is a supported identity format. */
-type IdentityField = ScalarFieldDefinition & {
-  /** UUID or Snowflake identity format. */
-  readonly type: FieldType.Snowflake | FieldType.UUID,
 }
 
 /** One singular entity-reference field. */
@@ -66,10 +56,6 @@ export interface EntityReferenceFieldDefinition {
   readonly name: string,
   /** Referenced entity name. */
   readonly target: string,
-  /** Referenced primary-key field name. */
-  readonly targetField: string,
-  /** Referenced primary-key scalar type. */
-  readonly targetType: FieldType.Snowflake | FieldType.UUID,
   /** Field-kind discriminator. */
   readonly type: FieldType.Entity,
 }
@@ -77,13 +63,25 @@ export interface EntityReferenceFieldDefinition {
 /** One logical entity field. */
 export type FieldDefinition = ScalarFieldDefinition | EntityReferenceFieldDefinition
 
+/** One effective inherited field and its owning entity table. */
+export type EffectiveFieldDefinition = FieldDefinition & {
+  /** Entity table that physically owns this field. */
+  readonly owner: string,
+}
+
 /** One entity definition. */
 export interface EntityDefinition {
-  /** Whether this entity is abstract and cannot be a concrete leaf. */
+  /** Whether this entity has descendants and cannot be a concrete leaf. */
   readonly abstract: boolean,
-  /** Logical fields in their declared order. */
+  /** Effective inherited and locally owned fields. */
+  readonly effectiveFields: readonly EffectiveFieldDefinition[],
+  /** Declared parent entity, when present. */
+  readonly extends?: string,
+  /** Locally owned fields plus the generated shared `id` field. */
   readonly fields: readonly FieldDefinition[],
-  /** Entity name, in PascalCase. */
+  /** Effective inherited ID format. */
+  readonly idFormat?: IdentityFormat,
+  /** Entity type name, in PascalCase. */
   readonly name: string,
   /** Parent entity name, or the system `Entity` root. */
   readonly parent: string,
@@ -97,14 +95,6 @@ interface TableColumn {
   readonly primaryKey?: boolean,
   /** Physical scalar type. */
   readonly type: ScalarFieldType,
-}
-
-/** One table-level check constraint. */
-interface TableCheck {
-  /** SQL boolean expression. */
-  readonly expression: string,
-  /** Constraint name. */
-  readonly name: string,
 }
 
 /** One physical table index. */
@@ -131,11 +121,155 @@ interface TableDefinition {
   readonly name: string,
 }
 
+/** One table-level check constraint. */
+interface TableCheck {
+  /** SQL boolean expression. */
+  readonly expression: string,
+  /** Constraint name. */
+  readonly name: string,
+}
+
+/** One lifecycle function that must exist and match its canonical body. */
+interface LifecycleFunction {
+  /** Function body between the dollar quotes. */
+  readonly body: string,
+  /** Function name. */
+  readonly name: string,
+  /** Full CREATE OR REPLACE statement. */
+  readonly statement: string,
+}
+
+/** One lifecycle constraint trigger that must exist and match. */
+interface LifecycleTrigger {
+  /** Whether this is a constraint trigger. */
+  readonly constraint: boolean,
+  /** Whether this is deferrable. */
+  readonly deferrable: boolean,
+  /** Function name. */
+  readonly function: string,
+  /** Whether this is initially deferred. */
+  readonly initDeferred: boolean,
+  /** Trigger name. */
+  readonly name: string,
+  /** Full CREATE TRIGGER statement. */
+  readonly statement: string,
+  /** Owning table. */
+  readonly table: string,
+  /** Trigger bitmask. */
+  readonly type: number,
+}
+
+/** Canonical UUID identity pattern. */
+const UUID_IDENTITY_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+/** Canonical signed 64-bit decimal identity pattern. */
+const SNOWFLAKE_IDENTITY_PATTERN = '^(0|-?[1-9][0-9]*)$'
+/** Canonical signed 64-bit decimal bounds. */
+const SNOWFLAKE_MIN_TEXT = '-9223372036854775808'
+const SNOWFLAKE_MAX_TEXT = '9223372036854775807'
+
+/** Root-owned field names that ordinary entities cannot redeclare. */
+const ROOT_FIELD_NAMES = new Set<string>([
+  'entity',
+  'name',
+])
+
+/** Formats accepted by canonical `id` refinements. */
+const IDENTITY_FORMATS = new Set<string>([
+  'Snowflake',
+  'UUID',
+])
+
+/** Scalar field type names accepted by the entity definitions. */
+const SCALAR_FIELD_TYPES = new Set<string>([
+  FieldType.Boolean,
+  FieldType.Date,
+  FieldType.ID,
+  FieldType.Number,
+  FieldType.String,
+  FieldType.Timestamp,
+])
+
+/**
+ * Whether a value is a canonical lowercase UUID identity.
+ * @param value - Candidate identity text.
+ * @returns `true` for a canonical UUID.
+ */
+export function isCanonicalUUID(value: string): boolean {
+  return new RegExp(UUID_IDENTITY_PATTERN).test(value)
+}
+
+/**
+ * Whether a value is a canonical signed 64-bit decimal identity.
+ * @param value - Candidate identity text.
+ * @returns `true` for a canonical Snowflake-format value.
+ */
+export function isCanonicalSnowflake(value: string): boolean {
+  if (value.length > 20 || !new RegExp(SNOWFLAKE_IDENTITY_PATTERN).test(value)) return false
+  const numeric = BigInt(value)
+  return numeric >= BigInt(SNOWFLAKE_MIN_TEXT) && numeric <= BigInt(SNOWFLAKE_MAX_TEXT)
+}
+
+/**
+ * Resolve the effective identity format for every entity.
+ * @param seeds - Parsed seeds by name.
+ * @returns Effective formats by entity name.
+ */
+function effectiveFormats(seeds: ReadonlyMap<string, EntitySeed>): ReadonlyMap<string, IdentityFormat | undefined> {
+  const result = new Map<string, IdentityFormat | undefined>()
+  for (const seed of seeds.values()) {
+    const chain: EntitySeed[] = []
+    let current: EntitySeed | undefined = seed
+    while (current) {
+      chain.unshift(current)
+      current = current.extends ? seeds.get(current.extends) : undefined
+    }
+    let format: IdentityFormat | undefined
+    for (const part of chain) {
+      if (!part.idFormat) continue
+      if (format && format !== part.idFormat) {
+        throw invalid(
+          `id format conflict in entity "${seed.name}": ` +
+          `inherited "${format}", redeclared "${part.idFormat}"`,
+        )
+      }
+      format = part.idFormat
+    }
+    result.set(seed.name, format)
+  }
+  return result
+}
+
+/**
+ * Resolve direct children for every entity.
+ * @param seeds - Parsed seeds.
+ * @returns Child names by parent entity.
+ */
+function childrenByEntity(seeds: readonly EntitySeed[]): ReadonlyMap<string, readonly string[]> {
+  const children = new Map<string, string[]>()
+  for (const seed of seeds) {
+    if (!seed.extends) continue
+    const list = children.get(seed.extends) ?? []
+    list.push(seed.name)
+    children.set(seed.extends, list)
+  }
+  return children
+}
+
+/**
+ * Build root-owned effective fields.
+ * @param format - Effective identity format.
+ * @returns Root id, name and entity fields.
+ */
+function rootFields(format: IdentityFormat | undefined): readonly EffectiveFieldDefinition[] {
+  return [
+    { ...(format ? { format } : {}), name: 'id', owner: 'Entity', type: FieldType.ID },
+    { name: 'name', owner: 'Entity', type: FieldType.String },
+    { name: 'entity', owner: 'Entity', type: FieldType.String },
+  ]
+}
+
 /**
  * Build the system-owned universal identity root.
- *
- * This is internal physical metadata, not a user-declarable entity. Public
- * primary-key validation still accepts only UUID and Snowflake fields.
  * @param entities - Validated entity definitions.
  * @returns The physical identity-root table.
  */
@@ -145,7 +279,7 @@ function identityRoot(entities: readonly EntityDefinition[]): TableDefinition {
   return {
     checks: [
       {
-        expression: `(${identityCheck('id', FieldType.UUID)} or ${identityCheck('id', FieldType.Snowflake)})`,
+        expression: identityCheck('id', undefined),
         name: 'Entity_id_format_check',
       },
       {
@@ -154,16 +288,16 @@ function identityRoot(entities: readonly EntityDefinition[]): TableDefinition {
       },
     ],
     columns: [
-      { name: 'id', primaryKey: true, type: FieldType.String },
-      { name: 'displayName', type: FieldType.String },
+      { name: 'id', primaryKey: true, type: FieldType.ID },
+      { name: 'name', type: FieldType.String },
       { name: 'entity', type: FieldType.String },
     ],
     indexes: [
-      { columns: ['displayName', 'id'], name: 'Entity_displayName_id_idx' },
+      { columns: ['name', 'id'], name: 'Entity_name_id_idx' },
       {
-        columns: ['displayName'],
+        columns: ['name'],
         method: 'gin',
-        name: 'Entity_displayName_trgm_idx',
+        name: 'Entity_name_trgm_idx',
         opclass: 'public.gin_trgm_ops',
       },
     ],
@@ -221,9 +355,8 @@ export class EntityDefinitions {
    * Deterministic PostgreSQL DDL for the identity root and declared entities.
    *
    * Every table, column and index is created first, in declaration order;
-   * foreign-key constraints are added afterward with `alter table`. This
-   * supports cyclic and self-referential references without ordering cycles.
-   * Identifiers are quoted; user values never enter these statements.
+   * foreign-key constraints and lifecycle checks follow. This is a
+   * fresh-schema compiler, not a migration planner.
    * @returns The complete ordered DDL sequence.
    */
   get ddl(): readonly string[] {
@@ -239,28 +372,21 @@ export class EntityDefinitions {
   }
 
   /**
-   * Create missing physical tables, including the system-owned identity root,
-   * then add missing foreign-key constraints.
+   * Create a fresh schema and reconcile existing integrity definitions.
    *
-   * Existing tables are left untouched, but declared constraints are still
-   * reconciled: a missing constraint is added and a mismatched existing
-   * constraint fails visibly. This is a fresh-initialization path, not a
-   * migration planner.
+   * Existing tables are not migrated. Existing lifecycle functions and
+   * triggers are inspected; matching definitions are left untouched and
+   * mismatches fail visibly rather than being silently replaced.
    * @param sql - The connected Bun SQL client.
-   * @returns A promise that resolves after every table and constraint succeeds.
-   * @throws {Error} When a constraint is missing a valid target or an existing
-   *   constraint does not match the canonical model.
+   * @returns A promise that resolves after initialization and reconciliation.
+   * @throws {Error} When a constraint or lifecycle definition does not match.
    */
   async createTables(sql: SQL): Promise<void> {
     await sql.unsafe(IDENTITY_EXTENSION_DDL).simple()
     for (const table of this.tables) {
       const rows = await sql<{ present: boolean }[]>`
-        select exists (
-          select 1
-          from pg_catalog.pg_tables
-          where schemaname = current_schema()
-            and tablename = ${table.name}
-        ) as present
+select exists (select 1 from pg_catalog.pg_tables where schemaname = current_schema() and tablename
+          = ${table.name} ) as present
       `
       const created = !rows[0]?.present
       if (created) await sql.unsafe(createTable(table)).simple()
@@ -271,15 +397,13 @@ export class EntityDefinitions {
     }
 
     for (const entity of this.entities) {
-      const localKey = primaryKeyField(entity).name
-      const targetKey = parentKey(entity)
       await reconcileForeignKey(
         sql,
         entity.name,
         parentConstraintName(entity),
-        localKey,
+        'id',
         entity.parent,
-        targetKey,
+        'id',
         addParentConstraint(entity),
       )
       for (const field of entity.fields.filter(isReferenceField)) {
@@ -289,119 +413,74 @@ export class EntityDefinitions {
           constraintName(entity, field),
           field.column,
           field.target,
-          field.targetField,
+          'id',
           addConstraint(entity, field),
         )
       }
     }
 
-    for (const statement of lifecycleStatements(this.entities)) {
-      await sql.unsafe(statement).simple()
+    const lifecycle = lifecycleDefinitions(this.entities)
+    for (const statement of lifecycle.functions) {
+      const existing = await sql<{ body: string }[]>`
+        select p.prosrc as body
+        from pg_catalog.pg_proc p
+        join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = current_schema() and p.proname = ${statement.name} and p.pronargs = 0
+      `
+      if (!existing[0]) {
+        await sql.unsafe(statement.statement).simple()
+        continue
+      }
+      if (normalizeBody(existing[0].body) !== normalizeBody(statement.body)) {
+        throw new Error(`Existing lifecycle function "${statement.name}" does not match the canonical model`)
+      }
+    }
+    for (const trigger of lifecycle.triggers) {
+      const existing = await sql<{
+        constraint: number,
+        deferrable: boolean,
+        functionName: string,
+        initDeferred: boolean,
+        type: number,
+      }[]>`
+        select t.tgconstraint as constraint,
+          t.tgdeferrable as deferrable,
+          t.tginitdeferred as "initDeferred",
+          t.tgtype as type,
+          p.proname as "functionName"
+        from pg_catalog.pg_trigger t
+        join pg_catalog.pg_proc p on p.oid = t.tgfoid
+where t.tgname = ${trigger.name} and t.tgrelid = ${quoteIdentifier(trigger.table)}::regclass and not
+  t.tgisinternal
+      `
+      if (!existing[0]) {
+        await sql.unsafe(trigger.statement).simple()
+        continue
+      }
+      const current = existing[0]
+      if (
+        current.deferrable !== trigger.deferrable
+        || current.initDeferred !== trigger.initDeferred
+        || (current.constraint !== 0) !== trigger.constraint
+        || current.functionName !== trigger.function
+        || current.type !== trigger.type
+      ) {
+        throw new Error(
+          `Existing lifecycle trigger "${trigger.name}" on "${trigger.table}" ` +
+          'does not match the canonical model',
+        )
+      }
     }
   }
 }
 
 /**
- * Build commit-time triggers that keep MTI root/leaf chains complete.
- * @param entities - Validated entity definitions.
- * @returns Function and trigger DDL in dependency order.
+ * Normalize a PL/pgSQL body for catalog comparison.
+ * @param body - Function body.
+ * @returns The comparison text.
  */
-function lifecycleStatements(entities: readonly EntityDefinition[]): readonly string[] {
-  const concrete = entities.filter(entity => !entity.abstract)
-  const leafChecks = concrete.map(entity => {
-    const key = quoteIdentifier(primaryKeyField(entity).name)
-    return `when ${quoteLiteral(entity.name)} then
-        if not exists (select 1 from ${quoteIdentifier(entity.name)} where ${key} = root_id) then
-          raise exception 'incomplete root row % for entity %', root_id, root_entity;
-        end if;`
-  })
-  const validateRoot = `create or replace function "Entity_validate_leaf"() returns trigger language plpgsql as $$
-declare
-  root_id text;
-  root_entity text;
-begin
-  root_id := new."id";
-  select "entity" into root_entity from "Entity" where "id" = root_id;
-  if not found then
-    return null;
-  end if;
-  case root_entity
-    ${leafChecks.join('\n    ')}
-    else
-      raise exception 'unknown concrete entity %', root_entity;
-  end case;
-  return new;
-end
-$$`
-  const validateLeafRow =
-    'create or replace function "Entity_validate_leaf_row"() ' +
-    `returns trigger language plpgsql as $$
-declare
-  key text;
-  root_entity text;
-  leaf_present integer;
-begin
-  if tg_op = 'UPDATE'
-    and to_jsonb(old)->>tg_argv[0] is distinct from to_jsonb(new)->>tg_argv[0] then
-    raise exception 'leaf row identity is immutable';
-  end if;
-  if tg_op = 'DELETE' then
-    key := to_jsonb(old)->>tg_argv[0];
-  else
-    key := to_jsonb(new)->>tg_argv[0];
-  end if;
-  execute format('select 1 from %I where %I = $1', tg_table_name, tg_argv[0])
-    into leaf_present using key;
-  if leaf_present is not null then
-    select "entity" into root_entity from "Entity" where "id" = key;
-    if not found then
-      raise exception 'leaf row % has no root row', key;
-    end if;
-    if root_entity is distinct from tg_table_name then
-      raise exception 'leaf row % must match root entity %, found %',
-        key, tg_table_name, root_entity;
-    end if;
-  elsif exists (
-    select 1 from "Entity" where "id" = key and "entity" = tg_table_name
-  ) then
-    raise exception 'deleting leaf row % would leave an incomplete root row', key;
-  end if;
-  return null;
-end
-$$`
-  const immutableLeaf = `create or replace function "Entity_leaf_immutable"() returns trigger language plpgsql as $$
-begin
-  if new."entity" is distinct from old."entity" then
-    raise exception 'leaf discriminator for root row % is immutable', old."id";
-  end if;
-  return new;
-end
-$$`
-  const rootTrigger = 'Entity_leaf_check'
-  const immutableTrigger = 'Entity_leaf_immutable'
-  return [
-    validateRoot,
-    `drop trigger if exists ${quoteIdentifier(rootTrigger)} on "Entity"`,
-    `create constraint trigger ${quoteIdentifier(rootTrigger)} ` +
-    'after insert or update on "Entity" deferrable initially deferred ' +
-    'for each row execute function "Entity_validate_leaf"()',
-    validateLeafRow,
-    ...concrete.flatMap(entity => {
-      const name = `${entity.name}_leaf_check`
-      return [
-        `drop trigger if exists ${quoteIdentifier(name)} on ${quoteIdentifier(entity.name)}`,
-        `create constraint trigger ${quoteIdentifier(name)} ` +
-        `after insert or update or delete on ${quoteIdentifier(entity.name)} ` +
-        'deferrable initially deferred for each row execute function "Entity_validate_leaf_row"' +
-        `(${quoteLiteral(primaryKeyField(entity).name)})`,
-      ]
-    }),
-    immutableLeaf,
-    `drop trigger if exists ${quoteIdentifier(immutableTrigger)} on "Entity"`,
-    `create trigger ${quoteIdentifier(immutableTrigger)} ` +
-    'before update of "entity" on "Entity" for each row ' +
-    'execute function "Entity_leaf_immutable"()',
-  ]
+function normalizeBody(body: string): string {
+  return body.replaceAll('\r\n', '\n').trim()
 }
 
 /**
@@ -412,173 +491,82 @@ $$`
 function parseEntities(value: unknown): readonly EntityDefinition[] {
   if (!isRecord(value)) throw invalid('entity definitions must be an object')
   assertKnownKeys(value, ['entities'], 'top-level')
-
-  const entities = value.entities
-  if (!Array.isArray(entities) || entities.length === 0) {
+  if (!Array.isArray(value.entities) || value.entities.length === 0) {
     throw invalid('entities must be a non-empty array')
   }
 
-  const seeds = entities.map(parseEntity)
+  const seeds = value.entities.map(parseEntity)
   const byName = new Map<string, EntitySeed>()
   for (const seed of seeds) {
     if (byName.has(seed.name)) throw invalid(`duplicate entity "${seed.name}"`)
     byName.set(seed.name, seed)
   }
   validateAncestry(seeds, byName)
-  return seeds.map(seed => resolveEntity(seed, byName))
+  for (const seed of seeds) {
+    for (const field of seed.fields) {
+      if (field.type === FieldType.Entity && !byName.has(field.target)) {
+        throw invalid(`unknown target entity "${field.target}" for field "${seed.name}.${field.name}"`)
+      }
+    }
+  }
+  const formats = effectiveFormats(byName)
+  const children = childrenByEntity(seeds)
+  return seeds.map(seed => resolveEntity(seed, byName, formats, children))
 }
-
-/** A parsed entity-reference field before its target key is resolved. */
-interface ParsedReferenceField {
-  /** Explicit physical column name. */
-  readonly column: string,
-  /** Logical field name. */
-  readonly name: string,
-  /** Referenced entity name. */
-  readonly target: string,
-  /** Field-kind discriminator. */
-  readonly type: FieldType.Entity,
-}
-
-/** A parsed scalar field. */
-type ParsedScalarField = ScalarFieldDefinition
-
-/** A parsed logical field. */
-type ParsedField = ParsedReferenceField | ParsedScalarField
 
 /** A parsed entity before reference targets are resolved. */
 interface EntitySeed {
-  /** Whether this entity is abstract. */
-  readonly abstract: boolean,
-  /** Optional declared parent entity name. */
-  readonly ancestor?: string,
-  /** Parsed fields in declaration order. */
-  readonly fields: readonly ParsedField[],
-  /** Entity name, in PascalCase. */
+  /** Declared parent entity, when present. */
+  readonly extends?: string,
+  /** Locally owned fields, excluding the `id` refinement. */
+  readonly fields: readonly FieldDefinition[],
+  /** Declared ID format refinement on this entity. */
+  readonly idFormat?: IdentityFormat,
+  /** Entity type name. */
   readonly name: string,
-  /** The entity's explicitly marked scalar primary key. */
-  readonly primaryKey: ParsedScalarField,
 }
 
 /**
- * Validate one entity definition's fields and primary key.
- * @param value - Parsed entity candidate.
- * @returns The entity seed awaiting reference resolution.
- */
-function parseEntity(value: unknown): EntitySeed {
-  if (!isRecord(value)) throw invalid('entity must be an object')
-  assertKnownKeys(value, ['abstract', 'extends', 'fields', 'name'], 'entity')
-
-  if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
-    throw invalid('entity name must be a PascalCase identifier')
-  }
-  if (value.name === 'Entity') {
-    throw invalid('entity name "Entity" is reserved for the universal identity root')
-  }
-  if (value.abstract !== undefined && typeof value.abstract !== 'boolean') {
-    throw invalid(`entity "${value.name}" abstract must be a boolean`)
-  }
-  if (
-    value.extends !== undefined
-    && (typeof value.extends !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.extends))
-  ) {
-    throw invalid(`entity "${value.name}" extends must be a PascalCase entity name`)
-  }
-
-  if (!Array.isArray(value.fields) || value.fields.length === 0) {
-    throw invalid(`entity "${value.name}" must define a non-empty fields array`)
-  }
-
-  const names = new Set<string>()
-  const fields = value.fields.map(field => parseField(value.name as string, field))
-  for (const field of fields) {
-    if (names.has(field.name)) throw invalid(`duplicate field "${value.name}.${field.name}"`)
-    names.add(field.name)
-    if (ROOT_FIELD_NAMES.has(field.name)) {
-      throw invalid(`field "${value.name}.${field.name}" is reserved for the universal identity root`)
-    }
-    const column = fieldColumn(field)
-    if (ROOT_FIELD_NAMES.has(column)) {
-      throw invalid(`physical column "${column}" is reserved for the universal identity root`)
-    }
-  }
-
-  const primaryKeys = fields.filter(isScalarField).filter(field => field.primaryKey)
-  if (primaryKeys.length !== 1) {
-    throw invalid(`entity "${value.name}" must define exactly one primary key`)
-  }
-  const primaryKey = primaryKeys[0] as ParsedScalarField
-  if (primaryKey.type !== FieldType.UUID && primaryKey.type !== FieldType.Snowflake) {
-    throw invalid(`primary key "${value.name}.${primaryKey.name}" must be type uuid or snowflake`)
-  }
-
-  return {
-    abstract: value.abstract === true,
-    ancestor: value.extends as string | undefined,
-    fields,
-    name: value.name,
-    primaryKey,
-  }
-}
-
-/**
- * Validate MTI parents, cycles and single ownership of inherited fields.
- * @param seeds - Parsed entity seeds.
- * @param byName - All parsed entities by name.
- * @throws {Error} When ancestry or inherited field ownership is invalid.
+ * Validate parent references, cycles and field ownership.
+ * @param seeds - Parsed seeds.
+ * @param byName - Seeds by name.
  */
 function validateAncestry(
   seeds: readonly EntitySeed[],
   byName: ReadonlyMap<string, EntitySeed>,
 ): void {
   for (const seed of seeds) {
-    const parentName = seed.ancestor ?? 'Entity'
-    if (parentName === 'Entity') continue
-    const parent = byName.get(parentName)
-    if (!parent) throw invalid(`unknown parent entity "${parentName}"`)
-    if (!parent.abstract) throw invalid(`parent entity "${parentName}" must be abstract`)
-    if (seed.primaryKey.name !== parent.primaryKey.name) {
-      throw invalid(
-        `primary key name must match parent entity "${parentName}": ` +
-        `expected "${parent.primaryKey.name}", received "${seed.primaryKey.name}"`,
-      )
-    }
-    if (seed.primaryKey.type !== parent.primaryKey.type) {
-      throw invalid(
-        `primary key type must match parent entity "${parentName}": ` +
-        `expected "${parent.primaryKey.type}", received "${seed.primaryKey.type}"`,
-      )
+    if (seed.extends !== undefined) {
+      if (seed.extends === 'Entity') throw invalid('extends "Entity" is implicit and cannot be authored')
+      if (!byName.has(seed.extends)) throw invalid(`unknown parent entity "${seed.extends}"`)
     }
   }
 
   for (const seed of seeds) {
     const seen = new Set<string>()
     let current: string | undefined = seed.name
-    while (current !== undefined && current !== 'Entity') {
+    while (current !== undefined) {
       if (seen.has(current)) throw invalid(`ancestry cycle detected at entity "${current}"`)
       seen.add(current)
-      current = byName.get(current)?.ancestor
+      current = byName.get(current)?.extends
     }
   }
 
   for (const seed of seeds) {
-    const fields = new Map<string, string>()
+    const names = new Map<string, string>()
     const columns = new Map<string, string>()
-    let parentName = seed.ancestor
-    while (parentName !== undefined && parentName !== 'Entity') {
+    let parentName = seed.extends
+    while (parentName !== undefined) {
       const parent = byName.get(parentName)
       if (!parent) break
       for (const field of parent.fields) {
-        if (isScalarField(field) && field.primaryKey) continue
-        fields.set(field.name, parent.name)
+        names.set(field.name, parent.name)
         columns.set(fieldColumn(field), parent.name)
       }
-      parentName = parent.ancestor
+      parentName = parent.extends
     }
-
     for (const field of seed.fields) {
-      if (isScalarField(field) && field.primaryKey) continue
-      const owner = fields.get(field.name)
+      const owner = names.get(field.name)
       if (owner) throw invalid(`field "${seed.name}.${field.name}" is already owned by "${owner}"`)
       const column = fieldColumn(field)
       const columnOwner = columns.get(column)
@@ -590,169 +578,168 @@ function validateAncestry(
 }
 
 /**
- * Return the physical column name for one logical field.
- * @param field - Parsed field.
- * @returns Its PostgreSQL column name.
+ * Validate one entity definition.
+ * @param value - Parsed entity candidate.
+ * @returns The validated entity seed.
  */
-function fieldColumn(field: ParsedField): string {
-  return field.type === FieldType.Entity ? field.column : field.name
+function parseEntity(value: unknown): EntitySeed {
+  if (!isRecord(value)) throw invalid('entity must be an object')
+  assertKnownKeys(value, ['extends', 'fields', 'name'], 'entity')
+  if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
+    throw invalid('entity name must be a PascalCase identifier')
+  }
+  if (value.name === 'Entity') throw invalid('entity name "Entity" is reserved for the universal identity root')
+  if (
+    value.extends !== undefined
+    && (typeof value.extends !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.extends))
+  ) {
+    throw invalid(`entity "${value.name}" extends must be a PascalCase entity name`)
+  }
+  if (!Array.isArray(value.fields)) {
+    throw invalid(`entity "${value.name}" must define a fields array`)
+  }
+
+  const names = new Set<string>()
+  const fields: FieldDefinition[] = []
+  let idFormat: IdentityFormat | undefined
+  for (const candidate of value.fields) {
+    const parsed = parseField(value.name, candidate)
+    if ('idRefinement' in parsed) {
+      if (idFormat) throw invalid(`duplicate id refinement in entity "${value.name}"`)
+      idFormat = parsed.idFormat
+      continue
+    }
+    const field = parsed.field
+    if (names.has(field.name)) throw invalid(`duplicate field "${value.name}.${field.name}"`)
+    names.add(field.name)
+    fields.push(field)
+  }
+  return { extends: value.extends as string | undefined, fields, idFormat, name: value.name }
+}
+
+/** Parsed field result, including the special `id` refinement. */
+type ParsedFieldResult =
+  | { readonly field: FieldDefinition }
+  | { readonly idFormat: IdentityFormat, readonly idRefinement: true }
+
+/**
+ * Validate one field descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The parsed field or id refinement.
+ */
+function parseField(entityName: string, value: unknown): ParsedFieldResult {
+  if (!isRecord(value)) throw invalid(`field "${entityName}" must be an object`)
+  if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
+    throw invalid(`field name must be a camelCase identifier in "${entityName}"`)
+  }
+  if (typeof value.type !== 'string' && value.field !== 'id') {
+    throw invalid(`field "${entityName}.${value.field}" type must be a string`)
+  }
+
+  if (value.type === FieldType.Entity) {
+    assertKnownKeys(value, ['column', 'field', 'target', 'type'], 'field')
+    if (ROOT_FIELD_NAMES.has(value.field) || value.field === 'id') {
+      throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
+    }
+    if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+      throw invalid(`reference field "${entityName}.${value.field}" target must be a PascalCase entity name`)
+    }
+    if (typeof value.column !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.column)) {
+      throw invalid(`reference field "${entityName}.${value.field}" column must be a camelCase identifier`)
+    }
+    return {
+      field: {
+        column: value.column,
+        name: value.field,
+        target: value.target,
+        type: FieldType.Entity,
+      },
+    }
+  }
+
+  if (value.field === 'id') {
+    assertKnownKeys(value, ['field', 'format'], 'field')
+    if (typeof value.format !== 'string' || !IDENTITY_FORMATS.has(value.format)) {
+      throw invalid(`id refinement in "${entityName}" must specify format UUID or Snowflake`)
+    }
+    return { idFormat: value.format as IdentityFormat, idRefinement: true }
+  }
+
+  if (ROOT_FIELD_NAMES.has(value.field)) {
+    throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
+  }
+  assertKnownKeys(value, ['field', 'format', 'type'], 'field')
+  const type = value.type as string
+  if (!SCALAR_FIELD_TYPES.has(type) || type === FieldType.ID) {
+    throw invalid(`unsupported field type "${String(type)}" in "${entityName}.${value.field}"`)
+  }
+  if (value.format !== undefined) {
+    throw invalid(`field "${entityName}.${value.field}" format is only valid on type ID`)
+  }
+  return {
+    field: {
+      name: value.field,
+      type: type as ScalarFieldType,
+    },
+  }
 }
 
 /**
- * Resolve reference targets for one parsed entity.
- * @param seed - Entity seed whose fields are validated.
- * @param byName - All parsed entities by name.
- * @returns The validated entity.
+ * Resolve one entity against its complete ancestry.
+ * @param seed - Validated entity seed.
+ * @param byName - Seeds by name.
+ * @param formats - Effective ID formats.
+ * @param children - Direct children by parent.
+ * @returns The resolved entity.
  */
 function resolveEntity(
   seed: EntitySeed,
   byName: ReadonlyMap<string, EntitySeed>,
+  formats: ReadonlyMap<string, IdentityFormat | undefined>,
+  children: ReadonlyMap<string, readonly string[]>,
 ): EntityDefinition {
-  const fields = seed.fields.map(field => resolveField(seed.name, field, byName))
-  const columns = new Map<string, string>()
-  for (const field of fields) {
-    const column = field.type === FieldType.Entity ? field.column : field.name
-    const existing = columns.get(column)
-    if (existing) {
-      throw invalid(
-        `physical column "${column}" is declared by both "${seed.name}.${existing}" ` +
-        `and "${seed.name}.${field.name}"`,
-      )
-    }
-    columns.set(column, field.name)
+  const effective: EffectiveFieldDefinition[] = [...rootFields(formats.get(seed.name))]
+  const ancestors: EntitySeed[] = []
+  let current = seed.extends ? byName.get(seed.extends) : undefined
+  while (current) {
+    ancestors.unshift(current)
+    current = current.extends ? byName.get(current.extends) : undefined
+  }
+  for (const ancestor of ancestors) {
+    for (const field of ancestor.fields) effective.push({ ...field, owner: ancestor.name })
+  }
+  for (const field of seed.fields) effective.push({ ...field, owner: seed.name })
+  const idField: ScalarFieldDefinition = {
+    ...(formats.get(seed.name) ? { format: formats.get(seed.name) } : {}),
+    name: 'id',
+    type: FieldType.ID,
   }
   return {
-    abstract: seed.abstract,
-    fields,
+    abstract: (children.get(seed.name)?.length ?? 0) > 0,
+    effectiveFields: effective,
+    ...(seed.extends ? { extends: seed.extends } : {}),
+    fields: [idField, ...seed.fields],
+    ...(formats.get(seed.name) ? { idFormat: formats.get(seed.name) } : {}),
     name: seed.name,
-    parent: seed.ancestor ?? 'Entity',
+    parent: seed.extends ?? 'Entity',
   }
 }
 
 /**
- * Resolve one parsed field.
- * @param entityName - Owning entity name for diagnostics.
- * @param field - Parsed field.
- * @param byName - All parsed entities by name.
- * @returns The resolved logical field.
- */
-function resolveField(
-  entityName: string,
-  field: ParsedField,
-  byName: ReadonlyMap<string, EntitySeed>,
-): FieldDefinition {
-  if (field.type !== FieldType.Entity) return field
-
-  const target = byName.get(field.target)
-  if (!target) {
-    throw invalid(`unknown target entity "${field.target}" for field "${entityName}.${field.name}"`)
-  }
-  return {
-    column: field.column,
-    name: field.name,
-    target: target.name,
-    targetField: target.primaryKey.name,
-    targetType: target.primaryKey.type as FieldType.Snowflake | FieldType.UUID,
-    type: FieldType.Entity,
-  }
-}
-
-/**
- * Whether a parsed or resolved field is scalar.
- * @param field - Field candidate.
- * @returns `true` for scalar fields.
- */
-function isScalarField(
-  field: FieldDefinition | ParsedField,
-): field is ParsedScalarField | ScalarFieldDefinition {
-  return field.type !== FieldType.Entity
-}
-
-/**
- * Whether a resolved field is a scalar primary key.
- * @param field - Resolved logical field.
- * @returns `true` for the primary-key field.
- */
-function isPrimaryKeyField(field: FieldDefinition): field is IdentityField {
-  return isScalarField(field) && field.primaryKey
-}
-
-/**
- * Whether a resolved field carries a UUID or Snowflake identity format.
- * @param field - Resolved logical field.
- * @returns `true` for identity-formatted scalar fields.
- */
-function isIdentityField(field: FieldDefinition): field is IdentityField {
-  return isScalarField(field)
-    && (field.type === FieldType.UUID || field.type === FieldType.Snowflake)
-}
-
-/**
- * Validate one field definition.
- * @param entityName - Owning entity name for diagnostics.
- * @param value - Parsed field candidate.
- * @returns The validated field.
- */
-function parseField(entityName: string, value: unknown): ParsedField {
-  if (!isRecord(value)) throw invalid(`field "${entityName}" must be an object`)
-  if (typeof value.type !== 'string') {
-    throw invalid(`field "${entityName}.${String(value.name)}" type must be a string`)
-  }
-  if (value.type === FieldType.Entity) {
-    assertKnownKeys(value, ['column', 'name', 'target', 'type'], 'field')
-    if (typeof value.name !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.name)) {
-      throw invalid(`field name must be a camelCase identifier in "${entityName}"`)
-    }
-    if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
-      throw invalid(`reference field "${entityName}.${value.name}" target must be a PascalCase entity name`)
-    }
-    if (typeof value.column !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.column)) {
-      throw invalid(`reference field "${entityName}.${value.name}" column must be a camelCase identifier`)
-    }
-    return {
-      column: value.column,
-      name: value.name,
-      target: value.target,
-      type: FieldType.Entity,
-    }
-  }
-
-  assertKnownKeys(value, ['name', 'primaryKey', 'type'], 'field')
-  if (typeof value.name !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.name)) {
-    throw invalid(`field name must be a camelCase identifier in "${entityName}"`)
-  }
-  if (!SCALAR_FIELD_TYPES.has(value.type)) {
-    throw invalid(`unsupported field type "${String(value.type)}" in "${entityName}.${value.name}"`)
-  }
-  if (value.primaryKey !== undefined && typeof value.primaryKey !== 'boolean') {
-    throw invalid(`field "${entityName}.${value.name}" primaryKey must be a boolean`)
-  }
-
-  return {
-    name: value.name,
-    primaryKey: value.primaryKey === true,
-    type: value.type as ScalarFieldType,
-  }
-}
-
-/**
- * Compile one canonical entity into physical table metadata.
- * @param entity - The validated entity.
- * @returns Its physical table definition.
+ * Build one entity table from locally owned fields.
+ * @param entity - Validated entity.
+ * @returns Its physical table metadata.
  */
 function entityTable(entity: EntityDefinition): TableDefinition {
   return {
-    checks: entity.fields.filter(isIdentityField).map(field => ({
-      expression: identityCheck(field.name, field.type),
-      name: `${entity.name}_${field.name}_format_check`,
-    })),
+    checks: [{
+      expression: identityCheck('id', entity.idFormat),
+      name: `${entity.name}_id_format_check`,
+    }],
     columns: entity.fields.map(field => {
-      if (field.type === FieldType.Entity) {
-        return { name: field.column, type: FieldType.String }
-      }
-      if (field.primaryKey) {
-        return { name: field.name, primaryKey: true, type: FieldType.String }
-      }
+      if (field.type === FieldType.Entity) return { name: field.column, type: FieldType.String }
+      if (field.type === FieldType.ID) return { name: field.name, primaryKey: true, type: FieldType.ID }
       return { name: field.name, type: field.type }
     }),
     name: entity.name,
@@ -760,25 +747,28 @@ function entityTable(entity: EntityDefinition): TableDefinition {
 }
 
 /**
- * Build a format check for one physical text identity key.
- * @param column - Physical primary-key column.
- * @param type - Logical identity format.
+ * Build one identity-format SQL predicate.
+ * @param column - Physical identity column.
+ * @param format - Effective format, or undefined for either format.
  * @returns A PostgreSQL boolean expression.
  */
-function identityCheck(column: string, type: FieldType.UUID | FieldType.Snowflake): string {
+function identityCheck(column: string, format: IdentityFormat | undefined): string {
   const identifier = quoteIdentifier(column)
-  if (type === FieldType.UUID) return `${identifier} ~ '${UUID_IDENTITY_PATTERN}'`
-  return `case
+  const uuid = `${identifier} ~ '${UUID_IDENTITY_PATTERN}'`
+  if (format === 'UUID') return uuid
+  const snowflake = `case
     when ${identifier} ~ '${SNOWFLAKE_IDENTITY_PATTERN}' and length(${identifier}) <= 20
       then ${identifier}::numeric between ${SNOWFLAKE_MIN_TEXT} and ${SNOWFLAKE_MAX_TEXT}
     else false
   end`
+  if (format === 'Snowflake') return snowflake
+  return `(${uuid} or ${snowflake})`
 }
 
 /**
- * Build the statements for one physical table.
+ * Build statements for one physical table.
  * @param table - Physical table metadata.
- * @returns Its table statement followed by its index statements.
+ * @returns Its table statement followed by index statements.
  */
 function tableStatements(table: TableDefinition): readonly string[] {
   return [
@@ -788,7 +778,7 @@ function tableStatements(table: TableDefinition): readonly string[] {
 }
 
 /**
- * Build one physical table's idempotent statement.
+ * Build one physical table statement.
  * @param table - Physical table metadata.
  * @returns The PostgreSQL DDL statement.
  */
@@ -804,10 +794,10 @@ function createTable(table: TableDefinition): string {
 }
 
 /**
- * Build one physical table's idempotent index statement.
+ * Build one physical table index.
  * @param table - Owning table.
  * @param index - Index metadata.
- * @returns The `create index` statement.
+ * @returns The create-index statement.
  */
 function createIndex(table: TableDefinition, index: TableIndex): string {
   const method = index.method ? ` using ${index.method}` : ''
@@ -819,45 +809,40 @@ function createIndex(table: TableDefinition, index: TableIndex): string {
 }
 
 /**
- * Build one MTI parent foreign-key constraint statement.
+ * Build one MTI parent foreign-key statement.
  * @param entity - Owning entity.
- * @returns The `alter table` statement.
+ * @returns The alter-table statement.
  */
 function addParentConstraint(entity: EntityDefinition): string {
-  const key = primaryKeyField(entity).name
-  const targetKey = parentKey(entity)
   return `alter table ${quoteIdentifier(entity.name)} ` +
     `add constraint ${quoteIdentifier(parentConstraintName(entity))} ` +
-    `foreign key (${quoteIdentifier(key)}) ` +
-    `references ${quoteIdentifier(entity.parent)} (${quoteIdentifier(targetKey)}) ` +
-    'deferrable initially immediate'
+    'foreign key ("id") references ' +
+    `${quoteIdentifier(entity.parent)} ("id") deferrable initially immediate`
 }
 
 /**
- * Build one foreign-key constraint statement.
+ * Build one reference foreign-key statement.
  * @param entity - Owning entity.
- * @param field - Resolved entity-reference field.
- * @returns The `alter table` statement.
+ * @param field - Reference field.
+ * @returns The alter-table statement.
  */
 function addConstraint(entity: EntityDefinition, field: EntityReferenceFieldDefinition): string {
   return `alter table ${quoteIdentifier(entity.name)} ` +
     `add constraint ${quoteIdentifier(constraintName(entity, field))} ` +
     `foreign key (${quoteIdentifier(field.column)}) ` +
-    `references ${quoteIdentifier(field.target)} (${quoteIdentifier(field.targetField)}) ` +
-    'deferrable initially immediate'
+    `references ${quoteIdentifier(field.target)} ("id") deferrable initially immediate`
 }
 
 /**
- * Reconcile one canonical foreign key against an existing table.
- * @param sql - The connected Bun SQL client.
+ * Reconcile one canonical foreign key.
+ * @param sql - SQL client.
  * @param entityName - Owning table.
- * @param name - Deterministic constraint name.
- * @param localColumn - Local foreign-key column.
- * @param targetName - Referenced table.
- * @param targetColumn - Referenced column.
- * @param statement - Statement to execute when the constraint is absent.
- * @returns A promise that resolves after the constraint matches or is added.
- * @throws {Error} When an existing constraint does not match the model.
+ * @param name - Constraint name.
+ * @param localColumn - Local column.
+ * @param targetName - Target table.
+ * @param targetColumn - Target column.
+ * @param statement - Statement for a missing constraint.
+ * @returns A promise that resolves after reconciliation.
  */
 async function reconcileForeignKey(
   sql: SQL,
@@ -879,8 +864,7 @@ async function reconcileForeignKey(
     updateAction: string,
     validated: boolean,
   }[]>`
-    select
-      con.condeferrable as deferrable,
+    select con.condeferrable as deferrable,
       con.condeferred as deferred,
       con.confdeltype as "deleteAction",
       con.confmatchtype as "matchType",
@@ -890,15 +874,12 @@ async function reconcileForeignKey(
       local.attname as "localColumn",
       foreign_field.attname as "targetColumn"
     from pg_catalog.pg_constraint con
-    join pg_catalog.pg_attribute local
-      on local.attrelid = con.conrelid and local.attnum = con.conkey[1]
-    join pg_catalog.pg_attribute foreign_field
-      on foreign_field.attrelid = con.confrelid and foreign_field.attnum = con.confkey[1]
-    where con.conname = ${name}
-      and con.conrelid = ${quoteIdentifier(entityName)}::regclass
-      and con.contype = 'f'
-      and cardinality(con.conkey) = 1
-      and cardinality(con.confkey) = 1
+join pg_catalog.pg_attribute local on local.attrelid = con.conrelid and local.attnum = con.conkey[1]
+    join pg_catalog.pg_attribute foreign_field on foreign_field.attrelid = con.confrelid and
+      foreign_field.attnum = con.confkey[1]
+where con.conname = ${name} and con.conrelid = ${quoteIdentifier(entityName)}::regclass and
+  con.contype = 'f' and
+      cardinality(con.conkey) = 1 and cardinality(con.confkey) = 1
   `
   const existing = rows[0]
   if (existing) {
@@ -924,155 +905,240 @@ async function reconcileForeignKey(
 }
 
 /**
- * Find an entity's primary-key field.
- * @param entity - Validated entity.
- * @returns The scalar primary-key field.
- */
-function primaryKeyField(entity: EntityDefinition): IdentityField {
-  const field = entity.fields.find(isPrimaryKeyField)
-  if (!field) throw new Error(`Entity "${entity.name}" has no primary key`)
-  return field
-}
-
-/**
- * Build one deterministic MTI parent constraint name.
+ * Build deterministic parent constraint name.
  * @param entity - Owning entity.
- * @returns The constraint name.
+ * @returns Constraint name.
  */
 function parentConstraintName(entity: EntityDefinition): string {
   return `${entity.name}_${entity.parent}_mti_fkey`
 }
 
 /**
- * Resolve the referenced primary-key column for an MTI parent.
+ * Build deterministic reference constraint name.
  * @param entity - Owning entity.
- * @returns The root `id` or the parent's shared primary-key column.
- */
-function parentKey(entity: EntityDefinition): string {
-  return entity.parent === 'Entity' ? 'id' : primaryKeyField(entity).name
-}
-
-/**
- * Build one deterministic foreign-key constraint name.
- * @param entity - Owning entity.
- * @param field - Resolved entity-reference field.
- * @returns The constraint name.
+ * @param field - Reference field.
+ * @returns Constraint name.
  */
 function constraintName(entity: EntityDefinition, field: EntityReferenceFieldDefinition): string {
   return `${entity.name}_${field.name}_fkey`
 }
 
 /**
+ * Whether an index exists in the current schema.
+ * @param sql - SQL client.
+ * @param name - Index name.
+ * @returns `true` when present.
+ */
+async function indexExists(sql: SQL, name: string): Promise<boolean> {
+  const rows = await sql<{ present: boolean }[]>`
+select exists (select 1 from pg_catalog.pg_indexes where schemaname = current_schema() and indexname
+      = ${name} ) as present
+  `
+  return rows[0]?.present === true
+}
+
+/**
+ * Build lifecycle function and trigger metadata.
+ * @param entities - Validated entities.
+ * @returns Functions and triggers in dependency order.
+ */
+function lifecycleDefinitions(entities: readonly EntityDefinition[]): {
+  readonly functions: readonly LifecycleFunction[],
+  readonly triggers: readonly LifecycleTrigger[],
+} {
+  const concrete = entities.filter(entity => !entity.abstract)
+  const leafChecks = concrete.map(entity => `when ${quoteLiteral(entity.name)} then
+        if not exists (select 1 from ${quoteIdentifier(entity.name)} where "id" = root_id) then
+          raise exception 'incomplete root row % for entity %', root_id, root_entity;
+        end if;`)
+  const rootBody = `
+declare
+  root_id text;
+  root_entity text;
+begin
+  root_id := new."id";
+  select "entity" into root_entity from "Entity" where "id" = root_id;
+  if not found then
+    return null;
+  end if;
+  case root_entity
+    ${leafChecks.join('\n    ')}
+    else
+      raise exception 'unknown concrete entity %', root_entity;
+  end case;
+  return new;
+end
+`
+  const leafBody = `
+declare
+  key text;
+  root_entity text;
+  leaf_present integer;
+begin
+  if tg_op = 'UPDATE'
+    and to_jsonb(old)->>'id' is distinct from to_jsonb(new)->>'id' then
+    raise exception 'leaf row identity is immutable';
+  end if;
+  if tg_op = 'DELETE' then
+    key := to_jsonb(old)->>'id';
+  else
+    key := to_jsonb(new)->>'id';
+  end if;
+  execute format('select 1 from %I where "id" = $1', tg_table_name)
+    into leaf_present using key;
+  if leaf_present is not null then
+    select "entity" into root_entity from "Entity" where "id" = key;
+    if not found then
+      raise exception 'leaf row % has no root row', key;
+    end if;
+    if root_entity is distinct from tg_table_name then
+      raise exception 'leaf row % must match root entity %, found %',
+        key, tg_table_name, root_entity;
+    end if;
+  elsif exists (
+    select 1 from "Entity" where "id" = key and "entity" = tg_table_name
+  ) then
+    raise exception 'deleting leaf row % would leave an incomplete root row', key;
+  end if;
+  return null;
+end
+`
+  const immutableBody = `
+begin
+  if new."entity" is distinct from old."entity" then
+    raise exception 'leaf discriminator for root row % is immutable', old."id";
+  end if;
+  return new;
+end
+`
+  const functions: LifecycleFunction[] = [
+    lifecycleFunction('Entity_validate_leaf', rootBody),
+    lifecycleFunction('Entity_validate_leaf_row', leafBody),
+    lifecycleFunction('Entity_leaf_immutable', immutableBody),
+  ]
+  const triggers: LifecycleTrigger[] = [
+    {
+      constraint: true,
+      deferrable: true,
+      function: 'Entity_validate_leaf',
+      initDeferred: true,
+      name: 'Entity_leaf_check',
+      statement: 'create constraint trigger "Entity_leaf_check" after insert or update on "Entity" ' +
+        'deferrable initially deferred for each row execute function "Entity_validate_leaf"()',
+      table: 'Entity',
+      type: 21,
+    },
+    ...concrete.map(entity => ({
+      constraint: true,
+      deferrable: true,
+      function: 'Entity_validate_leaf_row',
+      initDeferred: true,
+      name: `${entity.name}_leaf_check`,
+      statement: `create constraint trigger ${quoteIdentifier(`${entity.name}_leaf_check`)} ` +
+        `after insert or update or delete on ${quoteIdentifier(entity.name)} ` +
+        'deferrable initially deferred for each row execute function "Entity_validate_leaf_row"()',
+      table: entity.name,
+      type: 29,
+    })),
+    {
+      constraint: false,
+      deferrable: false,
+      function: 'Entity_leaf_immutable',
+      initDeferred: false,
+      name: 'Entity_leaf_immutable',
+      statement: 'create trigger "Entity_leaf_immutable" before update of "entity" on "Entity" ' +
+        'for each row execute function "Entity_leaf_immutable"()',
+      table: 'Entity',
+      type: 19,
+    },
+  ]
+  return { functions, triggers }
+}
+
+/**
+ * Build one lifecycle function definition.
+ * @param name - Function name.
+ * @param body - Function body.
+ * @returns Function metadata.
+ */
+function lifecycleFunction(name: string, body: string): LifecycleFunction {
+  return {
+    body,
+    name,
+    statement: `create or replace function ${quoteIdentifier(name)}() ` +
+      `returns trigger language plpgsql as $$${body}$$`,
+  }
+}
+
+/**
+ * Build lifecycle DDL for a fresh schema.
+ * @param entities - Validated entities.
+ * @returns Function and trigger statements.
+ */
+function lifecycleStatements(entities: readonly EntityDefinition[]): readonly string[] {
+  const definitions = lifecycleDefinitions(entities)
+  return [
+    ...definitions.functions.map(definition => definition.statement),
+    ...definitions.triggers.map(definition => definition.statement),
+  ]
+}
+
+/**
+ * Resolve the physical PostgreSQL type for a scalar field.
+ * @param type - Scalar field type.
+ * @returns Column type declaration.
+ */
+function columnType(type: ScalarFieldType): string {
+  switch (type) {
+    case FieldType.Boolean: return 'boolean'
+    case FieldType.Date: return 'date'
+    case FieldType.ID: return 'text'
+    case FieldType.Number: return 'double precision'
+    case FieldType.String: return 'text'
+    case FieldType.Timestamp: return 'timestamptz'
+    default: throw new Error(`Unsupported field type: ${String(type)}`)
+  }
+}
+
+/**
  * Whether a field is an entity reference.
  * @param field - Logical field.
- * @returns `true` for entity-reference fields.
+ * @returns `true` for reference fields.
  */
 function isReferenceField(field: FieldDefinition): field is EntityReferenceFieldDefinition {
   return field.type === FieldType.Entity
 }
 
 /**
- * Resolve the physical PostgreSQL type for a scalar field.
- * @param type - Scalar field type.
- * @returns The column type declaration.
+ * Return the physical column for a logical field.
+ * @param field - Logical field.
+ * @returns Column name.
  */
-function columnType(type: ScalarFieldType): string {
-  switch (type) {
-    case FieldType.Boolean: return 'boolean'
-    case FieldType.Date: return 'date'
-    case FieldType.Number: return 'double precision'
-    case FieldType.Snowflake: return 'text'
-    case FieldType.String: return 'text'
-    case FieldType.Timestamp: return 'timestamptz'
-    case FieldType.UUID: return 'text'
-    default: throw new Error(`Unsupported field type: ${String(type)}`)
-  }
+function fieldColumn(field: FieldDefinition): string {
+  return field.type === FieldType.Entity ? field.column : field.name
 }
 
 /**
- * Quote a PostgreSQL identifier. Validated model names contain no quotes, but
- * quoting at the boundary keeps the DDL safe if the vocabulary expands.
- * @param identifier - Entity or field name.
- * @returns The quoted identifier.
+ * Quote a PostgreSQL identifier.
+ * @param identifier - Identifier.
+ * @returns Quoted identifier.
  */
 function quoteIdentifier(identifier: string): string {
-  return `"${identifier.replace(/"/g, '""')}"`
+  return `"${identifier.replaceAll('"', '""')}"`
 }
 
 /**
- * Whether an index exists in the current schema.
- * @param sql - Connected SQL client.
- * @param name - Index name.
- * @returns `true` when present.
- */
-async function indexExists(sql: SQL, name: string): Promise<boolean> {
-  const rows = await sql<{ present: boolean }[]>`
-    select exists (
-      select 1 from pg_catalog.pg_indexes
-      where schemaname = current_schema() and indexname = ${name}
-    ) as present
-  `
-  return rows[0]?.present === true
-}
-
-/**
- * Quote a PostgreSQL string literal. Validated entity names contain no quotes,
- * but escaping at the boundary keeps the DDL safe if the vocabulary expands.
- * @param value - String literal value.
- * @returns The quoted literal.
+ * Quote a PostgreSQL string literal.
+ * @param value - Literal value.
+ * @returns Quoted literal.
  */
 function quoteLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`
 }
 
-/** Canonical UUID text pattern accepted by the universal identity root. */
-const UUID_IDENTITY_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-/** Canonical signed 64-bit decimal text pattern. */
-const SNOWFLAKE_IDENTITY_PATTERN = '^(0|-?[1-9][0-9]*)$'
-/** Canonical signed 64-bit decimal bounds. */
-const SNOWFLAKE_MIN_TEXT = '-9223372036854775808'
-const SNOWFLAKE_MAX_TEXT = '9223372036854775807'
-
-/**
- * Whether a value is a canonical lowercase UUID identity.
- * @param value - Candidate identity text.
- * @returns `true` for a canonical UUID.
- */
-export function isCanonicalUUID(value: string): boolean {
-  return new RegExp(UUID_IDENTITY_PATTERN).test(value)
-}
-
-/**
- * Whether a value is a canonical signed 64-bit decimal identity.
- * @param value - Candidate identity text.
- * @returns `true` for a canonical Snowflake-format value.
- */
-export function isCanonicalSnowflake(value: string): boolean {
-  if (value.length > 20 || !new RegExp(SNOWFLAKE_IDENTITY_PATTERN).test(value)) return false
-  const numeric = BigInt(value)
-  return numeric >= BigInt(SNOWFLAKE_MIN_TEXT) && numeric <= BigInt(SNOWFLAKE_MAX_TEXT)
-}
-
-/** Logical and physical names owned by the universal identity root. */
-const ROOT_FIELD_NAMES = new Set<string>([
-  'displayName',
-  'entity',
-])
-
-/** Scalar field type names accepted by the entity definitions. */
-const SCALAR_FIELD_TYPES = new Set<string>([
-  FieldType.Boolean,
-  FieldType.Date,
-  FieldType.Number,
-  FieldType.Snowflake,
-  FieldType.String,
-  FieldType.Timestamp,
-  FieldType.UUID,
-])
-
 /**
  * Whether a value is a plain object.
- * @param value - Candidate value.
+ * @param value - Candidate.
  * @returns `true` for a non-array object.
  */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1080,25 +1146,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Reject properties outside the entity vocabulary.
+ * Reject unknown properties.
  * @param value - Object being validated.
- * @param allowed - Accepted keys.
- * @param context - Label used in diagnostics.
+ * @param allowed - Allowed keys.
+ * @param context - Diagnostic label.
  */
-function assertKnownKeys(
-  value: Record<string, unknown>,
-  allowed: readonly string[],
-  context: string,
-): void {
+function assertKnownKeys(value: Record<string, unknown>, allowed: readonly string[], context: string): void {
   for (const key of Object.keys(value)) {
     if (!allowed.includes(key)) throw invalid(`unknown ${context} property "${key}"`)
   }
 }
 
 /**
- * Build an invalid-entity error.
- * @param message - Specific validation failure.
- * @returns The error to throw.
+ * Build an invalid-definition error.
+ * @param message - Specific failure.
+ * @returns Error.
  */
 function invalid(message: string): Error {
   return new Error(`Invalid entity definitions: ${message}`)

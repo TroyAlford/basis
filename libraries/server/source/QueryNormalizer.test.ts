@@ -7,13 +7,13 @@ import { QueryNormalizer } from './QueryNormalizer'
 const definitions = EntityDefinitions.load(JSON.stringify({
   entities: [{
     fields: [
-      { name: 'id', primaryKey: true, type: 'uuid' },
-      { name: 'active', type: 'boolean' },
-      { name: 'createdAt', type: 'timestamp' },
-      { name: 'dueOn', type: 'date' },
-      { name: 'externalId', type: 'snowflake' },
-      { name: 'score', type: 'number' },
-      { name: 'title', type: 'string' },
+      { field: 'id', format: 'UUID' },
+      { field: 'active', type: 'Boolean' },
+      { field: 'createdAt', type: 'Timestamp' },
+      { field: 'dueOn', type: 'Date' },
+      { field: 'externalId', type: 'Number' },
+      { field: 'score', type: 'Number' },
+      { field: 'title', type: 'String' },
     ],
     name: 'Note',
   }],
@@ -67,11 +67,11 @@ describe('QueryNormalizer', () => {
         values: [5, null],
       }),
     )
-    expect(QueryNormalizer.normalize(entity, 'externalId $between [9223372036854775807, null]')).toEqual(
+    expect(QueryNormalizer.normalize(entity, 'externalId $between [7, null]')).toEqual(
       Predicate.normalize(entity, {
         field: 'externalId',
         operator: Operator.Comparison.Between,
-        values: ['9223372036854775807', null],
+        values: [7, null],
       }),
     )
   })
@@ -135,10 +135,10 @@ describe('QueryNormalizer', () => {
       operator: Operator.Comparison.Equal,
       value: '5',
     })
-    expect(QueryNormalizer.normalize(entity, 'externalId = 9223372036854775807')).toEqual({
+    expect(QueryNormalizer.normalize(entity, 'externalId = 7')).toEqual({
       field: 'externalId',
       operator: Operator.Comparison.Equal,
-      value: '9223372036854775807',
+      value: 7,
     })
     expect(QueryNormalizer.normalize(entity, 'active = true')).toEqual({
       field: 'active',

@@ -12,13 +12,13 @@ expect.extend({ toMatchSQL })
 const definitions = EntityDefinitions.load(JSON.stringify({
   entities: [{
     fields: [
-      { name: 'id', primaryKey: true, type: 'uuid' },
-      { name: 'active', type: 'boolean' },
-      { name: 'createdAt', type: 'timestamp' },
-      { name: 'dueOn', type: 'date' },
-      { name: 'externalId', type: 'snowflake' },
-      { name: 'score', type: 'number' },
-      { name: 'title', type: 'string' },
+      { field: 'id', format: 'UUID' },
+      { field: 'active', type: 'Boolean' },
+      { field: 'createdAt', type: 'Timestamp' },
+      { field: 'dueOn', type: 'Date' },
+      { field: 'externalId', type: 'Number' },
+      { field: 'score', type: 'Number' },
+      { field: 'title', type: 'String' },
     ],
     name: 'Note',
   }],
@@ -31,9 +31,9 @@ if (!note) throw new Error('missing Note entity')
 const snowflakeDefinitions = EntityDefinitions.load(JSON.stringify({
   entities: [{
     fields: [
-      { name: 'id', primaryKey: true, type: 'snowflake' },
-      { name: 'externalId', type: 'snowflake' },
-      { name: 'title', type: 'string' },
+      { field: 'id', format: 'Snowflake' },
+      { field: 'externalId', type: 'Number' },
+      { field: 'title', type: 'String' },
     ],
     name: 'Account',
   }],
@@ -195,7 +195,7 @@ describe('SQL.where', () => {
     for (const [field, value] of [
       ['createdAt', '2026-01-02T03:04:05.000Z'],
       ['dueOn', '2026-01-02'],
-      ['externalId', '9223372036854775807'],
+      ['externalId', 7],
       ['score', 3],
       ['title', 'Hello'],
     ] as const) {
@@ -211,11 +211,14 @@ describe('SQL.where', () => {
       operator: Operator.Comparison.GreaterThan,
       value: true,
     })).toThrow('is not valid for field "Note.active"')
-    expect(() => SQL.where(definitions, entity, {
+    expect(SQL.where(definitions, entity, {
       field: 'id',
       operator: Operator.Comparison.GreaterThan,
       value: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
-    })).toThrow('is not valid for field "Note.id"')
+    })).toEqual({
+      sql: 'WHERE COALESCE("id" > $1, FALSE)',
+      values: ['a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'],
+    })
   })
 
   test('rejects null ranges and invalid scalar operands', () => {
@@ -229,16 +232,13 @@ describe('SQL.where', () => {
       expect(() => SQL.where(definitions, entity, { score: value })).toThrow('not a valid number value')
     }
     expect(() => SQL.where(definitions, entity, { active: 'true' })).toThrow('not a valid boolean value')
-    expect(() => SQL.where(definitions, entity, { id: '' })).toThrow('not a valid uuid value')
-    expect(() => SQL.where(definitions, entity, { id: '42' })).toThrow('not a valid uuid value')
-    expect(() => SQL.where(definitions, entity, { externalId: '01' })).toThrow('not a valid snowflake value')
+    expect(() => SQL.where(definitions, entity, { id: '' })).toThrow('not a valid id value')
+    expect(() => SQL.where(definitions, entity, { id: '42' })).toThrow('not a valid id value')
+    expect(() => SQL.where(definitions, entity, { externalId: '01' })).toThrow('not a valid number value')
     expect(() => SQL.where(definitions, entity, { dueOn: '' })).toThrow('not a valid date value')
     expect(() => SQL.where(definitions, entity, {
       createdAt: new Date('invalid'),
     })).toThrow('not a valid timestamp value')
-    expect(() => SQL.where(definitions, entity, { externalId: 9e18 })).toThrow('not a valid snowflake value')
-    expect(() => SQL.where(definitions, entity, { externalId: '9223372036854775808' }))
-      .toThrow('not a valid snowflake value')
   })
 
   test('does not parse an operator-looking equality value as syntax', () => {
@@ -263,10 +263,10 @@ describe('SQL.where', () => {
     expect(SQL.where(snowflakeDefinitions, 'Account', {
       field: 'externalId',
       operator: Operator.Comparison.GreaterThan,
-      value: '2',
+      value: 2,
     })).toEqual({
       sql: 'WHERE COALESCE("externalId" > $1, FALSE)',
-      values: ['2'],
+      values: [2],
     })
   })
 
@@ -277,12 +277,12 @@ describe('SQL.where', () => {
       .toEqual({ sql: 'ORDER BY "externalId" ASC' })
   })
 
-  test('normalizes exact Snowflake bigint operands to canonical text', () => {
-    expect(SQL.where(definitions, entity, {
-      externalId: 9223372036854775807n,
+  test('normalizes exact Snowflake identity bigint operands to canonical text', () => {
+    expect(SQL.where(snowflakeDefinitions, 'Account', {
+      id: 9223372036854775807n,
     }).values).toEqual(['9223372036854775807'])
-    expect(SQL.where(definitions, entity, {
-      externalId: '9223372036854775807',
+    expect(SQL.where(snowflakeDefinitions, 'Account', {
+      id: '9223372036854775807',
     }).values).toEqual(['9223372036854775807'])
   })
 

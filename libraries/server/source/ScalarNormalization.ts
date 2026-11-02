@@ -12,8 +12,7 @@ const SNOWFLAKE_MAX = 9223372036854775807n
  * Normalize one non-null scalar value against its canonical field definition.
  *
  * `undefined` means the value is invalid for the field. Null policy remains
- * owned by each caller: query predicates allow null only for equality, while
- * lifecycle writes never accept null.
+ * owned by each caller.
  * @param field - Canonical scalar field.
  * @param value - Raw non-null value.
  * @returns The normalized value, or `undefined` when invalid.
@@ -26,18 +25,24 @@ export function normalizeScalar(field: ScalarFieldDefinition, value: unknown): N
       return typeof value === 'string' && value.length > 0 ? value : undefined
     case FieldType.Number:
       return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-    case FieldType.Snowflake:
-      if (typeof value === 'bigint' && value >= SNOWFLAKE_MIN && value <= SNOWFLAKE_MAX) {
-        return value.toString()
+    case FieldType.ID: {
+      const canonicalUUID = typeof value === 'string' && isCanonicalUUID(value)
+      const canonicalSnowflake = (typeof value === 'string' && isCanonicalSnowflake(value))
+        || (typeof value === 'bigint' && value >= SNOWFLAKE_MIN && value <= SNOWFLAKE_MAX)
+      if (field.format === 'UUID') return canonicalUUID ? value : undefined
+      if (field.format === 'Snowflake') {
+        if (typeof value === 'bigint') return canonicalSnowflake ? value.toString() : undefined
+        return typeof value === 'string' && isCanonicalSnowflake(value) ? value : undefined
       }
+      if (canonicalUUID) return value
+      if (typeof value === 'bigint') return canonicalSnowflake ? value.toString() : undefined
       return typeof value === 'string' && isCanonicalSnowflake(value) ? value : undefined
+    }
     case FieldType.String:
       return typeof value === 'string' ? value : undefined
     case FieldType.Timestamp:
       if (value instanceof Date && !Number.isNaN(value.getTime())) return value
       return typeof value === 'string' && value.length > 0 ? value : undefined
-    case FieldType.UUID:
-      return typeof value === 'string' && isCanonicalUUID(value) ? value : undefined
     default:
       return undefined
   }

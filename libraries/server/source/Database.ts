@@ -4,8 +4,6 @@ import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
-import type { EntityInput } from './Lifecycle'
-import { createEntity, deleteEntity, updateEntity } from './Lifecycle'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { OrderBy } from './SQL'
@@ -152,18 +150,12 @@ export interface Database {
   readonly closed: boolean,
   /** Establishes the database pool's connection. */
   connect(): Promise<void>,
-  /** Creates one complete concrete entity chain in a transaction. */
-  create(entity: string, input: EntityInput): Promise<void>,
-  /** Deletes one complete concrete entity chain in a transaction. */
-  delete(entity: string, id: string): Promise<boolean>,
   /** Projects root scalar fields from one canonical entity. */
   query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]>,
   /** The pooled Bun SQL tagged-template API. */
   readonly sql: BunSQL,
   /** Runs a callback inside a pooled Bun transaction. */
   tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>>,
-  /** Updates one complete concrete entity chain in a transaction. */
-  update(entity: string, id: string, input: EntityInput): Promise<void>,
 }
 
 /** A managed container's observed state. */
@@ -252,46 +244,6 @@ class PostgresDatabase implements Database {
   }
 
   /**
-   * Creates one complete concrete entity chain in a transaction.
-   * @param entity - Concrete leaf entity name.
-   * @param input - Logical field values plus root `displayName`.
-   * @returns A promise that resolves after commit.
-   */
-  async create(entity: string, input: EntityInput): Promise<void> {
-    if (this.#closed) throw new Error('Database is closed')
-    const entities = this.#entities
-    if (!entities) throw new Error('No entity definitions are configured for this database')
-    await this.tx(tx => createEntity(tx, entities, entity, input))
-  }
-
-  /**
-   * Updates one complete concrete entity chain in a transaction.
-   * @param entity - Concrete leaf entity name.
-   * @param id - Shared identity value.
-   * @param input - Logical field changes plus optional `displayName`.
-   * @returns A promise that resolves after commit.
-   */
-  async update(entity: string, id: string, input: EntityInput): Promise<void> {
-    if (this.#closed) throw new Error('Database is closed')
-    const entities = this.#entities
-    if (!entities) throw new Error('No entity definitions are configured for this database')
-    await this.tx(tx => updateEntity(tx, entities, entity, id, input))
-  }
-
-  /**
-   * Deletes one complete concrete entity chain in a transaction.
-   * @param entity - Concrete leaf entity name.
-   * @param id - Shared identity value.
-   * @returns `true` when the root existed and was deleted.
-   */
-  delete(entity: string, id: string): Promise<boolean> {
-    if (this.#closed) return Promise.reject(new Error('Database is closed'))
-    if (!this.#entities) return Promise.reject(new Error('No entity definitions are configured for this database'))
-    const entities = this.#entities
-    return this.tx(tx => deleteEntity(tx, entities, entity, id))
-  }
-
-  /**
    * Runs a callback inside a Bun transaction on this pool.
    * @param callback - Transaction-scoped work.
    * @returns The callback result after commit.
@@ -349,44 +301,6 @@ export class NullDatabase implements Database {
   query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]> {
     void entity
     void options
-    return Promise.reject(new Error('No database is configured for this server'))
-  }
-
-  /**
-   * Rejects because no database is configured.
-   * @param entity - Entity name; unused without a database.
-   * @param input - Logical field values; unused without a database.
-   * @returns A rejected promise naming the missing configuration.
-   */
-  create(entity: string, input: EntityInput): Promise<void> {
-    void entity
-    void input
-    return Promise.reject(new Error('No database is configured for this server'))
-  }
-
-  /**
-   * Rejects because no database is configured.
-   * @param entity - Entity name; unused without a database.
-   * @param id - Identity value; unused without a database.
-   * @param input - Logical field changes; unused without a database.
-   * @returns A rejected promise naming the missing configuration.
-   */
-  update(entity: string, id: string, input: EntityInput): Promise<void> {
-    void entity
-    void id
-    void input
-    return Promise.reject(new Error('No database is configured for this server'))
-  }
-
-  /**
-   * Rejects because no database is configured.
-   * @param entity - Entity name; unused without a database.
-   * @param id - Identity value; unused without a database.
-   * @returns A rejected promise naming the missing configuration.
-   */
-  delete(entity: string, id: string): Promise<boolean> {
-    void entity
-    void id
     return Promise.reject(new Error('No database is configured for this server'))
   }
 
@@ -471,40 +385,6 @@ class ManagedDatabase implements Database {
   query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]> {
     if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
     return this.#database.query<T>(entity, options)
-  }
-
-  /**
-   * Creates one complete concrete entity chain.
-   * @param entity - Concrete leaf entity name.
-   * @param input - Logical field values plus root `displayName`.
-   * @returns A promise that resolves after commit.
-   */
-  create(entity: string, input: EntityInput): Promise<void> {
-    if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
-    return this.#database.create(entity, input)
-  }
-
-  /**
-   * Updates one complete concrete entity chain.
-   * @param entity - Concrete leaf entity name.
-   * @param id - Shared identity value.
-   * @param input - Logical field changes plus optional `displayName`.
-   * @returns A promise that resolves after commit.
-   */
-  update(entity: string, id: string, input: EntityInput): Promise<void> {
-    if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
-    return this.#database.update(entity, id, input)
-  }
-
-  /**
-   * Deletes one complete concrete entity chain.
-   * @param entity - Concrete leaf entity name.
-   * @param id - Shared identity value.
-   * @returns `true` when the root existed and was deleted.
-   */
-  delete(entity: string, id: string): Promise<boolean> {
-    if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
-    return this.#database.delete(entity, id)
   }
 
   /**

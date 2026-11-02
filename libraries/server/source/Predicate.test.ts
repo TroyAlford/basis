@@ -7,12 +7,12 @@ import { Predicate } from './Predicate'
 const definitions = EntityDefinitions.load(JSON.stringify({
   entities: [{
     fields: [
-      { name: 'id', primaryKey: true, type: 'uuid' },
-      { name: 'active', type: 'boolean' },
-      { name: 'createdAt', type: 'timestamp' },
-      { name: 'operator', type: 'string' },
-      { name: 'score', type: 'number' },
-      { name: 'title', type: 'string' },
+      { field: 'id', format: 'UUID' },
+      { field: 'active', type: 'Boolean' },
+      { field: 'createdAt', type: 'Timestamp' },
+      { field: 'operator', type: 'String' },
+      { field: 'score', type: 'Number' },
+      { field: 'title', type: 'String' },
     ],
     name: 'Note',
   }],

@@ -102,17 +102,16 @@ interface LogicalDefinition {
 const ALL_FIELD_TYPES = new Set<FieldType>([
   FieldType.Boolean,
   FieldType.Date,
+  FieldType.ID,
   FieldType.Number,
-  FieldType.Snowflake,
   FieldType.String,
   FieldType.Timestamp,
-  FieldType.UUID,
 ])
 /** Only ordered scalar field types support range comparisons. */
 const RANGE_FIELD_TYPES = new Set<FieldType>([
   FieldType.Date,
+  FieldType.ID,
   FieldType.Number,
-  FieldType.Snowflake,
   FieldType.String,
   FieldType.Timestamp,
 ])
@@ -250,7 +249,7 @@ function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOper
  * @throws {Error} Always, naming the invalid operand.
  */
 function invalidOperand(field: ScalarFieldDefinition): never {
-  throw new Error(`Query operand for "${field.name}" is not a valid ${field.type} value`)
+  throw new Error(`Query operand for "${field.name}" is not a valid ${field.type.toLowerCase()} value`)
 }
 
 /**

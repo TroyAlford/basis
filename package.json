@@ -93,6 +93,7 @@
     "@types/pngjs": "^6.0.5",
     "bun-types": "^1.4.2",
     "husky": "^9.1.7",
+    "jsonc-eslint-parser": "^3.3.0",
     "svg-path-commander": "^2.3.3"
   },
   "scripts": {

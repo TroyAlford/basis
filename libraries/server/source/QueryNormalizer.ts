@@ -98,7 +98,7 @@ function assertValues(node: QueryComparison, count: number): void {
 function literal(field: ScalarFieldDefinition, node: QueryLiteral): unknown {
   if (node.kind === 'null') return null
 
-  if (field.type === FieldType.Snowflake) {
+  if (field.type === FieldType.ID) {
     if (node.kind === 'number') return node.raw
     if (node.kind === 'string') return node.value
   }
@@ -113,12 +113,11 @@ function literal(field: ScalarFieldDefinition, node: QueryLiteral): unknown {
   if (
     (field.type === FieldType.Date
       || field.type === FieldType.String
-      || field.type === FieldType.Timestamp
-      || field.type === FieldType.UUID)
+      || field.type === FieldType.Timestamp)
     && node.kind === 'string'
   ) {
     return node.value
   }
 
-  throw new Error(`Query operand for "${field.name}" is not a valid ${field.type} value`)
+  throw new Error(`Query operand for "${field.name}" is not a valid ${field.type.toLowerCase()} value`)
 }
