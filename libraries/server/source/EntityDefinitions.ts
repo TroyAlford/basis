@@ -52,6 +52,12 @@ export interface ScalarFieldDefinition {
   readonly type: ScalarFieldType,
 }
 
+/** A primary-key scalar whose logical type is a supported identity format. */
+type IdentityField = ScalarFieldDefinition & {
+  /** UUID or Snowflake identity format. */
+  readonly type: FieldType.Snowflake | FieldType.UUID,
+}
+
 /** One singular entity-reference field. */
 export interface EntityReferenceFieldDefinition {
   /** Explicit PostgreSQL column name backing the reference. */
@@ -140,9 +146,9 @@ function identityRoot(entities: readonly EntityDefinition[]): TableDefinition {
     checks: [
       {
         expression: `case
-          when "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then true
-          when "id" ~ '^(0|-?[1-9][0-9]*)$' and length("id") <= 20
-            then "id"::numeric between -9223372036854775808 and 9223372036854775807
+          when "id" ~ '${UUID_IDENTITY_PATTERN}' then true
+          when "id" ~ '${SNOWFLAKE_IDENTITY_PATTERN}' and length("id") <= 20
+            then "id"::numeric between ${SNOWFLAKE_MIN_TEXT} and ${SNOWFLAKE_MAX_TEXT}
           else false
         end`,
         name: 'Entity_id_format_check',
@@ -562,7 +568,7 @@ function isScalarField(
  * @param field - Resolved logical field.
  * @returns `true` for the primary-key field.
  */
-function isPrimaryKeyField(field: FieldDefinition): field is ScalarFieldDefinition {
+function isPrimaryKeyField(field: FieldDefinition): field is IdentityField {
   return isScalarField(field) && field.primaryKey
 }
 
@@ -620,7 +626,12 @@ function parseField(entityName: string, value: unknown): ParsedField {
  * @returns Its physical table definition.
  */
 function entityTable(entity: EntityDefinition): TableDefinition {
+  const key = primaryKeyField(entity)
   return {
+    checks: [{
+      expression: identityCheck(key.name, key.type),
+      name: `${entity.name}_${key.name}_format_check`,
+    }],
     columns: entity.fields.map(field => {
       if (field.type === FieldType.Entity) {
         return { name: field.column, type: FieldType.String }
@@ -632,6 +643,22 @@ function entityTable(entity: EntityDefinition): TableDefinition {
     }),
     name: entity.name,
   }
+}
+
+/**
+ * Build a format check for one physical text identity key.
+ * @param column - Physical primary-key column.
+ * @param type - Logical identity format.
+ * @returns A PostgreSQL boolean expression.
+ */
+function identityCheck(column: string, type: FieldType.UUID | FieldType.Snowflake): string {
+  const identifier = quoteIdentifier(column)
+  if (type === FieldType.UUID) return `${identifier} ~ '${UUID_IDENTITY_PATTERN}'`
+  return `case
+    when ${identifier} ~ '${SNOWFLAKE_IDENTITY_PATTERN}' and length(${identifier}) <= 20
+      then ${identifier}::numeric between ${SNOWFLAKE_MIN_TEXT} and ${SNOWFLAKE_MAX_TEXT}
+    else false
+  end`
 }
 
 /**
@@ -787,7 +814,7 @@ async function reconcileForeignKey(
  * @param entity - Validated entity.
  * @returns The scalar primary-key field.
  */
-function primaryKeyField(entity: EntityDefinition): ScalarFieldDefinition {
+function primaryKeyField(entity: EntityDefinition): IdentityField {
   const field = entity.fields.find(isPrimaryKeyField)
   if (!field) throw new Error(`Entity "${entity.name}" has no primary key`)
   return field
@@ -867,6 +894,14 @@ function quoteIdentifier(identifier: string): string {
 function quoteLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`
 }
+
+/** Canonical UUID text pattern accepted by the universal identity root. */
+const UUID_IDENTITY_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+/** Canonical signed 64-bit decimal text pattern. */
+const SNOWFLAKE_IDENTITY_PATTERN = '^(0|-?[1-9][0-9]*)$'
+/** Canonical signed 64-bit decimal bounds. */
+const SNOWFLAKE_MIN_TEXT = '-9223372036854775808'
+const SNOWFLAKE_MAX_TEXT = '9223372036854775807'
 
 /** Logical and physical names owned by the universal identity root. */
 const ROOT_FIELD_NAMES = new Set<string>([

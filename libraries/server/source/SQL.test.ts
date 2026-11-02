@@ -28,6 +28,17 @@ const entity = 'Note'
 const note = definitions.entity(entity)
 if (!note) throw new Error('missing Note entity')
 
+const snowflakeDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [{
+    fields: [
+      { name: 'id', primaryKey: true, type: 'snowflake' },
+      { name: 'externalId', type: 'snowflake' },
+      { name: 'title', type: 'string' },
+    ],
+    name: 'Account',
+  }],
+}))
+
 describe('SQL.where', () => {
   test('compiles explicit And comparisons and preserves bound values', () => {
     const predicate = SQL.where(definitions, entity, {
@@ -232,6 +243,36 @@ describe('SQL.where', () => {
     expect(() => SQL.where(definitions, entity, {
       score: { [Operator.Comparison.GreaterThanOrEqual]: 5 },
     })).toThrow('not a valid number value')
+  })
+
+  test('casts text-backed Snowflake identity keys for numeric comparisons', () => {
+    expect(SQL.where(snowflakeDefinitions, 'Account', { id: '2' })).toEqual({
+      sql: 'WHERE "id"::bigint IS NOT DISTINCT FROM $1',
+      values: ['2'],
+    })
+    expect(SQL.where(snowflakeDefinitions, 'Account', {
+      field: 'id',
+      operator: Operator.Comparison.GreaterThan,
+      value: '2',
+    })).toEqual({
+      sql: 'WHERE COALESCE("id"::bigint > $1, FALSE)',
+      values: ['2'],
+    })
+    expect(SQL.where(snowflakeDefinitions, 'Account', {
+      field: 'externalId',
+      operator: Operator.Comparison.GreaterThan,
+      value: '2',
+    })).toEqual({
+      sql: 'WHERE COALESCE("externalId" > $1, FALSE)',
+      values: ['2'],
+    })
+  })
+
+  test('orders text-backed Snowflake identity keys numerically', () => {
+    expect(SQL.orderBy(snowflakeDefinitions, 'Account', 'id'))
+      .toEqual({ sql: 'ORDER BY "id"::bigint ASC' })
+    expect(SQL.orderBy(snowflakeDefinitions, 'Account', 'externalId'))
+      .toEqual({ sql: 'ORDER BY "externalId" ASC' })
   })
 
   test('accepts exact Snowflake bigint and decimal-string values', () => {

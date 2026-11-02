@@ -13,6 +13,35 @@ function load(value: unknown): EntityDefinitions {
   return EntityDefinitions.load(JSON.stringify(value))
 }
 
+/** Canonical UUID identity format. */
+const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
+/**
+ * Build an entity-table UUID key check.
+ * @param table - Physical table name.
+ * @param column - Physical identity column.
+ * @returns The expected check constraint.
+ */
+function uuidCheck(table: string, column: string): string {
+  return `constraint "${table}_${column}_format_check" check ("${column}" ~ '${UUID_PATTERN}')`
+}
+
+/**
+ * Build an entity-table Snowflake key check.
+ * @param table - Physical table name.
+ * @param column - Physical identity column.
+ * @returns The expected check constraint.
+ */
+function snowflakeCheck(table: string, column: string): string {
+  return `constraint "${table}_${column}_format_check" check (
+    case
+      when "${column}" ~ '^(0|-?[1-9][0-9]*)$' and length("${column}") <= 20
+        then "${column}"::numeric between -9223372036854775808 and 9223372036854775807
+      else false
+    end
+  )`
+}
+
 /**
  * Build the universal identity root DDL included in every complete schema.
  * @param leaves - Concrete leaf entity names accepted by the root.
@@ -161,11 +190,13 @@ describe('EntityDefinitions', () => {
         "id" text primary key,
         "ownerId" text not null,
         "lastUpdatedById" text not null,
-        "title" text not null
+        "title" text not null,
+        ${uuidCheck('Note', 'id')}
       )`,
       `create table "User" (
         "id" text primary key,
-        "name" text not null
+        "name" text not null,
+        ${snowflakeCheck('User', 'id')}
       )`,
       `alter table "Note" add constraint "Note_Entity_mti_fkey"
         foreign key ("id") references "Entity" ("id")
@@ -238,9 +269,13 @@ describe('EntityDefinitions', () => {
       ...identityDdl(['Note', 'User']),
       `create table "Note" (
         "id" text primary key,
-        "writer" text not null
+        "writer" text not null,
+        ${uuidCheck('Note', 'id')}
       )`,
-      'create table "User" ("id" text primary key)',
+      `create table "User" (
+        "id" text primary key,
+        ${snowflakeCheck('User', 'id')}
+      )`,
       `alter table "Note" add constraint "Note_Entity_mti_fkey"
         foreign key ("id") references "Entity" ("id")
         deferrable initially immediate`,
@@ -281,11 +316,13 @@ describe('EntityDefinitions', () => {
       ...identityDdl(['Note', 'User']),
       `create table "Note" (
         "id" text primary key,
-        "userId" text not null
+        "userId" text not null,
+        ${uuidCheck('Note', 'id')}
       )`,
       `create table "User" (
         "externalId" text primary key,
-        "name" text not null
+        "name" text not null,
+        ${snowflakeCheck('User', 'externalId')}
       )`,
       `alter table "Note" add constraint "Note_Entity_mti_fkey"
         foreign key ("id") references "Entity" ("id")
@@ -323,7 +360,8 @@ describe('EntityDefinitions', () => {
       `create table "User" (
         "id" text primary key,
         "managerId" text not null,
-        "name" text not null
+        "name" text not null,
+        ${uuidCheck('User', 'id')}
       )`,
       `alter table "User" add constraint "User_Entity_mti_fkey"
         foreign key ("id") references "Entity" ("id")
@@ -511,11 +549,13 @@ describe('EntityDefinitions', () => {
       ...identityDdl(['User', 'Car']),
       `create table "User" (
         "id" text primary key,
-        "carId" text not null
+        "carId" text not null,
+        ${uuidCheck('User', 'id')}
       )`,
       `create table "Car" (
         "id" text primary key,
-        "userId" text not null
+        "userId" text not null,
+        ${uuidCheck('Car', 'id')}
       )`,
       `alter table "User" add constraint "User_Entity_mti_fkey"
         foreign key ("id") references "Entity" ("id")
@@ -722,19 +762,23 @@ describe('EntityDefinitions', () => {
       ...identityDdl(['SystemUser', 'Novel']),
       `create table "User" (
         "id" text primary key,
-        "email" text not null
+        "email" text not null,
+        ${uuidCheck('User', 'id')}
       )`,
       `create table "SystemUser" (
         "id" text primary key,
-        "permissions" text not null
+        "permissions" text not null,
+        ${uuidCheck('SystemUser', 'id')}
       )`,
       `create table "Book" (
         "id" text primary key,
-        "title" text not null
+        "title" text not null,
+        ${snowflakeCheck('Book', 'id')}
       )`,
       `create table "Novel" (
         "id" text primary key,
-        "genre" text not null
+        "genre" text not null,
+        ${snowflakeCheck('Novel', 'id')}
       )`,
       `alter table "User" add constraint "User_Entity_mti_fkey"
         foreign key ("id") references "Entity" ("id")

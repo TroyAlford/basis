@@ -709,10 +709,101 @@ describe('Server database lifecycle', () => {
     })
     expect(missingParent).toMatchObject({ errno: '23503' })
 
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${'42'}, ${'Wrong UUID format'}, ${'SystemUser'})
+    `
+    const wrongUuid = await database.captureError(async db => {
+      await db.sql`
+        insert into "User" ("id", "email")
+        values (${'42'}, ${'wrong@example.test'})
+      `
+    })
+    expect(wrongUuid).toMatchObject({ errno: '23514' })
+
+    const wrongSnowflakeId = randomUUID()
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${wrongSnowflakeId}, ${'Wrong Snowflake format'}, ${'Novel'})
+    `
+    const wrongSnowflake = await database.captureError(async db => {
+      await db.sql`
+        insert into "Book" ("id", "title")
+        values (${wrongSnowflakeId}, ${'Wrong format'})
+      `
+    })
+    expect(wrongSnowflake).toMatchObject({ errno: '23514' })
+
     const blockedDelete = await database.captureError(async db => {
       await db.sql`delete from "User" where "id" = ${id}`
     })
     expect(blockedDelete).toMatchObject({ errno: '23503' })
+  }, 120_000)
+
+  isolatedTest('preserves numeric Snowflake identity ordering and ranges', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'snowflake' },
+          { name: 'name', type: 'string' },
+        ],
+        name: 'Account',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values
+        ('10', 'Ten', 'Account'),
+        ('2', 'Two', 'Account'),
+        ('-9223372036854775808', 'Minimum', 'Account'),
+        ('9223372036854775807', 'Maximum', 'Account'),
+        ('0', 'Zero', 'Account'),
+        ('-2', 'Negative two', 'Account')
+    `
+    await database.sql`
+      insert into "Account" ("id", "name")
+      values
+        ('10', 'Ten'),
+        ('2', 'Two'),
+        ('-9223372036854775808', 'Minimum'),
+        ('9223372036854775807', 'Maximum'),
+        ('0', 'Zero'),
+        ('-2', 'Negative two')
+    `
+
+    expect((await database.query<{ id: bigint }>('Account', {
+      fields: ['id'],
+      limit: null,
+      orderBy: 'id',
+    })).map(row => row.id)).toEqual([
+      -9223372036854775808n,
+      -2n,
+      0n,
+      2n,
+      10n,
+      9223372036854775807n,
+    ])
+    expect((await database.query<{ id: bigint }>('Account', {
+      fields: ['id'],
+      limit: null,
+      orderBy: 'id',
+      where: {
+        field: 'id',
+        operator: Operator.Comparison.GreaterThan,
+        value: '2',
+      },
+    })).map(row => row.id)).toEqual([10n, 9223372036854775807n])
+    expect((await database.query<{ id: bigint }>('Account', {
+      fields: ['id'],
+      limit: null,
+      orderBy: 'id',
+      where: {
+        field: 'id',
+        operator: Operator.Comparison.LessThan,
+        value: '0',
+      },
+    })).map(row => row.id)).toEqual([-9223372036854775808n, -2n])
   }, 120_000)
 
   isolatedTest('filters numeric values with each comparison operator', async database => {
