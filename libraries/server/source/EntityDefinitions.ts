@@ -1,30 +1,7 @@
 import type { SQL } from 'bun'
 
 /** Enable PostgreSQL trigram search for universal display names. */
-const IDENTITY_EXTENSION_DDL = 'CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public'
-
-/** The universal entity identity root. */
-const IDENTITY_TABLE_DDL = `CREATE TABLE "Entity" (
-  "id" TEXT PRIMARY KEY,
-  "displayName" TEXT NOT NULL,
-  "entity" TEXT NOT NULL,
-  CONSTRAINT "Entity_id_format_check" CHECK (
-    CASE
-      WHEN "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN TRUE
-      WHEN "id" ~ '^(0|-?[1-9][0-9]*)$' AND length("id") <= 20
-        THEN "id"::numeric BETWEEN -9223372036854775808 AND 9223372036854775807
-      ELSE FALSE
-    END
-  )
-)`
-
-/** Deterministic B-tree and trigram indexes for the identity root. */
-const IDENTITY_INDEX_DDLS = [
-  `CREATE INDEX IF NOT EXISTS "Entity_displayName_id_idx"
-    ON "Entity" ("displayName" ASC, "id" ASC)`,
-  `CREATE INDEX IF NOT EXISTS "Entity_displayName_trgm_idx"
-    ON "Entity" USING GIN ("displayName" public.gin_trgm_ops)`,
-]
+const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with schema public'
 
 /**
  * Logical field kinds supported by the canonical entity definitions.
@@ -102,6 +79,81 @@ export interface EntityDefinition {
   readonly name: string,
 }
 
+/** One physical table column compiled from canonical or system metadata. */
+interface TableColumn {
+  /** Physical column name. */
+  readonly name: string,
+  /** Whether this column is the table's primary key. */
+  readonly primaryKey?: boolean,
+  /** Physical scalar type. */
+  readonly type: ScalarFieldType,
+}
+
+/** One table-level check constraint. */
+interface TableCheck {
+  /** SQL boolean expression. */
+  readonly expression: string,
+  /** Constraint name. */
+  readonly name: string,
+}
+
+/** One physical table index. */
+interface TableIndex {
+  /** Indexed columns, in order. */
+  readonly columns: readonly string[],
+  /** Optional non-default index method. */
+  readonly method?: 'gin',
+  /** Index name. */
+  readonly name: string,
+  /** Optional operator class applied to every column. */
+  readonly opclass?: string,
+}
+
+/** Internal physical table metadata shared by system and model-owned tables. */
+interface TableDefinition {
+  /** Table-level check constraints. */
+  readonly checks?: readonly TableCheck[],
+  /** Columns in physical order. */
+  readonly columns: readonly TableColumn[],
+  /** Table indexes, created after the table. */
+  readonly indexes?: readonly TableIndex[],
+  /** Physical table name. */
+  readonly name: string,
+}
+
+/**
+ * System-owned universal identity root.
+ *
+ * This is internal physical metadata, not a user-declarable entity. Public
+ * primary-key validation still accepts only UUID and Snowflake fields.
+ */
+const IDENTITY_ROOT: TableDefinition = {
+  checks: [{
+    expression: `case
+      when "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then true
+      when "id" ~ '^(0|-?[1-9][0-9]*)$' and length("id") <= 20
+        then "id"::numeric between -9223372036854775808 and 9223372036854775807
+      else false
+    end`,
+    name: 'Entity_id_format_check',
+  }],
+  columns: [
+    { name: 'id', primaryKey: true, type: FieldType.String },
+    { name: 'displayName', type: FieldType.String },
+    { name: 'entity', type: FieldType.String },
+  ],
+  indexes: [
+    { columns: ['displayName', 'id'], name: 'Entity_displayName_id_idx' },
+    {
+      columns: ['displayName'],
+      method: 'gin',
+      name: 'Entity_displayName_trgm_idx',
+      opclass: 'public.gin_trgm_ops',
+    },
+  ],
+  name: 'Entity',
+}
+
 /** Parsed and validated canonical entity definitions. */
 export class EntityDefinitions {
   /** Entities in their declared order. */
@@ -132,6 +184,14 @@ export class EntityDefinitions {
   }
 
   /**
+   * Resolve the physical tables for the identity root and declared entities.
+   * @returns System-owned root followed by model-owned tables in order.
+   */
+  private get tables(): readonly TableDefinition[] {
+    return [IDENTITY_ROOT, ...this.entities.map(entityTable)]
+  }
+
+  /**
    * Find an entity by name.
    * @param name - Exact entity name.
    * @returns The entity, or undefined when absent.
@@ -141,20 +201,18 @@ export class EntityDefinitions {
   }
 
   /**
-   * Deterministic PostgreSQL DDL for the declared entities.
+   * Deterministic PostgreSQL DDL for the identity root and declared entities.
    *
-   * Every table and column is created first, in declaration order; foreign-key
-   * constraints are added afterward with `ALTER TABLE`. This supports cyclic
-   * and self-referential references without ordering cycles. Identifiers are
-   * quoted; user values never enter these statements.
+   * Every table, column and index is created first, in declaration order;
+   * foreign-key constraints are added afterward with `alter table`. This
+   * supports cyclic and self-referential references without ordering cycles.
+   * Identifiers are quoted; user values never enter these statements.
    * @returns The complete ordered DDL sequence.
    */
   get ddl(): readonly string[] {
     return [
       IDENTITY_EXTENSION_DDL,
-      IDENTITY_TABLE_DDL,
-      ...IDENTITY_INDEX_DDLS,
-      ...this.entities.map(createTable),
+      ...this.tables.flatMap(tableStatements),
       ...this.entities.flatMap(entity => entity.fields
         .filter(isReferenceField)
         .map(field => addConstraint(entity, field))),
@@ -162,8 +220,8 @@ export class EntityDefinitions {
   }
 
   /**
-   * Create the universal identity root and missing entity tables, then add
-   * missing foreign-key constraints.
+   * Create missing physical tables, including the system-owned identity root,
+   * then add missing foreign-key constraints.
    *
    * Existing tables are left untouched, but declared constraints are still
    * reconciled: a missing constraint is added and a mismatched existing
@@ -176,28 +234,19 @@ export class EntityDefinitions {
    */
   async createTables(sql: SQL): Promise<void> {
     await sql.unsafe(IDENTITY_EXTENSION_DDL).simple()
-    const identity = await sql<{ present: boolean }[]>`
-      select exists (
-        select 1
-        from pg_catalog.pg_tables
-        where schemaname = current_schema()
-          and tablename = 'Entity'
-      ) as present
-    `
-    if (!identity[0]?.present) await sql.unsafe(IDENTITY_TABLE_DDL).simple()
-    for (const index of IDENTITY_INDEX_DDLS) await sql.unsafe(index).simple()
-
-    for (const entity of this.entities) {
+    for (const table of this.tables) {
       const rows = await sql<{ present: boolean }[]>`
         select exists (
           select 1
           from pg_catalog.pg_tables
           where schemaname = current_schema()
-            and tablename = ${entity.name}
+            and tablename = ${table.name}
         ) as present
       `
-      if (rows[0]?.present) continue
-      await sql.unsafe(createTable(entity)).simple()
+      if (!rows[0]?.present) await sql.unsafe(createTable(table)).simple()
+      for (const index of table.indexes ?? []) {
+        await sql.unsafe(createIndex(table, index)).simple()
+      }
     }
 
     for (const entity of this.entities) {
@@ -465,33 +514,76 @@ function parseField(entityName: string, value: unknown): ParsedField {
 }
 
 /**
- * Build one entity's idempotent physical table statement.
+ * Compile one canonical entity into physical table metadata.
  * @param entity - The validated entity.
+ * @returns Its physical table definition.
+ */
+function entityTable(entity: EntityDefinition): TableDefinition {
+  return {
+    columns: entity.fields.map(field => (
+      field.type === FieldType.Entity
+        ? { name: field.column, type: field.targetType }
+        : { name: field.name, primaryKey: field.primaryKey, type: field.type }
+    )),
+    name: entity.name,
+  }
+}
+
+/**
+ * Build the statements for one physical table.
+ * @param table - Physical table metadata.
+ * @returns Its table statement followed by its index statements.
+ */
+function tableStatements(table: TableDefinition): readonly string[] {
+  return [
+    createTable(table),
+    ...(table.indexes ?? []).map(index => createIndex(table, index)),
+  ]
+}
+
+/**
+ * Build one physical table's idempotent statement.
+ * @param table - Physical table metadata.
  * @returns The PostgreSQL DDL statement.
  */
-function createTable(entity: EntityDefinition): string {
-  const columns = entity.fields.map(field => {
-    if (field.type === FieldType.Entity) {
-      return `${quoteIdentifier(field.column)} ${columnType(field.targetType)} NOT NULL`
-    }
-    const nullability = field.primaryKey ? ' PRIMARY KEY' : ' NOT NULL'
-    return `${quoteIdentifier(field.name)} ${columnType(field.type)}${nullability}`
+function createTable(table: TableDefinition): string {
+  const columns = table.columns.map(column => {
+    const nullability = column.primaryKey ? ' primary key' : ' not null'
+    return `${quoteIdentifier(column.name)} ${columnType(column.type)}${nullability}`
   })
-  return `CREATE TABLE ${quoteIdentifier(entity.name)} (\n${columns.join(',\n')}\n)`
+  const checks = (table.checks ?? []).map(check => (
+    `constraint ${quoteIdentifier(check.name)} check (${check.expression})`
+  ))
+  return `create table ${quoteIdentifier(table.name)} (\n${[...columns, ...checks].join(',\n')}\n)`
+}
+
+/**
+ * Build one physical table's idempotent index statement.
+ * @param table - Owning table.
+ * @param index - Index metadata.
+ * @returns The `create index` statement.
+ */
+function createIndex(table: TableDefinition, index: TableIndex): string {
+  const method = index.method ? ` using ${index.method}` : ''
+  const columns = index.columns.map(column => (
+    `${quoteIdentifier(column)}${index.opclass ? ` ${index.opclass}` : ''}`
+  ))
+  return `create index if not exists ${quoteIdentifier(index.name)} ` +
+    `on ${quoteIdentifier(table.name)}${method} (${columns.join(', ')})`
 }
 
 /**
  * Build one foreign-key constraint statement.
  * @param entity - Owning entity.
  * @param field - Resolved entity-reference field.
- * @returns The `ALTER TABLE` statement.
+ * @returns The `alter table` statement.
  */
 function addConstraint(entity: EntityDefinition, field: EntityReferenceFieldDefinition): string {
-  return `ALTER TABLE ${quoteIdentifier(entity.name)} ` +
-    `ADD CONSTRAINT ${quoteIdentifier(constraintName(entity, field))} ` +
-    `FOREIGN KEY (${quoteIdentifier(field.column)}) ` +
-    `REFERENCES ${quoteIdentifier(field.target)} (${quoteIdentifier(field.targetField)}) ` +
-    'DEFERRABLE INITIALLY IMMEDIATE'
+  return `alter table ${quoteIdentifier(entity.name)} ` +
+    `add constraint ${quoteIdentifier(constraintName(entity, field))} ` +
+    `foreign key (${quoteIdentifier(field.column)}) ` +
+    `references ${quoteIdentifier(field.target)} (${quoteIdentifier(field.targetField)}) ` +
+    'deferrable initially immediate'
 }
 
 /**
@@ -520,13 +612,13 @@ function isReferenceField(field: FieldDefinition): field is EntityReferenceField
  */
 function columnType(type: ScalarFieldType): string {
   switch (type) {
-    case FieldType.Boolean: return 'BOOLEAN'
-    case FieldType.Date: return 'DATE'
-    case FieldType.Number: return 'DOUBLE PRECISION'
-    case FieldType.Snowflake: return 'BIGINT'
-    case FieldType.String: return 'TEXT'
-    case FieldType.Timestamp: return 'TIMESTAMPTZ'
-    case FieldType.UUID: return 'UUID'
+    case FieldType.Boolean: return 'boolean'
+    case FieldType.Date: return 'date'
+    case FieldType.Number: return 'double precision'
+    case FieldType.Snowflake: return 'bigint'
+    case FieldType.String: return 'text'
+    case FieldType.Timestamp: return 'timestamptz'
+    case FieldType.UUID: return 'uuid'
     default: throw new Error(`Unsupported field type: ${String(type)}`)
   }
 }

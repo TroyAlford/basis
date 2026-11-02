@@ -24,24 +24,24 @@ expect.extend({ toMatchSQL })
 
 /** The universal identity root DDL included in every complete schema. */
 const identityDdl = [
-  'CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public',
-  `CREATE TABLE "Entity" (
-    "id" TEXT PRIMARY KEY,
-    "displayName" TEXT NOT NULL,
-    "entity" TEXT NOT NULL,
-    CONSTRAINT "Entity_id_format_check" CHECK (
-      CASE
-        WHEN "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN TRUE
-        WHEN "id" ~ '^(0|-?[1-9][0-9]*)$' AND length("id") <= 20
-          THEN "id"::numeric BETWEEN -9223372036854775808 AND 9223372036854775807
-        ELSE FALSE
-      END
+  'create extension if not exists pg_trgm with schema public',
+  `create table "Entity" (
+    "id" text primary key,
+    "displayName" text not null,
+    "entity" text not null,
+    constraint "Entity_id_format_check" check (
+      case
+        when "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then true
+        when "id" ~ '^(0|-?[1-9][0-9]*)$' and length("id") <= 20
+          then "id"::numeric between -9223372036854775808 and 9223372036854775807
+        else false
+      end
     )
   )`,
-  `CREATE INDEX IF NOT EXISTS "Entity_displayName_id_idx"
-    ON "Entity" ("displayName" ASC, "id" ASC)`,
-  `CREATE INDEX IF NOT EXISTS "Entity_displayName_trgm_idx"
-    ON "Entity" USING GIN ("displayName" public.gin_trgm_ops)`,
+  `create index if not exists "Entity_displayName_id_idx"
+    on "Entity" ("displayName", "id")`,
+  `create index if not exists "Entity_displayName_trgm_idx"
+    on "Entity" using gin ("displayName" public.gin_trgm_ops)`,
 ]
 
 const root = join(import.meta.dir, '..', '..', '..')
@@ -646,18 +646,18 @@ describe('Server database lifecycle', () => {
 
     expect(entities.ddl).toMatchSQL([
       ...identityDdl,
-      `CREATE TABLE "Post" (
-        "id" UUID PRIMARY KEY,
-        "userId" BIGINT NOT NULL,
-        "title" TEXT NOT NULL
+      `create table "Post" (
+        "id" uuid primary key,
+        "userId" bigint not null,
+        "title" text not null
       )`,
-      `CREATE TABLE "User" (
-        "id" BIGINT PRIMARY KEY,
-        "name" TEXT NOT NULL
+      `create table "User" (
+        "id" bigint primary key,
+        "name" text not null
       )`,
-      `ALTER TABLE "Post" ADD CONSTRAINT "Post_author_fkey"
-        FOREIGN KEY ("userId") REFERENCES "User" ("id")
-        DEFERRABLE INITIALLY IMMEDIATE`,
+      `alter table "Post" add constraint "Post_author_fkey"
+        foreign key ("userId") references "User" ("id")
+        deferrable initially immediate`,
     ])
     const constraints = await database.sql<{ definition: string }[]>`
       select pg_get_constraintdef(oid) as definition
