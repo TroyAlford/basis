@@ -828,6 +828,16 @@ describe('Server database lifecycle', () => {
       where e."id" = ${id}
     `)).toEqual([{ displayName: 'Ada', email: 'ada@example.test', permissions: 'admin' }])
 
+    await database.tx(async tx => {
+      await tx`
+        insert into "Client" ("id", "company") values (${id}, ${'Temporary sibling'})
+      `
+      await tx`delete from "Client" where "id" = ${id}`
+    })
+    expect(await database.tx(tx => tx<{ count: number }[]>`
+      select count(*)::int as count from "Client" where "id" = ${id}
+    `)).toEqual([{ count: 0 }])
+
     const transientId = randomUUID()
     await database.tx(async tx => {
       await createEntity(tx, entities, 'SystemUser', {
@@ -920,6 +930,61 @@ describe('Server database lifecycle', () => {
       select count(*)::int as count from "Entity" where "id" = ${id}
     `)).toEqual([{ count: 0 }])
     expect(await database.tx(tx => deleteEntity(tx, entities, 'SystemUser', id))).toBe(false)
+  }, 120_000)
+
+  durableTest('serializes lifecycle writes against concurrent deletion', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
+    await database.tx(tx => entities.createTables(tx))
+
+    const seed = (id: string) => database.tx(tx => createEntity(tx, entities, 'Note', {
+      active: true,
+      createdAt: new Date('2026-01-02T03:04:05.000Z'),
+      displayName: `Note ${id}`,
+      dueOn: '2026-01-02',
+      id,
+      score: 1,
+      title: 'Original',
+    }))
+
+    const firstId = randomUUID()
+    await seed(firstId)
+    let firstDeleted!: () => void
+    let releaseFirst!: () => void
+    const firstDeletion = new Promise<void>(resolve => { firstDeleted = resolve })
+    const firstRelease = new Promise<void>(resolve => { releaseFirst = resolve })
+    const deletingFirst = database.tx(async tx => {
+      expect(await deleteEntity(tx, entities, 'Note', firstId)).toBe(true)
+      firstDeleted()
+      await firstRelease
+    })
+    await firstDeletion
+    const updating = database.tx(tx => updateEntity(tx, entities, 'Note', firstId, {
+      title: 'Concurrent',
+    })).catch((error: unknown) => error)
+    await Bun.sleep(100)
+    releaseFirst()
+    await deletingFirst
+    expect(await updating).toMatchObject({
+      message: `Entity "Note" with id "${firstId}" was not found`,
+    })
+
+    const secondId = randomUUID()
+    await seed(secondId)
+    let secondDeleted!: () => void
+    let releaseSecond!: () => void
+    const secondDeletion = new Promise<void>(resolve => { secondDeleted = resolve })
+    const secondRelease = new Promise<void>(resolve => { releaseSecond = resolve })
+    const deletingSecond = database.tx(async tx => {
+      expect(await deleteEntity(tx, entities, 'Note', secondId)).toBe(true)
+      secondDeleted()
+      await secondRelease
+    })
+    await secondDeletion
+    const deletingConcurrently = database.tx(tx => deleteEntity(tx, entities, 'Note', secondId))
+    await Bun.sleep(100)
+    releaseSecond()
+    await deletingSecond
+    expect(await deletingConcurrently).toBe(false)
   }, 120_000)
 
   isolatedTest('preserves textual Snowflake identity values', async database => {

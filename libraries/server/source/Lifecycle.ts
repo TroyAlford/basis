@@ -239,7 +239,7 @@ async function insert(
  */
 async function requireLeaf(sql: SQL, entityName: string, id: string): Promise<void> {
   const rows = await sql<{ entity: string }[]>`
-    select "entity" from "Entity" where "id" = ${id}
+    select "entity" from "Entity" where "id" = ${id} for update
   `
   if (!rows[0]) throw new Error(`Entity "${entityName}" with id "${id}" was not found`)
   if (rows[0].entity !== entityName) {
@@ -256,7 +256,7 @@ async function requireLeaf(sql: SQL, entityName: string, id: string): Promise<vo
  */
 async function leafExists(sql: SQL, entityName: string, id: string): Promise<boolean> {
   const rows = await sql<{ entity: string }[]>`
-    select "entity" from "Entity" where "id" = ${id}
+    select "entity" from "Entity" where "id" = ${id} for update
   `
   if (!rows[0]) return false
   if (rows[0].entity !== entityName) {

@@ -361,7 +361,9 @@ begin
       raise exception 'leaf row % must match root entity %, found %',
         key, tg_table_name, root_entity;
     end if;
-  elsif exists (select 1 from "Entity" where "id" = key) then
+  elsif exists (
+    select 1 from "Entity" where "id" = key and "entity" = tg_table_name
+  ) then
     raise exception 'deleting leaf row % would leave an incomplete root row', key;
   end if;
   return null;

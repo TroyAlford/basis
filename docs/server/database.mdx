@@ -182,7 +182,7 @@ await server.db.update('SystemUser', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', {
 await server.db.delete('SystemUser', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11')
 ```
 
-Create input contains the logical primary-key field, `displayName`, and every non-primary-key field owned anywhere in that concrete entity's ancestry. Entity references are supplied as target identity text. Missing, unknown, abstract, or format-invalid input fails before a partial chain is accepted. Update changes only declared non-key fields and `displayName`; identity and leaf discriminator are immutable. Delete removes the complete leaf-to-root chain and returns `false` when the root does not exist.
+Create input contains the logical primary-key field, `displayName`, and every non-primary-key field owned anywhere in that concrete entity's ancestry. Update and delete lock the surviving root identity for the transaction, so a concurrent deletion cannot produce a false successful result. Entity references are supplied as target identity text. Missing, unknown, abstract, or format-invalid input fails before a partial chain is accepted. Update changes only declared non-key fields and `displayName`; identity and leaf discriminator are immutable. Delete removes the complete leaf-to-root chain and returns `false` when the root does not exist.
 
 Database triggers enforce the same guarantees for direct `db.sql` writes at transaction commit: a root cannot commit without its concrete leaf, a leaf cannot belong to a different root discriminator, and deleting only the leaf while leaving its root is rejected. These are persistence primitives, not automatically exposed CRUD routes.
 
