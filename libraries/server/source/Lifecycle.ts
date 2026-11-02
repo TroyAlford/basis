@@ -1,6 +1,7 @@
 import type { SQL } from 'bun'
 import type { EntityDefinition, EntityDefinitions, EntityReferenceFieldDefinition, FieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
+import { normalizeScalar } from './ScalarNormalization'
 
 /** A logical entity write payload keyed by canonical field names. */
 export type EntityInput = Readonly<Record<string, unknown>>
@@ -79,7 +80,8 @@ export async function updateEntity(
   const fields = new Map(chain.flatMap(part => part.fields
     .filter(field => !(isScalar(field) && field.primaryKey))
     .map(field => [field.name, field] as const)))
-  for (const [name] of changes) {
+  for (const [name, value] of changes) {
+    if (value === undefined) throw new Error(`Field "${name}" must not be undefined`)
     if (name !== 'displayName' && !fields.has(name)) {
       throw new Error(`Unknown or immutable field "${entityName}.${name}"`)
     }
@@ -191,35 +193,9 @@ function required(input: EntityInput, name: string): unknown {
  */
 function normalizeValue(field: FieldDefinition, value: unknown): unknown {
   if (field.type === FieldType.Entity) return normalizeReference(field, value)
-  switch (field.type) {
-    case FieldType.Boolean:
-      if (typeof value !== 'boolean') throw invalidField(field)
-      return value
-    case FieldType.Date:
-      if (typeof value !== 'string' || value.length === 0) throw invalidField(field)
-      return value
-    case FieldType.Number:
-      if (typeof value !== 'number' || !Number.isFinite(value)) throw invalidField(field)
-      return value
-    case FieldType.Snowflake:
-      if (typeof value === 'bigint' && value >= -9223372036854775808n && value <= 9223372036854775807n) {
-        return value.toString()
-      }
-      if (typeof value === 'string' && isCanonicalSnowflake(value)) return value
-      throw invalidField(field)
-    case FieldType.String:
-      if (typeof value !== 'string') throw invalidField(field)
-      return value
-    case FieldType.Timestamp:
-      if (value instanceof Date && !Number.isNaN(value.getTime())) return value
-      if (typeof value === 'string' && value.length > 0) return value
-      throw invalidField(field)
-    case FieldType.UUID:
-      if (typeof value === 'string' && isCanonicalUUID(value)) return value
-      throw invalidField(field)
-    default:
-      throw invalidField(field)
-  }
+  const normalized = normalizeScalar(field, value)
+  if (normalized === undefined) throw invalidField(field)
+  return normalized
 }
 
 /**

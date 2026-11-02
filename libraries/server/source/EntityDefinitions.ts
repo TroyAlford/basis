@@ -311,16 +311,24 @@ function lifecycleStatements(entities: readonly EntityDefinition[]): readonly st
   const leafChecks = concrete.map(entity => {
     const key = quoteIdentifier(primaryKeyField(entity).name)
     return `when ${quoteLiteral(entity.name)} then
-        if not exists (select 1 from ${quoteIdentifier(entity.name)} where ${key} = new."id") then
-          raise exception 'incomplete root row % for entity %', new."id", new."entity";
+        if not exists (select 1 from ${quoteIdentifier(entity.name)} where ${key} = root_id) then
+          raise exception 'incomplete root row % for entity %', root_id, root_entity;
         end if;`
   })
   const validateRoot = `create or replace function "Entity_validate_leaf"() returns trigger language plpgsql as $$
+declare
+  root_id text;
+  root_entity text;
 begin
-  case new."entity"
+  root_id := new."id";
+  select "entity" into root_entity from "Entity" where "id" = root_id;
+  if not found then
+    return null;
+  end if;
+  case root_entity
     ${leafChecks.join('\n    ')}
     else
-      raise exception 'unknown concrete entity %', new."entity";
+      raise exception 'unknown concrete entity %', root_entity;
   end case;
   return new;
 end
@@ -331,21 +339,32 @@ $$`
 declare
   key text;
   root_entity text;
+  leaf_present integer;
 begin
+  if tg_op = 'UPDATE'
+    and to_jsonb(old)->>tg_argv[0] is distinct from to_jsonb(new)->>tg_argv[0] then
+    raise exception 'leaf row identity is immutable';
+  end if;
   if tg_op = 'DELETE' then
     key := to_jsonb(old)->>tg_argv[0];
-    if exists (select 1 from "Entity" where "id" = key) then
-      raise exception 'deleting leaf row % would leave an incomplete root row', key;
+  else
+    key := to_jsonb(new)->>tg_argv[0];
+  end if;
+  execute format('select 1 from %I where %I = $1', tg_table_name, tg_argv[0])
+    into leaf_present using key;
+  if leaf_present is not null then
+    select "entity" into root_entity from "Entity" where "id" = key;
+    if not found then
+      raise exception 'leaf row % has no root row', key;
     end if;
-    return old;
+    if root_entity is distinct from tg_table_name then
+      raise exception 'leaf row % must match root entity %, found %',
+        key, tg_table_name, root_entity;
+    end if;
+  elsif exists (select 1 from "Entity" where "id" = key) then
+    raise exception 'deleting leaf row % would leave an incomplete root row', key;
   end if;
-  key := to_jsonb(new)->>tg_argv[0];
-  select "entity" into root_entity from "Entity" where "id" = key;
-  if root_entity is distinct from tg_table_name then
-    raise exception 'leaf row % must match root entity %, found %',
-      key, tg_table_name, coalesce(root_entity, '<missing>');
-  end if;
-  return new;
+  return null;
 end
 $$`
   const immutableLeaf = `create or replace function "Entity_leaf_immutable"() returns trigger language plpgsql as $$

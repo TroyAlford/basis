@@ -828,6 +828,45 @@ describe('Server database lifecycle', () => {
       where e."id" = ${id}
     `)).toEqual([{ displayName: 'Ada', email: 'ada@example.test', permissions: 'admin' }])
 
+    const transientId = randomUUID()
+    await database.tx(async tx => {
+      await createEntity(tx, entities, 'SystemUser', {
+        displayName: 'Transient',
+        email: 'transient@example.test',
+        id: transientId,
+        manager: transientId,
+        permissions: 'admin',
+      })
+      await deleteEntity(tx, entities, 'SystemUser', transientId)
+    })
+    expect(await database.tx(tx => tx<{ count: number }[]>`
+      select count(*)::int as count from "Entity" where "id" = ${transientId}
+    `)).toEqual([{ count: 0 }])
+
+    const replacementId = randomUUID()
+    const leafMove = await database.tx(async tx => {
+      await tx`
+        insert into "Entity" ("id", "displayName", "entity")
+        values (${replacementId}, ${'Replacement'}, ${'SystemUser'})
+      `
+      await tx`
+        insert into "User" ("id", "email")
+        values (${replacementId}, ${'replacement@example.test'})
+      `
+      await tx`
+        update "SystemUser" set "id" = ${replacementId} where "id" = ${id}
+      `
+    }).catch((error: unknown) => error)
+    expect(leafMove).toMatchObject({ errno: 'P0001' })
+    expect(await database.tx(tx => tx<{ count: number }[]>`
+      select count(*)::int as count from "SystemUser" where "id" = ${id}
+    `)).toEqual([{ count: 1 }])
+
+    const undefinedUpdate = await database.tx(tx => updateEntity(tx, entities, 'SystemUser', id, {
+      permissions: undefined,
+    })).catch((error: unknown) => error)
+    expect(undefinedUpdate).toMatchObject({ message: 'Field "permissions" must not be undefined' })
+
     await database.tx(tx => updateEntity(tx, entities, 'SystemUser', id, {
       displayName: 'Ada Lovelace',
       permissions: 'write',
