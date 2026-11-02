@@ -145,12 +145,7 @@ function identityRoot(entities: readonly EntityDefinition[]): TableDefinition {
   return {
     checks: [
       {
-        expression: `case
-          when "id" ~ '${UUID_IDENTITY_PATTERN}' then true
-          when "id" ~ '${SNOWFLAKE_IDENTITY_PATTERN}' and length("id") <= 20
-            then "id"::numeric between ${SNOWFLAKE_MIN_TEXT} and ${SNOWFLAKE_MAX_TEXT}
-          else false
-        end`,
+        expression: `(${identityCheck('id', FieldType.UUID)} or ${identityCheck('id', FieldType.Snowflake)})`,
         name: 'Entity_id_format_check',
       },
       {

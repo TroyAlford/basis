@@ -17,13 +17,35 @@ function load(value: unknown): EntityDefinitions {
 const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 /**
+ * Build a UUID identity-format SQL predicate.
+ * @param column - Physical identity column.
+ * @returns The expected boolean expression.
+ */
+function uuidExpression(column: string): string {
+  return `"${column}" ~ '${UUID_PATTERN}'`
+}
+
+/**
+ * Build a Snowflake identity-format SQL predicate.
+ * @param column - Physical identity column.
+ * @returns The expected boolean expression.
+ */
+function snowflakeExpression(column: string): string {
+  return `case
+    when "${column}" ~ '^(0|-?[1-9][0-9]*)$' and length("${column}") <= 20
+      then "${column}"::numeric between -9223372036854775808 and 9223372036854775807
+    else false
+  end`
+}
+
+/**
  * Build an entity-table UUID key check.
  * @param table - Physical table name.
  * @param column - Physical identity column.
  * @returns The expected check constraint.
  */
 function uuidCheck(table: string, column: string): string {
-  return `constraint "${table}_${column}_format_check" check ("${column}" ~ '${UUID_PATTERN}')`
+  return `constraint "${table}_${column}_format_check" check (${uuidExpression(column)})`
 }
 
 /**
@@ -33,13 +55,7 @@ function uuidCheck(table: string, column: string): string {
  * @returns The expected check constraint.
  */
 function snowflakeCheck(table: string, column: string): string {
-  return `constraint "${table}_${column}_format_check" check (
-    case
-      when "${column}" ~ '^(0|-?[1-9][0-9]*)$' and length("${column}") <= 20
-        then "${column}"::numeric between -9223372036854775808 and 9223372036854775807
-      else false
-    end
-  )`
+  return `constraint "${table}_${column}_format_check" check (${snowflakeExpression(column)})`
 }
 
 /**
@@ -54,14 +70,7 @@ function identityDdl(leaves: readonly string[]): readonly string[] {
       "id" text primary key,
       "displayName" text not null,
       "entity" text not null,
-      constraint "Entity_id_format_check" check (
-        case
-          when "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then true
-          when "id" ~ '^(0|-?[1-9][0-9]*)$' and length("id") <= 20
-            then "id"::numeric between -9223372036854775808 and 9223372036854775807
-          else false
-        end
-      ),
+      constraint "Entity_id_format_check" check ((${uuidExpression('id')} or ${snowflakeExpression('id')})),
       constraint "Entity_entity_check" check ("entity" in (${leaves.map(name => `'${name}'`).join(', ')}))
     )`,
     `create index if not exists "Entity_displayName_id_idx"
