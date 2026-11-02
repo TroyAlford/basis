@@ -13,6 +13,28 @@ function load(value: unknown): EntityDefinitions {
   return EntityDefinitions.load(JSON.stringify(value))
 }
 
+/** The universal identity root DDL included in every complete schema. */
+const identityDdl = [
+  'create extension if not exists pg_trgm with schema public',
+  `create table "Entity" (
+    "id" text primary key,
+    "displayName" text not null,
+    "entity" text not null,
+    constraint "Entity_id_format_check" check (
+      case
+        when "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then true
+        when "id" ~ '^(0|-?[1-9][0-9]*)$' and length("id") <= 20
+          then "id"::numeric between -9223372036854775808 and 9223372036854775807
+        else false
+      end
+    )
+  )`,
+  `create index if not exists "Entity_displayName_id_idx"
+    on "Entity" ("displayName", "id")`,
+  `create index if not exists "Entity_displayName_trgm_idx"
+    on "Entity" using gin ("displayName" public.gin_trgm_ops)`,
+]
+
 /** A valid minimal entity document with its primary key. */
 const note = {
   entities: [{
@@ -34,6 +56,29 @@ describe('EntityDefinitions', () => {
     expect(entity?.name).toBe('Note')
     expect(entity?.fields.map(field => field.name)).toEqual(['id', 'title', 'body', 'createdAt'])
     expect(entity?.fields.find(field => field.type !== FieldType.Entity && field.primaryKey)?.name).toBe('id')
+  })
+
+  test('emits lowercase PostgreSQL keywords in generated DDL', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { column: 'managerId', name: 'manager', target: 'User', type: 'entity' },
+          { name: 'name', type: 'string' },
+        ],
+        name: 'User',
+      }],
+    })
+
+    const keywords = [
+      'ALTER', 'AND', 'ASC', 'BETWEEN', 'BIGINT', 'BOOLEAN', 'CASE', 'CHECK',
+      'CONSTRAINT', 'CREATE', 'DATE', 'DEFERRABLE', 'DOUBLE', 'ELSE', 'END',
+      'EXTENSION', 'FALSE', 'FOREIGN', 'GIN', 'IF', 'IMMEDIATE', 'INDEX',
+      'INITIALLY', 'KEY', 'NOT', 'NULL', 'ON', 'PRECISION', 'PRIMARY', 'PUBLIC',
+      'REFERENCES', 'SCHEMA', 'TABLE', 'TEXT', 'THEN', 'TIMESTAMPTZ', 'TRUE',
+      'USING', 'UUID', 'WHEN', 'WITH',
+    ]
+    expect(entities.ddl.join('\n')).not.toMatch(new RegExp(`\\b(?:${keywords.join('|')})\\b`))
   })
 
   test('accepts every scalar field type', () => {
@@ -104,22 +149,23 @@ describe('EntityDefinitions', () => {
       type: FieldType.Entity,
     })
     expect(entities.ddl).toMatchSQL([
-      `CREATE TABLE "Note" (
-        "id" UUID PRIMARY KEY,
-        "ownerId" BIGINT NOT NULL,
-        "lastUpdatedById" BIGINT NOT NULL,
-        "title" TEXT NOT NULL
+      ...identityDdl,
+      `create table "Note" (
+        "id" uuid primary key,
+        "ownerId" bigint not null,
+        "lastUpdatedById" bigint not null,
+        "title" text not null
       )`,
-      `CREATE TABLE "User" (
-        "id" BIGINT PRIMARY KEY,
-        "name" TEXT NOT NULL
+      `create table "User" (
+        "id" bigint primary key,
+        "name" text not null
       )`,
-      `ALTER TABLE "Note" ADD CONSTRAINT "Note_owner_fkey"
-        FOREIGN KEY ("ownerId") REFERENCES "User" ("id")
-        DEFERRABLE INITIALLY IMMEDIATE`,
-      `ALTER TABLE "Note" ADD CONSTRAINT "Note_lastUpdatedBy_fkey"
-        FOREIGN KEY ("lastUpdatedById") REFERENCES "User" ("id")
-        DEFERRABLE INITIALLY IMMEDIATE`,
+      `alter table "Note" add constraint "Note_owner_fkey"
+        foreign key ("ownerId") references "User" ("id")
+        deferrable initially immediate`,
+      `alter table "Note" add constraint "Note_lastUpdatedBy_fkey"
+        foreign key ("lastUpdatedById") references "User" ("id")
+        deferrable initially immediate`,
     ])
   })
 
@@ -147,7 +193,7 @@ describe('EntityDefinitions', () => {
       { name: 'id', primaryKey: true, type: FieldType.UUID },
       { name: 'userId', primaryKey: false, type: FieldType.Snowflake },
     ])
-    expect(entities.ddl.some(ddl => ddl.includes('REFERENCES'))).toBe(false)
+    expect(entities.ddl.some(ddl => ddl.includes('references'))).toBe(false)
   })
 
   test('accepts any explicit physical column name for a logical reference', () => {
@@ -176,14 +222,15 @@ describe('EntityDefinitions', () => {
       type: FieldType.Entity,
     })
     expect(entities.ddl).toMatchSQL([
-      `CREATE TABLE "Note" (
-        "id" UUID PRIMARY KEY,
-        "writer" BIGINT NOT NULL
+      ...identityDdl,
+      `create table "Note" (
+        "id" uuid primary key,
+        "writer" bigint not null
       )`,
-      'CREATE TABLE "User" ("id" BIGINT PRIMARY KEY)',
-      `ALTER TABLE "Note" ADD CONSTRAINT "Note_author_fkey"
-        FOREIGN KEY ("writer") REFERENCES "User" ("id")
-        DEFERRABLE INITIALLY IMMEDIATE`,
+      'create table "User" ("id" bigint primary key)',
+      `alter table "Note" add constraint "Note_author_fkey"
+        foreign key ("writer") references "User" ("id")
+        deferrable initially immediate`,
     ])
   })
 
@@ -212,17 +259,18 @@ describe('EntityDefinitions', () => {
       targetType: FieldType.Snowflake,
     })
     expect(entities.ddl).toMatchSQL([
-      `CREATE TABLE "Note" (
-        "id" UUID PRIMARY KEY,
-        "userId" BIGINT NOT NULL
+      ...identityDdl,
+      `create table "Note" (
+        "id" uuid primary key,
+        "userId" bigint not null
       )`,
-      `CREATE TABLE "User" (
-        "externalId" BIGINT PRIMARY KEY,
-        "name" TEXT NOT NULL
+      `create table "User" (
+        "externalId" bigint primary key,
+        "name" text not null
       )`,
-      `ALTER TABLE "Note" ADD CONSTRAINT "Note_user_fkey"
-        FOREIGN KEY ("userId") REFERENCES "User" ("externalId")
-        DEFERRABLE INITIALLY IMMEDIATE`,
+      `alter table "Note" add constraint "Note_user_fkey"
+        foreign key ("userId") references "User" ("externalId")
+        deferrable initially immediate`,
     ])
   })
 
@@ -246,14 +294,15 @@ describe('EntityDefinitions', () => {
       type: FieldType.Entity,
     })
     expect(entities.ddl).toMatchSQL([
-      `CREATE TABLE "User" (
-        "id" UUID PRIMARY KEY,
-        "managerId" UUID NOT NULL,
-        "name" TEXT NOT NULL
+      ...identityDdl,
+      `create table "User" (
+        "id" uuid primary key,
+        "managerId" uuid not null,
+        "name" text not null
       )`,
-      `ALTER TABLE "User" ADD CONSTRAINT "User_manager_fkey"
-        FOREIGN KEY ("managerId") REFERENCES "User" ("id")
-        DEFERRABLE INITIALLY IMMEDIATE`,
+      `alter table "User" add constraint "User_manager_fkey"
+        foreign key ("managerId") references "User" ("id")
+        deferrable initially immediate`,
     ])
   })
 
@@ -431,20 +480,21 @@ describe('EntityDefinitions', () => {
     })
 
     expect(entities.ddl).toMatchSQL([
-      `CREATE TABLE "User" (
-        "id" UUID PRIMARY KEY,
-        "carId" UUID NOT NULL
+      ...identityDdl,
+      `create table "User" (
+        "id" uuid primary key,
+        "carId" uuid not null
       )`,
-      `CREATE TABLE "Car" (
-        "id" UUID PRIMARY KEY,
-        "userId" UUID NOT NULL
+      `create table "Car" (
+        "id" uuid primary key,
+        "userId" uuid not null
       )`,
-      `ALTER TABLE "User" ADD CONSTRAINT "User_car_fkey"
-        FOREIGN KEY ("carId") REFERENCES "Car" ("id")
-        DEFERRABLE INITIALLY IMMEDIATE`,
-      `ALTER TABLE "Car" ADD CONSTRAINT "Car_user_fkey"
-        FOREIGN KEY ("userId") REFERENCES "User" ("id")
-        DEFERRABLE INITIALLY IMMEDIATE`,
+      `alter table "User" add constraint "User_car_fkey"
+        foreign key ("carId") references "Car" ("id")
+        deferrable initially immediate`,
+      `alter table "Car" add constraint "Car_user_fkey"
+        foreign key ("userId") references "User" ("id")
+        deferrable initially immediate`,
     ])
   })
 
@@ -527,6 +577,15 @@ describe('EntityDefinitions', () => {
   test('rejects definitions without a primary key', () => {
     expect(() => load({ entities: [{ fields: [{ name: 'title', type: 'string' }], name: 'Note' }] }))
       .toThrow('exactly one primary key')
+  })
+
+  test('reserves the Entity name for the universal identity root', () => {
+    expect(() => load({
+      entities: [{
+        fields: [{ name: 'id', primaryKey: true, type: 'uuid' }],
+        name: 'Entity',
+      }],
+    })).toThrow('entity name "Entity" is reserved for the universal identity root')
   })
 
   test('rejects unknown properties so typos cannot become schema vocabulary', () => {

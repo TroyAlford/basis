@@ -8,7 +8,6 @@ import { dirname, join } from 'node:path'
 import { accountDefinition, containers, noteDefinition, numberRowDefinition, removeService, useDatabaseFixture } from '../testing/DatabaseFixture'
 import type { DurableDatabase, IsolatedDatabase } from '../testing/DatabaseIsolation'
 import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIsolation'
-import { toMatchSQL } from '../testing/toMatchSQL'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
@@ -19,8 +18,6 @@ import { SortDirection } from './SortDirection'
  * Real PostgreSQL lifecycle. The suite owns Docker services through the
  * server capability; it never replaces the database boundary with a mock.
  */
-
-expect.extend({ toMatchSQL })
 
 const root = join(import.meta.dir, '..', '..', '..')
 const silent = new Logger({ silent: true })
@@ -167,6 +164,19 @@ describe('Server database lifecycle', () => {
         if (!bId) throw new Error('installation B did not start its database')
         expect(aId).not.toBe(bId)
         expect(portOf(aId)).not.toBe(portOf(bId))
+
+        expect(await a.db.sql<{ present: boolean }[]>`
+          select exists (
+            select 1 from pg_extension where extname = 'pg_trgm'
+          ) as present
+        `).toEqual([{ present: false }])
+        await EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
+          .createTables(a.db.sql)
+        expect(await a.db.sql<{ present: boolean }[]>`
+          select exists (
+            select 1 from pg_extension where extname = 'pg_trgm'
+          ) as present
+        `).toEqual([{ present: true }])
 
         await a.db.sql`create table install_probe (value text)`
         await a.db.sql`insert into install_probe values ('A')`
@@ -461,6 +471,106 @@ describe('Server database lifecycle', () => {
         `).toEqual([{ tableSchema: 'later' }, { tableSchema: 'public' }])
   }, 120_000)
 
+  isolatedTest('creates and indexes the universal identity root', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
+    await entities.createTables(database.sql)
+
+    expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
+      select
+        column_name as "columnName",
+        data_type as "dataType",
+        is_nullable as "isNullable"
+      from information_schema.columns
+      where table_schema = current_schema() and table_name = 'Entity'
+      order by ordinal_position
+    `).toEqual([
+      { columnName: 'id', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'displayName', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'entity', dataType: 'text', isNullable: 'NO' },
+    ])
+
+    expect(await database.sql<{ indexName: string }[]>`
+      select indexname as "indexName"
+      from pg_indexes
+      where schemaname = current_schema()
+        and tablename = 'Entity'
+        and indexname like 'Entity_displayName%'
+      order by indexname
+    `).toEqual([
+      { indexName: 'Entity_displayName_id_idx' },
+      { indexName: 'Entity_displayName_trgm_idx' },
+    ])
+    expect(await database.sql<{ present: boolean }[]>`
+      select exists (
+        select 1 from pg_extension where extname = 'pg_trgm'
+      ) as present
+    `).toEqual([{ present: true }])
+
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values
+        ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'UUID entity', 'Note'),
+        ('0', 'Zero snowflake', 'Note'),
+        ('-9223372036854775808', 'Minimum snowflake', 'Note'),
+        ('9223372036854775807', 'Maximum snowflake', 'Note')
+    `
+    const duplicate = await database.captureError(async db => {
+      await db.sql`
+        insert into "Entity" ("id", "displayName", "entity")
+        values ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Duplicate', 'Note')
+      `
+    })
+    expect(duplicate).toMatchObject({ errno: '23505' })
+
+    for (const id of [
+      'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11',
+      '01',
+      '-0',
+      '9223372036854775808',
+      '-9223372036854775809',
+      'not-an-identity',
+    ]) {
+      const invalid = await database.captureError(async db => {
+        await db.sql`
+          insert into "Entity" ("id", "displayName", "entity")
+          values (${id}, 'Invalid', 'Note')
+        `
+      })
+      expect(invalid).toMatchObject({ errno: '23514' })
+    }
+
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      select
+        value::text,
+        'item-' || lpad(value::text, 6, '0') || '-' || md5(value::text),
+        case when value % 2 = 0 then 'Note' else 'Book' end
+      from generate_series(1, 100_000) as series(value)
+    `
+    await database.sql`analyze "Entity"`
+
+    const sortedPlan = await database.sql<Record<string, string>[]>`
+      explain (format text)
+      select "id"
+      from "Entity"
+      where "displayName" >= 'item-050000-' and "displayName" < 'item-060000-'
+      order by "displayName" asc, "id" asc
+      limit 20
+    `
+    expect(sortedPlan.map(row => Object.values(row).join('\n')).join('\n'))
+      .toContain('Entity_displayName_id_idx')
+
+    const trigramPlan = await database.sql<Record<string, string>[]>`
+      explain (format text)
+      select "id"
+      from "Entity"
+      where "displayName" ilike '%item-042000-%'
+      limit 20
+    `
+    expect(trigramPlan.map(row => Object.values(row).join('\n')).join('\n'))
+      .toContain('Entity_displayName_trgm_idx')
+  }, 120_000)
+
   isolatedTest('filters numeric values with each comparison operator', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [numberRowDefinition],
@@ -522,20 +632,6 @@ describe('Server database lifecycle', () => {
 
     await entities.createTables(database.sql)
 
-    expect(entities.ddl).toMatchSQL([
-      `CREATE TABLE "Post" (
-        "id" UUID PRIMARY KEY,
-        "userId" BIGINT NOT NULL,
-        "title" TEXT NOT NULL
-      )`,
-      `CREATE TABLE "User" (
-        "id" BIGINT PRIMARY KEY,
-        "name" TEXT NOT NULL
-      )`,
-      `ALTER TABLE "Post" ADD CONSTRAINT "Post_author_fkey"
-        FOREIGN KEY ("userId") REFERENCES "User" ("id")
-        DEFERRABLE INITIALLY IMMEDIATE`,
-    ])
     const constraints = await database.sql<{ definition: string }[]>`
       select pg_get_constraintdef(oid) as definition
       from pg_constraint
