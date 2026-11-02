@@ -144,6 +144,36 @@ describe('EntityDefinitions', () => {
     ])
   })
 
+  test('stores every UUID and Snowflake format as validated text', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { name: 'externalId', type: 'snowflake' },
+          { name: 'alternateId', type: 'uuid' },
+          { name: 'name', type: 'string' },
+        ],
+        name: 'IdentityRow',
+      }],
+    })
+
+    expect(entities.ddl).toMatchSQL([
+      ...identityDdl(['IdentityRow']),
+      `create table "IdentityRow" (
+        "id" text primary key,
+        "externalId" text not null,
+        "alternateId" text not null,
+        "name" text not null,
+        ${uuidCheck('IdentityRow', 'id')},
+        ${snowflakeCheck('IdentityRow', 'externalId')},
+        ${uuidCheck('IdentityRow', 'alternateId')}
+      )`,
+      `alter table "IdentityRow" add constraint "IdentityRow_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
+    ])
+  })
+
   test('represents logical references as fields and derives physical FK columns', () => {
     const entities = load({
       entities: [

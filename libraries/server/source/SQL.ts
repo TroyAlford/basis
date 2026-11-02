@@ -1,6 +1,6 @@
 import { match } from '../../utilities'
 import type { EntityDefinition, EntityDefinitions, ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType } from './EntityDefinitions'
+import { FieldType, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { ComparisonFilter, Filter, LogicalFilter } from './Predicate'
 import { Predicate } from './Predicate'
@@ -187,7 +187,7 @@ function whereClause(
         )
       }
       const operand = comparison.validateOperand(field, comparisonFilter.value)
-      return comparison.build(fieldExpression(field), operand, bind)
+      return comparison.build(quoteIdentifier(field.name), operand, bind)
     }
 
     const logical = logicalDefinitions.get(node.operator as Operator.Logical)
@@ -253,11 +253,10 @@ function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOper
         typeof raw === 'number' && Number.isFinite(raw) ? raw : invalidOperand(field)
       ))
       .when(FieldType.Snowflake).then(() => {
-        if (typeof raw === 'bigint') return raw
-        if (typeof raw === 'string' && /^-?\d+$/.test(raw)) {
-          const value = BigInt(raw)
-          if (value >= SNOWFLAKE_MIN && value <= SNOWFLAKE_MAX) return raw
+        if (typeof raw === 'bigint' && raw >= SNOWFLAKE_MIN && raw <= SNOWFLAKE_MAX) {
+          return raw.toString()
         }
+        if (typeof raw === 'string' && isCanonicalSnowflake(raw)) return raw
         return invalidOperand(field)
       })
       .when(FieldType.String).then(() => (
@@ -269,7 +268,7 @@ function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOper
         return invalidOperand(field)
       })
       .when(FieldType.UUID).then(() => (
-        typeof raw === 'string' && raw.length > 0 ? raw : invalidOperand(field)
+        typeof raw === 'string' && isCanonicalUUID(raw) ? raw : invalidOperand(field)
       ))
       .else(() => invalidOperand(field))
   }
@@ -312,7 +311,7 @@ function orderByClause(
       throw new Error('Query orderBy direction must be "asc" or "desc"')
     }
 
-    return `${fieldExpression(field)} ${direction.toUpperCase()}`
+    return `${quoteIdentifier(field.name)} ${direction.toUpperCase()}`
   })
 
   return { sql: `ORDER BY ${clauses.join(', ')}` }
@@ -375,23 +374,6 @@ function scalarField(entity: EntityDefinition, name: string): ScalarFieldDefinit
     )
   }
   return field
-}
-
-/**
- * Resolve a field's physically comparable SQL expression.
- *
- * Universal text identity keys declared as Snowflake remain signed 64-bit
- * numbers at the logical boundary, so numeric predicates and ordering cast the
- * physical text column back to `bigint`. Non-key Snowflake columns are already
- * physical `bigint` and need no cast.
- * @param field - Selected scalar field.
- * @returns The quoted column or its numeric identity-key expression.
- */
-function fieldExpression(field: ScalarFieldDefinition): string {
-  const column = quoteIdentifier(field.name)
-  return field.type === FieldType.Snowflake && field.primaryKey
-    ? `${column}::bigint`
-    : column
 }
 
 /**

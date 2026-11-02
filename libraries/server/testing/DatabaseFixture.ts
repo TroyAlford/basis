@@ -29,6 +29,7 @@ export const noteDefinition = {
 export const accountDefinition = {
   fields: [
     { name: 'id', primaryKey: true, type: 'snowflake' },
+    { name: 'externalId', type: 'snowflake' },
     { name: 'name', type: 'string' },
   ],
   name: 'Account',

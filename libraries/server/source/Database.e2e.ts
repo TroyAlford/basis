@@ -335,6 +335,7 @@ describe('Server database lifecycle', () => {
       { columnName: 'dueOn', dataType: 'date', isNullable: 'NO', tableName: 'Note' },
       { columnName: 'createdAt', dataType: 'timestamp with time zone', isNullable: 'NO', tableName: 'Note' },
       { columnName: 'id', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
+      { columnName: 'externalId', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
       { columnName: 'name', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
     ])
 
@@ -357,7 +358,10 @@ describe('Server database lifecycle', () => {
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values (${keptId}, 'kept', true, 1.5, '2026-01-02', now())
         `
-    await database.sql`insert into "Account" ("id", "name") values (${accountId}, ${'Troy'})`
+    await database.sql`
+      insert into "Account" ("id", "externalId", "name")
+      values (${accountId}, ${'123'}, ${'Troy'})
+    `
     await entities.createTables(database.sql)
     expect(await database.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
       .toEqual([{ count: 1 }])
@@ -366,12 +370,12 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ id: string }[]>`select id from "Account"`)
       .toEqual([{ id: accountId }])
 
-    const account = await database.query<{ id: bigint, name: string }>('Account', {
+    const account = await database.query<{ id: string, name: string }>('Account', {
       fields: ['id', 'name'],
       where: { id: '9223372036854775807' },
     })
-    expect(account).toEqual([{ id: 9223372036854775807n, name: 'Troy' }])
-    expect(typeof account[0]?.id).toBe('bigint')
+    expect(account).toEqual([{ id: '9223372036854775807', name: 'Troy' }])
+    expect(typeof account[0]?.id).toBe('string')
 
     expect(await database.query<{ score: number, title: string }>('Note', {
       fields: ['title', 'score'],
@@ -740,11 +744,12 @@ describe('Server database lifecycle', () => {
     expect(blockedDelete).toMatchObject({ errno: '23503' })
   }, 120_000)
 
-  isolatedTest('preserves numeric Snowflake identity ordering and ranges', async database => {
+  isolatedTest('preserves textual Snowflake identity values', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [{
         fields: [
           { name: 'id', primaryKey: true, type: 'snowflake' },
+          { name: 'externalId', type: 'snowflake' },
           { name: 'name', type: 'string' },
         ],
         name: 'Account',
@@ -762,48 +767,34 @@ describe('Server database lifecycle', () => {
         ('-2', 'Negative two', 'Account')
     `
     await database.sql`
-      insert into "Account" ("id", "name")
+      insert into "Account" ("id", "externalId", "name")
       values
-        ('10', 'Ten'),
-        ('2', 'Two'),
-        ('-9223372036854775808', 'Minimum'),
-        ('9223372036854775807', 'Maximum'),
-        ('0', 'Zero'),
-        ('-2', 'Negative two')
+        ('10', '100', 'Ten'),
+        ('2', '200', 'Two'),
+        ('-9223372036854775808', '-5', 'Minimum'),
+        ('9223372036854775807', '5', 'Maximum'),
+        ('0', '0', 'Zero'),
+        ('-2', '-1', 'Negative two')
     `
 
-    expect((await database.query<{ id: bigint }>('Account', {
-      fields: ['id'],
+    const rows = await database.query<{ externalId: string, id: string, name: string }>('Account', {
+      fields: ['id', 'externalId', 'name'],
       limit: null,
-      orderBy: 'id',
-    })).map(row => row.id)).toEqual([
-      -9223372036854775808n,
-      -2n,
-      0n,
-      2n,
-      10n,
-      9223372036854775807n,
+      orderBy: 'name',
+    })
+    expect(rows).toEqual([
+      { externalId: '5', id: '9223372036854775807', name: 'Maximum' },
+      { externalId: '-5', id: '-9223372036854775808', name: 'Minimum' },
+      { externalId: '-1', id: '-2', name: 'Negative two' },
+      { externalId: '100', id: '10', name: 'Ten' },
+      { externalId: '200', id: '2', name: 'Two' },
+      { externalId: '0', id: '0', name: 'Zero' },
     ])
-    expect((await database.query<{ id: bigint }>('Account', {
-      fields: ['id'],
-      limit: null,
-      orderBy: 'id',
-      where: {
-        field: 'id',
-        operator: Operator.Comparison.GreaterThan,
-        value: '2',
-      },
-    })).map(row => row.id)).toEqual([10n, 9223372036854775807n])
-    expect((await database.query<{ id: bigint }>('Account', {
-      fields: ['id'],
-      limit: null,
-      orderBy: 'id',
-      where: {
-        field: 'id',
-        operator: Operator.Comparison.LessThan,
-        value: '0',
-      },
-    })).map(row => row.id)).toEqual([-9223372036854775808n, -2n])
+    expect(rows.every(row => typeof row.id === 'string' && typeof row.externalId === 'string')).toBe(true)
+    expect(await database.query<{ externalId: string, id: string, name: string }>('Account', {
+      fields: ['id', 'externalId', 'name'],
+      where: { id: '10' },
+    })).toEqual([{ externalId: '100', id: '10', name: 'Ten' }])
   }, 120_000)
 
   isolatedTest('filters numeric values with each comparison operator', async database => {

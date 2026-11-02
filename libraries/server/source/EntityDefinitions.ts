@@ -20,15 +20,15 @@ export enum FieldType {
   /** Numeric value, including integers and floating point numbers. */
   Number = 'number',
   /**
-   * Externally assigned signed 64-bit identifier. Values are exact integers
-   * (`bigint` in TypeScript) and decimal strings at JSON boundaries.
+   * Externally assigned signed 64-bit identity format. Values are canonical
+   * decimal strings; exact bigint inputs normalize to canonical text.
    */
   Snowflake = 'snowflake',
   /** Text value. */
   String = 'string',
   /** Instant in time. */
   Timestamp = 'timestamp',
-  /** UUID identifier. */
+  /** Canonical lowercase UUID identity format. */
   UUID = 'uuid',
 }
 
@@ -564,12 +564,22 @@ function isScalarField(
 }
 
 /**
- * Whether a resolved field is the scalar primary key.
+ * Whether a resolved field is a scalar primary key.
  * @param field - Resolved logical field.
  * @returns `true` for the primary-key field.
  */
 function isPrimaryKeyField(field: FieldDefinition): field is IdentityField {
   return isScalarField(field) && field.primaryKey
+}
+
+/**
+ * Whether a resolved field carries a UUID or Snowflake identity format.
+ * @param field - Resolved logical field.
+ * @returns `true` for identity-formatted scalar fields.
+ */
+function isIdentityField(field: FieldDefinition): field is IdentityField {
+  return isScalarField(field)
+    && (field.type === FieldType.UUID || field.type === FieldType.Snowflake)
 }
 
 /**
@@ -626,12 +636,11 @@ function parseField(entityName: string, value: unknown): ParsedField {
  * @returns Its physical table definition.
  */
 function entityTable(entity: EntityDefinition): TableDefinition {
-  const key = primaryKeyField(entity)
   return {
-    checks: [{
-      expression: identityCheck(key.name, key.type),
-      name: `${entity.name}_${key.name}_format_check`,
-    }],
+    checks: entity.fields.filter(isIdentityField).map(field => ({
+      expression: identityCheck(field.name, field.type),
+      name: `${entity.name}_${field.name}_format_check`,
+    })),
     columns: entity.fields.map(field => {
       if (field.type === FieldType.Entity) {
         return { name: field.column, type: FieldType.String }
@@ -867,10 +876,10 @@ function columnType(type: ScalarFieldType): string {
     case FieldType.Boolean: return 'boolean'
     case FieldType.Date: return 'date'
     case FieldType.Number: return 'double precision'
-    case FieldType.Snowflake: return 'bigint'
+    case FieldType.Snowflake: return 'text'
     case FieldType.String: return 'text'
     case FieldType.Timestamp: return 'timestamptz'
-    case FieldType.UUID: return 'uuid'
+    case FieldType.UUID: return 'text'
     default: throw new Error(`Unsupported field type: ${String(type)}`)
   }
 }
@@ -902,6 +911,26 @@ const SNOWFLAKE_IDENTITY_PATTERN = '^(0|-?[1-9][0-9]*)$'
 /** Canonical signed 64-bit decimal bounds. */
 const SNOWFLAKE_MIN_TEXT = '-9223372036854775808'
 const SNOWFLAKE_MAX_TEXT = '9223372036854775807'
+
+/**
+ * Whether a value is a canonical lowercase UUID identity.
+ * @param value - Candidate identity text.
+ * @returns `true` for a canonical UUID.
+ */
+export function isCanonicalUUID(value: string): boolean {
+  return new RegExp(UUID_IDENTITY_PATTERN).test(value)
+}
+
+/**
+ * Whether a value is a canonical signed 64-bit decimal identity.
+ * @param value - Candidate identity text.
+ * @returns `true` for a canonical Snowflake-format value.
+ */
+export function isCanonicalSnowflake(value: string): boolean {
+  if (value.length > 20 || !new RegExp(SNOWFLAKE_IDENTITY_PATTERN).test(value)) return false
+  const numeric = BigInt(value)
+  return numeric >= BigInt(SNOWFLAKE_MIN_TEXT) && numeric <= BigInt(SNOWFLAKE_MAX_TEXT)
+}
 
 /** Logical and physical names owned by the universal identity root. */
 const ROOT_FIELD_NAMES = new Set<string>([
