@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test'
+import { toMatchSQL } from '../testing/toMatchSQL'
+import { compileEntityQuery } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
 import { QueryNormalizer } from './QueryNormalizer'
+import { SortDirection } from './SortDirection'
 import { SQL } from './SQL'
+
+expect.extend({ toMatchSQL })
 
 const definitions = EntityDefinitions.load(JSON.stringify({
   entities: [{
@@ -236,5 +241,26 @@ describe('SQL.where', () => {
     expect(SQL.where(definitions, entity, {
       externalId: '9223372036854775807',
     }).values).toEqual(['9223372036854775807'])
+  })
+
+  test('compiles a complete root query with ordered bindings', () => {
+    const compiled = compileEntityQuery(definitions, entity, {
+      fields: ['title', 'score'],
+      limit: 7,
+      offset: 3,
+      orderBy: [
+        { direction: SortDirection.Descending, field: 'score' },
+        { direction: SortDirection.Ascending, field: 'title' },
+      ],
+      where: '$not (score = 5 $or score = 10)',
+    })
+
+    expect(compiled.sql).toMatchSQL(`
+      SELECT "title", "score" FROM "Note"
+      WHERE (NOT (("score" IS NOT DISTINCT FROM $1 OR "score" IS NOT DISTINCT FROM $2)))
+      ORDER BY "score" DESC, "title" ASC
+      LIMIT $3 OFFSET $4
+    `)
+    expect(compiled.values).toEqual([5, 10, 7, 3])
   })
 })

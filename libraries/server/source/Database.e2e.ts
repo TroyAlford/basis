@@ -6,6 +6,9 @@ import { randomUUID } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { accountDefinition, containers, noteDefinition, numberRowDefinition, removeService, useDatabaseFixture } from '../testing/DatabaseFixture'
+import type { DurableDatabase, IsolatedDatabase } from '../testing/DatabaseIsolation'
+import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { toMatchSQL } from '../testing/toMatchSQL'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
@@ -16,6 +19,8 @@ import { SortDirection } from './SortDirection'
  * Real PostgreSQL lifecycle. The suite owns Docker services through the
  * server capability; it never replaces the database boundary with a mock.
  */
+
+expect.extend({ toMatchSQL })
 
 const root = join(import.meta.dir, '..', '..', '..')
 const silent = new Logger({ silent: true })
@@ -111,6 +116,34 @@ async function credentials(id: string): Promise<CredentialInspection> {
   return { directoryMode, mode, password, raw, source: mount.Source }
 }
 
+/**
+ * Register an ordinary transaction-isolated database test.
+ * @param name - Test name and fixture label.
+ * @param callback - Test work.
+ * @param timeout - Test timeout in milliseconds.
+ */
+function isolatedTest(
+  name: string,
+  callback: (database: IsolatedDatabase) => Promise<void>,
+  timeout = 120_000,
+): void {
+  test(name, () => withIsolatedDatabase(name, callback), timeout)
+}
+
+/**
+ * Register a cross-transaction database test in a durable unique schema.
+ * @param name - Test name and fixture label.
+ * @param callback - Test work.
+ * @param timeout - Test timeout in milliseconds.
+ */
+function durableTest(
+  name: string,
+  callback: (database: DurableDatabase) => Promise<void>,
+  timeout = 120_000,
+): void {
+  test(name, () => withDurableDatabase(name, callback), timeout)
+}
+
 describe('Server database lifecycle', () => {
   test('supports independent installs, durable restart, and same-install reconnection', async () => {
     const service = `basis-e2e-${randomUUID()}`
@@ -200,61 +233,61 @@ describe('Server database lifecycle', () => {
     }
   }, 180_000)
 
-  test('exposes Bun SQL parameterization and error semantics', async () => {
-    const { server } = await useDatabaseFixture('sql')
+  isolatedTest('exposes Bun SQL parameterization and error semantics', async database => {
     const injected = "Robert'); drop table users; --"
-    const rows = await server.db.sql<{ text: string, value: number }[]>`
+    const rows = await database.sql<{ text: string, value: number }[]>`
       select ${injected} as text, ${7} as value
     `
     expect(rows[0]?.text).toBe(injected)
     expect(rows[0]?.value).toBe(7)
 
-    const failure = await server.db.sql`select * from basis_missing_relation`
-      .catch((error: unknown) => error)
+    const failure = await database.captureError(async db => {
+      await db.sql`select * from basis_missing_relation`
+    })
     expect(failure).toMatchObject({ errno: '42P01' })
-  }, 120_000)
+  })
 
-  test('commits and rolls back through pooled Bun transactions', async () => {
-    const { server } = await useDatabaseFixture('transactions')
-    await server.db.sql`drop table if exists tx_probe`
-    await server.db.sql`create table tx_probe (value text)`
+  durableTest('commits and rolls back through pooled Bun transactions', async database => {
+    await database.tx(async tx => {
+      await tx`create table tx_probe (value text)`
+    })
 
-    const result = await server.db.tx(async tx => {
+    const result = await database.tx(async tx => {
       await tx`insert into tx_probe values ('committed')`
       return 'callback-result'
     })
     expect(result).toBe('callback-result')
 
-    const count = async (): Promise<number | undefined> => {
-      const rows = await server.db.sql<{ count: number }[]>`
-        select count(*)::int as count from tx_probe
-      `
-      return rows[0]?.count
-    }
+    const count = async (): Promise<number | undefined> => (
+      await database.tx(async tx => {
+        const rows = await tx<{ count: number }[]>`
+          select count(*)::int as count from tx_probe
+        `
+        return rows[0]?.count
+      })
+    )
     expect(await count()).toBe(1)
 
-    await expect(server.db.tx(async tx => {
+    await expect(database.tx(async tx => {
       await tx`insert into tx_probe values ('thrown')`
       throw new Error('rollback')
     })).rejects.toThrow('rollback')
     expect(await count()).toBe(1)
 
-    await expect(server.db.tx(async tx => {
+    await expect(database.tx(async tx => {
       await tx`insert into tx_probe values ('failed')`
       await tx`select * from basis_missing_tx_relation`
     })).rejects.toMatchObject({ errno: '42P01' })
     expect(await count()).toBe(1)
-  }, 120_000)
+  })
 
-  test('creates physical tables from canonical entities and reruns safely', async () => {
+  isolatedTest('creates physical tables from canonical entities and reruns safely', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [noteDefinition, accountDefinition],
     }))
-    const { server } = await useDatabaseFixture('schema')
-    await server.db.sql`drop table if exists "Note", "Account"`
-    await entities.createTables(server.db.sql)
+    await entities.createTables(database.sql)
 
-    const noteColumns = await server.db.sql<{
+    const noteColumns = await database.sql<{
       columnName: string,
       dataType: string,
       isNullable: string,
@@ -269,7 +302,7 @@ describe('Server database lifecycle', () => {
           where table_name = ${'Note'}
           order by ordinal_position
         `
-    const accountColumns = await server.db.sql<{
+    const accountColumns = await database.sql<{
       columnName: string,
       dataType: string,
       isNullable: string,
@@ -295,7 +328,7 @@ describe('Server database lifecycle', () => {
       { columnName: 'name', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
     ])
 
-    const primaryKeys = await server.db.sql<{ tableName: string }[]>`
+    const primaryKeys = await database.sql<{ tableName: string }[]>`
           select tc.table_name as "tableName"
           from information_schema.table_constraints tc
           where tc.constraint_type = 'PRIMARY KEY'
@@ -304,111 +337,111 @@ describe('Server database lifecycle', () => {
         `
     expect(primaryKeys.map(row => row.tableName)).toEqual(['Account', 'Note'])
 
-    await server.db.sql`
+    await database.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values (gen_random_uuid(), 'kept', true, 1.5, '2026-01-02', now())
         `
-    await server.db.sql`insert into "Account" ("id", "name") values (${'9223372036854775807'}, ${'Troy'})`
-    await entities.createTables(server.db.sql)
-    expect(await server.db.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
+    await database.sql`insert into "Account" ("id", "name") values (${'9223372036854775807'}, ${'Troy'})`
+    await entities.createTables(database.sql)
+    expect(await database.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
       .toEqual([{ count: 1 }])
-    expect(await server.db.sql<{ id: string }[]>`select id::text as id from "Account"`)
+    expect(await database.sql<{ id: string }[]>`select id::text as id from "Account"`)
       .toEqual([{ id: '9223372036854775807' }])
-    expect(await server.db.sql<{ id: string }[]>`select id from "Account"`)
+    expect(await database.sql<{ id: string }[]>`select id from "Account"`)
       .toEqual([{ id: '9223372036854775807' }])
 
-    const account = await server.db.query<{ id: bigint, name: string }>('Account', {
+    const account = await database.query<{ id: bigint, name: string }>('Account', {
       fields: ['id', 'name'],
       where: { id: '9223372036854775807' },
     })
     expect(account).toEqual([{ id: 9223372036854775807n, name: 'Troy' }])
     expect(typeof account[0]?.id).toBe('bigint')
 
-    expect(await server.db.query<{ score: number, title: string }>('Note', {
+    expect(await database.query<{ score: number, title: string }>('Note', {
       fields: ['title', 'score'],
     })).toEqual([{ score: 1.5, title: 'kept' }])
-    await server.db.sql`
+    await database.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values (gen_random_uuid(), 'ignored', false, 2, '2026-01-03', now())
         `
-    expect(await server.db.query<{ title: string }>('Note', {
+    expect(await database.query<{ title: string }>('Note', {
       fields: ['title'],
       where: { title: 'kept' },
     })).toEqual([{ title: 'kept' }])
-    expect(await server.db.query<{ title: string }>('Note', {
+    expect(await database.query<{ title: string }>('Note', {
       fields: ['title'],
       where: { title: "kept' OR true --" },
     })).toEqual([])
-    await expect(server.db.query('Note', {
+    await expect(database.query('Note', {
       fields: ['title'],
       where: { missing: 'kept' },
     })).rejects.toThrow('Unknown field "Note.missing"')
 
-    expect(await server.db.query<{ title: string }>('Note', {
+    expect(await database.query<{ title: string }>('Note', {
       fields: ['title'],
       limit: 1,
       orderBy: { direction: SortDirection.Descending, field: 'score' },
     })).toEqual([{ title: 'ignored' }])
-    expect(await server.db.query<{ title: string }>('Note', {
+    expect(await database.query<{ title: string }>('Note', {
       fields: ['title'],
       limit: 1,
       offset: 1,
       orderBy: { field: 'title' },
     })).toEqual([{ title: 'kept' }])
-    expect(await server.db.query<{ title: string }>('Note', {
+    expect(await database.query<{ title: string }>('Note', {
       fields: ['title'],
       limit: 1,
       orderBy: { direction: SortDirection.Descending, field: 'score' },
       where: { active: false },
     })).toEqual([{ title: 'ignored' }])
-    expect(await server.db.query<{ title: string }>('Note', {
+    expect(await database.query<{ title: string }>('Note', {
       fields: ['title'],
       limit: 2,
       orderBy: 'title',
     })).toEqual([{ title: 'ignored' }, { title: 'kept' }])
-    await server.db.sql`
+    await database.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values
             (gen_random_uuid(), 'beta', true, 5, '2026-01-04', now()),
             (gen_random_uuid(), 'alpha', true, 5, '2026-01-04', now())
         `
-    expect(await server.db.query<{ title: string }>('Note', {
+    expect(await database.query<{ title: string }>('Note', {
       fields: ['title'],
       orderBy: ['score', { direction: SortDirection.Ascending, field: 'title' }],
       where: { score: 5 },
     })).toEqual([{ title: 'alpha' }, { title: 'beta' }])
 
-    await expect(server.db.query('Note', {
+    await expect(database.query('Note', {
       fields: ['title'],
       orderBy: { field: 'missing' },
     })).rejects.toThrow('Unknown field "Note.missing"')
-    await expect(server.db.query('Note', {
+    await expect(database.query('Note', {
       fields: ['title'],
       orderBy: { direction: 'sideways' as SortDirection, field: 'title' },
     })).rejects.toThrow('Query orderBy direction must be "asc" or "desc"')
-    await expect(server.db.query('Note', {
+    await expect(database.query('Note', {
       fields: ['title'],
       limit: -1,
       orderBy: { field: 'title' },
     })).rejects.toThrow('Query limit must be a non-negative integer')
 
-    await expect(server.db.query('Note', { fields: ['missing'] }))
+    await expect(database.query('Note', { fields: ['missing'] }))
       .rejects.toThrow('Unknown field "Note.missing"')
-    await expect(server.db.query('Missing', { fields: ['id'] }))
+    await expect(database.query('Missing', { fields: ['id'] }))
       .rejects.toThrow('Unknown entity "Missing"')
-    await expect(server.db.query('Note', { fields: [] }))
+    await expect(database.query('Note', { fields: [] }))
       .rejects.toThrow('Query fields must be a non-empty array')
 
-    await server.db.sql`
+    await database.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           select gen_random_uuid(), 'page-' || value, true, value, '2026-01-03', now()
           from generate_series(1, 30) as series(value)
         `
-    expect(await server.db.query('Note', { fields: ['title'] })).toHaveLength(25)
-    expect(await server.db.query('Note', { fields: ['title'], limit: null })).toHaveLength(34)
+    expect(await database.query('Note', { fields: ['title'] })).toHaveLength(25)
+    expect(await database.query('Note', { fields: ['title'], limit: null })).toHaveLength(34)
 
-    await server.db.sql`create schema later`
-    await server.db.sql`create table later."Shadow" (marker text)`
+    await database.sql`create schema later`
+    await database.sql`create table later."Shadow" (marker text)`
     const shadow = EntityDefinitions.load(JSON.stringify({
       entities: [{
         fields: [
@@ -418,11 +451,9 @@ describe('Server database lifecycle', () => {
         name: 'Shadow',
       }],
     }))
-    await server.db.tx(async transaction => {
-      await transaction`set local search_path to public, later`
-      await shadow.createTables(transaction)
-    })
-    expect(await server.db.sql<{ tableSchema: string }[]>`
+    await database.sql.unsafe('set local search_path to public, later').simple()
+    await shadow.createTables(database.sql)
+    expect(await database.sql<{ tableSchema: string }[]>`
           select table_schema as "tableSchema"
           from information_schema.tables
           where table_name = ${'Shadow'}
@@ -430,21 +461,19 @@ describe('Server database lifecycle', () => {
         `).toEqual([{ tableSchema: 'later' }, { tableSchema: 'public' }])
   }, 120_000)
 
-  test('filters numeric values with each comparison operator', async () => {
+  isolatedTest('filters numeric values with each comparison operator', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [numberRowDefinition],
     }))
-    const { server } = await useDatabaseFixture('numeric')
-    await server.db.sql`drop table if exists "NumberRow"`
-    await entities.createTables(server.db.sql)
-    await server.db.sql`
+    await entities.createTables(database.sql)
+    await database.sql`
       insert into "NumberRow" ("id", "value")
       select gen_random_uuid(), value
       from generate_series(1, 10) as series(value)
     `
 
     const query = (where: Filter | Readonly<Record<string, unknown>>) => (
-      server.db.query<{ value: number }>('NumberRow', {
+      database.query<{ value: number }>('NumberRow', {
         fields: ['value'],
         limit: null,
         orderBy: { field: 'value' },
@@ -470,8 +499,7 @@ describe('Server database lifecycle', () => {
     })).toEqual([{ value: 3 }, { value: 4 }, { value: 5 }, { value: 6 }])
   }, 120_000)
 
-  test('creates and enforces many-to-one foreign keys', async () => {
-    const { server } = await useDatabaseFixture('relationships')
+  isolatedTest('creates and enforces many-to-one foreign keys', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
         {
@@ -492,50 +520,62 @@ describe('Server database lifecycle', () => {
       ],
     }))
 
-    await server.db.sql`drop table if exists "Post"`
-    await server.db.sql`drop table if exists "User"`
-    await entities.createTables(server.db.sql)
+    await entities.createTables(database.sql)
 
-    const creates = entities.ddl.filter(statement => statement.startsWith('CREATE TABLE'))
-    const constraints = await server.db.sql<{ definition: string }[]>`
+    expect(entities.ddl).toMatchSQL([
+      `CREATE TABLE "Post" (
+        "id" UUID PRIMARY KEY,
+        "userId" BIGINT NOT NULL,
+        "title" TEXT NOT NULL
+      )`,
+      `CREATE TABLE "User" (
+        "id" BIGINT PRIMARY KEY,
+        "name" TEXT NOT NULL
+      )`,
+      `ALTER TABLE "Post" ADD CONSTRAINT "Post_author_fkey"
+        FOREIGN KEY ("userId") REFERENCES "User" ("id")
+        DEFERRABLE INITIALLY IMMEDIATE`,
+    ])
+    const constraints = await database.sql<{ definition: string }[]>`
       select pg_get_constraintdef(oid) as definition
       from pg_constraint
       where conrelid = '"Post"'::regclass and contype = 'f'
     `
-    expect(creates[0]).toContain('CREATE TABLE "Post"')
-    expect(creates[0]).toContain('"userId" BIGINT NOT NULL')
-    expect(creates[0]).not.toContain('REFERENCES')
-    expect(entities.ddl.find(statement => statement.startsWith('ALTER TABLE')))
-      .toContain('DEFERRABLE INITIALLY IMMEDIATE')
     expect(constraints).toEqual([{
       definition: 'FOREIGN KEY ("userId") REFERENCES "User"(id) DEFERRABLE',
     }])
 
-    await server.db.sql`
+    await database.sql`
       insert into "User" ("id", "name") values (${'9223372036854775807'}, ${'Ada'})
     `
-    await server.db.sql`
+    await database.sql`
       insert into "Post" ("id", "userId", "title")
       values (gen_random_uuid(), ${'9223372036854775807'}, ${'Hello'})
     `
-    expect(await server.db.sql<{ userId: string }[]>`
+    expect(await database.sql<{ userId: string }[]>`
       select "userId"::text as "userId" from "Post"
     `).toEqual([{ userId: '9223372036854775807' }])
 
-    const invalidInsert = await server.db.sql`
-      insert into "Post" ("id", "userId", "title")
-      values (gen_random_uuid(), ${'1'}, ${'Invalid'})
-    `.catch((error: unknown) => error)
+    const invalidInsert = await database.captureError(async db => {
+      await db.sql`
+        insert into "Post" ("id", "userId", "title")
+        values (gen_random_uuid(), ${'1'}, ${'Invalid'})
+      `
+    })
     expect(invalidInsert).toMatchObject({ errno: '23503' })
 
-    const blockedDelete = await server.db.sql`
-      delete from "User" where "id" = ${'9223372036854775807'}
-    `.catch((error: unknown) => error)
+    const blockedDelete = await database.captureError(async db => {
+      await db.sql`
+        delete from "User" where "id" = ${'9223372036854775807'}
+      `
+    })
     expect(blockedDelete).toMatchObject({ errno: '23503' })
+    expect(await database.sql<{ count: number }[]>`
+      select count(*)::int as count from "Post"
+    `).toEqual([{ count: 1 }])
   }, 120_000)
 
-  test('creates cyclic foreign keys and validates deferred references', async () => {
-    const { server } = await useDatabaseFixture('cyclic-relationships')
+  durableTest('creates cyclic foreign keys and validates deferred references', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
         {
@@ -555,11 +595,9 @@ describe('Server database lifecycle', () => {
       ],
     }))
 
-    await server.db.sql`drop table if exists "CycleCar"`
-    await server.db.sql`drop table if exists "CycleUser"`
-    await entities.createTables(server.db.sql)
+    await database.tx(async tx => entities.createTables(tx))
 
-    const constraints = await server.db.sql<{
+    const constraints = await database.tx(async tx => tx<{
       deferrable: boolean,
       deferred: boolean,
       definition: string,
@@ -574,7 +612,7 @@ describe('Server database lifecycle', () => {
       where conrelid in ('"CycleUser"'::regclass, '"CycleCar"'::regclass)
         and contype = 'f'
       order by conname
-    `
+    `)
     expect(constraints.map(constraint => ({
       deferrable: constraint.deferrable,
       deferred: constraint.deferred,
@@ -588,7 +626,7 @@ describe('Server database lifecycle', () => {
 
     const userId = randomUUID()
     const carId = randomUUID()
-    await server.db.tx(async transaction => {
+    await database.tx(async transaction => {
       await transaction`set constraints all deferred`
       await transaction`
         insert into "CycleUser" ("id", "carId") values (${userId}, ${carId})
@@ -597,11 +635,11 @@ describe('Server database lifecycle', () => {
         insert into "CycleCar" ("id", "userId") values (${carId}, ${userId})
       `
     })
-    expect(await server.db.sql<{ count: number }[]>`
+    expect(await database.tx(async tx => tx<{ count: number }[]>`
       select count(*)::int as count from "CycleUser"
-    `).toEqual([{ count: 1 }])
+    `)).toEqual([{ count: 1 }])
 
-    const invalid = await server.db.tx(async transaction => {
+    const invalid = await database.tx(async transaction => {
       await transaction`set constraints all deferred`
       await transaction`
         insert into "CycleCar" ("id", "userId") values (${randomUUID()}, ${randomUUID()})
@@ -609,59 +647,58 @@ describe('Server database lifecycle', () => {
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
 
-    await entities.createTables(server.db.sql)
-    expect(await server.db.sql<{ count: number }[]>`
+    await database.tx(async tx => entities.createTables(tx))
+    expect(await database.tx(async tx => tx<{ count: number }[]>`
       select count(*)::int as count
       from pg_constraint
       where conrelid in ('"CycleUser"'::regclass, '"CycleCar"'::regclass)
         and contype = 'f'
-    `).toEqual([{ count: 2 }])
+    `)).toEqual([{ count: 2 }])
 
-    await server.db.sql`
+    await database.tx(async tx => tx`
       alter table "CycleUser" drop constraint "CycleUser_car_fkey"
-    `
-    await server.db.sql`
+    `)
+    await database.tx(async tx => tx`
       alter table "CycleUser" add constraint "CycleUser_car_fkey"
       foreign key ("carId") references "CycleCar" ("id")
-    `
-    await expect(entities.createTables(server.db.sql))
+    `)
+    await expect(database.tx(async tx => entities.createTables(tx)))
       .rejects.toThrow('does not match the canonical model')
 
-    await server.db.sql`
+    await database.tx(async tx => tx`
       alter table "CycleUser" drop constraint "CycleUser_car_fkey"
-    `
-    await server.db.sql`
+    `)
+    await database.tx(async tx => tx`
       alter table "CycleUser" add constraint "CycleUser_car_fkey"
       foreign key ("carId") references "CycleCar" ("id")
       on delete cascade deferrable initially immediate
-    `
-    await expect(entities.createTables(server.db.sql))
+    `)
+    await expect(database.tx(async tx => entities.createTables(tx)))
       .rejects.toThrow('does not match the canonical model')
 
-    await server.db.sql`
+    await database.tx(async tx => tx`
       alter table "CycleUser" drop constraint "CycleUser_car_fkey"
-    `
-    await server.db.sql`
+    `)
+    await database.tx(async tx => tx`
       alter table "CycleUser" add constraint "CycleUser_car_fkey"
       foreign key ("carId") references "CycleCar" ("id")
       deferrable initially immediate not valid
-    `
-    await expect(entities.createTables(server.db.sql))
+    `)
+    await expect(database.tx(async tx => entities.createTables(tx)))
       .rejects.toThrow('does not match the canonical model')
 
-    await server.db.sql`
+    await database.tx(async tx => tx`
       alter table "CycleUser" drop constraint "CycleUser_car_fkey"
-    `
-    await entities.createTables(server.db.sql)
-    expect(await server.db.sql<{ count: number }[]>`
+    `)
+    await database.tx(async tx => entities.createTables(tx))
+    expect(await database.tx(async tx => tx<{ count: number }[]>`
       select count(*)::int as count
       from pg_constraint
       where conrelid = '"CycleUser"'::regclass and conname = 'CycleUser_car_fkey'
-    `).toEqual([{ count: 1 }])
+    `)).toEqual([{ count: 1 }])
   }, 120_000)
 
-  test('enforces self-referential foreign keys', async () => {
-    const { server } = await useDatabaseFixture('self-relationships')
+  durableTest('enforces self-referential foreign keys', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [{
         fields: [
@@ -672,21 +709,20 @@ describe('Server database lifecycle', () => {
       }],
     }))
 
-    await server.db.sql`drop table if exists "TreeNode"`
-    await entities.createTables(server.db.sql)
+    await database.tx(async tx => entities.createTables(tx))
 
     const nodeId = randomUUID()
-    await server.db.tx(async transaction => {
+    await database.tx(async transaction => {
       await transaction`set constraints all deferred`
       await transaction`
         insert into "TreeNode" ("id", "parentId") values (${nodeId}, ${nodeId})
       `
     })
-    expect(await server.db.sql<{ count: number }[]>`
+    expect(await database.tx(async tx => tx<{ count: number }[]>`
       select count(*)::int as count from "TreeNode"
-    `).toEqual([{ count: 1 }])
+    `)).toEqual([{ count: 1 }])
 
-    const invalid = await server.db.tx(async transaction => {
+    const invalid = await database.tx(async transaction => {
       await transaction`set constraints all deferred`
       await transaction`
         insert into "TreeNode" ("id", "parentId") values (${randomUUID()}, ${randomUUID()})
@@ -695,46 +731,43 @@ describe('Server database lifecycle', () => {
     expect(invalid).toMatchObject({ errno: '23503' })
   }, 120_000)
 
-  test('rejects physical reference columns and unfinished graph operations', async () => {
-    const { server } = await useDatabaseFixture('reference-boundaries')
+  isolatedTest('rejects physical reference columns and unfinished graph operations', async database => {
 
-    await expect(server.db.query('Article', { fields: ['ownerId'] }))
+    await expect(database.query('Article', { fields: ['ownerId'] }))
       .rejects.toThrow('Unknown field "Article.ownerId"')
-    await expect(server.db.query('Article', { fields: ['owner'] }))
+    await expect(database.query('Article', { fields: ['owner'] }))
       .rejects.toThrow('entity reference; graph projections are not supported yet')
 
-    await expect(server.db.query('Article', {
+    await expect(database.query('Article', {
       fields: ['id'],
       where: { ownerId: '1' },
     })).rejects.toThrow('Unknown field "Article.ownerId"')
-    await expect(server.db.query('Article', {
+    await expect(database.query('Article', {
       fields: ['id'],
       where: { field: 'owner', operator: Operator.Comparison.Equal, value: '1' },
     })).rejects.toThrow('entity reference; graph projections are not supported yet')
-    await expect(server.db.query('Article', {
+    await expect(database.query('Article', {
       fields: ['id'],
       where: 'owner = "1"',
     })).rejects.toThrow('entity reference; graph projections are not supported yet')
-    await expect(server.db.query('Article', {
+    await expect(database.query('Article', {
       fields: ['id'],
       where: 'ownerId = "1"',
     })).rejects.toThrow('Unknown field "Article.ownerId"')
 
-    await expect(server.db.query('Article', {
+    await expect(database.query('Article', {
       fields: ['id'],
       orderBy: 'ownerId',
     })).rejects.toThrow('Unknown field "Article.ownerId"')
-    await expect(server.db.query('Article', {
+    await expect(database.query('Article', {
       fields: ['id'],
       orderBy: 'owner',
     })).rejects.toThrow('entity reference; graph projections are not supported yet')
   }, 120_000)
 
-  test('matches string and structured predicates with two-valued null semantics', async () => {
-    const { server } = await useDatabaseFixture('string')
-    await server.db.sql`drop table if exists "QueryRow"`
+  isolatedTest('matches string and structured predicates with two-valued null semantics', async database => {
     // Raw nullable DDL exercises NULL semantics while the canonical entity drives query validation.
-    await server.db.sql`
+    await database.sql`
       create table "QueryRow" (
         "id" uuid primary key,
         "active" boolean,
@@ -744,7 +777,7 @@ describe('Server database lifecycle', () => {
         "title" text
       )
     `
-    await server.db.sql`
+    await database.sql`
           insert into "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
           values
             (gen_random_uuid(), null, ${'9223372036854775807'}, 1, null, null),
@@ -755,7 +788,7 @@ describe('Server database lifecycle', () => {
         `
 
     type Where = Filter | Readonly<Record<string, unknown>> | string
-    const query = (where: Where) => server.db.query<{ rank: number }>('QueryRow', {
+    const query = (where: Where) => database.query<{ rank: number }>('QueryRow', {
       fields: ['rank'],
       limit: null,
       orderBy: 'rank',
@@ -862,15 +895,117 @@ describe('Server database lifecycle', () => {
     expect(await query('externalId $between [9223372036854775807, null]'))
       .toEqual([{ rank: 1 }, { rank: 5 }])
 
-    await expect(server.db.query('QueryRow', {
+    await expect(database.query('QueryRow', {
       fields: ['rank'],
       where: 'missing = 1',
     })).rejects.toThrow('Unknown field "QueryRow.missing"')
-    await expect(server.db.query('QueryRow', {
+    await expect(database.query('QueryRow', {
       fields: ['rank'],
       where: 'title = "unterminated',
     })).rejects.toThrow('Invalid where query at 8: Unterminated string literal')
   }, 120_000)
+
+  test('rolls back successful isolated tests and shares the transaction with db.query', async () => {
+    let schema = ''
+    await withIsolatedDatabase('rollback-success', async database => {
+      schema = database.schema
+      await database.sql`
+        create table "NumberRow" ("id" uuid primary key, "value" double precision not null)
+      `
+      await database.sql`
+        insert into "NumberRow" ("id", "value") values (gen_random_uuid(), ${1.5})
+      `
+      expect(await database.query<{ value: number }>('NumberRow', {
+        fields: ['value'],
+        limit: null,
+      })).toEqual([{ value: 1.5 }])
+    })
+
+    const { server } = await useDatabaseFixture('rollback-success-check')
+    expect(await server.db.sql<{ present: boolean }[]>`
+      select to_regclass(${`"${schema}"."NumberRow"`}) is not null as present
+    `).toEqual([{ present: false }])
+  }, 120_000)
+
+  test('rolls back failed isolated tests', async () => {
+    let schema = ''
+    await expect(withIsolatedDatabase('rollback-failure', async database => {
+      schema = database.schema
+      await database.sql`create table "FailureProbe" ("id" uuid primary key)`
+      throw new Error('forced isolated failure')
+    })).rejects.toThrow('forced isolated failure')
+
+    const { server } = await useDatabaseFixture('rollback-failure-check')
+    expect(await server.db.sql<{ present: boolean }[]>`
+      select to_regclass(${`"${schema}"."FailureProbe"`}) is not null as present
+    `).toEqual([{ present: false }])
+  }, 120_000)
+
+  test('runs concurrent isolated tests in independent schemas', async () => {
+    const schemas = await Promise.all([
+      withIsolatedDatabase('concurrent-a', async database => {
+        await database.sql`
+          create table "NumberRow" ("id" uuid primary key, "value" double precision not null)
+        `
+        await database.sql`
+          insert into "NumberRow" ("id", "value") values (gen_random_uuid(), ${1})
+        `
+        expect(await database.query<{ value: number }>('NumberRow', {
+          fields: ['value'],
+          limit: null,
+        })).toEqual([{ value: 1 }])
+        return database.schema
+      }),
+      withIsolatedDatabase('concurrent-b', async database => {
+        await database.sql`
+          create table "NumberRow" ("id" uuid primary key, "value" double precision not null)
+        `
+        await database.sql`
+          insert into "NumberRow" ("id", "value") values (gen_random_uuid(), ${2})
+        `
+        expect(await database.query<{ value: number }>('NumberRow', {
+          fields: ['value'],
+          limit: null,
+        })).toEqual([{ value: 2 }])
+        return database.schema
+      }),
+    ])
+
+    expect(new Set(schemas).size).toBe(2)
+    const { server } = await useDatabaseFixture('concurrent-check')
+    expect(await server.db.sql<{ count: number }[]>`
+      select count(*)::int as count
+      from pg_catalog.pg_namespace
+      where nspname in (${schemas[0]}, ${schemas[1]})
+    `).toEqual([{ count: 0 }])
+  }, 120_000)
+
+  test('cleans committed durable schemas after failures', async () => {
+    let schema = ''
+    await expect(withDurableDatabase('durable-failure', async database => {
+      schema = database.schema
+      await database.tx(async tx => {
+        await tx`create table "DurableFailure" ("id" uuid primary key)`
+      })
+      throw new Error('forced durable failure')
+    })).rejects.toThrow('forced durable failure')
+
+    const { server } = await useDatabaseFixture('durable-failure-check')
+    expect(await server.db.sql<{ present: boolean }[]>`
+      select exists (
+        select 1 from pg_catalog.pg_namespace where nspname = ${schema}
+      ) as present
+    `).toEqual([{ present: false }])
+  }, 120_000)
+
+  test('leaves no isolated database schemas behind', async () => {
+    const { server } = await useDatabaseFixture('schema-leak-check')
+    expect(await server.db.sql<{ count: number }[]>`
+      select count(*)::int as count
+      from pg_catalog.pg_namespace
+      where nspname like 'basis_test_%'
+    `).toEqual([{ count: 0 }])
+  }, 30_000)
 
   test('reports unhealthy when an external PostgreSQL connection fails', async () => {
     const server = start(new Server().database({

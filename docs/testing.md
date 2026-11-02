@@ -88,6 +88,24 @@ Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run t
 
 `registerRunCleanup(callback)` registers teardown for an in-process resource that needs the same process-wide ownership as `useApplication` but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. Use it for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
 
+## Database isolation
+
+Server database tests reuse one run-scoped managed PostgreSQL service, but each ordinary test gets a unique schema inside one reserved transaction. DDL, data, `db.sql`, and entity-rooted `db.query` all run through that same transaction, and the schema is rolled back whether the test succeeds or fails. Expected constraint errors recover through savepoints so the rest of the test can continue. Cross-transaction tests use an explicitly committed unique schema and drop it in cleanup instead of pretending commit behavior can roll back.
+
+### Golden SQL assertions
+
+Server database tests assert complete SQL statements, not fragments. Register the test-only `toMatchSQL` matcher from `libraries/server/testing/toMatchSQL.ts`:
+
+```ts
+import { expect } from 'bun:test'
+import { toMatchSQL } from '../testing/toMatchSQL'
+
+expect.extend({ toMatchSQL })
+expect(statement).toMatchSQL(`SELECT "id" FROM "Note" WHERE "id" = $1`)
+```
+
+The matcher normalizes only insignificant whitespace outside quoted text; quoting, keywords, operators, placeholders, and ordered statement arrays remain significant. Dollar-quoted string contents, backslash escapes in `E'…'` strings, and line/nested block comment text—including line-comment newlines—are preserved rather than normalized. Use complete golden statements for phased DDL and compiled queries, and assert ordered bind values separately from their SQL text.
+
 ## Docker and determinism
 
 Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime publishes the container's `run-server` to a random localhost port and connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server; the container has no fixed name and no host-network assumption.
