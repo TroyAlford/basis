@@ -4,7 +4,6 @@ import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
-import { FieldType } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { OrderBy } from './SQL'
@@ -66,12 +65,10 @@ export interface CompiledEntityQuery {
   readonly values: readonly unknown[],
 }
 
-/** A prepared query plus hydration metadata. */
+/** A prepared query. */
 interface PreparedEntityQuery {
   /** Complete SQL statement and ordered bindings. */
   readonly query: CompiledEntityQuery,
-  /** Snowflake fields that require bigint hydration. */
-  readonly snowflakes: ReadonlySet<string>,
 }
 
 /**
@@ -120,11 +117,6 @@ function prepareEntityQuery(
       sql: statement,
       values: [...predicate.values, ...pagination.values],
     },
-    snowflakes: new Set(
-      selection.fields
-        .filter(field => field.type === FieldType.Snowflake)
-        .map(field => field.name),
-    ),
   }
 }
 
@@ -147,18 +139,7 @@ export async function queryEntity<T = Record<string, unknown>>(
   options: QueryOptions,
 ): Promise<T[]> {
   const prepared = prepareEntityQuery(entities, entity, options)
-  const rows = await sql.unsafe<T[]>(prepared.query.sql, [...prepared.query.values])
-
-  for (const row of rows as Record<string, unknown>[]) {
-    for (const field of prepared.snowflakes) {
-      const value = row[field]
-      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
-        row[field] = BigInt(value)
-      }
-    }
-  }
-
-  return rows
+  return sql.unsafe<T[]>(prepared.query.sql, [...prepared.query.values])
 }
 
 /** A server-owned database capability. */

@@ -13,27 +13,72 @@ function load(value: unknown): EntityDefinitions {
   return EntityDefinitions.load(JSON.stringify(value))
 }
 
-/** The universal identity root DDL included in every complete schema. */
-const identityDdl = [
-  'create extension if not exists pg_trgm with schema public',
-  `create table "Entity" (
-    "id" text primary key,
-    "displayName" text not null,
-    "entity" text not null,
-    constraint "Entity_id_format_check" check (
-      case
-        when "id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then true
-        when "id" ~ '^(0|-?[1-9][0-9]*)$' and length("id") <= 20
-          then "id"::numeric between -9223372036854775808 and 9223372036854775807
-        else false
-      end
-    )
-  )`,
-  `create index if not exists "Entity_displayName_id_idx"
-    on "Entity" ("displayName", "id")`,
-  `create index if not exists "Entity_displayName_trgm_idx"
-    on "Entity" using gin ("displayName" public.gin_trgm_ops)`,
-]
+/** Canonical UUID identity format. */
+const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
+/**
+ * Build a UUID identity-format SQL predicate.
+ * @param column - Physical identity column.
+ * @returns The expected boolean expression.
+ */
+function uuidExpression(column: string): string {
+  return `"${column}" ~ '${UUID_PATTERN}'`
+}
+
+/**
+ * Build a Snowflake identity-format SQL predicate.
+ * @param column - Physical identity column.
+ * @returns The expected boolean expression.
+ */
+function snowflakeExpression(column: string): string {
+  return `case
+    when "${column}" ~ '^(0|-?[1-9][0-9]*)$' and length("${column}") <= 20
+      then "${column}"::numeric between -9223372036854775808 and 9223372036854775807
+    else false
+  end`
+}
+
+/**
+ * Build an entity-table UUID key check.
+ * @param table - Physical table name.
+ * @param column - Physical identity column.
+ * @returns The expected check constraint.
+ */
+function uuidCheck(table: string, column: string): string {
+  return `constraint "${table}_${column}_format_check" check (${uuidExpression(column)})`
+}
+
+/**
+ * Build an entity-table Snowflake key check.
+ * @param table - Physical table name.
+ * @param column - Physical identity column.
+ * @returns The expected check constraint.
+ */
+function snowflakeCheck(table: string, column: string): string {
+  return `constraint "${table}_${column}_format_check" check (${snowflakeExpression(column)})`
+}
+
+/**
+ * Build the universal identity root DDL included in every complete schema.
+ * @param leaves - Concrete leaf entity names accepted by the root.
+ * @returns Ordered identity-root SQL statements.
+ */
+function identityDdl(leaves: readonly string[]): readonly string[] {
+  return [
+    'create extension if not exists pg_trgm with schema public',
+    `create table "Entity" (
+      "id" text primary key,
+      "displayName" text not null,
+      "entity" text not null,
+      constraint "Entity_id_format_check" check ((${uuidExpression('id')} or ${snowflakeExpression('id')})),
+      constraint "Entity_entity_check" check ("entity" in (${leaves.map(name => `'${name}'`).join(', ')}))
+    )`,
+    `create index if not exists "Entity_displayName_id_idx"
+      on "Entity" ("displayName", "id")`,
+    `create index if not exists "Entity_displayName_trgm_idx"
+      on "Entity" using gin ("displayName" public.gin_trgm_ops)`,
+  ]
+}
 
 /** A valid minimal entity document with its primary key. */
 const note = {
@@ -108,6 +153,36 @@ describe('EntityDefinitions', () => {
     ])
   })
 
+  test('stores every UUID and Snowflake format as validated text', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { name: 'externalId', type: 'snowflake' },
+          { name: 'alternateId', type: 'uuid' },
+          { name: 'name', type: 'string' },
+        ],
+        name: 'IdentityRow',
+      }],
+    })
+
+    expect(entities.ddl).toMatchSQL([
+      ...identityDdl(['IdentityRow']),
+      `create table "IdentityRow" (
+        "id" text primary key,
+        "externalId" text not null,
+        "alternateId" text not null,
+        "name" text not null,
+        ${uuidCheck('IdentityRow', 'id')},
+        ${snowflakeCheck('IdentityRow', 'externalId')},
+        ${uuidCheck('IdentityRow', 'alternateId')}
+      )`,
+      `alter table "IdentityRow" add constraint "IdentityRow_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
+    ])
+  })
+
   test('represents logical references as fields and derives physical FK columns', () => {
     const entities = load({
       entities: [
@@ -149,17 +224,25 @@ describe('EntityDefinitions', () => {
       type: FieldType.Entity,
     })
     expect(entities.ddl).toMatchSQL([
-      ...identityDdl,
+      ...identityDdl(['Note', 'User']),
       `create table "Note" (
-        "id" uuid primary key,
-        "ownerId" bigint not null,
-        "lastUpdatedById" bigint not null,
-        "title" text not null
+        "id" text primary key,
+        "ownerId" text not null,
+        "lastUpdatedById" text not null,
+        "title" text not null,
+        ${uuidCheck('Note', 'id')}
       )`,
       `create table "User" (
-        "id" bigint primary key,
-        "name" text not null
+        "id" text primary key,
+        "name" text not null,
+        ${snowflakeCheck('User', 'id')}
       )`,
+      `alter table "Note" add constraint "Note_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
+      `alter table "User" add constraint "User_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
       `alter table "Note" add constraint "Note_owner_fkey"
         foreign key ("ownerId") references "User" ("id")
         deferrable initially immediate`,
@@ -193,7 +276,7 @@ describe('EntityDefinitions', () => {
       { name: 'id', primaryKey: true, type: FieldType.UUID },
       { name: 'userId', primaryKey: false, type: FieldType.Snowflake },
     ])
-    expect(entities.ddl.some(ddl => ddl.includes('references'))).toBe(false)
+    expect(entities.ddl.some(ddl => ddl.includes('references "User"'))).toBe(false)
   })
 
   test('accepts any explicit physical column name for a logical reference', () => {
@@ -222,12 +305,22 @@ describe('EntityDefinitions', () => {
       type: FieldType.Entity,
     })
     expect(entities.ddl).toMatchSQL([
-      ...identityDdl,
+      ...identityDdl(['Note', 'User']),
       `create table "Note" (
-        "id" uuid primary key,
-        "writer" bigint not null
+        "id" text primary key,
+        "writer" text not null,
+        ${uuidCheck('Note', 'id')}
       )`,
-      'create table "User" ("id" bigint primary key)',
+      `create table "User" (
+        "id" text primary key,
+        ${snowflakeCheck('User', 'id')}
+      )`,
+      `alter table "Note" add constraint "Note_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
+      `alter table "User" add constraint "User_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
       `alter table "Note" add constraint "Note_author_fkey"
         foreign key ("writer") references "User" ("id")
         deferrable initially immediate`,
@@ -259,15 +352,23 @@ describe('EntityDefinitions', () => {
       targetType: FieldType.Snowflake,
     })
     expect(entities.ddl).toMatchSQL([
-      ...identityDdl,
+      ...identityDdl(['Note', 'User']),
       `create table "Note" (
-        "id" uuid primary key,
-        "userId" bigint not null
+        "id" text primary key,
+        "userId" text not null,
+        ${uuidCheck('Note', 'id')}
       )`,
       `create table "User" (
-        "externalId" bigint primary key,
-        "name" text not null
+        "externalId" text primary key,
+        "name" text not null,
+        ${snowflakeCheck('User', 'externalId')}
       )`,
+      `alter table "Note" add constraint "Note_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
+      `alter table "User" add constraint "User_Entity_mti_fkey"
+        foreign key ("externalId") references "Entity" ("id")
+        deferrable initially immediate`,
       `alter table "Note" add constraint "Note_user_fkey"
         foreign key ("userId") references "User" ("externalId")
         deferrable initially immediate`,
@@ -294,12 +395,16 @@ describe('EntityDefinitions', () => {
       type: FieldType.Entity,
     })
     expect(entities.ddl).toMatchSQL([
-      ...identityDdl,
+      ...identityDdl(['User']),
       `create table "User" (
-        "id" uuid primary key,
-        "managerId" uuid not null,
-        "name" text not null
+        "id" text primary key,
+        "managerId" text not null,
+        "name" text not null,
+        ${uuidCheck('User', 'id')}
       )`,
+      `alter table "User" add constraint "User_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
       `alter table "User" add constraint "User_manager_fkey"
         foreign key ("managerId") references "User" ("id")
         deferrable initially immediate`,
@@ -480,20 +585,251 @@ describe('EntityDefinitions', () => {
     })
 
     expect(entities.ddl).toMatchSQL([
-      ...identityDdl,
+      ...identityDdl(['User', 'Car']),
       `create table "User" (
-        "id" uuid primary key,
-        "carId" uuid not null
+        "id" text primary key,
+        "carId" text not null,
+        ${uuidCheck('User', 'id')}
       )`,
       `create table "Car" (
-        "id" uuid primary key,
-        "userId" uuid not null
+        "id" text primary key,
+        "userId" text not null,
+        ${uuidCheck('Car', 'id')}
       )`,
+      `alter table "User" add constraint "User_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
+      `alter table "Car" add constraint "Car_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
       `alter table "User" add constraint "User_car_fkey"
         foreign key ("carId") references "Car" ("id")
         deferrable initially immediate`,
       `alter table "Car" add constraint "Car_user_fkey"
         foreign key ("userId") references "User" ("id")
+        deferrable initially immediate`,
+    ])
+  })
+
+  test('parses explicit multi-tier abstract ancestry', () => {
+    const entities = load({
+      entities: [
+        {
+          abstract: true,
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'email', type: 'string' },
+          ],
+          name: 'User',
+        },
+        {
+          extends: 'User',
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'permissions', type: 'string' },
+          ],
+          name: 'SystemUser',
+        },
+      ],
+    })
+
+    expect(entities.entity('User')).toMatchObject({ abstract: true, parent: 'Entity' })
+    expect(entities.entity('SystemUser')).toMatchObject({ abstract: false, parent: 'User' })
+    expect(entities.entity('SystemUser')?.fields.map(field => field.name))
+      .toEqual(['id', 'permissions'])
+  })
+
+  test('rejects invalid MTI ancestry and competing field ownership', () => {
+    expect(() => load({
+      entities: [
+        { abstract: true, fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'User' },
+        { extends: 'Missing', fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'SystemUser' },
+      ],
+    })).toThrow('unknown parent entity "Missing"')
+
+    expect(() => load({
+      entities: [
+        { fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'User' },
+        { extends: 'User', fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'SystemUser' },
+      ],
+    })).toThrow('parent entity "User" must be abstract')
+
+    expect(() => load({
+      entities: [
+        { abstract: true, fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'User' },
+        { extends: 'User', fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'SystemUser' },
+        { extends: 'SystemUser', fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'Client' },
+      ],
+    })).toThrow('parent entity "SystemUser" must be abstract')
+
+    expect(() => load({
+      entities: [
+        { abstract: true, fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'User' },
+        {
+          abstract: true,
+          extends: 'User',
+          fields: [{ name: 'id', primaryKey: true, type: 'uuid' }],
+          name: 'SystemUser',
+        },
+        { extends: 'User', fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'Client' },
+      ],
+    })).not.toThrow()
+
+    expect(() => load({
+      entities: [
+        { abstract: true, extends: 'Client', fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'User' },
+        { abstract: true, extends: 'User', fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'Client' },
+      ],
+    })).toThrow('ancestry cycle')
+
+    expect(() => load({
+      entities: [
+        { abstract: true, fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'User' },
+        { extends: 'User', fields: [{ name: 'identity', primaryKey: true, type: 'uuid' }], name: 'SystemUser' },
+      ],
+    })).toThrow('primary key name must match parent entity "User"')
+
+    expect(() => load({
+      entities: [
+        { abstract: true, fields: [{ name: 'id', primaryKey: true, type: 'uuid' }], name: 'User' },
+        { extends: 'User', fields: [{ name: 'id', primaryKey: true, type: 'snowflake' }], name: 'SystemUser' },
+      ],
+    })).toThrow('primary key type must match parent entity "User"')
+
+    expect(() => load({
+      entities: [
+        {
+          abstract: true,
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'email', type: 'string' },
+          ],
+          name: 'User',
+        },
+        {
+          extends: 'User',
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'email', type: 'string' },
+          ],
+          name: 'SystemUser',
+        },
+      ],
+    })).toThrow('field "SystemUser.email" is already owned by "User"')
+
+    expect(() => load({
+      entities: [
+        {
+          abstract: true,
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'email', type: 'string' },
+          ],
+          name: 'User',
+        },
+        {
+          extends: 'User',
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { column: 'email', name: 'owner', target: 'User', type: 'entity' },
+          ],
+          name: 'SystemUser',
+        },
+      ],
+    })).toThrow('physical column "email" is already owned by "User"')
+
+    expect(() => load({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { name: 'entity', type: 'string' },
+        ],
+        name: 'User',
+      }],
+    })).toThrow('field "User.entity" is reserved for the universal identity root')
+
+    expect(() => load({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'uuid' },
+          { column: 'displayName', name: 'label', target: 'User', type: 'entity' },
+        ],
+        name: 'User',
+      }],
+    })).toThrow('physical column "displayName" is reserved for the universal identity root')
+  })
+
+  test('composes multi-tier MTI tables with shared text keys and parent joins', () => {
+    const entities = load({
+      entities: [
+        {
+          abstract: true,
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'email', type: 'string' },
+          ],
+          name: 'User',
+        },
+        {
+          extends: 'User',
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'permissions', type: 'string' },
+          ],
+          name: 'SystemUser',
+        },
+        {
+          abstract: true,
+          fields: [
+            { name: 'id', primaryKey: true, type: 'snowflake' },
+            { name: 'title', type: 'string' },
+          ],
+          name: 'Book',
+        },
+        {
+          extends: 'Book',
+          fields: [
+            { name: 'id', primaryKey: true, type: 'snowflake' },
+            { name: 'genre', type: 'string' },
+          ],
+          name: 'Novel',
+        },
+      ],
+    })
+
+    expect(entities.ddl).toMatchSQL([
+      ...identityDdl(['SystemUser', 'Novel']),
+      `create table "User" (
+        "id" text primary key,
+        "email" text not null,
+        ${uuidCheck('User', 'id')}
+      )`,
+      `create table "SystemUser" (
+        "id" text primary key,
+        "permissions" text not null,
+        ${uuidCheck('SystemUser', 'id')}
+      )`,
+      `create table "Book" (
+        "id" text primary key,
+        "title" text not null,
+        ${snowflakeCheck('Book', 'id')}
+      )`,
+      `create table "Novel" (
+        "id" text primary key,
+        "genre" text not null,
+        ${snowflakeCheck('Novel', 'id')}
+      )`,
+      `alter table "User" add constraint "User_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
+      `alter table "SystemUser" add constraint "SystemUser_User_mti_fkey"
+        foreign key ("id") references "User" ("id")
+        deferrable initially immediate`,
+      `alter table "Book" add constraint "Book_Entity_mti_fkey"
+        foreign key ("id") references "Entity" ("id")
+        deferrable initially immediate`,
+      `alter table "Novel" add constraint "Novel_Book_mti_fkey"
+        foreign key ("id") references "Book" ("id")
         deferrable initially immediate`,
     ])
   })

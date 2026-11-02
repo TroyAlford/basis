@@ -1,6 +1,6 @@
 import { match } from '../../utilities'
 import type { EntityDefinition, EntityDefinitions, ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType } from './EntityDefinitions'
+import { FieldType, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { ComparisonFilter, Filter, LogicalFilter } from './Predicate'
 import { Predicate } from './Predicate'
@@ -253,11 +253,10 @@ function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOper
         typeof raw === 'number' && Number.isFinite(raw) ? raw : invalidOperand(field)
       ))
       .when(FieldType.Snowflake).then(() => {
-        if (typeof raw === 'bigint') return raw
-        if (typeof raw === 'string' && /^-?\d+$/.test(raw)) {
-          const value = BigInt(raw)
-          if (value >= SNOWFLAKE_MIN && value <= SNOWFLAKE_MAX) return raw
+        if (typeof raw === 'bigint' && raw >= SNOWFLAKE_MIN && raw <= SNOWFLAKE_MAX) {
+          return raw.toString()
         }
+        if (typeof raw === 'string' && isCanonicalSnowflake(raw)) return raw
         return invalidOperand(field)
       })
       .when(FieldType.String).then(() => (
@@ -269,7 +268,7 @@ function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOper
         return invalidOperand(field)
       })
       .when(FieldType.UUID).then(() => (
-        typeof raw === 'string' && raw.length > 0 ? raw : invalidOperand(field)
+        typeof raw === 'string' && isCanonicalUUID(raw) ? raw : invalidOperand(field)
       ))
       .else(() => invalidOperand(field))
   }

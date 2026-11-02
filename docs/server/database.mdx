@@ -44,9 +44,34 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 const note = entities.entity('Note')
 ```
 
-Entities use PascalCase names and unique camelCase fields. Exactly one primary key is required; its type must be `FieldType.UUID` (`uuid`) or `FieldType.Snowflake` (`snowflake`). `uuid` maps to PostgreSQL `uuid`; `snowflake` represents an externally assigned signed 64-bit ID and maps to `bigint`. Snowflake values are exact integers (`bigint` in TypeScript) and decimal strings at JSON boundaries; Basis does not generate them. Other scalar field types are `boolean`, `date`, `number`, `string`, and `timestamp`; they cannot be primary keys. `date` and `timestamp` are distinct, and `number` covers integer and floating point values. Duplicate entity/field names, malformed names, unsupported types, missing or multiple primary keys, malformed JSON, and unknown properties fail validation with a clear error.
+Entities use PascalCase names and unique camelCase fields. Exactly one logical primary key is required; its type must be `FieldType.UUID` (`uuid`) or `FieldType.Snowflake` (`snowflake`). The logical key type selects the identity format: `uuid` accepts canonical lowercase UUIDs, while `snowflake` represents an externally assigned canonical signed 64-bit decimal string; Basis does not generate them. UUID and Snowflake fields, primary keys and entity references all use PostgreSQL `text`, so identity values remain textual across database and query boundaries. Every UUID/Snowflake field has a format `check`; the root accepts either canonical format across concrete leaves. Numeric values use the separate `number` type and remain numeric. Other scalar field types are `boolean`, `date`, `number`, `string`, and `timestamp`; they cannot be primary keys. `date` and `timestamp` are distinct, and `number` covers integer and floating point values. Duplicate entity/field names, malformed names, unsupported types, missing or multiple primary keys, malformed JSON, invalid ancestry, competing field ownership, and unknown properties fail validation with a clear error.
 
-The model is logical-first. A singular entity reference is itself a field in `fields`: `Note.owner` is the logical field, while `ownerId` is only its explicit PostgreSQL storage column. A reference uses `type: "entity"`, an explicit `target` entity, and an explicit `column`. In the example, `Note.owner` and `Note.lastUpdatedBy` are independent logical fields targeting the same `User` entity through different columns. There is no relationship inference from names, suffixes, columns, or entity existence: an undeclared field such as `userId` remains an ordinary scalar even when a `User` entity exists. Reference names and physical column names are independently authored and do not require an `Id` suffix. The target must exist and have an explicitly marked UUID or snowflake primary key; the generated column type comes from that target key. Reference fields cannot be primary keys, and physical column collisions with scalar fields or other references fail validation. Resolved reference fields expose `column`, `target`, `targetField`, and `targetType`.
+An entity may declare `"abstract": true` when it supplies shared fields but cannot be instantiated. `displayName` and `entity` are owned by the universal identity root and cannot be redeclared as entity fields or physical columns. A concrete entity may declare `"extends": "Parent"`; the parent must be abstract, the primary key name and logical type must match, and a field or physical column may be owned by only one table in the ancestry. Every entity without `extends` is a direct child of the system `Entity` root; abstract root-level entities remain non-instantiable. Resolved definitions expose `abstract` and `parent`; root-level entities report `parent: "Entity"`.
+
+```json
+{
+  "entities": [
+    {
+      "name": "User",
+      "abstract": true,
+      "fields": [
+        { "name": "id", "type": "uuid", "primaryKey": true },
+        { "name": "email", "type": "string" }
+      ]
+    },
+    {
+      "name": "SystemUser",
+      "extends": "User",
+      "fields": [
+        { "name": "id", "type": "uuid", "primaryKey": true },
+        { "name": "permissions", "type": "string" }
+      ]
+    }
+  ]
+}
+```
+
+The model is logical-first. A singular entity reference is itself a field in `fields`: `Note.owner` is the logical field, while `ownerId` is only its explicit PostgreSQL storage column. A reference uses `type: "entity"`, an explicit `target` entity, and an explicit `column`. In the example, `Note.owner` and `Note.lastUpdatedBy` are independent logical fields targeting the same `User` entity through different columns. There is no relationship inference from names, suffixes, columns, or entity existence: an undeclared field such as `userId` remains an ordinary scalar even when a `User` entity exists. Reference names and physical column names are independently authored and do not require an `Id` suffix. The target must exist and have an explicitly marked UUID or snowflake primary key; the generated reference column is `text` and targets the shared identity key. Reference fields cannot be primary keys, and physical column collisions with scalar fields or other references fail validation. Resolved reference fields expose `column`, `target`, `targetField`, and `targetType`.
 
 Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `owner` is not selectable, filterable, or sortable until singular graph projection is implemented, and its physical `ownerId` column is not a logical field. Direct `db.sql` remains physical SQL and may use the generated column normally.
 
@@ -54,7 +79,7 @@ Entity-rooted `db.query` uses the logical field vocabulary. A reference field su
 
 Every initialized schema includes a system `"Entity"` table used for globally linkable identity. Its `id` is exact `text`; the format check accepts either a canonical lowercase UUID or a canonical signed 64-bit decimal string, so existing UUID and Snowflake keys can map to it without introducing a second identity format. `displayName` and the concrete-leaf `entity` discriminator are non-null text columns. `Entity` is reserved and cannot be declared as an application entity.
 
-The root has a B-tree index on `(displayName, id)` for stable sorted/paged access and a `pg_trgm` `gin` index on `displayName` for indexed `ILIKE '%term%'` lookup. Initialization enables `pg_trgm` and creates both indexes. MTI tables, lifecycle writes and polymorphic query execution are deliberately not part of this step.
+The root has a B-tree index on `(displayName, id)` for stable sorted/paged access and a `pg_trgm` `gin` index on `displayName` for indexed `ILIKE '%term%'` lookup. Initialization enables `pg_trgm` and creates both indexes. Its leaf check accepts only concrete entity names, so abstract entities cannot be instantiated through the root. Lifecycle writes and polymorphic query execution remain deferred.
 
 ## Creating physical tables
 
@@ -65,13 +90,16 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 await entities.createTables(server.db.sql)
 ```
 
-`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, and then creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared logical-field order for columns. Scalar fields use their logical field name; a singular reference field uses its explicit `column` name and derives the column type from the target's primary key. Foreign-key constraints are added in a separate phase after all tables exist. `uuid` maps to `uuid`, `snowflake` to `bigint`, `string` to `text`, `number` to `double precision`, `date` to `date`, `timestamp` to `timestamptz`, and `boolean` to `boolean`. Every column is `not null`; exactly one primary key is required, and ordinary `string` fields are never primary keys.
+`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, and then creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared logical-field order for columns. Scalar fields use their logical field name; a singular reference field uses its explicit `column` name. UUID and Snowflake values always map to `text` with format checks, as do primary keys and reference columns; `string` maps to `text`, `number` to `double precision`, `date` to `date`, `timestamp` to `timestamptz`, and `boolean` to `boolean`. Every column is `not null`; exactly one primary key is required, and ordinary `string` fields are never primary keys.
 
-The statements are deterministic and available through `entities.ddl`: each table's `create table` and `create index` statements run in table order, with the system root first, followed by `alter table ... add constraint` statements in entity/field order. Constraints are `deferrable initially immediate`, so normal operations validate immediately while a transaction can explicitly defer validation for mutually dependent inserts:
+Each entity table has a real primary key and an MTI parent foreign key to either the system `Entity` root or its abstract parent table. Shared fields are stored only in the table that owns them. The root alone stores `displayName` and the concrete-leaf `entity` discriminator. Multi-tier chains such as `Entity → User → SystemUser/Client` and `Entity → Book → Novel` therefore use ordinary PostgreSQL PK/FK joins, not `INHERITS`.
+
+The statements are deterministic and available through `entities.ddl`: each table's `create table` and `create index` statements run in table order, with the system root first, followed by MTI parent constraints in entity order and reference constraints in entity/field order. Constraints are `deferrable initially immediate`, so normal operations validate immediately while a transaction can explicitly defer validation for mutually dependent inserts:
 
 ```ts
 await server.db.tx(async transaction => {
   await transaction`set constraints all deferred`
+  await transaction`insert into "Entity" ("id", "displayName", "entity") values (${userId}, 'User', 'User'), (${carId}, 'Car', 'Car')`
   await transaction`insert into "User" ("id", "carId") values (${userId}, ${carId})`
   await transaction`insert into "Car" ("id", "userId") values (${carId}, ${userId})`
 })
@@ -81,7 +109,7 @@ Cyclic and self-referential schemas are supported. Existing tables in the curren
 
 ## `db.query`
 
-Attach the same canonical definitions to the database capability, then project root scalar fields from one entity:
+Attach the same canonical definitions to the database capability, then project root scalar fields from one entity. MTI leaf identity and descendant expansion remain deferred, so an abstract entity query currently exposes only that table's own scalar fields:
 
 ```ts
 import { EntityDefinitions, Operator, Server, SortDirection } from 'basis/server'
@@ -128,9 +156,11 @@ Structured and string filters normalize to the same canonical predicate tree and
 
 Predicate evaluation is two-valued, including on SQL `NULL`. Equality to a non-null value and range comparisons are false on `NULL`, and `Not` complements that result. Therefore `$ne 5` matches rows whose field is `NULL` as well as rows that are not `5`; `$eq null` matches only `NULL`, and `$ne null` matches only non-`NULL`. `$empty` matches exactly `NULL` or `''`, not whitespace-only strings; not-empty is `Not(Empty(field))` and does match whitespace-only strings.
 
-Unquoted literals are typed from the target field, and quoted values remain strings. Snowflake values accept exact decimal strings at the JSON boundary. Every value is passed as a SQL parameter. Range operators are limited to ordered scalar fields (`string`, `number`, `date`, `timestamp`, and `snowflake`), not `boolean` or `uuid`. Unknown fields, operators, malformed nodes, incompatible literal types, or incompatible field/operator combinations fail before SQL runs.
+Unquoted literals are typed from the target field, and quoted values remain strings. Snowflake operands accept canonical decimal strings or exact bigint values and normalize to canonical text. Every value is passed as a SQL parameter. Range operators are limited to ordered scalar fields (`string`, `number`, `date`, `timestamp`, and `snowflake`), not `boolean` or `uuid`. Snowflake identity ordering and ranges compare canonical text, not numeric magnitude. Unknown fields, operators, malformed nodes, incompatible literal types, or incompatible field/operator combinations fail before SQL runs.
 
-`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, row order is unspecified, so use explicit ordering when paging deterministically. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Snowflake values are hydrated to exact `bigint` values in `db.query` results; raw `db.sql` keeps Bun's native PostgreSQL `bigint` string decoding. This step intentionally supports scalar root projections only — relationships and graph projections arrive in later steps.
+UUID and Snowflake values remain canonical text in `db.query` results; there is no implicit bigint conversion for identity values. Ordering and comparisons operate on the physical text identity.
+
+`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, row order is unspecified, so use explicit ordering when paging deterministically. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step intentionally supports scalar root projections only — relationships and graph projections arrive in later steps.
 
 ## `db.sql`
 

@@ -28,6 +28,17 @@ const entity = 'Note'
 const note = definitions.entity(entity)
 if (!note) throw new Error('missing Note entity')
 
+const snowflakeDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [{
+    fields: [
+      { name: 'id', primaryKey: true, type: 'snowflake' },
+      { name: 'externalId', type: 'snowflake' },
+      { name: 'title', type: 'string' },
+    ],
+    name: 'Account',
+  }],
+}))
+
 describe('SQL.where', () => {
   test('compiles explicit And comparisons and preserves bound values', () => {
     const predicate = SQL.where(definitions, entity, {
@@ -219,6 +230,8 @@ describe('SQL.where', () => {
     }
     expect(() => SQL.where(definitions, entity, { active: 'true' })).toThrow('not a valid boolean value')
     expect(() => SQL.where(definitions, entity, { id: '' })).toThrow('not a valid uuid value')
+    expect(() => SQL.where(definitions, entity, { id: '42' })).toThrow('not a valid uuid value')
+    expect(() => SQL.where(definitions, entity, { externalId: '01' })).toThrow('not a valid snowflake value')
     expect(() => SQL.where(definitions, entity, { dueOn: '' })).toThrow('not a valid date value')
     expect(() => SQL.where(definitions, entity, {
       createdAt: new Date('invalid'),
@@ -234,10 +247,40 @@ describe('SQL.where', () => {
     })).toThrow('not a valid number value')
   })
 
-  test('accepts exact Snowflake bigint and decimal-string values', () => {
+  test('keeps text-backed Snowflake identity comparisons textual', () => {
+    expect(SQL.where(snowflakeDefinitions, 'Account', { id: '2' })).toEqual({
+      sql: 'WHERE "id" IS NOT DISTINCT FROM $1',
+      values: ['2'],
+    })
+    expect(SQL.where(snowflakeDefinitions, 'Account', {
+      field: 'id',
+      operator: Operator.Comparison.GreaterThan,
+      value: '2',
+    })).toEqual({
+      sql: 'WHERE COALESCE("id" > $1, FALSE)',
+      values: ['2'],
+    })
+    expect(SQL.where(snowflakeDefinitions, 'Account', {
+      field: 'externalId',
+      operator: Operator.Comparison.GreaterThan,
+      value: '2',
+    })).toEqual({
+      sql: 'WHERE COALESCE("externalId" > $1, FALSE)',
+      values: ['2'],
+    })
+  })
+
+  test('orders text-backed identity values by their text column', () => {
+    expect(SQL.orderBy(snowflakeDefinitions, 'Account', 'id'))
+      .toEqual({ sql: 'ORDER BY "id" ASC' })
+    expect(SQL.orderBy(snowflakeDefinitions, 'Account', 'externalId'))
+      .toEqual({ sql: 'ORDER BY "externalId" ASC' })
+  })
+
+  test('normalizes exact Snowflake bigint operands to canonical text', () => {
     expect(SQL.where(definitions, entity, {
       externalId: 9223372036854775807n,
-    }).values).toEqual([9223372036854775807n])
+    }).values).toEqual(['9223372036854775807'])
     expect(SQL.where(definitions, entity, {
       externalId: '9223372036854775807',
     }).values).toEqual(['9223372036854775807'])

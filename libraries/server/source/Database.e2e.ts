@@ -328,13 +328,14 @@ describe('Server database lifecycle', () => {
           order by ordinal_position
         `
     expect([...noteColumns, ...accountColumns]).toEqual([
-      { columnName: 'id', dataType: 'uuid', isNullable: 'NO', tableName: 'Note' },
+      { columnName: 'id', dataType: 'text', isNullable: 'NO', tableName: 'Note' },
       { columnName: 'title', dataType: 'text', isNullable: 'NO', tableName: 'Note' },
       { columnName: 'active', dataType: 'boolean', isNullable: 'NO', tableName: 'Note' },
       { columnName: 'score', dataType: 'double precision', isNullable: 'NO', tableName: 'Note' },
       { columnName: 'dueOn', dataType: 'date', isNullable: 'NO', tableName: 'Note' },
       { columnName: 'createdAt', dataType: 'timestamp with time zone', isNullable: 'NO', tableName: 'Note' },
-      { columnName: 'id', dataType: 'bigint', isNullable: 'NO', tableName: 'Account' },
+      { columnName: 'id', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
+      { columnName: 'externalId', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
       { columnName: 'name', dataType: 'text', isNullable: 'NO', tableName: 'Account' },
     ])
 
@@ -347,32 +348,46 @@ describe('Server database lifecycle', () => {
         `
     expect(primaryKeys.map(row => row.tableName)).toEqual(['Account', 'Note'])
 
+    const keptId = randomUUID()
+    const accountId = '9223372036854775807'
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${keptId}, ${'kept'}, ${'Note'}), (${accountId}, ${'Troy'}, ${'Account'})
+    `
     await database.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
-          values (gen_random_uuid(), 'kept', true, 1.5, '2026-01-02', now())
+          values (${keptId}, 'kept', true, 1.5, '2026-01-02', now())
         `
-    await database.sql`insert into "Account" ("id", "name") values (${'9223372036854775807'}, ${'Troy'})`
+    await database.sql`
+      insert into "Account" ("id", "externalId", "name")
+      values (${accountId}, ${'123'}, ${'Troy'})
+    `
     await entities.createTables(database.sql)
     expect(await database.sql<{ count: number }[]>`select count(*)::int as count from "Note"`)
       .toEqual([{ count: 1 }])
     expect(await database.sql<{ id: string }[]>`select id::text as id from "Account"`)
-      .toEqual([{ id: '9223372036854775807' }])
+      .toEqual([{ id: accountId }])
     expect(await database.sql<{ id: string }[]>`select id from "Account"`)
-      .toEqual([{ id: '9223372036854775807' }])
+      .toEqual([{ id: accountId }])
 
-    const account = await database.query<{ id: bigint, name: string }>('Account', {
+    const account = await database.query<{ id: string, name: string }>('Account', {
       fields: ['id', 'name'],
       where: { id: '9223372036854775807' },
     })
-    expect(account).toEqual([{ id: 9223372036854775807n, name: 'Troy' }])
-    expect(typeof account[0]?.id).toBe('bigint')
+    expect(account).toEqual([{ id: '9223372036854775807', name: 'Troy' }])
+    expect(typeof account[0]?.id).toBe('string')
 
     expect(await database.query<{ score: number, title: string }>('Note', {
       fields: ['title', 'score'],
     })).toEqual([{ score: 1.5, title: 'kept' }])
+    const ignoredId = randomUUID()
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${ignoredId}, ${'ignored'}, ${'Note'})
+    `
     await database.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
-          values (gen_random_uuid(), 'ignored', false, 2, '2026-01-03', now())
+          values (${ignoredId}, 'ignored', false, 2, '2026-01-03', now())
         `
     expect(await database.query<{ title: string }>('Note', {
       fields: ['title'],
@@ -409,11 +424,17 @@ describe('Server database lifecycle', () => {
       limit: 2,
       orderBy: 'title',
     })).toEqual([{ title: 'ignored' }, { title: 'kept' }])
+    const betaId = randomUUID()
+    const alphaId = randomUUID()
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${betaId}, ${'beta'}, ${'Note'}), (${alphaId}, ${'alpha'}, ${'Note'})
+    `
     await database.sql`
           insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
           values
-            (gen_random_uuid(), 'beta', true, 5, '2026-01-04', now()),
-            (gen_random_uuid(), 'alpha', true, 5, '2026-01-04', now())
+            (${betaId}, 'beta', true, 5, '2026-01-04', now()),
+            (${alphaId}, 'alpha', true, 5, '2026-01-04', now())
         `
     expect(await database.query<{ title: string }>('Note', {
       fields: ['title'],
@@ -443,10 +464,16 @@ describe('Server database lifecycle', () => {
       .rejects.toThrow('Query fields must be a non-empty array')
 
     await database.sql`
-          insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
-          select gen_random_uuid(), 'page-' || value, true, value, '2026-01-03', now()
-          from generate_series(1, 30) as series(value)
-        `
+      with rows as (
+        select gen_random_uuid()::text as id, value
+        from generate_series(1, 30) as series(value)
+      ), roots as (
+        insert into "Entity" ("id", "displayName", "entity")
+        select id, 'page-' || value, 'Note' from rows
+      )
+      insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
+      select id, 'page-' || value, true, value, '2026-01-03', now() from rows
+    `
     expect(await database.query('Note', { fields: ['title'] })).toHaveLength(25)
     expect(await database.query('Note', { fields: ['title'], limit: null })).toHaveLength(34)
 
@@ -544,7 +571,7 @@ describe('Server database lifecycle', () => {
       select
         value::text,
         'item-' || lpad(value::text, 6, '0') || '-' || md5(value::text),
-        case when value % 2 = 0 then 'Note' else 'Book' end
+        'Note'
       from generate_series(1, 100_000) as series(value)
     `
     await database.sql`analyze "Entity"`
@@ -571,15 +598,220 @@ describe('Server database lifecycle', () => {
       .toContain('Entity_displayName_trgm_idx')
   }, 120_000)
 
+  isolatedTest('creates multi-tier MTI tables with shared ids and parent joins', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          abstract: true,
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'email', type: 'string' },
+          ],
+          name: 'User',
+        },
+        {
+          extends: 'User',
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'permissions', type: 'string' },
+          ],
+          name: 'SystemUser',
+        },
+        {
+          extends: 'User',
+          fields: [
+            { name: 'id', primaryKey: true, type: 'uuid' },
+            { name: 'company', type: 'string' },
+          ],
+          name: 'Client',
+        },
+        {
+          abstract: true,
+          fields: [
+            { name: 'id', primaryKey: true, type: 'snowflake' },
+            { name: 'title', type: 'string' },
+          ],
+          name: 'Book',
+        },
+        {
+          extends: 'Book',
+          fields: [
+            { name: 'id', primaryKey: true, type: 'snowflake' },
+            { name: 'genre', type: 'string' },
+          ],
+          name: 'Novel',
+        },
+      ],
+    }))
+    await entities.createTables(database.sql)
+
+    expect(await database.sql<{ columnName: string, tableName: string }[]>`
+      select table_name as "tableName", column_name as "columnName"
+      from information_schema.columns
+      where table_schema = current_schema()
+        and table_name in ('User', 'SystemUser')
+      order by table_name, ordinal_position
+    `).toEqual([
+      { columnName: 'id', tableName: 'SystemUser' },
+      { columnName: 'permissions', tableName: 'SystemUser' },
+      { columnName: 'id', tableName: 'User' },
+      { columnName: 'email', tableName: 'User' },
+    ])
+
+    expect(await database.sql<{ definition: string }[]>`
+      select pg_get_constraintdef(oid) as definition
+      from pg_constraint
+      where conrelid = '"SystemUser"'::regclass and contype = 'f'
+    `).toEqual([{
+      definition: 'FOREIGN KEY (id) REFERENCES "User"(id) DEFERRABLE',
+    }])
+
+    const id = randomUUID()
+    await database.sql.unsafe('set constraints all deferred').simple()
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${id}, ${'Ada'}, ${'SystemUser'})
+    `
+    await database.sql`
+      insert into "SystemUser" ("id", "permissions") values (${id}, ${'admin'})
+    `
+    await database.sql`
+      insert into "User" ("id", "email") values (${id}, ${'ada@example.test'})
+    `
+    expect(await database.sql<{ displayName: string, email: string, entity: string, permissions: string }[]>`
+      select e."displayName", e."entity", u."email", s."permissions"
+      from "Entity" e
+      join "User" u on u."id" = e."id"
+      join "SystemUser" s on s."id" = e."id"
+    `).toEqual([{
+      displayName: 'Ada',
+      email: 'ada@example.test',
+      entity: 'SystemUser',
+      permissions: 'admin',
+    }])
+
+    const abstractId = randomUUID()
+    const abstract = await database.captureError(async db => {
+      await db.sql`
+        insert into "Entity" ("id", "displayName", "entity")
+        values (${abstractId}, ${'Abstract'}, ${'User'})
+      `
+    })
+    expect(abstract).toMatchObject({ errno: '23514' })
+
+    await database.sql.unsafe('set constraints all immediate').simple()
+    const missingParentId = randomUUID()
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${missingParentId}, ${'Missing parent'}, ${'SystemUser'})
+    `
+    const missingParent = await database.captureError(async db => {
+      await db.sql`
+        insert into "SystemUser" ("id", "permissions")
+        values (${missingParentId}, ${'admin'})
+      `
+    })
+    expect(missingParent).toMatchObject({ errno: '23503' })
+
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${'42'}, ${'Wrong UUID format'}, ${'SystemUser'})
+    `
+    const wrongUuid = await database.captureError(async db => {
+      await db.sql`
+        insert into "User" ("id", "email")
+        values (${'42'}, ${'wrong@example.test'})
+      `
+    })
+    expect(wrongUuid).toMatchObject({ errno: '23514' })
+
+    const wrongSnowflakeId = randomUUID()
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${wrongSnowflakeId}, ${'Wrong Snowflake format'}, ${'Novel'})
+    `
+    const wrongSnowflake = await database.captureError(async db => {
+      await db.sql`
+        insert into "Book" ("id", "title")
+        values (${wrongSnowflakeId}, ${'Wrong format'})
+      `
+    })
+    expect(wrongSnowflake).toMatchObject({ errno: '23514' })
+
+    const blockedDelete = await database.captureError(async db => {
+      await db.sql`delete from "User" where "id" = ${id}`
+    })
+    expect(blockedDelete).toMatchObject({ errno: '23503' })
+  }, 120_000)
+
+  isolatedTest('preserves textual Snowflake identity values', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { name: 'id', primaryKey: true, type: 'snowflake' },
+          { name: 'externalId', type: 'snowflake' },
+          { name: 'name', type: 'string' },
+        ],
+        name: 'Account',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values
+        ('10', 'Ten', 'Account'),
+        ('2', 'Two', 'Account'),
+        ('-9223372036854775808', 'Minimum', 'Account'),
+        ('9223372036854775807', 'Maximum', 'Account'),
+        ('0', 'Zero', 'Account'),
+        ('-2', 'Negative two', 'Account')
+    `
+    await database.sql`
+      insert into "Account" ("id", "externalId", "name")
+      values
+        ('10', '100', 'Ten'),
+        ('2', '200', 'Two'),
+        ('-9223372036854775808', '-5', 'Minimum'),
+        ('9223372036854775807', '5', 'Maximum'),
+        ('0', '0', 'Zero'),
+        ('-2', '-1', 'Negative two')
+    `
+
+    const rows = await database.query<{ externalId: string, id: string, name: string }>('Account', {
+      fields: ['id', 'externalId', 'name'],
+      limit: null,
+      orderBy: 'name',
+    })
+    expect(rows).toEqual([
+      { externalId: '5', id: '9223372036854775807', name: 'Maximum' },
+      { externalId: '-5', id: '-9223372036854775808', name: 'Minimum' },
+      { externalId: '-1', id: '-2', name: 'Negative two' },
+      { externalId: '100', id: '10', name: 'Ten' },
+      { externalId: '200', id: '2', name: 'Two' },
+      { externalId: '0', id: '0', name: 'Zero' },
+    ])
+    expect(rows.every(row => typeof row.id === 'string' && typeof row.externalId === 'string')).toBe(true)
+    expect(await database.query<{ externalId: string, id: string, name: string }>('Account', {
+      fields: ['id', 'externalId', 'name'],
+      where: { id: '10' },
+    })).toEqual([{ externalId: '100', id: '10', name: 'Ten' }])
+  }, 120_000)
+
   isolatedTest('filters numeric values with each comparison operator', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [numberRowDefinition],
     }))
     await entities.createTables(database.sql)
     await database.sql`
+      with rows as (
+        select gen_random_uuid()::text as id, value
+        from generate_series(1, 10) as series(value)
+      ), roots as (
+        insert into "Entity" ("id", "displayName", "entity")
+        select id, 'Number ' || value, 'NumberRow' from rows
+      )
       insert into "NumberRow" ("id", "value")
-      select gen_random_uuid(), value
-      from generate_series(1, 10) as series(value)
+      select id, value from rows
     `
 
     const query = (where: Filter | Readonly<Record<string, unknown>>) => (
@@ -636,26 +868,39 @@ describe('Server database lifecycle', () => {
       select pg_get_constraintdef(oid) as definition
       from pg_constraint
       where conrelid = '"Post"'::regclass and contype = 'f'
+      order by conname collate "C"
     `
-    expect(constraints).toEqual([{
-      definition: 'FOREIGN KEY ("userId") REFERENCES "User"(id) DEFERRABLE',
-    }])
+    expect(constraints).toEqual([
+      { definition: 'FOREIGN KEY (id) REFERENCES "Entity"(id) DEFERRABLE' },
+      { definition: 'FOREIGN KEY ("userId") REFERENCES "User"(id) DEFERRABLE' },
+    ])
 
+    const userId = '9223372036854775807'
+    const postId = randomUUID()
     await database.sql`
-      insert into "User" ("id", "name") values (${'9223372036854775807'}, ${'Ada'})
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${userId}, ${'Ada'}, ${'User'}), (${postId}, ${'Hello'}, ${'Post'})
+    `
+    await database.sql`
+      insert into "User" ("id", "name") values (${userId}, ${'Ada'})
     `
     await database.sql`
       insert into "Post" ("id", "userId", "title")
-      values (gen_random_uuid(), ${'9223372036854775807'}, ${'Hello'})
+      values (${postId}, ${userId}, ${'Hello'})
     `
     expect(await database.sql<{ userId: string }[]>`
       select "userId"::text as "userId" from "Post"
-    `).toEqual([{ userId: '9223372036854775807' }])
+    `).toEqual([{ userId }])
 
+    const invalidId = randomUUID()
+    await database.sql`
+      insert into "Entity" ("id", "displayName", "entity")
+      values (${invalidId}, ${'Invalid'}, ${'Post'})
+    `
     const invalidInsert = await database.captureError(async db => {
       await db.sql`
         insert into "Post" ("id", "userId", "title")
-        values (gen_random_uuid(), ${'1'}, ${'Invalid'})
+        values (${invalidId}, ${'1'}, ${'Invalid'})
       `
     })
     expect(invalidInsert).toMatchObject({ errno: '23503' })
@@ -707,14 +952,16 @@ describe('Server database lifecycle', () => {
       from pg_constraint
       where conrelid in ('"CycleUser"'::regclass, '"CycleCar"'::regclass)
         and contype = 'f'
-      order by conname
+      order by conname collate "C"
     `)
     expect(constraints.map(constraint => ({
       deferrable: constraint.deferrable,
       deferred: constraint.deferred,
       name: constraint.name,
     }))).toEqual([
+      { deferrable: true, deferred: false, name: 'CycleCar_Entity_mti_fkey' },
       { deferrable: true, deferred: false, name: 'CycleCar_user_fkey' },
+      { deferrable: true, deferred: false, name: 'CycleUser_Entity_mti_fkey' },
       { deferrable: true, deferred: false, name: 'CycleUser_car_fkey' },
     ])
     expect(constraints.every(constraint => constraint.definition.endsWith('DEFERRABLE')))
@@ -724,6 +971,10 @@ describe('Server database lifecycle', () => {
     const carId = randomUUID()
     await database.tx(async transaction => {
       await transaction`set constraints all deferred`
+      await transaction`
+        insert into "Entity" ("id", "displayName", "entity")
+        values (${userId}, ${'User'}, ${'CycleUser'}), (${carId}, ${'Car'}, ${'CycleCar'})
+      `
       await transaction`
         insert into "CycleUser" ("id", "carId") values (${userId}, ${carId})
       `
@@ -735,10 +986,17 @@ describe('Server database lifecycle', () => {
       select count(*)::int as count from "CycleUser"
     `)).toEqual([{ count: 1 }])
 
+    const invalidCarId = randomUUID()
+    const invalidUserId = randomUUID()
     const invalid = await database.tx(async transaction => {
       await transaction`set constraints all deferred`
       await transaction`
-        insert into "CycleCar" ("id", "userId") values (${randomUUID()}, ${randomUUID()})
+        insert into "Entity" ("id", "displayName", "entity")
+        values (${invalidUserId}, ${'Missing user'}, ${'CycleUser'}),
+          (${invalidCarId}, ${'Invalid car'}, ${'CycleCar'})
+      `
+      await transaction`
+        insert into "CycleCar" ("id", "userId") values (${invalidCarId}, ${invalidUserId})
       `
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
@@ -749,7 +1007,7 @@ describe('Server database lifecycle', () => {
       from pg_constraint
       where conrelid in ('"CycleUser"'::regclass, '"CycleCar"'::regclass)
         and contype = 'f'
-    `)).toEqual([{ count: 2 }])
+    `)).toEqual([{ count: 4 }])
 
     await database.tx(async tx => tx`
       alter table "CycleUser" drop constraint "CycleUser_car_fkey"
@@ -811,6 +1069,10 @@ describe('Server database lifecycle', () => {
     await database.tx(async transaction => {
       await transaction`set constraints all deferred`
       await transaction`
+        insert into "Entity" ("id", "displayName", "entity")
+        values (${nodeId}, ${'Node'}, ${'TreeNode'})
+      `
+      await transaction`
         insert into "TreeNode" ("id", "parentId") values (${nodeId}, ${nodeId})
       `
     })
@@ -818,10 +1080,15 @@ describe('Server database lifecycle', () => {
       select count(*)::int as count from "TreeNode"
     `)).toEqual([{ count: 1 }])
 
+    const invalidNodeId = randomUUID()
     const invalid = await database.tx(async transaction => {
       await transaction`set constraints all deferred`
       await transaction`
-        insert into "TreeNode" ("id", "parentId") values (${randomUUID()}, ${randomUUID()})
+        insert into "Entity" ("id", "displayName", "entity")
+        values (${invalidNodeId}, ${'Invalid node'}, ${'TreeNode'})
+      `
+      await transaction`
+        insert into "TreeNode" ("id", "parentId") values (${invalidNodeId}, ${randomUUID()})
       `
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
