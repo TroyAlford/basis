@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
+import { toMatchSQL } from '../testing/toMatchSQL'
 import { EntityDefinitions, FieldType } from './EntityDefinitions'
+
+expect.extend({ toMatchSQL })
 
 /**
  * Load entity definitions through their canonical JSON representation.
@@ -100,22 +103,23 @@ describe('EntityDefinitions', () => {
       targetType: FieldType.Snowflake,
       type: FieldType.Entity,
     })
-    const creates = entities.ddl.filter(statement => statement.startsWith('CREATE TABLE'))
-    const constraints = entities.ddl.filter(statement => statement.startsWith('ALTER TABLE'))
-    expect(creates[0]).toContain('CREATE TABLE "Note"')
-    expect(creates[1]).toContain('CREATE TABLE "User"')
-    expect(creates[0]).toContain('"ownerId" BIGINT NOT NULL')
-    expect(creates[0]).toContain('"lastUpdatedById" BIGINT NOT NULL')
-    expect(creates[0]).not.toContain('REFERENCES')
-    expect(constraints).toEqual([
-      expect.stringContaining(
-        'ALTER TABLE "Note" ADD CONSTRAINT "Note_owner_fkey" ' +
-        'FOREIGN KEY ("ownerId") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
-      ),
-      expect.stringContaining(
-        'ALTER TABLE "Note" ADD CONSTRAINT "Note_lastUpdatedBy_fkey" ' +
-        'FOREIGN KEY ("lastUpdatedById") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
-      ),
+    expect(entities.ddl).toMatchSQL([
+      `CREATE TABLE "Note" (
+        "id" UUID PRIMARY KEY,
+        "ownerId" BIGINT NOT NULL,
+        "lastUpdatedById" BIGINT NOT NULL,
+        "title" TEXT NOT NULL
+      )`,
+      `CREATE TABLE "User" (
+        "id" BIGINT PRIMARY KEY,
+        "name" TEXT NOT NULL
+      )`,
+      `ALTER TABLE "Note" ADD CONSTRAINT "Note_owner_fkey"
+        FOREIGN KEY ("ownerId") REFERENCES "User" ("id")
+        DEFERRABLE INITIALLY IMMEDIATE`,
+      `ALTER TABLE "Note" ADD CONSTRAINT "Note_lastUpdatedBy_fkey"
+        FOREIGN KEY ("lastUpdatedById") REFERENCES "User" ("id")
+        DEFERRABLE INITIALLY IMMEDIATE`,
     ])
   })
 
@@ -171,8 +175,16 @@ describe('EntityDefinitions', () => {
       targetType: FieldType.Snowflake,
       type: FieldType.Entity,
     })
-    expect(entities.ddl.find(statement => statement.startsWith('ALTER TABLE')))
-      .toContain('FOREIGN KEY ("writer") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE')
+    expect(entities.ddl).toMatchSQL([
+      `CREATE TABLE "Note" (
+        "id" UUID PRIMARY KEY,
+        "writer" BIGINT NOT NULL
+      )`,
+      'CREATE TABLE "User" ("id" BIGINT PRIMARY KEY)',
+      `ALTER TABLE "Note" ADD CONSTRAINT "Note_author_fkey"
+        FOREIGN KEY ("writer") REFERENCES "User" ("id")
+        DEFERRABLE INITIALLY IMMEDIATE`,
+    ])
   })
 
   test('derives the reference column type from a non-id target primary key', () => {
@@ -199,8 +211,19 @@ describe('EntityDefinitions', () => {
       targetField: 'externalId',
       targetType: FieldType.Snowflake,
     })
-    expect(entities.ddl.find(statement => statement.startsWith('ALTER TABLE')))
-      .toContain('REFERENCES "User" ("externalId") DEFERRABLE INITIALLY IMMEDIATE')
+    expect(entities.ddl).toMatchSQL([
+      `CREATE TABLE "Note" (
+        "id" UUID PRIMARY KEY,
+        "userId" BIGINT NOT NULL
+      )`,
+      `CREATE TABLE "User" (
+        "externalId" BIGINT PRIMARY KEY,
+        "name" TEXT NOT NULL
+      )`,
+      `ALTER TABLE "Note" ADD CONSTRAINT "Note_user_fkey"
+        FOREIGN KEY ("userId") REFERENCES "User" ("externalId")
+        DEFERRABLE INITIALLY IMMEDIATE`,
+    ])
   })
 
   test('supports self-referential singular references', () => {
@@ -222,11 +245,16 @@ describe('EntityDefinitions', () => {
       targetField: 'id',
       type: FieldType.Entity,
     })
-    expect(entities.ddl[0]).toContain('"managerId" UUID NOT NULL')
-    expect(entities.ddl[1]).toContain(
-      'ALTER TABLE "User" ADD CONSTRAINT "User_manager_fkey" ' +
-      'FOREIGN KEY ("managerId") REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
-    )
+    expect(entities.ddl).toMatchSQL([
+      `CREATE TABLE "User" (
+        "id" UUID PRIMARY KEY,
+        "managerId" UUID NOT NULL,
+        "name" TEXT NOT NULL
+      )`,
+      `ALTER TABLE "User" ADD CONSTRAINT "User_manager_fkey"
+        FOREIGN KEY ("managerId") REFERENCES "User" ("id")
+        DEFERRABLE INITIALLY IMMEDIATE`,
+    ])
   })
 
   test('rejects invalid references and physical column collisions', () => {
@@ -402,13 +430,21 @@ describe('EntityDefinitions', () => {
       ],
     })
 
-    expect(entities.ddl).toEqual([
-      'CREATE TABLE "User" (\n"id" UUID PRIMARY KEY,\n"carId" UUID NOT NULL\n)',
-      'CREATE TABLE "Car" (\n"id" UUID PRIMARY KEY,\n"userId" UUID NOT NULL\n)',
-      'ALTER TABLE "User" ADD CONSTRAINT "User_car_fkey" FOREIGN KEY ("carId") ' +
-        'REFERENCES "Car" ("id") DEFERRABLE INITIALLY IMMEDIATE',
-      'ALTER TABLE "Car" ADD CONSTRAINT "Car_user_fkey" FOREIGN KEY ("userId") ' +
-        'REFERENCES "User" ("id") DEFERRABLE INITIALLY IMMEDIATE',
+    expect(entities.ddl).toMatchSQL([
+      `CREATE TABLE "User" (
+        "id" UUID PRIMARY KEY,
+        "carId" UUID NOT NULL
+      )`,
+      `CREATE TABLE "Car" (
+        "id" UUID PRIMARY KEY,
+        "userId" UUID NOT NULL
+      )`,
+      `ALTER TABLE "User" ADD CONSTRAINT "User_car_fkey"
+        FOREIGN KEY ("carId") REFERENCES "Car" ("id")
+        DEFERRABLE INITIALLY IMMEDIATE`,
+      `ALTER TABLE "Car" ADD CONSTRAINT "Car_user_fkey"
+        FOREIGN KEY ("userId") REFERENCES "User" ("id")
+        DEFERRABLE INITIALLY IMMEDIATE`,
     ])
   })
 

@@ -58,6 +58,76 @@ export interface QueryOptions {
   where?: Filter | Readonly<Record<string, unknown>> | string,
 }
 
+/** A compiled entity query and its ordered parameter values. */
+export interface CompiledEntityQuery {
+  /** Complete SQL statement. */
+  readonly sql: string,
+  /** Values bound to `$1`, `$2`, … in order. */
+  readonly values: readonly unknown[],
+}
+
+/** A prepared query plus hydration metadata. */
+interface PreparedEntityQuery {
+  /** Complete SQL statement and ordered bindings. */
+  readonly query: CompiledEntityQuery,
+  /** Snowflake fields that require bigint hydration. */
+  readonly snowflakes: ReadonlySet<string>,
+}
+
+/**
+ * Compile one entity query without executing it.
+ * @param entities - Canonical entity definitions.
+ * @param entity - Exact canonical entity name.
+ * @param options - Query options.
+ * @returns The complete SQL and ordered bindings.
+ * @throws {Error} When the entity or query is invalid.
+ */
+export function compileEntityQuery(
+  entities: EntityDefinitions,
+  entity: string,
+  options: QueryOptions,
+): CompiledEntityQuery {
+  return prepareEntityQuery(entities, entity, options).query
+}
+
+/**
+ * Prepare one entity query for execution.
+ * @param entities - Canonical entity definitions.
+ * @param entity - Exact canonical entity name.
+ * @param options - Query options.
+ * @returns The compiled query and hydration metadata.
+ */
+function prepareEntityQuery(
+  entities: EntityDefinitions,
+  entity: string,
+  options: QueryOptions,
+): PreparedEntityQuery {
+  const definition = entities.entity(entity)
+  if (!definition) throw new Error(`Unknown entity "${entity}"`)
+  const selection = SQL.select(entities, entity, options.fields)
+  const where = typeof options.where === 'string'
+    ? QueryNormalizer.normalize(definition, options.where) ?? undefined
+    : options.where
+  const predicate = SQL.where(entities, entity, where)
+  const ordering = SQL.orderBy(entities, entity, options.orderBy)
+  const limit = options.limit === undefined ? 25 : options.limit
+  const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length)
+  const statement = [selection.sql, predicate.sql, ordering.sql, pagination.sql]
+    .filter(clause => clause !== '')
+    .join(' ')
+  return {
+    query: {
+      sql: statement,
+      values: [...predicate.values, ...pagination.values],
+    },
+    snowflakes: new Set(
+      selection.fields
+        .filter(field => field.type === FieldType.Snowflake)
+        .map(field => field.name),
+    ),
+  }
+}
+
 /**
  * Execute one entity query through a specific Bun SQL client.
  *
@@ -76,29 +146,11 @@ export async function queryEntity<T = Record<string, unknown>>(
   entity: string,
   options: QueryOptions,
 ): Promise<T[]> {
-  const definition = entities.entity(entity)
-  if (!definition) throw new Error(`Unknown entity "${entity}"`)
-  const selection = SQL.select(entities, entity, options.fields)
-  const where = typeof options.where === 'string'
-    ? QueryNormalizer.normalize(definition, options.where) ?? undefined
-    : options.where
-  const predicate = SQL.where(entities, entity, where)
-  const ordering = SQL.orderBy(entities, entity, options.orderBy)
-  const limit = options.limit === undefined ? 25 : options.limit
-  const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length)
-  const statement = [selection.sql, predicate.sql, ordering.sql, pagination.sql]
-    .filter(clause => clause !== '')
-    .join(' ')
-  const values = [...predicate.values, ...pagination.values]
-  const rows = await sql.unsafe<T[]>(statement, values)
-  const snowflakes = new Set(
-    selection.fields
-      .filter(field => field.type === FieldType.Snowflake)
-      .map(field => field.name),
-  )
+  const prepared = prepareEntityQuery(entities, entity, options)
+  const rows = await sql.unsafe<T[]>(prepared.query.sql, [...prepared.query.values])
 
   for (const row of rows as Record<string, unknown>[]) {
-    for (const field of snowflakes) {
+    for (const field of prepared.snowflakes) {
       const value = row[field]
       if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
         row[field] = BigInt(value)

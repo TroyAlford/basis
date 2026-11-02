@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 import { accountDefinition, containers, noteDefinition, numberRowDefinition, removeService, useDatabaseFixture } from '../testing/DatabaseFixture'
 import type { DurableDatabase, IsolatedDatabase } from '../testing/DatabaseIsolation'
 import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { toMatchSQL } from '../testing/toMatchSQL'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
@@ -18,6 +19,8 @@ import { SortDirection } from './SortDirection'
  * Real PostgreSQL lifecycle. The suite owns Docker services through the
  * server capability; it never replaces the database boundary with a mock.
  */
+
+expect.extend({ toMatchSQL })
 
 const root = join(import.meta.dir, '..', '..', '..')
 const silent = new Logger({ silent: true })
@@ -519,17 +522,25 @@ describe('Server database lifecycle', () => {
 
     await entities.createTables(database.sql)
 
-    const creates = entities.ddl.filter(statement => statement.startsWith('CREATE TABLE'))
+    expect(entities.ddl).toMatchSQL([
+      `CREATE TABLE "Post" (
+        "id" UUID PRIMARY KEY,
+        "userId" BIGINT NOT NULL,
+        "title" TEXT NOT NULL
+      )`,
+      `CREATE TABLE "User" (
+        "id" BIGINT PRIMARY KEY,
+        "name" TEXT NOT NULL
+      )`,
+      `ALTER TABLE "Post" ADD CONSTRAINT "Post_author_fkey"
+        FOREIGN KEY ("userId") REFERENCES "User" ("id")
+        DEFERRABLE INITIALLY IMMEDIATE`,
+    ])
     const constraints = await database.sql<{ definition: string }[]>`
       select pg_get_constraintdef(oid) as definition
       from pg_constraint
       where conrelid = '"Post"'::regclass and contype = 'f'
     `
-    expect(creates[0]).toContain('CREATE TABLE "Post"')
-    expect(creates[0]).toContain('"userId" BIGINT NOT NULL')
-    expect(creates[0]).not.toContain('REFERENCES')
-    expect(entities.ddl.find(statement => statement.startsWith('ALTER TABLE')))
-      .toContain('DEFERRABLE INITIALLY IMMEDIATE')
     expect(constraints).toEqual([{
       definition: 'FOREIGN KEY ("userId") REFERENCES "User"(id) DEFERRABLE',
     }])
