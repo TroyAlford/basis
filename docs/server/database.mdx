@@ -50,6 +50,12 @@ The model is logical-first. A singular entity reference is itself a field in `fi
 
 Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `owner` is not selectable, filterable, or sortable until singular graph projection is implemented, and its physical `ownerId` column is not a logical field. Direct `db.sql` remains physical SQL and may use the generated column normally.
 
+## Universal identity root
+
+Every initialized schema includes a system `"Entity"` table used for globally linkable identity. Its `id` is exact `TEXT`; the format check accepts either a canonical lowercase UUID or a canonical signed 64-bit decimal string, so existing UUID and Snowflake keys can map to it without introducing a second identity format. `displayName` and the concrete-leaf `entity` discriminator are non-null text columns. `Entity` is reserved and cannot be declared as an application entity.
+
+The root has a B-tree index on `(displayName, id)` for stable sorted/paged access and a `pg_trgm` GIN index on `displayName` for indexed `ILIKE '%term%'` lookup. Initialization enables `pg_trgm` and creates both indexes. MTI tables, lifecycle writes and polymorphic query execution are deliberately not part of this step.
+
 ## Creating physical tables
 
 A fresh database is initialized explicitly from the same canonical definitions:
@@ -59,7 +65,7 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 await entities.createTables(server.db.sql)
 ```
 
-`createTables` creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared logical-field order for columns. Scalar fields use their logical field name; a singular reference field uses its explicit `column` name and derives the column type from the target's primary key. Foreign-key constraints are added in a separate phase after all tables exist. `uuid` maps to `UUID`, `snowflake` to `BIGINT`, `string` to `TEXT`, `number` to `DOUBLE PRECISION`, `date` to `DATE`, `timestamp` to `TIMESTAMPTZ`, and `boolean` to `BOOLEAN`. Every column is `NOT NULL`; exactly one primary key is required, and ordinary `string` fields are never primary keys.
+`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, and then creates one ordinary PostgreSQL table per entity, using the entity name as a quoted table name and the declared logical-field order for columns. Scalar fields use their logical field name; a singular reference field uses its explicit `column` name and derives the column type from the target's primary key. Foreign-key constraints are added in a separate phase after all tables exist. `uuid` maps to `UUID`, `snowflake` to `BIGINT`, `string` to `TEXT`, `number` to `DOUBLE PRECISION`, `date` to `DATE`, `timestamp` to `TIMESTAMPTZ`, and `boolean` to `BOOLEAN`. Every column is `NOT NULL`; exactly one primary key is required, and ordinary `string` fields are never primary keys.
 
 The statements are deterministic and available through `entities.ddl`: every `CREATE TABLE` runs first in declaration order, followed by `ALTER TABLE ... ADD CONSTRAINT` statements in entity/field order. Constraints are `DEFERRABLE INITIALLY IMMEDIATE`, so normal operations validate immediately while a transaction can explicitly defer validation for mutually dependent inserts:
 
