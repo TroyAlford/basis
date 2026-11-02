@@ -58,6 +58,57 @@ export interface QueryOptions {
   where?: Filter | Readonly<Record<string, unknown>> | string,
 }
 
+/**
+ * Execute one entity query through a specific Bun SQL client.
+ *
+ * The caller owns connection lifecycle and transaction scope; this helper owns
+ * model validation, SQL construction, execution, and hydration.
+ * @param sql - Connected SQL client, including a transaction-scoped client.
+ * @param entities - Canonical entity definitions.
+ * @param entity - Exact canonical entity name.
+ * @param options - Query options.
+ * @returns The selected rows.
+ * @throws {Error} When the entity or query is invalid.
+ */
+export async function queryEntity<T = Record<string, unknown>>(
+  sql: BunSQL,
+  entities: EntityDefinitions,
+  entity: string,
+  options: QueryOptions,
+): Promise<T[]> {
+  const definition = entities.entity(entity)
+  if (!definition) throw new Error(`Unknown entity "${entity}"`)
+  const selection = SQL.select(entities, entity, options.fields)
+  const where = typeof options.where === 'string'
+    ? QueryNormalizer.normalize(definition, options.where) ?? undefined
+    : options.where
+  const predicate = SQL.where(entities, entity, where)
+  const ordering = SQL.orderBy(entities, entity, options.orderBy)
+  const limit = options.limit === undefined ? 25 : options.limit
+  const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length)
+  const statement = [selection.sql, predicate.sql, ordering.sql, pagination.sql]
+    .filter(clause => clause !== '')
+    .join(' ')
+  const values = [...predicate.values, ...pagination.values]
+  const rows = await sql.unsafe<T[]>(statement, values)
+  const snowflakes = new Set(
+    selection.fields
+      .filter(field => field.type === FieldType.Snowflake)
+      .map(field => field.name),
+  )
+
+  for (const row of rows as Record<string, unknown>[]) {
+    for (const field of snowflakes) {
+      const value = row[field]
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
+        row[field] = BigInt(value)
+      }
+    }
+  }
+
+  return rows
+}
+
 /** A server-owned database capability. */
 export interface Database {
   /** Closes the database pool and releases its resources. */
@@ -156,38 +207,7 @@ class PostgresDatabase implements Database {
   async query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]> {
     if (this.#closed) throw new Error('Database is closed')
     if (!this.#entities) throw new Error('No entity definitions are configured for this database')
-
-    const definition = this.#entities.entity(entity)
-    if (!definition) throw new Error(`Unknown entity "${entity}"`)
-    const selection = SQL.select(this.#entities, entity, options.fields)
-    const where = typeof options.where === 'string'
-      ? QueryNormalizer.normalize(definition, options.where) ?? undefined
-      : options.where
-    const predicate = SQL.where(this.#entities, entity, where)
-    const ordering = SQL.orderBy(this.#entities, entity, options.orderBy)
-    const limit = options.limit === undefined ? 25 : options.limit
-    const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length)
-    const statement = [selection.sql, predicate.sql, ordering.sql, pagination.sql]
-      .filter(clause => clause !== '')
-      .join(' ')
-    const values = [...predicate.values, ...pagination.values]
-    const rows = await this.#sql.unsafe<T[]>(statement, values)
-    const snowflakes = new Set(
-      selection.fields
-        .filter(field => field.type === FieldType.Snowflake)
-        .map(field => field.name),
-    )
-
-    for (const row of rows as Record<string, unknown>[]) {
-      for (const field of snowflakes) {
-        const value = row[field]
-        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
-          row[field] = BigInt(value)
-        }
-      }
-    }
-
-    return rows
+    return queryEntity<T>(this.#sql, this.#entities, entity, options)
   }
 
   /**
