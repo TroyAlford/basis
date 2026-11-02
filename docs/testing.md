@@ -104,7 +104,7 @@ expect.extend({ toMatchSQL })
 expect(statement).toMatchSQL(`SELECT "id" FROM "Note" WHERE "id" = $1`)
 ```
 
-The matcher normalizes only insignificant whitespace outside quoted text; quoting, keywords, operators, placeholders, and ordered statement arrays remain significant. Use complete golden statements for phased DDL and compiled queries, and assert ordered bind values separately from their SQL text.
+The matcher normalizes only insignificant whitespace outside quoted text; quoting, keywords, operators, placeholders, and ordered statement arrays remain significant. Dollar-quoted string contents and line/block comment text, including line-comment newlines, are preserved rather than normalized. Use complete golden statements for phased DDL and compiled queries, and assert ordered bind values separately from their SQL text.
 
 ## Docker and determinism
 

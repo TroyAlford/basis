@@ -79,11 +79,50 @@ export function normalizeSQL(sql: string): string {
     }
 
     if (character === '"' || character === "'") {
-      const previous = normalized.at(-1)
-      if (pendingSpace && previous !== '(' && previous !== ',') normalized += ' '
+      normalized += separator(normalized, pendingSpace, character)
       pendingSpace = false
       quote = character
       normalized += character
+      continue
+    }
+
+    if (character === '-' && sql[index + 1] === '-') {
+      normalized += separator(normalized, pendingSpace, character)
+      pendingSpace = false
+      const end = sql.indexOf('\n', index)
+      if (end === -1) {
+        normalized += sql.slice(index)
+        break
+      }
+      normalized += `${sql.slice(index, end)}\n`
+      index = end
+      continue
+    }
+
+    if (character === '/' && sql[index + 1] === '*') {
+      normalized += separator(normalized, pendingSpace, character)
+      pendingSpace = false
+      const end = sql.indexOf('*/', index + 2)
+      if (end === -1) {
+        normalized += sql.slice(index)
+        break
+      }
+      normalized += sql.slice(index, end + 2)
+      index = end + 1
+      continue
+    }
+
+    const tag = dollarQuoteTag(sql, index)
+    if (tag) {
+      normalized += separator(normalized, pendingSpace, character)
+      pendingSpace = false
+      const end = sql.indexOf(tag, index + tag.length)
+      if (end === -1) {
+        normalized += sql.slice(index)
+        break
+      }
+      normalized += sql.slice(index, end + tag.length)
+      index = end + tag.length - 1
       continue
     }
 
@@ -92,15 +131,37 @@ export function normalizeSQL(sql: string): string {
       continue
     }
 
-    const previous = normalized.at(-1)
-    if (pendingSpace && previous !== '(' && previous !== ',' && character !== ')' && character !== ',') {
-      normalized += ' '
-    }
+    normalized += separator(normalized, pendingSpace, character)
     pendingSpace = false
     normalized += character
   }
 
   return normalized.trim()
+}
+
+/**
+ * Return one insignificant separator when formatting whitespace is removable.
+ * @param current - SQL accumulated so far.
+ * @param pending - Whether source whitespace is pending.
+ * @param next - Next significant character.
+ * @returns A single space or an empty string.
+ */
+function separator(current: string, pending: boolean, next: string): string {
+  const previous = current.at(-1)
+  if (!pending || previous === undefined) return ''
+  if (previous === '(' || previous === ',' || next === ')' || next === ',') return ''
+  return ' '
+}
+
+/**
+ * Detect a PostgreSQL dollar-quote opening tag.
+ * @param sql - SQL source.
+ * @param index - Candidate `$` offset.
+ * @returns The opening tag, or null when this is not a dollar quote.
+ */
+function dollarQuoteTag(sql: string, index: number): string | null {
+  if (sql[index] !== '$') return null
+  return /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/.exec(sql.slice(index))?.[0] ?? null
 }
 
 /**

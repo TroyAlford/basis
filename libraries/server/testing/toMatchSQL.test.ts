@@ -17,6 +17,19 @@ describe('toMatchSQL', () => {
       .not.toMatchSQL('SELECT "a" FROM "Note" WHERE "id" = $2')
   })
 
+  test('preserves dollar-quoted string contents', () => {
+    expect('SELECT $$a  b$$').not.toMatchSQL('SELECT $$a b$$')
+    expect('SELECT $tag$a  b$tag$').not.toMatchSQL('SELECT $tag$a b$tag$')
+    expect('SELECT\n  $$a  b$$').toMatchSQL('SELECT $$a  b$$')
+  })
+
+  test('preserves line-comment termination and statement structure', () => {
+    expect('SELECT 1 -- ignored\nFROM demo')
+      .not.toMatchSQL('SELECT 1 -- ignored FROM demo')
+    expect('SELECT\n  1 -- ignored\nFROM   demo')
+      .toMatchSQL('SELECT 1 -- ignored\nFROM demo')
+  })
+
   test('compares ordered statement arrays', () => {
     const statements = [
       'CREATE TABLE "A" ("id" UUID)',
