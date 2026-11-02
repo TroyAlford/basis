@@ -630,6 +630,28 @@ describe('Server database lifecycle', () => {
     await server.db.sql`
       alter table "CycleUser" drop constraint "CycleUser_car_fkey"
     `
+    await server.db.sql`
+      alter table "CycleUser" add constraint "CycleUser_car_fkey"
+      foreign key ("carId") references "CycleCar" ("id")
+      on delete cascade deferrable initially immediate
+    `
+    await expect(entities.createTables(server.db.sql))
+      .rejects.toThrow('does not match the canonical model')
+
+    await server.db.sql`
+      alter table "CycleUser" drop constraint "CycleUser_car_fkey"
+    `
+    await server.db.sql`
+      alter table "CycleUser" add constraint "CycleUser_car_fkey"
+      foreign key ("carId") references "CycleCar" ("id")
+      deferrable initially immediate not valid
+    `
+    await expect(entities.createTables(server.db.sql))
+      .rejects.toThrow('does not match the canonical model')
+
+    await server.db.sql`
+      alter table "CycleUser" drop constraint "CycleUser_car_fkey"
+    `
     await entities.createTables(server.db.sql)
     expect(await server.db.sql<{ count: number }[]>`
       select count(*)::int as count

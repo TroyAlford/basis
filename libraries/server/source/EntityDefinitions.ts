@@ -164,18 +164,25 @@ export class EntityDefinitions {
         const rows = await sql<{
           deferrable: boolean,
           deferred: boolean,
+          deleteAction: string,
           localColumn: string,
+          matchType: string,
           targetColumn: string,
-          targetTable: string,
+          targetMatches: boolean,
+          updateAction: string,
+          validated: boolean,
         }[]>`
           select
             con.condeferrable as deferrable,
             con.condeferred as deferred,
+            con.confdeltype as "deleteAction",
+            con.confmatchtype as "matchType",
+            con.confrelid = ${quoteIdentifier(field.target)}::regclass as "targetMatches",
+            con.confupdtype as "updateAction",
+            con.convalidated as validated,
             local.attname as "localColumn",
-            target.relname as "targetTable",
             foreign_field.attname as "targetColumn"
           from pg_catalog.pg_constraint con
-          join pg_catalog.pg_class target on target.oid = con.confrelid
           join pg_catalog.pg_attribute local
             on local.attrelid = con.conrelid and local.attnum = con.conkey[1]
           join pg_catalog.pg_attribute foreign_field
@@ -191,9 +198,13 @@ export class EntityDefinitions {
           if (
             !existing.deferrable
             || existing.deferred
+            || existing.deleteAction !== 'a'
             || existing.localColumn !== field.column
-            || existing.targetTable !== field.target
+            || existing.matchType !== 's'
             || existing.targetColumn !== field.targetField
+            || !existing.targetMatches
+            || existing.updateAction !== 'a'
+            || !existing.validated
           ) {
             throw new Error(
               `Existing foreign key constraint "${name}" on "${entity.name}" ` +
