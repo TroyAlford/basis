@@ -63,6 +63,18 @@ describe('checkDocs', () => {
     expect(checkDocs(root).issues.some(issue => issue.message.startsWith('entity JSON:'))).toBe(true)
   })
 
+  test('rejects duplicate entities and unknown top-level entity properties in docs', () => {
+    for (const source of [
+      '{"entities":[{"name":"User","fields":[]},{"name":"User","fields":[]}]}',
+      '{"entities":[{"name":"User","fields":[]}],"extra":"keep"}',
+    ]) {
+      const root = fixture({
+        'docs/index.md': ['# Home', '', '```json', source, '```'].join('\n'),
+      })
+      expect(checkDocs(root).issues.some(issue => issue.message.startsWith('entity JSON:'))).toBe(true)
+    }
+  })
+
   test('reports an unclosed code fence', () => {
     const root = fixture({ 'docs/index.md': '# Home\n\n```mermaid\nflowchart TD\n' })
     const issues = checkDocs(root).issues

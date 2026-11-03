@@ -29,11 +29,15 @@ describe('sqlTemplateFormat', () => {
     expect(output.output).toContain('${title}')
   })
 
-  test('preserves line comments without swallowing following SQL', () => {
-    const output = lint('sql`select 1 -- note\n+ 2`')
-    expect(output.fixed).toBe(true)
-    expect(output.output).toContain('-- note\n')
-    expect(output.output).toContain('+ 2')
+  test('does not auto-format comment-bearing SQL', () => {
+    for (const code of [
+      'sql`select 1 -- where false`',
+      'sql`select 1 /* where false */`',
+    ]) {
+      const output = lint(code)
+      expect(output.fixed).toBe(false)
+      expect(output.output).toBe(code)
+    }
   })
 
   test('does not auto-format dollar-quoted bodies', () => {

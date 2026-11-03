@@ -315,7 +315,7 @@ export const sqlTemplateFormat: Rule.RuleModule = {
             raw += placeholder
           }
         })
-        if (/\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$/u.test(raw)) {
+        if (/--|\/\*/u.test(raw) || /\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$/u.test(raw)) {
           context.report({ messageId: 'unsupportedSQL', node })
           return
         }
@@ -354,7 +354,7 @@ export const sqlTemplateFormat: Rule.RuleModule = {
     fixable: 'code',
     messages: {
       formatSql: 'SQL template is not in canonical format.',
-      unsupportedSQL: 'SQL template contains a dollar-quoted body and is not safely auto-formattable.',
+      unsupportedSQL: 'SQL template contains comments or a dollar-quoted body and is not safely auto-formattable.',
     },
     schema: [],
     type: 'layout',

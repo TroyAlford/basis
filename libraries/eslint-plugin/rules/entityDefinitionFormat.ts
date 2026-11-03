@@ -1,13 +1,10 @@
 import type { Rule } from 'eslint'
+import { EntityDefinitions } from '../../server/source/EntityDefinitions'
 
 /** Canonical entity property order. */
 const ENTITY_KEYS = ['name', 'extends', 'fields'] as const
 /** Canonical field property order. */
 const FIELD_KEYS = ['field', 'type', 'format', 'target', 'column'] as const
-/** Exact scalar field types. */
-const FIELD_TYPES = new Set(['Boolean', 'Date', 'ID', 'Number', 'String', 'Timestamp'])
-/** Formats accepted only on the inherited `id` refinement. */
-const FORMATS = new Set(['Snowflake', 'UUID'])
 
 /**
  * Validate and format an entity document.
@@ -15,85 +12,25 @@ const FORMATS = new Set(['Snowflake', 'UUID'])
  * @returns Formatted JSON and validation messages.
  */
 export function formatEntityDocument(value: unknown): { formatted: string, issues: string[] } {
-  const issues: string[] = []
   if (!isRecord(value) || !Array.isArray(value.entities)) {
     return { formatted: '', issues: ['entity document must contain a top-level entities array'] }
   }
-  const entities = value.entities.map((entity, entityIndex) => {
-    if (!isRecord(entity)) {
-      issues.push(`entities[${entityIndex}] must be an object`)
-      return entity
-    }
-    assertOrder(entity, ENTITY_KEYS, `entities[${entityIndex}]`, issues)
-    if (typeof entity.name !== 'string') issues.push(`entities[${entityIndex}].name must be a string`)
-    if (entity.extends !== undefined && typeof entity.extends !== 'string') {
-      issues.push(`entities[${entityIndex}].extends must be a string`)
-    }
-    if (!Array.isArray(entity.fields)) {
-      issues.push(`entities[${entityIndex}].fields must be an array`)
-      return ordered(entity, ENTITY_KEYS)
-    }
-    const fields = entity.fields.map((field, fieldIndex) => {
-      if (!isRecord(field)) {
-        issues.push(`entities[${entityIndex}].fields[${fieldIndex}] must be an object`)
-        return field
-      }
-      assertOrder(field, FIELD_KEYS, `entities[${entityIndex}].fields[${fieldIndex}]`, issues)
-      if (typeof field.field !== 'string') {
-        issues.push(`entities[${entityIndex}].fields[${fieldIndex}].field must be a string`)
-      }
-      if (field.field === 'id') {
-        if (field.type !== undefined) {
-          issues.push(`entities[${entityIndex}].fields[${fieldIndex}] id refinement must not declare type`)
-        }
-        if (typeof field.format !== 'string' || !FORMATS.has(field.format)) {
-          issues.push(`entities[${entityIndex}].fields[${fieldIndex}] id refinement needs format UUID or Snowflake`)
-        }
-      } else if (field.field === 'name' || field.field === 'entity') {
-        issues.push(`entities[${entityIndex}].fields[${fieldIndex}] uses a reserved root field name`)
-      } else if (field.type === 'Entity') {
-        if (typeof field.target !== 'string') {
-          issues.push(`entities[${entityIndex}].fields[${fieldIndex}].target must be a string`)
-        }
-        if (typeof field.column !== 'string') {
-          issues.push(`entities[${entityIndex}].fields[${fieldIndex}].column must be a string`)
-        }
-        if (field.format !== undefined) {
-          issues.push(`entities[${entityIndex}].fields[${fieldIndex}] reference fields cannot declare format`)
-        }
-      } else if (
-        typeof field.type !== 'string'
-        || !FIELD_TYPES.has(field.type)
-        || field.type === 'ID'
-        || field.format !== undefined
-      ) {
-        issues.push(`entities[${entityIndex}].fields[${fieldIndex}] has an invalid type or format`)
-      }
-      return ordered(field, FIELD_KEYS)
-    })
-    return ordered({ ...entity, fields }, ENTITY_KEYS)
+  try {
+    EntityDefinitions.load(JSON.stringify(value))
+  } catch (error) {
+    return { formatted: '', issues: [(error as Error).message] }
+  }
+  const entities = value.entities.map(entity => {
+    const record = entity as Record<string, unknown>
+    const fields = (record.fields as unknown[]).map(field => ordered(
+      field as Record<string, unknown>,
+      FIELD_KEYS,
+    ))
+    return ordered({ ...record, fields }, ENTITY_KEYS)
   })
   return {
     formatted: `${JSON.stringify({ entities }, null, 2)}\n`,
-    issues,
-  }
-}
-
-/**
- * Check canonical key order.
- * @param value - Object.
- * @param keys - Canonical key order.
- * @param path - Diagnostic path.
- * @param issues - Mutable issue list.
- */
-function assertOrder(
-  value: Record<string, unknown>,
-  keys: readonly string[],
-  path: string,
-  issues: string[],
-): void {
-  for (const key of Object.keys(value)) {
-    if (!keys.includes(key)) issues.push(`${path} has unknown property "${key}"`)
+    issues: [],
   }
 }
 
