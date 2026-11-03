@@ -140,7 +140,8 @@ const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>
     build: (column, operand, bind) => {
       if (operand === null) throw new Error('Query operator "$contains" requires a non-null value')
       if (typeof operand !== 'string') throw new Error('Query operator "$contains" requires a string value')
-      return `${column} ILIKE ${bind(`%${operand.replace(/[\\%_]/gu, '\\$&')}%`)} ESCAPE '\\'`
+      const pattern = `%${operand.replace(/[\\%_]/gu, '\\$&')}%`
+      return `(${column} IS NOT NULL AND ${column} ILIKE ${bind(pattern)} ESCAPE '\\')`
     },
     validateOperand: scalarValidator(false),
   }],

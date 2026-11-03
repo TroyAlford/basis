@@ -1380,6 +1380,23 @@ VALUES (${invalidUserId},
     })
     expect(await query('title !$empty')).toEqual([{ rank: 3 }, { rank: 4 }, { rank: 5 }])
 
+    await same('title $contains "alp"', {
+      field: 'title',
+      operator: Operator.Comparison.Contains,
+      value: 'alp',
+    })
+    expect(await query('title $contains "alp"')).toEqual([{ rank: 4 }])
+    await same('$not title $contains "alp"', {
+      filters: [{
+        field: 'title',
+        operator: Operator.Comparison.Contains,
+        value: 'alp',
+      }],
+      operator: Operator.Logical.Not,
+    })
+    expect(await query('$not title $contains "alp"'))
+      .toEqual([{ rank: 1 }, { rank: 2 }, { rank: 3 }, { rank: 5 }])
+
     await same('score = 5 $or score = 10', {
       filters: [
         { field: 'score', operator: Operator.Comparison.Equal, value: 5 },

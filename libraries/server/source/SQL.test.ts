@@ -339,7 +339,7 @@ describe('SQL.where', () => {
       operator: Operator.Comparison.Contains,
       value: '50%_off\\',
     })).toEqual({
-      sql: 'WHERE "title" ILIKE $1 ESCAPE \'\\\'',
+      sql: 'WHERE ("title" IS NOT NULL AND "title" ILIKE $1 ESCAPE \'\\\')',
       values: ['%50\\%\\_off\\\\%'],
     })
   })
