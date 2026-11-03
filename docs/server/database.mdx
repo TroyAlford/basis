@@ -65,7 +65,7 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 const user = entities.entity('User')
 ```
 
-Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`, and singular references use `Entity` with explicit `target` and `column`. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, or authored `abstract` boolean.
+Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular references use `Entity` with explicit `target` and `column`; and generic collections use `Collection` with an explicit element descriptor, ordering, and storage. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, or authored `abstract` boolean.
 
 The implicit system root owns `id: ID`, `name: String`, and the concrete-leaf `entity` discriminator. The universal lightweight object shape is `{ id, name, entity }`. `id` is always the primary key; every physical table receives generated `id text primary key` storage and a parent foreign-key column. `name` replaces the former display-name column everywhere. Root field names are reserved from ordinary declarations.
 
@@ -79,6 +79,20 @@ Identity and ordinary fields are inherited. The only inherited refinement is an 
 The required fixture above derives `User` as abstract because it has children, and derives `SystemUser` and `Client` as concrete leaves. A standalone entity with `fields: []` is a valid concrete entity. A branch cannot be instantiated; only leaf names may appear as root discriminators.
 
 The model is logical-first. A singular entity reference is itself a field in `fields`: `SystemUser.manager` is the logical field, while `managerId` is only its explicit PostgreSQL storage column. A reference uses `type: "Entity"`, an explicit `target`, and an explicit `column`. There is no inference from names, suffixes, columns, or entity existence. Reference names and physical column names are independently authored. The target must exist, or be the universal `Entity` root; the generated reference column is `text` and targets the target table's shared `id`. A `User` reference therefore enforces that the referenced row has a `User` ancestor, while an `Entity` reference may target any concrete leaf. Reference columns are nullable; omit the value for a missing optional reference.
+
+A generic collection field declares one element kind and whether the collection is an ordered list. It also names its physical storage explicitly; this stage supports `jsonb` storage:
+
+```json
+{
+  "field": "tags",
+  "type": "Collection",
+  "items": { "type": "String" },
+  "ordered": false,
+  "storage": "jsonb"
+}
+```
+
+`items.type` may be a scalar (`String`, `Number`, `Boolean`, `Date`, `Timestamp`, or `ID`), `Entity` with a `target`, or `Structured` for structured/interface JSON values. `ordered: false` describes a generic unordered collection; `ordered: true` describes a list. The physical column is `jsonb` and is not null, so applications write the collection value directly through `db.sql` inside `db.tx`. Collection value validation and query projection remain deferred; relation-backed inverse and many-to-many collection mappings are separate later stages.
 
 Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `manager` is selectable as a singular projection, but it is not filterable or sortable; its physical `managerId` column is never a logical field. Direct `db.sql` remains physical SQL and may use generated columns normally.
 
@@ -97,7 +111,7 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 await server.db.tx(async sql => entities.createTables(sql))
 ```
 
-`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, and creates one ordinary PostgreSQL table per entity. Local scalar fields use their logical field name; a singular reference field uses its explicit `column` name. Every table gets generated `id text primary key` storage. `String` maps to `text`; `Number` to `double precision`; `Date` to `date`; `Timestamp` to `timestamptz`; `Boolean` to `boolean`. Format checks apply to the effective `id` format.
+`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, and creates one ordinary PostgreSQL table per entity. Local scalar fields use their logical field name; a singular reference field uses its explicit `column` name; a generic collection field uses its logical field name with `jsonb` storage. Every table gets generated `id text primary key` storage. `String` maps to `text`; `Number` to `double precision`; `Date` to `date`; `Timestamp` to `timestamptz`; `Boolean` to `boolean`; collection storage is `jsonb`. Format checks apply to the effective `id` format.
 
 Each entity table has a real primary key and an MTI parent foreign key to the system `Entity` root or its parent table. Shared fields are stored only in the table that owns them. The root alone stores `name` and the concrete-leaf `entity` discriminator. Multi-tier chains therefore use ordinary PostgreSQL PK/FK joins, not `INHERITS`.
 

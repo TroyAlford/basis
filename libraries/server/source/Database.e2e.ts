@@ -1076,6 +1076,50 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     })).toMatchObject({ errno: '23514' })
   }, 120_000)
 
+  isolatedTest('creates explicit jsonb storage for generic collections', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          {
+            field: 'tags',
+            items: { type: 'String' },
+            ordered: false,
+            storage: 'jsonb',
+            type: 'Collection',
+          },
+          {
+            field: 'authors',
+            items: { target: 'Entity', type: 'Entity' },
+            ordered: true,
+            storage: 'jsonb',
+            type: 'Collection',
+          },
+          {
+            field: 'payload',
+            items: { type: 'Structured' },
+            ordered: false,
+            storage: 'jsonb',
+            type: 'Collection',
+          },
+        ],
+        name: 'CollectionRow',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
+      SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
+      FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'CollectionRow'
+      ORDER BY ordinal_position
+    `).toEqual([
+      { columnName: 'id', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'tags', dataType: 'jsonb', isNullable: 'NO' },
+      { columnName: 'authors', dataType: 'jsonb', isNullable: 'NO' },
+      { columnName: 'payload', dataType: 'jsonb', isNullable: 'NO' },
+    ])
+  }, 120_000)
+
   durableTest('enforces MTI final-state integrity for direct SQL', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [

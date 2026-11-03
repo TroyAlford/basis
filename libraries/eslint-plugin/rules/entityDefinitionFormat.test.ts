@@ -37,6 +37,29 @@ describe('entityDefinitionFormat', () => {
     expect(lint(code).fixed).toBe(false)
   })
 
+  test('orders generic collection fields and element descriptors canonically', () => {
+    const code = JSON.stringify({
+      entities: [{
+        fields: [{
+          field: 'tags',
+          items: { type: 'String' },
+          ordered: false,
+          storage: 'jsonb',
+          type: 'Collection',
+        }],
+        name: 'Tagged',
+      }],
+    })
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain('"field": "tags"')
+    expect(output.output).toContain('"type": "Collection"')
+    expect(output.output).toContain('"items": {')
+    expect(output.output).toContain('"type": "String"')
+    expect(output.output).toContain('"ordered": false')
+    expect(output.output).toContain('"storage": "jsonb"')
+  })
+
   test('delegates semantics to the canonical loader before fixing', () => {
     const cases = [
       '{"entities":[{"name":"User","fields":[]},{"name":"User","fields":[]}]}',

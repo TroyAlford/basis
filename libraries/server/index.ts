@@ -8,11 +8,17 @@ export { FieldType, EntityDefinitions } from './source/EntityDefinitions'
 export { Operator } from './source/Operator'
 export type { ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
 export type {
+  CollectionElementDefinition,
+  CollectionFieldDefinition,
+  CollectionStorage,
+  EntityCollectionElementDefinition,
   EntityDefinition,
   EntityReferenceFieldDefinition,
   FieldDefinition,
+  ScalarCollectionElementDefinition,
   ScalarFieldDefinition,
   ScalarFieldType,
+  StructuredCollectionElementDefinition,
 } from './source/EntityDefinitions'
 export { OAuth } from './source/OAuth'
 export type { OAuthOptions } from './source/OAuth'

@@ -189,6 +189,7 @@ describe('EntityDefinitions', () => {
   test('uses the exact serialized field type vocabulary', () => {
     expect(Object.values(FieldType).map(String)).toEqual([
       'Boolean',
+      'Collection',
       'Date',
       'Entity',
       'ID',
@@ -196,6 +197,130 @@ describe('EntityDefinitions', () => {
       'String',
       'Timestamp',
     ])
+  })
+
+  test('accepts typed generic collection fields and explicit storage', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          {
+            field: 'tags',
+            items: { type: 'String' },
+            ordered: false,
+            storage: 'jsonb',
+            type: 'Collection',
+          },
+          {
+            field: 'authors',
+            items: { target: 'Entity', type: 'Entity' },
+            ordered: true,
+            storage: 'jsonb',
+            type: 'Collection',
+          },
+          {
+            field: 'payload',
+            items: { type: 'Structured' },
+            ordered: false,
+            storage: 'jsonb',
+            type: 'Collection',
+          },
+          {
+            field: 'identities',
+            items: { format: 'UUID', type: 'ID' },
+            ordered: false,
+            storage: 'jsonb',
+            type: 'Collection',
+          },
+        ],
+        name: 'CollectionRow',
+      }],
+    })
+    expect(entities.entity('CollectionRow')?.fields[1]).toEqual({
+      items: { type: FieldType.String },
+      name: 'tags',
+      ordered: false,
+      storage: 'jsonb',
+      type: FieldType.Collection,
+    })
+    expect(entities.entity('CollectionRow')?.effectiveFields.find(field => field.name === 'payload')).toMatchObject({
+      items: { type: 'Structured' },
+      owner: 'CollectionRow',
+      type: FieldType.Collection,
+    })
+    expect(entities.ddl.join('\n')).toContain('"tags" jsonb not null')
+    expect(entities.ddl.join('\n')).toContain('"authors" jsonb not null')
+    expect(entities.ddl.join('\n')).toContain('"payload" jsonb not null')
+  })
+
+  test('rejects malformed generic collection fields', () => {
+    const cases = [
+      {
+        fields: [{ field: 'tags', items: { type: 'String' }, ordered: false, type: 'Collection' }],
+        name: 'CollectionRow',
+      },
+      {
+        fields: [{
+          field: 'tags',
+          items: { type: 'String' },
+          ordered: 'no',
+          storage: 'jsonb',
+          type: 'Collection',
+        }],
+        name: 'CollectionRow',
+      },
+      {
+        fields: [{
+          field: 'tags',
+          items: { type: 'Missing' },
+          ordered: false,
+          storage: 'jsonb',
+          type: 'Collection',
+        }],
+        name: 'CollectionRow',
+      },
+      {
+        fields: [{
+          field: 'tags',
+          items: { target: 'Missing', type: 'Entity' },
+          ordered: false,
+          storage: 'jsonb',
+          type: 'Collection',
+        }],
+        name: 'CollectionRow',
+      },
+      {
+        fields: [{
+          field: 'tags',
+          items: { extra: true, type: 'Structured' },
+          ordered: false,
+          storage: 'jsonb',
+          type: 'Collection',
+        }],
+        name: 'CollectionRow',
+      },
+      {
+        fields: [{
+          field: 'tags',
+          items: { format: 'UUID', type: 'String' },
+          ordered: false,
+          storage: 'jsonb',
+          type: 'Collection',
+        }],
+        name: 'CollectionRow',
+      },
+      {
+        fields: [{
+          field: 'name',
+          items: { type: 'String' },
+          ordered: false,
+          storage: 'jsonb',
+          type: 'Collection',
+        }],
+        name: 'CollectionRow',
+      },
+    ]
+    for (const entity of cases) expect(() => load({ entities: [entity] })).toThrow()
   })
 
   test('derives effective inheritance from the required ontology fixture', () => {

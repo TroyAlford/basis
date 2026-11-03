@@ -367,6 +367,12 @@ function scalarField(entity: EntityDefinition, name: string): ScalarFieldDefinit
       'references cannot be used in predicates or ordering',
     )
   }
+  if (field.type === FieldType.Collection) {
+    throw new Error(
+      `Query field "${entity.name}.${name}" is a collection; ` +
+      'collection projections are not supported yet',
+    )
+  }
   return field
 }
 

@@ -99,6 +99,29 @@ const graphDefinitions = EntityDefinitions.load(JSON.stringify({
   ],
 }))
 
+const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [{
+    fields: [
+      { field: 'id', format: 'UUID' },
+      {
+        field: 'tags',
+        items: { type: 'String' },
+        ordered: false,
+        storage: 'jsonb',
+        type: 'Collection',
+      },
+      {
+        field: 'authors',
+        items: { target: 'Entity', type: 'Entity' },
+        ordered: true,
+        storage: 'jsonb',
+        type: 'Collection',
+      },
+    ],
+    name: 'Tagged',
+  }],
+}))
+
 const incompatibleDefinitions = EntityDefinitions.load(JSON.stringify({
   entities: [
     { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
@@ -414,6 +437,23 @@ describe('SQL.where', () => {
     expect(compiled.sql).toContain('"favorite__permissions"')
     expect(compiled.sql).toContain('"favorite__owner__v0__name"')
     expect(compiled.sql).not.toContain('"favorite.permissions"')
+  })
+
+  test('rejects collection fields from scalar queries and predicates', () => {
+    expect(() => compileEntityQuery(collectionDefinitions, 'Tagged', {
+      fields: ['tags'],
+    })).toThrow('collection projections are not supported yet')
+    expect(() => compileEntityQuery(collectionDefinitions, 'Tagged', {
+      fields: ['authors'],
+    })).toThrow('collection projections are not supported yet')
+    expect(() => compileEntityQuery(collectionDefinitions, 'Tagged', {
+      fields: ['id'],
+      where: { tags: 'x' },
+    })).toThrow('collection projections are not supported yet')
+    expect(() => compileEntityQuery(collectionDefinitions, 'Tagged', {
+      fields: ['id'],
+      orderBy: 'tags',
+    })).toThrow('collection projections are not supported yet')
   })
 
   test('rejects incompatible descendant-only declarations', () => {

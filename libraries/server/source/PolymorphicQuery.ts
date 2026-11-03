@@ -1,4 +1,4 @@
-import type { EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import type { CollectionElementDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
@@ -210,6 +210,12 @@ class QueryProjection {
     const effective = node.context.effective.get(name)
 
     if (effective) {
+      if (effective.type === FieldType.Collection) {
+        throw new Error(
+          `Query field "${node.context.definition.name}.${name}" is a collection; ` +
+          'collection projections are not supported yet',
+        )
+      }
       if (effective.type === FieldType.Entity) {
         const path = [...node.path, ...segments].join('.')
         if (references.has(name)) throw new Error(`Repeated reference expansion "${path}"`)
@@ -238,6 +244,12 @@ class QueryProjection {
 
     const descendant = node.context.descendants.get(name)
     if (descendant) {
+      if (descendant.type === FieldType.Collection) {
+        throw new Error(
+          `Query field "${node.context.definition.name}.${name}" is a collection; ` +
+          'collection projections are not supported yet',
+        )
+      }
       if (descendant.contracts.size > 1) {
         throw new Error(
           `Descendant field "${node.context.definition.name}.${name}" has incompatible declarations`,
@@ -341,7 +353,9 @@ class QueryProjection {
     if (node.fieldNames.has(name)) return
     if (node.identity && (name === 'id' || name === 'name' || name === 'entity')) return
     const field = node.context.effective.get(name)
-    if (!field || field.type === FieldType.Entity) throw new Error(`Unknown scalar field "${name}"`)
+    if (!field || field.type === FieldType.Collection || field.type === FieldType.Entity) {
+      throw new Error(`Unknown scalar field "${name}"`)
+    }
     const alias = columnAlias(node.path, name)
     const expression = this.#expression(node.context, field, false)
     this.columns.push(`${expression} AS ${quote(alias)}`)
@@ -491,6 +505,12 @@ export function compilePolymorphicQuery(
       throw new Error(
         `Query field "${definition.name}.${name}" is an entity reference; ` +
         'references cannot be used in predicates or ordering',
+      )
+    }
+    if (value.type === FieldType.Collection) {
+      throw new Error(
+        `Query field "${definition.name}.${name}" is a collection; ` +
+        'collection projections are not supported yet',
       )
     }
     return value
@@ -689,8 +709,22 @@ function collectDescendantFields(
  * @returns Type/format/reference-target signature.
  */
 function fieldContract(field: FieldDefinition): string {
+  if (field.type === FieldType.Collection) {
+    return `Collection:${field.ordered}:${field.storage}:${collectionElementContract(field.items)}`
+  }
   if (field.type === FieldType.Entity) return `Entity:${field.target}`
   return `${field.type}:${field.format ?? ''}`
+}
+
+/**
+ * Build one canonical contract signature for a collection element.
+ * @param element - Collection element descriptor.
+ * @returns Element type/format/reference-target signature.
+ */
+function collectionElementContract(element: CollectionElementDefinition): string {
+  if (element.type === 'Structured') return 'Structured'
+  if (element.type === FieldType.Entity) return `Entity:${element.target}`
+  return `${element.type}:${element.format ?? ''}`
 }
 
 /**

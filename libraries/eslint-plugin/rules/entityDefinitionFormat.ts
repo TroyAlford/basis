@@ -4,7 +4,9 @@ import { EntityDefinitions } from '../../server/source/EntityDefinitions'
 /** Canonical entity property order. */
 const ENTITY_KEYS = ['name', 'extends', 'fields'] as const
 /** Canonical field property order. */
-const FIELD_KEYS = ['field', 'type', 'format', 'target', 'column'] as const
+const FIELD_KEYS = ['field', 'type', 'format', 'target', 'column', 'items', 'ordered', 'storage'] as const
+/** Canonical collection-element property order. */
+const ELEMENT_KEYS = ['type', 'format', 'target'] as const
 
 /**
  * Validate and format an entity document.
@@ -22,9 +24,8 @@ export function formatEntityDocument(value: unknown): { formatted: string, issue
   }
   const entities = value.entities.map(entity => {
     const record = entity as Record<string, unknown>
-    const fields = (record.fields as unknown[]).map(field => ordered(
+    const fields = (record.fields as unknown[]).map(field => orderField(
       field as Record<string, unknown>,
-      FIELD_KEYS,
     ))
     return ordered({ ...record, fields }, ENTITY_KEYS)
   })
@@ -32,6 +33,19 @@ export function formatEntityDocument(value: unknown): { formatted: string, issue
     formatted: `${JSON.stringify({ entities }, null, 2)}\n`,
     issues: [],
   }
+}
+
+/**
+ * Reorder one field and any nested collection element canonically.
+ * @param value - Field object.
+ * @returns Ordered field.
+ */
+function orderField(value: Record<string, unknown>): Record<string, unknown> {
+  const field = ordered(value, FIELD_KEYS)
+  if (field.type === 'Collection' && isRecord(field.items)) {
+    field.items = ordered(field.items, ELEMENT_KEYS)
+  }
+  return field
 }
 
 /**

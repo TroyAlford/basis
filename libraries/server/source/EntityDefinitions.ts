@@ -12,6 +12,8 @@ const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with sche
 export enum FieldType {
   /** Boolean value. */
   Boolean = 'Boolean',
+  /** Generic collection value. */
+  Collection = 'Collection',
   /** Calendar date without a time of day. */
   Date = 'Date',
   /** Singular reference to another entity. */
@@ -38,6 +40,37 @@ export type ScalarFieldType =
 /** Supported canonical identity formats. */
 export type IdentityFormat = 'Snowflake' | 'UUID'
 
+/** Explicit physical storage for generic collections. */
+export type CollectionStorage = 'jsonb'
+
+/** One scalar element in a generic collection. */
+export interface ScalarCollectionElementDefinition {
+  /** Optional identity format for ID elements. */
+  readonly format?: IdentityFormat,
+  /** Scalar element type. */
+  readonly type: ScalarFieldType,
+}
+
+/** One entity element in a generic collection. */
+export interface EntityCollectionElementDefinition {
+  /** Referenced entity name, or the universal `Entity` root. */
+  readonly target: string,
+  /** Element-kind discriminator. */
+  readonly type: FieldType.Entity,
+}
+
+/** One structured/interface value in a generic collection. */
+export interface StructuredCollectionElementDefinition {
+  /** Opaque structured/interface element kind. */
+  readonly type: 'Structured',
+}
+
+/** One generic collection element descriptor. */
+export type CollectionElementDefinition =
+  | ScalarCollectionElementDefinition
+  | EntityCollectionElementDefinition
+  | StructuredCollectionElementDefinition
+
 /** One scalar field definition. */
 export interface ScalarFieldDefinition {
   /** Canonical format for an ID field. */
@@ -60,8 +93,25 @@ export interface EntityReferenceFieldDefinition {
   readonly type: FieldType.Entity,
 }
 
+/** One generic collection field. */
+export interface CollectionFieldDefinition {
+  /** Element descriptor for collection values. */
+  readonly items: CollectionElementDefinition,
+  /** Logical field name used by entity-rooted queries. */
+  readonly name: string,
+  /** Whether the collection is an ordered list rather than a generic set. */
+  readonly ordered: boolean,
+  /** Explicit physical storage for the collection. */
+  readonly storage: CollectionStorage,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Collection,
+}
+
 /** One logical entity field. */
-export type FieldDefinition = ScalarFieldDefinition | EntityReferenceFieldDefinition
+export type FieldDefinition =
+  | ScalarFieldDefinition
+  | EntityReferenceFieldDefinition
+  | CollectionFieldDefinition
 
 /** One effective inherited field and its owning entity table. */
 export type EffectiveFieldDefinition = FieldDefinition & {
@@ -95,8 +145,8 @@ interface TableColumn {
   readonly nullable?: boolean,
   /** Whether this column is the table's primary key. */
   readonly primaryKey?: boolean,
-  /** Physical scalar type. */
-  readonly type: ScalarFieldType,
+  /** Physical column type. */
+  readonly type: ScalarFieldType | FieldType.Collection,
 }
 
 /** One physical table index. */
@@ -559,6 +609,16 @@ function parseEntities(value: unknown): readonly EntityDefinition[] {
       if (field.type === FieldType.Entity && field.target !== 'Entity' && !byName.has(field.target)) {
         throw invalid(`unknown target entity "${field.target}" for field "${seed.name}.${field.name}"`)
       }
+      if (
+        field.type === FieldType.Collection
+        && field.items.type === FieldType.Entity
+        && field.items.target !== 'Entity'
+        && !byName.has(field.items.target)
+      ) {
+        throw invalid(
+          `unknown target entity "${field.items.target}" for collection field "${seed.name}.${field.name}"`,
+        )
+      }
     }
   }
   const formats = effectiveFormats(byName)
@@ -689,6 +749,10 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
     throw invalid(`field "${entityName}.${value.field}" type must be a string`)
   }
 
+  if (value.type === FieldType.Collection) {
+    return { field: parseCollectionField(entityName, value) }
+  }
+
   if (value.type === FieldType.Entity) {
     assertKnownKeys(value, ['column', 'field', 'target', 'type'], 'field')
     if (ROOT_FIELD_NAMES.has(value.field) || value.field === 'id') {
@@ -735,6 +799,82 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
       type: type as ScalarFieldType,
     },
   }
+}
+
+/**
+ * Validate one generic collection field descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated collection field.
+ */
+function parseCollectionField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): CollectionFieldDefinition {
+  assertKnownKeys(value, ['field', 'items', 'ordered', 'storage', 'type'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (!isRecord(value.items)) {
+    throw invalid(`collection field "${entityName}.${name}" items must be an object`)
+  }
+  if (typeof value.ordered !== 'boolean') {
+    throw invalid(`collection field "${entityName}.${name}" ordered must be a boolean`)
+  }
+  if (value.storage !== 'jsonb') {
+    throw invalid(`collection field "${entityName}.${name}" storage must be jsonb`)
+  }
+  return {
+    items: parseCollectionElement(entityName, name, value.items),
+    name,
+    ordered: value.ordered,
+    storage: 'jsonb',
+    type: FieldType.Collection,
+  }
+}
+
+/**
+ * Validate one generic collection element descriptor.
+ * @param entityName - Owning entity name.
+ * @param fieldName - Collection field name.
+ * @param value - Element candidate.
+ * @returns The validated element descriptor.
+ */
+function parseCollectionElement(
+  entityName: string,
+  fieldName: string,
+  value: Readonly<Record<string, unknown>>,
+): CollectionElementDefinition {
+  if (!isRecord(value) || typeof value.type !== 'string') {
+    throw invalid(`collection field "${entityName}.${fieldName}" items must have a type`)
+  }
+  if (value.type === 'Structured') {
+    assertKnownKeys(value, ['type'], 'collection item')
+    return { type: 'Structured' }
+  }
+  if (value.type === FieldType.Entity) {
+    assertKnownKeys(value, ['target', 'type'], 'collection item')
+    if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+      throw invalid(`collection field "${entityName}.${fieldName}" target must be a PascalCase entity name`)
+    }
+    return { target: value.target, type: FieldType.Entity }
+  }
+  if (!SCALAR_FIELD_TYPES.has(value.type)) {
+    throw invalid(`unsupported collection item type "${value.type}" in "${entityName}.${fieldName}"`)
+  }
+  if (value.type === FieldType.ID) {
+    assertKnownKeys(value, ['format', 'type'], 'collection item')
+    if (value.format !== undefined && (typeof value.format !== 'string' || !IDENTITY_FORMATS.has(value.format))) {
+      throw invalid(`collection field "${entityName}.${fieldName}" ID format must be UUID or Snowflake`)
+    }
+    return {
+      ...(value.format !== undefined ? { format: value.format as IdentityFormat } : {}),
+      type: FieldType.ID,
+    }
+  }
+  assertKnownKeys(value, ['type'], 'collection item')
+  return { type: value.type as ScalarFieldType }
 }
 
 /**
@@ -794,6 +934,9 @@ function entityTable(entity: EntityDefinition): TableDefinition {
         return { name: field.column, nullable: true, type: FieldType.String }
       }
       if (field.type === FieldType.ID) return { name: field.name, primaryKey: true, type: FieldType.ID }
+      if (field.type === FieldType.Collection) {
+        return { name: field.name, type: FieldType.Collection }
+      }
       return { name: field.name, type: field.type }
     }),
     name: entity.name,
@@ -1143,9 +1286,10 @@ function lifecycleStatements(entities: readonly EntityDefinition[]): readonly st
  * @param type - Scalar field type.
  * @returns Column type declaration.
  */
-function columnType(type: ScalarFieldType): string {
+function columnType(type: ScalarFieldType | FieldType.Collection): string {
   switch (type) {
     case FieldType.Boolean: return 'boolean'
+    case FieldType.Collection: return 'jsonb'
     case FieldType.Date: return 'date'
     case FieldType.ID: return 'text'
     case FieldType.Number: return 'double precision'
