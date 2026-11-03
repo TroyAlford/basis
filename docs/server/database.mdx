@@ -78,15 +78,15 @@ Identity and ordinary fields are inherited. The only inherited refinement is an 
 
 The required fixture above derives `User` as abstract because it has children, and derives `SystemUser` and `Client` as concrete leaves. A standalone entity with `fields: []` is a valid concrete entity. A branch cannot be instantiated; only leaf names may appear as root discriminators.
 
-The model is logical-first. A singular entity reference is itself a field in `fields`: `SystemUser.manager` is the logical field, while `managerId` is only its explicit PostgreSQL storage column. A reference uses `type: "Entity"`, an explicit `target`, and an explicit `column`. There is no inference from names, suffixes, columns, or entity existence. Reference names and physical column names are independently authored. The target must exist, or be the universal `Entity` root; the generated reference column is `text` and targets the target table's shared `id`. A `User` reference therefore enforces that the referenced row has a `User` ancestor, while an `Entity` reference may target any concrete leaf.
+The model is logical-first. A singular entity reference is itself a field in `fields`: `SystemUser.manager` is the logical field, while `managerId` is only its explicit PostgreSQL storage column. A reference uses `type: "Entity"`, an explicit `target`, and an explicit `column`. There is no inference from names, suffixes, columns, or entity existence. Reference names and physical column names are independently authored. The target must exist, or be the universal `Entity` root; the generated reference column is `text` and targets the target table's shared `id`. A `User` reference therefore enforces that the referenced row has a `User` ancestor, while an `Entity` reference may target any concrete leaf. Reference columns are nullable; omit the value for a missing optional reference.
 
-Entity-rooted `db.query` uses the logical local-field vocabulary. A reference field such as `manager` is not selectable, filterable, or sortable until singular graph projection is implemented, and its physical `managerId` column is not a logical field. Direct `db.sql` remains physical SQL and may use generated columns normally.
+Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `manager` is selectable as a singular projection, but it is not filterable or sortable; its physical `managerId` column is never a logical field. Direct `db.sql` remains physical SQL and may use generated columns normally.
 
 ## Universal identity root
 
 Every initialized schema includes a system `"Entity"` table. Its `id` is exact `text`; the root format check accepts either a canonical lowercase UUID or a canonical signed 64-bit decimal string. `name` and the concrete-leaf `entity` discriminator are non-null text columns. `Entity` is reserved and cannot be declared as an application entity.
 
-The root has a B-tree index on `(name, id)` for stable sorted/paged access and a `pg_trgm` `gin` index on `name` for indexed `ILIKE '%term%'` lookup. Initialization enables `pg_trgm` and creates both indexes. Its leaf check accepts only derived concrete entity names. Polymorphic query execution remains deferred.
+The root has a B-tree index on `(name, id)` for stable sorted/paged access and a `pg_trgm` `gin` index on `name` for indexed `ILIKE '%term%'` lookup. Initialization enables `pg_trgm` and creates both indexes. Its leaf check accepts only derived concrete entity names. Polymorphic scalar and singular-reference queries execute through the same `db.query` path.
 
 ## Creating physical tables
 
@@ -125,7 +125,7 @@ A separate reviewable `DDL.plan`/`DDL.apply` workflow is the intended next schem
 
 ## `db.query`
 
-Attach the same canonical definitions to the database capability, then project effective scalar fields from one entity. Querying an abstract entity reads its shared ancestor table and returns one row per concrete descendant, including the actual leaf `entity` discriminator and shared `id`/`name`. Inherited fields are joined from their owning tables in the same SQL statement, never by a per-row follow-up query:
+Attach the same canonical definitions to the database capability, then project effective scalar fields and singular reference paths from one entity. Querying an abstract entity reads its shared ancestor table and returns one row per concrete descendant, including the actual leaf `entity` discriminator and shared `id`/`name`. Inherited fields and reference targets are joined in the same SQL statement, never by a per-row follow-up query:
 
 ```ts
 import { EntityDefinitions, Operator, Server, SortDirection } from 'basis/server'
@@ -160,6 +160,34 @@ const users = await server.db.query<{
 })
 ```
 
+A field that exists only on some concrete descendants is still selectable on an abstract query. Its value is present for leaves that declare it and `null` for siblings that do not:
+
+```ts
+const users = await server.db.query<{
+  entity: string,
+  id: string,
+  permissions: string | null,
+}>('User', {
+  fields: ['id', 'entity', 'permissions'],
+})
+```
+
+Same-named descendant-only fields are accepted only when their type, format, and reference-target contracts are compatible. The value is selected conditionally from the owning table for each concrete leaf; incompatible declarations fail before SQL runs.
+
+Singular references return the target's lightweight identity `{ id, name, entity }` or `null` when the reference is unset. A reference declared only on some descendant leaves is present for those leaves and `null` for siblings. Selecting a dotted path expands the reference and includes that identity automatically. Fields from an abstract target resolve against its actual concrete leaf. A reference targeting the universal `Entity` root derives leaf-owned fields and references from the actual target leaf; leaves without that field yield `null`:
+
+```ts
+const articles = await server.db.query<{
+  id: string,
+  owner: { entity: string, id: string, name: string, permissions: string | null } | null,
+}>('Article', {
+  fields: ['id', 'owner.permissions'],
+  orderBy: 'id',
+})
+```
+
+`fields: ['owner.manager.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, repeated reference expansion, and paths deeper than eight reference hops fail before SQL runs. Reference fields cannot be used in `where` or `orderBy`; graph predicates and collection projections remain deferred.
+
 `$contains` is a case-insensitive literal substring match on `String` fields. It escapes `%`, `_`, and the escape character before binding, so user input is never interpreted as a wildcard. Abstract display-name searches use the root `pg_trgm` GIN index.
 
 ```ts
@@ -184,7 +212,7 @@ const matching = await server.db.query<{ id: string, title: string }>('Note', {
 })
 ```
 
-`fields` is required and must be a non-empty list of effective scalar fields for the named entity. Abstract queries include inherited fields and return the concrete leaf `entity`; concrete queries use the same effective-field contract. `where` accepts a single-field equality shorthand (`{ title: 'Hello' }`), an explicit canonical filter tree using the exported `Operator` enums, or a string query expression. An empty or whitespace-only string expression adds no predicate, matching an empty structured object. Shorthand is only equality for one field and normalizes to `Operator.Comparison.Equal`; multiple structured fields must be expressed explicitly with `And` and `filters`. An operator-looking object inside a field value is equality with that whole object, not operator syntax.
+`fields` is required and must be a non-empty list of effective scalar fields or dotted singular-reference paths for the named entity. Abstract queries include inherited and descendant-only scalar fields and return the concrete leaf `entity`; concrete queries use the same effective-field contract. A reference field selected without a dotted suffix still returns its default identity object. `where` accepts a single-field equality shorthand (`{ title: 'Hello' }`), an explicit canonical filter tree using the exported `Operator` enums, or a string query expression. An empty or whitespace-only string expression adds no predicate, matching an empty structured object. Shorthand is only equality for one field and normalizes to `Operator.Comparison.Equal`; multiple structured fields must be expressed explicitly with `And` and `filters`. An operator-looking object inside a field value is equality with that whole object, not operator syntax.
 
 Structured and string filters normalize to the same canonical predicate tree and SQL path. Comparisons use `$eq`, `$contains`, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$between`, and `$empty`; string expressions also accept `=`, `>`, `>=`, `<`, `<=`, `!=`, and `<>`. `$between` takes exactly two inclusive bounds and uses `values: [lower, upper]` in structured form or `[lower, upper]` after the operator in string form (`score $between [5, 10]`); a `null` bound is open, while `[null, null]` is invalid. `$empty` has no value and is valid only for string fields. `$ne` lowers to `Not(Equal)`, `$between` lowers to `And` of its bounds, and `$empty` lowers to `Or(Equal(null), Equal(''))`. Logical filters use `$and` or `$or` with a non-empty `filters` array and unary `$not` with exactly one child; string expressions support `$and`, `$or`, `$not`/`!`, and grouping parentheses. `$blank`, `$notblank`, `$nor`, and `$xor` are not part of the vocabulary.
 
@@ -194,7 +222,7 @@ Unquoted literals are typed from the target field, and quoted values remain stri
 
 UUID and Snowflake values remain canonical text in `db.query` results; there is no implicit bigint conversion for identity values. Ordering and comparisons operate on the physical text identity.
 
-`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar field projections, including inherited fields for abstract descendants; reference and collection graph projections arrive later.
+`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar field projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections and dotted paths. Reference collections, inverse/many-to-many edges, graph predicates, and collection SQL remain deferred.
 
 ## `db.sql`
 

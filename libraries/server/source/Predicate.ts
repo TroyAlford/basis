@@ -91,7 +91,8 @@ export const Predicate = {
     if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
     if (field.type === FieldType.Entity) {
       throw new Error(
-        `Query field "${entity.name}.${name}" is an entity reference; graph projections are not supported yet`,
+        `Query field "${entity.name}.${name}" is an entity reference; ` +
+        'references cannot be used in predicates or ordering',
       )
     }
     return field

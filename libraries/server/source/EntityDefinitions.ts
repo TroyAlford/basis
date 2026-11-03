@@ -91,6 +91,8 @@ export interface EntityDefinition {
 interface TableColumn {
   /** Physical column name. */
   readonly name: string,
+  /** Whether this column accepts NULL. */
+  readonly nullable?: boolean,
   /** Whether this column is the table's primary key. */
   readonly primaryKey?: boolean,
   /** Physical scalar type. */
@@ -268,6 +270,20 @@ function rootFields(format: IdentityFormat | undefined): readonly EffectiveField
     { name: 'name', owner: 'Entity', type: FieldType.String },
     { name: 'entity', owner: 'Entity', type: FieldType.String },
   ]
+}
+
+/**
+ * Create a synthetic definition for the universal identity root.
+ * @returns Canonical root identity metadata.
+ */
+export function identityDefinition(): EntityDefinition {
+  return {
+    abstract: false,
+    effectiveFields: rootFields(undefined),
+    fields: [],
+    name: 'Entity',
+    parent: 'Entity',
+  }
 }
 
 /**
@@ -774,7 +790,9 @@ function entityTable(entity: EntityDefinition): TableDefinition {
       name: `${entity.name}_id_format_check`,
     }],
     columns: entity.fields.map(field => {
-      if (field.type === FieldType.Entity) return { name: field.column, type: FieldType.String }
+      if (field.type === FieldType.Entity) {
+        return { name: field.column, nullable: true, type: FieldType.String }
+      }
       if (field.type === FieldType.ID) return { name: field.name, primaryKey: true, type: FieldType.ID }
       return { name: field.name, type: field.type }
     }),
@@ -820,7 +838,7 @@ function tableStatements(table: TableDefinition): readonly string[] {
  */
 function createTable(table: TableDefinition): string {
   const columns = table.columns.map(column => {
-    const nullability = column.primaryKey ? ' primary key' : ' not null'
+    const nullability = column.primaryKey ? ' primary key' : column.nullable ? '' : ' not null'
     return `${quoteIdentifier(column.name)} ${columnType(column.type)}${nullability}`
   })
   const checks = (table.checks ?? []).map(check => (

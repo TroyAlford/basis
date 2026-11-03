@@ -513,6 +513,395 @@ describe('Server database lifecycle', () => {
     expect(invalidManager).toMatchObject({ errno: '23503' })
   }, 120_000)
 
+  durableTest('projects descendant fields and singular reference paths', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'email', type: 'String' },
+          ],
+          name: 'User',
+        },
+        {
+          extends: 'User',
+          fields: [
+            { field: 'permissions', type: 'String' },
+            { field: 'status', type: 'String' },
+            { column: 'managerId', field: 'manager', target: 'User', type: 'Entity' },
+          ],
+          name: 'SystemUser',
+        },
+        {
+          extends: 'User',
+          fields: [
+            { field: 'company', type: 'String' },
+            { field: 'status', type: 'String' },
+          ],
+          name: 'Client',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { field: 'title', type: 'String' },
+            { column: 'ownerId', field: 'owner', target: 'User', type: 'Entity' },
+            { column: 'favoriteId', field: 'favorite', target: 'Entity', type: 'Entity' },
+          ],
+          name: 'Article',
+        },
+      ],
+    }))
+    await database.tx(async sql => entities.createTables(sql))
+    const systemUserId = randomUUID()
+    const clientOwnerId = randomUUID()
+    const clientManagerId = randomUUID()
+    await database.tx(async sql => {
+      await sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${systemUserId},
+          ${'System User'},
+          ${'SystemUser'}),
+          (${clientOwnerId},
+          ${'Client Owner'},
+          ${'Client'}),
+          (${clientManagerId},
+          ${'Client Manager'},
+          ${'Client'}),
+          (${'1001'},
+          ${'Article One'},
+          ${'Article'}),
+          (${'1002'},
+          ${'Article Two'},
+          ${'Article'}),
+          (${'1003'},
+          ${'Article Three'},
+          ${'Article'}),
+          (${'1004'},
+          ${'Article Four'},
+          ${'Article'})
+      `
+      await sql`
+        INSERT INTO "User" ("id", "email")
+VALUES (${systemUserId},
+  ${'system@example.test'}),
+  (${clientOwnerId},
+  ${'owner@example.test'}),
+  (${clientManagerId},
+  ${'manager@example.test'})
+      `
+      await sql`
+        INSERT INTO "SystemUser" ("id", "permissions", "status", "managerId")
+        VALUES (${systemUserId}, ${'admin'}, ${'active'}, ${clientManagerId})
+      `
+      await sql`
+        INSERT INTO "Client" ("id", "company", "status")
+VALUES (${clientOwnerId},
+  ${'Acme'},
+  ${'inactive'}),
+  (${clientManagerId},
+  ${'Manager Co'},
+  ${'active'})
+      `
+      await sql`
+        INSERT INTO "Article" ("id", "title", "ownerId", "favoriteId")
+VALUES (${'1001'},
+  ${'One'},
+  ${systemUserId},
+  ${systemUserId}),
+  (${'1002'},
+  ${'Two'},
+  ${clientOwnerId},
+  ${clientOwnerId}),
+  (${'1003'},
+  ${'Three'},
+  ${null},
+  ${'1001'}),
+  (${'1004'},
+  ${'Four'},
+  ${null},
+  ${null})
+      `
+    })
+
+    expect(await database.tx(async sql => queryEntity<{
+      entity: string,
+      id: string,
+      name: string,
+      permissions: string | null,
+      status: string,
+    }>(sql, entities, 'User', {
+      fields: ['id', 'name', 'entity', 'permissions', 'status'],
+      limit: null,
+      orderBy: 'name',
+    }))).toEqual([
+      {
+        entity: 'Client',
+        id: clientManagerId,
+        name: 'Client Manager',
+        permissions: null,
+        status: 'active',
+      },
+      {
+        entity: 'Client',
+        id: clientOwnerId,
+        name: 'Client Owner',
+        permissions: null,
+        status: 'inactive',
+      },
+      {
+        entity: 'SystemUser',
+        id: systemUserId,
+        name: 'System User',
+        permissions: 'admin',
+        status: 'active',
+      },
+    ])
+
+    expect(await database.tx(async sql => queryEntity<{
+      entity: string,
+      id: string,
+      permissions: string | null,
+    }>(sql, entities, 'User', {
+      fields: ['id', 'entity', 'permissions'],
+      limit: 1,
+      offset: 1,
+      orderBy: 'name',
+    }))).toEqual([{ entity: 'Client', id: clientOwnerId, permissions: null }])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'User', {
+      fields: ['id', 'entity', 'manager'],
+      limit: null,
+      orderBy: 'name',
+    }))).toEqual([
+      { entity: 'Client', id: clientManagerId, manager: null },
+      { entity: 'Client', id: clientOwnerId, manager: null },
+      {
+        entity: 'SystemUser',
+        id: systemUserId,
+        manager: { entity: 'Client', id: clientManagerId, name: 'Client Manager' },
+      },
+    ])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'title', 'owner'],
+      limit: null,
+      orderBy: 'id',
+    }))).toEqual([
+      {
+        id: '1001',
+        owner: { entity: 'SystemUser', id: systemUserId, name: 'System User' },
+        title: 'One',
+      },
+      {
+        id: '1002',
+        owner: { entity: 'Client', id: clientOwnerId, name: 'Client Owner' },
+        title: 'Two',
+      },
+      { id: '1003', owner: null, title: 'Three' },
+      { id: '1004', owner: null, title: 'Four' },
+    ])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'owner.permissions'],
+      limit: 1,
+      offset: 1,
+      orderBy: 'id',
+    }))).toEqual([{
+      id: '1002',
+      owner: {
+        entity: 'Client',
+        id: clientOwnerId,
+        name: 'Client Owner',
+        permissions: null,
+      },
+    }])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'owner.permissions'],
+      limit: null,
+      orderBy: 'id',
+    }))).toEqual([
+      {
+        id: '1001',
+        owner: {
+          entity: 'SystemUser',
+          id: systemUserId,
+          name: 'System User',
+          permissions: 'admin',
+        },
+      },
+      {
+        id: '1002',
+        owner: {
+          entity: 'Client',
+          id: clientOwnerId,
+          name: 'Client Owner',
+          permissions: null,
+        },
+      },
+      { id: '1003', owner: null },
+      { id: '1004', owner: null },
+    ])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'owner.manager.name'],
+      limit: null,
+      orderBy: 'id',
+    }))).toEqual([
+      {
+        id: '1001',
+        owner: {
+          entity: 'SystemUser',
+          id: systemUserId,
+          manager: {
+            entity: 'Client',
+            id: clientManagerId,
+            name: 'Client Manager',
+          },
+          name: 'System User',
+        },
+      },
+      {
+        id: '1002',
+        owner: {
+          entity: 'Client',
+          id: clientOwnerId,
+          manager: null,
+          name: 'Client Owner',
+        },
+      },
+      { id: '1003', owner: null },
+      { id: '1004', owner: null },
+    ])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'favorite'],
+      limit: null,
+      orderBy: 'id',
+    }))).toEqual([
+      {
+        favorite: { entity: 'SystemUser', id: systemUserId, name: 'System User' },
+        id: '1001',
+      },
+      {
+        favorite: { entity: 'Client', id: clientOwnerId, name: 'Client Owner' },
+        id: '1002',
+      },
+      {
+        favorite: { entity: 'Article', id: '1001', name: 'Article One' },
+        id: '1003',
+      },
+      { favorite: null, id: '1004' },
+    ])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'favorite.permissions'],
+      limit: null,
+      orderBy: 'id',
+    }))).toEqual([
+      {
+        favorite: {
+          entity: 'SystemUser',
+          id: systemUserId,
+          name: 'System User',
+          permissions: 'admin',
+        },
+        id: '1001',
+      },
+      {
+        favorite: {
+          entity: 'Client',
+          id: clientOwnerId,
+          name: 'Client Owner',
+          permissions: null,
+        },
+        id: '1002',
+      },
+      {
+        favorite: {
+          entity: 'Article',
+          id: '1001',
+          name: 'Article One',
+          permissions: null,
+        },
+        id: '1003',
+      },
+      { favorite: null, id: '1004' },
+    ])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'favorite.permissions'],
+      limit: 1,
+      offset: 1,
+      orderBy: 'id',
+    }))).toEqual([{
+      favorite: {
+        entity: 'Client',
+        id: clientOwnerId,
+        name: 'Client Owner',
+        permissions: null,
+      },
+      id: '1002',
+    }])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'favorite.owner.name'],
+      limit: null,
+      orderBy: 'id',
+    }))).toEqual([
+      {
+        favorite: {
+          entity: 'SystemUser',
+          id: systemUserId,
+          name: 'System User',
+          owner: null,
+        },
+        id: '1001',
+      },
+      {
+        favorite: {
+          entity: 'Client',
+          id: clientOwnerId,
+          name: 'Client Owner',
+          owner: null,
+        },
+        id: '1002',
+      },
+      {
+        favorite: {
+          entity: 'Article',
+          id: '1001',
+          name: 'Article One',
+          owner: { entity: 'SystemUser', id: systemUserId, name: 'System User' },
+        },
+        id: '1003',
+      },
+      { favorite: null, id: '1004' },
+    ])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'owner.permissions'],
+      limit: 1,
+      orderBy: 'id',
+      where: { title: 'One' },
+    }))).toEqual([{
+      id: '1001',
+      owner: {
+        entity: 'SystemUser',
+        id: systemUserId,
+        name: 'System User',
+        permissions: 'admin',
+      },
+    }])
+
+    await expect(database.tx(async sql => queryEntity(sql, entities, 'Article', {
+      fields: ['title.value'],
+    }))).rejects.toThrow('Cannot traverse scalar field')
+    await expect(database.tx(async sql => queryEntity(sql, entities, 'Article', {
+      fields: ['owner.manager.manager.name'],
+    }))).rejects.toThrow('Repeated reference expansion')
+  }, 120_000)
+
   durableTest('queries polymorphic descendants with indexed names', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
@@ -1251,12 +1640,11 @@ VALUES (${invalidUserId},
     expect(invalid).toMatchObject({ errno: '23503' })
   }, 120_000)
 
-  isolatedTest('rejects physical reference columns and unfinished graph operations', async database => {
-
+  isolatedTest('rejects physical reference columns and graph predicates', async database => {
     await expect(database.query('Article', { fields: ['ownerId'] }))
       .rejects.toThrow('Unknown field "Article.ownerId"')
-    await expect(database.query('Article', { fields: ['owner'] }))
-      .rejects.toThrow('entity reference; graph projections are not supported yet')
+    expect(compileEntityQuery(database.entities, 'Article', { fields: ['owner'] }).sql)
+      .toContain('"owner__id"')
 
     await expect(database.query('Article', {
       fields: ['id'],
@@ -1265,11 +1653,11 @@ VALUES (${invalidUserId},
     await expect(database.query('Article', {
       fields: ['id'],
       where: { field: 'owner', operator: Operator.Comparison.Equal, value: '1' },
-    })).rejects.toThrow('entity reference; graph projections are not supported yet')
+    })).rejects.toThrow('references cannot be used in predicates or ordering')
     await expect(database.query('Article', {
       fields: ['id'],
       where: 'owner = "1"',
-    })).rejects.toThrow('entity reference; graph projections are not supported yet')
+    })).rejects.toThrow('references cannot be used in predicates or ordering')
     await expect(database.query('Article', {
       fields: ['id'],
       where: 'ownerId = "1"',
@@ -1282,7 +1670,7 @@ VALUES (${invalidUserId},
     await expect(database.query('Article', {
       fields: ['id'],
       orderBy: 'owner',
-    })).rejects.toThrow('entity reference; graph projections are not supported yet')
+    })).rejects.toThrow('references cannot be used in predicates or ordering')
   }, 120_000)
 
   isolatedTest('matches string and structured predicates with two-valued null semantics', async database => {

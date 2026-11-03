@@ -66,6 +66,8 @@ export interface CompiledEntityQuery {
 
 /** A prepared query. */
 interface PreparedEntityQuery {
+  /** Convert one flat SQL row into the requested nested projection. */
+  readonly hydrate: (row: Record<string, unknown>) => Record<string, unknown>,
   /** Complete SQL statement and ordered bindings. */
   readonly query: CompiledEntityQuery,
 }
@@ -100,8 +102,10 @@ function prepareEntityQuery(
 ): PreparedEntityQuery {
   const definition = entities.entity(entity)
   if (!definition) throw new Error(`Unknown entity "${entity}"`)
+  const compiled = compilePolymorphicQuery(entities, definition, options)
   return {
-    query: compilePolymorphicQuery(entities, definition, options),
+    hydrate: compiled.hydrate,
+    query: { sql: compiled.sql, values: compiled.values },
   }
 }
 
@@ -124,7 +128,11 @@ export async function queryEntity<T = Record<string, unknown>>(
   options: QueryOptions,
 ): Promise<T[]> {
   const prepared = prepareEntityQuery(entities, entity, options)
-  return sql.unsafe<T[]>(prepared.query.sql, [...prepared.query.values])
+  const rows = await sql.unsafe<Record<string, unknown>[]>(
+    prepared.query.sql,
+    [...prepared.query.values],
+  )
+  return rows.map(row => prepared.hydrate(row)) as T[]
 }
 
 /** A server-owned database capability. */
@@ -135,7 +143,7 @@ export interface Database {
   readonly closed: boolean,
   /** Establishes the database pool's connection. */
   connect(): Promise<void>,
-  /** Projects root scalar fields from one canonical entity. */
+  /** Projects effective scalar and singular reference paths from one canonical entity. */
   query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]>,
   /** The pooled Bun SQL tagged-template API. */
   readonly sql: BunSQL,
@@ -216,9 +224,9 @@ class PostgresDatabase implements Database {
   }
 
   /**
-   * Project root scalar fields from one entity.
+   * Project effective scalar and singular reference paths from one entity.
    * @param entity - Exact canonical entity name.
-   * @param options - Fields to project.
+   * @param options - Scalar fields and singular reference paths to project.
    * @returns The selected rows.
    * @throws {Error} When no definitions are configured, the pool is closed, or the query is invalid.
    */
@@ -361,9 +369,9 @@ class ManagedDatabase implements Database {
   }
 
   /**
-   * Projects root scalar fields from one entity.
+   * Projects effective scalar and singular reference paths from one entity.
    * @param entity - Exact canonical entity name.
-   * @param options - Fields to project.
+   * @param options - Scalar fields and singular reference paths to project.
    * @returns The selected rows.
    * @throws {Error} When the managed pool is not connected or the query is invalid.
    */
