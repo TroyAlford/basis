@@ -106,9 +106,9 @@ export async function withDurableDatabase<T>(
   await fixture.server.db.sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
 
   const transaction = <Result>(work: BunSQL.TransactionContextCallback<Result>) => (
-    fixture.server.db.tx(async tx => {
-      await setSearchPath(tx, schema)
-      return await work(tx)
+    fixture.server.db.tx(async sql => {
+      await setSearchPath(sql, schema)
+      return await work(sql)
     })
   )
 
@@ -124,9 +124,7 @@ export async function withDurableDatabase<T>(
   const cleanup = async (): Promise<void> => {
     await fixture.server.db.sql.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`).simple()
     const remaining = await fixture.server.db.sql<{ present: boolean }[]>`
-      select exists (
-        select 1 from pg_catalog.pg_namespace where nspname = ${schema}
-      ) as present
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema} ) AS present
     `
     if (remaining[0]?.present) throw new Error(`Database test schema "${schema}" was not removed`)
   }

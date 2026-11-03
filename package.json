@@ -84,7 +84,8 @@
     "unified": "^11.0.5",
     "unified-lint-rule": "^3.0.1",
     "unist-util-visit": "^5.1.0",
-    "vfile": "^6.0.3"
+    "vfile": "^6.0.3",
+    "jsonc-eslint-parser": "^3.3.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

@@ -1,9 +1,9 @@
-import { match } from '../../utilities'
 import type { EntityDefinition, EntityDefinitions, ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
+import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { ComparisonFilter, Filter, LogicalFilter } from './Predicate'
 import { Predicate } from './Predicate'
+import { normalizeScalar } from './ScalarNormalization'
 import { SortDirection } from './SortDirection'
 
 /** A validated ordering clause. */
@@ -98,25 +98,20 @@ interface LogicalDefinition {
   readonly minimumOperands: number,
 }
 
-/** Signed 64-bit Snowflake bounds. */
-const SNOWFLAKE_MIN = -9223372036854775808n
-const SNOWFLAKE_MAX = 9223372036854775807n
-
 /** All scalar field types support equality. */
 const ALL_FIELD_TYPES = new Set<FieldType>([
   FieldType.Boolean,
   FieldType.Date,
+  FieldType.ID,
   FieldType.Number,
-  FieldType.Snowflake,
   FieldType.String,
   FieldType.Timestamp,
-  FieldType.UUID,
 ])
 /** Only ordered scalar field types support range comparisons. */
 const RANGE_FIELD_TYPES = new Set<FieldType>([
   FieldType.Date,
+  FieldType.ID,
   FieldType.Number,
-  FieldType.Snowflake,
   FieldType.String,
   FieldType.Timestamp,
 ])
@@ -242,35 +237,9 @@ function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOper
       throw new Error(`Query operand for "${field.name}" must not be null`)
     }
 
-    return match(field.type)
-      .when(FieldType.Boolean).then(() => (
-        typeof raw === 'boolean' ? raw : invalidOperand(field)
-      ))
-      .when(FieldType.Date).then(() => (
-        typeof raw === 'string' && raw.length > 0 ? raw : invalidOperand(field)
-      ))
-      .when(FieldType.Number).then(() => (
-        typeof raw === 'number' && Number.isFinite(raw) ? raw : invalidOperand(field)
-      ))
-      .when(FieldType.Snowflake).then(() => {
-        if (typeof raw === 'bigint' && raw >= SNOWFLAKE_MIN && raw <= SNOWFLAKE_MAX) {
-          return raw.toString()
-        }
-        if (typeof raw === 'string' && isCanonicalSnowflake(raw)) return raw
-        return invalidOperand(field)
-      })
-      .when(FieldType.String).then(() => (
-        typeof raw === 'string' ? raw : invalidOperand(field)
-      ))
-      .when(FieldType.Timestamp).then(() => {
-        if (raw instanceof Date && !Number.isNaN(raw.getTime())) return raw
-        if (typeof raw === 'string' && raw.length > 0) return raw
-        return invalidOperand(field)
-      })
-      .when(FieldType.UUID).then(() => (
-        typeof raw === 'string' && isCanonicalUUID(raw) ? raw : invalidOperand(field)
-      ))
-      .else(() => invalidOperand(field))
+    const normalized = normalizeScalar(field, raw)
+    if (normalized === undefined) invalidOperand(field)
+    return normalized
   }
 }
 
@@ -280,7 +249,7 @@ function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOper
  * @throws {Error} Always, naming the invalid operand.
  */
 function invalidOperand(field: ScalarFieldDefinition): never {
-  throw new Error(`Query operand for "${field.name}" is not a valid ${field.type} value`)
+  throw new Error(`Query operand for "${field.name}" is not a valid ${field.type.toLowerCase()} value`)
 }
 
 /**

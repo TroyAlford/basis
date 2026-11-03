@@ -15,12 +15,12 @@ const silent = new Logger({ silent: true })
 /** The Note entity fixture used by ordinary database tests. */
 export const noteDefinition = {
   fields: [
-    { name: 'id', primaryKey: true, type: 'uuid' },
-    { name: 'title', type: 'string' },
-    { name: 'active', type: 'boolean' },
-    { name: 'score', type: 'number' },
-    { name: 'dueOn', type: 'date' },
-    { name: 'createdAt', type: 'timestamp' },
+    { field: 'id', format: 'UUID' },
+    { field: 'title', type: 'String' },
+    { field: 'active', type: 'Boolean' },
+    { field: 'score', type: 'Number' },
+    { field: 'dueOn', type: 'Date' },
+    { field: 'createdAt', type: 'Timestamp' },
   ],
   name: 'Note',
 }
@@ -28,9 +28,8 @@ export const noteDefinition = {
 /** The Account entity fixture used by ordinary database tests. */
 export const accountDefinition = {
   fields: [
-    { name: 'id', primaryKey: true, type: 'snowflake' },
-    { name: 'externalId', type: 'snowflake' },
-    { name: 'name', type: 'string' },
+    { field: 'id', format: 'Snowflake' },
+    { field: 'label', type: 'String' },
   ],
   name: 'Account',
 }
@@ -38,8 +37,8 @@ export const accountDefinition = {
 /** The NumberRow entity fixture used by ordinary database tests. */
 export const numberRowDefinition = {
   fields: [
-    { name: 'id', primaryKey: true, type: 'uuid' },
-    { name: 'value', type: 'number' },
+    { field: 'id', format: 'UUID' },
+    { field: 'value', type: 'Number' },
   ],
   name: 'NumberRow',
 }
@@ -47,12 +46,12 @@ export const numberRowDefinition = {
 /** The nullable QueryRow entity fixture used by predicate tests. */
 export const queryRowDefinition = {
   fields: [
-    { name: 'id', primaryKey: true, type: 'uuid' },
-    { name: 'active', type: 'boolean' },
-    { name: 'externalId', type: 'snowflake' },
-    { name: 'rank', type: 'number' },
-    { name: 'score', type: 'number' },
-    { name: 'title', type: 'string' },
+    { field: 'id', format: 'UUID' },
+    { field: 'active', type: 'Boolean' },
+    { field: 'externalId', type: 'Number' },
+    { field: 'rank', type: 'Number' },
+    { field: 'score', type: 'Number' },
+    { field: 'title', type: 'String' },
   ],
   name: 'QueryRow',
 }
@@ -60,8 +59,8 @@ export const queryRowDefinition = {
 /** The User entity used by reference-field query tests. */
 export const userDefinition = {
   fields: [
-    { name: 'id', primaryKey: true, type: 'snowflake' },
-    { name: 'name', type: 'string' },
+    { field: 'id', format: 'UUID' },
+    { field: 'label', type: 'String' },
   ],
   name: 'User',
 }
@@ -69,9 +68,9 @@ export const userDefinition = {
 /** The Article entity used by reference-field query tests. */
 export const articleDefinition = {
   fields: [
-    { name: 'id', primaryKey: true, type: 'uuid' },
-    { name: 'title', type: 'string' },
-    { column: 'ownerId', name: 'owner', target: 'User', type: 'entity' },
+    { field: 'id', format: 'UUID' },
+    { field: 'title', type: 'String' },
+    { column: 'ownerId', field: 'owner', target: 'User', type: 'Entity' },
   ],
   name: 'Article',
 }
