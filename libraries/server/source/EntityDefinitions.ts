@@ -141,6 +141,8 @@ interface LifecycleFunction {
 
 /** One lifecycle constraint trigger that must exist and match. */
 interface LifecycleTrigger {
+  /** UPDATE OF columns, when declared. */
+  readonly columns?: readonly string[],
   /** Whether this is a constraint trigger. */
   readonly constraint: boolean,
   /** Whether this is deferrable. */
@@ -374,6 +376,7 @@ export class EntityDefinitions {
   /**
    * Create a fresh schema and reconcile existing integrity definitions.
    *
+   * The caller owns transaction scope; use `db.tx` for an atomic initialization.
    * Existing tables are not migrated. Existing lifecycle functions and
    * triggers are inspected; matching definitions are left untouched and
    * mismatches fail visibly rather than being silently replaced.
@@ -421,8 +424,18 @@ select exists (select 1 from pg_catalog.pg_tables where schemaname = current_sch
 
     const lifecycle = lifecycleDefinitions(this.entities)
     for (const statement of lifecycle.functions) {
-      const existing = await sql<{ body: string }[]>`
-        select p.prosrc as body
+      const existing = await sql<{
+        body: string,
+        normalFunction: boolean,
+        plpgsql: boolean,
+        returnTrigger: boolean,
+        securityDefiner: boolean,
+      }[]>`
+        select p.prosrc as body,
+          p.prokind = 'f' as "normalFunction",
+          p.prolang = (select oid from pg_catalog.pg_language where lanname = 'plpgsql') as plpgsql,
+          p.prorettype = 'trigger'::regtype as "returnTrigger",
+          p.prosecdef as "securityDefiner"
         from pg_catalog.pg_proc p
         join pg_catalog.pg_namespace n on n.oid = p.pronamespace
         where n.nspname = current_schema() and p.proname = ${statement.name} and p.pronargs = 0
@@ -431,25 +444,44 @@ select exists (select 1 from pg_catalog.pg_tables where schemaname = current_sch
         await sql.unsafe(statement.statement).simple()
         continue
       }
-      if (normalizeBody(existing[0].body) !== normalizeBody(statement.body)) {
+      const currentFunction = existing[0]
+      if (
+        normalizeBody(currentFunction.body) !== normalizeBody(statement.body)
+        || !currentFunction.normalFunction
+        || !currentFunction.plpgsql
+        || !currentFunction.returnTrigger
+        || currentFunction.securityDefiner
+      ) {
         throw new Error(`Existing lifecycle function "${statement.name}" does not match the canonical model`)
       }
     }
     for (const trigger of lifecycle.triggers) {
       const existing = await sql<{
+        columns: string[],
         constraint: number,
         deferrable: boolean,
+        enabled: string,
         functionName: string,
+        functionSchema: boolean,
         initDeferred: boolean,
+        noWhen: boolean,
         type: number,
       }[]>`
-        select t.tgconstraint as constraint,
+select coalesce((select array_agg(a.attname order by u.ordinality) from unnest(t.tgattr::smallint[])
+  with ordinality u(attnum,
+ordinality) join pg_catalog.pg_attribute a on a.attrelid = t.tgrelid and a.attnum = u.attnum ),
+          '{}'::text[]) as columns,
+          t.tgconstraint as constraint,
           t.tgdeferrable as deferrable,
+          t.tgenabled as enabled,
+          p.proname as "functionName",
+          n.nspname = current_schema() as "functionSchema",
           t.tginitdeferred as "initDeferred",
-          t.tgtype as type,
-          p.proname as "functionName"
+          t.tgqual is null as "noWhen",
+          t.tgtype as type
         from pg_catalog.pg_trigger t
         join pg_catalog.pg_proc p on p.oid = t.tgfoid
+        join pg_catalog.pg_namespace n on n.oid = p.pronamespace
 where t.tgname = ${trigger.name} and t.tgrelid = ${quoteIdentifier(trigger.table)}::regclass and not
   t.tgisinternal
       `
@@ -460,10 +492,14 @@ where t.tgname = ${trigger.name} and t.tgrelid = ${quoteIdentifier(trigger.table
       const current = existing[0]
       if (
         current.deferrable !== trigger.deferrable
+        || current.enabled !== 'O'
         || current.initDeferred !== trigger.initDeferred
         || (current.constraint !== 0) !== trigger.constraint
         || current.functionName !== trigger.function
+        || !current.functionSchema
+        || !current.noWhen
         || current.type !== trigger.type
+        || current.columns.join(',') !== (trigger.columns ?? []).join(',')
       ) {
         throw new Error(
           `Existing lifecycle trigger "${trigger.name}" on "${trigger.table}" ` +
@@ -1041,6 +1077,7 @@ end
       type: 29,
     })),
     {
+      columns: ['entity'],
       constraint: false,
       deferrable: false,
       function: 'Entity_leaf_immutable',

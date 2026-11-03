@@ -49,6 +49,8 @@ export function formatEntityDocument(value: unknown): { formatted: string, issue
         if (typeof field.format !== 'string' || !FORMATS.has(field.format)) {
           issues.push(`entities[${entityIndex}].fields[${fieldIndex}] id refinement needs format UUID or Snowflake`)
         }
+      } else if (field.field === 'name' || field.field === 'entity') {
+        issues.push(`entities[${entityIndex}].fields[${fieldIndex}] uses a reserved root field name`)
       } else if (field.type === 'Entity') {
         if (typeof field.target !== 'string') {
           issues.push(`entities[${entityIndex}].fields[${fieldIndex}].target must be a string`)
@@ -56,8 +58,16 @@ export function formatEntityDocument(value: unknown): { formatted: string, issue
         if (typeof field.column !== 'string') {
           issues.push(`entities[${entityIndex}].fields[${fieldIndex}].column must be a string`)
         }
-      } else if (typeof field.type !== 'string' || !FIELD_TYPES.has(field.type)) {
-        issues.push(`entities[${entityIndex}].fields[${fieldIndex}] has an invalid type`)
+        if (field.format !== undefined) {
+          issues.push(`entities[${entityIndex}].fields[${fieldIndex}] reference fields cannot declare format`)
+        }
+      } else if (
+        typeof field.type !== 'string'
+        || !FIELD_TYPES.has(field.type)
+        || field.type === 'ID'
+        || field.format !== undefined
+      ) {
+        issues.push(`entities[${entityIndex}].fields[${fieldIndex}] has an invalid type or format`)
       }
       return ordered(field, FIELD_KEYS)
     })

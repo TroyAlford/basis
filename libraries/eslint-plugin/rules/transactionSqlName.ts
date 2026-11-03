@@ -24,32 +24,48 @@ export const transactionSqlName: Rule.RuleModule = {
       CallExpression(node: ESTree.CallExpression): void {
         if (!isTransaction(node.callee)) return
         const callback = node.arguments[0]
-        if (
-          !callback
-          || (callback.type !== 'ArrowFunctionExpression' && callback.type !== 'FunctionExpression')
-        ) {
+        if (!callback) return
+        if (callback.type !== 'ArrowFunctionExpression') {
+          if (callback.type === 'FunctionExpression') {
+            context.report({
+              messageId: 'transactionSqlName',
+              node: callback,
+            })
+          }
           return
         }
         const parameter = callback.params[0]
-        if (!parameter || parameter.type !== 'Identifier' || parameter.name === 'sql') return
+        if (!parameter || parameter.type !== 'Identifier') {
+          context.report({ messageId: 'transactionSqlArrow', node: callback })
+          return
+        }
+        const needsAsync = !callback.async
+        const needsRename = parameter.name !== 'sql'
+        if (!needsAsync && !needsRename) return
 
         const scope = context.sourceCode.getScope(callback)
         const variable = scope.variables.find(candidate => candidate.name === parameter.name)
         const text = context.sourceCode.getText(callback)
-        const collides = scope.set.has('sql')
+        const collides = needsRename && (
+          scope.set.has('sql')
           || Boolean(scope.upper && hasOuterSql(scope.upper))
           || /\bsql\b/.test(text)
-        const safe = Boolean(variable) && !collides
+        )
+        const safe = !needsRename || (Boolean(variable) && !collides)
 
         let fix: ((fixer: Rule.RuleFixer) => Rule.Fix[]) | null = null
-        if (safe && variable) {
-          fix = (fixer): Rule.Fix[] => [
-            fixer.replaceText(parameter, 'sql'),
-            ...variable.references.map(reference => fixer.replaceText(
-              reference.identifier as ESTree.Identifier,
-              'sql',
-            )),
-          ]
+        if (safe) {
+          fix = (fixer): Rule.Fix[] => {
+            const fixes: Rule.Fix[] = []
+            if (needsAsync) fixes.push(fixer.insertTextBefore(callback, 'async '))
+            if (needsRename && variable) {
+              fixes.push(fixer.replaceText(parameter, 'sql'))
+              for (const reference of variable.references) {
+                fixes.push(fixer.replaceText(reference.identifier as ESTree.Identifier, 'sql'))
+              }
+            }
+            return fixes
+          }
         }
         context.report({
           data: { name: parameter.name },
@@ -66,6 +82,7 @@ export const transactionSqlName: Rule.RuleModule = {
     },
     fixable: 'code',
     messages: {
+      transactionSqlArrow: "Use an async 'sql' arrow for this transaction callback.",
       transactionSqlName: "Use 'sql' for the transaction SQL binding instead of '{{name}}'.",
     },
     schema: [],

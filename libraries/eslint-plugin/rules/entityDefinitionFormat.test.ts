@@ -37,6 +37,18 @@ describe('entityDefinitionFormat', () => {
     expect(lint(code).fixed).toBe(false)
   })
 
+  test('rejects invalid scalar format and ID declarations without fixing', () => {
+    const cases = [
+      '{"entities":[{"name":"User","fields":[{"field":"email","type":"String","format":"UUID"}]}]}',
+      '{"entities":[{"name":"User","fields":[{"field":"other","type":"ID"}]}]}',
+      '{"entities":[{"name":"User","fields":[{"field":"name","type":"String"}]}]}',
+    ]
+    for (const code of cases) {
+      const output = lint(code)
+      expect(output.fixed).toBe(false)
+    }
+  })
+
   test('reports obsolete vocabulary without fixing', () => {
     const code = '{"entities":[{"name":"User","fields":[{"name":"id","type":"uuid"}]}]}'
     expect(lint(code).fixed).toBe(false)

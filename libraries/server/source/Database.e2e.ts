@@ -417,6 +417,24 @@ describe('Server database lifecycle', () => {
     })).toEqual([{ score: 1.5, title: 'kept' }])
   }, 120_000)
 
+  durableTest('rolls back partial fresh-schema initialization inside db.tx', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [], name: 'Good' },
+        { fields: [], name: 'Broken' },
+      ],
+    }))
+    await database.tx(async sql => sql`
+      create table "Broken" ("marker" text)
+    `)
+    const failure = await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error)
+    expect(failure).toMatchObject({ errno: '42703' })
+    expect(await database.tx(async sql => sql<{ entity: boolean, good: boolean }[]>`
+select to_regclass('"Entity"') is not null as entity,
+  to_regclass('"Good"') is not null as good
+    `)).toEqual([{ entity: false, good: false }])
+  }, 120_000)
+
   isolatedTest('creates and indexes the universal identity root', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
     await entities.createTables(database.sql)
@@ -500,10 +518,10 @@ describe('Server database lifecycle', () => {
         },
       ],
     }))
-    await database.tx(sql => entities.createTables(sql))
+    await database.tx(async sql => entities.createTables(sql))
 
     const incompleteId = randomUUID()
-    expect(await database.tx(sql => sql`
+    expect(await database.tx(async sql => sql`
       insert into "Entity" ("id", "name", "entity")
       values (${incompleteId}, ${'Incomplete'}, ${'SystemUser'})
     `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
@@ -536,7 +554,7 @@ describe('Server database lifecycle', () => {
       `
     })
 
-    expect(await database.tx(sql => sql`
+    expect(await database.tx(async sql => sql`
       insert into "Client" ("id", "company")
       values (${id}, ${'Hooli'})
     `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
@@ -569,12 +587,12 @@ describe('Server database lifecycle', () => {
       `
     }).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
 
-    expect(await database.tx(sql => sql`
+    expect(await database.tx(async sql => sql`
       delete from "SystemUser"
       where "id" = ${id}
     `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
 
-    expect(await database.tx(sql => sql`
+    expect(await database.tx(async sql => sql`
       update "Entity"
       set "entity" = ${'Client'}
       where "id" = ${id}
@@ -638,13 +656,13 @@ describe('Server database lifecycle', () => {
       `
     })
 
-    const triggerOid = async () => database.tx(sql => sql<{ oid: number }[]>`
+    const triggerOid = async () => database.tx(async sql => sql<{ oid: number }[]>`
       select oid
       from pg_catalog.pg_trigger
       where tgname = 'Entity_leaf_check' and tgrelid = '"Entity"'::regclass
     `)
     const before = await triggerOid()
-    await database.tx(sql => entities.createTables(sql))
+    await database.tx(async sql => entities.createTables(sql))
     expect(await triggerOid()).toEqual(before)
 
     await database.tx(async sql => {
@@ -661,11 +679,48 @@ describe('Server database lifecycle', () => {
         where "id" = ${id}
       `
     })
-    expect(await database.tx(sql => sql<{ count: number }[]>`
+    expect(await database.tx(async sql => sql<{ count: number }[]>`
       select count(*)::int as count
       from "Entity"
       where "id" = ${id}
     `)).toEqual([{ count: 0 }])
+
+    await database.tx(async sql => sql`
+      alter table "Entity" disable trigger "Entity_leaf_check"
+    `)
+    expect(await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error))
+      .toHaveProperty(
+        'message',
+        'Existing lifecycle trigger "Entity_leaf_check" on "Entity" does not match the canonical model',
+      )
+    await database.tx(async sql => sql`
+      alter table "Entity" enable trigger "Entity_leaf_check"
+    `)
+
+    await database.tx(async sql => sql`
+      drop trigger "Entity_leaf_immutable" on "Entity"
+    `)
+    await database.tx(async sql => sql`
+      create trigger "Entity_leaf_immutable" before
+      update of "name" on "Entity" for each row execute function "Entity_leaf_immutable"()
+    `)
+    expect(await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error))
+      .toHaveProperty(
+        'message',
+        'Existing lifecycle trigger "Entity_leaf_immutable" on "Entity" does not match the canonical model',
+      )
+
+    await database.tx(async sql => {
+      await sql.unsafe(
+        'create or replace function "Entity_leaf_immutable"() returns trigger ' +
+        'language plpgsql as $$begin return new; end$$',
+      ).simple()
+    })
+    expect(await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error))
+      .toHaveProperty(
+        'message',
+        'Existing lifecycle function "Entity_leaf_immutable" does not match the canonical model',
+      )
   }, 120_000)
 
   isolatedTest('filters numeric values with each comparison operator', async database => {
@@ -1313,7 +1368,7 @@ values (${invalidUserId},
 
     try {
       await expect(server.db.connect()).rejects.toThrow('No database is configured for this server')
-      await expect(server.db.tx(async () => undefined)).rejects.toThrow('No database is configured for this server')
+      await expect(server.db.tx(async sql => { void sql })).rejects.toThrow('No database is configured for this server')
       expect(() => server.db.sql).toThrow('No database is configured for this server')
     } finally {
       await server.shutdown()

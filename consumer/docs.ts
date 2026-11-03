@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { formatEntityDocument } from '../libraries/eslint-plugin/rules/entityDefinitionFormat'
+import { EntityDefinitions } from '../libraries/server/source/EntityDefinitions'
 import type { DocsIssue } from '../libraries/server/source/globDocs'
 import { globDocs } from '../libraries/server/source/globDocs'
 
@@ -113,7 +114,15 @@ function entityJsonIssues(body: string, file: string): DocsIssue[] {
             const result = formatEntityDocument(value)
             if (result.issues.length > 0) {
               issues.push({ file, line: start, message: `entity JSON: ${result.issues.join('; ')}` })
-            } else if (result.formatted.trim() !== source.trim()) {
+              continue
+            }
+            try {
+              EntityDefinitions.load(source)
+            } catch (error) {
+              issues.push({ file, line: start, message: `entity JSON: ${(error as Error).message}` })
+              continue
+            }
+            if (result.formatted.trim() !== source.trim()) {
               issues.push({ file, line: start, message: 'entity JSON example is not in canonical format' })
             }
           }

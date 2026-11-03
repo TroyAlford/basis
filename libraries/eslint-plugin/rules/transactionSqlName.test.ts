@@ -27,6 +27,12 @@ describe('transactionSqlName', () => {
     expect(lint(code).fixed).toBe(false)
   })
 
+  test('adds async to a transaction arrow with the canonical binding', () => {
+    const output = lint('database.tx(sql => sql`select 1`)')
+    expect(output.fixed).toBe(true)
+    expect(output.output).toBe('database.tx(async sql => sql`select 1`)')
+  })
+
   test('does not rewrite unrelated tx methods', () => {
     const code = 'builder.tx(async transaction => transaction())'
     expect(lint(code).fixed).toBe(false)

@@ -29,6 +29,20 @@ describe('sqlTemplateFormat', () => {
     expect(output.output).toContain('${title}')
   })
 
+  test('preserves line comments without swallowing following SQL', () => {
+    const output = lint('sql`select 1 -- note\n+ 2`')
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain('-- note\n')
+    expect(output.output).toContain('+ 2')
+  })
+
+  test('does not auto-format dollar-quoted bodies', () => {
+    const code = 'sql`select $$a\n  b$$`'
+    const output = lint(code)
+    expect(output.fixed).toBe(false)
+    expect(output.output).toBe(code)
+  })
+
   test('accepts canonical multiline SQL', () => {
     const code = 'sql`\n  select 1\n`'
     expect(lint(code).fixed).toBe(false)

@@ -111,8 +111,13 @@ function normalizeSQL(sql: string): string {
       const end = sql.indexOf('\n', index)
       result += separator(result, pendingSpace)
       pendingSpace = false
-      result += end === -1 ? sql.slice(index) : sql.slice(index, end)
-      index = end === -1 ? sql.length : end
+      if (end === -1) {
+        result += sql.slice(index)
+        index = sql.length
+      } else {
+        result += `${sql.slice(index, end)}\n`
+        index = end + 1
+      }
       continue
     }
     if (character === '/' && sql[index + 1] === '*') {
@@ -235,6 +240,23 @@ function splitOutside(value: string, delimiter: string): string[] {
       }
       continue
     }
+    if (character === '-' && value[index + 1] === '-') {
+      const end = value.indexOf('\n', index)
+      if (end === -1) {
+        current += value.slice(index)
+        break
+      }
+      current += value.slice(index, end)
+      index = end - 1
+      continue
+    }
+    if (character === '/' && value[index + 1] === '*') {
+      const end = value.indexOf('*/', index + 2)
+      const stop = end === -1 ? value.length : end + 2
+      current += value.slice(index, stop)
+      index = stop - 1
+      continue
+    }
     if (character === "'" || character === '"') {
       quote = character
       current += character
@@ -293,6 +315,10 @@ export const sqlTemplateFormat: Rule.RuleModule = {
             raw += placeholder
           }
         })
+        if (/\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$/u.test(raw)) {
+          context.report({ messageId: 'unsupportedSQL', node })
+          return
+        }
         const formatted = formatSQL(raw)
         const lineStart = context.sourceCode.getText().lastIndexOf('\n', node.range[0]) + 1
         const baseIndent = context.sourceCode.text.slice(lineStart).match(/^\s*/u)?.[0] ?? ''
@@ -328,6 +354,7 @@ export const sqlTemplateFormat: Rule.RuleModule = {
     fixable: 'code',
     messages: {
       formatSql: 'SQL template is not in canonical format.',
+      unsupportedSQL: 'SQL template contains a dollar-quoted body and is not safely auto-formattable.',
     },
     schema: [],
     type: 'layout',

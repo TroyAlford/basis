@@ -94,7 +94,7 @@ A fresh database is initialized explicitly from the same canonical definitions:
 
 ```ts
 const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
-await entities.createTables(server.db.sql)
+await server.db.tx(async sql => entities.createTables(sql))
 ```
 
 `createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, and creates one ordinary PostgreSQL table per entity. Local scalar fields use their logical field name; a singular reference field uses its explicit `column` name. Every table gets generated `id text primary key` storage. `String` maps to `text`; `Number` to `double precision`; `Date` to `date`; `Timestamp` to `timestamptz`; `Boolean` to `boolean`. Format checks apply to the effective `id` format.
@@ -117,7 +117,7 @@ await server.db.tx(async sql => {
 
 Commit-time constraint triggers reject an incomplete root/leaf chain, a leaf discriminator that does not match, or an incompatible second leaf. The leaf discriminator and leaf identity are immutable after creation. Temporary create/delete and sibling-leaf events are evaluated against surviving final state.
 
-`createTables` is a fresh-schema compiler, not a migration planner. Existing tables and columns are not migrated. Existing lifecycle functions and triggers are inspected through the PostgreSQL catalog: matching definitions are left untouched, missing definitions are created, and mismatching definitions fail visibly. Initialization runs through the existing Bun transaction; it never drops and recreates matching integrity triggers during a rerun. Changing deployed columns, indexes, constraints, or ancestry requires a reviewed migration artifact and is not performed automatically at application startup.
+`createTables` is a fresh-schema compiler, not a migration planner. Existing tables and columns are not migrated. Existing lifecycle functions and triggers are inspected through the PostgreSQL catalog: matching definitions are left untouched, missing definitions are created, and mismatching definitions fail visibly. The caller supplies transaction scope; the documented path uses `db.tx`, so a failed initialization rolls back all tables and constraints created during that attempt. Initialization never drops and recreates matching integrity triggers during a rerun. Changing deployed columns, indexes, constraints, or ancestry requires a reviewed migration artifact and is not performed automatically at application startup.
 
 Instance writes use parameterized `db.sql` inside `db.tx`; Basis does not expose an ORM, repository methods, or automatic CRUD routes.
 
