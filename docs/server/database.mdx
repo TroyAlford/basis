@@ -174,7 +174,7 @@ const users = await server.db.query<{
 
 Same-named descendant-only fields are accepted only when their type, format, and reference-target contracts are compatible. The value is selected conditionally from the owning table for each concrete leaf; incompatible declarations fail before SQL runs.
 
-Singular references return the target's lightweight identity `{ id, name, entity }` or `null` when the reference is unset. A reference declared only on some descendant leaves is present for those leaves and `null` for siblings. Selecting a dotted path expands the reference and includes that identity automatically. Fields from an abstract target resolve against its actual concrete leaf:
+Singular references return the target's lightweight identity `{ id, name, entity }` or `null` when the reference is unset. A reference declared only on some descendant leaves is present for those leaves and `null` for siblings. Selecting a dotted path expands the reference and includes that identity automatically. Fields from an abstract target resolve against its actual concrete leaf. A reference targeting the universal `Entity` root derives leaf-owned fields and references from the actual target leaf; leaves without that field yield `null`:
 
 ```ts
 const articles = await server.db.query<{

@@ -312,7 +312,7 @@ class QueryProjection {
         `LEFT JOIN "Entity" "${rootAlias}" ON ` +
         `"${rootAlias}"."id" = ${sourceAlias}.${quote(field.column)}`,
       )
-      context = rootContext(rootAlias)
+      context = rootContext(this.#entities, rootAlias)
     } else {
       const target = this.#entities.entity(field.target)
       if (!target) throw new Error(`Unknown target entity "${field.target}"`)
@@ -426,9 +426,8 @@ class QueryProjection {
    * @returns Owner table alias.
    */
   #ownerAlias(context: EntityContext, owner: string, forceLeft: boolean): string {
-    if (context.rootOnly) return context.rootAlias
-    if (owner === context.definition.name) return context.baseAlias
     if (owner === 'Entity') return this.#ensureRoot(context)
+    if (owner === context.definition.name) return context.baseAlias
     const existing = context.ownerAliases.get(owner)
     if (existing) return existing
     const alias = this.#nextAlias('o')
@@ -570,15 +569,16 @@ function rootDefinition(): EntityDefinition {
 
 /**
  * Build an occurrence for the universal identity root.
+ * @param entities - Canonical definitions.
  * @param rootAlias - Joined root table alias.
- * @returns Root-only occurrence.
+ * @returns Universal root occurrence with every concrete leaf field available.
  */
-function rootContext(rootAlias: string): EntityContext {
+function rootContext(entities: EntityDefinitions, rootAlias: string): EntityContext {
   const definition = rootDefinition()
   return {
     baseAlias: rootAlias,
     definition,
-    descendants: new Map(),
+    descendants: universalDescendantFields(entities),
     effective: new Map(definition.effectiveFields.map(field => [field.name, field])),
     isTarget: true,
     ownerAliases: new Map([['Entity', rootAlias]]),
@@ -633,6 +633,31 @@ function descendantFields(
   const leaves = entities.entities.filter(entity => (
     !entity.abstract && descendsFrom(entities, entity, definition.name)
   ))
+  return collectDescendantFields(leaves, baseNames)
+}
+
+/**
+ * Build the selectable descendant union for the universal `Entity` root.
+ * @param entities - Canonical definitions.
+ * @returns Leaf-owned fields keyed by logical name.
+ */
+function universalDescendantFields(
+  entities: EntityDefinitions,
+): ReadonlyMap<string, DescendantField> {
+  const leaves = entities.entities.filter(entity => !entity.abstract)
+  return collectDescendantFields(leaves, new Set(['id', 'name', 'entity']))
+}
+
+/**
+ * Group leaf-owned fields into compatible descendant variants.
+ * @param leaves - Concrete entities in canonical order.
+ * @param baseNames - Field names already supplied by the base/root occurrence.
+ * @returns Descendant fields keyed by logical name.
+ */
+function collectDescendantFields(
+  leaves: readonly EntityDefinition[],
+  baseNames: ReadonlySet<string>,
+): ReadonlyMap<string, DescendantField> {
   const groups = new Map<string, Map<string, {
     readonly field: EffectiveFieldDefinition,
     readonly leaves: Set<string>,

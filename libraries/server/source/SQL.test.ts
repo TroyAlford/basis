@@ -402,14 +402,18 @@ describe('SQL.where', () => {
     expect(compiled.values).toEqual([25, 0])
   })
 
-  test('projects references to the universal Entity root', () => {
+  test('projects leaf-owned fields and references through the universal Entity root', () => {
     const compiled = compileEntityQuery(graphDefinitions, 'Article', {
-      fields: ['favorite.name'],
+      fields: ['favorite.name', 'favorite.permissions', 'favorite.owner.name'],
     })
     expect(compiled.sql).toContain('LEFT JOIN "Entity"')
+    expect(compiled.sql).toContain('LEFT JOIN "SystemUser"')
+    expect(compiled.sql).toContain('LEFT JOIN "Article"')
     expect(compiled.sql).toContain('"favorite__id"')
     expect(compiled.sql).toContain('"favorite__name"')
-    expect(compiled.sql).not.toContain('"favorite__permissions"')
+    expect(compiled.sql).toContain('"favorite__permissions"')
+    expect(compiled.sql).toContain('"favorite__owner__v0__name"')
+    expect(compiled.sql).not.toContain('"favorite.permissions"')
   })
 
   test('rejects incompatible descendant-only declarations', () => {

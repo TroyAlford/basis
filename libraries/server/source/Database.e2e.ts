@@ -575,6 +575,9 @@ describe('Server database lifecycle', () => {
           ${'Article'}),
           (${'1003'},
           ${'Article Three'},
+          ${'Article'}),
+          (${'1004'},
+          ${'Article Four'},
           ${'Article'})
       `
       await sql`
@@ -604,13 +607,17 @@ VALUES (${clientOwnerId},
 VALUES (${'1001'},
   ${'One'},
   ${systemUserId},
-  ${clientOwnerId}),
+  ${systemUserId}),
   (${'1002'},
   ${'Two'},
   ${clientOwnerId},
-  ${null}),
+  ${clientOwnerId}),
   (${'1003'},
   ${'Three'},
+  ${null},
+  ${'1001'}),
+  (${'1004'},
+  ${'Four'},
   ${null},
   ${null})
       `
@@ -691,6 +698,7 @@ VALUES (${'1001'},
         title: 'Two',
       },
       { id: '1003', owner: null, title: 'Three' },
+      { id: '1004', owner: null, title: 'Four' },
     ])
 
     expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
@@ -732,6 +740,7 @@ VALUES (${'1001'},
         },
       },
       { id: '1003', owner: null },
+      { id: '1004', owner: null },
     ])
 
     expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
@@ -762,6 +771,7 @@ VALUES (${'1001'},
         },
       },
       { id: '1003', owner: null },
+      { id: '1004', owner: null },
     ])
 
     expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
@@ -770,11 +780,103 @@ VALUES (${'1001'},
       orderBy: 'id',
     }))).toEqual([
       {
-        favorite: { entity: 'Client', id: clientOwnerId, name: 'Client Owner' },
+        favorite: { entity: 'SystemUser', id: systemUserId, name: 'System User' },
         id: '1001',
       },
-      { favorite: null, id: '1002' },
-      { favorite: null, id: '1003' },
+      {
+        favorite: { entity: 'Client', id: clientOwnerId, name: 'Client Owner' },
+        id: '1002',
+      },
+      {
+        favorite: { entity: 'Article', id: '1001', name: 'Article One' },
+        id: '1003',
+      },
+      { favorite: null, id: '1004' },
+    ])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'favorite.permissions'],
+      limit: null,
+      orderBy: 'id',
+    }))).toEqual([
+      {
+        favorite: {
+          entity: 'SystemUser',
+          id: systemUserId,
+          name: 'System User',
+          permissions: 'admin',
+        },
+        id: '1001',
+      },
+      {
+        favorite: {
+          entity: 'Client',
+          id: clientOwnerId,
+          name: 'Client Owner',
+          permissions: null,
+        },
+        id: '1002',
+      },
+      {
+        favorite: {
+          entity: 'Article',
+          id: '1001',
+          name: 'Article One',
+          permissions: null,
+        },
+        id: '1003',
+      },
+      { favorite: null, id: '1004' },
+    ])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'favorite.permissions'],
+      limit: 1,
+      offset: 1,
+      orderBy: 'id',
+    }))).toEqual([{
+      favorite: {
+        entity: 'Client',
+        id: clientOwnerId,
+        name: 'Client Owner',
+        permissions: null,
+      },
+      id: '1002',
+    }])
+
+    expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
+      fields: ['id', 'favorite.owner.name'],
+      limit: null,
+      orderBy: 'id',
+    }))).toEqual([
+      {
+        favorite: {
+          entity: 'SystemUser',
+          id: systemUserId,
+          name: 'System User',
+          owner: null,
+        },
+        id: '1001',
+      },
+      {
+        favorite: {
+          entity: 'Client',
+          id: clientOwnerId,
+          name: 'Client Owner',
+          owner: null,
+        },
+        id: '1002',
+      },
+      {
+        favorite: {
+          entity: 'Article',
+          id: '1001',
+          name: 'Article One',
+          owner: { entity: 'SystemUser', id: systemUserId, name: 'System User' },
+        },
+        id: '1003',
+      },
+      { favorite: null, id: '1004' },
     ])
 
     expect(await database.tx(async sql => queryEntity<Record<string, unknown>>(sql, entities, 'Article', {
