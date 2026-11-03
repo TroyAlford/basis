@@ -20,7 +20,7 @@ export interface IsolatedDatabase {
   /** Shared entity definitions attached to the fixture. */
   readonly entities: EntityDefinitions,
   /**
-   * Project root scalar fields through the test transaction.
+   * Project effective scalar and singular reference paths through the test transaction.
    * @param entity - Exact canonical entity name.
    * @param options - Query options.
    * @returns The selected rows.
@@ -37,7 +37,7 @@ export interface DurableDatabase {
   /** Shared entity definitions attached to the fixture. */
   readonly entities: EntityDefinitions,
   /**
-   * Project root scalar fields in a schema-scoped transaction.
+   * Project effective scalar and singular reference paths in a schema-scoped transaction.
    * @param entity - Exact canonical entity name.
    * @param options - Query options.
    * @returns The selected rows.
@@ -194,7 +194,7 @@ class IsolatedDatabaseContext implements IsolatedDatabase {
   }
 
   /**
-   * Project root scalar fields through the transaction.
+   * Project effective scalar and singular reference paths through the transaction.
    * @param entity - Exact canonical entity name.
    * @param options - Query options.
    * @returns The selected rows.

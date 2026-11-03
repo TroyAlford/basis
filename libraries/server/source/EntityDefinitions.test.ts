@@ -347,7 +347,7 @@ describe('EntityDefinitions', () => {
       `create table "SystemUser" (
         "id" text primary key,
         "permissions" text not null,
-        "managerId" text not null,
+        "managerId" text,
         constraint "SystemUser_id_format_check" check (${identityExpression('id', 'UUID')})
       )`,
       `create table "Client" (

@@ -61,6 +61,52 @@ const hierarchyDefinitions = EntityDefinitions.load(JSON.stringify({
   ],
 }))
 
+const graphDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'email', type: 'String' },
+      ],
+      name: 'User',
+    },
+    {
+      extends: 'User',
+      fields: [
+        { field: 'permissions', type: 'String' },
+        { field: 'status', type: 'String' },
+        { column: 'managerId', field: 'manager', target: 'User', type: 'Entity' },
+      ],
+      name: 'SystemUser',
+    },
+    {
+      extends: 'User',
+      fields: [
+        { field: 'company', type: 'String' },
+        { field: 'status', type: 'String' },
+      ],
+      name: 'Client',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'Snowflake' },
+        { field: 'title', type: 'String' },
+        { column: 'ownerId', field: 'owner', target: 'User', type: 'Entity' },
+        { column: 'favoriteId', field: 'favorite', target: 'Entity', type: 'Entity' },
+      ],
+      name: 'Article',
+    },
+  ],
+}))
+
+const incompatibleDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+    { extends: 'User', fields: [{ field: 'permissions', type: 'String' }], name: 'SystemUser' },
+    { extends: 'User', fields: [{ field: 'permissions', type: 'Number' }], name: 'Client' },
+  ],
+}))
+
 describe('SQL.where', () => {
   test('compiles explicit And comparisons and preserves bound values', () => {
     const predicate = SQL.where(definitions, entity, {
@@ -331,6 +377,57 @@ describe('SQL.where', () => {
     })
     expect(compiled.sql).toContain('ORDER BY r."name" ASC, r."id" ASC')
     expect(compiled.sql).not.toContain('ORDER BY ,')
+  })
+
+  test('projects nullable descendant-only fields for abstract leaves', () => {
+    const compiled = compileEntityQuery(graphDefinitions, 'User', {
+      fields: ['id', 'entity', 'permissions', 'status'],
+    })
+    expect(compiled.sql).toContain('LEFT JOIN "SystemUser"')
+    expect(compiled.sql).toContain('LEFT JOIN "Client"')
+    expect(compiled.sql).toContain('CASE WHEN r."entity" IN (\'SystemUser\')')
+    expect(compiled.sql).toContain('"status"')
+    expect(compiled.sql).toContain('"permissions"')
+  })
+
+  test('projects singular references and dotted paths with nested aliases', () => {
+    const compiled = compileEntityQuery(graphDefinitions, 'Article', {
+      fields: ['id', 'title', 'owner', 'owner.permissions', 'owner.manager.name'],
+    })
+    expect(compiled.sql).toContain('LEFT JOIN "User"')
+    expect(compiled.sql).toContain('"owner__id"')
+    expect(compiled.sql).toContain('"owner__permissions"')
+    expect(compiled.sql).toContain('"owner__manager__v0__name"')
+    expect(compiled.sql).not.toContain('"owner.permissions"')
+    expect(compiled.values).toEqual([25, 0])
+  })
+
+  test('projects references to the universal Entity root', () => {
+    const compiled = compileEntityQuery(graphDefinitions, 'Article', {
+      fields: ['favorite.name'],
+    })
+    expect(compiled.sql).toContain('LEFT JOIN "Entity"')
+    expect(compiled.sql).toContain('"favorite__id"')
+    expect(compiled.sql).toContain('"favorite__name"')
+    expect(compiled.sql).not.toContain('"favorite__permissions"')
+  })
+
+  test('rejects incompatible descendant-only declarations', () => {
+    expect(() => compileEntityQuery(incompatibleDefinitions, 'User', {
+      fields: ['permissions'],
+    })).toThrow('has incompatible declarations')
+  })
+
+  test('rejects invalid dotted projection paths', () => {
+    expect(() => compileEntityQuery(graphDefinitions, 'Article', {
+      fields: ['title.value'],
+    })).toThrow('Cannot traverse scalar field')
+    expect(() => compileEntityQuery(graphDefinitions, 'Article', {
+      fields: ['owner.missing'],
+    })).toThrow('Unknown field "User.missing"')
+    expect(() => compileEntityQuery(graphDefinitions, 'Article', {
+      fields: ['owner.manager.manager.name'],
+    })).toThrow('Repeated reference expansion')
   })
 
   test('compiles substring predicates and escapes wildcard characters', () => {
