@@ -16,10 +16,10 @@ function lint(code: string) {
 }
 
 describe('sqlTemplateFormat', () => {
-  test('formats clauses, lowercase keywords, and indentation', () => {
+  test('formats clauses, uppercase keywords, and indentation', () => {
     const output = lint('db.sql`SELECT * FROM "Entity" WHERE "id" = 1;`')
     expect(output.fixed).toBe(true)
-    expect(output.output).toBe('db.sql`\n  select *\n  from "Entity"\n  where "id" = 1\n`')
+    expect(output.output).toBe('db.sql`\n  SELECT *\n  FROM "Entity"\n  WHERE "id" = 1\n`')
   })
 
   test('preserves quoted text and interpolations', () => {
@@ -48,7 +48,7 @@ describe('sqlTemplateFormat', () => {
   })
 
   test('accepts canonical multiline SQL', () => {
-    const code = 'sql`\n  select 1\n`'
+    const code = 'sql`\n  SELECT 1\n`'
     expect(lint(code).fixed).toBe(false)
   })
 })

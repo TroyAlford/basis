@@ -105,13 +105,13 @@ The statements are deterministic and available through `entities.ddl`: table and
 
 ```ts
 await server.db.tx(async sql => {
-  await sql`set constraints all deferred`
+  await sql`SET CONSTRAINTS ALL DEFERRED`
   await sql`
-    insert into "Entity" ("id", "name", "entity")
-    values (${userId}, 'User', 'User'), (${carId}, 'Car', 'Car')
+    INSERT INTO "Entity" ("id", "name", "entity")
+    VALUES (${userId}, 'User', 'User'), (${carId}, 'Car', 'Car')
   `
-  await sql`insert into "User" ("id", "carId") values (${userId}, ${carId})`
-  await sql`insert into "Car" ("id", "userId") values (${carId}, ${userId})`
+  await sql`INSERT INTO "User" ("id", "carId") VALUES (${userId}, ${carId})`
+  await sql`INSERT INTO "Car" ("id", "userId") VALUES (${carId}, ${userId})`
 })
 ```
 
@@ -185,7 +185,7 @@ UUID and Snowflake values remain canonical text in `db.query` results; there is 
 ```ts
 const owner = 'Troy'
 const notes = await server.db.sql<{ id: string, title: string }[]>`
-  select id, title from notes where owner = ${owner}
+  SELECT id, title FROM notes WHERE owner = ${owner}
 `
 ```
 
@@ -195,8 +195,8 @@ const notes = await server.db.sql<{ id: string, title: string }[]>`
 
 ```ts
 const noteId = await server.db.tx(async sql => {
-  const [note] = await sql`insert into notes (title) values (${title}) returning id`
-  await sql`insert into audit (action, note_id) values ('created', ${note.id})`
+  const [note] = await sql`INSERT INTO notes (title) VALUES (${title}) RETURNING id`
+  await sql`INSERT INTO audit (action, note_id) VALUES ('created', ${note.id})`
   return note.id
 })
 ```

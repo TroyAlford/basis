@@ -170,26 +170,26 @@ describe('Server database lifecycle', () => {
         expect(portOf(aId)).not.toBe(portOf(bId))
 
         expect(await a.db.sql<{ present: boolean }[]>`
-          select exists (select 1 from pg_extension where extname = 'pg_trgm' ) as present
+          SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm' ) AS present
         `).toEqual([{ present: false }])
         await aEntities.createTables(a.db.sql)
         expect(await a.db.sql<{ present: boolean }[]>`
-          select exists (select 1 from pg_extension where extname = 'pg_trgm' ) as present
+          SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm' ) AS present
         `).toEqual([{ present: true }])
 
         await a.db.sql`
-          create table install_probe (value text)
+          CREATE TABLE install_probe (value text)
         `
         await a.db.sql`
-          insert into install_probe
-          values ('A')
+          INSERT INTO install_probe
+          VALUES ('A')
         `
         await b.db.sql`
-          create table install_probe (value text)
+          CREATE TABLE install_probe (value text)
         `
         await b.db.sql`
-          insert into install_probe
-          values ('B')
+          INSERT INTO install_probe
+          VALUES ('B')
         `
 
         const secret = await credentials(aId)
@@ -217,8 +217,8 @@ describe('Server database lifecycle', () => {
       try {
         await bAgain.ready()
         expect(await bAgain.db.sql<{ value: string }[]>`
-          select value
-          from install_probe
+          SELECT value
+          FROM install_probe
         `)
           .toEqual([{ value: 'B' }])
 
@@ -227,8 +227,8 @@ describe('Server database lifecycle', () => {
         try {
           await aAgain.ready()
           expect(await aAgain.db.sql<{ value: string }[]>`
-            select value
-            from install_probe
+            SELECT value
+            FROM install_probe
           `)
             .toEqual([{ value: 'A' }])
 
@@ -238,8 +238,8 @@ describe('Server database lifecycle', () => {
             await aTwin.ready()
             expect(containers(installA)).toHaveLength(1)
             expect(await aTwin.db.sql<{ value: string }[]>`
-              select value
-              from install_probe
+              SELECT value
+              FROM install_probe
             `)
               .toEqual([{ value: 'A' }])
           } finally {
@@ -251,8 +251,8 @@ describe('Server database lifecycle', () => {
 
         // The other installation stayed available through A's restart.
         expect(await bAgain.db.sql<{ value: string }[]>`
-          select value
-          from install_probe
+          SELECT value
+          FROM install_probe
         `)
           .toEqual([{ value: 'B' }])
       } finally {
@@ -267,15 +267,15 @@ describe('Server database lifecycle', () => {
   isolatedTest('exposes Bun SQL parameterization and error semantics', async database => {
     const injected = "Robert'); drop table users; --"
     const rows = await database.sql<{ text: string, value: number }[]>`
-      select ${injected} as text, ${7} as value
+      SELECT ${injected} AS text, ${7} AS value
     `
     expect(rows[0]?.text).toBe(injected)
     expect(rows[0]?.value).toBe(7)
 
     const failure = await database.captureError(async db => {
       await db.sql`
-        select *
-        from basis_missing_relation
+        SELECT *
+        FROM basis_missing_relation
       `
     })
     expect(failure).toMatchObject({ errno: '42P01' })
@@ -284,14 +284,14 @@ describe('Server database lifecycle', () => {
   durableTest('commits and rolls back through pooled Bun transactions', async database => {
     await database.tx(async sql => {
       await sql`
-        create table tx_probe (value text)
+        CREATE TABLE tx_probe (value text)
       `
     })
 
     const result = await database.tx(async sql => {
       await sql`
-        insert into tx_probe
-        values ('committed')
+        INSERT INTO tx_probe
+        VALUES ('committed')
       `
       return 'callback-result'
     })
@@ -300,8 +300,8 @@ describe('Server database lifecycle', () => {
     const count = async (): Promise<number | undefined> => (
       await database.tx(async sql => {
         const rows = await sql<{ count: number }[]>`
-          select count(*)::int as count
-          from tx_probe
+          SELECT count(*)::int AS count
+          FROM tx_probe
         `
         return rows[0]?.count
       })
@@ -310,8 +310,8 @@ describe('Server database lifecycle', () => {
 
     await expect(database.tx(async sql => {
       await sql`
-        insert into tx_probe
-        values ('thrown')
+        INSERT INTO tx_probe
+        VALUES ('thrown')
       `
       throw new Error('rollback')
     })).rejects.toThrow('rollback')
@@ -319,12 +319,12 @@ describe('Server database lifecycle', () => {
 
     await expect(database.tx(async sql => {
       await sql`
-        insert into tx_probe
-        values ('failed')
+        INSERT INTO tx_probe
+        VALUES ('failed')
       `
       await sql`
-        select *
-        from basis_missing_tx_relation
+        SELECT *
+        FROM basis_missing_tx_relation
       `
     })).rejects.toMatchObject({ errno: '42P01' })
     expect(await count()).toBe(1)
@@ -342,13 +342,13 @@ describe('Server database lifecycle', () => {
       isNullable: string,
       tableName: string,
     }[]>`
-      select table_name as "tableName",
-        column_name as "columnName",
-        data_type as "dataType",
-        is_nullable as "isNullable"
-      from information_schema.columns
-      where table_name = ${'Note'}
-      order by ordinal_position
+      SELECT table_name AS "tableName",
+        column_name AS "columnName",
+        data_type AS "dataType",
+        is_nullable AS "isNullable"
+      FROM information_schema.columns
+      WHERE table_name = ${'Note'}
+      ORDER BY ordinal_position
     `
     const accountColumns = await database.sql<{
       columnName: string,
@@ -356,13 +356,13 @@ describe('Server database lifecycle', () => {
       isNullable: string,
       tableName: string,
     }[]>`
-      select table_name as "tableName",
-        column_name as "columnName",
-        data_type as "dataType",
-        is_nullable as "isNullable"
-      from information_schema.columns
-      where table_name = ${'Account'}
-      order by ordinal_position
+      SELECT table_name AS "tableName",
+        column_name AS "columnName",
+        data_type AS "dataType",
+        is_nullable AS "isNullable"
+      FROM information_schema.columns
+      WHERE table_name = ${'Account'}
+      ORDER BY ordinal_position
     `
     expect([...noteColumns, ...accountColumns]).toEqual([
       { columnName: 'id', dataType: 'text', isNullable: 'NO', tableName: 'Note' },
@@ -376,36 +376,36 @@ describe('Server database lifecycle', () => {
     ])
 
     const primaryKeys = await database.sql<{ tableName: string }[]>`
-      select tc.table_name as "tableName"
-      from information_schema.table_constraints tc
-      where tc.constraint_type = 'PRIMARY KEY' and tc.table_name in (${'Note'}, ${'Account'})
-      order by tc.table_name
+      SELECT tc.table_name AS "tableName"
+      FROM information_schema.table_constraints tc
+      WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_name IN (${'Note'}, ${'Account'})
+      ORDER BY tc.table_name
     `
     expect(primaryKeys.map(row => row.tableName)).toEqual(['Account', 'Note'])
 
     const keptId = randomUUID()
     const accountId = '9223372036854775807'
     await database.sql`
-      insert into "Entity" ("id", "name", "entity")
-      values (${keptId}, ${'kept'}, ${'Note'}), (${accountId}, ${'Troy'}, ${'Account'})
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${keptId}, ${'kept'}, ${'Note'}), (${accountId}, ${'Troy'}, ${'Account'})
     `
     await database.sql`
-      insert into "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
-      values (${keptId}, 'kept', true, 1.5, '2026-01-02', now())
+      INSERT INTO "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
+      VALUES (${keptId}, 'kept', TRUE, 1.5, '2026-01-02', now())
     `
     await database.sql`
-      insert into "Account" ("id", "label")
-      values (${accountId}, ${'Troy'})
+      INSERT INTO "Account" ("id", "label")
+      VALUES (${accountId}, ${'Troy'})
     `
     await entities.createTables(database.sql)
     expect(await database.sql<{ count: number }[]>`
-      select count(*)::int as count
-      from "Note"
+      SELECT count(*)::int AS count
+      FROM "Note"
     `)
       .toEqual([{ count: 1 }])
     expect(await database.sql<{ id: string }[]>`
-      select id
-      from "Account"
+      SELECT id
+      FROM "Account"
     `)
       .toEqual([{ id: accountId }])
     expect(await database.query<{ id: string, label: string }>('Account', {
@@ -425,13 +425,13 @@ describe('Server database lifecycle', () => {
       ],
     }))
     await database.tx(async sql => sql`
-      create table "Broken" ("marker" text)
+      CREATE TABLE "Broken" ("marker" text)
     `)
     const failure = await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error)
     expect(failure).toMatchObject({ errno: '42703' })
     expect(await database.tx(async sql => sql<{ entity: boolean, good: boolean }[]>`
-select to_regclass('"Entity"') is not null as entity,
-  to_regclass('"Good"') is not null as good
+SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
+  to_regclass('"Good"') IS NOT NULL AS good
     `)).toEqual([{ entity: false, good: false }])
   }, 120_000)
 
@@ -440,27 +440,27 @@ select to_regclass('"Entity"') is not null as entity,
     await entities.createTables(database.sql)
 
     expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
-      select column_name as "columnName", data_type as "dataType", is_nullable as "isNullable"
-      from information_schema.columns
-      where table_schema = current_schema() and table_name = 'Entity'
-      order by ordinal_position
+      SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
+      FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'Entity'
+      ORDER BY ordinal_position
     `).toEqual([
       { columnName: 'id', dataType: 'text', isNullable: 'NO' },
       { columnName: 'name', dataType: 'text', isNullable: 'NO' },
       { columnName: 'entity', dataType: 'text', isNullable: 'NO' },
     ])
     expect(await database.sql<{ indexName: string }[]>`
-      select indexname as "indexName"
-      from pg_indexes
-      where schemaname = current_schema() and tablename = 'Entity' and indexname like 'Entity_name%'
-      order by indexname
+      SELECT indexname AS "indexName"
+      FROM pg_indexes
+      WHERE schemaname = current_schema() AND tablename = 'Entity' AND indexname like 'Entity_name%'
+      ORDER BY indexname
     `).toEqual([
       { indexName: 'Entity_name_id_idx' },
       { indexName: 'Entity_name_trgm_idx' },
     ])
     await database.sql`
-      insert into "Entity" ("id", "name", "entity")
-      values ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
         'UUID',
         'Note'),
         ('0',
@@ -475,8 +475,8 @@ select to_regclass('"Entity"') is not null as entity,
     `
     expect(await database.captureError(async db => {
       await db.sql`
-        insert into "Entity" ("id", "name", "entity")
-        values ('42', 'Abstract', 'User')
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES ('42', 'Abstract', 'User')
       `
     })).toMatchObject({ errno: '23514' })
   }, 120_000)
@@ -522,144 +522,144 @@ select to_regclass('"Entity"') is not null as entity,
 
     const incompleteId = randomUUID()
     expect(await database.tx(async sql => sql`
-      insert into "Entity" ("id", "name", "entity")
-      values (${incompleteId}, ${'Incomplete'}, ${'SystemUser'})
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${incompleteId}, ${'Incomplete'}, ${'SystemUser'})
     `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
 
     const missingParentId = randomUUID()
     expect(await database.tx(async sql => {
       await sql`
-        insert into "Entity" ("id", "name", "entity")
-        values (${missingParentId}, ${'Missing parent'}, ${'SystemUser'})
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${missingParentId}, ${'Missing parent'}, ${'SystemUser'})
       `
       await sql`
-        insert into "SystemUser" ("id", "permissions", "managerId")
-        values (${missingParentId}, ${'admin'}, ${missingParentId})
+        INSERT INTO "SystemUser" ("id", "permissions", "managerId")
+        VALUES (${missingParentId}, ${'admin'}, ${missingParentId})
       `
     }).catch((error: unknown) => error)).toMatchObject({ errno: '23503' })
 
     const id = randomUUID()
     await database.tx(async sql => {
       await sql`
-        insert into "Entity" ("id", "name", "entity")
-        values (${id}, ${'Ada'}, ${'SystemUser'})
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${id}, ${'Ada'}, ${'SystemUser'})
       `
       await sql`
-        insert into "User" ("id", "email")
-        values (${id}, ${'ada@example.test'})
+        INSERT INTO "User" ("id", "email")
+        VALUES (${id}, ${'ada@example.test'})
       `
       await sql`
-        insert into "SystemUser" ("id", "permissions", "managerId")
-        values (${id}, ${'admin'}, ${id})
+        INSERT INTO "SystemUser" ("id", "permissions", "managerId")
+        VALUES (${id}, ${'admin'}, ${id})
       `
     })
 
     expect(await database.tx(async sql => sql`
-      insert into "Client" ("id", "company")
-      values (${id}, ${'Hooli'})
+      INSERT INTO "Client" ("id", "company")
+      VALUES (${id}, ${'Hooli'})
     `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
 
     await database.tx(async sql => {
       await sql`
-        insert into "Client" ("id", "company")
-        values (${id}, ${'Temporary'})
+        INSERT INTO "Client" ("id", "company")
+        VALUES (${id}, ${'Temporary'})
       `
       await sql`
-        delete from "Client"
-        where "id" = ${id}
+        DELETE FROM "Client"
+        WHERE "id" = ${id}
       `
     })
 
     const replacementId = randomUUID()
     expect(await database.tx(async sql => {
       await sql`
-        insert into "Entity" ("id", "name", "entity")
-        values (${replacementId}, ${'Replacement'}, ${'SystemUser'})
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${replacementId}, ${'Replacement'}, ${'SystemUser'})
       `
       await sql`
-        insert into "User" ("id", "email")
-        values (${replacementId}, ${'replacement@example.test'})
+        INSERT INTO "User" ("id", "email")
+        VALUES (${replacementId}, ${'replacement@example.test'})
       `
       await sql`
-        update "SystemUser"
-        set "id" = ${replacementId}
-        where "id" = ${id}
+        UPDATE "SystemUser"
+        SET "id" = ${replacementId}
+        WHERE "id" = ${id}
       `
     }).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
 
     expect(await database.tx(async sql => sql`
-      delete from "SystemUser"
-      where "id" = ${id}
+      DELETE FROM "SystemUser"
+      WHERE "id" = ${id}
     `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
 
     expect(await database.tx(async sql => sql`
-      update "Entity"
-      set "entity" = ${'Client'}
-      where "id" = ${id}
+      UPDATE "Entity"
+      SET "entity" = ${'Client'}
+      WHERE "id" = ${id}
     `).catch((error: unknown) => error)).toMatchObject({ errno: 'P0001' })
 
     const transientId = randomUUID()
     await database.tx(async sql => {
       await sql`
-        insert into "Entity" ("id", "name", "entity")
-        values (${transientId}, ${'Transient'}, ${'SystemUser'})
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${transientId}, ${'Transient'}, ${'SystemUser'})
       `
       await sql`
-        insert into "User" ("id", "email")
-        values (${transientId}, ${'transient@example.test'})
+        INSERT INTO "User" ("id", "email")
+        VALUES (${transientId}, ${'transient@example.test'})
       `
       await sql`
-        insert into "SystemUser" ("id", "permissions", "managerId")
-        values (${transientId}, ${'admin'}, ${transientId})
+        INSERT INTO "SystemUser" ("id", "permissions", "managerId")
+        VALUES (${transientId}, ${'admin'}, ${transientId})
       `
       await sql`
-        delete from "SystemUser"
-        where "id" = ${transientId}
+        DELETE FROM "SystemUser"
+        WHERE "id" = ${transientId}
       `
       await sql`
-        delete from "User"
-        where "id" = ${transientId}
+        DELETE FROM "User"
+        WHERE "id" = ${transientId}
       `
       await sql`
-        delete from "Entity"
-        where "id" = ${transientId}
+        DELETE FROM "Entity"
+        WHERE "id" = ${transientId}
       `
     })
 
     const novelId = '123'
     await database.tx(async sql => {
       await sql`
-        insert into "Entity" ("id", "name", "entity")
-        values (${novelId}, ${'Novel'}, ${'Novel'})
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${novelId}, ${'Novel'}, ${'Novel'})
       `
       await sql`
-        insert into "Book" ("id", "title")
-        values (${novelId}, ${'Book'})
+        INSERT INTO "Book" ("id", "title")
+        VALUES (${novelId}, ${'Book'})
       `
       await sql`
-        insert into "Novel" ("id", "genre")
-        values (${novelId}, ${'Genre'})
+        INSERT INTO "Novel" ("id", "genre")
+        VALUES (${novelId}, ${'Genre'})
       `
     })
     await database.tx(async sql => {
       await sql`
-        delete from "Novel"
-        where "id" = ${novelId}
+        DELETE FROM "Novel"
+        WHERE "id" = ${novelId}
       `
       await sql`
-        delete from "Book"
-        where "id" = ${novelId}
+        DELETE FROM "Book"
+        WHERE "id" = ${novelId}
       `
       await sql`
-        delete from "Entity"
-        where "id" = ${novelId}
+        DELETE FROM "Entity"
+        WHERE "id" = ${novelId}
       `
     })
 
     const triggerOid = async () => database.tx(async sql => sql<{ oid: number }[]>`
-      select oid
-      from pg_catalog.pg_trigger
-      where tgname = 'Entity_leaf_check' and tgrelid = '"Entity"'::regclass
+      SELECT oid
+      FROM pg_catalog.pg_trigger
+      WHERE tgname = 'Entity_leaf_check' AND tgrelid = '"Entity"'::regclass
     `)
     const before = await triggerOid()
     await database.tx(async sql => entities.createTables(sql))
@@ -667,26 +667,26 @@ select to_regclass('"Entity"') is not null as entity,
 
     await database.tx(async sql => {
       await sql`
-        delete from "SystemUser"
-        where "id" = ${id}
+        DELETE FROM "SystemUser"
+        WHERE "id" = ${id}
       `
       await sql`
-        delete from "User"
-        where "id" = ${id}
+        DELETE FROM "User"
+        WHERE "id" = ${id}
       `
       await sql`
-        delete from "Entity"
-        where "id" = ${id}
+        DELETE FROM "Entity"
+        WHERE "id" = ${id}
       `
     })
     expect(await database.tx(async sql => sql<{ count: number }[]>`
-      select count(*)::int as count
-      from "Entity"
-      where "id" = ${id}
+      SELECT count(*)::int AS count
+      FROM "Entity"
+      WHERE "id" = ${id}
     `)).toEqual([{ count: 0 }])
 
     await database.tx(async sql => sql`
-      alter table "Entity" disable trigger "Entity_leaf_check"
+      ALTER TABLE "Entity" disable trigger "Entity_leaf_check"
     `)
     expect(await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error))
       .toHaveProperty(
@@ -694,15 +694,15 @@ select to_regclass('"Entity"') is not null as entity,
         'Existing lifecycle trigger "Entity_leaf_check" on "Entity" does not match the canonical model',
       )
     await database.tx(async sql => sql`
-      alter table "Entity" enable trigger "Entity_leaf_check"
+      ALTER TABLE "Entity" enable trigger "Entity_leaf_check"
     `)
 
     await database.tx(async sql => sql`
-      drop trigger "Entity_leaf_immutable" on "Entity"
+      DROP trigger "Entity_leaf_immutable" ON "Entity"
     `)
     await database.tx(async sql => sql`
-      create trigger "Entity_leaf_immutable" before
-      update of "name" on "Entity" for each row execute function "Entity_leaf_immutable"()
+      CREATE trigger "Entity_leaf_immutable" before
+      UPDATE of "name" ON "Entity" FOR each row execute function "Entity_leaf_immutable"()
     `)
     expect(await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error))
       .toHaveProperty(
@@ -729,17 +729,17 @@ select to_regclass('"Entity"') is not null as entity,
     }))
     await entities.createTables(database.sql)
     await database.sql`
-      with rows as (select gen_random_uuid()::text as id,
-        value from generate_series(1,
-        10) as series(value) ),
-        roots as (insert into "Entity" ("id",
+      WITH rows AS (SELECT gen_random_uuid()::text AS id,
+        value FROM generate_series(1,
+        10) AS series(value) ),
+        roots AS (INSERT INTO "Entity" ("id",
         "name",
-        "entity") select id,
+        "entity") SELECT id,
         'Number ' || value,
-        'NumberRow' from rows )
-      insert into "NumberRow" ("id", "value")
-      select id, value
-      from rows
+        'NumberRow' FROM rows )
+      INSERT INTO "NumberRow" ("id", "value")
+      SELECT id, value
+      FROM rows
     `
 
     const query = (where: Filter | Readonly<Record<string, unknown>>) => (
@@ -793,10 +793,10 @@ select to_regclass('"Entity"') is not null as entity,
     await entities.createTables(database.sql)
 
     const constraints = await database.sql<{ definition: string }[]>`
-      select pg_get_constraintdef(oid) as definition
-      from pg_constraint
-      where conrelid = '"Post"'::regclass and contype = 'f'
-      order by conname collate "C"
+      SELECT pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = '"Post"'::regclass AND contype = 'f'
+      ORDER BY conname collate "C"
     `
     expect(constraints).toEqual([
       { definition: 'FOREIGN KEY (id) REFERENCES "Entity"(id) DEFERRABLE' },
@@ -806,45 +806,45 @@ select to_regclass('"Entity"') is not null as entity,
     const userId = '9223372036854775807'
     const postId = randomUUID()
     await database.sql`
-      insert into "Entity" ("id", "name", "entity")
-      values (${userId}, ${'Ada'}, ${'User'}), (${postId}, ${'Hello'}, ${'Post'})
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${userId}, ${'Ada'}, ${'User'}), (${postId}, ${'Hello'}, ${'Post'})
     `
     await database.sql`
-      insert into "User" ("id", "label")
-      values (${userId}, ${'Ada'})
+      INSERT INTO "User" ("id", "label")
+      VALUES (${userId}, ${'Ada'})
     `
     await database.sql`
-      insert into "Post" ("id", "userId", "title")
-      values (${postId}, ${userId}, ${'Hello'})
+      INSERT INTO "Post" ("id", "userId", "title")
+      VALUES (${postId}, ${userId}, ${'Hello'})
     `
     expect(await database.sql<{ userId: string }[]>`
-      select "userId"::text as "userId"
-      from "Post"
+      SELECT "userId"::text AS "userId"
+      FROM "Post"
     `).toEqual([{ userId }])
 
     const invalidId = randomUUID()
     await database.sql`
-      insert into "Entity" ("id", "name", "entity")
-      values (${invalidId}, ${'Invalid'}, ${'Post'})
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${invalidId}, ${'Invalid'}, ${'Post'})
     `
     const invalidInsert = await database.captureError(async db => {
       await db.sql`
-        insert into "Post" ("id", "userId", "title")
-        values (${invalidId}, ${'1'}, ${'Invalid'})
+        INSERT INTO "Post" ("id", "userId", "title")
+        VALUES (${invalidId}, ${'1'}, ${'Invalid'})
       `
     })
     expect(invalidInsert).toMatchObject({ errno: '23503' })
 
     const blockedDelete = await database.captureError(async db => {
       await db.sql`
-        delete from "User"
-        where "id" = ${'9223372036854775807'}
+        DELETE FROM "User"
+        WHERE "id" = ${'9223372036854775807'}
       `
     })
     expect(blockedDelete).toMatchObject({ errno: '23503' })
     expect(await database.sql<{ count: number }[]>`
-      select count(*)::int as count
-      from "Post"
+      SELECT count(*)::int AS count
+      FROM "Post"
     `).toEqual([{ count: 1 }])
   }, 120_000)
 
@@ -876,13 +876,13 @@ select to_regclass('"Entity"') is not null as entity,
       definition: string,
       name: string,
     }[]>`
-      select conname as name,
-        condeferrable as deferrable,
-        condeferred as deferred,
-        pg_get_constraintdef(oid) as definition
-      from pg_constraint
-      where conrelid in ('"CycleUser"'::regclass, '"CycleCar"'::regclass) and contype = 'f'
-      order by conname collate "C"
+      SELECT conname AS name,
+        condeferrable AS DEFERRABLE,
+        condeferred AS deferred,
+        pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid IN ('"CycleUser"'::regclass, '"CycleCar"'::regclass) AND contype = 'f'
+      ORDER BY conname collate "C"
     `)
     expect(constraints.map(constraint => ({
       deferrable: constraint.deferrable,
@@ -901,24 +901,24 @@ select to_regclass('"Entity"') is not null as entity,
     const carId = randomUUID()
     await database.tx(async sql => {
       await sql`
-        set constraints all deferred
+        SET constraints ALL deferred
       `
       await sql`
-        insert into "Entity" ("id", "name", "entity")
-        values (${userId}, ${'User'}, ${'CycleUser'}), (${carId}, ${'Car'}, ${'CycleCar'})
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${userId}, ${'User'}, ${'CycleUser'}), (${carId}, ${'Car'}, ${'CycleCar'})
       `
       await sql`
-        insert into "CycleUser" ("id", "carId")
-        values (${userId}, ${carId})
+        INSERT INTO "CycleUser" ("id", "carId")
+        VALUES (${userId}, ${carId})
       `
       await sql`
-        insert into "CycleCar" ("id", "userId")
-        values (${carId}, ${userId})
+        INSERT INTO "CycleCar" ("id", "userId")
+        VALUES (${carId}, ${userId})
       `
     })
     expect(await database.tx(async sql => sql<{ count: number }[]>`
-      select count(*)::int as count
-      from "CycleUser"
+      SELECT count(*)::int AS count
+      FROM "CycleUser"
     `)).toEqual([{ count: 1 }])
 
     const invalidCarId = randomUUID()
@@ -926,11 +926,11 @@ select to_regclass('"Entity"') is not null as entity,
     const missingUserId = randomUUID()
     const invalid = await database.tx(async sql => {
       await sql`
-        set constraints all deferred
+        SET constraints ALL deferred
       `
       await sql`
-        insert into "Entity" ("id", "name", "entity")
-values (${invalidUserId},
+        INSERT INTO "Entity" ("id", "name", "entity")
+VALUES (${invalidUserId},
   ${'Invalid user'},
   ${'CycleUser'}),
   (${invalidCarId},
@@ -938,61 +938,61 @@ values (${invalidUserId},
   ${'CycleCar'})
       `
       await sql`
-        insert into "CycleUser" ("id", "carId")
-        values (${invalidUserId}, ${invalidCarId})
+        INSERT INTO "CycleUser" ("id", "carId")
+        VALUES (${invalidUserId}, ${invalidCarId})
       `
       await sql`
-        insert into "CycleCar" ("id", "userId")
-        values (${invalidCarId}, ${missingUserId})
+        INSERT INTO "CycleCar" ("id", "userId")
+        VALUES (${invalidCarId}, ${missingUserId})
       `
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
 
     await database.tx(async sql => entities.createTables(sql))
     expect(await database.tx(async sql => sql<{ count: number }[]>`
-      select count(*)::int as count
-      from pg_constraint
-      where conrelid in ('"CycleUser"'::regclass, '"CycleCar"'::regclass) and contype = 'f'
+      SELECT count(*)::int AS count
+      FROM pg_constraint
+      WHERE conrelid IN ('"CycleUser"'::regclass, '"CycleCar"'::regclass) AND contype = 'f'
     `)).toEqual([{ count: 4 }])
 
     await database.tx(async sql => sql`
-      alter table "CycleUser" drop constraint "CycleUser_car_fkey"
+      ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
     `)
     await database.tx(async sql => sql`
-      alter table "CycleUser" add constraint "CycleUser_car_fkey" foreign key ("carId") references
+      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("carId") REFERENCES
         "CycleCar" ("id")
     `)
     await expect(database.tx(async sql => entities.createTables(sql)))
       .rejects.toThrow('does not match the canonical model')
 
     await database.tx(async sql => sql`
-      alter table "CycleUser" drop constraint "CycleUser_car_fkey"
+      ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
     `)
     await database.tx(async sql => sql`
-      alter table "CycleUser" add constraint "CycleUser_car_fkey" foreign key ("carId") references
-        "CycleCar" ("id") on delete cascade deferrable initially immediate
-    `)
-    await expect(database.tx(async sql => entities.createTables(sql)))
-      .rejects.toThrow('does not match the canonical model')
-
-    await database.tx(async sql => sql`
-      alter table "CycleUser" drop constraint "CycleUser_car_fkey"
-    `)
-    await database.tx(async sql => sql`
-      alter table "CycleUser" add constraint "CycleUser_car_fkey" foreign key ("carId") references
-        "CycleCar" ("id") deferrable initially immediate not valid
+      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("carId") REFERENCES
+        "CycleCar" ("id") ON DELETE cascade DEFERRABLE INITIALLY immediate
     `)
     await expect(database.tx(async sql => entities.createTables(sql)))
       .rejects.toThrow('does not match the canonical model')
 
     await database.tx(async sql => sql`
-      alter table "CycleUser" drop constraint "CycleUser_car_fkey"
+      ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
+    `)
+    await database.tx(async sql => sql`
+      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("carId") REFERENCES
+        "CycleCar" ("id") DEFERRABLE INITIALLY immediate NOT valid
+    `)
+    await expect(database.tx(async sql => entities.createTables(sql)))
+      .rejects.toThrow('does not match the canonical model')
+
+    await database.tx(async sql => sql`
+      ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
     `)
     await database.tx(async sql => entities.createTables(sql))
     expect(await database.tx(async sql => sql<{ count: number }[]>`
-      select count(*)::int as count
-      from pg_constraint
-      where conrelid = '"CycleUser"'::regclass and conname = 'CycleUser_car_fkey'
+      SELECT count(*)::int AS count
+      FROM pg_constraint
+      WHERE conrelid = '"CycleUser"'::regclass AND conname = 'CycleUser_car_fkey'
     `)).toEqual([{ count: 1 }])
   }, 120_000)
 
@@ -1012,34 +1012,34 @@ values (${invalidUserId},
     const nodeId = randomUUID()
     await database.tx(async sql => {
       await sql`
-        set constraints all deferred
+        SET constraints ALL deferred
       `
       await sql`
-        insert into "Entity" ("id", "name", "entity")
-        values (${nodeId}, ${'Node'}, ${'TreeNode'})
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${nodeId}, ${'Node'}, ${'TreeNode'})
       `
       await sql`
-        insert into "TreeNode" ("id", "parentId")
-        values (${nodeId}, ${nodeId})
+        INSERT INTO "TreeNode" ("id", "parentId")
+        VALUES (${nodeId}, ${nodeId})
       `
     })
     expect(await database.tx(async sql => sql<{ count: number }[]>`
-      select count(*)::int as count
-      from "TreeNode"
+      SELECT count(*)::int AS count
+      FROM "TreeNode"
     `)).toEqual([{ count: 1 }])
 
     const invalidNodeId = randomUUID()
     const invalid = await database.tx(async sql => {
       await sql`
-        set constraints all deferred
+        SET constraints ALL deferred
       `
       await sql`
-        insert into "Entity" ("id", "name", "entity")
-        values (${invalidNodeId}, ${'Invalid node'}, ${'TreeNode'})
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${invalidNodeId}, ${'Invalid node'}, ${'TreeNode'})
       `
       await sql`
-        insert into "TreeNode" ("id", "parentId")
-        values (${invalidNodeId}, ${randomUUID()})
+        INSERT INTO "TreeNode" ("id", "parentId")
+        VALUES (${invalidNodeId}, ${randomUUID()})
       `
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
@@ -1082,7 +1082,7 @@ values (${invalidUserId},
   isolatedTest('matches string and structured predicates with two-valued null semantics', async database => {
     // Raw nullable DDL exercises NULL semantics while the canonical entity drives query validation.
     await database.sql`
-      create table "QueryRow" ("id" uuid primary key,
+      CREATE TABLE "QueryRow" ("id" uuid PRIMARY KEY,
         "active" boolean,
         "externalId" double precision,
         "rank" double precision,
@@ -1090,36 +1090,36 @@ values (${invalidUserId},
         "title" text )
     `
     await database.sql`
-      insert into "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
-      values (gen_random_uuid(),
-        null,
+      INSERT INTO "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
+      VALUES (gen_random_uuid(),
+        NULL,
         ${7},
         1,
-        null,
-        null),
+        NULL,
+        NULL),
         (gen_random_uuid(),
-        true,
-        null,
+        TRUE,
+        NULL,
         2,
         0,
         ''),
         (gen_random_uuid(),
-        false,
-        null,
+        FALSE,
+        NULL,
         3,
         5,
         '   '),
         (gen_random_uuid(),
-        true,
-        null,
+        TRUE,
+        NULL,
         4,
         10,
         'alpha'),
         (gen_random_uuid(),
-        false,
+        FALSE,
         ${7},
         5,
-        null,
+        NULL,
         'beta')
     `
 
@@ -1246,11 +1246,11 @@ values (${invalidUserId},
     await withIsolatedDatabase('rollback-success', async database => {
       schema = database.schema
       await database.sql`
-        create table "NumberRow" ("id" uuid primary key, "value" double precision not null)
+        CREATE TABLE "NumberRow" ("id" uuid PRIMARY KEY, "value" double precision NOT NULL)
       `
       await database.sql`
-        insert into "NumberRow" ("id", "value")
-        values (gen_random_uuid(), ${1.5})
+        INSERT INTO "NumberRow" ("id", "value")
+        VALUES (gen_random_uuid(), ${1.5})
       `
       expect(await database.query<{ value: number }>('NumberRow', {
         fields: ['value'],
@@ -1260,7 +1260,7 @@ values (${invalidUserId},
 
     const { server } = await useDatabaseFixture('rollback-success-check')
     expect(await server.db.sql<{ present: boolean }[]>`
-      select to_regclass(${`"${schema}"."NumberRow"`}) is not null as present
+      SELECT to_regclass(${`"${schema}"."NumberRow"`}) IS NOT NULL AS present
     `).toEqual([{ present: false }])
   }, 120_000)
 
@@ -1269,14 +1269,14 @@ values (${invalidUserId},
     await expect(withIsolatedDatabase('rollback-failure', async database => {
       schema = database.schema
       await database.sql`
-        create table "FailureProbe" ("id" uuid primary key)
+        CREATE TABLE "FailureProbe" ("id" uuid PRIMARY KEY)
       `
       throw new Error('forced isolated failure')
     })).rejects.toThrow('forced isolated failure')
 
     const { server } = await useDatabaseFixture('rollback-failure-check')
     expect(await server.db.sql<{ present: boolean }[]>`
-      select to_regclass(${`"${schema}"."FailureProbe"`}) is not null as present
+      SELECT to_regclass(${`"${schema}"."FailureProbe"`}) IS NOT NULL AS present
     `).toEqual([{ present: false }])
   }, 120_000)
 
@@ -1284,11 +1284,11 @@ values (${invalidUserId},
     const schemas = await Promise.all([
       withIsolatedDatabase('concurrent-a', async database => {
         await database.sql`
-          create table "NumberRow" ("id" uuid primary key, "value" double precision not null)
+          CREATE TABLE "NumberRow" ("id" uuid PRIMARY KEY, "value" double precision NOT NULL)
         `
         await database.sql`
-          insert into "NumberRow" ("id", "value")
-          values (gen_random_uuid(), ${1})
+          INSERT INTO "NumberRow" ("id", "value")
+          VALUES (gen_random_uuid(), ${1})
         `
         expect(await database.query<{ value: number }>('NumberRow', {
           fields: ['value'],
@@ -1298,11 +1298,11 @@ values (${invalidUserId},
       }),
       withIsolatedDatabase('concurrent-b', async database => {
         await database.sql`
-          create table "NumberRow" ("id" uuid primary key, "value" double precision not null)
+          CREATE TABLE "NumberRow" ("id" uuid PRIMARY KEY, "value" double precision NOT NULL)
         `
         await database.sql`
-          insert into "NumberRow" ("id", "value")
-          values (gen_random_uuid(), ${2})
+          INSERT INTO "NumberRow" ("id", "value")
+          VALUES (gen_random_uuid(), ${2})
         `
         expect(await database.query<{ value: number }>('NumberRow', {
           fields: ['value'],
@@ -1315,9 +1315,9 @@ values (${invalidUserId},
     expect(new Set(schemas).size).toBe(2)
     const { server } = await useDatabaseFixture('concurrent-check')
     expect(await server.db.sql<{ count: number }[]>`
-      select count(*)::int as count
-      from pg_catalog.pg_namespace
-      where nspname in (${schemas[0]}, ${schemas[1]})
+      SELECT count(*)::int AS count
+      FROM pg_catalog.pg_namespace
+      WHERE nspname IN (${schemas[0]}, ${schemas[1]})
     `).toEqual([{ count: 0 }])
   }, 120_000)
 
@@ -1327,7 +1327,7 @@ values (${invalidUserId},
       schema = database.schema
       await database.tx(async sql => {
         await sql`
-          create table "DurableFailure" ("id" uuid primary key)
+          CREATE TABLE "DurableFailure" ("id" uuid PRIMARY KEY)
         `
       })
       throw new Error('forced durable failure')
@@ -1335,16 +1335,16 @@ values (${invalidUserId},
 
     const { server } = await useDatabaseFixture('durable-failure-check')
     expect(await server.db.sql<{ present: boolean }[]>`
-      select exists (select 1 from pg_catalog.pg_namespace where nspname = ${schema} ) as present
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema} ) AS present
     `).toEqual([{ present: false }])
   }, 120_000)
 
   test('leaves no isolated database schemas behind', async () => {
     const { server } = await useDatabaseFixture('schema-leak-check')
     expect(await server.db.sql<{ count: number }[]>`
-      select count(*)::int as count
-      from pg_catalog.pg_namespace
-      where nspname like 'basis_test_%'
+      SELECT count(*)::int AS count
+      FROM pg_catalog.pg_namespace
+      WHERE nspname like 'basis_test_%'
     `).toEqual([{ count: 0 }])
   }, 30_000)
 

@@ -388,8 +388,8 @@ export class EntityDefinitions {
     await sql.unsafe(IDENTITY_EXTENSION_DDL).simple()
     for (const table of this.tables) {
       const rows = await sql<{ present: boolean }[]>`
-select exists (select 1 from pg_catalog.pg_tables where schemaname = current_schema() and tablename
-          = ${table.name} ) as present
+SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_schema() AND tablename
+          = ${table.name} ) AS present
       `
       const created = !rows[0]?.present
       if (created) await sql.unsafe(createTable(table)).simple()
@@ -431,14 +431,14 @@ select exists (select 1 from pg_catalog.pg_tables where schemaname = current_sch
         returnTrigger: boolean,
         securityDefiner: boolean,
       }[]>`
-        select p.prosrc as body,
-          p.prokind = 'f' as "normalFunction",
-          p.prolang = (select oid from pg_catalog.pg_language where lanname = 'plpgsql') as plpgsql,
-          p.prorettype = 'trigger'::regtype as "returnTrigger",
-          p.prosecdef as "securityDefiner"
-        from pg_catalog.pg_proc p
-        join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-        where n.nspname = current_schema() and p.proname = ${statement.name} and p.pronargs = 0
+        SELECT p.prosrc AS body,
+          p.prokind = 'f' AS "normalFunction",
+          p.prolang = (SELECT oid FROM pg_catalog.pg_language WHERE lanname = 'plpgsql') AS plpgsql,
+          p.prorettype = 'trigger'::regtype AS "returnTrigger",
+          p.prosecdef AS "securityDefiner"
+        FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = current_schema() AND p.proname = ${statement.name} AND p.pronargs = 0
       `
       if (!existing[0]) {
         await sql.unsafe(statement.statement).simple()
@@ -467,22 +467,22 @@ select exists (select 1 from pg_catalog.pg_tables where schemaname = current_sch
         noWhen: boolean,
         type: number,
       }[]>`
-select coalesce((select array_agg(a.attname order by u.ordinality) from unnest(t.tgattr::smallint[])
-  with ordinality u(attnum,
-ordinality) join pg_catalog.pg_attribute a on a.attrelid = t.tgrelid and a.attnum = u.attnum ),
-          '{}'::text[]) as columns,
-          t.tgconstraint as constraint,
-          t.tgdeferrable as deferrable,
-          t.tgenabled as enabled,
-          p.proname as "functionName",
-          n.nspname = current_schema() as "functionSchema",
-          t.tginitdeferred as "initDeferred",
-          t.tgqual is null as "noWhen",
-          t.tgtype as type
-        from pg_catalog.pg_trigger t
-        join pg_catalog.pg_proc p on p.oid = t.tgfoid
-        join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-where t.tgname = ${trigger.name} and t.tgrelid = ${quoteIdentifier(trigger.table)}::regclass and not
+SELECT coalesce((SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(t.tgattr::smallint[])
+  WITH ordinality u(attnum,
+ordinality) JOIN pg_catalog.pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = u.attnum ),
+          '{}'::text[]) AS columns,
+          t.tgconstraint AS CONSTRAINT,
+          t.tgdeferrable AS DEFERRABLE,
+          t.tgenabled AS enabled,
+          p.proname AS "functionName",
+          n.nspname = current_schema() AS "functionSchema",
+          t.tginitdeferred AS "initDeferred",
+          t.tgqual IS NULL AS "noWhen",
+          t.tgtype AS type
+        FROM pg_catalog.pg_trigger t
+        JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
+        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table)}::regclass AND NOT
   t.tgisinternal
       `
       if (!existing[0]) {
@@ -900,22 +900,22 @@ async function reconcileForeignKey(
     updateAction: string,
     validated: boolean,
   }[]>`
-    select con.condeferrable as deferrable,
-      con.condeferred as deferred,
-      con.confdeltype as "deleteAction",
-      con.confmatchtype as "matchType",
-      con.confrelid = ${quoteIdentifier(targetName)}::regclass as "targetMatches",
-      con.confupdtype as "updateAction",
-      con.convalidated as validated,
-      local.attname as "localColumn",
-      foreign_field.attname as "targetColumn"
-    from pg_catalog.pg_constraint con
-join pg_catalog.pg_attribute local on local.attrelid = con.conrelid and local.attnum = con.conkey[1]
-    join pg_catalog.pg_attribute foreign_field on foreign_field.attrelid = con.confrelid and
+    SELECT con.condeferrable AS DEFERRABLE,
+      con.condeferred AS deferred,
+      con.confdeltype AS "deleteAction",
+      con.confmatchtype AS "matchType",
+      con.confrelid = ${quoteIdentifier(targetName)}::regclass AS "targetMatches",
+      con.confupdtype AS "updateAction",
+      con.convalidated AS validated,
+      local.attname AS "localColumn",
+      foreign_field.attname AS "targetColumn"
+    FROM pg_catalog.pg_constraint con
+JOIN pg_catalog.pg_attribute local ON local.attrelid = con.conrelid AND local.attnum = con.conkey[1]
+    JOIN pg_catalog.pg_attribute foreign_field ON foreign_field.attrelid = con.confrelid AND
       foreign_field.attnum = con.confkey[1]
-where con.conname = ${name} and con.conrelid = ${quoteIdentifier(entityName)}::regclass and
-  con.contype = 'f' and
-      cardinality(con.conkey) = 1 and cardinality(con.confkey) = 1
+WHERE con.conname = ${name} AND con.conrelid = ${quoteIdentifier(entityName)}::regclass AND
+  con.contype = 'f' AND
+      cardinality(con.conkey) = 1 AND cardinality(con.confkey) = 1
   `
   const existing = rows[0]
   if (existing) {
@@ -967,8 +967,8 @@ function constraintName(entity: EntityDefinition, field: EntityReferenceFieldDef
  */
 async function indexExists(sql: SQL, name: string): Promise<boolean> {
   const rows = await sql<{ present: boolean }[]>`
-select exists (select 1 from pg_catalog.pg_indexes where schemaname = current_schema() and indexname
-      = ${name} ) as present
+SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_indexes WHERE schemaname = current_schema() AND indexname
+      = ${name} ) AS present
   `
   return rows[0]?.present === true
 }

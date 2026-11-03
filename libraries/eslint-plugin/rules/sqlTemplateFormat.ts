@@ -8,7 +8,7 @@ const CLAUSES = [
   'select', 'from', 'where', 'join', 'left join', 'right join', 'inner join',
   'set', 'values', 'having', 'limit', 'offset', 'returning', 'update', 'with',
 ]
-/** SQL keywords normalized to lowercase outside literals and identifiers. */
+/** SQL keywords normalized to uppercase outside literals and identifiers. */
 const KEYWORDS = new Set([
   'add', 'all', 'alter', 'and', 'as', 'asc', 'begin', 'between', 'by', 'case',
   'check', 'constraint', 'create', 'deferrable', 'delete', 'desc', 'distinct',
@@ -78,7 +78,7 @@ function wrapLine(line: string): readonly string[] {
 }
 
 /**
- * Lowercase SQL keywords and normalize whitespace outside quoted regions.
+ * Uppercase SQL keywords and normalize whitespace outside quoted regions.
  * @param sql - SQL text.
  * @returns Normalized text.
  */
@@ -150,7 +150,7 @@ function normalizeSQL(sql: string): string {
       const word = sql.slice(index, end)
       result += separator(result, pendingSpace)
       pendingSpace = false
-      result += KEYWORDS.has(word.toLowerCase()) ? word.toLowerCase() : word
+      result += KEYWORDS.has(word.toLowerCase()) ? word.toUpperCase() : word
       index = end
       continue
     }
@@ -196,7 +196,7 @@ function addClauseBreaks(sql: string): string {
         && !/[A-Za-z0-9_]/u.test(sql[index + clause.length] ?? ''))
       if (match) {
         if (result.trim() !== '' && !result.endsWith('\n')) result = result.trimEnd() + '\n'
-        result += match
+        result += match.toUpperCase()
         index += match.length
         continue
       }
