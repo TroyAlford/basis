@@ -25,6 +25,7 @@ export type Filter = ComparisonFilter | LogicalFilter
 
 /** Primitive comparison operators retained in the canonical filter tree. */
 const BASE_COMPARISON_OPERATORS = new Set<Operator.Comparison>([
+  Operator.Comparison.Contains,
   Operator.Comparison.Equal,
   Operator.Comparison.GreaterThan,
   Operator.Comparison.GreaterThanOrEqual,

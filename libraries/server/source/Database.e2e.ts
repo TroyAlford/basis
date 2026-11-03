@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 import { accountDefinition, containers, noteDefinition, numberRowDefinition, removeService, useDatabaseFixture } from '../testing/DatabaseFixture'
 import type { DurableDatabase, IsolatedDatabase } from '../testing/DatabaseIsolation'
 import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { compileEntityQuery, queryEntity } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
@@ -416,6 +417,182 @@ describe('Server database lifecycle', () => {
       fields: ['title', 'score'],
     })).toEqual([{ score: 1.5, title: 'kept' }])
   }, 120_000)
+
+  durableTest('enforces Entity and User reference eligibility', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'email', type: 'String' },
+          ],
+          name: 'User',
+        },
+        {
+          extends: 'User',
+          fields: [
+            { field: 'permissions', type: 'String' },
+            { column: 'favoriteId', field: 'favorite', target: 'Entity', type: 'Entity' },
+            { column: 'managerId', field: 'manager', target: 'User', type: 'Entity' },
+          ],
+          name: 'SystemUser',
+        },
+        {
+          extends: 'User',
+          fields: [{ field: 'company', type: 'String' }],
+          name: 'Client',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { field: 'title', type: 'String' },
+          ],
+          name: 'Book',
+        },
+        {
+          extends: 'Book',
+          fields: [{ field: 'genre', type: 'String' }],
+          name: 'Novel',
+        },
+      ],
+    }))
+    await database.tx(async sql => entities.createTables(sql))
+    const userId = randomUUID()
+    const novelId = '123'
+    await database.tx(async sql => {
+      await sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${userId}, ${'User'}, ${'SystemUser'}), (${novelId}, ${'Novel'}, ${'Novel'})
+      `
+      await sql`
+        INSERT INTO "User" ("id", "email")
+        VALUES (${userId}, ${'user@example.test'})
+      `
+      await sql`
+        INSERT INTO "SystemUser" ("id", "permissions", "favoriteId", "managerId")
+        VALUES (${userId}, ${'admin'}, ${novelId}, ${userId})
+      `
+      await sql`
+        INSERT INTO "Book" ("id", "title")
+        VALUES (${novelId}, ${'Book'})
+      `
+      await sql`
+        INSERT INTO "Novel" ("id", "genre")
+        VALUES (${novelId}, ${'Genre'})
+      `
+    })
+
+    const invalidManager = await database.tx(async sql => sql`
+      UPDATE "SystemUser"
+      SET "managerId" = ${novelId}
+      WHERE "id" = ${userId}
+    `).catch((error: unknown) => error)
+    expect(invalidManager).toMatchObject({ errno: '23503' })
+  }, 120_000)
+
+  durableTest('queries polymorphic descendants with indexed names', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { field: 'email', type: 'String' },
+          ],
+          name: 'User',
+        },
+        {
+          extends: 'User',
+          fields: [{ field: 'permissions', type: 'String' }],
+          name: 'SystemUser',
+        },
+        {
+          extends: 'User',
+          fields: [{ field: 'company', type: 'String' }],
+          name: 'Client',
+        },
+      ],
+    }))
+    await database.tx(async sql => entities.createTables(sql))
+    for (let chunkStart = 1; chunkStart <= 500_000; chunkStart += 25_000) {
+      const end = Math.min(chunkStart + 24_999, 500_000)
+      await database.tx(async sql => {
+        await sql`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          SELECT value::text,
+            'person-' || lpad(value::text,
+            6,
+            '0'),
+            CASE WHEN value % 2 = 0 THEN 'SystemUser' ELSE 'Client' END
+          FROM generate_series(${chunkStart}, ${end}) AS series(value)
+        `
+        await sql`
+          INSERT INTO "User" ("id", "email")
+          SELECT value::text, 'user-' || value || '@example.test'
+          FROM generate_series(${chunkStart}, ${end}) AS series(value)
+        `
+        await sql`
+          INSERT INTO "SystemUser" ("id", "permissions")
+          SELECT value::text, 'permissions'
+FROM generate_series(${chunkStart + (chunkStart % 2 === 0 ? 0 : 1)},
+  ${end},
+  2) AS series(value)
+        `
+        await sql`
+          INSERT INTO "Client" ("id", "company")
+          SELECT value::text, 'company'
+FROM generate_series(${chunkStart + (chunkStart % 2 === 1 ? 0 : 1)},
+  ${end},
+  2) AS series(value)
+        `
+      })
+    }
+    await database.tx(async sql => {
+      await sql`
+        ANALYZE "Entity"
+      `
+    })
+    const options = {
+      fields: ['id', 'name', 'entity', 'email'],
+      limit: 10,
+      orderBy: 'name',
+      where: { field: 'name', operator: Operator.Comparison.Contains, value: 'person-250000' },
+    } as const
+    const rows = await database.tx(async sql => queryEntity<{
+      email: string,
+      entity: string,
+      id: string,
+      name: string,
+    }>(sql, entities, 'User', options))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      email: 'user-250000@example.test',
+      entity: 'SystemUser',
+      id: '250000',
+      name: 'person-250000',
+    })
+
+    const pageOne = await database.tx(async sql => queryEntity<{ name: string }>(sql, entities, 'User', {
+      fields: ['name'],
+      limit: 3,
+      orderBy: 'name',
+    }))
+    const pageTwo = await database.tx(async sql => queryEntity<{ name: string }>(sql, entities, 'User', {
+      fields: ['name'],
+      limit: 3,
+      offset: 3,
+      orderBy: 'name',
+    }))
+    expect(pageOne.map(row => row.name)).toEqual(['person-000001', 'person-000002', 'person-000003'])
+    expect(pageTwo.map(row => row.name)).toEqual(['person-000004', 'person-000005', 'person-000006'])
+
+    const compiled = compileEntityQuery(entities, 'User', options)
+    const plan = await database.tx(async sql => sql.unsafe<Record<string, string>[]>(
+      `EXPLAIN (FORMAT TEXT) ${compiled.sql}`,
+      [...compiled.values],
+    ))
+    expect(plan.map(row => Object.values(row).join('\n')).join('\n'))
+      .toContain('Entity_name_trgm_idx')
+  }, 300_000)
 
   durableTest('rolls back partial fresh-schema initialization inside db.tx', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({

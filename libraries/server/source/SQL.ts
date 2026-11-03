@@ -50,6 +50,16 @@ export interface SQLPredicate {
   readonly values: readonly unknown[],
 }
 
+/** Optional effective-field scope for polymorphic entity queries. */
+export interface QueryScope {
+  /** Effective entity metadata used for validation. */
+  readonly definition: EntityDefinition,
+  /** Render a field expression with physical table qualification. */
+  readonly expression: (field: ScalarFieldDefinition) => string,
+  /** Resolve a logical field by name. */
+  readonly field: (name: string) => ScalarFieldDefinition,
+}
+
 /**
  * Build a root-field projection for one entity.
  * @param entities - Validated entity definitions.
@@ -125,6 +135,15 @@ const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>
       : `${column} IS NOT DISTINCT FROM ${bind(operand)}`),
     validateOperand: scalarValidator(true),
   }],
+  [Operator.Comparison.Contains, {
+    allowedFieldTypes: new Set([FieldType.String]),
+    build: (column, operand, bind) => {
+      if (operand === null) throw new Error('Query operator "$contains" requires a non-null value')
+      if (typeof operand !== 'string') throw new Error('Query operator "$contains" requires a string value')
+      return `${column} ILIKE ${bind(`%${operand.replace(/[\\%_]/gu, '\\$&')}%`)} ESCAPE '\\'`
+    },
+    validateOperand: scalarValidator(false),
+  }],
   [Operator.Comparison.GreaterThan, rangeDefinition('>', RANGE_FIELD_TYPES)],
   [Operator.Comparison.GreaterThanOrEqual, rangeDefinition('>=', RANGE_FIELD_TYPES)],
   [Operator.Comparison.LessThan, rangeDefinition('<', RANGE_FIELD_TYPES)],
@@ -153,6 +172,7 @@ const logicalDefinitions = new Map<Operator.Logical, LogicalDefinition>([
  * @param entities - Validated entity definitions.
  * @param entityName - Exact entity name.
  * @param where - Equality shorthand, structured comparisons, or logical groups.
+ * @param scope - Optional effective-field expressions for polymorphic queries.
  * @returns The quoted `WHERE` clause and its parameter values.
  * @throws {Error} When the entity, field, operator, or value is invalid.
  */
@@ -160,8 +180,9 @@ function whereClause(
   entities: EntityDefinitions,
   entityName: string,
   where: Filter | Readonly<Record<string, unknown>> = {},
+  scope?: QueryScope,
 ): SQLPredicate {
-  const entity = definition(entities, entityName)
+  const entity = scope?.definition ?? definition(entities, entityName)
   const filter = Predicate.normalize(entity, where)
   if (!filter) return { sql: '', values: [] }
 
@@ -175,14 +196,14 @@ function whereClause(
     const comparison = comparisonDefinitions.get(node.operator as Operator.Comparison)
     if (comparison) {
       const comparisonFilter = node as ComparisonFilter
-      const field = scalarField(entity, comparisonFilter.field)
+      const field = scope ? scope.field(comparisonFilter.field) : scalarField(entity, comparisonFilter.field)
       if (!comparison.allowedFieldTypes.has(field.type)) {
         throw new Error(
           `Query operator "${comparisonFilter.operator}" is not valid for field "${entity.name}.${field.name}"`,
         )
       }
       const operand = comparison.validateOperand(field, comparisonFilter.value)
-      return comparison.build(quoteIdentifier(field.name), operand, bind)
+      return comparison.build(scope ? scope.expression(field) : quoteIdentifier(field.name), operand, bind)
     }
 
     const logical = logicalDefinitions.get(node.operator as Operator.Logical)
@@ -257,6 +278,7 @@ function invalidOperand(field: ScalarFieldDefinition): never {
  * @param entities - Validated entity definitions.
  * @param entityName - Exact entity name.
  * @param orderBy - Root field and direction, when ordering is requested.
+ * @param scope - Optional effective-field expressions for polymorphic queries.
  * @returns The quoted `ORDER BY` clause.
  * @throws {Error} When the entity, field, or direction is invalid.
  */
@@ -264,23 +286,24 @@ function orderByClause(
   entities: EntityDefinitions,
   entityName: string,
   orderBy?: OrderBy,
+  scope?: QueryScope,
 ): SQLOrder {
   if (orderBy === undefined) return { sql: '' }
 
-  const entity = definition(entities, entityName)
+  const entity = scope?.definition ?? definition(entities, entityName)
   const entries = Array.isArray(orderBy) ? orderBy : [orderBy]
   if (entries.length === 0) return { sql: '' }
 
   const clauses = entries.map(entry => {
     const name = typeof entry === 'string' ? entry : entry.field
     const direction = typeof entry === 'string' ? SortDirection.Ascending : entry.direction ?? SortDirection.Ascending
-    const field = scalarField(entity, name)
+    const field = scope ? scope.field(name) : scalarField(entity, name)
 
     if (direction !== SortDirection.Ascending && direction !== SortDirection.Descending) {
       throw new Error('Query orderBy direction must be "asc" or "desc"')
     }
 
-    return `${quoteIdentifier(field.name)} ${direction.toUpperCase()}`
+    return `${scope ? scope.expression(field) : quoteIdentifier(field.name)} ${direction.toUpperCase()}`
   })
 
   return { sql: `ORDER BY ${clauses.join(', ')}` }

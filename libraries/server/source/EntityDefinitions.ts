@@ -540,7 +540,7 @@ function parseEntities(value: unknown): readonly EntityDefinition[] {
   validateAncestry(seeds, byName)
   for (const seed of seeds) {
     for (const field of seed.fields) {
-      if (field.type === FieldType.Entity && !byName.has(field.target)) {
+      if (field.type === FieldType.Entity && field.target !== 'Entity' && !byName.has(field.target)) {
         throw invalid(`unknown target entity "${field.target}" for field "${seed.name}.${field.name}"`)
       }
     }

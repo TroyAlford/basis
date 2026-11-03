@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
+import { compilePolymorphicQuery } from './PolymorphicQuery'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { OrderBy } from './SQL'
@@ -101,6 +102,11 @@ function prepareEntityQuery(
 ): PreparedEntityQuery {
   const definition = entities.entity(entity)
   if (!definition) throw new Error(`Unknown entity "${entity}"`)
+  if (definition.abstract) {
+    return {
+      query: compilePolymorphicQuery(entities, definition, options),
+    }
+  }
   const selection = SQL.select(entities, entity, options.fields)
   const where = typeof options.where === 'string'
     ? QueryNormalizer.normalize(definition, options.where) ?? undefined

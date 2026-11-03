@@ -78,7 +78,7 @@ Identity and ordinary fields are inherited. The only inherited refinement is an 
 
 The required fixture above derives `User` as abstract because it has children, and derives `SystemUser` and `Client` as concrete leaves. A standalone entity with `fields: []` is a valid concrete entity. A branch cannot be instantiated; only leaf names may appear as root discriminators.
 
-The model is logical-first. A singular entity reference is itself a field in `fields`: `SystemUser.manager` is the logical field, while `managerId` is only its explicit PostgreSQL storage column. A reference uses `type: "Entity"`, an explicit `target`, and an explicit `column`. There is no inference from names, suffixes, columns, or entity existence. Reference names and physical column names are independently authored. The target must exist; the generated reference column is `text` and targets the target table's shared `id`.
+The model is logical-first. A singular entity reference is itself a field in `fields`: `SystemUser.manager` is the logical field, while `managerId` is only its explicit PostgreSQL storage column. A reference uses `type: "Entity"`, an explicit `target`, and an explicit `column`. There is no inference from names, suffixes, columns, or entity existence. Reference names and physical column names are independently authored. The target must exist, or be the universal `Entity` root; the generated reference column is `text` and targets the target table's shared `id`. A `User` reference therefore enforces that the referenced row has a `User` ancestor, while an `Entity` reference may target any concrete leaf.
 
 Entity-rooted `db.query` uses the logical local-field vocabulary. A reference field such as `manager` is not selectable, filterable, or sortable until singular graph projection is implemented, and its physical `managerId` column is not a logical field. Direct `db.sql` remains physical SQL and may use generated columns normally.
 
@@ -125,9 +125,9 @@ A separate reviewable `DDL.plan`/`DDL.apply` workflow is the intended next schem
 
 ## `db.query`
 
-Attach the same canonical definitions to the database capability, then project root scalar fields from one entity. MTI leaf identity and descendant expansion remain deferred, so an abstract entity query currently exposes only that table's own scalar fields:
+Attach the same canonical definitions to the database capability, then project effective scalar fields from one entity. Querying an abstract entity reads its shared ancestor table and returns one row per concrete descendant, including the actual leaf `entity` discriminator and shared `id`/`name`. Inherited fields are joined from their owning tables in the same SQL statement, never by a per-row follow-up query:
 
-```ts
+````ts
 import { EntityDefinitions, Operator, Server, SortDirection } from 'basis/server'
 
 const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
@@ -142,7 +142,26 @@ const notes = await server.db.query<{ id: string, title: string }>('Note', {
   limit: 20,
   offset: 0,
 })
-```
+
+For an abstract entity, the effective field set includes `id`, `name`, `entity`, and inherited/local fields. A single query returns every concrete descendant:
+
+```ts
+const users = await server.db.query<{
+  email: string,
+  entity: string,
+  id: string,
+  name: string,
+}>('User', {
+  fields: ['id', 'name', 'entity', 'email'],
+  where: { field: 'name', operator: Operator.Comparison.Contains, value: 'Ada' },
+  orderBy: 'name',
+  limit: 20,
+})
+````
+
+`$contains` is a case-insensitive literal substring match on `String` fields. It escapes `%`, `_`, and the escape character before binding, so user input is never interpreted as a wildcard. Abstract display-name searches use the root `pg_trgm` GIN index.
+
+````
 
 ```ts
 const filtered = await server.db.query<{ id: string, title: string }>('Note', {
@@ -157,7 +176,7 @@ const filtered = await server.db.query<{ id: string, title: string }>('Note', {
   },
   orderBy: { field: 'score', direction: SortDirection.Descending },
 })
-```
+````
 
 ```ts
 const matching = await server.db.query<{ id: string, title: string }>('Note', {
@@ -168,7 +187,7 @@ const matching = await server.db.query<{ id: string, title: string }>('Note', {
 
 `fields` is required and must be a non-empty list of the named entity's root fields. `where` accepts a single-field equality shorthand (`{ title: 'Hello' }`), an explicit canonical filter tree using the exported `Operator` enums, or a string query expression. An empty or whitespace-only string expression adds no predicate, matching an empty structured object. Shorthand is only equality for one field and normalizes to `Operator.Comparison.Equal`; multiple structured fields must be expressed explicitly with `And` and `filters`. An operator-looking object inside a field value is equality with that whole object, not operator syntax.
 
-Structured and string filters normalize to the same canonical predicate tree and SQL path. Comparisons use `$eq`, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$between`, and `$empty`; string expressions also accept `=`, `>`, `>=`, `<`, `<=`, `!=`, and `<>`. `$between` takes exactly two inclusive bounds and uses `values: [lower, upper]` in structured form or `[lower, upper]` after the operator in string form (`score $between [5, 10]`); a `null` bound is open, while `[null, null]` is invalid. `$empty` has no value and is valid only for string fields. `$ne` lowers to `Not(Equal)`, `$between` lowers to `And` of its bounds, and `$empty` lowers to `Or(Equal(null), Equal(''))`. Logical filters use `$and` or `$or` with a non-empty `filters` array and unary `$not` with exactly one child; string expressions support `$and`, `$or`, `$not`/`!`, and grouping parentheses. `$blank`, `$notblank`, `$nor`, and `$xor` are not part of the vocabulary.
+Structured and string filters normalize to the same canonical predicate tree and SQL path. Comparisons use `$eq`, `$contains`, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$between`, and `$empty`; string expressions also accept `=`, `>`, `>=`, `<`, `<=`, `!=`, and `<>`. `$between` takes exactly two inclusive bounds and uses `values: [lower, upper]` in structured form or `[lower, upper]` after the operator in string form (`score $between [5, 10]`); a `null` bound is open, while `[null, null]` is invalid. `$empty` has no value and is valid only for string fields. `$ne` lowers to `Not(Equal)`, `$between` lowers to `And` of its bounds, and `$empty` lowers to `Or(Equal(null), Equal(''))`. Logical filters use `$and` or `$or` with a non-empty `filters` array and unary `$not` with exactly one child; string expressions support `$and`, `$or`, `$not`/`!`, and grouping parentheses. `$blank`, `$notblank`, `$nor`, and `$xor` are not part of the vocabulary.
 
 Predicate evaluation is two-valued, including on SQL `NULL`. Equality to a non-null value and range comparisons are false on `NULL`, and `Not` complements that result. Therefore `$ne 5` matches rows whose field is `NULL` as well as rows that are not `5`; `$eq null` matches only `NULL`, and `$ne null` matches only non-`NULL`. `$empty` matches exactly `NULL` or `''`, not whitespace-only strings; not-empty is `Not(Empty(field))` and does match whitespace-only strings.
 
@@ -176,7 +195,7 @@ Unquoted literals are typed from the target field, and quoted values remain stri
 
 UUID and Snowflake values remain canonical text in `db.query` results; there is no implicit bigint conversion for identity values. Ordering and comparisons operate on the physical text identity.
 
-`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, row order is unspecified, so use explicit ordering when paging deterministically. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step intentionally supports scalar root projections only — relationships and graph projections arrive in later steps.
+`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar field projections, including inherited fields for abstract descendants; reference and collection graph projections arrive later.
 
 ## `db.sql`
 

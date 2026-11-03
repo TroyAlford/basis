@@ -371,6 +371,26 @@ describe('EntityDefinitions', () => {
     ])
   })
 
+  test('allows references to the universal Entity root', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { column: 'favoriteId', field: 'favorite', target: 'Entity', type: 'Entity' },
+        ],
+        name: 'Selection',
+      }],
+    })
+
+    expect(entities.entity('Selection')?.fields[1]).toMatchObject({
+      target: 'Entity',
+      type: FieldType.Entity,
+    })
+    expect(entities.ddl.join('\n')).toContain(
+      'references "Entity" ("id") deferrable initially immediate',
+    )
+  })
+
   test('emits lowercase SQL keywords', () => {
     const sql = load(ontology).ddl.join('\n').replaceAll("'UPDATE'", '')
     const keywords = [
