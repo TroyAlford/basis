@@ -28,14 +28,14 @@ export interface CompiledPolymorphicQuery {
 }
 
 /**
- * Compile one query over all concrete descendants of an abstract entity.
+ * Compile one query over a concrete entity or all concrete descendants of an
+ * abstract entity.
  *
- * The abstract table supplies one shared ancestor row per descendant. Root
- * joins supply the universal name and leaf discriminator; ancestor joins
- * supply inherited fields. The result is one SQL statement, never a row-by-row
- * expansion.
+ * The named table supplies one row per result. Root joins supply the universal
+ * name and leaf discriminator; ancestor joins supply inherited fields. The
+ * result is one SQL statement, never a row-by-row expansion.
  * @param entities - Canonical entity definitions.
- * @param definition - Abstract entity being queried.
+ * @param definition - Concrete entity or abstract ancestor being queried.
  * @param options - Query options.
  * @returns The complete SQL and ordered bindings.
  */
@@ -48,11 +48,8 @@ export function compilePolymorphicQuery(
   const effective = new Map(definition.effectiveFields.map(field => [field.name, field]))
   const baseAlias = 't'
   const rootAlias = 'r'
-  const aliases = new Map<string, string>([
-    ['Entity', rootAlias],
-    [definition.name, baseAlias],
-  ])
-  const joins = [`JOIN "Entity" "${rootAlias}" ON "${rootAlias}"."id" = "${baseAlias}"."id"`]
+  const aliases = new Map<string, string>([[definition.name, baseAlias]])
+  const joins: string[] = []
 
   /**
    * Resolve or create a joined alias for one field owner.
@@ -62,7 +59,7 @@ export function compilePolymorphicQuery(
   const aliasFor = (owner: string): string => {
     const existing = aliases.get(owner)
     if (existing) return existing
-    const alias = `o${aliases.size}`
+    const alias = owner === 'Entity' ? rootAlias : `o${aliases.size}`
     aliases.set(owner, alias)
     joins.push(`JOIN "${owner}" "${alias}" ON "${alias}"."id" = "${baseAlias}"."id"`)
     return alias
@@ -82,9 +79,12 @@ export function compilePolymorphicQuery(
   const expression = (value: ScalarFieldDefinition): string => {
     const owner = effective.get(value.name)?.owner
     if (!owner) throw new Error(`Unknown field "${definition.name}.${value.name}"`)
-    if (owner === 'Entity') return `${rootAlias}.${quote(value.name)}`
+    if (value.name === 'id') return `${baseAlias}.${quote(value.name)}`
+    if (owner === 'Entity') return `${aliasFor('Entity')}.${quote(value.name)}`
     return `${aliasFor(owner)}.${quote(value.name)}`
   }
+
+  if (definition.abstract) aliasFor('Entity')
 
   const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
   const scope: QueryScope = { definition: synthetic, expression, field }
@@ -96,16 +96,34 @@ export function compilePolymorphicQuery(
     ? QueryNormalizer.normalize(synthetic, options.where) ?? undefined
     : options.where
   const predicate = SQL.where(entities, definition.name, where, scope)
-  const ordering = options.orderBy === undefined
-    ? `ORDER BY ${rootAlias}."name" ASC, ${rootAlias}."id" ASC`
-    : `${SQL.orderBy(entities, definition.name, options.orderBy, scope).sql}, ${rootAlias}."id" ASC`
-  const leaves = entities.entities
-    .filter(entity => !entity.abstract && descendsFrom(entities, entity, definition.name))
-    .map(entity => quoteLiteral(entity.name))
+  let ordering = ''
+  if (options.orderBy !== undefined) {
+    ordering = SQL.orderBy(entities, definition.name, options.orderBy, scope).sql
+    if (ordering !== '' && definition.abstract) ordering += `, ${rootAlias}."id" ASC`
+  }
+  if (ordering === '' && definition.abstract) {
+    ordering = `ORDER BY ${rootAlias}."name" ASC, ${rootAlias}."id" ASC`
+  }
+  const leaves: string[] = []
+  if (definition.abstract) {
+    for (const entity of entities.entities) {
+      if (!entity.abstract && descendsFrom(entities, entity, definition.name)) {
+        leaves.push(quoteLiteral(entity.name))
+      }
+    }
+  }
   const leafFilter = leaves.length === 0
     ? 'FALSE'
     : `${rootAlias}."entity" IN (${leaves.join(', ')})`
-  const conditions = [leafFilter, ...(predicate.sql === '' ? [] : [predicate.sql.replace(/^WHERE /u, '')])]
+  const conditions = [
+    ...(definition.abstract ? [leafFilter] : []),
+    ...(predicate.sql === '' ? [] : [predicate.sql.replace(/^WHERE /u, '')]),
+  ]
+  const whereSql = conditions.length === 0
+    ? ''
+    : conditions.length === 1
+      ? `WHERE ${conditions[0]}`
+      : `WHERE ${conditions.map(condition => `(${condition})`).join(' AND ')}`
   const limit = options.limit === undefined ? 25 : options.limit
   const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length)
   return {
@@ -113,7 +131,7 @@ export function compilePolymorphicQuery(
       `SELECT ${selected.join(', ')}`,
       `FROM ${quote(definition.name)} "${baseAlias}"`,
       ...joins,
-      `WHERE ${conditions.map(condition => `(${condition})`).join(' AND ')}`,
+      whereSql,
       ordering,
       pagination.sql,
     ].filter(part => part !== '').join(' '),

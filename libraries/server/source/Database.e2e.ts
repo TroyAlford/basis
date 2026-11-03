@@ -482,6 +482,29 @@ describe('Server database lifecycle', () => {
       `
     })
 
+    expect(await database.tx(async sql => queryEntity<{
+      email: string,
+      entity: string,
+      id: string,
+      name: string,
+      permissions: string,
+    }>(sql, entities, 'SystemUser', {
+      fields: ['id', 'name', 'entity', 'email', 'permissions'],
+      orderBy: 'email',
+      where: { email: 'user@example.test' },
+    }))).toEqual([{
+      email: 'user@example.test',
+      entity: 'SystemUser',
+      id: userId,
+      name: 'User',
+      permissions: 'admin',
+    }])
+    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'SystemUser', {
+      fields: ['id'],
+      limit: 1,
+      orderBy: [],
+    }))).toEqual([{ id: userId }])
+
     const invalidManager = await database.tx(async sql => sql`
       UPDATE "SystemUser"
       SET "managerId" = ${novelId}
@@ -584,6 +607,12 @@ FROM generate_series(${chunkStart + (chunkStart % 2 === 1 ? 0 : 1)},
     }))
     expect(pageOne.map(row => row.name)).toEqual(['person-000001', 'person-000002', 'person-000003'])
     expect(pageTwo.map(row => row.name)).toEqual(['person-000004', 'person-000005', 'person-000006'])
+
+    expect(await database.tx(async sql => queryEntity<{ name: string }>(sql, entities, 'User', {
+      fields: ['name'],
+      limit: 1,
+      orderBy: [],
+    }))).toEqual([{ name: 'person-000001' }])
 
     const compiled = compileEntityQuery(entities, 'User', options)
     const plan = await database.tx(async sql => sql.unsafe<Record<string, string>[]>(

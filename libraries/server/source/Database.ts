@@ -6,9 +6,7 @@ import { join, resolve } from 'node:path'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { compilePolymorphicQuery } from './PolymorphicQuery'
 import type { Filter } from './Predicate'
-import { QueryNormalizer } from './QueryNormalizer'
 import type { OrderBy } from './SQL'
-import { SQL } from './SQL'
 
 /** The pool defaults used by every managed or external connection. */
 const POOL_DEFAULTS = {
@@ -102,27 +100,8 @@ function prepareEntityQuery(
 ): PreparedEntityQuery {
   const definition = entities.entity(entity)
   if (!definition) throw new Error(`Unknown entity "${entity}"`)
-  if (definition.abstract) {
-    return {
-      query: compilePolymorphicQuery(entities, definition, options),
-    }
-  }
-  const selection = SQL.select(entities, entity, options.fields)
-  const where = typeof options.where === 'string'
-    ? QueryNormalizer.normalize(definition, options.where) ?? undefined
-    : options.where
-  const predicate = SQL.where(entities, entity, where)
-  const ordering = SQL.orderBy(entities, entity, options.orderBy)
-  const limit = options.limit === undefined ? 25 : options.limit
-  const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length)
-  const statement = [selection.sql, predicate.sql, ordering.sql, pagination.sql]
-    .filter(clause => clause !== '')
-    .join(' ')
   return {
-    query: {
-      sql: statement,
-      values: [...predicate.values, ...pagination.values],
-    },
+    query: compilePolymorphicQuery(entities, definition, options),
   }
 }
 

@@ -324,6 +324,15 @@ describe('SQL.where', () => {
     expect(compiled.values).toEqual(['%Ada%', 10, 0])
   })
 
+  test('treats an empty abstract orderBy as stable default ordering', () => {
+    const compiled = compileEntityQuery(hierarchyDefinitions, 'User', {
+      fields: ['id'],
+      orderBy: [],
+    })
+    expect(compiled.sql).toContain('ORDER BY r."name" ASC, r."id" ASC')
+    expect(compiled.sql).not.toContain('ORDER BY ,')
+  })
+
   test('compiles substring predicates and escapes wildcard characters', () => {
     expect(SQL.where(definitions, entity, {
       field: 'title',
@@ -335,7 +344,7 @@ describe('SQL.where', () => {
     })
   })
 
-  test('compiles a complete root query with ordered bindings', () => {
+  test('compiles a complete concrete query with ordered bindings', () => {
     const compiled = compileEntityQuery(definitions, entity, {
       fields: ['title', 'score'],
       limit: 7,
@@ -348,9 +357,12 @@ describe('SQL.where', () => {
     })
 
     expect(compiled.sql).toMatchSQL(`
-      SELECT "title", "score" FROM "Note"
-      WHERE (NOT (("score" IS NOT DISTINCT FROM $1 OR "score" IS NOT DISTINCT FROM $2)))
-      ORDER BY "score" DESC, "title" ASC
+      SELECT t."title" AS "title", t."score" AS "score"
+      FROM "Note" "t"
+      WHERE (NOT ((
+        t."score" IS NOT DISTINCT FROM $1 OR t."score" IS NOT DISTINCT FROM $2
+      )))
+      ORDER BY t."score" DESC, t."title" ASC
       LIMIT $3 OFFSET $4
     `)
     expect(compiled.values).toEqual([5, 10, 7, 3])
