@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { toMatchSQL } from '../testing/toMatchSQL'
-import { EntityDefinitions, FieldType } from './EntityDefinitions'
+import { EntityDefinitions, FieldType, identityDefinition } from './EntityDefinitions'
 
 expect.extend({ toMatchSQL })
 
@@ -179,6 +179,13 @@ const ontology = {
 }
 
 describe('EntityDefinitions', () => {
+  test('exposes the canonical universal identity root metadata', () => {
+    const root = identityDefinition()
+    expect(root.name).toBe('Entity')
+    expect(root.effectiveFields.map(field => field.name)).toEqual(['id', 'name', 'entity'])
+    expect(root.effectiveFields.every(field => field.owner === 'Entity')).toBe(true)
+  })
+
   test('uses the exact serialized field type vocabulary', () => {
     expect(Object.values(FieldType).map(String)).toEqual([
       'Boolean',

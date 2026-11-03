@@ -273,6 +273,20 @@ function rootFields(format: IdentityFormat | undefined): readonly EffectiveField
 }
 
 /**
+ * Create a synthetic definition for the universal identity root.
+ * @returns Canonical root identity metadata.
+ */
+export function identityDefinition(): EntityDefinition {
+  return {
+    abstract: false,
+    effectiveFields: rootFields(undefined),
+    fields: [],
+    name: 'Entity',
+    parent: 'Entity',
+  }
+}
+
+/**
  * Build the system-owned universal identity root.
  * @param entities - Validated entity definitions.
  * @returns The physical identity-root table.

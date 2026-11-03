@@ -1,5 +1,5 @@
 import type { EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType } from './EntityDefinitions'
+import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { OrderBy, QueryScope } from './SQL'
@@ -550,35 +550,17 @@ export function compilePolymorphicQuery(
 }
 
 /**
- * Build the root-only entity definition used by `Entity` reference targets.
- * @returns Synthetic identity-root metadata.
- */
-function rootDefinition(): EntityDefinition {
-  return {
-    abstract: false,
-    effectiveFields: [
-      { name: 'id', owner: 'Entity', type: FieldType.ID },
-      { name: 'name', owner: 'Entity', type: FieldType.String },
-      { name: 'entity', owner: 'Entity', type: FieldType.String },
-    ],
-    fields: [],
-    name: 'Entity',
-    parent: 'Entity',
-  }
-}
-
-/**
  * Build an occurrence for the universal identity root.
  * @param entities - Canonical definitions.
  * @param rootAlias - Joined root table alias.
  * @returns Universal root occurrence with every concrete leaf field available.
  */
 function rootContext(entities: EntityDefinitions, rootAlias: string): EntityContext {
-  const definition = rootDefinition()
+  const definition = identityDefinition()
   return {
     baseAlias: rootAlias,
     definition,
-    descendants: universalDescendantFields(entities),
+    descendants: universalDescendantFields(entities, definition),
     effective: new Map(definition.effectiveFields.map(field => [field.name, field])),
     isTarget: true,
     ownerAliases: new Map([['Entity', rootAlias]]),
@@ -639,13 +621,15 @@ function descendantFields(
 /**
  * Build the selectable descendant union for the universal `Entity` root.
  * @param entities - Canonical definitions.
+ * @param root - Canonical universal root definition.
  * @returns Leaf-owned fields keyed by logical name.
  */
 function universalDescendantFields(
   entities: EntityDefinitions,
+  root: EntityDefinition,
 ): ReadonlyMap<string, DescendantField> {
   const leaves = entities.entities.filter(entity => !entity.abstract)
-  return collectDescendantFields(leaves, new Set(['id', 'name', 'entity']))
+  return collectDescendantFields(leaves, new Set(root.effectiveFields.map(field => field.name)))
 }
 
 /**
