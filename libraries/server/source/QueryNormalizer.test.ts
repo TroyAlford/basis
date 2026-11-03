@@ -76,6 +76,14 @@ describe('QueryNormalizer', () => {
     )
   })
 
+  test('normalizes substring containment expressions', () => {
+    expect(QueryNormalizer.normalize(entity, 'title $contains "5%"')).toEqual({
+      field: 'title',
+      operator: Operator.Comparison.Contains,
+      value: '5%',
+    })
+  })
+
   test('normalizes Empty and Not Empty identically to structured JSON', () => {
     expect(QueryNormalizer.normalize(entity, 'title $empty')).toEqual(
       Predicate.normalize(entity, {

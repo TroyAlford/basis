@@ -11,6 +11,8 @@ export namespace Operator {
   export enum Comparison {
     /** Inclusive range convenience for a paired comparison. */
     Between = '$between',
+    /** Case-insensitive substring containment for string fields. */
+    Contains = '$contains',
     /** Empty string or null convenience for string fields. */
     Empty = '$empty',
     /** Equal. */

@@ -39,6 +39,28 @@ const snowflakeDefinitions = EntityDefinitions.load(JSON.stringify({
   }],
 }))
 
+const hierarchyDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'email', type: 'String' },
+      ],
+      name: 'User',
+    },
+    {
+      extends: 'User',
+      fields: [{ field: 'permissions', type: 'String' }],
+      name: 'SystemUser',
+    },
+    {
+      extends: 'User',
+      fields: [{ field: 'company', type: 'String' }],
+      name: 'Client',
+    },
+  ],
+}))
+
 describe('SQL.where', () => {
   test('compiles explicit And comparisons and preserves bound values', () => {
     const predicate = SQL.where(definitions, entity, {
@@ -286,7 +308,43 @@ describe('SQL.where', () => {
     }).values).toEqual(['9223372036854775807'])
   })
 
-  test('compiles a complete root query with ordered bindings', () => {
+  test('compiles polymorphic abstract queries with root identity and descendants', () => {
+    const compiled = compileEntityQuery(hierarchyDefinitions, 'User', {
+      fields: ['id', 'name', 'entity', 'email'],
+      limit: 10,
+      orderBy: 'name',
+      where: { field: 'name', operator: Operator.Comparison.Contains, value: 'Ada' },
+    })
+
+    expect(compiled.sql).toContain('FROM "User" "t"')
+    expect(compiled.sql).toContain('JOIN "Entity" "r" ON "r"."id" = "t"."id"')
+    expect(compiled.sql).toContain('r."entity" IN (\'SystemUser\', \'Client\')')
+    expect(compiled.sql).toContain('r."name" ILIKE $1 ESCAPE')
+    expect(compiled.sql).toContain('ORDER BY r."name" ASC, r."id" ASC')
+    expect(compiled.values).toEqual(['%Ada%', 10, 0])
+  })
+
+  test('treats an empty abstract orderBy as stable default ordering', () => {
+    const compiled = compileEntityQuery(hierarchyDefinitions, 'User', {
+      fields: ['id'],
+      orderBy: [],
+    })
+    expect(compiled.sql).toContain('ORDER BY r."name" ASC, r."id" ASC')
+    expect(compiled.sql).not.toContain('ORDER BY ,')
+  })
+
+  test('compiles substring predicates and escapes wildcard characters', () => {
+    expect(SQL.where(definitions, entity, {
+      field: 'title',
+      operator: Operator.Comparison.Contains,
+      value: '50%_off\\',
+    })).toEqual({
+      sql: 'WHERE ("title" IS NOT NULL AND "title" ILIKE $1 ESCAPE \'\\\')',
+      values: ['%50\\%\\_off\\\\%'],
+    })
+  })
+
+  test('compiles a complete concrete query with ordered bindings', () => {
     const compiled = compileEntityQuery(definitions, entity, {
       fields: ['title', 'score'],
       limit: 7,
@@ -299,9 +357,12 @@ describe('SQL.where', () => {
     })
 
     expect(compiled.sql).toMatchSQL(`
-      SELECT "title", "score" FROM "Note"
-      WHERE (NOT (("score" IS NOT DISTINCT FROM $1 OR "score" IS NOT DISTINCT FROM $2)))
-      ORDER BY "score" DESC, "title" ASC
+      SELECT t."title" AS "title", t."score" AS "score"
+      FROM "Note" "t"
+      WHERE (NOT ((
+        t."score" IS NOT DISTINCT FROM $1 OR t."score" IS NOT DISTINCT FROM $2
+      )))
+      ORDER BY t."score" DESC, t."title" ASC
       LIMIT $3 OFFSET $4
     `)
     expect(compiled.values).toEqual([5, 10, 7, 3])
