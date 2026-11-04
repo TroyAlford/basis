@@ -269,6 +269,77 @@ describe('EntityDefinitions', () => {
     expect(ddl).toContain('"identities" text[] not null')
     expect(ddl).not.toContain('"ownedVisits"')
     expect(ddl).not.toContain('"members"')
+    expect(ddl).toContain('create table "CollectionMember"')
+    expect(ddl).toContain('"collectionRowId" text not null')
+    expect(ddl).toContain('"entityId" text not null')
+    expect(ddl).toContain('"position" double precision not null')
+    expect(ddl).toContain('primary key ("collectionRowId", "entityId")')
+    expect(ddl).toContain('foreign key ("collectionRowId") references "Pet"')
+    expect(ddl).toContain('foreign key ("entityId") references "Entity"')
+  })
+
+  test('rejects ambiguous junction mappings', () => {
+    const base = {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        {
+          field: 'first',
+          items: { target: 'Pet', type: 'Entity' },
+          mapping: {
+            kind: 'Junction',
+            sourceColumn: 'petId',
+            table: 'PetLink',
+            targetColumn: 'otherPetId',
+          },
+          type: 'Collection',
+        },
+        {
+          field: 'second',
+          items: { target: 'Pet', type: 'Entity' },
+          mapping: {
+            kind: 'Junction',
+            sourceColumn: 'petId',
+            table: 'PetLink',
+            targetColumn: 'thirdPetId',
+          },
+          type: 'Collection',
+        },
+      ],
+      name: 'Pet',
+    }
+    expect(() => load({ entities: [base] })).toThrow('already owned')
+    expect(() => load({
+      entities: [{
+        fields: [{
+          field: 'links',
+          items: { target: 'Pet', type: 'Entity' },
+          mapping: {
+            kind: 'Junction',
+            sourceColumn: 'petId',
+            table: 'Pet',
+            targetColumn: 'otherPetId',
+          },
+          type: 'Collection',
+        }, { field: 'id', format: 'UUID' }],
+        name: 'Pet',
+      }],
+    })).toThrow('conflicts with an entity table')
+    expect(() => load({
+      entities: [{
+        fields: [{
+          field: 'links',
+          items: { target: 'Entity', type: 'Entity' },
+          mapping: {
+            kind: 'Junction',
+            sourceColumn: 'petId',
+            table: 'PetLink',
+            targetColumn: 'petId',
+          },
+          type: 'Collection',
+        }, { field: 'id', format: 'UUID' }],
+        name: 'Pet',
+      }],
+    })).toThrow('source and target columns must differ')
   })
 
   test('validates inherited inverse collection metadata at its declaring owner', () => {
