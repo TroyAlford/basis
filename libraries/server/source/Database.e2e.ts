@@ -1323,6 +1323,22 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
             unique: false,
           },
           {
+            field: 'identities',
+            items: { format: 'UUID', type: 'ID' },
+            ordered: false,
+            storage: 'jsonb',
+            type: 'ValueCollection',
+            unique: false,
+          },
+          {
+            field: 'days',
+            items: { type: 'Date' },
+            ordered: false,
+            storage: 'jsonb',
+            type: 'ValueCollection',
+            unique: false,
+          },
+          {
             field: 'events',
             items: {
               fields: [
@@ -1348,11 +1364,15 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
       VALUES (${first}, ${'First'}, ${'Document'}), (${second}, ${'Second'}, ${'Document'})
     `
     await database.sql`
-      INSERT INTO "Document" ("id", "labels", "events")
+      INSERT INTO "Document" ("id", "labels", "identities", "days", "events")
       VALUES (${first},
         '["beta","alpha","alpha"]'::jsonb,
+        jsonb_build_array(${first}::text),
+        '["2026-01-15"]'::jsonb,
         '[{"kind":"b","count":2},{"kind":"a","count":1},{"kind":"a","count":1}]'::jsonb),
         (${second},
+        '[]'::jsonb,
+        '[]'::jsonb,
         '[]'::jsonb,
         '[]'::jsonb)
     `
@@ -1376,6 +1396,14 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
       },
     }])
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Document', {
+      fields: ['id', 'identities', 'days'],
+      where: { id: first },
+    })).toEqual([{
+      days: { items: ['2026-01-15'], remaining: 0, total: 1 },
+      id: first,
+      identities: { items: [first], remaining: 0, total: 1 },
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Document', {
       collections: { events: { limit: 1 }, labels: { limit: 2, offset: 1 } },
       fields: ['id', 'labels', 'events'],
       where: { id: first },
@@ -1392,6 +1420,24 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
       id: second,
       labels: { items: [], remaining: 0, total: 0 },
     }])
+    await database.sql`
+      UPDATE "Document"
+      SET "identities" = '["not-a-uuid"]'::jsonb
+      WHERE "id" = ${second}
+    `
+    await expect(queryEntity(database.sql, entities, 'Document', {
+      fields: ['id', 'identities'],
+      where: { id: second },
+    })).rejects.toThrow('Invalid value in collection')
+    await database.sql`
+      UPDATE "Document"
+      SET "days" = '["tomorrow"]'::jsonb
+      WHERE "id" = ${second}
+    `
+    await expect(queryEntity(database.sql, entities, 'Document', {
+      fields: ['id', 'days'],
+      where: { id: second },
+    })).rejects.toThrow('Invalid value in collection')
     await database.sql`
       UPDATE "Document"
       SET "labels" = '[1]'::jsonb

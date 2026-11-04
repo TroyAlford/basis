@@ -1,5 +1,5 @@
-import type { CollectionFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition, ValueCollectionElementDefinition } from './EntityDefinitions'
-import { FieldType, identityDefinition } from './EntityDefinitions'
+import type { CollectionFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition, ScalarValueCollectionElementDefinition, StructuredValueFieldDefinition, ValueCollectionElementDefinition } from './EntityDefinitions'
+import { FieldType, identityDefinition, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { OrderBy, QueryScope } from './SQL'
@@ -53,20 +53,6 @@ interface IdentityProjection {
   readonly id: string,
   /** SQL column alias for the target name. */
   readonly name: string,
-}
-
-/** One non-entity value collection projection. */
-interface ValueCollectionProjection {
-  /** Element contract for query-time validation. */
-  readonly element: ValueCollectionElementDefinition,
-  /** SQL alias for the JSON values array. */
-  readonly itemsAlias: string,
-  /** Output field name. */
-  readonly name: string,
-  /** SQL alias for the remaining count. */
-  readonly remainingAlias: string,
-  /** SQL alias for the total count. */
-  readonly totalAlias: string,
 }
 
 /** One non-entity value collection projection. */
@@ -1177,38 +1163,83 @@ function validateValueCollectionItem(
       if (!(field.name in record)) {
         throw new Error(`Invalid structured value in collection "${collection}": missing "${field.name}"`)
       }
-      validateScalarValue(collection, field.type, field.name, record[field.name])
+      validateScalarValue(collection, field, record[field.name])
     }
     return
   }
-  validateScalarValue(collection, element.type, undefined, value)
+  validateScalarValue(collection, element, value)
 }
 
 /**
  * Validate one scalar value in a collection.
  * @param collection - Collection field name.
- * @param type - Scalar or JSON type.
- * @param field - Structured field name, when applicable.
+ * @param descriptor - Scalar descriptor including its declared format.
  * @param value - Stored value.
  */
 function validateScalarValue(
   collection: string,
-  type: ScalarFieldDefinition['type'] | FieldType.JSON,
-  field: string | undefined,
+  descriptor: ScalarValueCollectionElementDefinition | StructuredValueFieldDefinition,
   value: unknown,
 ): void {
-  const label = field ? `${collection}.${field}` : collection
-  const valid = type === FieldType.JSON
-    ? true
-    : type === FieldType.Boolean
-      ? typeof value === 'boolean'
-      : type === FieldType.Number
-        ? typeof value === 'number'
-        : type === FieldType.String || type === FieldType.ID
-          || type === FieldType.Date || type === FieldType.Timestamp
-          ? typeof value === 'string'
-          : false
-  if (!valid) throw new Error(`Invalid value in collection "${label}"`)
+  const label = 'name' in descriptor ? `${collection}.${descriptor.name}` : collection
+  if (descriptor.type === FieldType.JSON) return
+  if (descriptor.type === FieldType.Boolean) {
+    if (typeof value !== 'boolean') throw new Error(`Invalid value in collection "${label}"`)
+    return
+  }
+  if (descriptor.type === FieldType.Number) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(`Invalid value in collection "${label}"`)
+    }
+    return
+  }
+  if (descriptor.type === FieldType.String) {
+    if (typeof value !== 'string') throw new Error(`Invalid value in collection "${label}"`)
+    return
+  }
+  if (descriptor.type === FieldType.ID) {
+    if (
+      typeof value !== 'string'
+      || (descriptor.format === 'UUID' && !isCanonicalUUID(value))
+      || (descriptor.format === 'Snowflake' && !isCanonicalSnowflake(value))
+      || (descriptor.format === undefined && !isCanonicalUUID(value) && !isCanonicalSnowflake(value))
+    ) {
+      throw new Error(`Invalid value in collection "${label}"`)
+    }
+    return
+  }
+  if (descriptor.type === FieldType.Date) {
+    if (!isDate(value)) throw new Error(`Invalid value in collection "${label}"`)
+    return
+  }
+  if (descriptor.type === FieldType.Timestamp) {
+    if (!isTimestamp(value)) throw new Error(`Invalid value in collection "${label}"`)
+    return
+  }
+  throw new Error(`Invalid value in collection "${label}"`)
+}
+
+/**
+ * Whether a value is a valid ISO calendar date.
+ * @param value - Candidate value.
+ * @returns `true` for `YYYY-MM-DD` dates that exist.
+ */
+function isDate(value: unknown): boolean {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number) as [number, number, number]
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
+/**
+ * Whether a value is a valid ISO timestamp string.
+ * @param value - Candidate value.
+ * @returns `true` for parseable ISO timestamps with a time component.
+ */
+function isTimestamp(value: unknown): boolean {
+  return typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/.test(value)
+    && Number.isFinite(Date.parse(value))
 }
 
 /**
