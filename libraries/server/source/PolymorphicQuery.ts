@@ -7,6 +7,10 @@ import { SQL } from './SQL'
 
 /** Maximum number of singular reference hops in one requested path. */
 const MAX_REFERENCE_DEPTH = 8
+/** Maximum number of requested projection paths in one query. */
+const MAX_PROJECTION_PATHS = 64
+/** Maximum total path segments and selected collections in one query. */
+const MAX_PROJECTION_WORK = 128
 
 /** Options accepted by a polymorphic entity query. */
 export interface PolymorphicQueryOptions {
@@ -70,6 +74,8 @@ interface CollectionProjection {
 
 /** One nested singular reference. */
 interface ReferenceProjection {
+  /** Canonical reference-edge identities aligned with `nodes`. */
+  readonly edges: readonly string[],
   /** Output reference field name. */
   readonly name: string,
   /** Variant target nodes; a normal reference has exactly one. */
@@ -216,6 +222,7 @@ class QueryProjection {
     valueStart: number,
   ): (row: Record<string, unknown>) => Record<string, unknown> {
     if (fields.length === 0) throw new Error('Query fields must be a non-empty array')
+    this.#validateBudget(fields)
     this.#valueStart = valueStart
     const root = this.#node(this.root, [])
     for (const field of fields) this.#addPath(root, field.split('.'), new Set(), 0)
@@ -225,6 +232,25 @@ class QueryProjection {
       }
     }
     return row => hydrateRoot(row, root)
+  }
+
+  /**
+   * Validate path count and total graph work before compiling SQL.
+   * @param fields - Requested field paths.
+   */
+  #validateBudget(fields: readonly string[]): void {
+    const collections = Object.keys(this.#collections ?? {})
+    if (fields.length + collections.length > MAX_PROJECTION_PATHS) {
+      throw new Error(
+        `Query projection exceeds the maximum path count of ${MAX_PROJECTION_PATHS}`,
+      )
+    }
+    const work = fields.reduce((total, field) => total + field.split('.').length, collections.length)
+    if (work > MAX_PROJECTION_WORK) {
+      throw new Error(
+        `Query projection exceeds the maximum graph work budget of ${MAX_PROJECTION_WORK}`,
+      )
+    }
   }
 
   /**
@@ -277,19 +303,25 @@ class QueryProjection {
     if (effective) {
       if (effective.type === FieldType.Entity) {
         const path = [...node.path, ...segments].join('.')
-        if (references.has(name)) throw new Error(`Repeated reference expansion "${path}"`)
+        const edge = referenceEdge(effective)
+        if (references.has(edge)) throw new Error(`Repeated reference expansion "${path}"`)
         if (depth >= MAX_REFERENCE_DEPTH) {
           throw new Error(`Reference path "${path}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
         }
         let reference = node.referenceNames.get(name)
         if (!reference) {
-          reference = { name, nodes: [this.#reference(node, effective)] }
+          reference = { edges: [edge], name, nodes: [this.#reference(node, effective)] }
           node.referenceNames.set(name, reference)
           node.references.push(reference)
         }
         if (rest.length > 0) {
-          for (const child of reference.nodes) {
-            this.#addPath(child, rest, new Set([...references, name]), depth + 1)
+          for (const [index, child] of reference.nodes.entries()) {
+            this.#addPath(
+              child,
+              rest,
+              new Set([...references, reference.edges[index] ?? edge]),
+              depth + 1,
+            )
           }
         }
         return
@@ -310,7 +342,10 @@ class QueryProjection {
       }
       if (descendant.type === FieldType.Entity) {
         const path = [...node.path, ...segments].join('.')
-        if (references.has(name)) throw new Error(`Repeated reference expansion "${path}"`)
+        const edges = descendant.variants.map(variant => referenceEdge(variant.field))
+        if (edges.some(edge => references.has(edge))) {
+          throw new Error(`Repeated reference expansion "${path}"`)
+        }
         if (depth >= MAX_REFERENCE_DEPTH) {
           throw new Error(`Reference path "${path}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
         }
@@ -324,13 +359,18 @@ class QueryProjection {
               sourceAlias,
             )
           })
-          reference = { name, nodes }
+          reference = { edges, name, nodes }
           node.referenceNames.set(name, reference)
           node.references.push(reference)
         }
         if (rest.length > 0) {
-          for (const child of reference.nodes) {
-            this.#addPath(child, rest, new Set([...references, name]), depth + 1)
+          for (const [index, child] of reference.nodes.entries()) {
+            this.#addPath(
+              child,
+              rest,
+              new Set([...references, reference.edges[index] ?? name]),
+              depth + 1,
+            )
           }
         }
         return
@@ -1109,6 +1149,15 @@ function hydrateReference(
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
   return result
+}
+
+/**
+ * Build the canonical identity of one singular reference edge.
+ * @param field - Effective reference field.
+ * @returns Owner-qualified edge identity.
+ */
+function referenceEdge(field: EffectiveFieldDefinition): string {
+  return `${field.owner}\u0000${field.name}`
 }
 
 /**

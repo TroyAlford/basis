@@ -553,6 +553,53 @@ describe('SQL.where', () => {
     })).toThrow('Repeated reference expansion')
   })
 
+  test('validates graph budgets, repeated edges and collection boundaries', () => {
+    expect(() => compileEntityQuery(definitions, entity, {
+      fields: Array.from({ length: 65 }, () => 'id'),
+    })).toThrow('maximum path count')
+    expect(() => compileEntityQuery(definitions, entity, {
+      fields: Array.from({ length: 64 }, () => 'a.b.c'),
+    })).toThrow('maximum graph work budget')
+
+    const edgeDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'link', target: 'Middle', type: 'Entity' },
+          ],
+          name: 'Root',
+        },
+        {
+          fields: [
+            { field: 'link', target: 'Root', type: 'Entity' },
+          ],
+          name: 'Middle',
+        },
+      ],
+    }))
+    expect(() => compileEntityQuery(edgeDefinitions, 'Root', {
+      fields: ['link.link'],
+    })).not.toThrow()
+    expect(() => compileEntityQuery(edgeDefinitions, 'Root', {
+      fields: ['link.link.link'],
+    })).toThrow('Repeated reference expansion')
+
+    expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
+      collections: { campaigns: {} },
+      fields: ['id', 'campaigns.members'],
+    })).toThrow('Cannot traverse collection field')
+
+    const deepDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: Array.from({ length: 10 }, (_, index) => ({
+        fields: index === 9 ? [] : [{ field: 'next', target: `Node${index + 1}`, type: 'Entity' }],
+        name: `Node${index}`,
+      })),
+    }))
+    expect(() => compileEntityQuery(deepDefinitions, 'Node0', {
+      fields: [Array.from({ length: 9 }, () => 'next').join('.')],
+    })).toThrow('exceeds the maximum depth')
+  })
+
   test('compiles substring predicates and escapes wildcard characters', () => {
     expect(SQL.where(definitions, entity, {
       field: 'title',
