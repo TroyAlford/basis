@@ -1085,6 +1085,11 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
       WHERE table_schema = current_schema() AND table_name = 'Pet'
       ORDER BY ordinal_position
     `).toEqual([{ columnName: 'id' }])
+    expect(await database.sql<{ indexName: string }[]>`
+      SELECT indexname AS "indexName"
+      FROM pg_indexes
+WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Visit_petId_fk_idx'
+    `).toEqual([{ indexName: 'Visit_petId_fk_idx' }])
     expect(await database.sql<{
       columnName: string,
       dataType: string,
@@ -1213,6 +1218,82 @@ VALUES (${userId},
       ownedVisits: { items: [], remaining: 0, total: 0 },
       playmates: { items: [], remaining: 0, total: 0 },
     }])
+
+    const collectionQuery = compileEntityQuery(entities, 'Pet', {
+      fields: ['id', 'ownedVisits'],
+      where: { id: userId },
+    })
+    const plan = await database.sql.unsafe<Record<string, string>[]>(
+      `EXPLAIN (FORMAT TEXT) ${collectionQuery.sql}`,
+      [...collectionQuery.values],
+    )
+    expect(plan.map(row => Object.values(row).join('\n')).join('\n'))
+      .toContain('Visit_petId_fk_idx')
+  }, 120_000)
+
+  isolatedTest('projects inherited forward-reference inverse collections', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'specialVisits',
+              items: { target: 'SpecialVisit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
+          ],
+          name: 'Visit',
+        },
+        {
+          extends: 'Visit',
+          fields: [{ field: 'notes', type: 'String' }],
+          name: 'SpecialVisit',
+        },
+      ],
+    }))
+    await entities.createTables(database.sql)
+    const petId = randomUUID()
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${petId}, ${'Pet'}, ${'Pet'}), (${'1001'}, ${'Special Visit'}, ${'SpecialVisit'})
+    `
+    await database.sql`
+      INSERT INTO "Pet" ("id")
+      VALUES (${petId})
+    `
+    await database.sql`
+      INSERT INTO "Visit" ("id", "petId")
+      VALUES (${'1001'}, ${petId})
+    `
+    await database.sql`
+      INSERT INTO "SpecialVisit" ("id", "notes")
+      VALUES (${'1001'}, ${'note'})
+    `
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
+      fields: ['id', 'specialVisits'],
+      where: { id: petId },
+    })).toEqual([{
+      id: petId,
+      specialVisits: {
+        items: [{ entity: 'SpecialVisit', id: '1001', name: 'Special Visit' }],
+        remaining: 0,
+        total: 1,
+      },
+    }])
+    expect(await database.sql<{ indexName: string }[]>`
+      SELECT indexname AS "indexName"
+      FROM pg_indexes
+WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Visit_petId_fk_idx'
+    `).toEqual([{ indexName: 'Visit_petId_fk_idx' }])
   }, 120_000)
 
   durableTest('enforces MTI final-state integrity for direct SQL', async database => {

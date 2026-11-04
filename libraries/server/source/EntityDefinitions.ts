@@ -436,9 +436,10 @@ export class EntityDefinitions {
    * @returns System-owned root followed by model-owned tables in order.
    */
   private get tables(): readonly TableDefinition[] {
+    const inverseIndexes = inverseReferenceIndexes(this.entities)
     return [
       identityRoot(this.entities),
-      ...this.entities.map(entityTable),
+      ...this.entities.map(entity => entityTable(entity, inverseIndexes.get(entity.name) ?? [])),
       ...junctionDefinitions(this.entities).map(junctionTable),
     ]
   }
@@ -1126,9 +1127,13 @@ function resolveEntity(
 /**
  * Build one entity table from locally owned fields.
  * @param entity - Validated entity.
+ * @param indexes - Additional indexes derived from inverse collection mappings.
  * @returns Its physical table metadata.
  */
-function entityTable(entity: EntityDefinition): TableDefinition {
+function entityTable(
+  entity: EntityDefinition,
+  indexes: readonly TableIndex[] = [],
+): TableDefinition {
   return {
     checks: [{
       expression: identityCheck('id', entity.idFormat),
@@ -1145,8 +1150,42 @@ function entityTable(entity: EntityDefinition): TableDefinition {
       }
       return [{ name: field.name, type: field.type }]
     }),
+    ...(indexes.length > 0 ? { indexes } : {}),
     name: entity.name,
   }
+}
+
+/**
+ * Derive indexes for physical forward FKs used by inverse collections.
+ * @param entities - Resolved canonical definitions.
+ * @returns Deduplicated indexes by owning entity table.
+ */
+function inverseReferenceIndexes(
+  entities: readonly EntityDefinition[],
+): ReadonlyMap<string, readonly TableIndex[]> {
+  const byName = new Map(entities.map(entity => [entity.name, entity]))
+  const result = new Map<string, TableIndex[]>()
+  const seen = new Set<string>()
+  for (const entity of entities) {
+    for (const field of entity.fields) {
+      if (field.type !== FieldType.Collection) continue
+      const mapping = field.mapping
+      if (mapping.kind !== 'Inverse') continue
+      const target = byName.get(field.items.target)
+      const forward = target?.effectiveFields.find(candidate => candidate.name === mapping.field)
+      if (!forward || forward.type !== FieldType.Entity) continue
+      const key = `${forward.owner}\u0000${forward.column}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const indexes = result.get(forward.owner) ?? []
+      indexes.push({
+        columns: [forward.column],
+        name: `${forward.owner}_${forward.column}_fk_idx`,
+      })
+      result.set(forward.owner, indexes)
+    }
+  }
+  return result
 }
 
 /** One physical many-to-many junction derived from an explicit collection mapping. */

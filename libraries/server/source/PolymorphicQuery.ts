@@ -454,8 +454,13 @@ class QueryProjection {
     if (!forward || forward.type !== FieldType.Entity) {
       throw new Error(`Unknown forward reference "${target}.${mapping.field}"`)
     }
-    const relation = `"${target}" "ct" JOIN "Entity" "cr" ON "cr"."id" = "ct"."id"`
-    const condition = `"ct".${quote(forward.column)} = "${node.context.baseAlias}"."id"`
+    const owner = forward.owner
+    const relation = owner === target
+      ? `"${target}" "ct" JOIN "Entity" "cr" ON "cr"."id" = "ct"."id"`
+      : `"${owner}" "fo" JOIN "${target}" "ct" ON "ct"."id" = "fo"."id" ` +
+        'JOIN "Entity" "cr" ON "cr"."id" = "ct"."id"'
+    const condition = `"${owner === target ? 'ct' : 'fo'}".${quote(forward.column)} = ` +
+      `"${node.context.baseAlias}"."id"`
     this.#addCollectionColumns(node, field, 'cr', relation, condition, '"cr"."id"', limit, offset)
   }
 
@@ -509,7 +514,11 @@ class QueryProjection {
     const items = this.#bind(limit)
     const itemOffset = this.#bind(offset)
     const remainingOffset = this.#bind(offset + limit)
-    const count = `COALESCE((SELECT count(*)::int FROM ${relation} WHERE ${condition}), 0)`
+    const countAlias = this.#nextAlias('c')
+    this.joins.push(
+      `LEFT JOIN LATERAL (SELECT count(*)::int AS "total" FROM ${relation} WHERE ${condition}) ` +
+      `"${countAlias}" ON TRUE`,
+    )
     this.columns.push(
       'COALESCE((' +
       'SELECT json_agg(json_build_object(\'id\', collection_page."id", \'name\', collection_page."name", ' +
@@ -520,8 +529,8 @@ class QueryProjection {
       `WHERE ${condition} ORDER BY ${orderBy} ASC, "${targetRoot}"."id" ASC ` +
       `LIMIT ${items} OFFSET ${itemOffset}) AS collection_page), ` +
       `'[]'::json) AS "${itemsAlias}"`,
-      `${count} AS "${totalAlias}"`,
-      `GREATEST(${count} - ${remainingOffset}, 0) AS "${remainingAlias}"`,
+      `"${countAlias}"."total" AS "${totalAlias}"`,
+      `GREATEST("${countAlias}"."total" - ${remainingOffset}, 0) AS "${remainingAlias}"`,
     )
     node.collections.push({ itemsAlias, name: field.name, remainingAlias, totalAlias })
   }
