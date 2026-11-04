@@ -193,7 +193,7 @@ Typed non-entity collections use `ValueCollection`. Their element contract is sc
 }
 ```
 
-A `ValueCollection` is stored as a non-null `jsonb` array and constrained to array shape. Scalar/structured element metadata is validated when the model loads. `unique: true` removes duplicate values by canonical JSON text in query results and counts; `ordered: true` preserves stored order, while unordered results use canonical value order for stable paging. Value collections project `{ items, total, remaining }` with the same per-collection `limit`/`offset` options as entity collections. Value-collection predicates and ordering are not supported.
+A `ValueCollection` is stored as a non-null `jsonb` array and constrained to array shape. Scalar/structured element metadata is validated when the model loads, and returned items are validated against that element contract. `unique: true` removes duplicate values by canonical JSON text in query results and counts; `ordered: true` preserves stored order, while unordered results use canonical value order for stable paging. Value collections project `{ items, total, remaining }` with the same per-collection `limit`/`offset` options as entity collections. Value-collection predicates and ordering are not supported.
 
 Entity relationship collections use `type: "Collection"` with an `Entity` element target and an explicit mapping. An inverse mapping reuses the target's existing singular reference and creates no membership column:
 

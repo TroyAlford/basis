@@ -1,4 +1,4 @@
-import type { CollectionFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import type { CollectionFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition, ValueCollectionElementDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
@@ -57,6 +57,8 @@ interface IdentityProjection {
 
 /** One non-entity value collection projection. */
 interface ValueCollectionProjection {
+  /** Element contract for query-time validation. */
+  readonly element: ValueCollectionElementDefinition,
   /** SQL alias for the JSON values array. */
   readonly itemsAlias: string,
   /** Output field name. */
@@ -69,6 +71,8 @@ interface ValueCollectionProjection {
 
 /** One non-entity value collection projection. */
 interface ValueCollectionProjection {
+  /** Element contract for query-time validation. */
+  readonly element: ValueCollectionElementDefinition,
   /** SQL alias for the JSON values array. */
   readonly itemsAlias: string,
   /** Output field name. */
@@ -486,7 +490,13 @@ class QueryProjection {
       `GREATEST("${countAlias}"."total" - ${remainingOffset}, 0) AS "${remainingAlias}"`,
     )
     node.valueCollectionNames.add(field.name)
-    node.valueCollections.push({ itemsAlias, name: field.name, remainingAlias, totalAlias })
+    node.valueCollections.push({
+      element: field.items,
+      itemsAlias,
+      name: field.name,
+      remainingAlias,
+      totalAlias,
+    })
   }
 
   /**
@@ -1139,11 +1149,66 @@ function hydrateValueCollection(
     : typeof raw === 'string'
       ? JSON.parse(raw) as unknown[]
       : []
+  for (const item of items) validateValueCollectionItem(collection.name, collection.element, item)
   return {
     items,
     remaining: Number(row[collection.remainingAlias] ?? 0),
     total: Number(row[collection.totalAlias] ?? 0),
   }
+}
+
+/**
+ * Validate one stored value against a canonical collection element contract.
+ * @param collection - Collection field name.
+ * @param element - Canonical element contract.
+ * @param value - Stored value.
+ */
+function validateValueCollectionItem(
+  collection: string,
+  element: ValueCollectionElementDefinition,
+  value: unknown,
+): void {
+  if (element.type === 'Structured') {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error(`Invalid structured value in collection "${collection}"`)
+    }
+    const record = value as Record<string, unknown>
+    for (const field of element.fields) {
+      if (!(field.name in record)) {
+        throw new Error(`Invalid structured value in collection "${collection}": missing "${field.name}"`)
+      }
+      validateScalarValue(collection, field.type, field.name, record[field.name])
+    }
+    return
+  }
+  validateScalarValue(collection, element.type, undefined, value)
+}
+
+/**
+ * Validate one scalar value in a collection.
+ * @param collection - Collection field name.
+ * @param type - Scalar or JSON type.
+ * @param field - Structured field name, when applicable.
+ * @param value - Stored value.
+ */
+function validateScalarValue(
+  collection: string,
+  type: ScalarFieldDefinition['type'] | FieldType.JSON,
+  field: string | undefined,
+  value: unknown,
+): void {
+  const label = field ? `${collection}.${field}` : collection
+  const valid = type === FieldType.JSON
+    ? true
+    : type === FieldType.Boolean
+      ? typeof value === 'boolean'
+      : type === FieldType.Number
+        ? typeof value === 'number'
+        : type === FieldType.String || type === FieldType.ID
+          || type === FieldType.Date || type === FieldType.Timestamp
+          ? typeof value === 'string'
+          : false
+  if (!valid) throw new Error(`Invalid value in collection "${label}"`)
 }
 
 /**

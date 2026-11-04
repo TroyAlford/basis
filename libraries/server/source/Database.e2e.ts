@@ -1392,6 +1392,15 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
       id: second,
       labels: { items: [], remaining: 0, total: 0 },
     }])
+    await database.sql`
+      UPDATE "Document"
+      SET "labels" = '[1]'::jsonb
+      WHERE "id" = ${second}
+    `
+    await expect(queryEntity(database.sql, entities, 'Document', {
+      fields: ['id', 'labels'],
+      where: { id: second },
+    })).rejects.toThrow('Invalid value in collection')
     expect(await database.captureError(async db => {
       await db.sql`
         UPDATE "Document"
