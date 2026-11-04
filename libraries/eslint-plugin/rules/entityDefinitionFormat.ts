@@ -4,11 +4,13 @@ import { EntityDefinitions } from '../../server/source/EntityDefinitions'
 /** Canonical entity property order. */
 const ENTITY_KEYS = ['name', 'extends', 'fields'] as const
 /** Canonical field property order. */
-const FIELD_KEYS = ['field', 'type', 'format', 'target', 'column', 'items', 'mapping'] as const
-/** Canonical array/collection element property order. */
-const ELEMENT_KEYS = ['type', 'format', 'target'] as const
-/** Canonical collection-mapping property order. */
-const MAPPING_KEYS = ['kind', 'field', 'table', 'sourceColumn', 'targetColumn', 'orderingColumn'] as const
+const FIELD_KEYS = ['field', 'type', 'format', 'target', 'inverse', 'items'] as const
+/** Canonical array element property order. */
+const ELEMENT_KEYS = ['type', 'format'] as const
+/** Canonical relationship property order. */
+const RELATIONSHIP_KEYS = ['name', 'between', 'fields'] as const
+/** Canonical relationship endpoint property order. */
+const ENDPOINT_KEYS = ['field', 'target', 'inverse'] as const
 
 /**
  * Validate and format an entity document.
@@ -31,10 +33,32 @@ export function formatEntityDocument(value: unknown): { formatted: string, issue
     ))
     return ordered({ ...record, fields }, ENTITY_KEYS)
   })
+  let relationships: readonly unknown[] | undefined
+  if (Array.isArray(value.relationships)) {
+    relationships = value.relationships.map(relationship => (
+      orderRelationship(relationship as Record<string, unknown>)
+    ))
+  }
+  const document = relationships === undefined ? { entities } : { entities, relationships }
   return {
-    formatted: `${JSON.stringify({ entities }, null, 2)}\n`,
+    formatted: `${JSON.stringify(document, null, 2)}\n`,
     issues: [],
   }
+}
+
+/**
+ * Reorder one relationship and its endpoints canonically.
+ * @param value - Relationship object.
+ * @returns Ordered relationship.
+ */
+function orderRelationship(value: Record<string, unknown>): Record<string, unknown> {
+  const between = Array.isArray(value.between)
+    ? value.between.map(endpoint => ordered(endpoint as Record<string, unknown>, ENDPOINT_KEYS))
+    : value.between
+  const fields = Array.isArray(value.fields)
+    ? value.fields.map(field => orderField(field as Record<string, unknown>))
+    : value.fields
+  return ordered({ ...value, between, fields }, RELATIONSHIP_KEYS)
 }
 
 /**
@@ -46,10 +70,6 @@ function orderField(value: Record<string, unknown>): Record<string, unknown> {
   const field = ordered(value, FIELD_KEYS)
   if (field.type === 'Array' && isRecord(field.items)) {
     field.items = ordered(field.items, ELEMENT_KEYS)
-  }
-  if (field.type === 'Collection') {
-    if (isRecord(field.items)) field.items = ordered(field.items, ELEMENT_KEYS)
-    if (isRecord(field.mapping)) field.mapping = ordered(field.mapping, MAPPING_KEYS)
   }
   return field
 }

@@ -433,8 +433,8 @@ describe('Server database lifecycle', () => {
           extends: 'User',
           fields: [
             { field: 'permissions', type: 'String' },
-            { column: 'favoriteId', field: 'favorite', target: 'Entity', type: 'Entity' },
-            { column: 'managerId', field: 'manager', target: 'User', type: 'Entity' },
+            { field: 'favorite', target: 'Entity', type: 'Entity' },
+            { field: 'manager', target: 'User', type: 'Entity' },
           ],
           name: 'SystemUser',
         },
@@ -470,7 +470,7 @@ describe('Server database lifecycle', () => {
         VALUES (${userId}, ${'user@example.test'})
       `
       await sql`
-        INSERT INTO "SystemUser" ("id", "permissions", "favoriteId", "managerId")
+        INSERT INTO "SystemUser" ("id", "permissions", "favorite.id", "manager.id")
         VALUES (${userId}, ${'admin'}, ${novelId}, ${userId})
       `
       await sql`
@@ -508,7 +508,7 @@ describe('Server database lifecycle', () => {
 
     const invalidManager = await database.tx(async sql => sql`
       UPDATE "SystemUser"
-      SET "managerId" = ${novelId}
+      SET "manager.id" = ${novelId}
       WHERE "id" = ${userId}
     `).catch((error: unknown) => error)
     expect(invalidManager).toMatchObject({ errno: '23503' })
@@ -529,7 +529,7 @@ describe('Server database lifecycle', () => {
           fields: [
             { field: 'permissions', type: 'String' },
             { field: 'status', type: 'String' },
-            { column: 'managerId', field: 'manager', target: 'User', type: 'Entity' },
+            { field: 'manager', target: 'User', type: 'Entity' },
           ],
           name: 'SystemUser',
         },
@@ -545,8 +545,8 @@ describe('Server database lifecycle', () => {
           fields: [
             { field: 'id', format: 'Snowflake' },
             { field: 'title', type: 'String' },
-            { column: 'ownerId', field: 'owner', target: 'User', type: 'Entity' },
-            { column: 'favoriteId', field: 'favorite', target: 'Entity', type: 'Entity' },
+            { field: 'owner', target: 'User', type: 'Entity' },
+            { field: 'favorite', target: 'Entity', type: 'Entity' },
           ],
           name: 'Article',
         },
@@ -591,7 +591,7 @@ VALUES (${systemUserId},
   ${'manager@example.test'})
       `
       await sql`
-        INSERT INTO "SystemUser" ("id", "permissions", "status", "managerId")
+        INSERT INTO "SystemUser" ("id", "permissions", "status", "manager.id")
         VALUES (${systemUserId}, ${'admin'}, ${'active'}, ${clientManagerId})
       `
       await sql`
@@ -604,7 +604,7 @@ VALUES (${clientOwnerId},
   ${'active'})
       `
       await sql`
-        INSERT INTO "Article" ("id", "title", "ownerId", "favoriteId")
+        INSERT INTO "Article" ("id", "title", "owner.id", "favorite.id")
 VALUES (${'1001'},
   ${'One'},
   ${systemUserId},
@@ -1040,70 +1040,34 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     })).toMatchObject({ errno: '23514' })
   }, 120_000)
 
-  isolatedTest('uses native scalar arrays and explicit relationship collections', async database => {
+  isolatedTest('stores and queries named relationships and inverse references', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
+        { fields: [], name: 'User' },
+        { fields: [], name: 'Campaign' },
         {
           fields: [
-            { field: 'id', format: 'UUID' },
-            {
-              field: 'ownedVisits',
-              items: { target: 'Visit', type: 'Entity' },
-              mapping: { field: 'pet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-            {
-              field: 'playmates',
-              items: { target: 'Pet', type: 'Entity' },
-              mapping: {
-                kind: 'Junction',
-                orderingColumn: 'position',
-                sourceColumn: 'petId',
-                table: 'PetPlaymate',
-                targetColumn: 'playmateId',
-              },
-              type: 'Collection',
-            },
-          ],
-          name: 'Pet',
-        },
-        {
-          fields: [
-            { field: 'id', format: 'Snowflake' },
+            { field: 'author', inverse: 'articles', target: 'User', type: 'Entity' },
             { field: 'tags', items: { type: 'String' }, type: 'Array' },
-            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
+            { field: 'payload', type: 'JSON' },
           ],
-          name: 'Visit',
+          name: 'Article',
         },
       ],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [
+          { field: 'role', type: 'String' },
+          { field: 'favorites', type: 'String' },
+        ],
+        name: 'Membership',
+      }],
     }))
     await entities.createTables(database.sql)
 
-    expect(await database.sql<{ columnName: string }[]>`
-      SELECT column_name AS "columnName"
-      FROM information_schema.columns
-      WHERE table_schema = current_schema() AND table_name = 'Pet'
-      ORDER BY ordinal_position
-    `).toEqual([{ columnName: 'id' }])
-    expect(await database.sql<{ indexName: string }[]>`
-      SELECT indexname AS "indexName"
-      FROM pg_indexes
-WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Visit_petId_fk_idx'
-    `).toEqual([{ indexName: 'Visit_petId_fk_idx' }])
-    expect(await database.sql<{
-      columnName: string,
-      dataType: string,
-      isNullable: string,
-    }[]>`
-      SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
-      FROM information_schema.columns
-      WHERE table_schema = current_schema() AND table_name = 'PetPlaymate'
-      ORDER BY ordinal_position
-    `).toEqual([
-      { columnName: 'petId', dataType: 'text', isNullable: 'NO' },
-      { columnName: 'playmateId', dataType: 'text', isNullable: 'NO' },
-      { columnName: 'position', dataType: 'double precision', isNullable: 'NO' },
-    ])
     expect(await database.sql<{
       columnName: string,
       dataType: string,
@@ -1115,141 +1079,331 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
         is_nullable AS "isNullable",
         udt_name AS "udtName"
       FROM information_schema.columns
-      WHERE table_schema = current_schema() AND table_name = 'Visit'
+      WHERE table_schema = current_schema() AND table_name = 'Article'
       ORDER BY ordinal_position
     `).toEqual([
       { columnName: 'id', dataType: 'text', isNullable: 'NO', udtName: 'text' },
+      { columnName: 'author.id', dataType: 'text', isNullable: 'YES', udtName: 'text' },
       { columnName: 'tags', dataType: 'ARRAY', isNullable: 'NO', udtName: '_text' },
-      { columnName: 'petId', dataType: 'text', isNullable: 'YES', udtName: 'text' },
+      { columnName: 'payload', dataType: 'jsonb', isNullable: 'NO', udtName: 'jsonb' },
+    ])
+    expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
+      SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
+      FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'Membership'
+      ORDER BY ordinal_position
+    `).toEqual([
+      { columnName: 'user.id', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'campaign.id', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'role', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'favorites', dataType: 'text', isNullable: 'NO' },
+    ])
+    expect(await database.sql<{ definition: string }[]>`
+      SELECT pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = '"Membership"'::regclass AND contype = 'p'
+    `).toEqual([{ definition: 'PRIMARY KEY ("user.id", "campaign.id")' }])
+    expect(await database.sql<{ definition: string }[]>`
+      SELECT pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = '"Membership"'::regclass AND contype = 'f'
+      ORDER BY conname
+    `).toEqual([
+      { definition: 'FOREIGN KEY ("campaign.id") REFERENCES "Campaign"(id) DEFERRABLE' },
+      { definition: 'FOREIGN KEY ("user.id") REFERENCES "User"(id) DEFERRABLE' },
+    ])
+    expect((await database.sql<{ indexName: string }[]>`
+      SELECT indexname AS "indexName"
+      FROM pg_indexes
+      WHERE schemaname = current_schema() AND tablename = 'Membership'
+      ORDER BY indexname
+    `).map(row => row.indexName)).toEqual([
+      'Membership_campaign_idx',
+      'Membership_pkey',
+      'Membership_user_idx',
     ])
 
-    const userId = randomUUID()
-    const playmateId = randomUUID()
-    const secondPlaymateId = randomUUID()
+    const ada = '00000000-0000-4000-8000-000000000001'
+    const grace = '00000000-0000-4000-8000-000000000002'
+    const linus = '00000000-0000-4000-8000-000000000003'
+    const campaign = '00000000-0000-4000-8000-000000000010'
+    const secondCampaign = '00000000-0000-4000-8000-000000000011'
+    const articleOne = '00000000-0000-4000-8000-000000000020'
+    const articleTwo = '00000000-0000-4000-8000-000000000021'
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-VALUES (${userId},
-  ${'Pet'},
-  ${'Pet'}),
-  (${playmateId},
-  ${'Playmate'},
-  ${'Pet'}),
-  (${secondPlaymateId},
-  ${'Second Playmate'},
-  ${'Pet'}),
-  (${'1001'},
-  ${'Visit One'},
-  ${'Visit'})
+      VALUES (${ada},
+        'Ada',
+        'User'),
+        (${grace},
+        'Grace',
+        'User'),
+        (${linus},
+        'Linus',
+        'User'),
+        (${campaign},
+        'Example Campaign',
+        'Campaign'),
+        (${secondCampaign},
+        'Second Campaign',
+        'Campaign'),
+        (${articleOne},
+        'Article One',
+        'Article'),
+        (${articleTwo},
+        'Article Two',
+        'Article')
     `
     await database.sql`
-      INSERT INTO "Pet" ("id")
-      VALUES (${userId}), (${playmateId}), (${secondPlaymateId})
+      INSERT INTO "User" ("id")
+      VALUES (${ada}), (${grace}), (${linus})
     `
     await database.sql`
-      INSERT INTO "Visit" ("id", "tags", "petId")
-      VALUES (${'1001'}, ARRAY['one', 'two'], ${userId})
+      INSERT INTO "Campaign" ("id")
+      VALUES (${campaign}), (${secondCampaign})
     `
-    expect(await queryEntity<{ id: string, tags: string[] }>(database.sql, entities, 'Visit', {
-      fields: ['id', 'tags'],
-      limit: null,
-      orderBy: 'id',
-    })).toEqual([{ id: '1001', tags: ['one', 'two'] }])
     await database.sql`
-      INSERT INTO "PetPlaymate" ("petId", "playmateId", "position")
-      VALUES (${userId}, ${playmateId}, ${2}), (${userId}, ${secondPlaymateId}, ${1})
+      INSERT INTO "Article" ("id", "author.id", "tags", "payload")
+      VALUES (${articleOne},
+        ${ada},
+        ARRAY['one',
+        'two'],
+        '{"kind":"note"}'::jsonb),
+        (${articleTwo},
+        ${ada},
+        ARRAY['three'],
+        '{"kind":"memo"}'::jsonb)
     `
+    await database.sql`
+      INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
+      VALUES (${ada}, ${campaign}, 'GM', 'dice'), (${grace}, ${campaign}, 'Player', 'cards')
+    `
+    expect(await database.sql<{ count: number }[]>`
+      SELECT count(*)::int AS count
+      FROM "Entity"
+      WHERE "entity" = 'Membership'
+    `).toEqual([{ count: 0 }])
     expect(await database.captureError(async db => {
       await db.sql`
-        INSERT INTO "PetPlaymate" ("petId", "playmateId", "position")
-        VALUES (${userId}, ${randomUUID()}, ${2})
+        INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
+        VALUES (${ada}, ${campaign}, 'Duplicate', 'none')
+      `
+    })).toMatchObject({ errno: '23505' })
+    expect(await database.captureError(async db => {
+      await db.sql`
+        INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
+        VALUES (${randomUUID()}, ${campaign}, 'Dangling', 'none')
       `
     })).toMatchObject({ errno: '23503' })
 
-    await database.sql`
-      INSERT INTO "Entity" ("id", "name", "entity")
-      SELECT value::text, 'Visit ' || value, 'Visit'
-      FROM generate_series(2000, 6999) AS series(value)
-    `
-    await database.sql`
-      INSERT INTO "Visit" ("id", "tags", "petId")
-      SELECT value::text, ARRAY['fanout'], ${userId}
-      FROM generate_series(2000, 6999) AS series(value)
-    `
-    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
-      fields: ['id', 'ownedVisits', 'playmates'],
-      where: { id: userId },
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
+      fields: ['id', 'name', 'articles'],
+      where: { id: ada },
     })).toEqual([{
-      id: userId,
-      ownedVisits: {
+      articles: {
         items: [
-          { entity: 'Visit', id: '1001', name: 'Visit One' },
-          { entity: 'Visit', id: '2000', name: 'Visit 2000' },
-          { entity: 'Visit', id: '2001', name: 'Visit 2001' },
+          { entity: 'Article', id: articleOne, name: 'Article One' },
+          { entity: 'Article', id: articleTwo, name: 'Article Two' },
         ],
-        remaining: 4998,
-        total: 5001,
+        remaining: 0,
+        total: 2,
       },
-      playmates: {
+      id: ada,
+      name: 'Ada',
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Article', {
+      fields: ['id', 'tags', 'payload'],
+      orderBy: 'id',
+      where: { id: articleOne },
+    })).toEqual([{
+      id: articleOne,
+      payload: { kind: 'note' },
+      tags: ['one', 'two'],
+    }])
+
+    const withProperties = await queryEntity<Record<string, unknown>>(database.sql, entities, 'Campaign', {
+      collections: {
+        members: { limit: 1, offset: 0, relationshipFields: ['role'] },
+      },
+      fields: ['id', 'name', 'members'],
+      where: { id: campaign },
+    })
+    expect(withProperties).toEqual([{
+      id: campaign,
+      members: {
+        items: [{
+          entity: 'User',
+          id: ada,
+          membership: { role: 'GM' },
+          name: 'Ada',
+        }],
+        remaining: 1,
+        total: 2,
+      },
+      name: 'Example Campaign',
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Campaign', {
+      collections: { members: { limit: 2, offset: 0 } },
+      fields: ['id', 'members'],
+      where: { id: campaign },
+    })).toEqual([{
+      id: campaign,
+      members: {
         items: [
-          { entity: 'Pet', id: secondPlaymateId, name: 'Second Playmate' },
-          { entity: 'Pet', id: playmateId, name: 'Playmate' },
+          { entity: 'User', id: ada, name: 'Ada' },
+          { entity: 'User', id: grace, name: 'Grace' },
         ],
         remaining: 0,
         total: 2,
       },
     }])
-    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
-      collections: { ownedVisits: { limit: 1, offset: 1 } },
-      fields: ['id', 'ownedVisits'],
-      where: { id: userId },
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
+      collections: { campaigns: { relationshipFields: ['role'] } },
+      fields: ['id', 'campaigns'],
+      orderBy: 'id',
+      where: { id: ada },
     })).toEqual([{
-      id: userId,
-      ownedVisits: {
-        items: [{ entity: 'Visit', id: '2000', name: 'Visit 2000' }],
-        remaining: 4999,
-        total: 5001,
+      campaigns: {
+        items: [{
+          entity: 'Campaign',
+          id: campaign,
+          membership: { role: 'GM' },
+          name: 'Example Campaign',
+        }],
+        remaining: 0,
+        total: 1,
+      },
+      id: ada,
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
+      collections: { campaigns: { limit: 1, offset: 1 } },
+      fields: ['id', 'campaigns'],
+      where: { id: linus },
+    })).toEqual([{
+      campaigns: { items: [], remaining: 0, total: 0 },
+      id: linus,
+    }])
+
+    await database.sql`
+      INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
+      VALUES (${linus}, ${campaign}, 'Player', 'cards')
+    `
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Campaign', {
+      collections: { members: { limit: 1, offset: 1 } },
+      fields: ['id', 'members'],
+      where: { id: campaign },
+    })).toEqual([{
+      id: campaign,
+      members: {
+        items: [{ entity: 'User', id: grace, name: 'Grace' }],
+        remaining: 1,
+        total: 3,
       },
     }])
-    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
-      fields: ['id', 'ownedVisits', 'playmates'],
-      where: { id: playmateId },
-    })).toEqual([{
-      id: playmateId,
-      ownedVisits: { items: [], remaining: 0, total: 0 },
-      playmates: { items: [], remaining: 0, total: 0 },
-    }])
-
-    const collectionQuery = compileEntityQuery(entities, 'Pet', {
-      fields: ['id', 'ownedVisits'],
-      where: { id: userId },
+    const multipleRoots = await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
+      collections: { campaigns: { limit: 1 } },
+      fields: ['id', 'campaigns'],
+      orderBy: 'id',
     })
-    const plan = await database.sql.unsafe<Record<string, string>[]>(
-      `EXPLAIN (FORMAT TEXT) ${collectionQuery.sql}`,
-      [...collectionQuery.values],
-    )
-    expect(plan.map(row => Object.values(row).join('\n')).join('\n'))
-      .toContain('Visit_petId_fk_idx')
+    expect(multipleRoots.map(row => row.id)).toEqual([ada, grace, linus])
+    expect(multipleRoots).toHaveLength(3)
   }, 120_000)
 
-  isolatedTest('projects inherited forward-reference inverse collections', async database => {
+  isolatedTest('inherits relationship and inverse navigations on MTI descendants', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
         {
-          fields: [
-            { field: 'id', format: 'UUID' },
-            {
-              field: 'specialVisits',
-              items: { target: 'SpecialVisit', type: 'Entity' },
-              mapping: { field: 'pet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-          ],
-          name: 'Pet',
+          extends: 'User',
+          fields: [{ field: 'permissions', type: 'String' }],
+          name: 'SystemUser',
         },
+        { fields: [], name: 'Campaign' },
+        {
+          fields: [{ field: 'author', inverse: 'articles', target: 'User', type: 'Entity' }],
+          name: 'Article',
+        },
+      ],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [
+          { field: 'role', type: 'String' },
+          { field: 'favorites', type: 'String' },
+        ],
+        name: 'Membership',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    const userId = '00000000-0000-4000-8000-000000000001'
+    const campaignId = '00000000-0000-4000-8000-000000000002'
+    const articleId = '00000000-0000-4000-8000-000000000003'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${userId},
+        'Ada',
+        'SystemUser'),
+        (${campaignId},
+        'Example Campaign',
+        'Campaign'),
+        (${articleId},
+        'Article One',
+        'Article')
+    `
+    await database.sql`
+      INSERT INTO "User" ("id")
+      VALUES (${userId})
+    `
+    await database.sql`
+      INSERT INTO "SystemUser" ("id", "permissions")
+      VALUES (${userId}, 'admin')
+    `
+    await database.sql`
+      INSERT INTO "Campaign" ("id")
+      VALUES (${campaignId})
+    `
+    await database.sql`
+      INSERT INTO "Article" ("id", "author.id")
+      VALUES (${articleId}, ${userId})
+    `
+    await database.sql`
+      INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
+      VALUES (${userId}, ${campaignId}, 'GM', 'dice')
+    `
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'SystemUser', {
+      collections: { campaigns: { relationshipFields: ['role'] } },
+      fields: ['id', 'campaigns', 'articles'],
+      where: { id: userId },
+    })).toEqual([{
+      articles: {
+        items: [{ entity: 'Article', id: articleId, name: 'Article One' }],
+        remaining: 0,
+        total: 1,
+      },
+      campaigns: {
+        items: [{
+          entity: 'Campaign',
+          id: campaignId,
+          membership: { role: 'GM' },
+          name: 'Example Campaign',
+        }],
+        remaining: 0,
+        total: 1,
+      },
+      id: userId,
+    }])
+  }, 120_000)
+
+  isolatedTest('projects inverse navigations for inherited and multiple roots', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Pet' },
         {
           fields: [
             { field: 'id', format: 'Snowflake' },
-            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
+            { field: 'pet', inverse: 'visits', target: 'Pet', type: 'Entity' },
           ],
           name: 'Visit',
         },
@@ -1261,39 +1415,55 @@ VALUES (${userId},
       ],
     }))
     await entities.createTables(database.sql)
-    const petId = randomUUID()
+    const petOne = '00000000-0000-4000-8000-000000000001'
+    const petTwo = '00000000-0000-4000-8000-000000000002'
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${petId}, ${'Pet'}, ${'Pet'}), (${'1001'}, ${'Special Visit'}, ${'SpecialVisit'})
+      VALUES (${petOne},
+        'Pet One',
+        'Pet'),
+        (${petTwo},
+        'Pet Two',
+        'Pet'),
+        ('1001',
+        'Special Visit',
+        'SpecialVisit'),
+        ('1002',
+        'Second Special Visit',
+        'SpecialVisit')
     `
     await database.sql`
       INSERT INTO "Pet" ("id")
-      VALUES (${petId})
+      VALUES (${petOne}), (${petTwo})
     `
     await database.sql`
-      INSERT INTO "Visit" ("id", "petId")
-      VALUES (${'1001'}, ${petId})
+      INSERT INTO "Visit" ("id", "pet.id")
+      VALUES ('1001', ${petOne}), ('1002', ${petOne})
     `
     await database.sql`
       INSERT INTO "SpecialVisit" ("id", "notes")
-      VALUES (${'1001'}, ${'note'})
+      VALUES ('1001', 'note'), ('1002', 'other')
     `
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
-      fields: ['id', 'specialVisits'],
-      where: { id: petId },
-    })).toEqual([{
-      id: petId,
-      specialVisits: {
-        items: [{ entity: 'SpecialVisit', id: '1001', name: 'Special Visit' }],
-        remaining: 0,
-        total: 1,
+      fields: ['id', 'visits'],
+      orderBy: 'id',
+    })).toEqual([
+      {
+        id: petOne,
+        visits: {
+          items: [
+            { entity: 'SpecialVisit', id: '1001', name: 'Special Visit' },
+            { entity: 'SpecialVisit', id: '1002', name: 'Second Special Visit' },
+          ],
+          remaining: 0,
+          total: 2,
+        },
       },
-    }])
-    expect(await database.sql<{ indexName: string }[]>`
-      SELECT indexname AS "indexName"
-      FROM pg_indexes
-WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Visit_petId_fk_idx'
-    `).toEqual([{ indexName: 'Visit_petId_fk_idx' }])
+      {
+        id: petTwo,
+        visits: { items: [], remaining: 0, total: 0 },
+      },
+    ])
   }, 120_000)
 
   durableTest('enforces MTI final-state integrity for direct SQL', async database => {
@@ -1310,7 +1480,7 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
           extends: 'User',
           fields: [
             { field: 'permissions', type: 'String' },
-            { column: 'managerId', field: 'manager', target: 'User', type: 'Entity' },
+            { field: 'manager', target: 'User', type: 'Entity' },
           ],
           name: 'SystemUser',
         },
@@ -1348,7 +1518,7 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
         VALUES (${missingParentId}, ${'Missing parent'}, ${'SystemUser'})
       `
       await sql`
-        INSERT INTO "SystemUser" ("id", "permissions", "managerId")
+        INSERT INTO "SystemUser" ("id", "permissions", "manager.id")
         VALUES (${missingParentId}, ${'admin'}, ${missingParentId})
       `
     }).catch((error: unknown) => error)).toMatchObject({ errno: '23503' })
@@ -1364,7 +1534,7 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
         VALUES (${id}, ${'ada@example.test'})
       `
       await sql`
-        INSERT INTO "SystemUser" ("id", "permissions", "managerId")
+        INSERT INTO "SystemUser" ("id", "permissions", "manager.id")
         VALUES (${id}, ${'admin'}, ${id})
       `
     })
@@ -1424,7 +1594,7 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
         VALUES (${transientId}, ${'transient@example.test'})
       `
       await sql`
-        INSERT INTO "SystemUser" ("id", "permissions", "managerId")
+        INSERT INTO "SystemUser" ("id", "permissions", "manager.id")
         VALUES (${transientId}, ${'admin'}, ${transientId})
       `
       await sql`
@@ -1590,7 +1760,7 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
         {
           fields: [
             { field: 'id', format: 'UUID' },
-            { column: 'userId', field: 'author', target: 'User', type: 'Entity' },
+            { field: 'author', target: 'User', type: 'Entity' },
             { field: 'title', type: 'String' },
           ],
           name: 'Post',
@@ -1615,7 +1785,7 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
     `
     expect(constraints).toEqual([
       { definition: 'FOREIGN KEY (id) REFERENCES "Entity"(id) DEFERRABLE' },
-      { definition: 'FOREIGN KEY ("userId") REFERENCES "User"(id) DEFERRABLE' },
+      { definition: 'FOREIGN KEY ("author.id") REFERENCES "User"(id) DEFERRABLE' },
     ])
 
     const userId = '9223372036854775807'
@@ -1629,11 +1799,11 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
       VALUES (${userId}, ${'Ada'})
     `
     await database.sql`
-      INSERT INTO "Post" ("id", "userId", "title")
+      INSERT INTO "Post" ("id", "author.id", "title")
       VALUES (${postId}, ${userId}, ${'Hello'})
     `
     expect(await database.sql<{ userId: string }[]>`
-      SELECT "userId"::text AS "userId"
+      SELECT "author.id"::text AS "userId"
       FROM "Post"
     `).toEqual([{ userId }])
 
@@ -1644,7 +1814,7 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
     `
     const invalidInsert = await database.captureError(async db => {
       await db.sql`
-        INSERT INTO "Post" ("id", "userId", "title")
+        INSERT INTO "Post" ("id", "author.id", "title")
         VALUES (${invalidId}, ${'1'}, ${'Invalid'})
       `
     })
@@ -1669,14 +1839,14 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
         {
           fields: [
             { field: 'id', format: 'UUID' },
-            { column: 'carId', field: 'car', target: 'CycleCar', type: 'Entity' },
+            { field: 'car', target: 'CycleCar', type: 'Entity' },
           ],
           name: 'CycleUser',
         },
         {
           fields: [
             { field: 'id', format: 'UUID' },
-            { column: 'userId', field: 'user', target: 'CycleUser', type: 'Entity' },
+            { field: 'user', target: 'CycleUser', type: 'Entity' },
           ],
           name: 'CycleCar',
         },
@@ -1723,11 +1893,11 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
         VALUES (${userId}, ${'User'}, ${'CycleUser'}), (${carId}, ${'Car'}, ${'CycleCar'})
       `
       await sql`
-        INSERT INTO "CycleUser" ("id", "carId")
+        INSERT INTO "CycleUser" ("id", "car.id")
         VALUES (${userId}, ${carId})
       `
       await sql`
-        INSERT INTO "CycleCar" ("id", "userId")
+        INSERT INTO "CycleCar" ("id", "user.id")
         VALUES (${carId}, ${userId})
       `
     })
@@ -1753,11 +1923,11 @@ VALUES (${invalidUserId},
   ${'CycleCar'})
       `
       await sql`
-        INSERT INTO "CycleUser" ("id", "carId")
+        INSERT INTO "CycleUser" ("id", "car.id")
         VALUES (${invalidUserId}, ${invalidCarId})
       `
       await sql`
-        INSERT INTO "CycleCar" ("id", "userId")
+        INSERT INTO "CycleCar" ("id", "user.id")
         VALUES (${invalidCarId}, ${missingUserId})
       `
     }).catch((error: unknown) => error)
@@ -1774,7 +1944,7 @@ VALUES (${invalidUserId},
       ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
     `)
     await database.tx(async sql => sql`
-      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("carId") REFERENCES
+      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("car.id") REFERENCES
         "CycleCar" ("id")
     `)
     await expect(database.tx(async sql => entities.createTables(sql)))
@@ -1784,7 +1954,7 @@ VALUES (${invalidUserId},
       ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
     `)
     await database.tx(async sql => sql`
-      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("carId") REFERENCES
+      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("car.id") REFERENCES
         "CycleCar" ("id") ON DELETE cascade DEFERRABLE INITIALLY immediate
     `)
     await expect(database.tx(async sql => entities.createTables(sql)))
@@ -1794,7 +1964,7 @@ VALUES (${invalidUserId},
       ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
     `)
     await database.tx(async sql => sql`
-      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("carId") REFERENCES
+      ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("car.id") REFERENCES
         "CycleCar" ("id") DEFERRABLE INITIALLY immediate NOT valid
     `)
     await expect(database.tx(async sql => entities.createTables(sql)))
@@ -1816,7 +1986,7 @@ VALUES (${invalidUserId},
       entities: [{
         fields: [
           { field: 'id', format: 'UUID' },
-          { column: 'parentId', field: 'parent', target: 'TreeNode', type: 'Entity' },
+          { field: 'parent', target: 'TreeNode', type: 'Entity' },
         ],
         name: 'TreeNode',
       }],
@@ -1834,7 +2004,7 @@ VALUES (${invalidUserId},
         VALUES (${nodeId}, ${'Node'}, ${'TreeNode'})
       `
       await sql`
-        INSERT INTO "TreeNode" ("id", "parentId")
+        INSERT INTO "TreeNode" ("id", "parent.id")
         VALUES (${nodeId}, ${nodeId})
       `
     })
@@ -1853,7 +2023,7 @@ VALUES (${invalidUserId},
         VALUES (${invalidNodeId}, ${'Invalid node'}, ${'TreeNode'})
       `
       await sql`
-        INSERT INTO "TreeNode" ("id", "parentId")
+        INSERT INTO "TreeNode" ("id", "parent.id")
         VALUES (${invalidNodeId}, ${randomUUID()})
       `
     }).catch((error: unknown) => error)
