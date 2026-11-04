@@ -379,6 +379,12 @@ function scalarField(entity: EntityDefinition, name: string): ScalarFieldDefinit
       'array fields cannot be used in predicates or ordering',
     )
   }
+  if (field.type === FieldType.JSON) {
+    throw new Error(
+      `Query field "${entity.name}.${name}" is JSON; ` +
+      'JSON fields cannot be used in predicates or ordering',
+    )
+  }
   return field
 }
 

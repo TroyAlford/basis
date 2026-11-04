@@ -24,6 +24,8 @@ export enum FieldType {
   Entity = 'Entity',
   /** Universal text identity. */
   ID = 'ID',
+  /** Structured/interface JSON value. */
+  JSON = 'JSON',
   /** Numeric value, including integers and floating point numbers. */
   Number = 'Number',
   /** Text value. */
@@ -109,6 +111,14 @@ export interface EntityReferenceFieldDefinition {
   readonly type: FieldType.Entity,
 }
 
+/** One structured/interface JSON field. */
+export interface JSONFieldDefinition {
+  /** Logical field name used by entity-rooted queries. */
+  readonly name: string,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.JSON,
+}
+
 /** One native scalar-array field. */
 export interface ArrayFieldDefinition {
   /** Scalar element descriptor. */
@@ -134,6 +144,7 @@ export interface CollectionFieldDefinition {
 /** One logical entity field. */
 export type FieldDefinition =
   | ArrayFieldDefinition
+  | JSONFieldDefinition
   | ScalarFieldDefinition
   | EntityReferenceFieldDefinition
   | CollectionFieldDefinition
@@ -173,7 +184,7 @@ interface TableColumn {
   /** Whether this column is the table's primary key. */
   readonly primaryKey?: boolean,
   /** Physical column type. */
-  readonly type: ScalarFieldType | FieldType.Array,
+  readonly type: ScalarFieldType | FieldType.Array | FieldType.JSON,
 }
 
 /** One physical table index. */
@@ -899,6 +910,10 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
     return { field: parseCollectionField(entityName, value) }
   }
 
+  if (value.type === FieldType.JSON) {
+    return { field: parseJSONField(entityName, value) }
+  }
+
   if (value.type === FieldType.Entity) {
     assertKnownKeys(value, ['column', 'field', 'target', 'type'], 'field')
     if (ROOT_FIELD_NAMES.has(value.field) || value.field === 'id') {
@@ -945,6 +960,24 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
       type: type as ScalarFieldType,
     },
   }
+}
+
+/**
+ * Validate one structured/interface JSON field descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated JSON field.
+ */
+function parseJSONField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): JSONFieldDefinition {
+  assertKnownKeys(value, ['field', 'type'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  return { name, type: FieldType.JSON }
 }
 
 /**
@@ -1147,6 +1180,9 @@ function entityTable(
       if (field.type === FieldType.ID) return [{ name: field.name, primaryKey: true, type: FieldType.ID }]
       if (field.type === FieldType.Array) {
         return [{ arrayType: field.items.type, name: field.name, type: FieldType.Array }]
+      }
+      if (field.type === FieldType.JSON) {
+        return [{ name: field.name, type: FieldType.JSON }]
       }
       return [{ name: field.name, type: field.type }]
     }),
@@ -1668,6 +1704,7 @@ function columnType(column: TableColumn): string {
     if (!column.arrayType) throw new Error(`Array column "${column.name}" has no element type`)
     return `${scalarColumnType(column.arrayType)}[]`
   }
+  if (column.type === FieldType.JSON) return 'jsonb'
   return scalarColumnType(column.type)
 }
 

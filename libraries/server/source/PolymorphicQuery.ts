@@ -15,7 +15,7 @@ export interface PolymorphicQueryOptions {
     readonly limit?: number,
     readonly offset?: number,
   }>>,
-  /** Effective scalar, scalar-array, collection, or singular-reference paths to project. */
+  /** Effective scalar, scalar-array, JSON, collection, or singular-reference paths to project. */
   readonly fields: readonly string[],
   /** Maximum rows to return; defaults to 25, or `null` for unlimited. */
   readonly limit?: number | null,
@@ -720,6 +720,12 @@ export function compilePolymorphicQuery(
         'array fields cannot be used in predicates or ordering',
       )
     }
+    if (value.type === FieldType.JSON) {
+      throw new Error(
+        `Query field "${definition.name}.${name}" is JSON; ` +
+        'JSON fields cannot be used in predicates or ordering',
+      )
+    }
     return value
   }
   const scope: QueryScope = {
@@ -918,6 +924,7 @@ function collectDescendantFields(
  * @returns Type/format/reference-target signature.
  */
 function fieldContract(field: FieldDefinition): string {
+  if (field.type === FieldType.JSON) return 'JSON'
   if (field.type === FieldType.Array) {
     return `Array:${field.items.type}:${field.items.format ?? ''}`
   }

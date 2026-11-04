@@ -1046,6 +1046,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
         {
           fields: [
             { field: 'id', format: 'UUID' },
+            { field: 'profile', type: 'JSON' },
             {
               field: 'ownedVisits',
               items: { target: 'Visit', type: 'Entity' },
@@ -1084,7 +1085,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
       FROM information_schema.columns
       WHERE table_schema = current_schema() AND table_name = 'Pet'
       ORDER BY ordinal_position
-    `).toEqual([{ columnName: 'id' }])
+    `).toEqual([{ columnName: 'id' }, { columnName: 'profile' }])
     expect(await database.sql<{ indexName: string }[]>`
       SELECT indexname AS "indexName"
       FROM pg_indexes
@@ -1142,8 +1143,16 @@ VALUES (${userId},
   ${'Visit'})
     `
     await database.sql`
-      INSERT INTO "Pet" ("id")
-      VALUES (${userId}), (${playmateId}), (${secondPlaymateId})
+      INSERT INTO "Pet" ("id", "profile")
+      VALUES (${userId},
+        jsonb_build_object('nickname',
+        'Pet')),
+        (${playmateId},
+        jsonb_build_object('nickname',
+        'Playmate')),
+        (${secondPlaymateId},
+        jsonb_build_object('nickname',
+        'Second'))
     `
     await database.sql`
       INSERT INTO "Visit" ("id", "tags", "petId")
@@ -1219,6 +1228,10 @@ VALUES (${userId},
       playmates: { items: [], remaining: 0, total: 0 },
     }])
 
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
+      fields: ['id', 'profile'],
+      where: { id: userId },
+    })).toEqual([{ id: userId, profile: { nickname: 'Pet' } }])
     const collectionQuery = compileEntityQuery(entities, 'Pet', {
       fields: ['id', 'ownedVisits'],
       where: { id: userId },

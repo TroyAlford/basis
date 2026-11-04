@@ -194,10 +194,43 @@ describe('EntityDefinitions', () => {
       'Date',
       'Entity',
       'ID',
+      'JSON',
       'Number',
       'String',
       'Timestamp',
     ])
+  })
+
+  test('accepts structured JSON fields and maps them to jsonb', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'payload', type: 'JSON' },
+        ],
+        name: 'Document',
+      }],
+    })
+    expect(entities.entity('Document')?.fields[1]).toEqual({
+      name: 'payload',
+      type: FieldType.JSON,
+    })
+    expect(entities.ddl.join('\n')).toContain('"payload" jsonb not null')
+  })
+
+  test('rejects malformed JSON fields', () => {
+    expect(() => load({
+      entities: [{
+        fields: [{ field: 'payload', format: 'UUID', type: 'JSON' }],
+        name: 'Document',
+      }],
+    })).toThrow()
+    expect(() => load({
+      entities: [{
+        fields: [{ field: 'id', type: 'JSON' }],
+        name: 'Document',
+      }],
+    })).toThrow()
   })
 
   test('accepts native scalar arrays and explicit entity relationship collections', () => {

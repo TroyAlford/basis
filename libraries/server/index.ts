@@ -16,6 +16,7 @@ export type {
   EntityReferenceFieldDefinition,
   FieldDefinition,
   InverseCollectionMappingDefinition,
+  JSONFieldDefinition,
   JunctionCollectionMappingDefinition,
   ScalarArrayElementDefinition,
   ScalarFieldDefinition,

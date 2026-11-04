@@ -127,7 +127,7 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 const pet = entities.entity('Pet')
 ```
 
-Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular references use `Entity` with explicit `target` and `column`; scalar arrays use `Array`; and entity relationships use `Collection` with an explicit mapping. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, or authored `abstract` boolean.
+Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular references use `Entity` with explicit `target` and `column`; scalar arrays use `Array`; structured/interface values use `JSON`; and entity relationships use `Collection` with an explicit mapping. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, or authored `abstract` boolean.
 
 The implicit system root owns `id: ID`, `name: String`, and the concrete-leaf `entity` discriminator. The universal lightweight object shape is `{ id, name, entity }`. `id` is always the primary key; every physical table receives generated `id text primary key` storage and a parent foreign-key column. `name` replaces the former display-name column everywhere. Root field names are reserved from ordinary declarations.
 
@@ -151,6 +151,17 @@ Scalar arrays use `type: "Array"` with a scalar `items` descriptor. They map to 
   "items": { "type": "String" }
 }
 ```
+
+Structured/interface values use `type: "JSON"` and map to a non-null PostgreSQL `jsonb` column. The value shape is intentionally opaque in this stage; object and array structure is whatever JSON is written. PostgreSQL `jsonb` preserves array order and duplicate members, while object key order is not semantic. JSON values are projected as whole values and cannot be used in predicates or ordering yet:
+
+```json
+{
+  "field": "payload",
+  "type": "JSON"
+}
+```
+
+Scalar arrays and JSON values are values rather than entity relationship envelopes. They are returned whole; bounded collection envelopes apply to declared entity `Collection` fields.
 
 Entity relationship collections use `type: "Collection"` with an `Entity` element target and an explicit mapping. An inverse mapping reuses the target's existing singular reference and creates no membership column:
 
@@ -201,7 +212,7 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 await server.db.tx(async sql => entities.createTables(sql))
 ```
 
-`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, creates one ordinary PostgreSQL table per entity, creates explicit junction tables for `Collection` mappings, and indexes physical FK columns used by inverse collections. Local scalar fields use their logical field name; a singular reference field uses its explicit `column` name; a scalar array uses its logical field name with the matching native PostgreSQL array type. Every table gets generated `id text primary key` storage. `String` maps to `text`; `Number` to `double precision`; `Date` to `date`; `Timestamp` to `timestamptz`; `Boolean` to `boolean`; array types append `[]`. Entity `Collection` fields are relationship metadata and do not create a membership column. Format checks apply to the effective `id` format.
+`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, creates one ordinary PostgreSQL table per entity, creates explicit junction tables for `Collection` mappings, and indexes physical FK columns used by inverse collections. Local scalar fields use their logical field name; a singular reference field uses its explicit `column` name; a scalar array uses its logical field name with the matching native PostgreSQL array type. Every table gets generated `id text primary key` storage. `String` maps to `text`; `Number` to `double precision`; `Date` to `date`; `Timestamp` to `timestamptz`; `Boolean` to `boolean`; `JSON` maps to `jsonb`; array types append `[]`. Entity `Collection` fields are relationship metadata and do not create a membership column. Format checks apply to the effective `id` format.
 
 Each entity table has a real primary key and an MTI parent foreign key to the system `Entity` root or its parent table. Shared fields are stored only in the table that owns them. The root alone stores `name` and the concrete-leaf `entity` discriminator. Multi-tier chains therefore use ordinary PostgreSQL PK/FK joins, not `INHERITS`.
 
@@ -334,7 +345,7 @@ const matching = await server.db.query<{ id: string, title: string }>('Note', {
 })
 ```
 
-`fields` is required and must be a non-empty list of effective scalar fields, scalar-array fields, or dotted singular-reference paths for the named entity. Abstract queries include inherited and descendant-only scalar fields and return the concrete leaf `entity`; concrete queries use the same effective-field contract. A reference field selected without a dotted suffix still returns its default identity object. `where` accepts a single-field equality shorthand (`{ title: 'Hello' }`), an explicit canonical filter tree using the exported `Operator` enums, or a string query expression. An empty or whitespace-only string expression adds no predicate, matching an empty structured object. Shorthand is only equality for one field and normalizes to `Operator.Comparison.Equal`; multiple structured fields must be expressed explicitly with `And` and `filters`. An operator-looking object inside a field value is equality with that whole object, not operator syntax.
+`fields` is required and must be a non-empty list of effective scalar, scalar-array, JSON, entity-collection, or dotted singular-reference paths for the named entity. Abstract queries include inherited and descendant-only scalar fields and return the concrete leaf `entity`; concrete queries use the same effective-field contract. A reference field selected without a dotted suffix still returns its default identity object. `where` accepts a single-field equality shorthand (`{ title: 'Hello' }`), an explicit canonical filter tree using the exported `Operator` enums, or a string query expression. An empty or whitespace-only string expression adds no predicate, matching an empty structured object. Shorthand is only equality for one field and normalizes to `Operator.Comparison.Equal`; multiple structured fields must be expressed explicitly with `And` and `filters`. An operator-looking object inside a field value is equality with that whole object, not operator syntax.
 
 Structured and string filters normalize to the same canonical predicate tree and SQL path. Comparisons use `$eq`, `$contains`, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$between`, and `$empty`; string expressions also accept `=`, `>`, `>=`, `<`, `<=`, `!=`, and `<>`. `$between` takes exactly two inclusive bounds and uses `values: [lower, upper]` in structured form or `[lower, upper]` after the operator in string form (`score $between [5, 10]`); a `null` bound is open, while `[null, null]` is invalid. `$empty` has no value and is valid only for string fields. `$ne` lowers to `Not(Equal)`, `$between` lowers to `And` of its bounds, and `$empty` lowers to `Or(Equal(null), Equal(''))`. Logical filters use `$and` or `$or` with a non-empty `filters` array and unary `$not` with exactly one child; string expressions support `$and`, `$or`, `$not`/`!`, and grouping parentheses. `$blank`, `$notblank`, `$nor`, and `$xor` are not part of the vocabulary.
 
@@ -344,7 +355,7 @@ Unquoted literals are typed from the target field, and quoted values remain stri
 
 UUID and Snowflake values remain canonical text in `db.query` results; there is no implicit bigint conversion for identity values. Ordering and comparisons operate on the physical text identity.
 
-`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar and native scalar-array projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections, dotted paths, and bounded root entity-collection envelopes. Collection predicates, nested collection projections, collection value validation, and graph expansion budgets remain deferred.
+`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar, native scalar-array, and JSON projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections, dotted paths, and bounded root entity-collection envelopes. Collection predicates, nested collection projections, JSON shape validation, and graph expansion budgets remain deferred.
 
 ## `db.sql`
 

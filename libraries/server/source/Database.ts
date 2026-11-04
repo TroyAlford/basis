@@ -49,7 +49,7 @@ export interface QueryOptions {
     readonly limit?: number,
     readonly offset?: number,
   }>>,
-  /** Effective scalar, scalar-array, collection, or singular-reference paths to project. */
+  /** Effective scalar, scalar-array, JSON, collection, or singular-reference paths to project. */
   fields: readonly string[],
   /** Maximum rows to return; defaults to 25, or `null` for unlimited. */
   limit?: number | null,

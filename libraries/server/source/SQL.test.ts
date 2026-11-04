@@ -109,6 +109,7 @@ const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
           items: { type: 'String' },
           type: 'Array',
         },
+        { field: 'payload', type: 'JSON' },
         {
           field: 'visits',
           items: { target: 'Visit', type: 'Entity' },
@@ -453,9 +454,10 @@ describe('SQL.where', () => {
   test('projects native scalar arrays and collection envelopes', () => {
     const compiled = compileEntityQuery(collectionDefinitions, 'Pet', {
       collections: { visits: { limit: 2, offset: 1 } },
-      fields: ['id', 'tags', 'visits'],
+      fields: ['id', 'tags', 'payload', 'visits'],
     })
     expect(compiled.sql).toContain('t."tags" AS "tags"')
+    expect(compiled.sql).toContain('t."payload" AS "payload"')
     expect(compiled.sql).toContain('"visits__items"')
     expect(compiled.sql).toContain('"visits__total"')
     expect(compiled.sql).toContain('"visits__remaining"')
@@ -468,6 +470,14 @@ describe('SQL.where', () => {
       fields: ['id'],
       orderBy: 'tags',
     })).toThrow('array fields cannot be used in predicates or ordering')
+    expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
+      fields: ['id'],
+      where: { payload: 'x' },
+    })).toThrow('JSON fields cannot be used in predicates or ordering')
+    expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
+      fields: ['id'],
+      orderBy: 'payload',
+    })).toThrow('JSON fields cannot be used in predicates or ordering')
   })
 
   test('rejects incompatible descendant-only declarations', () => {
