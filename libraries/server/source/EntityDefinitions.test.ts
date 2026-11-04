@@ -315,6 +315,150 @@ describe('EntityDefinitions', () => {
     expect(entities.ddl.join('\n')).not.toContain('"ownedVisits"')
   })
 
+  test('resolves distinct inverse forward edges without membership columns', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'visits',
+              items: { target: 'Visit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+            {
+              field: 'updatedVisits',
+              items: { target: 'Visit', type: 'Entity' },
+              mapping: { field: 'updatedPet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
+            { column: 'updatedPetId', field: 'updatedPet', target: 'Pet', type: 'Entity' },
+          ],
+          name: 'Visit',
+        },
+      ],
+    })
+    const ddl = entities.ddl.join('\n')
+    expect(ddl).not.toContain('"visits"')
+    expect(ddl).not.toContain('"updatedVisits"')
+    expect(ddl.match(/Visit_pet_fkey/g)).toHaveLength(1)
+    expect(ddl.match(/Visit_updatedPet_fkey/g)).toHaveLength(1)
+  })
+
+  test('rejects inherited forward-edge reuse across descendant targets', () => {
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'visits',
+              items: { target: 'Visit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+            {
+              field: 'specialVisits',
+              items: { target: 'SpecialVisit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
+          ],
+          name: 'Visit',
+        },
+        {
+          extends: 'Visit',
+          fields: [{ field: 'notes', type: 'String' }],
+          name: 'SpecialVisit',
+        },
+      ],
+    })).toThrow('already inverted')
+  })
+
+  test('scopes inverse forward-edge uniqueness to the declaring owner', () => {
+    const entities = load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Pet' },
+        {
+          extends: 'Pet',
+          fields: [{
+            field: 'dogVisits',
+            items: { target: 'Visit', type: 'Entity' },
+            mapping: { field: 'pet', kind: 'Inverse' },
+            type: 'Collection',
+          }],
+          name: 'Dog',
+        },
+        {
+          extends: 'Pet',
+          fields: [{
+            field: 'catVisits',
+            items: { target: 'Visit', type: 'Entity' },
+            mapping: { field: 'pet', kind: 'Inverse' },
+            type: 'Collection',
+          }],
+          name: 'Cat',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
+          ],
+          name: 'Visit',
+        },
+      ],
+    })
+    expect(entities.ddl.join('\n')).not.toContain('"dogVisits"')
+    expect(entities.ddl.join('\n')).not.toContain('"catVisits"')
+  })
+
+  test('rejects duplicate inverse forward-edge authority', () => {
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'visits',
+              items: { target: 'Visit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+            {
+              field: 'alsoVisits',
+              items: { target: 'Visit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
+          ],
+          name: 'Visit',
+        },
+      ],
+    })).toThrow('already inverted')
+  })
+
   test('rejects malformed array and relationship collection fields', () => {
     const cases = [
       {

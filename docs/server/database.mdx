@@ -37,6 +37,18 @@ Pass `url` only when using an explicit external PostgreSQL server. Managed state
             "kind": "Inverse",
             "field": "pet"
           }
+        },
+        {
+          "field": "updatedVisits",
+          "type": "Collection",
+          "items": {
+            "type": "Entity",
+            "target": "Visit"
+          },
+          "mapping": {
+            "kind": "Inverse",
+            "field": "updatedPet"
+          }
         }
       ]
     },
@@ -91,6 +103,12 @@ Pass `url` only when using an explicit external PostgreSQL server. Managed state
           "type": "Entity",
           "target": "Pet",
           "column": "petId"
+        },
+        {
+          "field": "updatedPet",
+          "type": "Entity",
+          "target": "Pet",
+          "column": "updatedPetId"
         },
         {
           "field": "notes",
@@ -162,7 +180,7 @@ A many-to-many mapping names its junction table and columns explicitly:
 }
 ```
 
-Inverse mappings resolve against the forward FK during metadata validation. Junction physical DDL and FK enforcement, collection query execution, and collection value validation remain deferred. Collection fields are logical relationship metadata and do not create a generic JSONB membership column.
+Inverse mappings resolve against the forward FK during metadata validation. Multiple inverse collections on one owner must use distinct forward edges; for example, `Pet.visits` uses `Visit.pet` and `Pet.updatedVisits` uses `Visit.updatedPet`. Uniqueness is scoped to the declaring owner and uses the forward field's physical owner, so descendant targets cannot reuse an inherited forward FK. Reusing one forward edge for two inverse collections on the same owner is rejected, and inverse collections never create a membership column. Junction physical DDL and FK enforcement, collection query execution, and collection value validation remain deferred.
 
 Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `vet` is selectable as a singular projection, but it is not filterable or sortable; its physical `vetId` column is never a logical field. Direct `db.sql` remains physical SQL and may use generated columns normally.
 
