@@ -9,23 +9,19 @@ export { Operator } from './source/Operator'
 export type { ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
 export type {
   ArrayFieldDefinition,
-  CollectionFieldDefinition,
-  CollectionMappingDefinition,
-  EntityCollectionElementDefinition,
+  DerivedCollectionDefinition,
   EntityDefinition,
   EntityReferenceFieldDefinition,
   FieldDefinition,
-  InverseCollectionMappingDefinition,
+  InverseDerivedCollectionDefinition,
   JSONFieldDefinition,
-  JunctionCollectionMappingDefinition,
+  RelationshipDefinition,
+  RelationshipDerivedCollectionDefinition,
+  RelationshipEndpointDefinition,
+  RelationshipFieldDefinition,
   ScalarArrayElementDefinition,
   ScalarFieldDefinition,
   ScalarFieldType,
-  ScalarValueCollectionElementDefinition,
-  StructuredValueCollectionElementDefinition,
-  StructuredValueFieldDefinition,
-  ValueCollectionElementDefinition,
-  ValueCollectionFieldDefinition,
 } from './source/EntityDefinitions'
 export { OAuth } from './source/OAuth'
 export type { OAuthOptions } from './source/OAuth'

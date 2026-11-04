@@ -48,6 +48,7 @@ export interface QueryOptions {
   collections?: Readonly<Record<string, {
     readonly limit?: number,
     readonly offset?: number,
+    readonly relationshipFields?: readonly string[],
   }>>,
   /** Effective scalar, scalar-array, JSON, collection, or singular-reference paths to project. */
   fields: readonly string[],

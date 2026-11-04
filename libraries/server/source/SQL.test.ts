@@ -75,7 +75,7 @@ const graphDefinitions = EntityDefinitions.load(JSON.stringify({
       fields: [
         { field: 'permissions', type: 'String' },
         { field: 'status', type: 'String' },
-        { column: 'managerId', field: 'manager', target: 'User', type: 'Entity' },
+        { field: 'manager', target: 'User', type: 'Entity' },
       ],
       name: 'SystemUser',
     },
@@ -91,8 +91,8 @@ const graphDefinitions = EntityDefinitions.load(JSON.stringify({
       fields: [
         { field: 'id', format: 'Snowflake' },
         { field: 'title', type: 'String' },
-        { column: 'ownerId', field: 'owner', target: 'User', type: 'Entity' },
-        { column: 'favoriteId', field: 'favorite', target: 'Entity', type: 'Entity' },
+        { field: 'owner', target: 'User', type: 'Entity' },
+        { field: 'favorite', target: 'Entity', type: 'Entity' },
       ],
       name: 'Article',
     },
@@ -104,64 +104,45 @@ const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
     {
       fields: [
         { field: 'id', format: 'UUID' },
-        {
-          field: 'tags',
-          items: { type: 'String' },
-          type: 'Array',
-        },
+        { field: 'tags', items: { type: 'String' }, type: 'Array' },
         { field: 'payload', type: 'JSON' },
-        {
-          field: 'visits',
-          items: { target: 'Visit', type: 'Entity' },
-          mapping: { field: 'pet', kind: 'Inverse' },
-          type: 'Collection',
-        },
       ],
       name: 'Pet',
     },
     {
       fields: [
         { field: 'id', format: 'Snowflake' },
-        {
-          column: 'petId',
-          field: 'pet',
-          target: 'Pet',
-          type: 'Entity',
-        },
+        { field: 'pet', inverse: 'visits', target: 'Pet', type: 'Entity' },
       ],
       name: 'Visit',
     },
   ],
 }))
 
-const valueCollectionDefinitions = EntityDefinitions.load(JSON.stringify({
-  entities: [{
-    fields: [
-      { field: 'id', format: 'UUID' },
-      {
-        field: 'labels',
-        items: { type: 'String' },
-        ordered: true,
-        storage: 'jsonb',
-        type: 'ValueCollection',
-        unique: false,
-      },
-      {
-        field: 'events',
-        items: {
-          fields: [
-            { field: 'kind', type: 'String' },
-            { field: 'count', type: 'Number' },
-          ],
-          type: 'Structured',
-        },
-        ordered: false,
-        storage: 'jsonb',
-        type: 'ValueCollection',
-        unique: true,
-      },
+const relationshipDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    { fields: [], name: 'User' },
+    { fields: [], name: 'Campaign' },
+    {
+      fields: [
+        { field: 'author', inverse: 'articles', target: 'User', type: 'Entity' },
+        { field: 'tags', items: { type: 'String' }, type: 'Array' },
+        { field: 'payload', type: 'JSON' },
+      ],
+      name: 'Article',
+    },
+  ],
+  relationships: [{
+    between: [
+      { field: 'user', inverse: 'campaigns', target: 'User' },
+      { field: 'campaign', inverse: 'members', target: 'Campaign' },
     ],
-    name: 'Document',
+    fields: [
+      { field: 'role', type: 'String' },
+      { field: 'favorites', type: 'String' },
+      { field: 'labels', items: { type: 'String' }, type: 'Array' },
+    ],
+    name: 'Membership',
   }],
 }))
 
@@ -511,24 +492,47 @@ describe('SQL.where', () => {
     })).toThrow('JSON fields cannot be used in predicates or ordering')
   })
 
-  test('projects bounded typed value-collection envelopes', () => {
-    const compiled = compileEntityQuery(valueCollectionDefinitions, 'Document', {
-      collections: { events: { limit: 1 }, labels: { limit: 2, offset: 1 } },
-      fields: ['id', 'labels', 'events'],
+  test('projects relationship-backed collections and nested relationship fields', () => {
+    const members = compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      collections: { members: { limit: 2, offset: 1, relationshipFields: ['role'] } },
+      fields: ['id', 'members'],
     })
-    expect(compiled.sql).toContain('"labels__items"')
-    expect(compiled.sql).toContain('"labels__total"')
-    expect(compiled.sql).toContain('"events__items"')
-    expect(compiled.sql).toContain('jsonb_array_elements')
-    expect(compiled.values).toEqual([2, 1, 3, 1, 0, 1, 25, 0])
-    expect(() => compileEntityQuery(valueCollectionDefinitions, 'Document', {
-      fields: ['labels'],
-      where: { labels: 'x' },
-    })).toThrow('value collections cannot be used in predicates or ordering')
-    expect(() => compileEntityQuery(valueCollectionDefinitions, 'Document', {
-      fields: ['labels'],
-      orderBy: 'labels',
-    })).toThrow('value collections cannot be used in predicates or ordering')
+    expect(members.sql).toContain('FROM "Campaign" "t"')
+    expect(members.sql).toContain('"Membership" "cj"')
+    expect(members.sql).toContain('"cj"."campaign.id" = "t"."id"')
+    expect(members.sql).toContain('"cj"."user.id"')
+    expect(members.sql).toContain('"members__items"')
+    expect(members.sql).toContain("'membership'")
+    expect(members.sql).toContain("'role'")
+    expect(members.sql).toContain('"role"')
+    expect(members.values).toEqual([2, 1, 3, 25, 0])
+
+    const articles = compileEntityQuery(relationshipDefinitions, 'User', {
+      collections: { articles: { limit: 1 } },
+      fields: ['id', 'articles'],
+    })
+    expect(articles.sql).toContain('"Article" "ct"')
+    expect(articles.sql).toContain('"ct"."author.id" = "t"."id"')
+    expect(articles.sql).not.toContain('"Membership"')
+  })
+
+  test('rejects relationshipFields on inverse and unknown relationship properties', () => {
+    expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
+      collections: { articles: { relationshipFields: [] } },
+      fields: ['id', 'articles'],
+    })).toThrow('does not accept relationshipFields')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      collections: { members: { relationshipFields: ['name'] } },
+      fields: ['id', 'members'],
+    })).toThrow('Unknown relationship field "Membership.name"')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      collections: { members: { relationshipFields: ['favorites.role'] } },
+      fields: ['id', 'members'],
+    })).toThrow('Unknown relationship field "Membership.favorites.role"')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      collections: { members: { relationshipFields: ['labels'] } },
+      fields: ['id', 'members'],
+    })).toThrow('is not a scalar property')
   })
 
   test('rejects incompatible descendant-only declarations', () => {

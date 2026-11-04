@@ -70,7 +70,7 @@ export const articleDefinition = {
   fields: [
     { field: 'id', format: 'UUID' },
     { field: 'title', type: 'String' },
-    { column: 'ownerId', field: 'owner', target: 'User', type: 'Entity' },
+    { field: 'owner', target: 'User', type: 'Entity' },
   ],
   name: 'Article',
 }

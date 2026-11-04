@@ -7,24 +7,22 @@ const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with sche
  * Canonical field types.
  *
  * `Entity` is the singular reference kind. `Array` holds scalar values in a
- * native PostgreSQL array; `Collection` describes an explicit entity
- * relationship. `ID` is the universal identity field type; concrete
- * UUID/Snowflake variants are selected by `format`.
+ * native PostgreSQL array. `JSON` is an opaque structured value. Entity
+ * collections are navigations derived from inverse references or named
+ * top-level relationships, never authored as fields.
  */
 export enum FieldType {
   /** Native scalar array. */
   Array = 'Array',
   /** Boolean value. */
   Boolean = 'Boolean',
-  /** Explicit entity relationship collection. */
-  Collection = 'Collection',
   /** Calendar date without a time of day. */
   Date = 'Date',
   /** Singular reference to another entity. */
   Entity = 'Entity',
   /** Universal text identity. */
   ID = 'ID',
-  /** Structured/interface JSON value. */
+  /** Opaque JSON value. */
   JSON = 'JSON',
   /** Numeric value, including integers and floating point numbers. */
   Number = 'Number',
@@ -32,8 +30,6 @@ export enum FieldType {
   String = 'String',
   /** Instant in time. */
   Timestamp = 'Timestamp',
-  /** Ordered or unordered non-entity value collection. */
-  ValueCollection = 'ValueCollection',
 }
 
 /** Field types that represent scalar values. */
@@ -56,41 +52,6 @@ export interface ScalarArrayElementDefinition {
   readonly type: ScalarFieldType,
 }
 
-/** One entity element in an explicit relationship collection. */
-export interface EntityCollectionElementDefinition {
-  /** Referenced entity name, or the universal `Entity` root. */
-  readonly target: string,
-  /** Element-kind discriminator. */
-  readonly type: FieldType.Entity,
-}
-
-/** An inverse collection backed by an existing forward reference. */
-export interface InverseCollectionMappingDefinition {
-  /** Forward reference field on the target entity. */
-  readonly field: string,
-  /** Mapping-kind discriminator. */
-  readonly kind: 'Inverse',
-}
-
-/** An explicit junction-backed many-to-many collection. */
-export interface JunctionCollectionMappingDefinition {
-  /** Mapping-kind discriminator. */
-  readonly kind: 'Junction',
-  /** Optional ordering column on the junction. */
-  readonly orderingColumn?: string,
-  /** Junction table name. */
-  readonly sourceColumn: string,
-  /** Junction source/owner column. */
-  readonly table: string,
-  /** Junction target column. */
-  readonly targetColumn: string,
-}
-
-/** One explicit entity-collection mapping. */
-export type CollectionMappingDefinition =
-  | InverseCollectionMappingDefinition
-  | JunctionCollectionMappingDefinition
-
 /** One scalar field definition. */
 export interface ScalarFieldDefinition {
   /** Canonical format for an ID field. */
@@ -103,8 +64,10 @@ export interface ScalarFieldDefinition {
 
 /** One singular entity-reference field. */
 export interface EntityReferenceFieldDefinition {
-  /** Explicit PostgreSQL column name backing the reference. */
+  /** Derived physical column name, always `field + '.id'`. */
   readonly column: string,
+  /** Derived collection name exposed on the target entity. */
+  readonly inverse?: string,
   /** Logical field name used by entity-rooted queries. */
   readonly name: string,
   /** Referenced entity name. */
@@ -113,59 +76,12 @@ export interface EntityReferenceFieldDefinition {
   readonly type: FieldType.Entity,
 }
 
-/** One structured/interface JSON field. */
+/** One opaque JSON field. */
 export interface JSONFieldDefinition {
   /** Logical field name used by entity-rooted queries. */
   readonly name: string,
   /** Field-kind discriminator. */
   readonly type: FieldType.JSON,
-}
-
-/** One scalar value in a non-entity value collection. */
-export interface ScalarValueCollectionElementDefinition {
-  /** Optional identity format for ID elements. */
-  readonly format?: IdentityFormat,
-  /** Scalar element type. */
-  readonly type: ScalarFieldType,
-}
-
-/** One field inside a structured value-collection element. */
-export interface StructuredValueFieldDefinition {
-  /** Optional identity format for ID fields. */
-  readonly format?: IdentityFormat,
-  /** Field name, in camelCase. */
-  readonly name: string,
-  /** Scalar or JSON field type. */
-  readonly type: ScalarFieldType | FieldType.JSON,
-}
-
-/** One structured/interface value-collection element. */
-export interface StructuredValueCollectionElementDefinition {
-  /** Inline field contract for structured values. */
-  readonly fields: readonly StructuredValueFieldDefinition[],
-  /** Element-kind discriminator. */
-  readonly type: 'Structured',
-}
-
-/** One non-entity value-collection element descriptor. */
-export type ValueCollectionElementDefinition =
-  | ScalarValueCollectionElementDefinition
-  | StructuredValueCollectionElementDefinition
-
-/** One non-entity value collection field. */
-export interface ValueCollectionFieldDefinition {
-  /** Element descriptor for collection values. */
-  readonly items: ValueCollectionElementDefinition,
-  /** Logical field name used by entity-rooted queries. */
-  readonly name: string,
-  /** Whether values retain their stored order. */
-  readonly ordered: boolean,
-  /** Explicit physical storage for the collection. */
-  readonly storage: 'jsonb',
-  /** Field-kind discriminator. */
-  readonly type: FieldType.ValueCollection,
-  /** Whether values are unique. */
-  readonly unique: boolean,
 }
 
 /** One native scalar-array field. */
@@ -178,26 +94,69 @@ export interface ArrayFieldDefinition {
   readonly type: FieldType.Array,
 }
 
-/** One explicit entity-relationship collection field. */
-export interface CollectionFieldDefinition {
-  /** Entity element descriptor. */
-  readonly items: EntityCollectionElementDefinition,
-  /** Explicit inverse or junction mapping. */
-  readonly mapping: CollectionMappingDefinition,
-  /** Logical field name used by entity-rooted queries. */
-  readonly name: string,
-  /** Field-kind discriminator. */
-  readonly type: FieldType.Collection,
-}
-
 /** One logical entity field. */
 export type FieldDefinition =
   | ArrayFieldDefinition
   | JSONFieldDefinition
   | ScalarFieldDefinition
-  | ValueCollectionFieldDefinition
   | EntityReferenceFieldDefinition
-  | CollectionFieldDefinition
+
+/** One endpoint of a named relationship. */
+export interface RelationshipEndpointDefinition {
+  /** Local endpoint column name, in camelCase. */
+  readonly field: string,
+  /** Derived navigation name exposed on the target entity. */
+  readonly inverse: string,
+  /** Referenced entity or supported ancestor. */
+  readonly target: string,
+}
+
+/** A property owned by a named relationship rather than either endpoint. */
+export type RelationshipFieldDefinition =
+  | ArrayFieldDefinition
+  | JSONFieldDefinition
+  | ScalarFieldDefinition
+
+/** One named, first-class many-to-many relationship. */
+export interface RelationshipDefinition {
+  /** The two endpoint descriptors in authored order. */
+  readonly between: readonly [RelationshipEndpointDefinition, RelationshipEndpointDefinition],
+  /** Properties owned by the relationship itself. */
+  readonly fields: readonly RelationshipFieldDefinition[],
+  /** Relationship name, in PascalCase. */
+  readonly name: string,
+}
+
+/** A collection navigation derived from an inverse reference. */
+export interface InverseDerivedCollectionDefinition {
+  /** Derivation-kind discriminator. */
+  readonly kind: 'inverse',
+  /** Navigation name exposed on the target entity. */
+  readonly name: string,
+  /** The singular forward reference that owns this navigation. */
+  readonly reference: EntityReferenceFieldDefinition,
+  /** Entity type returned by the navigation. */
+  readonly target: string,
+}
+
+/** A collection navigation derived from one relationship endpoint. */
+export interface RelationshipDerivedCollectionDefinition {
+  /** Authored endpoint index that owns this navigation. */
+  readonly endpoint: 0 | 1,
+  /** Derivation-kind discriminator. */
+  readonly kind: 'relationship',
+  /** Navigation name exposed on the target entity. */
+  readonly name: string,
+  /** The named relationship that owns this navigation. */
+  readonly relationship: RelationshipDefinition,
+  /** Entity type returned by the navigation. */
+  readonly target: string,
+}
+
+/** One collection navigation available in the query model. */
+export type DerivedCollectionDefinition =
+  | InverseDerivedCollectionDefinition
+  | RelationshipDerivedCollectionDefinition
 
 /** One effective inherited field and its owning entity table. */
 export type EffectiveFieldDefinition = FieldDefinition & {
@@ -209,6 +168,8 @@ export type EffectiveFieldDefinition = FieldDefinition & {
 export interface EntityDefinition {
   /** Whether this entity has descendants and cannot be a concrete leaf. */
   readonly abstract: boolean,
+  /** Derived inverse and relationship navigations exposed on this entity. */
+  readonly collections: readonly DerivedCollectionDefinition[],
   /** Effective inherited and locally owned fields. */
   readonly effectiveFields: readonly EffectiveFieldDefinition[],
   /** Declared parent entity, when present. */
@@ -234,7 +195,7 @@ interface TableColumn {
   /** Whether this column is the table's primary key. */
   readonly primaryKey?: boolean,
   /** Physical column type. */
-  readonly type: ScalarFieldType | FieldType.Array | FieldType.JSON | FieldType.ValueCollection,
+  readonly type: ScalarFieldType | FieldType.Array | FieldType.JSON,
 }
 
 /** One physical table index. */
@@ -419,6 +380,7 @@ function rootFields(format: IdentityFormat | undefined): readonly EffectiveField
 export function identityDefinition(): EntityDefinition {
   return {
     abstract: false,
+    collections: [],
     effectiveFields: rootFields(undefined),
     fields: [],
     name: 'Entity',
@@ -467,6 +429,10 @@ function identityRoot(entities: readonly EntityDefinition[]): TableDefinition {
 export class EntityDefinitions {
   /** Entities in their declared order. */
   readonly entities: readonly EntityDefinition[]
+  /** Named first-class relationships in their declared order. */
+  readonly relationships: readonly RelationshipDefinition[]
+  /** Derived navigations exposed by the universal identity root. */
+  readonly #rootCollections: readonly DerivedCollectionDefinition[]
 
   /**
    * Parse and validate canonical entity JSON.
@@ -481,19 +447,28 @@ export class EntityDefinitions {
     } catch (error) {
       throw new Error('Invalid entity JSON', { cause: error })
     }
-    return new EntityDefinitions(parseEntities(value))
+    const document = parseEntityDocument(value)
+    return new EntityDefinitions(document.entities, document.relationships, document.rootCollections)
   }
 
   /**
    * Creates entity definitions from already-validated definitions.
    * @param entities - Validated entity definitions.
+   * @param relationships - Named relationship definitions.
+   * @param rootCollections - Navigations exposed by the universal identity root.
    */
-  private constructor(entities: readonly EntityDefinition[]) {
+  private constructor(
+    entities: readonly EntityDefinition[],
+    relationships: readonly RelationshipDefinition[],
+    rootCollections: readonly DerivedCollectionDefinition[],
+  ) {
     this.entities = entities
+    this.relationships = relationships
+    this.#rootCollections = rootCollections
   }
 
   /**
-   * Resolve the physical tables for the identity root and declared entities.
+   * Resolve the physical tables for the identity root, entities and relationships.
    * @returns System-owned root followed by model-owned tables in order.
    */
   private get tables(): readonly TableDefinition[] {
@@ -501,8 +476,19 @@ export class EntityDefinitions {
     return [
       identityRoot(this.entities),
       ...this.entities.map(entity => entityTable(entity, inverseIndexes.get(entity.name) ?? [])),
-      ...junctionDefinitions(this.entities).map(junctionTable),
+      ...this.relationships.map(relationshipTable),
     ]
+  }
+
+  /**
+   * Resolve derived collection navigations exposed by one entity.
+   * @param name - Exact entity name, or `Entity` for the universal root.
+   * @returns Derived navigations in canonical order.
+   */
+  collections(name: string): readonly DerivedCollectionDefinition[] {
+    return name === 'Entity'
+      ? this.#rootCollections
+      : this.entity(name)?.collections ?? []
   }
 
   /**
@@ -512,6 +498,15 @@ export class EntityDefinitions {
    */
   entity(name: string): EntityDefinition | undefined {
     return this.entities.find(entity => entity.name === name)
+  }
+
+  /**
+   * Find a named relationship.
+   * @param name - Exact relationship name.
+   * @returns The relationship, or undefined when absent.
+   */
+  relationship(name: string): RelationshipDefinition | undefined {
+    return this.relationships.find(relationship => relationship.name === name)
   }
 
   /**
@@ -530,7 +525,7 @@ export class EntityDefinitions {
       ...this.entities.flatMap(entity => entity.fields
         .filter(isReferenceField)
         .map(field => addConstraint(entity, field))),
-      ...junctionDefinitions(this.entities).flatMap(junctionConstraints),
+      ...this.relationships.flatMap(relationshipConstraints),
       ...lifecycleStatements(this.entities),
     ]
   }
@@ -583,11 +578,11 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_sch
         )
       }
     }
-    for (const junction of junctionDefinitions(this.entities)) {
-      for (const constraint of junctionForeignKeyDefinitions(junction)) {
+    for (const relationship of this.relationships) {
+      for (const constraint of relationshipForeignKeyDefinitions(relationship)) {
         await reconcileForeignKey(
           sql,
-          junction.table,
+          relationship.name,
           constraint.name,
           constraint.column,
           constraint.target,
@@ -694,14 +689,24 @@ function normalizeBody(body: string): string {
   return body.replaceAll('\r\n', '\n').trim()
 }
 
+/** Parsed canonical document, including derived navigations. */
+interface ParsedEntityDocument {
+  /** Resolved entities in declaration order. */
+  readonly entities: readonly EntityDefinition[],
+  /** Named relationships in declaration order. */
+  readonly relationships: readonly RelationshipDefinition[],
+  /** Derived navigations exposed by the universal identity root. */
+  readonly rootCollections: readonly DerivedCollectionDefinition[],
+}
+
 /**
  * Validate the parsed entity document root.
  * @param value - Parsed JSON value.
- * @returns Validated entities.
+ * @returns Validated entities, relationships and navigations.
  */
-function parseEntities(value: unknown): readonly EntityDefinition[] {
+function parseEntityDocument(value: unknown): ParsedEntityDocument {
   if (!isRecord(value)) throw invalid('entity definitions must be an object')
-  assertKnownKeys(value, ['entities'], 'top-level')
+  assertKnownKeys(value, ['entities', 'relationships'], 'top-level')
   if (!Array.isArray(value.entities) || value.entities.length === 0) {
     throw invalid('entities must be a non-empty array')
   }
@@ -715,116 +720,245 @@ function parseEntities(value: unknown): readonly EntityDefinition[] {
   validateAncestry(seeds, byName)
   for (const seed of seeds) {
     for (const field of seed.fields) {
-      if (field.type === FieldType.Entity && field.target !== 'Entity' && !byName.has(field.target)) {
+      if (field.type !== FieldType.Entity) continue
+      if (field.target !== 'Entity' && !byName.has(field.target)) {
         throw invalid(`unknown target entity "${field.target}" for field "${seed.name}.${field.name}"`)
-      }
-      if (
-        field.type === FieldType.Collection
-        && field.items.type === FieldType.Entity
-        && field.items.target !== 'Entity'
-        && !byName.has(field.items.target)
-      ) {
-        throw invalid(
-          `unknown target entity "${field.items.target}" for collection field "${seed.name}.${field.name}"`,
-        )
       }
     }
   }
   const formats = effectiveFormats(byName)
   const children = childrenByEntity(seeds)
   const resolved = seeds.map(seed => resolveEntity(seed, byName, formats, children))
-  validateCollectionMappings(resolved)
-  return resolved
+  const relationships = parseRelationships(value.relationships, byName)
+  validateRelationshipPhysicalNames(relationships)
+  const collections = deriveCollections(resolved, relationships)
+  return {
+    entities: resolved.map(entity => ({
+      ...entity,
+      collections: collections.get(entity.name) ?? [],
+    })),
+    relationships,
+    rootCollections: collections.get('Entity') ?? [],
+  }
 }
 
 /**
- * Validate explicit collection mappings against the resolved entity graph.
- * @param entities - Resolved canonical definitions.
+ * Validate named relationships against the resolved entity graph.
+ * @param value - Optional relationship array.
+ * @param byName - Parsed entities by name.
+ * @returns Validated relationship definitions.
  */
-function validateCollectionMappings(entities: readonly EntityDefinition[]): void {
-  const byName = new Map(entities.map(entity => [entity.name, entity]))
-  const inverseEdges = new Map<string, string>()
-  const junctionOwners = new Map<string, string>()
-  for (const entity of entities) {
-    for (const field of entity.fields) {
-      if (field.type !== FieldType.Collection) continue
-      const mapping = field.mapping
-      if (mapping.kind === 'Junction') {
-        if (mapping.table === 'Entity' || byName.has(mapping.table)) {
-          throw invalid(`junction table "${mapping.table}" conflicts with an entity table`)
-        }
-        const owner = junctionOwners.get(mapping.table)
-        if (owner) {
-          throw invalid(
-            `junction table "${mapping.table}" is already owned by "${owner}"`,
-          )
-        }
-        if (mapping.sourceColumn === mapping.targetColumn) {
-          throw invalid(
-            `junction table "${mapping.table}" source and target columns must differ`,
-          )
-        }
-        junctionOwners.set(mapping.table, `${entity.name}.${field.name}`)
-        continue
+function parseRelationships(
+  value: unknown,
+  byName: ReadonlyMap<string, EntitySeed>,
+): readonly RelationshipDefinition[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw invalid('relationships must be an array')
+  const names = new Set<string>()
+  return value.map(candidate => {
+    const relationship = parseRelationship(candidate, byName)
+    if (relationship.name === 'Entity' || byName.has(relationship.name)) {
+      throw invalid(`relationship "${relationship.name}" conflicts with an entity name`)
+    }
+    if (names.has(relationship.name)) {
+      throw invalid(`duplicate relationship "${relationship.name}"`)
+    }
+    names.add(relationship.name)
+    return relationship
+  })
+}
+
+/**
+ * Reject colliding generated relationship index and constraint identifiers.
+ * @param relationships - Validated named relationships.
+ */
+function validateRelationshipPhysicalNames(
+  relationships: readonly RelationshipDefinition[],
+): void {
+  const indexes = new Set<string>()
+  const constraints = new Set<string>()
+  for (const relationship of relationships) {
+    for (const endpoint of relationship.between) {
+      const index = `${relationship.name}_${endpoint.field}_idx`
+      if (indexes.has(index)) {
+        throw invalid(`relationship physical index "${index}" is not unique`)
       }
-      if (mapping.kind !== 'Inverse') continue
-      if (field.items.target === 'Entity') {
-        throw invalid(
-          `inverse collection "${entity.name}.${field.name}" requires a declared target entity`,
-        )
+      indexes.add(index)
+      const constraint = `${relationship.name}_${endpoint.field}_fkey`
+      if (constraints.has(constraint)) {
+        throw invalid(`relationship physical constraint "${constraint}" is not unique`)
       }
-      const target = byName.get(field.items.target)
-      if (!target) {
-        throw invalid(
-          `unknown target entity "${field.items.target}" for collection field "${entity.name}.${field.name}"`,
-        )
-      }
-      const forward = target.effectiveFields.find(candidate => candidate.name === mapping.field)
-      if (!forward || forward.type !== FieldType.Entity) {
-        throw invalid(
-          `inverse collection "${entity.name}.${field.name}" must reference an Entity field ` +
-          `"${field.items.target}.${mapping.field}"`,
-        )
-      }
-      if (forward.target !== entity.name && !isAncestor(entities, entity.name, forward.target)) {
-        throw invalid(
-          `inverse collection "${entity.name}.${field.name}" forward target ` +
-          `"${forward.target}" must be "${entity.name}" or an ancestor`,
-        )
-      }
-      const edge = `${forward.owner}.${forward.name}`
-      const key = `${entity.name}\u0000${edge}`
-      const existing = inverseEdges.get(key)
-      if (existing) {
-        throw invalid(
-          `forward reference "${edge}" is already inverted by "${existing}"; ` +
-          `inverse collections on "${entity.name}" must use distinct forward edges`,
-        )
-      }
-      inverseEdges.set(key, `${entity.name}.${field.name}`)
+      constraints.add(constraint)
     }
   }
 }
 
 /**
- * Whether an entity name is an ancestor of another entity.
- * @param entities - Resolved canonical definitions.
- * @param entityName - Descendant entity name.
- * @param ancestor - Candidate ancestor name.
- * @returns `true` when the ancestor owns a table above the entity.
+ * Validate one named relationship.
+ * @param value - Relationship candidate.
+ * @param byName - Parsed entities by name.
+ * @returns The validated relationship.
  */
-function isAncestor(
-  entities: readonly EntityDefinition[],
-  entityName: string,
-  ancestor: string,
-): boolean {
-  let current: string | undefined = entityName
-  while (current !== undefined) {
-    if (current === ancestor) return true
-    current = entities.find(entity => entity.name === current)?.parent
-    if (current === 'Entity') return ancestor === 'Entity'
+function parseRelationship(
+  value: unknown,
+  byName: ReadonlyMap<string, EntitySeed>,
+): RelationshipDefinition {
+  if (!isRecord(value)) throw invalid('relationship must be an object')
+  assertKnownKeys(value, ['between', 'fields', 'name'], 'relationship')
+  if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
+    throw invalid('relationship name must be a PascalCase identifier')
   }
-  return false
+  const name = value.name
+  validatePhysicalIdentifier(name, 'relationship table')
+  if (!Array.isArray(value.between) || value.between.length !== 2) {
+    throw invalid(`relationship "${name}" between must contain exactly two endpoints`)
+  }
+  const first = parseRelationshipEndpoint(name, value.between[0], byName)
+  const second = parseRelationshipEndpoint(name, value.between[1], byName)
+  if (first.field === second.field) {
+    throw invalid(`relationship "${name}" endpoint fields must differ`)
+  }
+  if (first.inverse === second.inverse) {
+    throw invalid(`relationship "${name}" endpoint inverse names must differ`)
+  }
+  if (!Array.isArray(value.fields)) {
+    throw invalid(`relationship "${name}" must define a fields array`)
+  }
+  const fieldNames = new Set<string>()
+  const fields = value.fields.map(candidate => {
+    const field = parseRelationshipField(name, candidate)
+    if (fieldNames.has(field.name)) {
+      throw invalid(`duplicate field "${name}.${field.name}"`)
+    }
+    fieldNames.add(field.name)
+    validatePhysicalIdentifier(field.name, `relationship "${name}" field`)
+    return field
+  })
+  return { between: [first, second], fields, name }
+}
+
+/**
+ * Validate one relationship endpoint.
+ * @param relationshipName - Owning relationship name.
+ * @param value - Endpoint candidate.
+ * @param byName - Parsed entities by name.
+ * @returns The validated endpoint.
+ */
+function parseRelationshipEndpoint(
+  relationshipName: string,
+  value: unknown,
+  byName: ReadonlyMap<string, EntitySeed>,
+): RelationshipEndpointDefinition {
+  if (!isRecord(value)) {
+    throw invalid(`relationship "${relationshipName}" endpoint must be an object`)
+  }
+  assertKnownKeys(value, ['field', 'inverse', 'target'], 'relationship endpoint')
+  if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
+    throw invalid(`relationship "${relationshipName}" endpoint field must be a camelCase identifier`)
+  }
+  if (typeof value.inverse !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.inverse)) {
+    throw invalid(`relationship "${relationshipName}" endpoint inverse must be a camelCase identifier`)
+  }
+  if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+    throw invalid(`relationship "${relationshipName}" endpoint target must be a PascalCase entity name`)
+  }
+  if (value.target !== 'Entity' && !byName.has(value.target)) {
+    throw invalid(
+      `unknown target entity "${value.target}" for relationship "${relationshipName}" ` +
+      `endpoint "${value.field}"`,
+    )
+  }
+  validatePhysicalIdentifier(`${value.field}.id`, `relationship "${relationshipName}" endpoint column`)
+  validatePhysicalIdentifier(`${relationshipName}_${value.field}_fkey`, `relationship "${relationshipName}" constraint`)
+  validatePhysicalIdentifier(`${relationshipName}_${value.field}_idx`, `relationship "${relationshipName}" index`)
+  return { field: value.field, inverse: value.inverse, target: value.target }
+}
+
+/**
+ * Validate one property owned by a named relationship.
+ * @param relationshipName - Owning relationship name.
+ * @param value - Field candidate.
+ * @returns The validated relationship field.
+ */
+function parseRelationshipField(
+  relationshipName: string,
+  value: unknown,
+): RelationshipFieldDefinition {
+  const parsed = parseField(relationshipName, value)
+  if ('idRefinement' in parsed) {
+    throw invalid(`relationship "${relationshipName}" may not declare an id refinement`)
+  }
+  if (parsed.field.type === FieldType.Entity) {
+    throw invalid(
+      `relationship field "${relationshipName}.${parsed.field.name}" must be a scalar, array or JSON field`,
+    )
+  }
+  if (parsed.field.name === 'id') {
+    throw invalid(`relationship "${relationshipName}" may not declare a field named "id"`)
+  }
+  return parsed.field
+}
+
+/**
+ * Derive reverse 1:N and relationship navigations from canonical metadata.
+ * @param entities - Resolved entity graph.
+ * @param relationships - Named relationships.
+ * @returns Navigations by exposing entity name.
+ */
+function deriveCollections(
+  entities: readonly EntityDefinition[],
+  relationships: readonly RelationshipDefinition[],
+): ReadonlyMap<string, readonly DerivedCollectionDefinition[]> {
+  const effectiveNames = new Map<string, Set<string>>([
+    ['Entity', new Set(['id', 'name', 'entity'])],
+  ])
+  for (const entity of entities) {
+    effectiveNames.set(entity.name, new Set(entity.effectiveFields.map(field => field.name)))
+  }
+  const result = new Map<string, DerivedCollectionDefinition[]>()
+  const add = (owner: string, collection: DerivedCollectionDefinition): void => {
+    const names = effectiveNames.get(owner)
+    if (!names) throw invalid(`derived navigation target entity "${owner}" is not declared`)
+    if (names.has(collection.name)) {
+      throw invalid(`derived navigation "${owner}.${collection.name}" conflicts with a field`)
+    }
+    const existing = result.get(owner) ?? []
+    if (existing.some(candidate => candidate.name === collection.name)) {
+      throw invalid(`duplicate derived navigation "${owner}.${collection.name}"`)
+    }
+    existing.push(collection)
+    result.set(owner, existing)
+  }
+  for (const entity of entities) {
+    for (const field of entity.fields) {
+      if (field.type !== FieldType.Entity || field.inverse === undefined) continue
+      validatePhysicalIdentifier(
+        `${entity.name}_${field.name}_fk_idx`,
+        `inverse index for "${field.target}.${field.inverse}"`,
+      )
+      add(field.target, {
+        kind: 'inverse',
+        name: field.inverse,
+        reference: field,
+        target: entity.name,
+      })
+    }
+  }
+  for (const relationship of relationships) {
+    const endpoints = relationship.between
+    for (const index of [0, 1] as const) {
+      const endpoint = endpoints[index]
+      const remote = endpoints[index === 0 ? 1 : 0]
+      add(endpoint.target, {
+        endpoint: index,
+        kind: 'relationship',
+        name: endpoint.inverse,
+        relationship,
+        target: remote.target,
+      })
+    }
+  }
+  return result
 }
 
 /** A parsed entity before reference targets are resolved. */
@@ -874,19 +1008,17 @@ function validateAncestry(
       if (!parent) break
       for (const field of parent.fields) {
         names.set(field.name, parent.name)
-        if (field.type !== FieldType.Collection) columns.set(fieldColumn(field), parent.name)
+        columns.set(fieldColumn(field), parent.name)
       }
       parentName = parent.extends
     }
     for (const field of seed.fields) {
       const owner = names.get(field.name)
       if (owner) throw invalid(`field "${seed.name}.${field.name}" is already owned by "${owner}"`)
-      if (field.type !== FieldType.Collection) {
-        const column = fieldColumn(field)
-        const columnOwner = columns.get(column)
-        if (columnOwner) {
-          throw invalid(`physical column "${column}" is already owned by "${columnOwner}"`)
-        }
+      const column = fieldColumn(field)
+      const columnOwner = columns.get(column)
+      if (columnOwner) {
+        throw invalid(`physical column "${column}" is already owned by "${columnOwner}"`)
       }
     }
   }
@@ -903,6 +1035,7 @@ function parseEntity(value: unknown): EntitySeed {
   if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
     throw invalid('entity name must be a PascalCase identifier')
   }
+  validatePhysicalIdentifier(value.name, 'entity table')
   if (value.name === 'Entity') throw invalid('entity name "Entity" is reserved for the universal identity root')
   if (
     value.extends !== undefined
@@ -948,6 +1081,7 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
     throw invalid(`field name must be a camelCase identifier in "${entityName}"`)
   }
+  validatePhysicalIdentifier(value.field, `field "${entityName}.${value.field}"`)
   if (typeof value.type !== 'string' && value.field !== 'id') {
     throw invalid(`field "${entityName}.${value.field}" type must be a string`)
   }
@@ -956,32 +1090,29 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
     return { field: parseArrayField(entityName, value) }
   }
 
-  if (value.type === FieldType.Collection) {
-    return { field: parseCollectionField(entityName, value) }
-  }
-
   if (value.type === FieldType.JSON) {
     return { field: parseJSONField(entityName, value) }
   }
 
-  if (value.type === FieldType.ValueCollection) {
-    return { field: parseValueCollectionField(entityName, value) }
-  }
-
   if (value.type === FieldType.Entity) {
-    assertKnownKeys(value, ['column', 'field', 'target', 'type'], 'field')
+    assertKnownKeys(value, ['field', 'inverse', 'target', 'type'], 'field')
     if (ROOT_FIELD_NAMES.has(value.field) || value.field === 'id') {
       throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
     }
     if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
       throw invalid(`reference field "${entityName}.${value.field}" target must be a PascalCase entity name`)
     }
-    if (typeof value.column !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.column)) {
-      throw invalid(`reference field "${entityName}.${value.field}" column must be a camelCase identifier`)
+    if (
+      value.inverse !== undefined
+      && (typeof value.inverse !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.inverse))
+    ) {
+      throw invalid(`reference field "${entityName}.${value.field}" inverse must be a camelCase identifier`)
     }
+    validatePhysicalIdentifier(`${value.field}.id`, `reference field "${entityName}.${value.field}" column`)
     return {
       field: {
-        column: value.column,
+        column: `${value.field}.id`,
+        ...(value.inverse !== undefined ? { inverse: value.inverse as string } : {}),
         name: value.field,
         target: value.target,
         type: FieldType.Entity,
@@ -1017,121 +1148,7 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
 }
 
 /**
- * Validate one non-entity value-collection descriptor.
- * @param entityName - Owning entity name.
- * @param value - Field candidate.
- * @returns The validated value collection.
- */
-function parseValueCollectionField(
-  entityName: string,
-  value: Readonly<Record<string, unknown>>,
-): ValueCollectionFieldDefinition {
-  assertKnownKeys(value, ['field', 'items', 'ordered', 'storage', 'type', 'unique'], 'field')
-  const name = value.field as string
-  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
-    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
-  }
-  if (typeof value.ordered !== 'boolean') {
-    throw invalid(`value collection "${entityName}.${name}" ordered must be a boolean`)
-  }
-  if (typeof value.unique !== 'boolean') {
-    throw invalid(`value collection "${entityName}.${name}" unique must be a boolean`)
-  }
-  if (value.storage !== 'jsonb') {
-    throw invalid(`value collection "${entityName}.${name}" storage must be jsonb`)
-  }
-  if (!isRecord(value.items)) {
-    throw invalid(`value collection "${entityName}.${name}" items must be an object`)
-  }
-  return {
-    items: parseValueCollectionElement(entityName, name, value.items),
-    name,
-    ordered: value.ordered,
-    storage: 'jsonb',
-    type: FieldType.ValueCollection,
-    unique: value.unique,
-  }
-}
-
-/**
- * Validate one non-entity collection element descriptor.
- * @param entityName - Owning entity name.
- * @param fieldName - Collection field name.
- * @param value - Element candidate.
- * @returns The validated element descriptor.
- */
-function parseValueCollectionElement(
-  entityName: string,
-  fieldName: string,
-  value: Readonly<Record<string, unknown>>,
-): ValueCollectionElementDefinition {
-  if (!isRecord(value) || typeof value.type !== 'string') {
-    throw invalid(`value collection "${entityName}.${fieldName}" items must have a type`)
-  }
-  if (value.type === 'Structured') {
-    assertKnownKeys(value, ['fields', 'type'], 'value collection item')
-    if (!Array.isArray(value.fields) || value.fields.length === 0) {
-      throw invalid(`value collection "${entityName}.${fieldName}" structured fields must be non-empty`)
-    }
-    const names = new Set<string>()
-    const fields: StructuredValueFieldDefinition[] = value.fields.map((field, index) => {
-      if (!isRecord(field)) {
-        throw invalid(`structured field ${index} in "${entityName}.${fieldName}" must be an object`)
-      }
-      if (typeof field.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(field.field)) {
-        throw invalid(`structured field in "${entityName}.${fieldName}" must be camelCase`)
-      }
-      if (names.has(field.field)) {
-        throw invalid(`duplicate structured field "${field.field}" in "${entityName}.${fieldName}"`)
-      }
-      names.add(field.field)
-      if (field.type === FieldType.JSON) {
-        assertKnownKeys(field, ['field', 'type'], 'structured field')
-        return { name: field.field, type: FieldType.JSON }
-      }
-      if (typeof field.type !== 'string' || !SCALAR_FIELD_TYPES.has(field.type)) {
-        throw invalid(`unsupported structured field type in "${entityName}.${fieldName}.${field.field}"`)
-      }
-      if (field.type === FieldType.ID) {
-        assertKnownKeys(field, ['field', 'format', 'type'], 'structured field')
-        if (
-          field.format !== undefined
-          && (typeof field.format !== 'string' || !IDENTITY_FORMATS.has(field.format))
-        ) {
-          throw invalid(
-            `structured field "${entityName}.${fieldName}.${field.field}" ID format must be UUID or Snowflake`,
-          )
-        }
-        return {
-          ...(field.format !== undefined ? { format: field.format as IdentityFormat } : {}),
-          name: field.field,
-          type: FieldType.ID,
-        }
-      }
-      assertKnownKeys(field, ['field', 'type'], 'structured field')
-      return { name: field.field, type: field.type as ScalarFieldType }
-    })
-    return { fields, type: 'Structured' }
-  }
-  if (!SCALAR_FIELD_TYPES.has(value.type)) {
-    throw invalid(`unsupported value collection item type "${value.type}" in "${entityName}.${fieldName}"`)
-  }
-  if (value.type === FieldType.ID) {
-    assertKnownKeys(value, ['format', 'type'], 'value collection item')
-    if (value.format !== undefined && (typeof value.format !== 'string' || !IDENTITY_FORMATS.has(value.format))) {
-      throw invalid(`value collection "${entityName}.${fieldName}" ID format must be UUID or Snowflake`)
-    }
-    return {
-      ...(value.format !== undefined ? { format: value.format as IdentityFormat } : {}),
-      type: FieldType.ID,
-    }
-  }
-  assertKnownKeys(value, ['type'], 'value collection item')
-  return { type: value.type as ScalarFieldType }
-}
-
-/**
- * Validate one structured/interface JSON field descriptor.
+ * Validate one opaque JSON field descriptor.
  * @param entityName - Owning entity name.
  * @param value - Field candidate.
  * @returns The validated JSON field.
@@ -1189,99 +1206,14 @@ function parseArrayField(
 }
 
 /**
- * Validate one explicit entity-relationship collection field descriptor.
- * @param entityName - Owning entity name.
- * @param value - Field candidate.
- * @returns The validated collection field.
+ * Validate generated PostgreSQL identifier length.
+ * @param value - Generated identifier.
+ * @param context - Diagnostic label.
  */
-function parseCollectionField(
-  entityName: string,
-  value: Readonly<Record<string, unknown>>,
-): CollectionFieldDefinition {
-  assertKnownKeys(value, ['field', 'items', 'mapping', 'type'], 'field')
-  const name = value.field as string
-  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
-    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+function validatePhysicalIdentifier(value: string, context: string): void {
+  if (new TextEncoder().encode(value).length > 63) {
+    throw invalid(`${context} "${value}" exceeds PostgreSQL's 63-byte identifier limit`)
   }
-  if (!isRecord(value.items)) {
-    throw invalid(`collection field "${entityName}.${name}" items must be an object`)
-  }
-  if (value.items.type !== FieldType.Entity) {
-    throw invalid(`collection field "${entityName}.${name}" items must declare an Entity target`)
-  }
-  if (typeof value.items.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.items.target)) {
-    throw invalid(`collection field "${entityName}.${name}" target must be a PascalCase entity name`)
-  }
-  if (!isRecord(value.mapping)) {
-    throw invalid(`collection field "${entityName}.${name}" mapping must be an object`)
-  }
-  return {
-    items: { target: value.items.target, type: FieldType.Entity },
-    mapping: parseCollectionMapping(entityName, name, value.mapping),
-    name,
-    type: FieldType.Collection,
-  }
-}
-
-/**
- * Validate one explicit collection mapping descriptor.
- * @param entityName - Owning entity name.
- * @param fieldName - Collection field name.
- * @param value - Mapping candidate.
- * @returns The validated mapping.
- */
-function parseCollectionMapping(
-  entityName: string,
-  fieldName: string,
-  value: Readonly<Record<string, unknown>>,
-): CollectionMappingDefinition {
-  if (typeof value.kind !== 'string') {
-    throw invalid(`collection field "${entityName}.${fieldName}" mapping must have a kind`)
-  }
-  if (value.kind === 'Inverse') {
-    assertKnownKeys(value, ['field', 'kind'], 'collection mapping')
-    if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
-      throw invalid(`collection field "${entityName}.${fieldName}" inverse field must be camelCase`)
-    }
-    return { field: value.field, kind: 'Inverse' }
-  }
-  if (value.kind === 'Junction') {
-    assertKnownKeys(
-      value,
-      ['kind', 'orderingColumn', 'sourceColumn', 'table', 'targetColumn'],
-      'collection mapping',
-    )
-    if (typeof value.table !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.table)) {
-      throw invalid(`collection field "${entityName}.${fieldName}" junction table must be PascalCase`)
-    }
-    for (const key of ['sourceColumn', 'targetColumn'] as const) {
-      if (typeof value[key] !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value[key])) {
-        throw invalid(`collection field "${entityName}.${fieldName}" ${key} must be camelCase`)
-      }
-    }
-    if (value.sourceColumn === value.targetColumn) {
-      throw invalid(`collection field "${entityName}.${fieldName}" source and target columns must differ`)
-    }
-    if (value.orderingColumn !== undefined) {
-      if (
-        typeof value.orderingColumn !== 'string'
-        || !/^[a-z][A-Za-z0-9]*$/.test(value.orderingColumn)
-      ) {
-        throw invalid(`collection field "${entityName}.${fieldName}" orderingColumn must be camelCase`)
-      }
-      if (value.orderingColumn === value.sourceColumn || value.orderingColumn === value.targetColumn) {
-        throw invalid(`collection field "${entityName}.${fieldName}" ordering column must differ from keys`)
-      }
-    }
-    return {
-      kind: 'Junction',
-      ...(value.orderingColumn !== undefined ? { orderingColumn: value.orderingColumn as string } : {}),
-      sourceColumn: value.sourceColumn as string,
-      table: value.table,
-      targetColumn: value.targetColumn as string,
-    }
-  }
-  throw invalid(`collection field "${entityName}.${fieldName}" mapping kind must be Inverse or Junction`)
 }
 
 /**
@@ -1316,6 +1248,7 @@ function resolveEntity(
   }
   return {
     abstract: (children.get(seed.name)?.length ?? 0) > 0,
+    collections: [],
     effectiveFields: effective,
     ...(seed.extends ? { extends: seed.extends } : {}),
     fields: [idField, ...seed.fields],
@@ -1328,204 +1261,142 @@ function resolveEntity(
 /**
  * Build one entity table from locally owned fields.
  * @param entity - Validated entity.
- * @param indexes - Additional indexes derived from inverse collection mappings.
+ * @param indexes - Additional indexes derived from inverse references.
  * @returns Its physical table metadata.
  */
 function entityTable(
   entity: EntityDefinition,
   indexes: readonly TableIndex[] = [],
 ): TableDefinition {
-  const checks: TableCheck[] = [{
-    expression: identityCheck('id', entity.idFormat),
-    name: `${entity.name}_id_format_check`,
-  }]
-  for (const field of entity.fields) {
-    if (field.type !== FieldType.ValueCollection) continue
-    checks.push({
-      expression: `jsonb_typeof(${quoteIdentifier(field.name)}) = 'array'`,
-      name: `${entity.name}_${field.name}_array_check`,
-    })
-  }
   return {
-    checks,
-    columns: entity.fields.flatMap((field): TableColumn[] => {
-      if (field.type === FieldType.Collection) return []
-      if (field.type === FieldType.Entity) {
-        return [{ name: field.column, nullable: true, type: FieldType.String }]
-      }
-      if (field.type === FieldType.ID) return [{ name: field.name, primaryKey: true, type: FieldType.ID }]
-      if (field.type === FieldType.Array) {
-        return [{ arrayType: field.items.type, name: field.name, type: FieldType.Array }]
-      }
-      if (field.type === FieldType.JSON || field.type === FieldType.ValueCollection) {
-        return [{ name: field.name, type: field.type }]
-      }
-      return [{ name: field.name, type: field.type }]
-    }),
+    checks: [{
+      expression: identityCheck('id', entity.idFormat),
+      name: `${entity.name}_id_format_check`,
+    }],
+    columns: entity.fields.map(fieldTableColumn),
     ...(indexes.length > 0 ? { indexes } : {}),
     name: entity.name,
   }
 }
 
 /**
- * Derive indexes for physical forward FKs used by inverse collections.
+ * Build one physical table column from a scalar, array, JSON or reference field.
+ * @param field - Logical field.
+ * @returns Physical column metadata.
+ */
+function fieldTableColumn(field: FieldDefinition): TableColumn {
+  if (field.type === FieldType.Entity) {
+    return { name: field.column, nullable: true, type: FieldType.String }
+  }
+  if (field.type === FieldType.ID) return { name: field.name, primaryKey: true, type: FieldType.ID }
+  if (field.type === FieldType.Array) {
+    return { arrayType: field.items.type, name: field.name, type: FieldType.Array }
+  }
+  return { name: field.name, type: field.type }
+}
+
+/**
+ * Derive indexes for physical forward FKs used by inverse navigations.
  * @param entities - Resolved canonical definitions.
  * @returns Deduplicated indexes by owning entity table.
  */
 function inverseReferenceIndexes(
   entities: readonly EntityDefinition[],
 ): ReadonlyMap<string, readonly TableIndex[]> {
-  const byName = new Map(entities.map(entity => [entity.name, entity]))
   const result = new Map<string, TableIndex[]>()
   const seen = new Set<string>()
   for (const entity of entities) {
     for (const field of entity.fields) {
-      if (field.type !== FieldType.Collection) continue
-      const mapping = field.mapping
-      if (mapping.kind !== 'Inverse') continue
-      const target = byName.get(field.items.target)
-      const forward = target?.effectiveFields.find(candidate => candidate.name === mapping.field)
-      if (!forward || forward.type !== FieldType.Entity) continue
-      const key = `${forward.owner}\u0000${forward.column}`
+      if (field.type !== FieldType.Entity || field.inverse === undefined) continue
+      const key = `${entity.name}\u0000${field.column}`
       if (seen.has(key)) continue
       seen.add(key)
-      const indexes = result.get(forward.owner) ?? []
+      const indexes = result.get(entity.name) ?? []
       indexes.push({
-        columns: [forward.column],
-        name: `${forward.owner}_${forward.column}_fk_idx`,
+        columns: [field.column],
+        name: `${entity.name}_${field.name}_fk_idx`,
       })
-      result.set(forward.owner, indexes)
+      result.set(entity.name, indexes)
     }
   }
   return result
 }
 
-/** One physical many-to-many junction derived from an explicit collection mapping. */
-interface JunctionDefinition {
-  /** Optional ordering column. */
-  readonly orderingColumn?: string,
-  /** Owning entity table. */
-  readonly owner: string,
-  /** Source/owner foreign-key column. */
-  readonly sourceColumn: string,
-  /** Junction table name. */
-  readonly table: string,
-  /** Target entity table. */
-  readonly target: string,
-  /** Target foreign-key column. */
-  readonly targetColumn: string,
-}
-
-/** One foreign-key definition for a junction table. */
-interface JunctionForeignKeyDefinition {
+/** One foreign-key definition for a relationship table. */
+interface RelationshipForeignKeyDefinition {
   /** Local column. */
   readonly column: string,
   /** Deterministic constraint name. */
   readonly name: string,
-  /** Optional CREATE ALTER statement. */
+  /** CREATE ALTER statement. */
   readonly statement: string,
   /** Referenced entity table. */
   readonly target: string,
 }
 
 /**
- * Derive explicit junction tables from local collection mappings.
- * @param entities - Resolved canonical definitions.
- * @returns Junction definitions in declaration order.
- */
-function junctionDefinitions(entities: readonly EntityDefinition[]): readonly JunctionDefinition[] {
-  const result: JunctionDefinition[] = []
-  for (const entity of entities) {
-    for (const field of entity.fields) {
-      if (field.type !== FieldType.Collection || field.mapping.kind !== 'Junction') continue
-      result.push({
-        ...(field.mapping.orderingColumn ? { orderingColumn: field.mapping.orderingColumn } : {}),
-        owner: entity.name,
-        sourceColumn: field.mapping.sourceColumn,
-        table: field.mapping.table,
-        target: field.items.target,
-        targetColumn: field.mapping.targetColumn,
-      })
-    }
-  }
-  return result
-}
-
-/**
- * Build one physical junction table.
- * @param junction - Explicit junction definition.
+ * Build one physical relationship table.
+ * @param relationship - Named relationship definition.
  * @returns Its table metadata.
  */
-function junctionTable(junction: JunctionDefinition): TableDefinition {
-  const columns: TableColumn[] = [
-    { name: junction.sourceColumn, type: FieldType.String },
-    { name: junction.targetColumn, type: FieldType.String },
-  ]
-  if (junction.orderingColumn) {
-    columns.push({ name: junction.orderingColumn, type: FieldType.Number })
-  }
-  const indexes: TableIndex[] = [
-    { columns: [junction.sourceColumn], name: `${junction.table}_${junction.sourceColumn}_idx` },
-    { columns: [junction.targetColumn], name: `${junction.table}_${junction.targetColumn}_idx` },
-  ]
-  if (junction.orderingColumn) {
-    indexes.push({
-      columns: [junction.sourceColumn, junction.orderingColumn],
-      name: `${junction.table}_${junction.sourceColumn}_${junction.orderingColumn}_idx`,
-    })
-  }
+function relationshipTable(relationship: RelationshipDefinition): TableDefinition {
+  const endpointColumns = relationship.between.map(endpoint => ({
+    name: `${endpoint.field}.id`,
+    type: FieldType.String,
+  })) satisfies TableColumn[]
   return {
-    columns,
-    indexes,
-    name: junction.table,
-    primaryKey: [junction.sourceColumn, junction.targetColumn],
+    columns: [...endpointColumns, ...relationship.fields.map(fieldTableColumn)],
+    indexes: relationship.between.map(endpoint => ({
+      columns: [`${endpoint.field}.id`],
+      name: `${relationship.name}_${endpoint.field}_idx`,
+    })),
+    name: relationship.name,
+    primaryKey: endpointColumns.map(column => column.name),
   }
 }
 
 /**
- * Build the foreign-key statements for one junction table.
- * @param junction - Explicit junction definition.
- * @returns Source and target foreign-key statements.
+ * Build the foreign-key statements for one relationship table.
+ * @param relationship - Named relationship definition.
+ * @returns Endpoint foreign-key statements in authored order.
  */
-function junctionConstraints(junction: JunctionDefinition): readonly string[] {
-  return junctionForeignKeyDefinitions(junction).map(definition => definition.statement)
+function relationshipConstraints(relationship: RelationshipDefinition): readonly string[] {
+  return relationshipForeignKeyDefinitions(relationship).map(definition => definition.statement)
 }
 
 /**
- * Build foreign-key metadata for one junction table.
- * @param junction - Explicit junction definition.
- * @returns Source and target foreign-key definitions.
+ * Build foreign-key metadata for one relationship table.
+ * @param relationship - Named relationship definition.
+ * @returns Endpoint foreign-key definitions in authored order.
  */
-function junctionForeignKeyDefinitions(
-  junction: JunctionDefinition,
-): readonly JunctionForeignKeyDefinition[] {
-  return [
-    junctionForeignKey(junction, junction.sourceColumn, junction.owner),
-    junctionForeignKey(junction, junction.targetColumn, junction.target),
-  ]
+function relationshipForeignKeyDefinitions(
+  relationship: RelationshipDefinition,
+): readonly RelationshipForeignKeyDefinition[] {
+  return relationship.between.map(endpoint => (
+    relationshipForeignKey(relationship, endpoint)
+  ))
 }
 
 /**
- * Build one junction foreign-key statement.
- * @param junction - Explicit junction definition.
- * @param column - Local column.
- * @param target - Referenced table.
+ * Build one relationship endpoint foreign-key definition.
+ * @param relationship - Named relationship definition.
+ * @param endpoint - Authored endpoint descriptor.
  * @returns Foreign-key metadata.
  */
-function junctionForeignKey(
-  junction: JunctionDefinition,
-  column: string,
-  target: string,
-): JunctionForeignKeyDefinition {
-  const name = `${junction.table}_${column}_fkey`
+function relationshipForeignKey(
+  relationship: RelationshipDefinition,
+  endpoint: RelationshipEndpointDefinition,
+): RelationshipForeignKeyDefinition {
+  const column = `${endpoint.field}.id`
+  const name = `${relationship.name}_${endpoint.field}_fkey`
   return {
     column,
     name,
-    statement: `alter table ${quoteIdentifier(junction.table)} ` +
+    statement: `alter table ${quoteIdentifier(relationship.name)} ` +
       `add constraint ${quoteIdentifier(name)} ` +
       `foreign key (${quoteIdentifier(column)}) ` +
-      `references ${quoteIdentifier(target)} ("id") deferrable initially immediate`,
-    target,
+      `references ${quoteIdentifier(endpoint.target)} ("id") deferrable initially immediate`,
+    target: endpoint.target,
   }
 }
 
@@ -1880,7 +1751,7 @@ function columnType(column: TableColumn): string {
     if (!column.arrayType) throw new Error(`Array column "${column.name}" has no element type`)
     return `${scalarColumnType(column.arrayType)}[]`
   }
-  if (column.type === FieldType.JSON || column.type === FieldType.ValueCollection) return 'jsonb'
+  if (column.type === FieldType.JSON) return 'jsonb'
   return scalarColumnType(column.type)
 }
 

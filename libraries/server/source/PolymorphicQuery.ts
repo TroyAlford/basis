@@ -1,5 +1,5 @@
-import type { CollectionFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition, ScalarValueCollectionElementDefinition, StructuredValueFieldDefinition, ValueCollectionElementDefinition } from './EntityDefinitions'
-import { FieldType, identityDefinition, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
+import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, InverseDerivedCollectionDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { OrderBy, QueryScope } from './SQL'
@@ -14,6 +14,7 @@ export interface PolymorphicQueryOptions {
   readonly collections?: Readonly<Record<string, {
     readonly limit?: number,
     readonly offset?: number,
+    readonly relationshipFields?: readonly string[],
   }>>,
   /** Effective scalar, scalar-array, JSON, collection, or singular-reference paths to project. */
   readonly fields: readonly string[],
@@ -53,20 +54,6 @@ interface IdentityProjection {
   readonly id: string,
   /** SQL column alias for the target name. */
   readonly name: string,
-}
-
-/** One non-entity value collection projection. */
-interface ValueCollectionProjection {
-  /** Element contract for query-time validation. */
-  readonly element: ValueCollectionElementDefinition,
-  /** SQL alias for the JSON values array. */
-  readonly itemsAlias: string,
-  /** Output field name. */
-  readonly name: string,
-  /** SQL alias for the remaining count. */
-  readonly remainingAlias: string,
-  /** SQL alias for the total count. */
-  readonly totalAlias: string,
 }
 
 /** One entity collection projection. */
@@ -109,10 +96,6 @@ interface ProjectionNode {
   readonly referenceNames: Map<string, ReferenceProjection>,
   /** Singular references selected at this node. */
   readonly references: ReferenceProjection[],
-  /** Value-collection field names already selected at this node. */
-  readonly valueCollectionNames: Set<string>,
-  /** Non-entity value collections selected at this node. */
-  readonly valueCollections: ValueCollectionProjection[],
 }
 
 /** One descendant-only field declaration group. */
@@ -137,15 +120,12 @@ interface DescendantVariant {
   readonly owner: string,
 }
 
-/** One effective collection field with its owning table. */
-type EffectiveCollectionField = CollectionFieldDefinition & {
-  readonly owner: string,
-}
-
 /** Effective-field metadata for one entity occurrence. */
 interface EntityContext {
   /** Base table holding the entity row. */
   readonly baseAlias: string,
+  /** Derived collection navigations exposed by this occurrence. */
+  readonly collections: ReadonlyMap<string, DerivedCollectionDefinition>,
   /** Entity definition for this occurrence. */
   readonly definition: EntityDefinition,
   /** Descendant-only fields keyed by logical name. */
@@ -186,6 +166,7 @@ class QueryProjection {
   readonly #collections: Readonly<Record<string, {
     readonly limit?: number,
     readonly offset?: number,
+    readonly relationshipFields?: readonly string[],
   }>> | undefined
   /** Values bound by collection subqueries. */
   readonly values: unknown[] = []
@@ -204,12 +185,14 @@ class QueryProjection {
     collections?: Readonly<Record<string, {
       readonly limit?: number,
       readonly offset?: number,
+      readonly relationshipFields?: readonly string[],
     }>>,
   ) {
     this.#entities = entities
     this.#collections = collections
     this.root = {
       baseAlias: 't',
+      collections: new Map(definition.collections.map(collection => [collection.name, collection])),
       definition,
       descendants: descendantFields(entities, definition),
       effective: new Map(definition.effectiveFields.map(field => [field.name, field])),
@@ -237,7 +220,7 @@ class QueryProjection {
     const root = this.#node(this.root, [])
     for (const field of fields) this.#addPath(root, field.split('.'), new Set(), 0)
     for (const name of Object.keys(this.#collections ?? {})) {
-      if (!root.collectionNames.has(name) && !root.valueCollectionNames.has(name)) {
+      if (!root.collectionNames.has(name)) {
         throw new Error(`Collection options were provided for unselected field "${name}"`)
       }
     }
@@ -279,25 +262,19 @@ class QueryProjection {
     const name = segments[0]
     if (name === undefined) throw new Error('Query field path cannot be empty')
     const rest = segments.slice(1)
+    const collection = node.context.collections.get(name)
+    if (collection) {
+      if (rest.length > 0) {
+        throw new Error(
+          `Cannot traverse collection field "${node.context.definition.name}.${segments.join('.')}"`,
+        )
+      }
+      this.#addCollection(node, collection)
+      return
+    }
     const effective = node.context.effective.get(name)
 
     if (effective) {
-      if (effective.type === FieldType.ValueCollection) {
-        if (rest.length > 0) {
-          throw new Error(
-            `Cannot traverse value collection field "${node.context.definition.name}.${segments.join('.')}"`,
-          )
-        }
-        this.#addValueCollection(node, effective)
-        return
-      }
-      if (effective.type === FieldType.Collection) {
-        if (rest.length > 0) {
-          throw new Error(`Cannot traverse collection field "${node.context.definition.name}.${segments.join('.')}"`)
-        }
-        this.#addCollection(node, effective as EffectiveCollectionField)
-        return
-      }
       if (effective.type === FieldType.Entity) {
         const path = [...node.path, ...segments].join('.')
         if (references.has(name)) throw new Error(`Repeated reference expansion "${path}"`)
@@ -326,12 +303,6 @@ class QueryProjection {
 
     const descendant = node.context.descendants.get(name)
     if (descendant) {
-      if (descendant.type === FieldType.Collection || descendant.type === FieldType.ValueCollection) {
-        throw new Error(
-          `Query field "${node.context.definition.name}.${name}" is a collection; ` +
-          'descendant collection projections are not supported yet',
-        )
-      }
       if (descendant.contracts.size > 1) {
         throw new Error(
           `Descendant field "${node.context.definition.name}.${name}" has incompatible declarations`,
@@ -427,176 +398,175 @@ class QueryProjection {
   }
 
   /**
-   * Add one root non-entity value-collection envelope projection.
+   * Add one root collection envelope projection.
    * @param node - Projection occurrence.
-   * @param field - Effective value-collection field.
+   * @param collection - Derived collection navigation.
    */
-  #addValueCollection(node: ProjectionNode, field: EffectiveFieldDefinition): void {
-    if (field.type !== FieldType.ValueCollection) throw new Error(`Field "${field.name}" is not a value collection`)
-    if (node.path.length > 0) throw new Error('Nested value-collection projections are not supported yet')
-    if (node.valueCollectionNames.has(field.name)) return
-    const config = this.#collections?.[field.name]
-    const limit = config?.limit ?? 3
-    const offset = config?.offset ?? 0
-    if (!Number.isInteger(limit) || limit < 1) {
-      throw new Error(`Collection "${field.name}" limit must be a positive integer`)
-    }
-    if (!Number.isInteger(offset) || offset < 0) {
-      throw new Error(`Collection "${field.name}" offset must be a non-negative integer`)
-    }
-    const column = this.#expression(node.context, field, false)
-    const itemsAlias = `${field.name}__items`
-    const totalAlias = `${field.name}__total`
-    const remainingAlias = `${field.name}__remaining`
-    const items = this.#bind(limit)
-    const itemOffset = this.#bind(offset)
-    const remainingOffset = this.#bind(offset + limit)
-    const countExpression = field.unique
-      ? `(SELECT count(DISTINCT value::text)::int FROM jsonb_array_elements(${column}) AS element(value))`
-      : `jsonb_array_length(${column})::int`
-    const countAlias = this.#nextAlias('c')
-    this.joins.push(
-      `LEFT JOIN LATERAL (SELECT ${countExpression} AS "total") "${countAlias}" ON TRUE`,
-    )
-    const order = field.ordered ? 'ordinality' : 'value::text'
-    const valueSource = `jsonb_array_elements(${column}) WITH ORDINALITY AS element(value, ordinality)`
-    const itemsExpression = field.unique
-      ? `COALESCE((SELECT jsonb_agg(value ORDER BY ${order}) FROM (` +
-        'SELECT value, ordinality FROM (' +
-        `SELECT DISTINCT ON (value::text) value, ordinality FROM ${valueSource} ` +
-        'ORDER BY value::text, ordinality' +
-        `) AS distinct_values ORDER BY ${order} LIMIT ${items} OFFSET ${itemOffset}` +
-        ') AS value_page), \'[]\'::jsonb)'
-      : `COALESCE((SELECT jsonb_agg(value ORDER BY ${order}) FROM (` +
-        `SELECT value, ordinality FROM ${valueSource} ` +
-        `ORDER BY ${order} LIMIT ${items} OFFSET ${itemOffset}) AS value_page), '[]'::jsonb)`
-    this.columns.push(
-      `${itemsExpression} AS "${itemsAlias}"`,
-      `"${countAlias}"."total" AS "${totalAlias}"`,
-      `GREATEST("${countAlias}"."total" - ${remainingOffset}, 0) AS "${remainingAlias}"`,
-    )
-    node.valueCollectionNames.add(field.name)
-    node.valueCollections.push({
-      element: field.items,
-      itemsAlias,
-      name: field.name,
-      remainingAlias,
-      totalAlias,
-    })
-  }
-
-  /**
-   * Add one root entity collection envelope projection.
-   * @param node - Projection occurrence.
-   * @param field - Effective collection field.
-   */
-  #addCollection(node: ProjectionNode, field: EffectiveCollectionField): void {
-    if (field.type !== FieldType.Collection) throw new Error(`Field "${field.name}" is not a collection`)
+  #addCollection(node: ProjectionNode, collection: DerivedCollectionDefinition): void {
     if (node.path.length > 0) {
       throw new Error('Nested collection projections are not supported yet')
     }
-    if (node.collectionNames.has(field.name)) return
-    const config = this.#collections?.[field.name]
+    if (node.collectionNames.has(collection.name)) return
+    const config = this.#collections?.[collection.name]
     const limit = config?.limit ?? 3
     const offset = config?.offset ?? 0
     if (!Number.isInteger(limit) || limit < 1) {
-      throw new Error(`Collection "${field.name}" limit must be a positive integer`)
+      throw new Error(`Collection "${collection.name}" limit must be a positive integer`)
     }
     if (!Number.isInteger(offset) || offset < 0) {
-      throw new Error(`Collection "${field.name}" offset must be a non-negative integer`)
+      throw new Error(`Collection "${collection.name}" offset must be a non-negative integer`)
     }
-    const target = field.items.target
-    const targetDefinition = target === 'Entity' ? null : this.#entities.entity(target)
-    if (target !== 'Entity' && !targetDefinition) throw new Error(`Unknown target entity "${target}"`)
-    if (field.mapping.kind === 'Inverse') {
-      this.#addInverseCollection(node, field, targetDefinition, target, limit, offset)
+    if (collection.kind === 'inverse') {
+      if (config?.relationshipFields !== undefined) {
+        throw new Error(
+          `Collection "${collection.name}" is an inverse navigation and does not accept relationshipFields`,
+        )
+      }
+      this.#addInverseCollection(node, collection, limit, offset)
     } else {
-      this.#addJunctionCollection(node, field, targetDefinition, target, limit, offset)
+      const fields = this.#relationshipFields(collection, config?.relationshipFields)
+      this.#addRelationshipCollection(node, collection, fields, limit, offset)
     }
-    node.collectionNames.add(field.name)
+    node.collectionNames.add(collection.name)
   }
 
   /**
-   * Add an inverse collection subquery.
+   * Validate selected relationship properties for one navigation.
+   * @param collection - Relationship-backed navigation.
+   * @param names - Requested direct property names.
+   * @returns Selected relationship fields in request order.
+   */
+  #relationshipFields(
+    collection: RelationshipDerivedCollectionDefinition,
+    names: readonly string[] | undefined,
+  ): readonly RelationshipFieldDefinition[] {
+    if (names === undefined) return []
+    if (!Array.isArray(names)) {
+      throw new Error(`Collection "${collection.name}" relationshipFields must be an array`)
+    }
+    const result: RelationshipFieldDefinition[] = []
+    const seen = new Set<string>()
+    for (const name of names) {
+      if (typeof name !== 'string') {
+        throw new Error(`Collection "${collection.name}" relationshipFields must contain strings`)
+      }
+      if (seen.has(name)) continue
+      const field = collection.relationship.fields.find(candidate => candidate.name === name)
+      if (!field) {
+        throw new Error(
+          `Unknown relationship field "${collection.relationship.name}.${name}" ` +
+          `for collection "${collection.name}"`,
+        )
+      }
+      if (field.type === FieldType.Array || field.type === FieldType.JSON) {
+        throw new Error(
+          `Relationship field "${collection.relationship.name}.${name}" is not a scalar property`,
+        )
+      }
+      seen.add(name)
+      result.push(field)
+    }
+    return result
+  }
+
+  /**
+   * Add an inverse-collection subquery.
    * @param node - Root projection occurrence.
-   * @param field - Collection field.
-   * @param targetDefinition - Target entity, unless the target is `Entity`.
-   * @param target - Target entity name.
+   * @param collection - Inverse navigation.
    * @param limit - Preview row limit.
    * @param offset - Preview row offset.
    */
   #addInverseCollection(
     node: ProjectionNode,
-    field: EffectiveCollectionField,
-    targetDefinition: EntityDefinition | null,
-    target: string,
+    collection: InverseDerivedCollectionDefinition,
     limit: number,
     offset: number,
   ): void {
-    const mapping = field.mapping
-    if (mapping.kind !== 'Inverse') throw new Error('Expected an inverse collection mapping')
-    if (!targetDefinition) throw new Error('Inverse collection targets must declare an entity')
-    const forward = targetDefinition.effectiveFields.find(candidate => candidate.name === mapping.field)
-    if (!forward || forward.type !== FieldType.Entity) {
-      throw new Error(`Unknown forward reference "${target}.${mapping.field}"`)
+    const target = collection.target
+    if (target !== 'Entity' && !this.#entities.entity(target)) {
+      throw new Error(`Unknown target entity "${target}"`)
     }
-    const owner = forward.owner
-    const relation = owner === target
-      ? `"${target}" "ct" JOIN "Entity" "cr" ON "cr"."id" = "ct"."id"`
-      : `"${owner}" "fo" JOIN "${target}" "ct" ON "ct"."id" = "fo"."id" ` +
-        'JOIN "Entity" "cr" ON "cr"."id" = "ct"."id"'
-    const condition = `"${owner === target ? 'ct' : 'fo'}".${quote(forward.column)} = ` +
-      `"${node.context.baseAlias}"."id"`
-    this.#addCollectionColumns(node, field, 'cr', relation, condition, '"cr"."id"', limit, offset)
+    const relation = target === 'Entity'
+      ? '"Entity" "cr"'
+      : `"${target}" "ct" JOIN "Entity" "cr" ON "cr"."id" = "ct"."id"`
+    const condition = target === 'Entity'
+      ? `"cr"."id" = "${node.context.baseAlias}"."id"`
+      : `"ct".${quote(collection.reference.column)} = "${node.context.baseAlias}"."id"`
+    this.#addCollectionColumns(node, collection, 'cr', relation, condition, '"cr"."id"', limit, offset)
   }
 
-  #addJunctionCollection(
+  /**
+   * Add a relationship-backed collection subquery.
+   * @param node - Root projection occurrence.
+   * @param collection - Relationship navigation.
+   * @param fields - Selected relationship properties.
+   * @param limit - Preview row limit.
+   * @param offset - Preview row offset.
+   */
+  #addRelationshipCollection(
     node: ProjectionNode,
-    field: EffectiveCollectionField,
-    targetDefinition: EntityDefinition | null,
-    target: string,
+    collection: RelationshipDerivedCollectionDefinition,
+    fields: readonly RelationshipFieldDefinition[],
     limit: number,
     offset: number,
   ): void {
-    const mapping = field.mapping
-    if (mapping.kind !== 'Junction') throw new Error('Expected a junction collection mapping')
-    const source = `"${mapping.table}" "cj"`
+    const relationship = collection.relationship
+    const local = relationship.between[collection.endpoint]
+    const remote = relationship.between[collection.endpoint === 0 ? 1 : 0]
+    const target = collection.target
+    if (target !== 'Entity' && !this.#entities.entity(target)) {
+      throw new Error(`Unknown target entity "${target}"`)
+    }
+    const source = `"${relationship.name}" "cj"`
     const relation = target === 'Entity'
-      ? `${source} JOIN "Entity" "cr" ON "cr"."id" = "cj".${quote(mapping.targetColumn)}`
-      : `${source} JOIN "${target}" "ct" ON "ct"."id" = "cj".${quote(mapping.targetColumn)} ` +
+      ? `${source} JOIN "Entity" "cr" ON "cr"."id" = "cj".${quote(`${remote.field}.id`)}`
+      : `${source} JOIN "${target}" "ct" ON "ct"."id" = "cj".${quote(`${remote.field}.id`)} ` +
         'JOIN "Entity" "cr" ON "cr"."id" = "ct"."id"'
-    if (target !== 'Entity' && !targetDefinition) throw new Error(`Unknown target entity "${target}"`)
-    const condition = `"cj".${quote(mapping.sourceColumn)} = "${node.context.baseAlias}"."id"`
-    const orderBy = mapping.orderingColumn
-      ? `"cj".${quote(mapping.orderingColumn)}`
-      : '"cr"."id"'
-    this.#addCollectionColumns(node, field, 'cr', relation, condition, orderBy, limit, offset)
+    const condition = `"cj".${quote(`${local.field}.id`)} = "${node.context.baseAlias}"."id"`
+    this.#addCollectionColumns(
+      node,
+      collection,
+      'cr',
+      relation,
+      condition,
+      '"cr"."id"',
+      limit,
+      offset,
+      { fields, name: relationship.name },
+    )
   }
 
   /**
    * Add collection count and preview columns using correlated subqueries.
    * @param node - Root projection occurrence.
-   * @param field - Collection field.
+   * @param collection - Derived collection navigation.
    * @param targetRoot - Target root alias inside the collection relation.
    * @param relation - Collection relation SQL.
    * @param condition - Correlated relation condition.
-   * @param orderBy - Declared collection ordering expression.
+   * @param orderBy - Stable collection ordering expression.
    * @param limit - Preview row limit.
    * @param offset - Preview row offset.
+   * @param relationship - Relationship context; its fields are nested under its lowercased name.
+   * @param relationship.fields - Selected scalar relationship properties.
+   * @param relationship.name - Relationship name used as the nested result property.
    */
   #addCollectionColumns(
     node: ProjectionNode,
-    field: EffectiveCollectionField,
+    collection: DerivedCollectionDefinition,
     targetRoot: string,
     relation: string,
     condition: string,
     orderBy: string,
     limit: number,
     offset: number,
+    relationship?: {
+      readonly fields: readonly RelationshipFieldDefinition[],
+      readonly name: string,
+    },
   ): void {
-    const itemsAlias = `${field.name}__items`
-    const totalAlias = `${field.name}__total`
-    const remainingAlias = `${field.name}__remaining`
+    const itemsAlias = `${collection.name}__items`
+    const totalAlias = `${collection.name}__total`
+    const remainingAlias = `${collection.name}__remaining`
     const items = this.#bind(limit)
     const itemOffset = this.#bind(offset)
     const remainingOffset = this.#bind(offset + limit)
@@ -605,20 +575,30 @@ class QueryProjection {
       `LEFT JOIN LATERAL (SELECT count(*)::int AS "total" FROM ${relation} WHERE ${condition}) ` +
       `"${countAlias}" ON TRUE`,
     )
+    const relationshipColumns = (relationship?.fields ?? []).map(field => (
+      `"cj".${quote(field.name)} AS ${quote(`relationship__${field.name}`)}`
+    ))
+    const relationshipObject = relationship && relationship.fields.length > 0
+      ? `, ${quoteLiteral(lowerFirst(relationship.name))}, json_build_object(${relationship.fields.map(field => (
+        `${quoteLiteral(field.name)}, collection_page.${quote(`relationship__${field.name}`)}`
+      )).join(', ')})`
+      : ''
     this.columns.push(
       'COALESCE((' +
       'SELECT json_agg(json_build_object(\'id\', collection_page."id", \'name\', collection_page."name", ' +
-      '\'entity\', collection_page."entity") ' +
+      `'entity', collection_page."entity"${relationshipObject}) ` +
       'ORDER BY collection_page."order_by", collection_page."id") ' +
       `FROM (SELECT "${targetRoot}"."id" AS "id", "${targetRoot}"."name" AS "name", ` +
-      `"${targetRoot}"."entity" AS "entity", ${orderBy} AS "order_by" FROM ${relation} ` +
+      `"${targetRoot}"."entity" AS "entity", ${orderBy} AS "order_by"` +
+      `${relationshipColumns.length > 0 ? `, ${relationshipColumns.join(', ')}` : ''} ` +
+      `FROM ${relation} ` +
       `WHERE ${condition} ORDER BY ${orderBy} ASC, "${targetRoot}"."id" ASC ` +
       `LIMIT ${items} OFFSET ${itemOffset}) AS collection_page), ` +
       `'[]'::json) AS "${itemsAlias}"`,
       `"${countAlias}"."total" AS "${totalAlias}"`,
       `GREATEST("${countAlias}"."total" - ${remainingOffset}, 0) AS "${remainingAlias}"`,
     )
-    node.collections.push({ itemsAlias, name: field.name, remainingAlias, totalAlias })
+    node.collections.push({ itemsAlias, name: collection.name, remainingAlias, totalAlias })
   }
 
   /**
@@ -639,12 +619,7 @@ class QueryProjection {
     if (node.fieldNames.has(name)) return
     if (node.identity && (name === 'id' || name === 'name' || name === 'entity')) return
     const field = node.context.effective.get(name)
-    if (
-      !field
-      || field.type === FieldType.Collection
-      || field.type === FieldType.ValueCollection
-      || field.type === FieldType.Entity
-    ) {
+    if (!field || field.type === FieldType.Entity) {
       throw new Error(`Unknown scalar field "${name}"`)
     }
     const alias = columnAlias(node.path, name)
@@ -760,8 +735,6 @@ class QueryProjection {
       path,
       referenceNames: new Map(),
       references: [],
-      valueCollectionNames: new Set(),
-      valueCollections: [],
     }
   }
 
@@ -801,12 +774,6 @@ export function compilePolymorphicQuery(
         'references cannot be used in predicates or ordering',
       )
     }
-    if (value.type === FieldType.Collection) {
-      throw new Error(
-        `Query field "${definition.name}.${name}" is a collection; ` +
-        'collection fields cannot be used in predicates or ordering',
-      )
-    }
     if (value.type === FieldType.Array) {
       throw new Error(
         `Query field "${definition.name}.${name}" is an array; ` +
@@ -817,12 +784,6 @@ export function compilePolymorphicQuery(
       throw new Error(
         `Query field "${definition.name}.${name}" is JSON; ` +
         'JSON fields cannot be used in predicates or ordering',
-      )
-    }
-    if (value.type === FieldType.ValueCollection) {
-      throw new Error(
-        `Query field "${definition.name}.${name}" is a value collection; ` +
-        'value collections cannot be used in predicates or ordering',
       )
     }
     return value
@@ -893,6 +854,7 @@ function rootContext(entities: EntityDefinitions, rootAlias: string): EntityCont
   const definition = identityDefinition()
   return {
     baseAlias: rootAlias,
+    collections: new Map(entities.collections('Entity').map(collection => [collection.name, collection])),
     definition,
     descendants: universalDescendantFields(entities, definition),
     effective: new Map(definition.effectiveFields.map(field => [field.name, field])),
@@ -920,6 +882,7 @@ function targetContext(
 ): EntityContext {
   return {
     baseAlias,
+    collections: new Map(definition.collections.map(collection => [collection.name, collection])),
     definition,
     descendants: descendantFields(entities, definition),
     effective: new Map(definition.effectiveFields.map(field => [field.name, field])),
@@ -1024,18 +987,8 @@ function collectDescendantFields(
  */
 function fieldContract(field: FieldDefinition): string {
   if (field.type === FieldType.JSON) return 'JSON'
-  if (field.type === FieldType.ValueCollection) {
-    return `ValueCollection:${field.ordered}:${field.unique}:${field.storage}`
-  }
   if (field.type === FieldType.Array) {
     return `Array:${field.items.type}:${field.items.format ?? ''}`
-  }
-  if (field.type === FieldType.Collection) {
-    const mapping = field.mapping.kind === 'Inverse'
-      ? `Inverse:${field.mapping.field}`
-      : `Junction:${field.mapping.table}:${field.mapping.sourceColumn}:` +
-        `${field.mapping.targetColumn}:${field.mapping.orderingColumn ?? ''}`
-    return `Collection:${field.items.target}:${mapping}`
   }
   if (field.type === FieldType.Entity) return `Entity:${field.target}`
   return `${field.type}:${field.format ?? ''}`
@@ -1087,9 +1040,6 @@ function hydrateRoot(
   for (const collection of node.collections) {
     result[collection.name] = hydrateCollection(row, collection)
   }
-  for (const collection of node.valueCollections) {
-    result[collection.name] = hydrateValueCollection(row, collection)
-  }
   for (const reference of node.references) {
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
@@ -1117,129 +1067,6 @@ function hydrateCollection(
     remaining: Number(row[collection.remainingAlias] ?? 0),
     total: Number(row[collection.totalAlias] ?? 0),
   }
-}
-
-/**
- * Hydrate one non-entity value collection envelope.
- * @param row - Flat SQL row.
- * @param collection - Value collection projection metadata.
- * @returns The `{ items, total, remaining }` envelope.
- */
-function hydrateValueCollection(
-  row: Record<string, unknown>,
-  collection: ValueCollectionProjection,
-): { items: unknown[], remaining: number, total: number } {
-  const raw = row[collection.itemsAlias]
-  const items = Array.isArray(raw)
-    ? raw
-    : typeof raw === 'string'
-      ? JSON.parse(raw) as unknown[]
-      : []
-  for (const item of items) validateValueCollectionItem(collection.name, collection.element, item)
-  return {
-    items,
-    remaining: Number(row[collection.remainingAlias] ?? 0),
-    total: Number(row[collection.totalAlias] ?? 0),
-  }
-}
-
-/**
- * Validate one stored value against a canonical collection element contract.
- * @param collection - Collection field name.
- * @param element - Canonical element contract.
- * @param value - Stored value.
- */
-function validateValueCollectionItem(
-  collection: string,
-  element: ValueCollectionElementDefinition,
-  value: unknown,
-): void {
-  if (element.type === 'Structured') {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      throw new Error(`Invalid structured value in collection "${collection}"`)
-    }
-    const record = value as Record<string, unknown>
-    for (const field of element.fields) {
-      if (!(field.name in record)) {
-        throw new Error(`Invalid structured value in collection "${collection}": missing "${field.name}"`)
-      }
-      validateScalarValue(collection, field, record[field.name])
-    }
-    return
-  }
-  validateScalarValue(collection, element, value)
-}
-
-/**
- * Validate one scalar value in a collection.
- * @param collection - Collection field name.
- * @param descriptor - Scalar descriptor including its declared format.
- * @param value - Stored value.
- */
-function validateScalarValue(
-  collection: string,
-  descriptor: ScalarValueCollectionElementDefinition | StructuredValueFieldDefinition,
-  value: unknown,
-): void {
-  const label = 'name' in descriptor ? `${collection}.${descriptor.name}` : collection
-  if (descriptor.type === FieldType.JSON) return
-  if (descriptor.type === FieldType.Boolean) {
-    if (typeof value !== 'boolean') throw new Error(`Invalid value in collection "${label}"`)
-    return
-  }
-  if (descriptor.type === FieldType.Number) {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-      throw new Error(`Invalid value in collection "${label}"`)
-    }
-    return
-  }
-  if (descriptor.type === FieldType.String) {
-    if (typeof value !== 'string') throw new Error(`Invalid value in collection "${label}"`)
-    return
-  }
-  if (descriptor.type === FieldType.ID) {
-    if (
-      typeof value !== 'string'
-      || (descriptor.format === 'UUID' && !isCanonicalUUID(value))
-      || (descriptor.format === 'Snowflake' && !isCanonicalSnowflake(value))
-      || (descriptor.format === undefined && !isCanonicalUUID(value) && !isCanonicalSnowflake(value))
-    ) {
-      throw new Error(`Invalid value in collection "${label}"`)
-    }
-    return
-  }
-  if (descriptor.type === FieldType.Date) {
-    if (!isDate(value)) throw new Error(`Invalid value in collection "${label}"`)
-    return
-  }
-  if (descriptor.type === FieldType.Timestamp) {
-    if (!isTimestamp(value)) throw new Error(`Invalid value in collection "${label}"`)
-    return
-  }
-  throw new Error(`Invalid value in collection "${label}"`)
-}
-
-/**
- * Whether a value is a valid ISO calendar date.
- * @param value - Candidate value.
- * @returns `true` for `YYYY-MM-DD` dates that exist.
- */
-function isDate(value: unknown): boolean {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
-  const [year, month, day] = value.split('-').map(Number) as [number, number, number]
-  const date = new Date(Date.UTC(year, month - 1, day))
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
-}
-
-/**
- * Whether a value is a valid ISO timestamp string.
- * @param value - Candidate value.
- * @returns `true` for parseable ISO timestamps with a time component.
- */
-function isTimestamp(value: unknown): boolean {
-  return typeof value === 'string'
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/.test(value)
-    && Number.isFinite(Date.parse(value))
 }
 
 /**
@@ -1282,6 +1109,15 @@ function hydrateReference(
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
   return result
+}
+
+/**
+ * Lowercase only the first character of a relationship name.
+ * @param value - Relationship name.
+ * @returns Its nested result property name.
+ */
+function lowerFirst(value: string): string {
+  return value.length === 0 ? value : `${value[0]?.toLowerCase()}${value.slice(1)}`
 }
 
 /**

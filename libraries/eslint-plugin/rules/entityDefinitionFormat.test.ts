@@ -37,75 +37,54 @@ describe('entityDefinitionFormat', () => {
     expect(lint(code).fixed).toBe(false)
   })
 
-  test('orders native arrays and explicit relationship collections canonically', () => {
+  test('orders native arrays and named relationships canonically', () => {
     const code = JSON.stringify({
       entities: [{
         fields: [
           {
             field: 'tags',
+            fields: undefined,
             items: { type: 'String' },
             type: 'Array',
           },
           {
-            field: 'ownedArticles',
-            items: { target: 'Article', type: 'Entity' },
-            mapping: { field: 'owner', kind: 'Inverse' },
-            type: 'Collection',
-          },
-        ],
-        name: 'Tagged',
-      }, {
-        fields: [
-          { field: 'id', format: 'Snowflake' },
-          {
-            column: 'ownerId',
-            field: 'owner',
-            target: 'Tagged',
+            field: 'author',
+            inverse: 'articles',
+            target: 'User',
             type: 'Entity',
           },
         ],
         name: 'Article',
+      }, {
+        fields: [],
+        name: 'User',
+      }, {
+        fields: [],
+        name: 'Campaign',
+      }],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [
+          { field: 'role', type: 'String' },
+        ],
+        name: 'Membership',
       }],
     })
     const output = lint(code)
     expect(output.fixed).toBe(true)
     expect(output.output).toContain('"field": "tags"')
     expect(output.output).toContain('"type": "Array"')
-    expect(output.output).toContain('"field": "ownedArticles"')
-    expect(output.output).toContain('"type": "Collection"')
-    expect(output.output).toContain('"mapping": {')
-    expect(output.output).toContain('"kind": "Inverse"')
-    expect(output.output).toContain('"field": "owner"')
-  })
-
-  test('orders value collections and structured element fields canonically', () => {
-    const code = JSON.stringify({
-      entities: [{
-        fields: [{
-          field: 'events',
-          items: {
-            fields: [
-              { field: 'count', type: 'Number' },
-              { field: 'kind', type: 'String' },
-            ],
-            type: 'Structured',
-          },
-          ordered: false,
-          storage: 'jsonb',
-          type: 'ValueCollection',
-          unique: true,
-        }],
-        name: 'Document',
-      }],
-    })
-    const output = lint(code)
-    expect(output.fixed).toBe(true)
-    expect(output.output).toContain('"field": "events"')
-    expect(output.output).toContain('"type": "ValueCollection"')
-    expect(output.output).toContain('"ordered": false')
-    expect(output.output).toContain('"unique": true')
-    expect(output.output).toContain('"storage": "jsonb"')
-    expect(output.output).toContain('"field": "count"')
+    expect(output.output).toContain('"field": "author"')
+    expect(output.output).toContain('"inverse": "articles"')
+    expect(output.output).toContain('"relationships": [')
+    expect(output.output).toContain('"between": [')
+    expect(output.output).toContain('"field": "user"')
+    expect(output.output).toContain('"inverse": "campaigns"')
+    expect(output.output).toContain('"field": "role"')
+    expect(output.output.indexOf('"entities"')).toBeLessThan(output.output.indexOf('"relationships"'))
   })
 
   test('delegates semantics to the canonical loader before fixing', () => {
@@ -134,7 +113,13 @@ describe('entityDefinitionFormat', () => {
   })
 
   test('reports obsolete vocabulary without fixing', () => {
-    const code = '{"entities":[{"name":"User","fields":[{"name":"id","type":"uuid"}]}]}'
-    expect(lint(code).fixed).toBe(false)
+    for (const code of [
+      '{"entities":[{"name":"User","fields":[{"name":"id","type":"uuid"}]}]}',
+      '{"entities":[{"name":"User","fields":[{"field":"events",' +
+        '"type":"ValueCollection","items":{"type":"Structured"}}]}]}',
+      '{"entities":[{"name":"User","fields":[{"field":"owner","column":"ownerId","target":"User","type":"Entity"}]}]}',
+    ]) {
+      expect(lint(code).fixed).toBe(false)
+    }
   })
 })

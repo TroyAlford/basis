@@ -166,7 +166,7 @@ const ontology = {
       extends: 'User',
       fields: [
         { field: 'permissions', type: 'String' },
-        { column: 'managerId', field: 'manager', target: 'User', type: 'Entity' },
+        { field: 'manager', inverse: 'managedUsers', target: 'User', type: 'Entity' },
       ],
       name: 'SystemUser',
     },
@@ -178,10 +178,38 @@ const ontology = {
   ],
 }
 
+/** The exact canonical relationship fixture from the accepted ontology. */
+const relationshipOntology = {
+  entities: [
+    { fields: [], name: 'User' },
+    { fields: [], name: 'Campaign' },
+    {
+      fields: [
+        { field: 'author', inverse: 'articles', target: 'User', type: 'Entity' },
+        { field: 'tags', items: { type: 'String' }, type: 'Array' },
+        { field: 'payload', type: 'JSON' },
+      ],
+      name: 'Article',
+    },
+  ],
+  relationships: [{
+    between: [
+      { field: 'user', inverse: 'campaigns', target: 'User' },
+      { field: 'campaign', inverse: 'members', target: 'Campaign' },
+    ],
+    fields: [
+      { field: 'role', type: 'String' },
+      { field: 'favorites', type: 'String' },
+    ],
+    name: 'Membership',
+  }],
+}
+
 describe('EntityDefinitions', () => {
   test('exposes the canonical universal identity root metadata', () => {
     const root = identityDefinition()
     expect(root.name).toBe('Entity')
+    expect(root.collections).toEqual([])
     expect(root.effectiveFields.map(field => field.name)).toEqual(['id', 'name', 'entity'])
     expect(root.effectiveFields.every(field => field.owner === 'Entity')).toBe(true)
   })
@@ -190,7 +218,6 @@ describe('EntityDefinitions', () => {
     expect(Object.values(FieldType).map(String)).toEqual([
       'Array',
       'Boolean',
-      'Collection',
       'Date',
       'Entity',
       'ID',
@@ -198,391 +225,287 @@ describe('EntityDefinitions', () => {
       'Number',
       'String',
       'Timestamp',
-      'ValueCollection',
     ])
   })
 
-  test('accepts typed non-entity value collections and structured elements', () => {
-    const entities = load({
-      entities: [{
-        fields: [
-          { field: 'id', format: 'UUID' },
-          {
+  test('accepts the exact named-relationship ontology and derives both directions', () => {
+    const entities = load(relationshipOntology)
+    const user = entities.entity('User')
+    const campaign = entities.entity('Campaign')
+    const article = entities.entity('Article')
+
+    expect(user?.collections.map(collection => collection.name)).toEqual(['articles', 'campaigns'])
+    expect(campaign?.collections.map(collection => collection.name)).toEqual(['members'])
+    expect(article?.collections).toEqual([])
+    expect(article?.fields).toContainEqual({
+      column: 'author.id',
+      inverse: 'articles',
+      name: 'author',
+      target: 'User',
+      type: FieldType.Entity,
+    })
+    expect(article?.fields).toContainEqual({
+      items: { type: FieldType.String },
+      name: 'tags',
+      type: FieldType.Array,
+    })
+    expect(article?.fields).toContainEqual({ name: 'payload', type: FieldType.JSON })
+    expect(entities.relationships).toHaveLength(1)
+    expect(entities.relationship('Membership')).toMatchObject({
+      between: [
+        { field: 'user', inverse: 'campaigns', target: 'User' },
+        { field: 'campaign', inverse: 'members', target: 'Campaign' },
+      ],
+      name: 'Membership',
+    })
+
+    const ddl = entities.ddl.join('\n')
+    expect(ddl).toContain('create table "Membership"')
+    expect(ddl).toContain('"user.id" text not null')
+    expect(ddl).toContain('"campaign.id" text not null')
+    expect(ddl).toContain('"role" text not null')
+    expect(ddl).toContain('"favorites" text not null')
+    expect(ddl).toContain('primary key ("user.id", "campaign.id")')
+    expect(ddl).toContain('foreign key ("user.id") references "User" ("id")')
+    expect(ddl).toContain('foreign key ("campaign.id") references "Campaign" ("id")')
+    expect(ddl).toContain('create index if not exists "Membership_user_idx" on "Membership" ("user.id")')
+    expect(ddl).toContain('create index if not exists "Membership_campaign_idx" on "Membership" ("campaign.id")')
+    expect(ddl).toContain('"author.id" text')
+    expect(ddl).toContain('create index if not exists "Article_author_fk_idx" on "Article" ("author.id")')
+  })
+
+  test('rejects the removed value-collection, structured and junction grammar', () => {
+    const cases = [
+      {
+        entities: [{
+          fields: [{
             field: 'labels',
             items: { type: 'String' },
             ordered: true,
             storage: 'jsonb',
             type: 'ValueCollection',
             unique: false,
-          },
-          {
+          }],
+          name: 'Document',
+        }],
+      },
+      {
+        entities: [{
+          fields: [{
             field: 'events',
             items: {
-              fields: [
-                { field: 'kind', type: 'String' },
-                { field: 'count', type: 'Number' },
-              ],
+              fields: [{ field: 'kind', type: 'String' }],
               type: 'Structured',
             },
             ordered: false,
             storage: 'jsonb',
             type: 'ValueCollection',
             unique: true,
-          },
-        ],
-        name: 'Document',
-      }],
-    })
-    expect(entities.entity('Document')?.fields[1]).toEqual({
-      items: { type: FieldType.String },
-      name: 'labels',
-      ordered: true,
-      storage: 'jsonb',
-      type: FieldType.ValueCollection,
-      unique: false,
-    })
-    expect(entities.entity('Document')?.fields[2]).toMatchObject({
-      items: { type: 'Structured' },
-      name: 'events',
-      ordered: false,
-      type: FieldType.ValueCollection,
-      unique: true,
-    })
-    expect(entities.ddl.join('\n')).toContain('"labels" jsonb not null')
-    expect(entities.ddl.join('\n')).toContain('"events" jsonb not null')
-    expect(entities.ddl.join('\n')).toContain('jsonb_typeof("labels") = \'array\'')
-  })
-
-  test('rejects malformed value collections', () => {
-    const cases = [
-      {
-        fields: [{ field: 'labels', items: { type: 'String' }, ordered: true, type: 'ValueCollection', unique: false }],
-        name: 'Document',
+          }],
+          name: 'Document',
+        }],
       },
       {
-        fields: [{
-          field: 'labels',
-          items: { target: 'Document', type: 'Entity' },
-          ordered: true,
-          storage: 'jsonb',
-          type: 'ValueCollection',
-          unique: false,
+        entities: [{
+          fields: [{ field: 'tags', items: { type: 'Structured' }, type: 'Array' }],
+          name: 'Document',
         }],
-        name: 'Document',
       },
       {
-        fields: [{
-          field: 'events',
-          items: { fields: [], type: 'Structured' },
-          ordered: true,
-          storage: 'jsonb',
-          type: 'ValueCollection',
-          unique: false,
+        entities: [{
+          fields: [{
+            field: 'members',
+            items: { target: 'User', type: 'Entity' },
+            mapping: { field: 'owner', kind: 'Inverse' },
+            type: 'Collection',
+          }],
+          name: 'Group',
         }],
-        name: 'Document',
       },
       {
-        fields: [{
-          field: 'events',
-          items: {
-            fields: [
-              { field: 'x', type: 'String' },
-              { field: 'x', type: 'Number' },
-            ],
-            type: 'Structured',
-          },
-          ordered: true,
-          storage: 'jsonb',
-          type: 'ValueCollection',
-          unique: false,
+        entities: [{
+          fields: [{ column: 'ownerId', field: 'owner', target: 'User', type: 'Entity' }],
+          name: 'Note',
         }],
-        name: 'Document',
+      },
+      {
+        entities: [],
+        relationships: [{
+          between: [],
+          fields: [],
+          name: 'Membership',
+          type: 'ManyToMany',
+        }],
       },
     ]
-    for (const entity of cases) expect(() => load({ entities: [entity] })).toThrow()
+    for (const value of cases) expect(() => load(value)).toThrow()
   })
 
-  test('accepts structured JSON fields and maps them to jsonb', () => {
+  test('rejects invalid relationship endpoints, names, fields and alias collisions', () => {
+    const base = {
+      entities: [
+        { fields: [], name: 'User' },
+        { fields: [], name: 'Campaign' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [],
+        name: 'Membership',
+      }],
+    }
+    expect(() => load(base)).not.toThrow()
+    expect(() => load({
+      ...base,
+      relationships: [{ ...base.relationships[0], name: 'User' }],
+    })).toThrow('conflicts with an entity name')
+    expect(() => load({
+      ...base,
+      relationships: [base.relationships[0], base.relationships[0]],
+    })).toThrow('duplicate relationship')
+    expect(() => load({
+      ...base,
+      relationships: [{
+        ...base.relationships[0],
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'Missing' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+      }],
+    })).toThrow('unknown target entity "Missing"')
+    expect(() => load({
+      ...base,
+      relationships: [{
+        ...base.relationships[0],
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'user', inverse: 'members', target: 'Campaign' },
+        ],
+      }],
+    })).toThrow('endpoint fields must differ')
+    expect(() => load({
+      ...base,
+      relationships: [{
+        ...base.relationships[0],
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'campaigns', target: 'Campaign' },
+        ],
+      }],
+    })).toThrow('endpoint inverse names must differ')
+    expect(() => load({
+      ...base,
+      entities: [{ fields: [{ field: 'campaigns', type: 'String' }], name: 'User' }, base.entities[1]],
+    })).toThrow('conflicts with a field')
+    expect(() => load({
+      ...base,
+      relationships: [{
+        ...base.relationships[0],
+        fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
+      }],
+    })).toThrow('must be a scalar, array or JSON field')
+    expect(() => load({
+      ...base,
+      relationships: [{
+        ...base.relationships[0],
+        fields: [{ field: 'id', format: 'UUID' }],
+      }],
+    })).toThrow('may not declare an id refinement')
+    expect(() => load({
+      ...base,
+      relationships: [{ ...base.relationships[0], name: `${'A'.repeat(64)}` }],
+    })).toThrow('63-byte identifier limit')
+    expect(() => load({
+      ...base,
+      relationships: [{
+        ...base.relationships[0],
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'user', inverse: 'members', target: 'User' },
+        ],
+      }],
+    })).toThrow('endpoint fields must differ')
+    expect(() => load({
+      ...base,
+      entities: [
+        {
+          fields: [
+            { field: 'a', inverse: 'campaigns', target: 'User', type: 'Entity' },
+            { field: 'b', inverse: 'campaigns', target: 'User', type: 'Entity' },
+          ],
+          name: 'User',
+        },
+        base.entities[1],
+      ],
+    })).toThrow('duplicate derived navigation')
+  })
+
+  test('supports abstract relationship targets and distinct self-relations', () => {
+    const entities = load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Person' },
+        { extends: 'Person', fields: [], name: 'Member' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'mentor', inverse: 'mentees', target: 'Person' },
+          { field: 'member', inverse: 'mentors', target: 'Person' },
+        ],
+        fields: [{ field: 'since', type: 'Date' }],
+        name: 'Mentorship',
+      }],
+    })
+    expect(entities.entity('Person')?.collections.map(collection => collection.name))
+      .toEqual(['mentees', 'mentors'])
+    expect(entities.relationships[0]?.between.map(endpoint => endpoint.target))
+      .toEqual(['Person', 'Person'])
+    const ddl = entities.ddl.join('\n')
+    expect(ddl).toContain('primary key ("mentor.id", "member.id")')
+    expect(ddl).toContain('foreign key ("mentor.id") references "Person"')
+    expect(ddl).toContain('foreign key ("member.id") references "Person"')
+    expect(ddl).toContain('"since" date not null')
+  })
+
+  test('accepts native scalar arrays and opaque JSON values', () => {
     const entities = load({
       entities: [{
         fields: [
           { field: 'id', format: 'UUID' },
+          { field: 'tags', items: { type: 'String' }, type: 'Array' },
+          { field: 'identities', items: { format: 'UUID', type: 'ID' }, type: 'Array' },
           { field: 'payload', type: 'JSON' },
         ],
         name: 'Document',
       }],
     })
     expect(entities.entity('Document')?.fields[1]).toEqual({
-      name: 'payload',
-      type: FieldType.JSON,
-    })
-    expect(entities.ddl.join('\n')).toContain('"payload" jsonb not null')
-  })
-
-  test('rejects malformed JSON fields', () => {
-    expect(() => load({
-      entities: [{
-        fields: [{ field: 'payload', format: 'UUID', type: 'JSON' }],
-        name: 'Document',
-      }],
-    })).toThrow()
-    expect(() => load({
-      entities: [{
-        fields: [{ field: 'id', type: 'JSON' }],
-        name: 'Document',
-      }],
-    })).toThrow()
-  })
-
-  test('accepts native scalar arrays and explicit entity relationship collections', () => {
-    const entities = load({
-      entities: [
-        {
-          fields: [
-            { field: 'id', format: 'UUID' },
-            {
-              field: 'tags',
-              items: { type: 'String' },
-              type: 'Array',
-            },
-            {
-              field: 'identities',
-              items: { format: 'UUID', type: 'ID' },
-              type: 'Array',
-            },
-            {
-              field: 'ownedVisits',
-              items: { target: 'Visit', type: 'Entity' },
-              mapping: { field: 'pet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-            {
-              field: 'members',
-              items: { target: 'Entity', type: 'Entity' },
-              mapping: {
-                kind: 'Junction',
-                orderingColumn: 'position',
-                sourceColumn: 'collectionRowId',
-                table: 'CollectionMember',
-                targetColumn: 'entityId',
-              },
-              type: 'Collection',
-            },
-          ],
-          name: 'Pet',
-        },
-        {
-          fields: [
-            { field: 'id', format: 'Snowflake' },
-            {
-              column: 'petId',
-              field: 'pet',
-              target: 'Pet',
-              type: 'Entity',
-            },
-          ],
-          name: 'Visit',
-        },
-      ],
-    })
-    expect(entities.entity('Pet')?.fields[1]).toEqual({
       items: { type: FieldType.String },
       name: 'tags',
       type: FieldType.Array,
     })
-    expect(entities.entity('Pet')?.fields[3]).toEqual({
-      items: { target: 'Visit', type: FieldType.Entity },
-      mapping: { field: 'pet', kind: 'Inverse' },
-      name: 'ownedVisits',
-      type: FieldType.Collection,
+    expect(entities.entity('Document')?.fields[2]).toEqual({
+      items: { format: 'UUID', type: FieldType.ID },
+      name: 'identities',
+      type: FieldType.Array,
     })
-    expect(entities.entity('Pet')?.effectiveFields.find(field => field.name === 'identities'))
-      .toMatchObject({ items: { format: 'UUID', type: FieldType.ID }, owner: 'Pet', type: FieldType.Array })
-    const ddl = entities.ddl.join('\n')
-    expect(ddl).toContain('"tags" text[] not null')
-    expect(ddl).toContain('"identities" text[] not null')
-    expect(ddl).not.toContain('"ownedVisits"')
-    expect(ddl).not.toContain('"members"')
-    expect(ddl).toContain('create table "CollectionMember"')
-    expect(ddl).toContain('"collectionRowId" text not null')
-    expect(ddl).toContain('"entityId" text not null')
-    expect(ddl).toContain('"position" double precision not null')
-    expect(ddl).toContain('primary key ("collectionRowId", "entityId")')
-    expect(ddl).toContain('foreign key ("collectionRowId") references "Pet"')
-    expect(ddl).toContain('foreign key ("entityId") references "Entity"')
+    expect(entities.entity('Document')?.fields[3]).toEqual({ name: 'payload', type: FieldType.JSON })
+    expect(entities.ddl.join('\n')).toContain('"tags" text[] not null')
+    expect(entities.ddl.join('\n')).toContain('"payload" jsonb not null')
   })
 
-  test('rejects ambiguous junction mappings', () => {
-    const base = {
-      fields: [
-        { field: 'id', format: 'UUID' },
-        {
-          field: 'first',
-          items: { target: 'Pet', type: 'Entity' },
-          mapping: {
-            kind: 'Junction',
-            sourceColumn: 'petId',
-            table: 'PetLink',
-            targetColumn: 'otherPetId',
-          },
-          type: 'Collection',
-        },
-        {
-          field: 'second',
-          items: { target: 'Pet', type: 'Entity' },
-          mapping: {
-            kind: 'Junction',
-            sourceColumn: 'petId',
-            table: 'PetLink',
-            targetColumn: 'thirdPetId',
-          },
-          type: 'Collection',
-        },
-      ],
-      name: 'Pet',
-    }
-    expect(() => load({ entities: [base] })).toThrow('already owned')
-    expect(() => load({
-      entities: [{
-        fields: [{
-          field: 'links',
-          items: { target: 'Pet', type: 'Entity' },
-          mapping: {
-            kind: 'Junction',
-            sourceColumn: 'petId',
-            table: 'Pet',
-            targetColumn: 'otherPetId',
-          },
-          type: 'Collection',
-        }, { field: 'id', format: 'UUID' }],
-        name: 'Pet',
-      }],
-    })).toThrow('conflicts with an entity table')
-    expect(() => load({
-      entities: [{
-        fields: [{
-          field: 'links',
-          items: { target: 'Entity', type: 'Entity' },
-          mapping: {
-            kind: 'Junction',
-            sourceColumn: 'petId',
-            table: 'PetLink',
-            targetColumn: 'petId',
-          },
-          type: 'Collection',
-        }, { field: 'id', format: 'UUID' }],
-        name: 'Pet',
-      }],
-    })).toThrow('source and target columns must differ')
-  })
-
-  test('validates inherited inverse collection metadata at its declaring owner', () => {
+  test('derives inverse navigations from forward references only', () => {
     const entities = load({
       entities: [
         {
-          fields: [
-            { field: 'id', format: 'UUID' },
-            {
-              field: 'ownedVisits',
-              items: { target: 'Visit', type: 'Entity' },
-              mapping: { field: 'pet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-          ],
-          name: 'Pet',
-        },
-        {
-          extends: 'Pet',
-          fields: [{ field: 'permissions', type: 'String' }],
-          name: 'SystemPet',
-        },
-        {
-          extends: 'Pet',
-          fields: [{ field: 'company', type: 'String' }],
-          name: 'Cat',
-        },
-        {
-          fields: [
-            { field: 'id', format: 'Snowflake' },
-            {
-              column: 'petId',
-              field: 'pet',
-              target: 'Pet',
-              type: 'Entity',
-            },
-          ],
-          name: 'Visit',
-        },
-      ],
-    })
-    expect(entities.entity('SystemPet')?.effectiveFields.find(field => field.name === 'ownedVisits'))
-      .toMatchObject({ owner: 'Pet', type: FieldType.Collection })
-    expect(entities.ddl.join('\n')).not.toContain('"ownedVisits"')
-  })
-
-  test('resolves distinct inverse forward edges without membership columns', () => {
-    const entities = load({
-      entities: [
-        {
-          fields: [
-            { field: 'id', format: 'UUID' },
-            {
-              field: 'visits',
-              items: { target: 'Visit', type: 'Entity' },
-              mapping: { field: 'pet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-            {
-              field: 'updatedVisits',
-              items: { target: 'Visit', type: 'Entity' },
-              mapping: { field: 'updatedPet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-          ],
+          fields: [{ field: 'id', format: 'UUID' }],
           name: 'Pet',
         },
         {
           fields: [
             { field: 'id', format: 'Snowflake' },
-            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
-            { column: 'updatedPetId', field: 'updatedPet', target: 'Pet', type: 'Entity' },
-          ],
-          name: 'Visit',
-        },
-      ],
-    })
-    const ddl = entities.ddl.join('\n')
-    expect(ddl).not.toContain('"visits"')
-    expect(ddl).not.toContain('"updatedVisits"')
-    expect(ddl.match(/Visit_pet_fkey/g)).toHaveLength(1)
-    expect(ddl.match(/Visit_updatedPet_fkey/g)).toHaveLength(1)
-  })
-
-  test('rejects inherited forward-edge reuse across descendant targets', () => {
-    expect(() => load({
-      entities: [
-        {
-          fields: [
-            { field: 'id', format: 'UUID' },
-            {
-              field: 'visits',
-              items: { target: 'Visit', type: 'Entity' },
-              mapping: { field: 'pet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-            {
-              field: 'specialVisits',
-              items: { target: 'SpecialVisit', type: 'Entity' },
-              mapping: { field: 'pet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-          ],
-          name: 'Pet',
-        },
-        {
-          fields: [
-            { field: 'id', format: 'Snowflake' },
-            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
+            { field: 'pet', inverse: 'visits', target: 'Pet', type: 'Entity' },
           ],
           name: 'Visit',
         },
@@ -592,128 +515,15 @@ describe('EntityDefinitions', () => {
           name: 'SpecialVisit',
         },
       ],
-    })).toThrow('already inverted')
-  })
-
-  test('scopes inverse forward-edge uniqueness to the declaring owner', () => {
-    const entities = load({
-      entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Pet' },
-        {
-          extends: 'Pet',
-          fields: [{
-            field: 'dogVisits',
-            items: { target: 'Visit', type: 'Entity' },
-            mapping: { field: 'pet', kind: 'Inverse' },
-            type: 'Collection',
-          }],
-          name: 'Dog',
-        },
-        {
-          extends: 'Pet',
-          fields: [{
-            field: 'catVisits',
-            items: { target: 'Visit', type: 'Entity' },
-            mapping: { field: 'pet', kind: 'Inverse' },
-            type: 'Collection',
-          }],
-          name: 'Cat',
-        },
-        {
-          fields: [
-            { field: 'id', format: 'Snowflake' },
-            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
-          ],
-          name: 'Visit',
-        },
-      ],
     })
-    expect(entities.ddl.join('\n')).not.toContain('"dogVisits"')
-    expect(entities.ddl.join('\n')).not.toContain('"catVisits"')
-  })
-
-  test('rejects duplicate inverse forward-edge authority', () => {
-    expect(() => load({
-      entities: [
-        {
-          fields: [
-            { field: 'id', format: 'UUID' },
-            {
-              field: 'visits',
-              items: { target: 'Visit', type: 'Entity' },
-              mapping: { field: 'pet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-            {
-              field: 'alsoVisits',
-              items: { target: 'Visit', type: 'Entity' },
-              mapping: { field: 'pet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-          ],
-          name: 'Pet',
-        },
-        {
-          fields: [
-            { field: 'id', format: 'Snowflake' },
-            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
-          ],
-          name: 'Visit',
-        },
-      ],
-    })).toThrow('already inverted')
-  })
-
-  test('rejects malformed array and relationship collection fields', () => {
-    const cases = [
-      {
-        fields: [{ field: 'tags', items: { target: 'Entity', type: 'Entity' }, type: 'Array' }],
-        name: 'Pet',
-      },
-      {
-        fields: [{ field: 'tags', items: { type: 'Structured' }, type: 'Array' }],
-        name: 'Pet',
-      },
-      {
-        fields: [{ field: 'tags', items: { format: 'UUID', type: 'String' }, type: 'Array' }],
-        name: 'Pet',
-      },
-      {
-        fields: [{
-          field: 'ownedVisits',
-          items: { target: 'Visit', type: 'Entity' },
-          type: 'Collection',
-        }],
-        name: 'Pet',
-      },
-      {
-        fields: [{
-          field: 'members',
-          items: { target: 'Entity', type: 'Entity' },
-          mapping: { kind: 'Junction', sourceColumn: 'memberOwnerId', table: 'Member' },
-          type: 'Collection',
-        }],
-        name: 'Pet',
-      },
-    ]
-    for (const entity of cases) expect(() => load({ entities: [entity] })).toThrow()
-    expect(() => load({
-      entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Pet' },
-        {
-          fields: [
-            { field: 'id', format: 'Snowflake' },
-            {
-              field: 'ownedVisits',
-              items: { target: 'Visit', type: 'Entity' },
-              mapping: { field: 'pet', kind: 'Inverse' },
-              type: 'Collection',
-            },
-          ],
-          name: 'Visit',
-        },
-      ],
-    })).toThrow()
+    expect(entities.entity('Pet')?.collections).toMatchObject([{
+      kind: 'inverse',
+      name: 'visits',
+      target: 'Visit',
+    }])
+    expect(entities.entity('Pet')?.fields.map(field => field.name)).not.toContain('visits')
+    expect(entities.ddl.join('\n')).not.toContain('"visits"')
+    expect(entities.ddl.join('\n')).toContain('Visit_pet_fk_idx')
   })
 
   test('derives effective inheritance from the required ontology fixture', () => {
@@ -734,13 +544,15 @@ describe('EntityDefinitions', () => {
       { name: 'email', owner: 'User', type: FieldType.String },
       { name: 'permissions', owner: 'SystemUser', type: FieldType.String },
       {
-        column: 'managerId',
+        column: 'manager.id',
+        inverse: 'managedUsers',
         name: 'manager',
         owner: 'SystemUser',
         target: 'User',
         type: FieldType.Entity,
       },
     ])
+    expect(user?.collections).toMatchObject([{ kind: 'inverse', name: 'managedUsers', target: 'SystemUser' }])
   })
 
   test('accepts empty fields for a standalone concrete entity', () => {
@@ -787,9 +599,6 @@ describe('EntityDefinitions', () => {
       entities: [{ fields: [{ field: 'id', primaryKey: true, type: 'uuid' }], name: 'User' }],
     })).toThrow('unknown field property "primaryKey"')
     expect(() => load({
-      entities: [{ fields: [{ field: 'id', type: 'uuid' }], name: 'User' }],
-    })).toThrow('unknown field property "type"')
-    expect(() => load({
       entities: [{ fields: [{ field: 'externalId', format: 'UUID', type: 'ID' }], name: 'User' }],
     })).toThrow('unsupported field type "ID"')
     expect(() => load({
@@ -833,11 +642,11 @@ describe('EntityDefinitions', () => {
         { fields: [{ field: 'email', type: 'String' }], name: 'User' },
         {
           extends: 'User',
-          fields: [{ column: 'email', field: 'owner', target: 'User', type: 'Entity' }],
+          fields: [{ field: 'manager', target: 'User', type: 'Entity' }],
           name: 'SystemUser',
         },
       ],
-    })).toThrow('physical column "email" is already owned by "User"')
+    })).not.toThrow()
   })
 
   test('narrows but never conflicts with inherited id formats', () => {
@@ -872,9 +681,10 @@ describe('EntityDefinitions', () => {
       `create table "SystemUser" (
         "id" text primary key,
         "permissions" text not null,
-        "managerId" text,
+        "manager.id" text,
         constraint "SystemUser_id_format_check" check (${identityExpression('id', 'UUID')})
       )`,
+      'create index if not exists "SystemUser_manager_fk_idx" on "SystemUser" ("manager.id")',
       `create table "Client" (
         "id" text primary key,
         "company" text not null,
@@ -890,7 +700,7 @@ describe('EntityDefinitions', () => {
         foreign key ("id") references "User" ("id")
         deferrable initially immediate`,
       `alter table "SystemUser" add constraint "SystemUser_manager_fkey"
-        foreign key ("managerId") references "User" ("id")
+        foreign key ("manager.id") references "User" ("id")
         deferrable initially immediate`,
       ...lifecycleDdl(['SystemUser', 'Client']),
     ])
@@ -901,13 +711,14 @@ describe('EntityDefinitions', () => {
       entities: [{
         fields: [
           { field: 'id', format: 'UUID' },
-          { column: 'favoriteId', field: 'favorite', target: 'Entity', type: 'Entity' },
+          { field: 'favorite', target: 'Entity', type: 'Entity' },
         ],
         name: 'Selection',
       }],
     })
 
     expect(entities.entity('Selection')?.fields[1]).toMatchObject({
+      column: 'favorite.id',
       target: 'Entity',
       type: FieldType.Entity,
     })
@@ -938,13 +749,10 @@ describe('EntityDefinitions', () => {
       entities: [{ fields: [], name: 'Entity' }],
     })).toThrow('reserved for the universal identity root')
     expect(() => load({
-      entities: [{ fields: [{ column: 'ownerId', field: 'owner', target: 'Missing', type: 'Entity' }], name: 'Note' }],
+      entities: [{ fields: [{ field: 'owner', target: 'Missing', type: 'Entity' }], name: 'Note' }],
     })).toThrow('unknown target entity "Missing"')
     expect(() => load({
       entities: [{ fields: [{ field: 'owner', target: 'Note', type: 'Entity' }], name: 'Note' }],
-    })).toThrow('column must be a camelCase identifier')
-    expect(() => load({
-      entities: [{ fields: [{ column: 'ownerId', field: 'owner', target: 'Note', type: 'Entity' }], name: 'Note' }],
     })).not.toThrow()
   })
 })
