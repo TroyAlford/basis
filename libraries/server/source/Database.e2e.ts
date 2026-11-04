@@ -1040,7 +1040,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     })).toMatchObject({ errno: '23514' })
   }, 120_000)
 
-  isolatedTest('uses native scalar arrays and metadata-only relationship collections', async database => {
+  isolatedTest('uses native scalar arrays and explicit relationship collections', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
         {
@@ -1050,6 +1050,18 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
               field: 'ownedVisits',
               items: { target: 'Visit', type: 'Entity' },
               mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+            {
+              field: 'playmates',
+              items: { target: 'Pet', type: 'Entity' },
+              mapping: {
+                kind: 'Junction',
+                orderingColumn: 'position',
+                sourceColumn: 'petId',
+                table: 'PetPlaymate',
+                targetColumn: 'playmateId',
+              },
               type: 'Collection',
             },
           ],
@@ -1077,6 +1089,20 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
       columnName: string,
       dataType: string,
       isNullable: string,
+    }[]>`
+      SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
+      FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'PetPlaymate'
+      ORDER BY ordinal_position
+    `).toEqual([
+      { columnName: 'petId', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'playmateId', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'position', dataType: 'double precision', isNullable: 'NO' },
+    ])
+    expect(await database.sql<{
+      columnName: string,
+      dataType: string,
+      isNullable: string,
       udtName: string,
     }[]>`
       SELECT column_name AS "columnName",
@@ -1093,13 +1119,22 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     ])
 
     const userId = randomUUID()
+    const playmateId = randomUUID()
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${userId}, ${'Pet'}, ${'Pet'}), (${'1001'}, ${'Visit One'}, ${'Visit'})
+VALUES (${userId},
+  ${'Pet'},
+  ${'Pet'}),
+  (${playmateId},
+  ${'Playmate'},
+  ${'Pet'}),
+  (${'1001'},
+  ${'Visit One'},
+  ${'Visit'})
     `
     await database.sql`
       INSERT INTO "Pet" ("id")
-      VALUES (${userId})
+      VALUES (${userId}), (${playmateId})
     `
     await database.sql`
       INSERT INTO "Visit" ("id", "tags", "petId")
@@ -1110,8 +1145,21 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
       limit: null,
       orderBy: 'id',
     })).toEqual([{ id: '1001', tags: ['one', 'two'] }])
+    await database.sql`
+      INSERT INTO "PetPlaymate" ("petId", "playmateId", "position")
+      VALUES (${userId}, ${playmateId}, ${1})
+    `
+    expect(await database.captureError(async db => {
+      await db.sql`
+        INSERT INTO "PetPlaymate" ("petId", "playmateId", "position")
+        VALUES (${userId}, ${randomUUID()}, ${2})
+      `
+    })).toMatchObject({ errno: '23503' })
     await expect(queryEntity(database.sql, entities, 'Pet', {
       fields: ['ownedVisits'],
+    })).rejects.toThrow('collection projections are not supported yet')
+    await expect(queryEntity(database.sql, entities, 'Pet', {
+      fields: ['playmates'],
     })).rejects.toThrow('collection projections are not supported yet')
   }, 120_000)
 

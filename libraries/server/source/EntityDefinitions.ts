@@ -198,6 +198,8 @@ interface TableDefinition {
   readonly indexes?: readonly TableIndex[],
   /** Physical table name. */
   readonly name: string,
+  /** Table-level composite primary key columns, when not a single column key. */
+  readonly primaryKey?: readonly string[],
 }
 
 /** One table-level check constraint. */
@@ -434,7 +436,11 @@ export class EntityDefinitions {
    * @returns System-owned root followed by model-owned tables in order.
    */
   private get tables(): readonly TableDefinition[] {
-    return [identityRoot(this.entities), ...this.entities.map(entityTable)]
+    return [
+      identityRoot(this.entities),
+      ...this.entities.map(entityTable),
+      ...junctionDefinitions(this.entities).map(junctionTable),
+    ]
   }
 
   /**
@@ -462,6 +468,7 @@ export class EntityDefinitions {
       ...this.entities.flatMap(entity => entity.fields
         .filter(isReferenceField)
         .map(field => addConstraint(entity, field))),
+      ...junctionDefinitions(this.entities).flatMap(junctionConstraints),
       ...lifecycleStatements(this.entities),
     ]
   }
@@ -511,6 +518,19 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_sch
           field.target,
           'id',
           addConstraint(entity, field),
+        )
+      }
+    }
+    for (const junction of junctionDefinitions(this.entities)) {
+      for (const constraint of junctionForeignKeyDefinitions(junction)) {
+        await reconcileForeignKey(
+          sql,
+          junction.table,
+          constraint.name,
+          constraint.column,
+          constraint.target,
+          'id',
+          constraint.statement,
         )
       }
     }
@@ -662,10 +682,29 @@ function parseEntities(value: unknown): readonly EntityDefinition[] {
 function validateCollectionMappings(entities: readonly EntityDefinition[]): void {
   const byName = new Map(entities.map(entity => [entity.name, entity]))
   const inverseEdges = new Map<string, string>()
+  const junctionOwners = new Map<string, string>()
   for (const entity of entities) {
     for (const field of entity.fields) {
       if (field.type !== FieldType.Collection) continue
       const mapping = field.mapping
+      if (mapping.kind === 'Junction') {
+        if (mapping.table === 'Entity' || byName.has(mapping.table)) {
+          throw invalid(`junction table "${mapping.table}" conflicts with an entity table`)
+        }
+        const owner = junctionOwners.get(mapping.table)
+        if (owner) {
+          throw invalid(
+            `junction table "${mapping.table}" is already owned by "${owner}"`,
+          )
+        }
+        if (mapping.sourceColumn === mapping.targetColumn) {
+          throw invalid(
+            `junction table "${mapping.table}" source and target columns must differ`,
+          )
+        }
+        junctionOwners.set(mapping.table, `${entity.name}.${field.name}`)
+        continue
+      }
       if (mapping.kind !== 'Inverse') continue
       if (field.items.target === 'Entity') {
         throw invalid(
@@ -1018,6 +1057,9 @@ function parseCollectionMapping(
         throw invalid(`collection field "${entityName}.${fieldName}" ${key} must be camelCase`)
       }
     }
+    if (value.sourceColumn === value.targetColumn) {
+      throw invalid(`collection field "${entityName}.${fieldName}" source and target columns must differ`)
+    }
     if (value.orderingColumn !== undefined) {
       if (
         typeof value.orderingColumn !== 'string'
@@ -1107,6 +1149,135 @@ function entityTable(entity: EntityDefinition): TableDefinition {
   }
 }
 
+/** One physical many-to-many junction derived from an explicit collection mapping. */
+interface JunctionDefinition {
+  /** Optional ordering column. */
+  readonly orderingColumn?: string,
+  /** Owning entity table. */
+  readonly owner: string,
+  /** Source/owner foreign-key column. */
+  readonly sourceColumn: string,
+  /** Junction table name. */
+  readonly table: string,
+  /** Target entity table. */
+  readonly target: string,
+  /** Target foreign-key column. */
+  readonly targetColumn: string,
+}
+
+/** One foreign-key definition for a junction table. */
+interface JunctionForeignKeyDefinition {
+  /** Local column. */
+  readonly column: string,
+  /** Deterministic constraint name. */
+  readonly name: string,
+  /** Optional CREATE ALTER statement. */
+  readonly statement: string,
+  /** Referenced entity table. */
+  readonly target: string,
+}
+
+/**
+ * Derive explicit junction tables from local collection mappings.
+ * @param entities - Resolved canonical definitions.
+ * @returns Junction definitions in declaration order.
+ */
+function junctionDefinitions(entities: readonly EntityDefinition[]): readonly JunctionDefinition[] {
+  const result: JunctionDefinition[] = []
+  for (const entity of entities) {
+    for (const field of entity.fields) {
+      if (field.type !== FieldType.Collection || field.mapping.kind !== 'Junction') continue
+      result.push({
+        ...(field.mapping.orderingColumn ? { orderingColumn: field.mapping.orderingColumn } : {}),
+        owner: entity.name,
+        sourceColumn: field.mapping.sourceColumn,
+        table: field.mapping.table,
+        target: field.items.target,
+        targetColumn: field.mapping.targetColumn,
+      })
+    }
+  }
+  return result
+}
+
+/**
+ * Build one physical junction table.
+ * @param junction - Explicit junction definition.
+ * @returns Its table metadata.
+ */
+function junctionTable(junction: JunctionDefinition): TableDefinition {
+  const columns: TableColumn[] = [
+    { name: junction.sourceColumn, type: FieldType.String },
+    { name: junction.targetColumn, type: FieldType.String },
+  ]
+  if (junction.orderingColumn) {
+    columns.push({ name: junction.orderingColumn, type: FieldType.Number })
+  }
+  const indexes: TableIndex[] = [
+    { columns: [junction.sourceColumn], name: `${junction.table}_${junction.sourceColumn}_idx` },
+    { columns: [junction.targetColumn], name: `${junction.table}_${junction.targetColumn}_idx` },
+  ]
+  if (junction.orderingColumn) {
+    indexes.push({
+      columns: [junction.sourceColumn, junction.orderingColumn],
+      name: `${junction.table}_${junction.sourceColumn}_${junction.orderingColumn}_idx`,
+    })
+  }
+  return {
+    columns,
+    indexes,
+    name: junction.table,
+    primaryKey: [junction.sourceColumn, junction.targetColumn],
+  }
+}
+
+/**
+ * Build the foreign-key statements for one junction table.
+ * @param junction - Explicit junction definition.
+ * @returns Source and target foreign-key statements.
+ */
+function junctionConstraints(junction: JunctionDefinition): readonly string[] {
+  return junctionForeignKeyDefinitions(junction).map(definition => definition.statement)
+}
+
+/**
+ * Build foreign-key metadata for one junction table.
+ * @param junction - Explicit junction definition.
+ * @returns Source and target foreign-key definitions.
+ */
+function junctionForeignKeyDefinitions(
+  junction: JunctionDefinition,
+): readonly JunctionForeignKeyDefinition[] {
+  return [
+    junctionForeignKey(junction, junction.sourceColumn, junction.owner),
+    junctionForeignKey(junction, junction.targetColumn, junction.target),
+  ]
+}
+
+/**
+ * Build one junction foreign-key statement.
+ * @param junction - Explicit junction definition.
+ * @param column - Local column.
+ * @param target - Referenced table.
+ * @returns Foreign-key metadata.
+ */
+function junctionForeignKey(
+  junction: JunctionDefinition,
+  column: string,
+  target: string,
+): JunctionForeignKeyDefinition {
+  const name = `${junction.table}_${column}_fkey`
+  return {
+    column,
+    name,
+    statement: `alter table ${quoteIdentifier(junction.table)} ` +
+      `add constraint ${quoteIdentifier(name)} ` +
+      `foreign key (${quoteIdentifier(column)}) ` +
+      `references ${quoteIdentifier(target)} ("id") deferrable initially immediate`,
+    target,
+  }
+}
+
 /**
  * Build one identity-format SQL predicate.
  * @param column - Physical identity column.
@@ -1151,7 +1322,10 @@ function createTable(table: TableDefinition): string {
   const checks = (table.checks ?? []).map(check => (
     `constraint ${quoteIdentifier(check.name)} check (${check.expression})`
   ))
-  return `create table ${quoteIdentifier(table.name)} (\n${[...columns, ...checks].join(',\n')}\n)`
+  const primaryKey = table.primaryKey
+    ? [`primary key (${table.primaryKey.map(quoteIdentifier).join(', ')})`]
+    : []
+  return `create table ${quoteIdentifier(table.name)} (\n${[...columns, ...primaryKey, ...checks].join(',\n')}\n)`
 }
 
 /**
