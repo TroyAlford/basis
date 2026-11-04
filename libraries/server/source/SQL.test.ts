@@ -560,6 +560,12 @@ describe('SQL.where', () => {
     expect(() => compileEntityQuery(definitions, entity, {
       fields: Array.from({ length: 64 }, () => 'a.b.c'),
     })).toThrow('maximum graph work budget')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      collections: {
+        members: { relationshipFields: Array.from({ length: 128 }, () => 'role') },
+      },
+      fields: ['id', 'members'],
+    })).toThrow('maximum graph work budget')
 
     const edgeDefinitions = EntityDefinitions.load(JSON.stringify({
       entities: [
@@ -585,8 +591,8 @@ describe('SQL.where', () => {
     })).toThrow('Repeated reference expansion')
 
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
-      collections: { campaigns: {} },
-      fields: ['id', 'campaigns.members'],
+      collections: { articles: {} },
+      fields: ['id', 'articles.author'],
     })).toThrow('Cannot traverse collection field')
 
     const deepDefinitions = EntityDefinitions.load(JSON.stringify({

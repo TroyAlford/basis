@@ -245,7 +245,12 @@ class QueryProjection {
         `Query projection exceeds the maximum path count of ${MAX_PROJECTION_PATHS}`,
       )
     }
-    const work = fields.reduce((total, field) => total + field.split('.').length, collections.length)
+    const collectionWork = (this.#collections
+      ? Object.values(this.#collections)
+      : []).reduce((total, config) => (
+      total + 1 + (config.relationshipFields?.length ?? 0)
+    ), 0)
+    const work = fields.reduce((total, field) => total + field.split('.').length, collectionWork)
     if (work > MAX_PROJECTION_WORK) {
       throw new Error(
         `Query projection exceeds the maximum graph work budget of ${MAX_PROJECTION_WORK}`,
