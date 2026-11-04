@@ -1120,6 +1120,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
 
     const userId = randomUUID()
     const playmateId = randomUUID()
+    const secondPlaymateId = randomUUID()
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
 VALUES (${userId},
@@ -1128,13 +1129,16 @@ VALUES (${userId},
   (${playmateId},
   ${'Playmate'},
   ${'Pet'}),
+  (${secondPlaymateId},
+  ${'Second Playmate'},
+  ${'Pet'}),
   (${'1001'},
   ${'Visit One'},
   ${'Visit'})
     `
     await database.sql`
       INSERT INTO "Pet" ("id")
-      VALUES (${userId}), (${playmateId})
+      VALUES (${userId}), (${playmateId}), (${secondPlaymateId})
     `
     await database.sql`
       INSERT INTO "Visit" ("id", "tags", "petId")
@@ -1147,7 +1151,7 @@ VALUES (${userId},
     })).toEqual([{ id: '1001', tags: ['one', 'two'] }])
     await database.sql`
       INSERT INTO "PetPlaymate" ("petId", "playmateId", "position")
-      VALUES (${userId}, ${playmateId}, ${1})
+      VALUES (${userId}, ${playmateId}, ${2}), (${userId}, ${secondPlaymateId}, ${1})
     `
     expect(await database.captureError(async db => {
       await db.sql`
@@ -1155,12 +1159,60 @@ VALUES (${userId},
         VALUES (${userId}, ${randomUUID()}, ${2})
       `
     })).toMatchObject({ errno: '23503' })
-    await expect(queryEntity(database.sql, entities, 'Pet', {
-      fields: ['ownedVisits'],
-    })).rejects.toThrow('collection projections are not supported yet')
-    await expect(queryEntity(database.sql, entities, 'Pet', {
-      fields: ['playmates'],
-    })).rejects.toThrow('collection projections are not supported yet')
+
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      SELECT value::text, 'Visit ' || value, 'Visit'
+      FROM generate_series(2000, 6999) AS series(value)
+    `
+    await database.sql`
+      INSERT INTO "Visit" ("id", "tags", "petId")
+      SELECT value::text, ARRAY['fanout'], ${userId}
+      FROM generate_series(2000, 6999) AS series(value)
+    `
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
+      fields: ['id', 'ownedVisits', 'playmates'],
+      where: { id: userId },
+    })).toEqual([{
+      id: userId,
+      ownedVisits: {
+        items: [
+          { entity: 'Visit', id: '1001', name: 'Visit One' },
+          { entity: 'Visit', id: '2000', name: 'Visit 2000' },
+          { entity: 'Visit', id: '2001', name: 'Visit 2001' },
+        ],
+        remaining: 4998,
+        total: 5001,
+      },
+      playmates: {
+        items: [
+          { entity: 'Pet', id: secondPlaymateId, name: 'Second Playmate' },
+          { entity: 'Pet', id: playmateId, name: 'Playmate' },
+        ],
+        remaining: 0,
+        total: 2,
+      },
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
+      collections: { ownedVisits: { limit: 1, offset: 1 } },
+      fields: ['id', 'ownedVisits'],
+      where: { id: userId },
+    })).toEqual([{
+      id: userId,
+      ownedVisits: {
+        items: [{ entity: 'Visit', id: '2000', name: 'Visit 2000' }],
+        remaining: 4999,
+        total: 5001,
+      },
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
+      fields: ['id', 'ownedVisits', 'playmates'],
+      where: { id: playmateId },
+    })).toEqual([{
+      id: playmateId,
+      ownedVisits: { items: [], remaining: 0, total: 0 },
+      playmates: { items: [], remaining: 0, total: 0 },
+    }])
   }, 120_000)
 
   durableTest('enforces MTI final-state integrity for direct SQL', async database => {

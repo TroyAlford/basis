@@ -450,14 +450,16 @@ describe('SQL.where', () => {
     expect(compiled.sql).not.toContain('"favorite.permissions"')
   })
 
-  test('projects native scalar arrays and rejects relationship collections', () => {
+  test('projects native scalar arrays and collection envelopes', () => {
     const compiled = compileEntityQuery(collectionDefinitions, 'Pet', {
-      fields: ['id', 'tags'],
+      collections: { visits: { limit: 2, offset: 1 } },
+      fields: ['id', 'tags', 'visits'],
     })
     expect(compiled.sql).toContain('t."tags" AS "tags"')
-    expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
-      fields: ['visits'],
-    })).toThrow('collection projections are not supported yet')
+    expect(compiled.sql).toContain('"visits__items"')
+    expect(compiled.sql).toContain('"visits__total"')
+    expect(compiled.sql).toContain('"visits__remaining"')
+    expect(compiled.values).toEqual([2, 1, 3, 25, 0])
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { tags: 'x' },

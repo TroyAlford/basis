@@ -44,7 +44,12 @@ export interface DatabaseOptions {
 
 /** Options for a root entity query. */
 export interface QueryOptions {
-  /** Root scalar fields to project, in output order. */
+  /** Per-collection preview and pagination overrides. */
+  collections?: Readonly<Record<string, {
+    readonly limit?: number,
+    readonly offset?: number,
+  }>>,
+  /** Effective scalar, scalar-array, collection, or singular-reference paths to project. */
   fields: readonly string[],
   /** Maximum rows to return; defaults to 25, or `null` for unlimited. */
   limit?: number | null,
