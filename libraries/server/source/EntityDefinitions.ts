@@ -903,31 +903,32 @@ function parseRelationshipField(
  * Derive reverse 1:N and relationship navigations from canonical metadata.
  * @param entities - Resolved entity graph.
  * @param relationships - Named relationships.
- * @returns Navigations by exposing entity name.
+ * @returns Effective navigations by exposing entity name.
  */
 function deriveCollections(
   entities: readonly EntityDefinition[],
   relationships: readonly RelationshipDefinition[],
 ): ReadonlyMap<string, readonly DerivedCollectionDefinition[]> {
-  const effectiveNames = new Map<string, Set<string>>([
+  const byName = new Map(entities.map(entity => [entity.name, entity]))
+  const fields = new Map<string, Set<string>>([
     ['Entity', new Set(['id', 'name', 'entity'])],
   ])
   for (const entity of entities) {
-    effectiveNames.set(entity.name, new Set(entity.effectiveFields.map(field => field.name)))
+    fields.set(entity.name, new Set(entity.effectiveFields.map(field => field.name)))
   }
-  const result = new Map<string, DerivedCollectionDefinition[]>()
-  const add = (owner: string, collection: DerivedCollectionDefinition): void => {
-    const names = effectiveNames.get(owner)
+  const direct = new Map<string, DerivedCollectionDefinition[]>()
+  const addDirect = (owner: string, collection: DerivedCollectionDefinition): void => {
+    const names = fields.get(owner)
     if (!names) throw invalid(`derived navigation target entity "${owner}" is not declared`)
     if (names.has(collection.name)) {
       throw invalid(`derived navigation "${owner}.${collection.name}" conflicts with a field`)
     }
-    const existing = result.get(owner) ?? []
+    const existing = direct.get(owner) ?? []
     if (existing.some(candidate => candidate.name === collection.name)) {
       throw invalid(`duplicate derived navigation "${owner}.${collection.name}"`)
     }
     existing.push(collection)
-    result.set(owner, existing)
+    direct.set(owner, existing)
   }
   for (const entity of entities) {
     for (const field of entity.fields) {
@@ -936,7 +937,7 @@ function deriveCollections(
         `${entity.name}_${field.name}_fk_idx`,
         `inverse index for "${field.target}.${field.inverse}"`,
       )
-      add(field.target, {
+      addDirect(field.target, {
         kind: 'inverse',
         name: field.inverse,
         reference: field,
@@ -949,7 +950,7 @@ function deriveCollections(
     for (const index of [0, 1] as const) {
       const endpoint = endpoints[index]
       const remote = endpoints[index === 0 ? 1 : 0]
-      add(endpoint.target, {
+      addDirect(endpoint.target, {
         endpoint: index,
         kind: 'relationship',
         name: endpoint.inverse,
@@ -958,7 +959,58 @@ function deriveCollections(
       })
     }
   }
+
+  const result = new Map<string, readonly DerivedCollectionDefinition[]>()
+  const root = direct.get('Entity') ?? []
+  validateEffectiveNavigations('Entity', fields.get('Entity') ?? new Set(), root)
+  result.set('Entity', root)
+  for (const entity of entities) {
+    const chain: EntityDefinition[] = []
+    let current: string | undefined = entity.name
+    while (current !== undefined && current !== 'Entity') {
+      const definition = byName.get(current)
+      if (!definition) break
+      chain.unshift(definition)
+      current = definition.parent
+    }
+    const navigations = [
+      ...root,
+      ...chain.flatMap(definition => direct.get(definition.name) ?? []),
+    ]
+    validateEffectiveNavigations(
+      entity.name,
+      fields.get(entity.name) ?? new Set(),
+      navigations,
+    )
+    result.set(entity.name, navigations)
+  }
   return result
+}
+
+/**
+ * Validate effective navigations against fields and each other.
+ * @param entityName - Exposing entity name.
+ * @param fields - Effective field names.
+ * @param navigations - Inherited and local navigations.
+ */
+function validateEffectiveNavigations(
+  entityName: string,
+  fields: ReadonlySet<string>,
+  navigations: readonly DerivedCollectionDefinition[],
+): void {
+  const names = new Set<string>()
+  for (const navigation of navigations) {
+    if (fields.has(navigation.name)) {
+      throw invalid(
+        `derived navigation "${entityName}.${navigation.name}" ` +
+        'conflicts with an inherited navigation or field',
+      )
+    }
+    if (names.has(navigation.name)) {
+      throw invalid(`duplicate derived navigation "${entityName}.${navigation.name}"`)
+    }
+    names.add(navigation.name)
+  }
 }
 
 /** A parsed entity before reference targets are resolved. */

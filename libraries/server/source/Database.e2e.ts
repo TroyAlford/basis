@@ -1309,6 +1309,93 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     expect(multipleRoots).toHaveLength(3)
   }, 120_000)
 
+  isolatedTest('inherits relationship and inverse navigations on MTI descendants', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+        {
+          extends: 'User',
+          fields: [{ field: 'permissions', type: 'String' }],
+          name: 'SystemUser',
+        },
+        { fields: [], name: 'Campaign' },
+        {
+          fields: [{ field: 'author', inverse: 'articles', target: 'User', type: 'Entity' }],
+          name: 'Article',
+        },
+      ],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [
+          { field: 'role', type: 'String' },
+          { field: 'favorites', type: 'String' },
+        ],
+        name: 'Membership',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    const userId = '00000000-0000-4000-8000-000000000001'
+    const campaignId = '00000000-0000-4000-8000-000000000002'
+    const articleId = '00000000-0000-4000-8000-000000000003'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${userId},
+        'Ada',
+        'SystemUser'),
+        (${campaignId},
+        'Example Campaign',
+        'Campaign'),
+        (${articleId},
+        'Article One',
+        'Article')
+    `
+    await database.sql`
+      INSERT INTO "User" ("id")
+      VALUES (${userId})
+    `
+    await database.sql`
+      INSERT INTO "SystemUser" ("id", "permissions")
+      VALUES (${userId}, 'admin')
+    `
+    await database.sql`
+      INSERT INTO "Campaign" ("id")
+      VALUES (${campaignId})
+    `
+    await database.sql`
+      INSERT INTO "Article" ("id", "author.id")
+      VALUES (${articleId}, ${userId})
+    `
+    await database.sql`
+      INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
+      VALUES (${userId}, ${campaignId}, 'GM', 'dice')
+    `
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'SystemUser', {
+      collections: { campaigns: { relationshipFields: ['role'] } },
+      fields: ['id', 'campaigns', 'articles'],
+      where: { id: userId },
+    })).toEqual([{
+      articles: {
+        items: [{ entity: 'Article', id: articleId, name: 'Article One' }],
+        remaining: 0,
+        total: 1,
+      },
+      campaigns: {
+        items: [{
+          entity: 'Campaign',
+          id: campaignId,
+          membership: { role: 'GM' },
+          name: 'Example Campaign',
+        }],
+        remaining: 0,
+        total: 1,
+      },
+      id: userId,
+    }])
+  }, 120_000)
+
   isolatedTest('projects inverse navigations for inherited and multiple roots', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [

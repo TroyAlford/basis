@@ -97,7 +97,7 @@ Identity and ordinary fields are inherited. The only inherited refinement is an 
 - Without a refinement, ID accepts either format.
 - A descendant inherits an ancestor format; a conflicting redeclaration is rejected.
 
-The example derives `User.articles` from `Article.author.inverse`, and derives `User.campaigns` and `Campaign.members` from the single `Membership` relationship. Navigations are not authored entity fields.
+The example derives `User.articles` from `Article.author.inverse`, and derives `User.campaigns` and `Campaign.members` from the single `Membership` relationship. Navigations are not authored entity fields. Like effective fields, derived navigations are inherited across MTI: a `SystemUser extends User` query exposes the ancestor’s `articles` and `campaigns`, and a descendant field or navigation that shadows an inherited navigation is rejected.
 
 ## References, arrays, JSON, and relationships
 

@@ -468,6 +468,40 @@ describe('EntityDefinitions', () => {
     expect(ddl).toContain('"since" date not null')
   })
 
+  test('inherits derived navigations through ancestry and rejects field shadowing', () => {
+    const model = {
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+        { extends: 'User', fields: [], name: 'SystemUser' },
+        { fields: [], name: 'Campaign' },
+        {
+          fields: [{ field: 'author', inverse: 'articles', target: 'User', type: 'Entity' }],
+          name: 'Article',
+        },
+      ],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+      }],
+    }
+    const entities = load(model)
+    expect(entities.entity('User')?.collections.map(collection => collection.name))
+      .toEqual(['articles', 'campaigns'])
+    expect(entities.entity('SystemUser')?.collections.map(collection => collection.name))
+      .toEqual(['articles', 'campaigns'])
+
+    expect(() => load({
+      ...model,
+      entities: model.entities.map(entity => (entity.name === 'SystemUser'
+        ? { ...entity, fields: [{ field: 'campaigns', type: 'String' }] }
+        : entity)),
+    })).toThrow('conflicts with an inherited navigation')
+  })
+
   test('accepts native scalar arrays and opaque JSON values', () => {
     const entities = load({
       entities: [{
