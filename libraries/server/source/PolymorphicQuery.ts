@@ -1,4 +1,4 @@
-import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, InverseDerivedCollectionDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, InverseDerivedCollectionDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
@@ -74,12 +74,20 @@ interface CollectionProjection {
 
 /** One nested singular reference. */
 interface ReferenceProjection {
-  /** Canonical reference-edge identities aligned with `nodes`. */
-  readonly edges: readonly string[],
+  /** Canonical association for each target node. */
+  readonly associations: readonly (AssociationDefinition | undefined)[],
   /** Output reference field name. */
   readonly name: string,
   /** Variant target nodes; a normal reference has exactly one. */
   readonly nodes: readonly ProjectionNode[],
+}
+
+/** Path-local navigation state used for reciprocal backtracking checks. */
+interface TraversalState {
+  /** Reciprocal association entered by the previous step. */
+  readonly association?: AssociationDefinition,
+  /** Direction of the previous step. */
+  readonly direction: 'forward' | 'inverse',
 }
 
 /** One entity occurrence in a projection tree. */
@@ -148,6 +156,8 @@ interface EntityContext {
   rootJoined: boolean,
   /** Whether this occurrence is the universal `Entity` root itself. */
   readonly rootOnly: boolean,
+  /** Effective singular inverse navigations exposed by this occurrence. */
+  readonly singularNavigations: ReadonlyMap<string, DerivedSingularDefinition>,
 }
 
 /**
@@ -176,6 +186,8 @@ class QueryProjection {
     readonly offset?: number,
     readonly relationshipFields?: readonly string[],
   }>> | undefined
+  /** Selected collection option keys. */
+  readonly #selectedCollectionKeys = new Set<string>()
   /** Values bound by collection subqueries. */
   readonly values: unknown[] = []
   /** Starting placeholder index for collection values. */
@@ -209,6 +221,9 @@ class QueryProjection {
       rootAlias: 'r',
       rootJoined: false,
       rootOnly: false,
+      singularNavigations: new Map(
+        definition.singularNavigations.map(navigation => [navigation.name, navigation]),
+      ),
     }
   }
 
@@ -227,9 +242,9 @@ class QueryProjection {
     this.#validateBudget(fields)
     this.#valueStart = valueStart
     const root = this.#node(this.root, [])
-    for (const field of fields) this.#addPath(root, field.split('.'), new Set(), 0)
+    for (const field of fields) this.#addPath(root, field.split('.'), undefined, 0)
     for (const name of Object.keys(this.#collections ?? {})) {
-      if (!root.collectionNames.has(name)) {
+      if (!this.#selectedCollectionKeys.has(name)) {
         throw new Error(`Collection options were provided for unselected field "${name}"`)
       }
     }
@@ -283,21 +298,56 @@ class QueryProjection {
    * Add one projection path below an occurrence.
    * @param node - Current occurrence.
    * @param segments - Remaining path segments.
-   * @param references - Reference field names already traversed.
+   * @param traversal - Reciprocal association state from the previous step.
    * @param depth - Number of reference hops already traversed.
    */
   #addPath(
     node: ProjectionNode,
     segments: readonly string[],
-    references: ReadonlySet<string>,
+    traversal: TraversalState | undefined,
     depth: number,
   ): void {
     const name = segments[0]
     if (name === undefined) throw new Error('Query field path cannot be empty')
     const rest = segments.slice(1)
+    const path = [...node.path, ...segments].join('.')
+    const singular = node.context.singularNavigations.get(name)
+    if (singular) {
+      if (traversal?.direction === 'forward' && traversal.association === singular.association) {
+        throw new Error(`Reciprocal reference backtracking "${path}"`)
+      }
+      if (depth >= MAX_REFERENCE_DEPTH) {
+        throw new Error(`Reference path "${path}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
+      }
+      let reference = node.referenceNames.get(name)
+      if (!reference) {
+        reference = {
+          associations: [singular.association],
+          name,
+          nodes: [this.#inverseTarget(node, singular, [...node.path, name])],
+        }
+        node.referenceNames.set(name, reference)
+        node.references.push(reference)
+      }
+      if (rest.length > 0) {
+        for (const child of reference.nodes) {
+          this.#addPath(child, rest, {
+            association: singular.association,
+            direction: 'inverse',
+          }, depth + 1)
+        }
+      }
+      return
+    }
     const collection = node.context.collections.get(name)
     if (collection) {
       if (rest.length > 0) {
+        if (
+          collection.kind === 'inverse'
+          && rest[0] === collection.association.forward.name
+        ) {
+          throw new Error(`Reciprocal reference backtracking "${path}"`)
+        }
         throw new Error(
           `Cannot traverse collection field "${node.context.definition.name}.${segments.join('.')}"`,
         )
@@ -309,24 +359,28 @@ class QueryProjection {
 
     if (effective) {
       if (effective.type === FieldType.Entity) {
-        const path = [...node.path, ...segments].join('.')
-        const edge = referenceEdge(effective)
-        if (references.has(edge)) throw new Error(`Repeated reference expansion "${path}"`)
+        const association = this.#entities.association(effective.owner, effective.name)
+        if (traversal?.direction === 'inverse' && traversal.association === association) {
+          throw new Error(`Reciprocal reference backtracking "${path}"`)
+        }
         if (depth >= MAX_REFERENCE_DEPTH) {
           throw new Error(`Reference path "${path}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
         }
         let reference = node.referenceNames.get(name)
         if (!reference) {
-          reference = { edges: [edge], name, nodes: [this.#reference(node, effective)] }
+          reference = { associations: [association], name, nodes: [this.#reference(node, effective)] }
           node.referenceNames.set(name, reference)
           node.references.push(reference)
         }
         if (rest.length > 0) {
           for (const [index, child] of reference.nodes.entries()) {
+            const referenceAssociation = reference.associations[index]
             this.#addPath(
               child,
               rest,
-              new Set([...references, reference.edges[index] ?? edge]),
+              referenceAssociation
+                ? { association: referenceAssociation, direction: 'forward' }
+                : undefined,
               depth + 1,
             )
           }
@@ -348,17 +402,23 @@ class QueryProjection {
         )
       }
       if (descendant.type === FieldType.Entity) {
-        const path = [...node.path, ...segments].join('.')
-        const edges = descendant.variants.map(variant => referenceEdge(variant.field))
-        if (edges.some(edge => references.has(edge))) {
-          throw new Error(`Repeated reference expansion "${path}"`)
-        }
         if (depth >= MAX_REFERENCE_DEPTH) {
           throw new Error(`Reference path "${path}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
         }
         let reference = node.referenceNames.get(name)
         if (!reference) {
-          const nodes = descendant.variants.map((variant, index) => {
+          const selected = descendant.variants
+            .map(variant => ({
+              association: this.#entities.association(variant.field.owner, variant.field.name),
+              variant,
+            }))
+            .filter(({ association }) => !(
+              traversal?.direction === 'inverse' && association === traversal.association
+            ))
+          if (selected.length === 0) {
+            throw new Error(`Reciprocal reference backtracking "${path}"`)
+          }
+          const nodes = selected.map(({ variant }, index) => {
             const sourceAlias = this.#ownerAlias(node.context, variant.owner, true)
             return this.#target(
               variant.field,
@@ -366,16 +426,23 @@ class QueryProjection {
               sourceAlias,
             )
           })
-          reference = { edges, name, nodes }
+          reference = {
+            associations: selected.map(({ association }) => association),
+            name,
+            nodes,
+          }
           node.referenceNames.set(name, reference)
           node.references.push(reference)
         }
         if (rest.length > 0) {
           for (const [index, child] of reference.nodes.entries()) {
+            const referenceAssociation = reference.associations[index]
             this.#addPath(
               child,
               rest,
-              new Set([...references, reference.edges[index] ?? name]),
+              referenceAssociation
+                ? { association: referenceAssociation, direction: 'forward' }
+                : undefined,
               depth + 1,
             )
           }
@@ -402,6 +469,45 @@ class QueryProjection {
     if (field.type !== FieldType.Entity) throw new Error(`Field "${field.name}" is not a reference`)
     const sourceAlias = this.#ownerAlias(source.context, field.owner, false)
     return this.#target(field, [...source.path, field.name], sourceAlias)
+  }
+
+  /**
+   * Join one singular inverse target and create its projection node.
+   * @param source - Source occurrence exposing the inverse navigation.
+   * @param navigation - Derived singular inverse navigation.
+   * @param path - Internal projection path for target aliases.
+   * @returns The target projection node.
+   */
+  #inverseTarget(
+    source: ProjectionNode,
+    navigation: DerivedSingularDefinition,
+    path: readonly string[],
+  ): ProjectionNode {
+    this.#consume()
+    if (navigation.target === 'Entity') {
+      const rootAlias = this.#nextAlias('r')
+      this.joins.push(
+        `LEFT JOIN "Entity" "${rootAlias}" ON ` +
+        `"${rootAlias}"."id" = "${source.context.baseAlias}"."id"`,
+      )
+      const child = this.#node(rootContext(this.#entities, rootAlias), path)
+      this.#identity(child)
+      return child
+    }
+    const target = this.#entities.entity(navigation.target)
+    if (!target) throw new Error(`Unknown target entity "${navigation.target}"`)
+    const baseAlias = this.#nextAlias('b')
+    const rootAlias = this.#nextAlias('r')
+    this.joins.push(
+      `LEFT JOIN "${target.name}" "${baseAlias}" ON ` +
+      `"${baseAlias}".${quote(navigation.reference.column)} = "${source.context.baseAlias}"."id"`,
+    )
+    this.joins.push(
+      `LEFT JOIN "Entity" "${rootAlias}" ON "${rootAlias}"."id" = "${baseAlias}"."id"`,
+    )
+    const child = this.#node(targetContext(this.#entities, target, baseAlias, rootAlias), path)
+    this.#identity(child)
+    return child
   }
 
   /**
@@ -451,18 +557,16 @@ class QueryProjection {
    * @param collection - Derived collection navigation.
    */
   #addCollection(node: ProjectionNode, collection: DerivedCollectionDefinition): void {
-    if (node.path.length > 0) {
-      throw new Error('Nested collection projections are not supported yet')
-    }
     if (node.collectionNames.has(collection.name)) return
-    const config = this.#collections?.[collection.name]
+    const key = collectionKey(node.path, collection.name)
+    const config = this.#collections?.[key]
     const limit = config?.limit ?? 3
     const offset = config?.offset ?? 0
     if (!Number.isInteger(limit) || limit < 1) {
-      throw new Error(`Collection "${collection.name}" limit must be a positive integer`)
+      throw new Error(`Collection "${key}" limit must be a positive integer`)
     }
     if (!Number.isInteger(offset) || offset < 0) {
-      throw new Error(`Collection "${collection.name}" offset must be a non-negative integer`)
+      throw new Error(`Collection "${key}" offset must be a non-negative integer`)
     }
     if (collection.kind === 'inverse') {
       if (config?.relationshipFields !== undefined) {
@@ -476,6 +580,7 @@ class QueryProjection {
       this.#addRelationshipCollection(node, collection, fields, limit, offset)
     }
     node.collectionNames.add(collection.name)
+    this.#selectedCollectionKeys.add(key)
   }
 
   /**
@@ -613,9 +718,10 @@ class QueryProjection {
     },
   ): void {
     this.#consume(2 + (relationship?.fields.length ?? 0))
-    const itemsAlias = `${collection.name}__items`
-    const totalAlias = `${collection.name}__total`
-    const remainingAlias = `${collection.name}__remaining`
+    const aliasKey = columnAlias(node.path, collection.name)
+    const itemsAlias = `${aliasKey}__items`
+    const totalAlias = `${aliasKey}__total`
+    const remainingAlias = `${aliasKey}__remaining`
     const items = this.#bind(limit)
     const itemOffset = this.#bind(offset)
     const remainingOffset = this.#bind(offset + limit)
@@ -928,6 +1034,9 @@ function rootContext(entities: EntityDefinitions, rootAlias: string): EntityCont
     rootAlias,
     rootJoined: true,
     rootOnly: true,
+    singularNavigations: new Map(
+      entities.singularNavigations('Entity').map(navigation => [navigation.name, navigation]),
+    ),
   }
 }
 
@@ -959,6 +1068,9 @@ function targetContext(
     rootAlias,
     rootJoined: true,
     rootOnly: false,
+    singularNavigations: new Map(
+      definition.singularNavigations.map(navigation => [navigation.name, navigation]),
+    ),
   }
 }
 
@@ -1056,6 +1168,7 @@ function fieldContract(field: FieldDefinition): string {
     return `Array:${field.items.type}:${field.items.format ?? ''}`
   }
   if (field.type === FieldType.Entity) return `Entity:${field.target}`
+  if (field.type === FieldType.Inverse) return `Inverse:${field.target}:${field.inverse}:${field.cardinality}`
   return `${field.type}:${field.format ?? ''}`
 }
 
@@ -1078,6 +1191,16 @@ function descendsFrom(
     if (current === 'Entity') return false
   }
   return false
+}
+
+/**
+ * Build one dotted collection option key for a projection path.
+ * @param path - Reference path from the query root.
+ * @param name - Collection name.
+ * @returns Collection option key.
+ */
+function collectionKey(path: readonly string[], name: string): string {
+  return [...path.map(segment => segment.replace(/__v\d+$/u, '')), name].join('.')
 }
 
 /**
@@ -1170,19 +1293,13 @@ function hydrateReference(
     name: row[identity.name],
   }
   for (const field of node.fields) result[field.name] = row[field.alias]
+  for (const collection of node.collections) {
+    result[collection.name] = hydrateCollection(row, collection)
+  }
   for (const reference of node.references) {
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
   return result
-}
-
-/**
- * Build the canonical identity of one singular reference edge.
- * @param field - Effective reference field.
- * @returns Owner-qualified edge identity.
- */
-function referenceEdge(field: EffectiveFieldDefinition): string {
-  return `${field.owner}\u0000${field.name}`
 }
 
 /**

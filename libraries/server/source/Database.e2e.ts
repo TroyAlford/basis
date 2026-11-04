@@ -898,9 +898,9 @@ VALUES (${'1001'},
     await expect(database.tx(async sql => queryEntity(sql, entities, 'Article', {
       fields: ['title.value'],
     }))).rejects.toThrow('Cannot traverse scalar field')
-    await expect(database.tx(async sql => queryEntity(sql, entities, 'Article', {
+    await database.tx(async sql => queryEntity(sql, entities, 'Article', {
       fields: ['owner.manager.manager.name'],
-    }))).rejects.toThrow('Repeated reference expansion')
+    }))
   }, 120_000)
 
   test('queries prebuilt polymorphic descendants with indexed names', async () => {
@@ -1043,7 +1043,16 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
   isolatedTest('stores and queries named relationships and inverse references', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
-        { fields: [], name: 'User' },
+        {
+          fields: [{
+            cardinality: 'Many',
+            field: 'articles',
+            inverse: 'author',
+            target: 'Article',
+            type: 'Inverse',
+          }],
+          name: 'User',
+        },
         { fields: [], name: 'Campaign' },
         {
           fields: [
@@ -1312,7 +1321,19 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
   isolatedTest('inherits relationship and inverse navigations on MTI descendants', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              cardinality: 'Many',
+              field: 'articles',
+              inverse: 'author',
+              target: 'Article',
+              type: 'Inverse',
+            },
+          ],
+          name: 'User',
+        },
         {
           extends: 'User',
           fields: [{ field: 'permissions', type: 'String' }],
@@ -1396,10 +1417,165 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     }])
   }, 120_000)
 
+  isolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              cardinality: 'Many',
+              field: 'pets',
+              inverse: 'owner',
+              target: 'Pet',
+              type: 'Inverse',
+            },
+            {
+              cardinality: 'One',
+              field: 'pet',
+              inverse: 'guardian',
+              target: 'Pet',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Person',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', inverse: 'pets', target: 'Person', type: 'Entity' },
+            { field: 'guardian', inverse: 'pet', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+      ],
+    }))
+    await entities.createTables(database.sql)
+    await entities.createTables(database.sql)
+
+    expect(await database.sql<{ indexName: string, isUnique: boolean }[]>`
+      SELECT indexname AS "indexName", indisunique AS "isUnique"
+      FROM pg_indexes
+      JOIN pg_class ON pg_class.relname = indexname
+      JOIN pg_index ON pg_index.indexrelid = pg_class.oid
+      WHERE schemaname = current_schema() AND tablename = 'Pet' AND indexname LIKE 'Pet_%_fk_idx'
+      ORDER BY indexname
+    `).toEqual([
+      { indexName: 'Pet_guardian_fk_idx', isUnique: true },
+      { indexName: 'Pet_owner_fk_idx', isUnique: false },
+    ])
+
+    const personOne = '00000000-0000-4000-8000-000000000001'
+    const personTwo = '00000000-0000-4000-8000-000000000002'
+    const personThree = '00000000-0000-4000-8000-000000000003'
+    const petOne = '00000000-0000-4000-8000-000000000011'
+    const petTwo = '00000000-0000-4000-8000-000000000012'
+    const petThree = '00000000-0000-4000-8000-000000000013'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${personOne},
+        'Ada',
+        'Person'),
+        (${personTwo},
+        'Grace',
+        'Person'),
+        (${personThree},
+        'Linus',
+        'Person'),
+        (${petOne},
+        'Pet One',
+        'Pet'),
+        (${petTwo},
+        'Pet Two',
+        'Pet'),
+        (${petThree},
+        'Pet Three',
+        'Pet')
+    `
+    await database.sql`
+      INSERT INTO "Person" ("id")
+      VALUES (${personOne}), (${personTwo}), (${personThree})
+    `
+    await database.sql`
+      INSERT INTO "Pet" ("id", "owner.id", "guardian.id")
+VALUES (${petOne},
+  ${personOne},
+  ${personOne}),
+  (${petTwo},
+  ${personOne},
+  ${null}),
+  (${petThree},
+  ${personTwo},
+  ${personTwo})
+    `
+    expect(await database.captureError(async db => {
+      await db.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${'00000000-0000-4000-8000-000000000014'}, 'Duplicate', 'Pet')
+      `
+      await db.sql`
+        INSERT INTO "Pet" ("id", "owner.id", "guardian.id")
+        VALUES (${'00000000-0000-4000-8000-000000000014'}, ${personOne}, ${personOne})
+      `
+    })).toMatchObject({ errno: '23505' })
+
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Person', {
+      collections: { pets: { limit: 1, offset: 0 } },
+      fields: ['id', 'pet', 'pets'],
+      orderBy: 'id',
+      where: { id: personOne },
+    })).toEqual([{
+      id: personOne,
+      pet: { entity: 'Pet', id: petOne, name: 'Pet One' },
+      pets: {
+        items: [{ entity: 'Pet', id: petOne, name: 'Pet One' }],
+        remaining: 1,
+        total: 2,
+      },
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Person', {
+      fields: ['id', 'pet'],
+      orderBy: 'id',
+    })).toEqual([
+      { id: personOne, pet: { entity: 'Pet', id: petOne, name: 'Pet One' } },
+      { id: personTwo, pet: { entity: 'Pet', id: petThree, name: 'Pet Three' } },
+      { id: personThree, pet: null },
+    ])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
+      collections: { 'owner.pets': { limit: 1, offset: 0 } },
+      fields: ['id', 'owner.pets'],
+      where: { id: petOne },
+    })).toEqual([{
+      id: petOne,
+      owner: {
+        entity: 'Person',
+        id: personOne,
+        name: 'Ada',
+        pets: {
+          items: [{ entity: 'Pet', id: petOne, name: 'Pet One' }],
+          remaining: 1,
+          total: 2,
+        },
+      },
+    }])
+  }, 120_000)
+
   isolatedTest('projects inverse navigations for inherited and multiple roots', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'Pet' },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              cardinality: 'Many',
+              field: 'visits',
+              inverse: 'pet',
+              target: 'Visit',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Pet',
+        },
         {
           fields: [
             { field: 'id', format: 'Snowflake' },

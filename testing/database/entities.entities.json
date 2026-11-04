@@ -10,6 +10,13 @@
         {
           "field": "email",
           "type": "String"
+        },
+        {
+          "field": "managedUsers",
+          "type": "Inverse",
+          "target": "SystemUser",
+          "inverse": "manager",
+          "cardinality": "Many"
         }
       ]
     },

@@ -19,7 +19,15 @@ The document root accepts `entities` and an optional `relationships` array. This
   "entities": [
     {
       "name": "User",
-      "fields": []
+      "fields": [
+        {
+          "field": "articles",
+          "type": "Inverse",
+          "target": "Article",
+          "inverse": "author",
+          "cardinality": "Many"
+        }
+      ]
     },
     {
       "name": "Campaign",
@@ -86,7 +94,7 @@ const campaign = entities.entity('Campaign')
 const membership = entities.relationship('Membership')
 ```
 
-Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular references use `Entity`; scalar arrays use `Array` with scalar `items`; and opaque structured values use `JSON`. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, authored `abstract` boolean, `column`, `Collection`, `ValueCollection`, `Structured`, `Junction`, or mapping descriptor.
+Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular forward references use `Entity`; reciprocal navigation fields use `Inverse`; scalar arrays use `Array` with scalar `items`; and opaque structured values use `JSON`. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, authored `abstract` boolean, `column`, `Collection`, `ValueCollection`, `Structured`, `Junction`, or mapping descriptor.
 
 The implicit system root owns `id: ID`, `name: String`, and the concrete-leaf `entity` discriminator. The universal lightweight object shape is `{ id, name, entity }`. `id` is always the primary key; every ordinary entity table receives generated `id text primary key` storage and a parent foreign-key column. Root field names are reserved from ordinary declarations.
 
@@ -101,12 +109,46 @@ The example derives `User.articles` from `Article.author.inverse`, and derives `
 
 ## References, arrays, JSON, and relationships
 
-A singular reference is an effective field with `type: "Entity"`, an explicit `target`, and an optional `inverse`. It does not author a column. The physical foreign-key column is always the quoted dotted field path `field + '.id'`:
+A singular forward reference is a field with `type: "Entity"`, an explicit `target`, and an optional `inverse`. It does not author a column. The physical foreign-key column is always the quoted dotted field path `field + '.id'`:
 
 - `Article.author` is addressed as `"Article"."author.id"` in direct SQL and stores text that targets the referenced entity's shared `id`.
 - Logical `author` is selectable as a singular projection; `author.name` traverses to the referenced target.
 - Reference columns are nullable; omit the value for a missing optional reference.
-- `inverse` names a derived collection on the target entity. It is not a field and creates no column.
+- `inverse` must be paired with an authored `Inverse` field on the target. A forward reference without `inverse` remains an independent relationship with no inferred reverse navigation.
+
+A reciprocal navigation is a navigation-only field with `type: "Inverse"`, a `target`, the forward field name in `inverse`, and `cardinality: "One" | "Many"`. It creates no PostgreSQL column and is never a predicate or ordering scalar. `One` means zero or one, so it is nullable and physically enforced with a unique index on the forward FK; `Many` uses the normal reverse-lookup index.
+
+```json
+{
+  "entities": [
+    {
+      "name": "Pet",
+      "fields": [
+        {
+          "field": "owner",
+          "type": "Entity",
+          "target": "Person",
+          "inverse": "pets"
+        }
+      ]
+    },
+    {
+      "name": "Person",
+      "fields": [
+        {
+          "field": "pets",
+          "type": "Inverse",
+          "target": "Pet",
+          "inverse": "owner",
+          "cardinality": "Many"
+        }
+      ]
+    }
+  ]
+}
+```
+
+For a one-to-one association, change the reciprocal declaration to `{ "field": "pet", "type": "Inverse", "target": "Pet", "inverse": "owner", "cardinality": "One" }`. The forward field remains the only stored FK and gains a unique index. Model loading requires both sides to name each other and rejects orphan/wrongly directed declarations.
 
 Scalar arrays use `type: "Array"` with a scalar `items` descriptor. They map to native PostgreSQL arrays, preserve element order, and permit duplicates:
 
@@ -148,7 +190,7 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 await server.db.tx(async sql => entities.createTables(sql))
 ```
 
-`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, creates one ordinary PostgreSQL table per entity, and creates one table per named relationship. Local scalar fields use their logical field name; a singular reference field uses its derived dotted `field + '.id'` column; a scalar array uses its logical field name with the matching native PostgreSQL array type. Every ordinary entity table gets generated `id text primary key` storage. `String` maps to `text`; `Number` to `double precision`; `Date` to `date`; `Timestamp` to `timestamptz`; `Boolean` to `boolean`; `JSON` maps to `jsonb`; array types append `[]`. Relationship tables have no surrogate root identity; their two endpoint columns form the composite primary key. Format checks apply to the effective ordinary `id` format.
+`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, creates one ordinary PostgreSQL table per entity, and creates one table per named relationship. Local scalar fields use their logical field name; a singular reference field uses its derived dotted `field + '.id'` column; a scalar array uses its logical field name with the matching native PostgreSQL array type. Every ordinary entity table gets generated `id text primary key` storage. `String` maps to `text`; `Number` to `double precision`; `Date` to `date`; `Timestamp` to `timestamptz`; `Boolean` to `boolean`; `JSON` maps to `jsonb`; array types append `[]`. A `Many` reciprocal navigation adds the normal forward-FK index; a `One` reciprocal navigation adds a unique index on the same stored FK column. Relationship tables have no surrogate root identity; their two endpoint columns form the composite primary key. Format checks apply to the effective ordinary `id` format.
 
 Each entity table has a real primary key and an MTI parent foreign key to the system `Entity` root or its parent table. Shared fields are stored only in the table that owns them. The root alone stores `name` and the concrete-leaf `entity` discriminator. Multi-tier chains therefore use ordinary PostgreSQL PK/FK joins, not `INHERITS`.
 
@@ -241,9 +283,9 @@ const visits = await server.db.query<{
 })
 ```
 
-`fields: ['pet.vet.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, repeated reference edges, paths deeper than eight reference hops, and projections exceeding the finite path or work budget fail before SQL runs. Reference fields cannot be used in `where` or `orderBy`; graph predicates and nested collection projections remain deferred. Relation cycles are allowed in the canonical model and physical foreign keys, but a query cannot revisit the same reference edge. The compiler caps requested paths and both authored path work and actual expanded projection/join work, rejecting an over-budget projection before SQL execution.
+`fields: ['pet.vet.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, reciprocal backtracking, paths deeper than eight reference hops, and projections exceeding the finite path or work budget fail before SQL runs. Reference fields cannot be used in `where` or `orderBy`; arbitrary graph predicates remain deferred. Relation cycles are allowed in the canonical model and physical foreign keys; a query rejects only guaranteed immediate backtracking through a declared reciprocal pair. The compiler caps requested paths and both authored path work and actual expanded projection/join work, rejecting an over-budget projection before SQL execution.
 
-Derived collection navigations project a bounded envelope. The default preview is three lightweight `{ id, name, entity }` items; `total` is the exact collection count and `remaining` is the count after the requested page. `collections` overrides the preview limit and offset per selected collection. The navigation name is the declared `inverse` from a singular reference or named relationship endpoint:
+Derived collection navigations project a bounded envelope. The default preview is three lightweight `{ id, name, entity }` items; `total` is the exact collection count and `remaining` is the count after the requested page. `collections` overrides the preview limit and offset per selected collection. The navigation name is the authored `Inverse` field name, or the declared endpoint inverse for a named relationship:
 
 ```ts
 const campaigns = await server.db.query<{
@@ -282,7 +324,26 @@ const campaigns = await server.db.query<{
 })
 ```
 
-`relationshipFields` accepts only direct scalar property names of the named relationship; target entity fields, nested graph paths, arrays, JSON, and unknown names are rejected. The same physical `Membership` row produces `User.campaigns` in the other direction. Inverse-only navigations such as `User.articles` reject `relationshipFields` because there is no intervening relationship. The envelope is computed in the same SQL statement for both inverse and relationship-backed collections; there is no per-parent lookup. Collections follow stable target identity order. Collection predicates, nested collection projections, and arbitrary graph expansion remain deferred.
+`relationshipFields` accepts only direct scalar property names of the named relationship; target entity fields, nested graph paths, arrays, JSON, and unknown names are rejected. The same physical `Membership` row produces `User.campaigns` in the other direction. Inverse-only navigations such as `User.articles` reject `relationshipFields` because there is no intervening relationship. The envelope is computed in the same SQL statement for both inverse and relationship-backed collections; there is no per-parent lookup. Collections follow stable target identity order.
+
+A terminal nested collection is allowed beneath a singular forward reference, using the natural dotted collection key:
+
+```ts
+const pets = await server.db.query<{
+  id: string,
+  owner: {
+    entity: string,
+    id: string,
+    name: string,
+    pets: { items: { entity: string, id: string, name: string }[], remaining: number, total: number },
+  },
+}>('Pet', {
+  collections: { 'owner.pets': { limit: 2, offset: 0 } },
+  fields: ['id', 'owner.pets'],
+})
+```
+
+`Pet.owner.pets` is legal and bounded. `Pet.owner.pets.owner` is rejected as reciprocal backtracking because the collection item’s `owner` returns to the already traversed Person. A singular reciprocal navigation follows the same rule: `Pet.owner.pet` and `Person.pet.owner` are rejected for a `One` pair, while `Person.manager.manager` remains legal because repeating a forward-only reference is not reciprocal backtracking. Arbitrary recursion through collection elements and collection predicates remain deferred.
 
 `$contains` is a case-insensitive literal substring match on `String` fields. It escapes `%`, `_`, and the escape character before binding, so user input is never interpreted as a wildcard. Abstract display-name searches use the root `pg_trgm` GIN index.
 
@@ -318,7 +379,7 @@ Unquoted literals are typed from the target field, and quoted values remain stri
 
 UUID and Snowflake values remain canonical text in `db.query` results; there is no implicit bigint conversion for identity values. Ordering and comparisons operate on the physical text identity.
 
-`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar, native scalar-array, and JSON projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections, dotted paths, and bounded inverse and named-relationship collection envelopes. Collection predicates, nested collection projections, JSON shape validation, and direct composite-key relationship queries remain deferred. Explicit path depth and work are bounded before SQL execution; the compiler also charges expansion work as it creates projection nodes, joins, leaf-owner aliases, identity projections, and collection subqueries. Reference-edge cycles are rejected without rejecting cyclic entity definitions or physical foreign keys.
+`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar, native scalar-array, and JSON projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections, dotted paths, and bounded inverse and named-relationship collection envelopes. Collection predicates, arbitrary nested collection projections beyond a terminal collection beneath a singular reference, JSON shape validation, and direct composite-key relationship queries remain deferred. Explicit path depth and work are bounded before SQL execution; the compiler also charges expansion work as it creates projection nodes, joins, leaf-owner aliases, identity projections, and collection subqueries. Only guaranteed reciprocal backtracking is rejected; cyclic entity definitions and physical foreign keys remain valid.
 
 ## `db.sql`
 
