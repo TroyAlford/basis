@@ -110,25 +110,25 @@ const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
           type: 'Array',
         },
         {
-          field: 'articles',
-          items: { target: 'Article', type: 'Entity' },
-          mapping: { field: 'owner', kind: 'Inverse' },
+          field: 'visits',
+          items: { target: 'Visit', type: 'Entity' },
+          mapping: { field: 'pet', kind: 'Inverse' },
           type: 'Collection',
         },
       ],
-      name: 'Tagged',
+      name: 'Pet',
     },
     {
       fields: [
         { field: 'id', format: 'Snowflake' },
         {
-          column: 'ownerId',
-          field: 'owner',
-          target: 'Tagged',
+          column: 'petId',
+          field: 'pet',
+          target: 'Pet',
           type: 'Entity',
         },
       ],
-      name: 'Article',
+      name: 'Visit',
     },
   ],
 }))
@@ -451,18 +451,18 @@ describe('SQL.where', () => {
   })
 
   test('projects native scalar arrays and rejects relationship collections', () => {
-    const compiled = compileEntityQuery(collectionDefinitions, 'Tagged', {
+    const compiled = compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id', 'tags'],
     })
     expect(compiled.sql).toContain('t."tags" AS "tags"')
-    expect(() => compileEntityQuery(collectionDefinitions, 'Tagged', {
-      fields: ['articles'],
+    expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
+      fields: ['visits'],
     })).toThrow('collection projections are not supported yet')
-    expect(() => compileEntityQuery(collectionDefinitions, 'Tagged', {
+    expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { tags: 'x' },
     })).toThrow('array fields cannot be used in predicates or ordering')
-    expect(() => compileEntityQuery(collectionDefinitions, 'Tagged', {
+    expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       orderBy: 'tags',
     })).toThrow('array fields cannot be used in predicates or ordering')

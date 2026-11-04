@@ -909,64 +909,64 @@ VALUES (${'1001'},
         {
           fields: [
             { field: 'id', format: 'Snowflake' },
-            { field: 'email', type: 'String' },
+            { field: 'nickname', type: 'String' },
           ],
-          name: 'User',
+          name: 'Pet',
         },
         {
-          extends: 'User',
-          fields: [{ field: 'permissions', type: 'String' }],
-          name: 'SystemUser',
+          extends: 'Pet',
+          fields: [{ field: 'breed', type: 'String' }],
+          name: 'Dog',
         },
         {
-          extends: 'User',
-          fields: [{ field: 'company', type: 'String' }],
-          name: 'Client',
+          extends: 'Pet',
+          fields: [{ field: 'indoor', type: 'Boolean' }],
+          name: 'Cat',
         },
       ],
     }))
     await withSeedDatabase(async ({ sql }) => {
       const options = {
-        fields: ['id', 'name', 'entity', 'email'],
+        fields: ['id', 'name', 'entity', 'nickname'],
         limit: 10,
         orderBy: 'name',
-        where: { field: 'name', operator: Operator.Comparison.Contains, value: 'person-250000' },
+        where: { field: 'name', operator: Operator.Comparison.Contains, value: 'pet-250000' },
       } as const
       const rows = await queryEntity<{
-        email: string,
         entity: string,
         id: string,
         name: string,
-      }>(sql, entities, 'User', options)
+        nickname: string,
+      }>(sql, entities, 'Pet', options)
       expect(rows).toHaveLength(1)
       expect(rows[0]).toMatchObject({
-        email: 'user-250000@example.test',
-        entity: 'SystemUser',
+        entity: 'Dog',
         id: '250000',
-        name: 'person-250000',
+        name: 'pet-250000',
+        nickname: 'pet-250000',
       })
 
-      const pageOne = await queryEntity<{ name: string }>(sql, entities, 'User', {
+      const pageOne = await queryEntity<{ name: string }>(sql, entities, 'Pet', {
         fields: ['name'],
         limit: 3,
         orderBy: 'name',
       })
-      const pageTwo = await queryEntity<{ name: string }>(sql, entities, 'User', {
+      const pageTwo = await queryEntity<{ name: string }>(sql, entities, 'Pet', {
         fields: ['name'],
         limit: 3,
         offset: 3,
         orderBy: 'name',
       })
-      expect(pageOne.map(row => row.name)).toEqual(['person-000001', 'person-000002', 'person-000003'])
-      expect(pageTwo.map(row => row.name)).toEqual(['person-000004', 'person-000005', 'person-000006'])
+      expect(pageOne.map(row => row.name)).toEqual(['pet-000001', 'pet-000002', 'pet-000003'])
+      expect(pageTwo.map(row => row.name)).toEqual(['pet-000004', 'pet-000005', 'pet-000006'])
 
-      expect(await queryEntity<{ name: string }>(sql, entities, 'User', {
+      expect(await queryEntity<{ name: string }>(sql, entities, 'Pet', {
         fields: ['name'],
         limit: 1,
         orderBy: [],
-      })).toEqual([{ name: 'person-000001' }])
+      })).toEqual([{ name: 'pet-000001' }])
 
-      const compiled = compileEntityQuery(entities, 'User', options)
+      const compiled = compileEntityQuery(entities, 'Pet', options)
       const plan = await sql.unsafe<Record<string, string>[]>(
         `EXPLAIN (FORMAT TEXT) ${compiled.sql}`,
         [...compiled.values],
@@ -974,7 +974,7 @@ VALUES (${'1001'},
       expect(plan.map(row => Object.values(row).join('\n')).join('\n'))
         .toContain('Entity_name_trgm_idx')
     })
-  }, 120_000)
+  }, 300_000)
 
   durableTest('rolls back partial fresh-schema initialization inside db.tx', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -1047,21 +1047,21 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
           fields: [
             { field: 'id', format: 'UUID' },
             {
-              field: 'ownedArticles',
-              items: { target: 'Article', type: 'Entity' },
-              mapping: { field: 'owner', kind: 'Inverse' },
+              field: 'ownedVisits',
+              items: { target: 'Visit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
               type: 'Collection',
             },
           ],
-          name: 'User',
+          name: 'Pet',
         },
         {
           fields: [
             { field: 'id', format: 'Snowflake' },
             { field: 'tags', items: { type: 'String' }, type: 'Array' },
-            { column: 'ownerId', field: 'owner', target: 'User', type: 'Entity' },
+            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
           ],
-          name: 'Article',
+          name: 'Visit',
         },
       ],
     }))
@@ -1070,7 +1070,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     expect(await database.sql<{ columnName: string }[]>`
       SELECT column_name AS "columnName"
       FROM information_schema.columns
-      WHERE table_schema = current_schema() AND table_name = 'User'
+      WHERE table_schema = current_schema() AND table_name = 'Pet'
       ORDER BY ordinal_position
     `).toEqual([{ columnName: 'id' }])
     expect(await database.sql<{
@@ -1084,34 +1084,34 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
         is_nullable AS "isNullable",
         udt_name AS "udtName"
       FROM information_schema.columns
-      WHERE table_schema = current_schema() AND table_name = 'Article'
+      WHERE table_schema = current_schema() AND table_name = 'Visit'
       ORDER BY ordinal_position
     `).toEqual([
       { columnName: 'id', dataType: 'text', isNullable: 'NO', udtName: 'text' },
       { columnName: 'tags', dataType: 'ARRAY', isNullable: 'NO', udtName: '_text' },
-      { columnName: 'ownerId', dataType: 'text', isNullable: 'YES', udtName: 'text' },
+      { columnName: 'petId', dataType: 'text', isNullable: 'YES', udtName: 'text' },
     ])
 
     const userId = randomUUID()
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${userId}, ${'User'}, ${'User'}), (${'1001'}, ${'Article One'}, ${'Article'})
+      VALUES (${userId}, ${'Pet'}, ${'Pet'}), (${'1001'}, ${'Visit One'}, ${'Visit'})
     `
     await database.sql`
-      INSERT INTO "User" ("id")
+      INSERT INTO "Pet" ("id")
       VALUES (${userId})
     `
     await database.sql`
-      INSERT INTO "Article" ("id", "tags", "ownerId")
+      INSERT INTO "Visit" ("id", "tags", "petId")
       VALUES (${'1001'}, ARRAY['one', 'two'], ${userId})
     `
-    expect(await queryEntity<{ id: string, tags: string[] }>(database.sql, entities, 'Article', {
+    expect(await queryEntity<{ id: string, tags: string[] }>(database.sql, entities, 'Visit', {
       fields: ['id', 'tags'],
       limit: null,
       orderBy: 'id',
     })).toEqual([{ id: '1001', tags: ['one', 'two'] }])
-    await expect(queryEntity(database.sql, entities, 'User', {
-      fields: ['ownedArticles'],
+    await expect(queryEntity(database.sql, entities, 'Pet', {
+      fields: ['ownedVisits'],
     })).rejects.toThrow('collection projections are not supported yet')
   }, 120_000)
 

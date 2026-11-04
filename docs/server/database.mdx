@@ -16,40 +16,84 @@ Pass `url` only when using an explicit external PostgreSQL server. Managed state
 {
   "entities": [
     {
-      "name": "User",
+      "name": "Pet",
       "fields": [
         {
           "field": "id",
           "format": "UUID"
         },
         {
-          "field": "email",
-          "type": "String"
-        }
-      ]
-    },
-    {
-      "name": "SystemUser",
-      "extends": "User",
-      "fields": [
-        {
-          "field": "permissions",
+          "field": "nickname",
           "type": "String"
         },
         {
-          "field": "manager",
-          "type": "Entity",
-          "target": "User",
-          "column": "managerId"
+          "field": "visits",
+          "type": "Collection",
+          "items": {
+            "type": "Entity",
+            "target": "Visit"
+          },
+          "mapping": {
+            "kind": "Inverse",
+            "field": "pet"
+          }
         }
       ]
     },
     {
-      "name": "Client",
-      "extends": "User",
+      "name": "Dog",
+      "extends": "Pet",
       "fields": [
         {
-          "field": "company",
+          "field": "breed",
+          "type": "String"
+        },
+        {
+          "field": "vet",
+          "type": "Entity",
+          "target": "Vet",
+          "column": "vetId"
+        }
+      ]
+    },
+    {
+      "name": "Cat",
+      "extends": "Pet",
+      "fields": [
+        {
+          "field": "indoor",
+          "type": "Boolean"
+        }
+      ]
+    },
+    {
+      "name": "Vet",
+      "fields": [
+        {
+          "field": "id",
+          "format": "UUID"
+        },
+        {
+          "field": "clinic",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "name": "Visit",
+      "fields": [
+        {
+          "field": "id",
+          "format": "Snowflake"
+        },
+        {
+          "field": "pet",
+          "type": "Entity",
+          "target": "Pet",
+          "column": "petId"
+        },
+        {
+          "field": "notes",
           "type": "String"
         }
       ]
@@ -62,7 +106,7 @@ Pass `url` only when using an explicit external PostgreSQL server. Managed state
 import { EntityDefinitions, FieldType } from 'basis/server'
 
 const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
-const user = entities.entity('User')
+const pet = entities.entity('Pet')
 ```
 
 Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular references use `Entity` with explicit `target` and `column`; scalar arrays use `Array`; and entity relationships use `Collection` with an explicit mapping. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, or authored `abstract` boolean.
@@ -76,9 +120,9 @@ Identity and ordinary fields are inherited. The only inherited refinement is an 
 - Without a refinement, ID accepts either format.
 - A descendant inherits an ancestor format; a conflicting redeclaration is rejected.
 
-The required fixture above derives `User` as abstract because it has children, and derives `SystemUser` and `Client` as concrete leaves. A standalone entity with `fields: []` is a valid concrete entity. A branch cannot be instantiated; only leaf names may appear as root discriminators.
+The required fixture above derives `Pet` as abstract because it has children, and derives `Dog` and `Cat` as concrete leaves. A standalone entity with `fields: []` is a valid concrete entity. A branch cannot be instantiated; only leaf names may appear as root discriminators.
 
-The model is logical-first. A singular entity reference is itself a field in `fields`: `SystemUser.manager` is the logical field, while `managerId` is only its explicit PostgreSQL storage column. A reference uses `type: "Entity"`, an explicit `target`, and an explicit `column`. There is no inference from names, suffixes, columns, or entity existence. Reference names and physical column names are independently authored. The target must exist, or be the universal `Entity` root; the generated reference column is `text` and targets the target table's shared `id`. A `User` reference therefore enforces that the referenced row has a `User` ancestor, while an `Entity` reference may target any concrete leaf. Reference columns are nullable; omit the value for a missing optional reference.
+The model is logical-first. A singular entity reference is itself a field in `fields`: `Dog.vet` is the logical field, while `vetId` is only its explicit PostgreSQL storage column. A reference uses `type: "Entity"`, an explicit `target`, and an explicit `column`. There is no inference from names, suffixes, columns, or entity existence. Reference names and physical column names are independently authored. The target must exist, or be the universal `Entity` root; the generated reference column is `text` and targets the target table's shared `id`. A `Vet` reference therefore enforces that the referenced row has a `Vet` ancestor, while an `Entity` reference may target any concrete leaf. Reference columns are nullable; omit the value for a missing optional reference.
 
 Scalar arrays use `type: "Array"` with a scalar `items` descriptor. They map to native PostgreSQL arrays, preserve element order, and permit duplicates:
 
@@ -94,10 +138,10 @@ Entity relationship collections use `type: "Collection"` with an `Entity` elemen
 
 ```json
 {
-  "field": "ownedArticles",
+  "field": "visits",
   "type": "Collection",
-  "items": { "type": "Entity", "target": "Article" },
-  "mapping": { "kind": "Inverse", "field": "owner" }
+  "items": { "type": "Entity", "target": "Visit" },
+  "mapping": { "kind": "Inverse", "field": "pet" }
 }
 ```
 
@@ -105,14 +149,14 @@ A many-to-many mapping names its junction table and columns explicitly:
 
 ```json
 {
-  "field": "authors",
+  "field": "playmates",
   "type": "Collection",
-  "items": { "type": "Entity", "target": "User" },
+  "items": { "type": "Entity", "target": "Pet" },
   "mapping": {
     "kind": "Junction",
-    "table": "ArticleAuthor",
-    "sourceColumn": "articleId",
-    "targetColumn": "userId",
+    "table": "PetPlaymate",
+    "sourceColumn": "petId",
+    "targetColumn": "playmateId",
     "orderingColumn": "position"
   }
 }
@@ -120,7 +164,7 @@ A many-to-many mapping names its junction table and columns explicitly:
 
 Inverse mappings resolve against the forward FK during metadata validation. Junction physical DDL and FK enforcement, collection query execution, and collection value validation remain deferred. Collection fields are logical relationship metadata and do not create a generic JSONB membership column.
 
-Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `manager` is selectable as a singular projection, but it is not filterable or sortable; its physical `managerId` column is never a logical field. Direct `db.sql` remains physical SQL and may use generated columns normally.
+Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `vet` is selectable as a singular projection, but it is not filterable or sortable; its physical `vetId` column is never a logical field. Direct `db.sql` remains physical SQL and may use generated columns normally.
 
 ## Universal identity root
 
@@ -148,9 +192,9 @@ await server.db.tx(async sql => {
   await sql`SET CONSTRAINTS ALL DEFERRED`
   await sql`
     INSERT INTO "Entity" ("id", "name", "entity")
-    VALUES (${userId}, 'User', 'User'), (${carId}, 'Car', 'Car')
+    VALUES (${petId}, 'Pet', 'Pet'), (${carId}, 'Car', 'Car')
   `
-  await sql`INSERT INTO "User" ("id", "carId") VALUES (${userId}, ${carId})`
+  await sql`INSERT INTO "Pet" ("id", "carId") VALUES (${petId}, ${carId})`
   await sql`INSERT INTO "Car" ("id", "userId") VALUES (${carId}, ${userId})`
 })
 ```
@@ -187,13 +231,13 @@ const notes = await server.db.query<{ id: string, title: string }>('Note', {
 For an abstract entity, the effective field set includes `id`, `name`, `entity`, and inherited/local fields. A single query returns every concrete descendant:
 
 ```ts
-const users = await server.db.query<{
-  email: string,
+const pets = await server.db.query<{
   entity: string,
   id: string,
   name: string,
-}>('User', {
-  fields: ['id', 'name', 'entity', 'email'],
+  nickname: string,
+}>('Pet', {
+  fields: ['id', 'name', 'entity', 'nickname'],
   where: { field: 'name', operator: Operator.Comparison.Contains, value: 'Ada' },
   orderBy: 'name',
   limit: 20,
@@ -203,12 +247,12 @@ const users = await server.db.query<{
 A field that exists only on some concrete descendants is still selectable on an abstract query. Its value is present for leaves that declare it and `null` for siblings that do not:
 
 ```ts
-const users = await server.db.query<{
+const pets = await server.db.query<{
+  breed: string | null,
   entity: string,
   id: string,
-  permissions: string | null,
-}>('User', {
-  fields: ['id', 'entity', 'permissions'],
+}>('Pet', {
+  fields: ['id', 'entity', 'breed'],
 })
 ```
 
@@ -217,16 +261,16 @@ Same-named descendant-only fields are accepted only when their type, format, and
 Singular references return the target's lightweight identity `{ id, name, entity }` or `null` when the reference is unset. A reference declared only on some descendant leaves is present for those leaves and `null` for siblings. Selecting a dotted path expands the reference and includes that identity automatically. Fields from an abstract target resolve against its actual concrete leaf. A reference targeting the universal `Entity` root derives leaf-owned fields and references from the actual target leaf; leaves without that field yield `null`:
 
 ```ts
-const articles = await server.db.query<{
+const visits = await server.db.query<{
   id: string,
-  owner: { entity: string, id: string, name: string, permissions: string | null } | null,
-}>('Article', {
-  fields: ['id', 'owner.permissions'],
+  pet: { breed: string | null, entity: string, id: string, name: string } | null,
+}>('Visit', {
+  fields: ['id', 'pet.breed'],
   orderBy: 'id',
 })
 ```
 
-`fields: ['owner.manager.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, repeated reference expansion, and paths deeper than eight reference hops fail before SQL runs. Reference fields cannot be used in `where` or `orderBy`; graph predicates and collection projections remain deferred.
+`fields: ['pet.vet.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, repeated reference expansion, and paths deeper than eight reference hops fail before SQL runs. Reference fields cannot be used in `where` or `orderBy`; graph predicates and collection projections remain deferred.
 
 `$contains` is a case-insensitive literal substring match on `String` fields. It escapes `%`, `_`, and the escape character before binding, so user input is never interpreted as a wildcard. Abstract display-name searches use the root `pg_trgm` GIN index.
 

@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+/** Directory containing the committed seed SQL and Dockerfile. */
+export const SEED_DIRECTORY = import.meta.dir
 /** Schema populated by the prebuilt PostgreSQL fixture image. */
 export const SEED_SCHEMA = 'basis_seed'
 /** Default GHCR repository for the prebuilt database fixture. */

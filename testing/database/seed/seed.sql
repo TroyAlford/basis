@@ -13,40 +13,40 @@ constraint "Entity_id_format_check" check (("id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-
       then "id"::numeric between -9223372036854775808 and 9223372036854775807
     else false
   end)),
-constraint "Entity_entity_check" check ("entity" in ('SystemUser', 'Client'))
+constraint "Entity_entity_check" check ("entity" in ('Dog', 'Cat'))
 );
 create index if not exists "Entity_name_id_idx" on "Entity" ("name", "id");
 create index if not exists "Entity_name_trgm_idx" on "Entity" using gin ("name" public.gin_trgm_ops);
-create table "User" (
+create table "Pet" (
 "id" text primary key,
-"email" text not null,
-constraint "User_id_format_check" check (case
+"nickname" text not null,
+constraint "Pet_id_format_check" check (case
     when "id" ~ '^(0|-?[1-9][0-9]*)$' and length("id") <= 20
       then "id"::numeric between -9223372036854775808 and 9223372036854775807
     else false
   end)
 );
-create table "SystemUser" (
+create table "Dog" (
 "id" text primary key,
-"permissions" text not null,
-constraint "SystemUser_id_format_check" check (case
+"breed" text not null,
+constraint "Dog_id_format_check" check (case
     when "id" ~ '^(0|-?[1-9][0-9]*)$' and length("id") <= 20
       then "id"::numeric between -9223372036854775808 and 9223372036854775807
     else false
   end)
 );
-create table "Client" (
+create table "Cat" (
 "id" text primary key,
-"company" text not null,
-constraint "Client_id_format_check" check (case
+"indoor" boolean not null,
+constraint "Cat_id_format_check" check (case
     when "id" ~ '^(0|-?[1-9][0-9]*)$' and length("id") <= 20
       then "id"::numeric between -9223372036854775808 and 9223372036854775807
     else false
   end)
 );
-alter table "User" add constraint "User_Entity_mti_fkey" foreign key ("id") references "Entity" ("id") deferrable initially immediate;
-alter table "SystemUser" add constraint "SystemUser_User_mti_fkey" foreign key ("id") references "User" ("id") deferrable initially immediate;
-alter table "Client" add constraint "Client_User_mti_fkey" foreign key ("id") references "User" ("id") deferrable initially immediate;
+alter table "Pet" add constraint "Pet_Entity_mti_fkey" foreign key ("id") references "Entity" ("id") deferrable initially immediate;
+alter table "Dog" add constraint "Dog_Pet_mti_fkey" foreign key ("id") references "Pet" ("id") deferrable initially immediate;
+alter table "Cat" add constraint "Cat_Pet_mti_fkey" foreign key ("id") references "Pet" ("id") deferrable initially immediate;
 create or replace function "Entity_validate_leaf"() returns trigger language plpgsql as $$
 declare
   root_id text;
@@ -58,12 +58,12 @@ begin
     return null;
   end if;
   case root_entity
-    when 'SystemUser' then
-        if not exists (select 1 from "SystemUser" where "id" = root_id) then
+    when 'Dog' then
+        if not exists (select 1 from "Dog" where "id" = root_id) then
           raise exception 'incomplete root row % for entity %', root_id, root_entity;
         end if;
-    when 'Client' then
-        if not exists (select 1 from "Client" where "id" = root_id) then
+    when 'Cat' then
+        if not exists (select 1 from "Cat" where "id" = root_id) then
           raise exception 'incomplete root row % for entity %', root_id, root_entity;
         end if;
     else
@@ -115,31 +115,31 @@ begin
 end
 $$;
 create constraint trigger "Entity_leaf_check" after insert or update on "Entity" deferrable initially deferred for each row execute function "Entity_validate_leaf"();
-create constraint trigger "SystemUser_leaf_check" after insert or update or delete on "SystemUser" deferrable initially deferred for each row execute function "Entity_validate_leaf_row"();
-create constraint trigger "Client_leaf_check" after insert or update or delete on "Client" deferrable initially deferred for each row execute function "Entity_validate_leaf_row"();
+create constraint trigger "Dog_leaf_check" after insert or update or delete on "Dog" deferrable initially deferred for each row execute function "Entity_validate_leaf_row"();
+create constraint trigger "Cat_leaf_check" after insert or update or delete on "Cat" deferrable initially deferred for each row execute function "Entity_validate_leaf_row"();
 create trigger "Entity_leaf_immutable" before update of "entity" on "Entity" for each row execute function "Entity_leaf_immutable"();
 
 insert into "Entity" ("id", "name", "entity")
 select value::text,
-  'person-' || lpad(value::text, 6, '0'),
-  case when value % 2 = 0 then 'SystemUser' else 'Client' end
+  'pet-' || lpad(value::text, 6, '0'),
+  case when value % 2 = 0 then 'Dog' else 'Cat' end
 from generate_series(1, 500000) as series(value);
 
-insert into "User" ("id", "email")
-select value::text, 'user-' || value || '@example.test'
+insert into "Pet" ("id", "nickname")
+select value::text, 'pet-' || value
 from generate_series(1, 500000) as series(value);
 
-insert into "SystemUser" ("id", "permissions")
-select value::text, 'permissions'
+insert into "Dog" ("id", "breed")
+select value::text, 'breed'
 from generate_series(2, 500000, 2) as series(value);
 
-insert into "Client" ("id", "company")
-select value::text, 'company'
+insert into "Cat" ("id", "indoor")
+select value::text, true
 from generate_series(1, 499999, 2) as series(value);
 
 analyze "Entity";
-analyze "User";
-analyze "SystemUser";
-analyze "Client";
+analyze "Pet";
+analyze "Dog";
+analyze "Cat";
 
 commit;

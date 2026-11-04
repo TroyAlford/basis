@@ -14,4 +14,4 @@ Regenerate SQL after changing the model:
 bun testing/database/seed/generate.ts
 ```
 
-Publish the immutable image through the `Database fixture image` workflow. Tests reuse an existing image for the same checksum and never insert the 500,000 rows at runtime.
+Publish the immutable image through the `Database fixture image` workflow. Tests reuse an existing image for the same checksum and never insert the 500,000 rows at runtime. If neither the local Docker cache nor GHCR has the checksum tag, `withSeedDatabase` builds the committed Dockerfile once and reuses that local image on later runs.

@@ -662,7 +662,7 @@ function parseEntities(value: unknown): readonly EntityDefinition[] {
 function validateCollectionMappings(entities: readonly EntityDefinition[]): void {
   const byName = new Map(entities.map(entity => [entity.name, entity]))
   for (const entity of entities) {
-    for (const field of entity.effectiveFields) {
+    for (const field of entity.fields) {
       if (field.type !== FieldType.Collection) continue
       const mapping = field.mapping
       if (mapping.kind !== 'Inverse') continue
@@ -684,14 +684,35 @@ function validateCollectionMappings(entities: readonly EntityDefinition[]): void
           `"${field.items.target}.${mapping.field}"`,
         )
       }
-      if (forward.target !== entity.name) {
+      if (forward.target !== entity.name && !isAncestor(entities, entity.name, forward.target)) {
         throw invalid(
           `inverse collection "${entity.name}.${field.name}" forward target ` +
-          `"${forward.target}" must be "${entity.name}"`,
+          `"${forward.target}" must be "${entity.name}" or an ancestor`,
         )
       }
     }
   }
+}
+
+/**
+ * Whether an entity name is an ancestor of another entity.
+ * @param entities - Resolved canonical definitions.
+ * @param entityName - Descendant entity name.
+ * @param ancestor - Candidate ancestor name.
+ * @returns `true` when the ancestor owns a table above the entity.
+ */
+function isAncestor(
+  entities: readonly EntityDefinition[],
+  entityName: string,
+  ancestor: string,
+): boolean {
+  let current: string | undefined = entityName
+  while (current !== undefined) {
+    if (current === ancestor) return true
+    current = entities.find(entity => entity.name === current)?.parent
+    if (current === 'Entity') return ancestor === 'Entity'
+  }
+  return false
 }
 
 /** A parsed entity before reference targets are resolved. */

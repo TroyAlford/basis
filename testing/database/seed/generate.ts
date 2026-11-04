@@ -8,19 +8,19 @@ const seedEntities = EntityDefinitions.load(JSON.stringify({
     {
       fields: [
         { field: 'id', format: 'Snowflake' },
-        { field: 'email', type: 'String' },
+        { field: 'nickname', type: 'String' },
       ],
-      name: 'User',
+      name: 'Pet',
     },
     {
-      extends: 'User',
-      fields: [{ field: 'permissions', type: 'String' }],
-      name: 'SystemUser',
+      extends: 'Pet',
+      fields: [{ field: 'breed', type: 'String' }],
+      name: 'Dog',
     },
     {
-      extends: 'User',
-      fields: [{ field: 'company', type: 'String' }],
-      name: 'Client',
+      extends: 'Pet',
+      fields: [{ field: 'indoor', type: 'Boolean' }],
+      name: 'Cat',
     },
   ],
 }))
@@ -35,26 +35,26 @@ ${ddl}
 
 insert into "Entity" ("id", "name", "entity")
 select value::text,
-  'person-' || lpad(value::text, 6, '0'),
-  case when value % 2 = 0 then 'SystemUser' else 'Client' end
+  'pet-' || lpad(value::text, 6, '0'),
+  case when value % 2 = 0 then 'Dog' else 'Cat' end
 from generate_series(1, 500000) as series(value);
 
-insert into "User" ("id", "email")
-select value::text, 'user-' || value || '@example.test'
+insert into "Pet" ("id", "nickname")
+select value::text, 'pet-' || value
 from generate_series(1, 500000) as series(value);
 
-insert into "SystemUser" ("id", "permissions")
-select value::text, 'permissions'
+insert into "Dog" ("id", "breed")
+select value::text, 'breed'
 from generate_series(2, 500000, 2) as series(value);
 
-insert into "Client" ("id", "company")
-select value::text, 'company'
+insert into "Cat" ("id", "indoor")
+select value::text, true
 from generate_series(1, 499999, 2) as series(value);
 
 analyze "Entity";
-analyze "User";
-analyze "SystemUser";
-analyze "Client";
+analyze "Pet";
+analyze "Dog";
+analyze "Cat";
 
 commit;
 `

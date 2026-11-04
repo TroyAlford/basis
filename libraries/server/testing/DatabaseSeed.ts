@@ -1,7 +1,8 @@
 import { runAsync } from 'basis/configuration'
 import { SQL } from 'bun'
 import { randomUUID } from 'node:crypto'
-import { SEED_SCHEMA, seedImage } from '../../../testing/database/seed/image'
+import { join } from 'node:path'
+import { SEED_DIRECTORY, SEED_SCHEMA, seedImage } from '../../../testing/database/seed/image'
 
 /** A connection to the prebuilt PostgreSQL fixture image. */
 export interface SeedDatabase {
@@ -25,6 +26,8 @@ const READY_TIMEOUT_MS = 30_000
 export async function withSeedDatabase<T>(
   callback: (database: SeedDatabase) => Promise<T>,
 ): Promise<T> {
+  const image = seedImage()
+  await ensureImage(image)
   const name = `basis-seed-${randomUUID()}`
   const started = await runAsync('docker', [
     'run',
@@ -35,7 +38,7 @@ export async function withSeedDatabase<T>(
     name,
     '-p',
     '127.0.0.1::5432',
-    seedImage(),
+    image,
   ])
   if (started.exitCode !== 0) {
     throw new Error(`Prebuilt PostgreSQL fixture failed to start: ${started.stderr.trim()}`)
@@ -51,6 +54,29 @@ export async function withSeedDatabase<T>(
   } finally {
     await sql?.close()
     await runAsync('docker', ['rm', '-f', name])
+  }
+}
+
+/**
+ * Pull the immutable image or build the committed seed locally when no cache or
+ * registry copy exists. Once present, later runs reuse the same image.
+ * @param image - Immutable image reference.
+ */
+async function ensureImage(image: string): Promise<void> {
+  const local = await runAsync('docker', ['image', 'inspect', image])
+  if (local.exitCode === 0) return
+  const pulled = await runAsync('docker', ['pull', image])
+  if (pulled.exitCode === 0) return
+  const built = await runAsync('docker', [
+    'build',
+    '--file',
+    join(SEED_DIRECTORY, 'Dockerfile'),
+    '--tag',
+    image,
+    SEED_DIRECTORY,
+  ])
+  if (built.exitCode !== 0) {
+    throw new Error(`Prebuilt PostgreSQL fixture could not be pulled or built: ${built.stderr.trim()}`)
   }
 }
 
