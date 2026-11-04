@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 import { accountDefinition, containers, noteDefinition, numberRowDefinition, removeService, useDatabaseFixture } from '../testing/DatabaseFixture'
 import type { DurableDatabase, IsolatedDatabase } from '../testing/DatabaseIsolation'
 import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { withSeedDatabase } from '../testing/DatabaseSeed'
 import { compileEntityQuery, queryEntity } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
@@ -902,114 +903,77 @@ VALUES (${'1001'},
     }))).rejects.toThrow('Repeated reference expansion')
   }, 120_000)
 
-  durableTest('queries polymorphic descendants with indexed names', async database => {
+  test('queries prebuilt polymorphic descendants with indexed names', async () => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
         {
           fields: [
             { field: 'id', format: 'Snowflake' },
-            { field: 'email', type: 'String' },
+            { field: 'nickname', type: 'String' },
           ],
-          name: 'User',
+          name: 'Pet',
         },
         {
-          extends: 'User',
-          fields: [{ field: 'permissions', type: 'String' }],
-          name: 'SystemUser',
+          extends: 'Pet',
+          fields: [{ field: 'breed', type: 'String' }],
+          name: 'Dog',
         },
         {
-          extends: 'User',
-          fields: [{ field: 'company', type: 'String' }],
-          name: 'Client',
+          extends: 'Pet',
+          fields: [{ field: 'indoor', type: 'Boolean' }],
+          name: 'Cat',
         },
       ],
     }))
-    await database.tx(async sql => entities.createTables(sql))
-    for (let chunkStart = 1; chunkStart <= 500_000; chunkStart += 25_000) {
-      const end = Math.min(chunkStart + 24_999, 500_000)
-      await database.tx(async sql => {
-        await sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
-          SELECT value::text,
-            'person-' || lpad(value::text,
-            6,
-            '0'),
-            CASE WHEN value % 2 = 0 THEN 'SystemUser' ELSE 'Client' END
-          FROM generate_series(${chunkStart}, ${end}) AS series(value)
-        `
-        await sql`
-          INSERT INTO "User" ("id", "email")
-          SELECT value::text, 'user-' || value || '@example.test'
-          FROM generate_series(${chunkStart}, ${end}) AS series(value)
-        `
-        await sql`
-          INSERT INTO "SystemUser" ("id", "permissions")
-          SELECT value::text, 'permissions'
-FROM generate_series(${chunkStart + (chunkStart % 2 === 0 ? 0 : 1)},
-  ${end},
-  2) AS series(value)
-        `
-        await sql`
-          INSERT INTO "Client" ("id", "company")
-          SELECT value::text, 'company'
-FROM generate_series(${chunkStart + (chunkStart % 2 === 1 ? 0 : 1)},
-  ${end},
-  2) AS series(value)
-        `
+    await withSeedDatabase(async ({ sql }) => {
+      const options = {
+        fields: ['id', 'name', 'entity', 'nickname'],
+        limit: 10,
+        orderBy: 'name',
+        where: { field: 'name', operator: Operator.Comparison.Contains, value: 'pet-250000' },
+      } as const
+      const rows = await queryEntity<{
+        entity: string,
+        id: string,
+        name: string,
+        nickname: string,
+      }>(sql, entities, 'Pet', options)
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({
+        entity: 'Dog',
+        id: '250000',
+        name: 'pet-250000',
+        nickname: 'pet-250000',
       })
-    }
-    await database.tx(async sql => {
-      await sql`
-        ANALYZE "Entity"
-      `
+
+      const pageOne = await queryEntity<{ name: string }>(sql, entities, 'Pet', {
+        fields: ['name'],
+        limit: 3,
+        orderBy: 'name',
+      })
+      const pageTwo = await queryEntity<{ name: string }>(sql, entities, 'Pet', {
+        fields: ['name'],
+        limit: 3,
+        offset: 3,
+        orderBy: 'name',
+      })
+      expect(pageOne.map(row => row.name)).toEqual(['pet-000001', 'pet-000002', 'pet-000003'])
+      expect(pageTwo.map(row => row.name)).toEqual(['pet-000004', 'pet-000005', 'pet-000006'])
+
+      expect(await queryEntity<{ name: string }>(sql, entities, 'Pet', {
+        fields: ['name'],
+        limit: 1,
+        orderBy: [],
+      })).toEqual([{ name: 'pet-000001' }])
+
+      const compiled = compileEntityQuery(entities, 'Pet', options)
+      const plan = await sql.unsafe<Record<string, string>[]>(
+        `EXPLAIN (FORMAT TEXT) ${compiled.sql}`,
+        [...compiled.values],
+      )
+      expect(plan.map(row => Object.values(row).join('\n')).join('\n'))
+        .toContain('Entity_name_trgm_idx')
     })
-    const options = {
-      fields: ['id', 'name', 'entity', 'email'],
-      limit: 10,
-      orderBy: 'name',
-      where: { field: 'name', operator: Operator.Comparison.Contains, value: 'person-250000' },
-    } as const
-    const rows = await database.tx(async sql => queryEntity<{
-      email: string,
-      entity: string,
-      id: string,
-      name: string,
-    }>(sql, entities, 'User', options))
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({
-      email: 'user-250000@example.test',
-      entity: 'SystemUser',
-      id: '250000',
-      name: 'person-250000',
-    })
-
-    const pageOne = await database.tx(async sql => queryEntity<{ name: string }>(sql, entities, 'User', {
-      fields: ['name'],
-      limit: 3,
-      orderBy: 'name',
-    }))
-    const pageTwo = await database.tx(async sql => queryEntity<{ name: string }>(sql, entities, 'User', {
-      fields: ['name'],
-      limit: 3,
-      offset: 3,
-      orderBy: 'name',
-    }))
-    expect(pageOne.map(row => row.name)).toEqual(['person-000001', 'person-000002', 'person-000003'])
-    expect(pageTwo.map(row => row.name)).toEqual(['person-000004', 'person-000005', 'person-000006'])
-
-    expect(await database.tx(async sql => queryEntity<{ name: string }>(sql, entities, 'User', {
-      fields: ['name'],
-      limit: 1,
-      orderBy: [],
-    }))).toEqual([{ name: 'person-000001' }])
-
-    const compiled = compileEntityQuery(entities, 'User', options)
-    const plan = await database.tx(async sql => sql.unsafe<Record<string, string>[]>(
-      `EXPLAIN (FORMAT TEXT) ${compiled.sql}`,
-      [...compiled.values],
-    ))
-    expect(plan.map(row => Object.values(row).join('\n')).join('\n'))
-      .toContain('Entity_name_trgm_idx')
   }, 300_000)
 
   durableTest('rolls back partial fresh-schema initialization inside db.tx', async database => {
@@ -1074,6 +1038,81 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
         VALUES ('42', 'Abstract', 'User')
       `
     })).toMatchObject({ errno: '23514' })
+  }, 120_000)
+
+  isolatedTest('uses native scalar arrays and metadata-only relationship collections', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'ownedVisits',
+              items: { target: 'Visit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { field: 'tags', items: { type: 'String' }, type: 'Array' },
+            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
+          ],
+          name: 'Visit',
+        },
+      ],
+    }))
+    await entities.createTables(database.sql)
+
+    expect(await database.sql<{ columnName: string }[]>`
+      SELECT column_name AS "columnName"
+      FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'Pet'
+      ORDER BY ordinal_position
+    `).toEqual([{ columnName: 'id' }])
+    expect(await database.sql<{
+      columnName: string,
+      dataType: string,
+      isNullable: string,
+      udtName: string,
+    }[]>`
+      SELECT column_name AS "columnName",
+        data_type AS "dataType",
+        is_nullable AS "isNullable",
+        udt_name AS "udtName"
+      FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'Visit'
+      ORDER BY ordinal_position
+    `).toEqual([
+      { columnName: 'id', dataType: 'text', isNullable: 'NO', udtName: 'text' },
+      { columnName: 'tags', dataType: 'ARRAY', isNullable: 'NO', udtName: '_text' },
+      { columnName: 'petId', dataType: 'text', isNullable: 'YES', udtName: 'text' },
+    ])
+
+    const userId = randomUUID()
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${userId}, ${'Pet'}, ${'Pet'}), (${'1001'}, ${'Visit One'}, ${'Visit'})
+    `
+    await database.sql`
+      INSERT INTO "Pet" ("id")
+      VALUES (${userId})
+    `
+    await database.sql`
+      INSERT INTO "Visit" ("id", "tags", "petId")
+      VALUES (${'1001'}, ARRAY['one', 'two'], ${userId})
+    `
+    expect(await queryEntity<{ id: string, tags: string[] }>(database.sql, entities, 'Visit', {
+      fields: ['id', 'tags'],
+      limit: null,
+      orderBy: 'id',
+    })).toEqual([{ id: '1001', tags: ['one', 'two'] }])
+    await expect(queryEntity(database.sql, entities, 'Pet', {
+      fields: ['ownedVisits'],
+    })).rejects.toThrow('collection projections are not supported yet')
   }, 120_000)
 
   durableTest('enforces MTI final-state integrity for direct SQL', async database => {

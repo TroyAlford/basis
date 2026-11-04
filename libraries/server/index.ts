@@ -8,9 +8,16 @@ export { FieldType, EntityDefinitions } from './source/EntityDefinitions'
 export { Operator } from './source/Operator'
 export type { ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
 export type {
+  ArrayFieldDefinition,
+  CollectionFieldDefinition,
+  CollectionMappingDefinition,
+  EntityCollectionElementDefinition,
   EntityDefinition,
   EntityReferenceFieldDefinition,
   FieldDefinition,
+  InverseCollectionMappingDefinition,
+  JunctionCollectionMappingDefinition,
+  ScalarArrayElementDefinition,
   ScalarFieldDefinition,
   ScalarFieldType,
 } from './source/EntityDefinitions'

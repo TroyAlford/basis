@@ -6,12 +6,18 @@ const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with sche
 /**
  * Canonical field types.
  *
- * `Entity` is the singular reference kind. `ID` is the universal identity
- * field type; concrete UUID/Snowflake variants are selected by `format`.
+ * `Entity` is the singular reference kind. `Array` holds scalar values in a
+ * native PostgreSQL array; `Collection` describes an explicit entity
+ * relationship. `ID` is the universal identity field type; concrete
+ * UUID/Snowflake variants are selected by `format`.
  */
 export enum FieldType {
+  /** Native scalar array. */
+  Array = 'Array',
   /** Boolean value. */
   Boolean = 'Boolean',
+  /** Explicit entity relationship collection. */
+  Collection = 'Collection',
   /** Calendar date without a time of day. */
   Date = 'Date',
   /** Singular reference to another entity. */
@@ -38,6 +44,49 @@ export type ScalarFieldType =
 /** Supported canonical identity formats. */
 export type IdentityFormat = 'Snowflake' | 'UUID'
 
+/** One scalar element in a native array field. */
+export interface ScalarArrayElementDefinition {
+  /** Optional identity format for ID elements. */
+  readonly format?: IdentityFormat,
+  /** Scalar element type. */
+  readonly type: ScalarFieldType,
+}
+
+/** One entity element in an explicit relationship collection. */
+export interface EntityCollectionElementDefinition {
+  /** Referenced entity name, or the universal `Entity` root. */
+  readonly target: string,
+  /** Element-kind discriminator. */
+  readonly type: FieldType.Entity,
+}
+
+/** An inverse collection backed by an existing forward reference. */
+export interface InverseCollectionMappingDefinition {
+  /** Forward reference field on the target entity. */
+  readonly field: string,
+  /** Mapping-kind discriminator. */
+  readonly kind: 'Inverse',
+}
+
+/** An explicit junction-backed many-to-many collection. */
+export interface JunctionCollectionMappingDefinition {
+  /** Mapping-kind discriminator. */
+  readonly kind: 'Junction',
+  /** Optional ordering column on the junction. */
+  readonly orderingColumn?: string,
+  /** Junction table name. */
+  readonly sourceColumn: string,
+  /** Junction source/owner column. */
+  readonly table: string,
+  /** Junction target column. */
+  readonly targetColumn: string,
+}
+
+/** One explicit entity-collection mapping. */
+export type CollectionMappingDefinition =
+  | InverseCollectionMappingDefinition
+  | JunctionCollectionMappingDefinition
+
 /** One scalar field definition. */
 export interface ScalarFieldDefinition {
   /** Canonical format for an ID field. */
@@ -60,8 +109,34 @@ export interface EntityReferenceFieldDefinition {
   readonly type: FieldType.Entity,
 }
 
+/** One native scalar-array field. */
+export interface ArrayFieldDefinition {
+  /** Scalar element descriptor. */
+  readonly items: ScalarArrayElementDefinition,
+  /** Logical field name used by entity-rooted queries. */
+  readonly name: string,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Array,
+}
+
+/** One explicit entity-relationship collection field. */
+export interface CollectionFieldDefinition {
+  /** Entity element descriptor. */
+  readonly items: EntityCollectionElementDefinition,
+  /** Explicit inverse or junction mapping. */
+  readonly mapping: CollectionMappingDefinition,
+  /** Logical field name used by entity-rooted queries. */
+  readonly name: string,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Collection,
+}
+
 /** One logical entity field. */
-export type FieldDefinition = ScalarFieldDefinition | EntityReferenceFieldDefinition
+export type FieldDefinition =
+  | ArrayFieldDefinition
+  | ScalarFieldDefinition
+  | EntityReferenceFieldDefinition
+  | CollectionFieldDefinition
 
 /** One effective inherited field and its owning entity table. */
 export type EffectiveFieldDefinition = FieldDefinition & {
@@ -89,14 +164,16 @@ export interface EntityDefinition {
 
 /** One physical table column compiled from canonical or system metadata. */
 interface TableColumn {
+  /** Element type for native array columns. */
+  readonly arrayType?: ScalarFieldType,
   /** Physical column name. */
   readonly name: string,
   /** Whether this column accepts NULL. */
   readonly nullable?: boolean,
   /** Whether this column is the table's primary key. */
   readonly primaryKey?: boolean,
-  /** Physical scalar type. */
-  readonly type: ScalarFieldType,
+  /** Physical column type. */
+  readonly type: ScalarFieldType | FieldType.Array,
 }
 
 /** One physical table index. */
@@ -559,11 +636,83 @@ function parseEntities(value: unknown): readonly EntityDefinition[] {
       if (field.type === FieldType.Entity && field.target !== 'Entity' && !byName.has(field.target)) {
         throw invalid(`unknown target entity "${field.target}" for field "${seed.name}.${field.name}"`)
       }
+      if (
+        field.type === FieldType.Collection
+        && field.items.type === FieldType.Entity
+        && field.items.target !== 'Entity'
+        && !byName.has(field.items.target)
+      ) {
+        throw invalid(
+          `unknown target entity "${field.items.target}" for collection field "${seed.name}.${field.name}"`,
+        )
+      }
     }
   }
   const formats = effectiveFormats(byName)
   const children = childrenByEntity(seeds)
-  return seeds.map(seed => resolveEntity(seed, byName, formats, children))
+  const resolved = seeds.map(seed => resolveEntity(seed, byName, formats, children))
+  validateCollectionMappings(resolved)
+  return resolved
+}
+
+/**
+ * Validate explicit collection mappings against the resolved entity graph.
+ * @param entities - Resolved canonical definitions.
+ */
+function validateCollectionMappings(entities: readonly EntityDefinition[]): void {
+  const byName = new Map(entities.map(entity => [entity.name, entity]))
+  for (const entity of entities) {
+    for (const field of entity.fields) {
+      if (field.type !== FieldType.Collection) continue
+      const mapping = field.mapping
+      if (mapping.kind !== 'Inverse') continue
+      if (field.items.target === 'Entity') {
+        throw invalid(
+          `inverse collection "${entity.name}.${field.name}" requires a declared target entity`,
+        )
+      }
+      const target = byName.get(field.items.target)
+      if (!target) {
+        throw invalid(
+          `unknown target entity "${field.items.target}" for collection field "${entity.name}.${field.name}"`,
+        )
+      }
+      const forward = target.effectiveFields.find(candidate => candidate.name === mapping.field)
+      if (!forward || forward.type !== FieldType.Entity) {
+        throw invalid(
+          `inverse collection "${entity.name}.${field.name}" must reference an Entity field ` +
+          `"${field.items.target}.${mapping.field}"`,
+        )
+      }
+      if (forward.target !== entity.name && !isAncestor(entities, entity.name, forward.target)) {
+        throw invalid(
+          `inverse collection "${entity.name}.${field.name}" forward target ` +
+          `"${forward.target}" must be "${entity.name}" or an ancestor`,
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Whether an entity name is an ancestor of another entity.
+ * @param entities - Resolved canonical definitions.
+ * @param entityName - Descendant entity name.
+ * @param ancestor - Candidate ancestor name.
+ * @returns `true` when the ancestor owns a table above the entity.
+ */
+function isAncestor(
+  entities: readonly EntityDefinition[],
+  entityName: string,
+  ancestor: string,
+): boolean {
+  let current: string | undefined = entityName
+  while (current !== undefined) {
+    if (current === ancestor) return true
+    current = entities.find(entity => entity.name === current)?.parent
+    if (current === 'Entity') return ancestor === 'Entity'
+  }
+  return false
 }
 
 /** A parsed entity before reference targets are resolved. */
@@ -613,17 +762,19 @@ function validateAncestry(
       if (!parent) break
       for (const field of parent.fields) {
         names.set(field.name, parent.name)
-        columns.set(fieldColumn(field), parent.name)
+        if (field.type !== FieldType.Collection) columns.set(fieldColumn(field), parent.name)
       }
       parentName = parent.extends
     }
     for (const field of seed.fields) {
       const owner = names.get(field.name)
       if (owner) throw invalid(`field "${seed.name}.${field.name}" is already owned by "${owner}"`)
-      const column = fieldColumn(field)
-      const columnOwner = columns.get(column)
-      if (columnOwner) {
-        throw invalid(`physical column "${column}" is already owned by "${columnOwner}"`)
+      if (field.type !== FieldType.Collection) {
+        const column = fieldColumn(field)
+        const columnOwner = columns.get(column)
+        if (columnOwner) {
+          throw invalid(`physical column "${column}" is already owned by "${columnOwner}"`)
+        }
       }
     }
   }
@@ -689,6 +840,14 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
     throw invalid(`field "${entityName}.${value.field}" type must be a string`)
   }
 
+  if (value.type === FieldType.Array) {
+    return { field: parseArrayField(entityName, value) }
+  }
+
+  if (value.type === FieldType.Collection) {
+    return { field: parseCollectionField(entityName, value) }
+  }
+
   if (value.type === FieldType.Entity) {
     assertKnownKeys(value, ['column', 'field', 'target', 'type'], 'field')
     if (ROOT_FIELD_NAMES.has(value.field) || value.field === 'id') {
@@ -735,6 +894,139 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
       type: type as ScalarFieldType,
     },
   }
+}
+
+/**
+ * Validate one native scalar-array field descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated array field.
+ */
+function parseArrayField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): ArrayFieldDefinition {
+  assertKnownKeys(value, ['field', 'items', 'type'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (!isRecord(value.items)) {
+    throw invalid(`array field "${entityName}.${name}" items must be an object`)
+  }
+  const items = value.items
+  if (typeof items.type !== 'string' || !SCALAR_FIELD_TYPES.has(items.type)) {
+    throw invalid(`array field "${entityName}.${name}" items must be a scalar type`)
+  }
+  if (items.type === FieldType.ID) {
+    assertKnownKeys(items, ['format', 'type'], 'array item')
+    if (items.format !== undefined && (typeof items.format !== 'string' || !IDENTITY_FORMATS.has(items.format))) {
+      throw invalid(`array field "${entityName}.${name}" ID format must be UUID or Snowflake`)
+    }
+    return {
+      items: {
+        ...(items.format !== undefined ? { format: items.format as IdentityFormat } : {}),
+        type: FieldType.ID,
+      },
+      name,
+      type: FieldType.Array,
+    }
+  }
+  assertKnownKeys(items, ['type'], 'array item')
+  return { items: { type: items.type as ScalarFieldType }, name, type: FieldType.Array }
+}
+
+/**
+ * Validate one explicit entity-relationship collection field descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated collection field.
+ */
+function parseCollectionField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): CollectionFieldDefinition {
+  assertKnownKeys(value, ['field', 'items', 'mapping', 'type'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (!isRecord(value.items)) {
+    throw invalid(`collection field "${entityName}.${name}" items must be an object`)
+  }
+  if (value.items.type !== FieldType.Entity) {
+    throw invalid(`collection field "${entityName}.${name}" items must declare an Entity target`)
+  }
+  if (typeof value.items.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.items.target)) {
+    throw invalid(`collection field "${entityName}.${name}" target must be a PascalCase entity name`)
+  }
+  if (!isRecord(value.mapping)) {
+    throw invalid(`collection field "${entityName}.${name}" mapping must be an object`)
+  }
+  return {
+    items: { target: value.items.target, type: FieldType.Entity },
+    mapping: parseCollectionMapping(entityName, name, value.mapping),
+    name,
+    type: FieldType.Collection,
+  }
+}
+
+/**
+ * Validate one explicit collection mapping descriptor.
+ * @param entityName - Owning entity name.
+ * @param fieldName - Collection field name.
+ * @param value - Mapping candidate.
+ * @returns The validated mapping.
+ */
+function parseCollectionMapping(
+  entityName: string,
+  fieldName: string,
+  value: Readonly<Record<string, unknown>>,
+): CollectionMappingDefinition {
+  if (typeof value.kind !== 'string') {
+    throw invalid(`collection field "${entityName}.${fieldName}" mapping must have a kind`)
+  }
+  if (value.kind === 'Inverse') {
+    assertKnownKeys(value, ['field', 'kind'], 'collection mapping')
+    if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
+      throw invalid(`collection field "${entityName}.${fieldName}" inverse field must be camelCase`)
+    }
+    return { field: value.field, kind: 'Inverse' }
+  }
+  if (value.kind === 'Junction') {
+    assertKnownKeys(
+      value,
+      ['kind', 'orderingColumn', 'sourceColumn', 'table', 'targetColumn'],
+      'collection mapping',
+    )
+    if (typeof value.table !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.table)) {
+      throw invalid(`collection field "${entityName}.${fieldName}" junction table must be PascalCase`)
+    }
+    for (const key of ['sourceColumn', 'targetColumn'] as const) {
+      if (typeof value[key] !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value[key])) {
+        throw invalid(`collection field "${entityName}.${fieldName}" ${key} must be camelCase`)
+      }
+    }
+    if (value.orderingColumn !== undefined) {
+      if (
+        typeof value.orderingColumn !== 'string'
+        || !/^[a-z][A-Za-z0-9]*$/.test(value.orderingColumn)
+      ) {
+        throw invalid(`collection field "${entityName}.${fieldName}" orderingColumn must be camelCase`)
+      }
+      if (value.orderingColumn === value.sourceColumn || value.orderingColumn === value.targetColumn) {
+        throw invalid(`collection field "${entityName}.${fieldName}" ordering column must differ from keys`)
+      }
+    }
+    return {
+      kind: 'Junction',
+      ...(value.orderingColumn !== undefined ? { orderingColumn: value.orderingColumn as string } : {}),
+      sourceColumn: value.sourceColumn as string,
+      table: value.table,
+      targetColumn: value.targetColumn as string,
+    }
+  }
+  throw invalid(`collection field "${entityName}.${fieldName}" mapping kind must be Inverse or Junction`)
 }
 
 /**
@@ -789,12 +1081,16 @@ function entityTable(entity: EntityDefinition): TableDefinition {
       expression: identityCheck('id', entity.idFormat),
       name: `${entity.name}_id_format_check`,
     }],
-    columns: entity.fields.map(field => {
+    columns: entity.fields.flatMap((field): TableColumn[] => {
+      if (field.type === FieldType.Collection) return []
       if (field.type === FieldType.Entity) {
-        return { name: field.column, nullable: true, type: FieldType.String }
+        return [{ name: field.column, nullable: true, type: FieldType.String }]
       }
-      if (field.type === FieldType.ID) return { name: field.name, primaryKey: true, type: FieldType.ID }
-      return { name: field.name, type: field.type }
+      if (field.type === FieldType.ID) return [{ name: field.name, primaryKey: true, type: FieldType.ID }]
+      if (field.type === FieldType.Array) {
+        return [{ arrayType: field.items.type, name: field.name, type: FieldType.Array }]
+      }
+      return [{ name: field.name, type: field.type }]
     }),
     name: entity.name,
   }
@@ -839,7 +1135,7 @@ function tableStatements(table: TableDefinition): readonly string[] {
 function createTable(table: TableDefinition): string {
   const columns = table.columns.map(column => {
     const nullability = column.primaryKey ? ' primary key' : column.nullable ? '' : ' not null'
-    return `${quoteIdentifier(column.name)} ${columnType(column.type)}${nullability}`
+    return `${quoteIdentifier(column.name)} ${columnType(column)}${nullability}`
   })
   const checks = (table.checks ?? []).map(check => (
     `constraint ${quoteIdentifier(check.name)} check (${check.expression})`
@@ -1139,11 +1435,24 @@ function lifecycleStatements(entities: readonly EntityDefinition[]): readonly st
 }
 
 /**
+ * Resolve the physical PostgreSQL type for a table column.
+ * @param column - Physical column metadata.
+ * @returns Column type declaration.
+ */
+function columnType(column: TableColumn): string {
+  if (column.type === FieldType.Array) {
+    if (!column.arrayType) throw new Error(`Array column "${column.name}" has no element type`)
+    return `${scalarColumnType(column.arrayType)}[]`
+  }
+  return scalarColumnType(column.type)
+}
+
+/**
  * Resolve the physical PostgreSQL type for a scalar field.
  * @param type - Scalar field type.
  * @returns Column type declaration.
  */
-function columnType(type: ScalarFieldType): string {
+function scalarColumnType(type: ScalarFieldType): string {
   switch (type) {
     case FieldType.Boolean: return 'boolean'
     case FieldType.Date: return 'date'

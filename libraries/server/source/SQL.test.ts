@@ -99,6 +99,40 @@ const graphDefinitions = EntityDefinitions.load(JSON.stringify({
   ],
 }))
 
+const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        {
+          field: 'tags',
+          items: { type: 'String' },
+          type: 'Array',
+        },
+        {
+          field: 'visits',
+          items: { target: 'Visit', type: 'Entity' },
+          mapping: { field: 'pet', kind: 'Inverse' },
+          type: 'Collection',
+        },
+      ],
+      name: 'Pet',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'Snowflake' },
+        {
+          column: 'petId',
+          field: 'pet',
+          target: 'Pet',
+          type: 'Entity',
+        },
+      ],
+      name: 'Visit',
+    },
+  ],
+}))
+
 const incompatibleDefinitions = EntityDefinitions.load(JSON.stringify({
   entities: [
     { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
@@ -414,6 +448,24 @@ describe('SQL.where', () => {
     expect(compiled.sql).toContain('"favorite__permissions"')
     expect(compiled.sql).toContain('"favorite__owner__v0__name"')
     expect(compiled.sql).not.toContain('"favorite.permissions"')
+  })
+
+  test('projects native scalar arrays and rejects relationship collections', () => {
+    const compiled = compileEntityQuery(collectionDefinitions, 'Pet', {
+      fields: ['id', 'tags'],
+    })
+    expect(compiled.sql).toContain('t."tags" AS "tags"')
+    expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
+      fields: ['visits'],
+    })).toThrow('collection projections are not supported yet')
+    expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
+      fields: ['id'],
+      where: { tags: 'x' },
+    })).toThrow('array fields cannot be used in predicates or ordering')
+    expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
+      fields: ['id'],
+      orderBy: 'tags',
+    })).toThrow('array fields cannot be used in predicates or ordering')
   })
 
   test('rejects incompatible descendant-only declarations', () => {

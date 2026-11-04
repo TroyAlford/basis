@@ -188,7 +188,9 @@ describe('EntityDefinitions', () => {
 
   test('uses the exact serialized field type vocabulary', () => {
     expect(Object.values(FieldType).map(String)).toEqual([
+      'Array',
       'Boolean',
+      'Collection',
       'Date',
       'Entity',
       'ID',
@@ -196,6 +198,173 @@ describe('EntityDefinitions', () => {
       'String',
       'Timestamp',
     ])
+  })
+
+  test('accepts native scalar arrays and explicit entity relationship collections', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'tags',
+              items: { type: 'String' },
+              type: 'Array',
+            },
+            {
+              field: 'identities',
+              items: { format: 'UUID', type: 'ID' },
+              type: 'Array',
+            },
+            {
+              field: 'ownedVisits',
+              items: { target: 'Visit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+            {
+              field: 'members',
+              items: { target: 'Entity', type: 'Entity' },
+              mapping: {
+                kind: 'Junction',
+                orderingColumn: 'position',
+                sourceColumn: 'collectionRowId',
+                table: 'CollectionMember',
+                targetColumn: 'entityId',
+              },
+              type: 'Collection',
+            },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            {
+              column: 'petId',
+              field: 'pet',
+              target: 'Pet',
+              type: 'Entity',
+            },
+          ],
+          name: 'Visit',
+        },
+      ],
+    })
+    expect(entities.entity('Pet')?.fields[1]).toEqual({
+      items: { type: FieldType.String },
+      name: 'tags',
+      type: FieldType.Array,
+    })
+    expect(entities.entity('Pet')?.fields[3]).toEqual({
+      items: { target: 'Visit', type: FieldType.Entity },
+      mapping: { field: 'pet', kind: 'Inverse' },
+      name: 'ownedVisits',
+      type: FieldType.Collection,
+    })
+    expect(entities.entity('Pet')?.effectiveFields.find(field => field.name === 'identities'))
+      .toMatchObject({ items: { format: 'UUID', type: FieldType.ID }, owner: 'Pet', type: FieldType.Array })
+    const ddl = entities.ddl.join('\n')
+    expect(ddl).toContain('"tags" text[] not null')
+    expect(ddl).toContain('"identities" text[] not null')
+    expect(ddl).not.toContain('"ownedVisits"')
+    expect(ddl).not.toContain('"members"')
+  })
+
+  test('validates inherited inverse collection metadata at its declaring owner', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'ownedVisits',
+              items: { target: 'Visit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+          ],
+          name: 'Pet',
+        },
+        {
+          extends: 'Pet',
+          fields: [{ field: 'permissions', type: 'String' }],
+          name: 'SystemPet',
+        },
+        {
+          extends: 'Pet',
+          fields: [{ field: 'company', type: 'String' }],
+          name: 'Cat',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            {
+              column: 'petId',
+              field: 'pet',
+              target: 'Pet',
+              type: 'Entity',
+            },
+          ],
+          name: 'Visit',
+        },
+      ],
+    })
+    expect(entities.entity('SystemPet')?.effectiveFields.find(field => field.name === 'ownedVisits'))
+      .toMatchObject({ owner: 'Pet', type: FieldType.Collection })
+    expect(entities.ddl.join('\n')).not.toContain('"ownedVisits"')
+  })
+
+  test('rejects malformed array and relationship collection fields', () => {
+    const cases = [
+      {
+        fields: [{ field: 'tags', items: { target: 'Entity', type: 'Entity' }, type: 'Array' }],
+        name: 'Pet',
+      },
+      {
+        fields: [{ field: 'tags', items: { type: 'Structured' }, type: 'Array' }],
+        name: 'Pet',
+      },
+      {
+        fields: [{ field: 'tags', items: { format: 'UUID', type: 'String' }, type: 'Array' }],
+        name: 'Pet',
+      },
+      {
+        fields: [{
+          field: 'ownedVisits',
+          items: { target: 'Visit', type: 'Entity' },
+          type: 'Collection',
+        }],
+        name: 'Pet',
+      },
+      {
+        fields: [{
+          field: 'members',
+          items: { target: 'Entity', type: 'Entity' },
+          mapping: { kind: 'Junction', sourceColumn: 'memberOwnerId', table: 'Member' },
+          type: 'Collection',
+        }],
+        name: 'Pet',
+      },
+    ]
+    for (const entity of cases) expect(() => load({ entities: [entity] })).toThrow()
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Pet' },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            {
+              field: 'ownedVisits',
+              items: { target: 'Visit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+          ],
+          name: 'Visit',
+        },
+      ],
+    })).toThrow()
   })
 
   test('derives effective inheritance from the required ontology fixture', () => {
