@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 import { accountDefinition, containers, noteDefinition, numberRowDefinition, removeService, useDatabaseFixture } from '../testing/DatabaseFixture'
 import type { DurableDatabase, IsolatedDatabase } from '../testing/DatabaseIsolation'
 import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { withSeedDatabase } from '../testing/DatabaseSeed'
 import { compileEntityQuery, queryEntity } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
@@ -902,7 +903,7 @@ VALUES (${'1001'},
     }))).rejects.toThrow('Repeated reference expansion')
   }, 120_000)
 
-  durableTest('queries polymorphic descendants with indexed names', async database => {
+  test('queries prebuilt polymorphic descendants with indexed names', async () => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
         {
@@ -924,93 +925,56 @@ VALUES (${'1001'},
         },
       ],
     }))
-    await database.tx(async sql => entities.createTables(sql))
-    for (let chunkStart = 1; chunkStart <= 500_000; chunkStart += 25_000) {
-      const end = Math.min(chunkStart + 24_999, 500_000)
-      await database.tx(async sql => {
-        await sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
-          SELECT value::text,
-            'person-' || lpad(value::text,
-            6,
-            '0'),
-            CASE WHEN value % 2 = 0 THEN 'SystemUser' ELSE 'Client' END
-          FROM generate_series(${chunkStart}, ${end}) AS series(value)
-        `
-        await sql`
-          INSERT INTO "User" ("id", "email")
-          SELECT value::text, 'user-' || value || '@example.test'
-          FROM generate_series(${chunkStart}, ${end}) AS series(value)
-        `
-        await sql`
-          INSERT INTO "SystemUser" ("id", "permissions")
-          SELECT value::text, 'permissions'
-FROM generate_series(${chunkStart + (chunkStart % 2 === 0 ? 0 : 1)},
-  ${end},
-  2) AS series(value)
-        `
-        await sql`
-          INSERT INTO "Client" ("id", "company")
-          SELECT value::text, 'company'
-FROM generate_series(${chunkStart + (chunkStart % 2 === 1 ? 0 : 1)},
-  ${end},
-  2) AS series(value)
-        `
+    await withSeedDatabase(async ({ sql }) => {
+      const options = {
+        fields: ['id', 'name', 'entity', 'email'],
+        limit: 10,
+        orderBy: 'name',
+        where: { field: 'name', operator: Operator.Comparison.Contains, value: 'person-250000' },
+      } as const
+      const rows = await queryEntity<{
+        email: string,
+        entity: string,
+        id: string,
+        name: string,
+      }>(sql, entities, 'User', options)
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({
+        email: 'user-250000@example.test',
+        entity: 'SystemUser',
+        id: '250000',
+        name: 'person-250000',
       })
-    }
-    await database.tx(async sql => {
-      await sql`
-        ANALYZE "Entity"
-      `
+
+      const pageOne = await queryEntity<{ name: string }>(sql, entities, 'User', {
+        fields: ['name'],
+        limit: 3,
+        orderBy: 'name',
+      })
+      const pageTwo = await queryEntity<{ name: string }>(sql, entities, 'User', {
+        fields: ['name'],
+        limit: 3,
+        offset: 3,
+        orderBy: 'name',
+      })
+      expect(pageOne.map(row => row.name)).toEqual(['person-000001', 'person-000002', 'person-000003'])
+      expect(pageTwo.map(row => row.name)).toEqual(['person-000004', 'person-000005', 'person-000006'])
+
+      expect(await queryEntity<{ name: string }>(sql, entities, 'User', {
+        fields: ['name'],
+        limit: 1,
+        orderBy: [],
+      })).toEqual([{ name: 'person-000001' }])
+
+      const compiled = compileEntityQuery(entities, 'User', options)
+      const plan = await sql.unsafe<Record<string, string>[]>(
+        `EXPLAIN (FORMAT TEXT) ${compiled.sql}`,
+        [...compiled.values],
+      )
+      expect(plan.map(row => Object.values(row).join('\n')).join('\n'))
+        .toContain('Entity_name_trgm_idx')
     })
-    const options = {
-      fields: ['id', 'name', 'entity', 'email'],
-      limit: 10,
-      orderBy: 'name',
-      where: { field: 'name', operator: Operator.Comparison.Contains, value: 'person-250000' },
-    } as const
-    const rows = await database.tx(async sql => queryEntity<{
-      email: string,
-      entity: string,
-      id: string,
-      name: string,
-    }>(sql, entities, 'User', options))
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({
-      email: 'user-250000@example.test',
-      entity: 'SystemUser',
-      id: '250000',
-      name: 'person-250000',
-    })
-
-    const pageOne = await database.tx(async sql => queryEntity<{ name: string }>(sql, entities, 'User', {
-      fields: ['name'],
-      limit: 3,
-      orderBy: 'name',
-    }))
-    const pageTwo = await database.tx(async sql => queryEntity<{ name: string }>(sql, entities, 'User', {
-      fields: ['name'],
-      limit: 3,
-      offset: 3,
-      orderBy: 'name',
-    }))
-    expect(pageOne.map(row => row.name)).toEqual(['person-000001', 'person-000002', 'person-000003'])
-    expect(pageTwo.map(row => row.name)).toEqual(['person-000004', 'person-000005', 'person-000006'])
-
-    expect(await database.tx(async sql => queryEntity<{ name: string }>(sql, entities, 'User', {
-      fields: ['name'],
-      limit: 1,
-      orderBy: [],
-    }))).toEqual([{ name: 'person-000001' }])
-
-    const compiled = compileEntityQuery(entities, 'User', options)
-    const plan = await database.tx(async sql => sql.unsafe<Record<string, string>[]>(
-      `EXPLAIN (FORMAT TEXT) ${compiled.sql}`,
-      [...compiled.values],
-    ))
-    expect(plan.map(row => Object.values(row).join('\n')).join('\n'))
-      .toContain('Entity_name_trgm_idx')
-  }, 300_000)
+  }, 120_000)
 
   durableTest('rolls back partial fresh-schema initialization inside db.tx', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({

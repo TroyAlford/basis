@@ -1,0 +1,56 @@
+name: Database fixture image
+
+on:
+  push:
+    branches: [main, 'epic/**']
+    paths:
+      - 'testing/database/seed/**'
+      - '.github/workflows/database-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: database-fixture-image
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asdf-setup
+
+      - name: Resolve immutable image tag
+        id: image
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          BASIS_SEED_IMAGE_REPOSITORY="ghcr.io/${owner}/basis-postgres-test"             bun testing/database/seed/image.ts > /tmp/seed-image
+          echo "image=$(cat /tmp/seed-image)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for an existing checksum image
+        id: exists
+        run: |
+          if docker manifest inspect "${{ steps.image.outputs.image }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push the seeded database fixture
+        if: steps.exists.outputs.exists != 'true'
+        run: |
+          docker build \
+            --file testing/database/seed/Dockerfile \
+            --tag "${{ steps.image.outputs.image }}" \
+            testing/database/seed
+          docker push "${{ steps.image.outputs.image }}"
