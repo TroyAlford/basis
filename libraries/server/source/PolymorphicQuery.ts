@@ -168,6 +168,8 @@ class QueryProjection {
   readonly #entities: EntityDefinitions
   /** Next generated table alias number. */
   #alias = 0
+  /** Graph work consumed while expanding the projection. */
+  #work = 0
   /** Collection configuration overrides. */
   readonly #collections: Readonly<Record<string, {
     readonly limit?: number,
@@ -415,6 +417,7 @@ class QueryProjection {
     sourceAlias: string,
   ): ProjectionNode {
     if (field.type !== FieldType.Entity) throw new Error(`Field "${field.name}" is not a reference`)
+    this.#consume()
     let context: EntityContext
     if (field.target === 'Entity') {
       const rootAlias = this.#nextAlias('r')
@@ -609,6 +612,7 @@ class QueryProjection {
       readonly name: string,
     },
   ): void {
+    this.#consume(2 + (relationship?.fields.length ?? 0))
     const itemsAlias = `${collection.name}__items`
     const totalAlias = `${collection.name}__total`
     const remainingAlias = `${collection.name}__remaining`
@@ -667,6 +671,7 @@ class QueryProjection {
     if (!field || field.type === FieldType.Entity) {
       throw new Error(`Unknown scalar field "${name}"`)
     }
+    this.#consume()
     const alias = columnAlias(node.path, name)
     const expression = this.#expression(node.context, field, false)
     this.columns.push(`${expression} AS ${quote(alias)}`)
@@ -681,6 +686,7 @@ class QueryProjection {
    */
   #addDescendantScalar(node: ProjectionNode, field: DescendantField): void {
     if (node.fieldNames.has(field.name)) return
+    this.#consume()
     this.#ensureRoot(node.context)
     const branches = field.variants.map(variant => {
       const owner = this.#ownerAlias(node.context, variant.owner, true)
@@ -700,6 +706,7 @@ class QueryProjection {
    */
   #identity(node: ProjectionNode): void {
     if (node.identity) return
+    this.#consume(3)
     const prefix = node.path.join('__')
     const entity = `${prefix}__entity`
     const id = `${prefix}__id`
@@ -735,6 +742,7 @@ class QueryProjection {
   #ensureRoot(context: EntityContext): string {
     if (context.rootOnly || context.rootJoined) return context.rootAlias
     const join = context.isTarget ? 'LEFT JOIN' : 'JOIN'
+    this.#consume()
     this.joins.push(
       `${join} "Entity" "${context.rootAlias}" ON ` +
       `"${context.rootAlias}"."id" = "${context.baseAlias}"."id"`,
@@ -757,6 +765,7 @@ class QueryProjection {
     if (existing) return existing
     const alias = this.#nextAlias('o')
     const join = context.isTarget || forceLeft ? 'LEFT JOIN' : 'JOIN'
+    this.#consume()
     this.joins.push(
       `${join} "${owner}" "${alias}" ON "${alias}"."id" = "${context.baseAlias}"."id"`,
     )
@@ -780,6 +789,17 @@ class QueryProjection {
       path,
       referenceNames: new Map(),
       references: [],
+    }
+  }
+
+  /**
+   * Consume graph work and reject an over-budget projection.
+   * @param units - Conservative physical work units.
+   */
+  #consume(units = 1): void {
+    this.#work += units
+    if (this.#work > MAX_PROJECTION_WORK) {
+      throw new Error(`Query projection exceeds the maximum graph work budget of ${MAX_PROJECTION_WORK}`)
     }
   }
 

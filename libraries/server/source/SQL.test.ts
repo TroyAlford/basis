@@ -594,6 +594,23 @@ describe('SQL.where', () => {
       collections: { articles: {} },
       fields: ['id', 'articles.author'],
     })).toThrow('Cannot traverse collection field')
+    const fanoutDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'entry', target: 'Entity', type: 'Entity' }], name: 'Start' },
+        ...['x', 'y', 'z', 'w'].flatMap(field => (
+          Array.from({ length: 4 }, (_, index) => ({
+            fields: [{ field, target: 'Entity', type: 'Entity' }],
+            name: `${field.toUpperCase()}${index}`,
+          }))
+        )),
+      ],
+    }))
+    expect(() => compileEntityQuery(fanoutDefinitions, 'Start', {
+      fields: ['entry.x.y.z.w.name'],
+    })).toThrow('maximum graph work budget')
+    expect(() => compileEntityQuery(fanoutDefinitions, 'Start', {
+      fields: ['entry.x.name'],
+    })).not.toThrow()
 
     const deepDefinitions = EntityDefinitions.load(JSON.stringify({
       entities: Array.from({ length: 10 }, (_, index) => ({
