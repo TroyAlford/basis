@@ -37,27 +37,45 @@ describe('entityDefinitionFormat', () => {
     expect(lint(code).fixed).toBe(false)
   })
 
-  test('orders generic collection fields and element descriptors canonically', () => {
+  test('orders native arrays and explicit relationship collections canonically', () => {
     const code = JSON.stringify({
       entities: [{
-        fields: [{
-          field: 'tags',
-          items: { type: 'String' },
-          ordered: false,
-          storage: 'jsonb',
-          type: 'Collection',
-        }],
+        fields: [
+          {
+            field: 'tags',
+            items: { type: 'String' },
+            type: 'Array',
+          },
+          {
+            field: 'ownedArticles',
+            items: { target: 'Article', type: 'Entity' },
+            mapping: { field: 'owner', kind: 'Inverse' },
+            type: 'Collection',
+          },
+        ],
         name: 'Tagged',
+      }, {
+        fields: [
+          { field: 'id', format: 'Snowflake' },
+          {
+            column: 'ownerId',
+            field: 'owner',
+            target: 'Tagged',
+            type: 'Entity',
+          },
+        ],
+        name: 'Article',
       }],
     })
     const output = lint(code)
     expect(output.fixed).toBe(true)
     expect(output.output).toContain('"field": "tags"')
+    expect(output.output).toContain('"type": "Array"')
+    expect(output.output).toContain('"field": "ownedArticles"')
     expect(output.output).toContain('"type": "Collection"')
-    expect(output.output).toContain('"items": {')
-    expect(output.output).toContain('"type": "String"')
-    expect(output.output).toContain('"ordered": false')
-    expect(output.output).toContain('"storage": "jsonb"')
+    expect(output.output).toContain('"mapping": {')
+    expect(output.output).toContain('"kind": "Inverse"')
+    expect(output.output).toContain('"field": "owner"')
   })
 
   test('delegates semantics to the canonical loader before fixing', () => {

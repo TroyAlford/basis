@@ -1,4 +1,4 @@
-import type { CollectionElementDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import type { EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
@@ -513,6 +513,12 @@ export function compilePolymorphicQuery(
         'collection projections are not supported yet',
       )
     }
+    if (value.type === FieldType.Array) {
+      throw new Error(
+        `Query field "${definition.name}.${name}" is an array; ` +
+        'array fields cannot be used in predicates or ordering',
+      )
+    }
     return value
   }
   const scope: QueryScope = {
@@ -709,22 +715,18 @@ function collectDescendantFields(
  * @returns Type/format/reference-target signature.
  */
 function fieldContract(field: FieldDefinition): string {
+  if (field.type === FieldType.Array) {
+    return `Array:${field.items.type}:${field.items.format ?? ''}`
+  }
   if (field.type === FieldType.Collection) {
-    return `Collection:${field.ordered}:${field.storage}:${collectionElementContract(field.items)}`
+    const mapping = field.mapping.kind === 'Inverse'
+      ? `Inverse:${field.mapping.field}`
+      : `Junction:${field.mapping.table}:${field.mapping.sourceColumn}:` +
+        `${field.mapping.targetColumn}:${field.mapping.orderingColumn ?? ''}`
+    return `Collection:${field.items.target}:${mapping}`
   }
   if (field.type === FieldType.Entity) return `Entity:${field.target}`
   return `${field.type}:${field.format ?? ''}`
-}
-
-/**
- * Build one canonical contract signature for a collection element.
- * @param element - Collection element descriptor.
- * @returns Element type/format/reference-target signature.
- */
-function collectionElementContract(element: CollectionElementDefinition): string {
-  if (element.type === 'Structured') return 'Structured'
-  if (element.type === FieldType.Entity) return `Entity:${element.target}`
-  return `${element.type}:${element.format ?? ''}`
 }
 
 /**

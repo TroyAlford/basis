@@ -188,6 +188,7 @@ describe('EntityDefinitions', () => {
 
   test('uses the exact serialized field type vocabulary', () => {
     expect(Object.values(FieldType).map(String)).toEqual([
+      'Array',
       'Boolean',
       'Collection',
       'Date',
@@ -199,128 +200,127 @@ describe('EntityDefinitions', () => {
     ])
   })
 
-  test('accepts typed generic collection fields and explicit storage', () => {
+  test('accepts native scalar arrays and explicit entity relationship collections', () => {
     const entities = load({
-      entities: [{
-        fields: [
-          { field: 'id', format: 'UUID' },
-          {
-            field: 'tags',
-            items: { type: 'String' },
-            ordered: false,
-            storage: 'jsonb',
-            type: 'Collection',
-          },
-          {
-            field: 'authors',
-            items: { target: 'Entity', type: 'Entity' },
-            ordered: true,
-            storage: 'jsonb',
-            type: 'Collection',
-          },
-          {
-            field: 'payload',
-            items: { type: 'Structured' },
-            ordered: false,
-            storage: 'jsonb',
-            type: 'Collection',
-          },
-          {
-            field: 'identities',
-            items: { format: 'UUID', type: 'ID' },
-            ordered: false,
-            storage: 'jsonb',
-            type: 'Collection',
-          },
-        ],
-        name: 'CollectionRow',
-      }],
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'tags',
+              items: { type: 'String' },
+              type: 'Array',
+            },
+            {
+              field: 'identities',
+              items: { format: 'UUID', type: 'ID' },
+              type: 'Array',
+            },
+            {
+              field: 'ownedArticles',
+              items: { target: 'Article', type: 'Entity' },
+              mapping: { field: 'owner', kind: 'Inverse' },
+              type: 'Collection',
+            },
+            {
+              field: 'members',
+              items: { target: 'Entity', type: 'Entity' },
+              mapping: {
+                kind: 'Junction',
+                orderingColumn: 'position',
+                sourceColumn: 'collectionRowId',
+                table: 'CollectionMember',
+                targetColumn: 'entityId',
+              },
+              type: 'Collection',
+            },
+          ],
+          name: 'CollectionRow',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            {
+              column: 'ownerId',
+              field: 'owner',
+              target: 'CollectionRow',
+              type: 'Entity',
+            },
+          ],
+          name: 'Article',
+        },
+      ],
     })
     expect(entities.entity('CollectionRow')?.fields[1]).toEqual({
       items: { type: FieldType.String },
       name: 'tags',
-      ordered: false,
-      storage: 'jsonb',
+      type: FieldType.Array,
+    })
+    expect(entities.entity('CollectionRow')?.fields[3]).toEqual({
+      items: { target: 'Article', type: FieldType.Entity },
+      mapping: { field: 'owner', kind: 'Inverse' },
+      name: 'ownedArticles',
       type: FieldType.Collection,
     })
-    expect(entities.entity('CollectionRow')?.effectiveFields.find(field => field.name === 'payload')).toMatchObject({
-      items: { type: 'Structured' },
-      owner: 'CollectionRow',
-      type: FieldType.Collection,
-    })
-    expect(entities.ddl.join('\n')).toContain('"tags" jsonb not null')
-    expect(entities.ddl.join('\n')).toContain('"authors" jsonb not null')
-    expect(entities.ddl.join('\n')).toContain('"payload" jsonb not null')
+    expect(entities.entity('CollectionRow')?.effectiveFields.find(field => field.name === 'identities'))
+      .toMatchObject({ items: { format: 'UUID', type: FieldType.ID }, owner: 'CollectionRow', type: FieldType.Array })
+    const ddl = entities.ddl.join('\n')
+    expect(ddl).toContain('"tags" text[] not null')
+    expect(ddl).toContain('"identities" text[] not null')
+    expect(ddl).not.toContain('"ownedArticles"')
+    expect(ddl).not.toContain('"members"')
   })
 
-  test('rejects malformed generic collection fields', () => {
+  test('rejects malformed array and relationship collection fields', () => {
     const cases = [
       {
-        fields: [{ field: 'tags', items: { type: 'String' }, ordered: false, type: 'Collection' }],
+        fields: [{ field: 'tags', items: { target: 'Entity', type: 'Entity' }, type: 'Array' }],
+        name: 'CollectionRow',
+      },
+      {
+        fields: [{ field: 'tags', items: { type: 'Structured' }, type: 'Array' }],
+        name: 'CollectionRow',
+      },
+      {
+        fields: [{ field: 'tags', items: { format: 'UUID', type: 'String' }, type: 'Array' }],
         name: 'CollectionRow',
       },
       {
         fields: [{
-          field: 'tags',
-          items: { type: 'String' },
-          ordered: 'no',
-          storage: 'jsonb',
+          field: 'ownedArticles',
+          items: { target: 'Article', type: 'Entity' },
           type: 'Collection',
         }],
         name: 'CollectionRow',
       },
       {
         fields: [{
-          field: 'tags',
-          items: { type: 'Missing' },
-          ordered: false,
-          storage: 'jsonb',
-          type: 'Collection',
-        }],
-        name: 'CollectionRow',
-      },
-      {
-        fields: [{
-          field: 'tags',
-          items: { target: 'Missing', type: 'Entity' },
-          ordered: false,
-          storage: 'jsonb',
-          type: 'Collection',
-        }],
-        name: 'CollectionRow',
-      },
-      {
-        fields: [{
-          field: 'tags',
-          items: { extra: true, type: 'Structured' },
-          ordered: false,
-          storage: 'jsonb',
-          type: 'Collection',
-        }],
-        name: 'CollectionRow',
-      },
-      {
-        fields: [{
-          field: 'tags',
-          items: { format: 'UUID', type: 'String' },
-          ordered: false,
-          storage: 'jsonb',
-          type: 'Collection',
-        }],
-        name: 'CollectionRow',
-      },
-      {
-        fields: [{
-          field: 'name',
-          items: { type: 'String' },
-          ordered: false,
-          storage: 'jsonb',
+          field: 'members',
+          items: { target: 'Entity', type: 'Entity' },
+          mapping: { kind: 'Junction', sourceColumn: 'memberOwnerId', table: 'Member' },
           type: 'Collection',
         }],
         name: 'CollectionRow',
       },
     ]
     for (const entity of cases) expect(() => load({ entities: [entity] })).toThrow()
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'CollectionRow' },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            {
+              field: 'ownedArticles',
+              items: { target: 'Article', type: 'Entity' },
+              mapping: { field: 'owner', kind: 'Inverse' },
+              type: 'Collection',
+            },
+          ],
+          name: 'Article',
+        },
+      ],
+    })).toThrow()
   })
 
   test('derives effective inheritance from the required ontology fixture', () => {

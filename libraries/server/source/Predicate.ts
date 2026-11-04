@@ -101,6 +101,12 @@ export const Predicate = {
         'collection projections are not supported yet',
       )
     }
+    if (field.type === FieldType.Array) {
+      throw new Error(
+        `Query field "${entity.name}.${name}" is an array; ` +
+        'array fields cannot be used in predicates or ordering',
+      )
+    }
     return field
   },
 

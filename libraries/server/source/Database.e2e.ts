@@ -1076,48 +1076,79 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     })).toMatchObject({ errno: '23514' })
   }, 120_000)
 
-  isolatedTest('creates explicit jsonb storage for generic collections', async database => {
+  isolatedTest('uses native scalar arrays and metadata-only relationship collections', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
-      entities: [{
-        fields: [
-          { field: 'id', format: 'UUID' },
-          {
-            field: 'tags',
-            items: { type: 'String' },
-            ordered: false,
-            storage: 'jsonb',
-            type: 'Collection',
-          },
-          {
-            field: 'authors',
-            items: { target: 'Entity', type: 'Entity' },
-            ordered: true,
-            storage: 'jsonb',
-            type: 'Collection',
-          },
-          {
-            field: 'payload',
-            items: { type: 'Structured' },
-            ordered: false,
-            storage: 'jsonb',
-            type: 'Collection',
-          },
-        ],
-        name: 'CollectionRow',
-      }],
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'ownedArticles',
+              items: { target: 'Article', type: 'Entity' },
+              mapping: { field: 'owner', kind: 'Inverse' },
+              type: 'Collection',
+            },
+          ],
+          name: 'User',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { field: 'tags', items: { type: 'String' }, type: 'Array' },
+            { column: 'ownerId', field: 'owner', target: 'User', type: 'Entity' },
+          ],
+          name: 'Article',
+        },
+      ],
     }))
     await entities.createTables(database.sql)
-    expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
-      SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
+
+    expect(await database.sql<{ columnName: string }[]>`
+      SELECT column_name AS "columnName"
       FROM information_schema.columns
-      WHERE table_schema = current_schema() AND table_name = 'CollectionRow'
+      WHERE table_schema = current_schema() AND table_name = 'User'
+      ORDER BY ordinal_position
+    `).toEqual([{ columnName: 'id' }])
+    expect(await database.sql<{
+      columnName: string,
+      dataType: string,
+      isNullable: string,
+      udtName: string,
+    }[]>`
+      SELECT column_name AS "columnName",
+        data_type AS "dataType",
+        is_nullable AS "isNullable",
+        udt_name AS "udtName"
+      FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'Article'
       ORDER BY ordinal_position
     `).toEqual([
-      { columnName: 'id', dataType: 'text', isNullable: 'NO' },
-      { columnName: 'tags', dataType: 'jsonb', isNullable: 'NO' },
-      { columnName: 'authors', dataType: 'jsonb', isNullable: 'NO' },
-      { columnName: 'payload', dataType: 'jsonb', isNullable: 'NO' },
+      { columnName: 'id', dataType: 'text', isNullable: 'NO', udtName: 'text' },
+      { columnName: 'tags', dataType: 'ARRAY', isNullable: 'NO', udtName: '_text' },
+      { columnName: 'ownerId', dataType: 'text', isNullable: 'YES', udtName: 'text' },
     ])
+
+    const userId = randomUUID()
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${userId}, ${'User'}, ${'User'}), (${'1001'}, ${'Article One'}, ${'Article'})
+    `
+    await database.sql`
+      INSERT INTO "User" ("id")
+      VALUES (${userId})
+    `
+    await database.sql`
+      INSERT INTO "Article" ("id", "tags", "ownerId")
+      VALUES (${'1001'}, ARRAY['one', 'two'], ${userId})
+    `
+    expect(await queryEntity<{ id: string, tags: string[] }>(database.sql, entities, 'Article', {
+      fields: ['id', 'tags'],
+      limit: null,
+      orderBy: 'id',
+    })).toEqual([{ id: '1001', tags: ['one', 'two'] }])
+    await expect(queryEntity(database.sql, entities, 'User', {
+      fields: ['ownedArticles'],
+    })).rejects.toThrow('collection projections are not supported yet')
   }, 120_000)
 
   durableTest('enforces MTI final-state integrity for direct SQL', async database => {
