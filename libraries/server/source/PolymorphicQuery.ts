@@ -55,6 +55,30 @@ interface IdentityProjection {
   readonly name: string,
 }
 
+/** One non-entity value collection projection. */
+interface ValueCollectionProjection {
+  /** SQL alias for the JSON values array. */
+  readonly itemsAlias: string,
+  /** Output field name. */
+  readonly name: string,
+  /** SQL alias for the remaining count. */
+  readonly remainingAlias: string,
+  /** SQL alias for the total count. */
+  readonly totalAlias: string,
+}
+
+/** One non-entity value collection projection. */
+interface ValueCollectionProjection {
+  /** SQL alias for the JSON values array. */
+  readonly itemsAlias: string,
+  /** Output field name. */
+  readonly name: string,
+  /** SQL alias for the remaining count. */
+  readonly remainingAlias: string,
+  /** SQL alias for the total count. */
+  readonly totalAlias: string,
+}
+
 /** One entity collection projection. */
 interface CollectionProjection {
   /** SQL alias for the JSON items array. */
@@ -95,6 +119,10 @@ interface ProjectionNode {
   readonly referenceNames: Map<string, ReferenceProjection>,
   /** Singular references selected at this node. */
   readonly references: ReferenceProjection[],
+  /** Value-collection field names already selected at this node. */
+  readonly valueCollectionNames: Set<string>,
+  /** Non-entity value collections selected at this node. */
+  readonly valueCollections: ValueCollectionProjection[],
 }
 
 /** One descendant-only field declaration group. */
@@ -219,7 +247,7 @@ class QueryProjection {
     const root = this.#node(this.root, [])
     for (const field of fields) this.#addPath(root, field.split('.'), new Set(), 0)
     for (const name of Object.keys(this.#collections ?? {})) {
-      if (!root.collectionNames.has(name)) {
+      if (!root.collectionNames.has(name) && !root.valueCollectionNames.has(name)) {
         throw new Error(`Collection options were provided for unselected field "${name}"`)
       }
     }
@@ -264,6 +292,15 @@ class QueryProjection {
     const effective = node.context.effective.get(name)
 
     if (effective) {
+      if (effective.type === FieldType.ValueCollection) {
+        if (rest.length > 0) {
+          throw new Error(
+            `Cannot traverse value collection field "${node.context.definition.name}.${segments.join('.')}"`,
+          )
+        }
+        this.#addValueCollection(node, effective)
+        return
+      }
       if (effective.type === FieldType.Collection) {
         if (rest.length > 0) {
           throw new Error(`Cannot traverse collection field "${node.context.definition.name}.${segments.join('.')}"`)
@@ -299,7 +336,7 @@ class QueryProjection {
 
     const descendant = node.context.descendants.get(name)
     if (descendant) {
-      if (descendant.type === FieldType.Collection) {
+      if (descendant.type === FieldType.Collection || descendant.type === FieldType.ValueCollection) {
         throw new Error(
           `Query field "${node.context.definition.name}.${name}" is a collection; ` +
           'descendant collection projections are not supported yet',
@@ -397,6 +434,59 @@ class QueryProjection {
     const child = this.#node(context, path)
     this.#identity(child)
     return child
+  }
+
+  /**
+   * Add one root non-entity value-collection envelope projection.
+   * @param node - Projection occurrence.
+   * @param field - Effective value-collection field.
+   */
+  #addValueCollection(node: ProjectionNode, field: EffectiveFieldDefinition): void {
+    if (field.type !== FieldType.ValueCollection) throw new Error(`Field "${field.name}" is not a value collection`)
+    if (node.path.length > 0) throw new Error('Nested value-collection projections are not supported yet')
+    if (node.valueCollectionNames.has(field.name)) return
+    const config = this.#collections?.[field.name]
+    const limit = config?.limit ?? 3
+    const offset = config?.offset ?? 0
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error(`Collection "${field.name}" limit must be a positive integer`)
+    }
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error(`Collection "${field.name}" offset must be a non-negative integer`)
+    }
+    const column = this.#expression(node.context, field, false)
+    const itemsAlias = `${field.name}__items`
+    const totalAlias = `${field.name}__total`
+    const remainingAlias = `${field.name}__remaining`
+    const items = this.#bind(limit)
+    const itemOffset = this.#bind(offset)
+    const remainingOffset = this.#bind(offset + limit)
+    const countExpression = field.unique
+      ? `(SELECT count(DISTINCT value::text)::int FROM jsonb_array_elements(${column}) AS element(value))`
+      : `jsonb_array_length(${column})::int`
+    const countAlias = this.#nextAlias('c')
+    this.joins.push(
+      `LEFT JOIN LATERAL (SELECT ${countExpression} AS "total") "${countAlias}" ON TRUE`,
+    )
+    const order = field.ordered ? 'ordinality' : 'value::text'
+    const valueSource = `jsonb_array_elements(${column}) WITH ORDINALITY AS element(value, ordinality)`
+    const itemsExpression = field.unique
+      ? `COALESCE((SELECT jsonb_agg(value ORDER BY ${order}) FROM (` +
+        'SELECT value, ordinality FROM (' +
+        `SELECT DISTINCT ON (value::text) value, ordinality FROM ${valueSource} ` +
+        'ORDER BY value::text, ordinality' +
+        `) AS distinct_values ORDER BY ${order} LIMIT ${items} OFFSET ${itemOffset}` +
+        ') AS value_page), \'[]\'::jsonb)'
+      : `COALESCE((SELECT jsonb_agg(value ORDER BY ${order}) FROM (` +
+        `SELECT value, ordinality FROM ${valueSource} ` +
+        `ORDER BY ${order} LIMIT ${items} OFFSET ${itemOffset}) AS value_page), '[]'::jsonb)`
+    this.columns.push(
+      `${itemsExpression} AS "${itemsAlias}"`,
+      `"${countAlias}"."total" AS "${totalAlias}"`,
+      `GREATEST("${countAlias}"."total" - ${remainingOffset}, 0) AS "${remainingAlias}"`,
+    )
+    node.valueCollectionNames.add(field.name)
+    node.valueCollections.push({ itemsAlias, name: field.name, remainingAlias, totalAlias })
   }
 
   /**
@@ -553,7 +643,12 @@ class QueryProjection {
     if (node.fieldNames.has(name)) return
     if (node.identity && (name === 'id' || name === 'name' || name === 'entity')) return
     const field = node.context.effective.get(name)
-    if (!field || field.type === FieldType.Collection || field.type === FieldType.Entity) {
+    if (
+      !field
+      || field.type === FieldType.Collection
+      || field.type === FieldType.ValueCollection
+      || field.type === FieldType.Entity
+    ) {
       throw new Error(`Unknown scalar field "${name}"`)
     }
     const alias = columnAlias(node.path, name)
@@ -669,6 +764,8 @@ class QueryProjection {
       path,
       referenceNames: new Map(),
       references: [],
+      valueCollectionNames: new Set(),
+      valueCollections: [],
     }
   }
 
@@ -724,6 +821,12 @@ export function compilePolymorphicQuery(
       throw new Error(
         `Query field "${definition.name}.${name}" is JSON; ` +
         'JSON fields cannot be used in predicates or ordering',
+      )
+    }
+    if (value.type === FieldType.ValueCollection) {
+      throw new Error(
+        `Query field "${definition.name}.${name}" is a value collection; ` +
+        'value collections cannot be used in predicates or ordering',
       )
     }
     return value
@@ -925,6 +1028,9 @@ function collectDescendantFields(
  */
 function fieldContract(field: FieldDefinition): string {
   if (field.type === FieldType.JSON) return 'JSON'
+  if (field.type === FieldType.ValueCollection) {
+    return `ValueCollection:${field.ordered}:${field.unique}:${field.storage}`
+  }
   if (field.type === FieldType.Array) {
     return `Array:${field.items.type}:${field.items.format ?? ''}`
   }
@@ -985,6 +1091,9 @@ function hydrateRoot(
   for (const collection of node.collections) {
     result[collection.name] = hydrateCollection(row, collection)
   }
+  for (const collection of node.valueCollections) {
+    result[collection.name] = hydrateValueCollection(row, collection)
+  }
   for (const reference of node.references) {
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
@@ -1000,6 +1109,29 @@ function hydrateRoot(
 function hydrateCollection(
   row: Record<string, unknown>,
   collection: CollectionProjection,
+): { items: unknown[], remaining: number, total: number } {
+  const raw = row[collection.itemsAlias]
+  const items = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? JSON.parse(raw) as unknown[]
+      : []
+  return {
+    items,
+    remaining: Number(row[collection.remainingAlias] ?? 0),
+    total: Number(row[collection.totalAlias] ?? 0),
+  }
+}
+
+/**
+ * Hydrate one non-entity value collection envelope.
+ * @param row - Flat SQL row.
+ * @param collection - Value collection projection metadata.
+ * @returns The `{ items, total, remaining }` envelope.
+ */
+function hydrateValueCollection(
+  row: Record<string, unknown>,
+  collection: ValueCollectionProjection,
 ): { items: unknown[], remaining: number, total: number } {
   const raw = row[collection.itemsAlias]
   const items = Array.isArray(raw)

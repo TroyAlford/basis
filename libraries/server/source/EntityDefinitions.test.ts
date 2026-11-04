@@ -198,7 +198,108 @@ describe('EntityDefinitions', () => {
       'Number',
       'String',
       'Timestamp',
+      'ValueCollection',
     ])
+  })
+
+  test('accepts typed non-entity value collections and structured elements', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          {
+            field: 'labels',
+            items: { type: 'String' },
+            ordered: true,
+            storage: 'jsonb',
+            type: 'ValueCollection',
+            unique: false,
+          },
+          {
+            field: 'events',
+            items: {
+              fields: [
+                { field: 'kind', type: 'String' },
+                { field: 'count', type: 'Number' },
+              ],
+              type: 'Structured',
+            },
+            ordered: false,
+            storage: 'jsonb',
+            type: 'ValueCollection',
+            unique: true,
+          },
+        ],
+        name: 'Document',
+      }],
+    })
+    expect(entities.entity('Document')?.fields[1]).toEqual({
+      items: { type: FieldType.String },
+      name: 'labels',
+      ordered: true,
+      storage: 'jsonb',
+      type: FieldType.ValueCollection,
+      unique: false,
+    })
+    expect(entities.entity('Document')?.fields[2]).toMatchObject({
+      items: { type: 'Structured' },
+      name: 'events',
+      ordered: false,
+      type: FieldType.ValueCollection,
+      unique: true,
+    })
+    expect(entities.ddl.join('\n')).toContain('"labels" jsonb not null')
+    expect(entities.ddl.join('\n')).toContain('"events" jsonb not null')
+    expect(entities.ddl.join('\n')).toContain('jsonb_typeof("labels") = \'array\'')
+  })
+
+  test('rejects malformed value collections', () => {
+    const cases = [
+      {
+        fields: [{ field: 'labels', items: { type: 'String' }, ordered: true, type: 'ValueCollection', unique: false }],
+        name: 'Document',
+      },
+      {
+        fields: [{
+          field: 'labels',
+          items: { target: 'Document', type: 'Entity' },
+          ordered: true,
+          storage: 'jsonb',
+          type: 'ValueCollection',
+          unique: false,
+        }],
+        name: 'Document',
+      },
+      {
+        fields: [{
+          field: 'events',
+          items: { fields: [], type: 'Structured' },
+          ordered: true,
+          storage: 'jsonb',
+          type: 'ValueCollection',
+          unique: false,
+        }],
+        name: 'Document',
+      },
+      {
+        fields: [{
+          field: 'events',
+          items: {
+            fields: [
+              { field: 'x', type: 'String' },
+              { field: 'x', type: 'Number' },
+            ],
+            type: 'Structured',
+          },
+          ordered: true,
+          storage: 'jsonb',
+          type: 'ValueCollection',
+          unique: false,
+        }],
+        name: 'Document',
+      },
+    ]
+    for (const entity of cases) expect(() => load({ entities: [entity] })).toThrow()
   })
 
   test('accepts structured JSON fields and maps them to jsonb', () => {

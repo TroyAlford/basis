@@ -113,6 +113,12 @@ export const Predicate = {
         'JSON fields cannot be used in predicates or ordering',
       )
     }
+    if (field.type === FieldType.ValueCollection) {
+      throw new Error(
+        `Query field "${entity.name}.${name}" is a value collection; ` +
+        'value collections cannot be used in predicates or ordering',
+      )
+    }
     return field
   },
 

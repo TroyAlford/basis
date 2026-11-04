@@ -4,7 +4,9 @@ import { EntityDefinitions } from '../../server/source/EntityDefinitions'
 /** Canonical entity property order. */
 const ENTITY_KEYS = ['name', 'extends', 'fields'] as const
 /** Canonical field property order. */
-const FIELD_KEYS = ['field', 'type', 'format', 'target', 'column', 'items', 'mapping'] as const
+const FIELD_KEYS = [
+  'field', 'type', 'format', 'target', 'column', 'items', 'ordered', 'unique', 'storage', 'mapping',
+] as const
 /** Canonical array/collection element property order. */
 const ELEMENT_KEYS = ['type', 'format', 'target'] as const
 /** Canonical collection-mapping property order. */
@@ -50,6 +52,16 @@ function orderField(value: Record<string, unknown>): Record<string, unknown> {
   if (field.type === 'Collection') {
     if (isRecord(field.items)) field.items = ordered(field.items, ELEMENT_KEYS)
     if (isRecord(field.mapping)) field.mapping = ordered(field.mapping, MAPPING_KEYS)
+  }
+  if (field.type === 'ValueCollection' && isRecord(field.items)) {
+    const items = ordered(field.items, ['type', 'format', 'fields'])
+    if (Array.isArray(items.fields)) {
+      items.fields = items.fields.map(candidate => ordered(
+        candidate as Record<string, unknown>,
+        ['field', 'type', 'format'],
+      ))
+    }
+    field.items = items
   }
   return field
 }

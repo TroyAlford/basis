@@ -1309,6 +1309,98 @@ WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Vis
     `).toEqual([{ indexName: 'Visit_petId_fk_idx' }])
   }, 120_000)
 
+  isolatedTest('projects validated value-collection storage and envelopes', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          {
+            field: 'labels',
+            items: { type: 'String' },
+            ordered: true,
+            storage: 'jsonb',
+            type: 'ValueCollection',
+            unique: false,
+          },
+          {
+            field: 'events',
+            items: {
+              fields: [
+                { field: 'kind', type: 'String' },
+                { field: 'count', type: 'Number' },
+              ],
+              type: 'Structured',
+            },
+            ordered: false,
+            storage: 'jsonb',
+            type: 'ValueCollection',
+            unique: true,
+          },
+        ],
+        name: 'Document',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    const first = randomUUID()
+    const second = randomUUID()
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${first}, ${'First'}, ${'Document'}), (${second}, ${'Second'}, ${'Document'})
+    `
+    await database.sql`
+      INSERT INTO "Document" ("id", "labels", "events")
+      VALUES (${first},
+        '["beta","alpha","alpha"]'::jsonb,
+        '[{"kind":"b","count":2},{"kind":"a","count":1},{"kind":"a","count":1}]'::jsonb),
+        (${second},
+        '[]'::jsonb,
+        '[]'::jsonb)
+    `
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Document', {
+      fields: ['id', 'labels', 'events'],
+      where: { id: first },
+    })).toEqual([{
+      events: {
+        items: [
+          { count: 1, kind: 'a' },
+          { count: 2, kind: 'b' },
+        ],
+        remaining: 0,
+        total: 2,
+      },
+      id: first,
+      labels: {
+        items: ['beta', 'alpha', 'alpha'],
+        remaining: 0,
+        total: 3,
+      },
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Document', {
+      collections: { events: { limit: 1 }, labels: { limit: 2, offset: 1 } },
+      fields: ['id', 'labels', 'events'],
+      where: { id: first },
+    })).toEqual([{
+      events: { items: [{ count: 1, kind: 'a' }], remaining: 1, total: 2 },
+      id: first,
+      labels: { items: ['alpha', 'alpha'], remaining: 0, total: 3 },
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Document', {
+      fields: ['id', 'labels', 'events'],
+      where: { id: second },
+    })).toEqual([{
+      events: { items: [], remaining: 0, total: 0 },
+      id: second,
+      labels: { items: [], remaining: 0, total: 0 },
+    }])
+    expect(await database.captureError(async db => {
+      await db.sql`
+        UPDATE "Document"
+        SET "labels" = '{}'::jsonb
+        WHERE "id" = ${second}
+      `
+    })).toMatchObject({ errno: '23514' })
+  }, 120_000)
+
   durableTest('enforces MTI final-state integrity for direct SQL', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [

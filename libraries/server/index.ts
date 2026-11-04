@@ -21,6 +21,11 @@ export type {
   ScalarArrayElementDefinition,
   ScalarFieldDefinition,
   ScalarFieldType,
+  ScalarValueCollectionElementDefinition,
+  StructuredValueCollectionElementDefinition,
+  StructuredValueFieldDefinition,
+  ValueCollectionElementDefinition,
+  ValueCollectionFieldDefinition,
 } from './source/EntityDefinitions'
 export { OAuth } from './source/OAuth'
 export type { OAuthOptions } from './source/OAuth'

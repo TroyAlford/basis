@@ -78,6 +78,36 @@ describe('entityDefinitionFormat', () => {
     expect(output.output).toContain('"field": "owner"')
   })
 
+  test('orders value collections and structured element fields canonically', () => {
+    const code = JSON.stringify({
+      entities: [{
+        fields: [{
+          field: 'events',
+          items: {
+            fields: [
+              { field: 'count', type: 'Number' },
+              { field: 'kind', type: 'String' },
+            ],
+            type: 'Structured',
+          },
+          ordered: false,
+          storage: 'jsonb',
+          type: 'ValueCollection',
+          unique: true,
+        }],
+        name: 'Document',
+      }],
+    })
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain('"field": "events"')
+    expect(output.output).toContain('"type": "ValueCollection"')
+    expect(output.output).toContain('"ordered": false')
+    expect(output.output).toContain('"unique": true')
+    expect(output.output).toContain('"storage": "jsonb"')
+    expect(output.output).toContain('"field": "count"')
+  })
+
   test('delegates semantics to the canonical loader before fixing', () => {
     const cases = [
       '{"entities":[{"name":"User","fields":[]},{"name":"User","fields":[]}]}',

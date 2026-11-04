@@ -32,6 +32,8 @@ export enum FieldType {
   String = 'String',
   /** Instant in time. */
   Timestamp = 'Timestamp',
+  /** Ordered or unordered non-entity value collection. */
+  ValueCollection = 'ValueCollection',
 }
 
 /** Field types that represent scalar values. */
@@ -119,6 +121,53 @@ export interface JSONFieldDefinition {
   readonly type: FieldType.JSON,
 }
 
+/** One scalar value in a non-entity value collection. */
+export interface ScalarValueCollectionElementDefinition {
+  /** Optional identity format for ID elements. */
+  readonly format?: IdentityFormat,
+  /** Scalar element type. */
+  readonly type: ScalarFieldType,
+}
+
+/** One field inside a structured value-collection element. */
+export interface StructuredValueFieldDefinition {
+  /** Optional identity format for ID fields. */
+  readonly format?: IdentityFormat,
+  /** Field name, in camelCase. */
+  readonly name: string,
+  /** Scalar or JSON field type. */
+  readonly type: ScalarFieldType | FieldType.JSON,
+}
+
+/** One structured/interface value-collection element. */
+export interface StructuredValueCollectionElementDefinition {
+  /** Inline field contract for structured values. */
+  readonly fields: readonly StructuredValueFieldDefinition[],
+  /** Element-kind discriminator. */
+  readonly type: 'Structured',
+}
+
+/** One non-entity value-collection element descriptor. */
+export type ValueCollectionElementDefinition =
+  | ScalarValueCollectionElementDefinition
+  | StructuredValueCollectionElementDefinition
+
+/** One non-entity value collection field. */
+export interface ValueCollectionFieldDefinition {
+  /** Element descriptor for collection values. */
+  readonly items: ValueCollectionElementDefinition,
+  /** Logical field name used by entity-rooted queries. */
+  readonly name: string,
+  /** Whether values retain their stored order. */
+  readonly ordered: boolean,
+  /** Explicit physical storage for the collection. */
+  readonly storage: 'jsonb',
+  /** Field-kind discriminator. */
+  readonly type: FieldType.ValueCollection,
+  /** Whether values are unique. */
+  readonly unique: boolean,
+}
+
 /** One native scalar-array field. */
 export interface ArrayFieldDefinition {
   /** Scalar element descriptor. */
@@ -146,6 +195,7 @@ export type FieldDefinition =
   | ArrayFieldDefinition
   | JSONFieldDefinition
   | ScalarFieldDefinition
+  | ValueCollectionFieldDefinition
   | EntityReferenceFieldDefinition
   | CollectionFieldDefinition
 
@@ -184,7 +234,7 @@ interface TableColumn {
   /** Whether this column is the table's primary key. */
   readonly primaryKey?: boolean,
   /** Physical column type. */
-  readonly type: ScalarFieldType | FieldType.Array | FieldType.JSON,
+  readonly type: ScalarFieldType | FieldType.Array | FieldType.JSON | FieldType.ValueCollection,
 }
 
 /** One physical table index. */
@@ -914,6 +964,10 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
     return { field: parseJSONField(entityName, value) }
   }
 
+  if (value.type === FieldType.ValueCollection) {
+    return { field: parseValueCollectionField(entityName, value) }
+  }
+
   if (value.type === FieldType.Entity) {
     assertKnownKeys(value, ['column', 'field', 'target', 'type'], 'field')
     if (ROOT_FIELD_NAMES.has(value.field) || value.field === 'id') {
@@ -960,6 +1014,120 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
       type: type as ScalarFieldType,
     },
   }
+}
+
+/**
+ * Validate one non-entity value-collection descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated value collection.
+ */
+function parseValueCollectionField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): ValueCollectionFieldDefinition {
+  assertKnownKeys(value, ['field', 'items', 'ordered', 'storage', 'type', 'unique'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (typeof value.ordered !== 'boolean') {
+    throw invalid(`value collection "${entityName}.${name}" ordered must be a boolean`)
+  }
+  if (typeof value.unique !== 'boolean') {
+    throw invalid(`value collection "${entityName}.${name}" unique must be a boolean`)
+  }
+  if (value.storage !== 'jsonb') {
+    throw invalid(`value collection "${entityName}.${name}" storage must be jsonb`)
+  }
+  if (!isRecord(value.items)) {
+    throw invalid(`value collection "${entityName}.${name}" items must be an object`)
+  }
+  return {
+    items: parseValueCollectionElement(entityName, name, value.items),
+    name,
+    ordered: value.ordered,
+    storage: 'jsonb',
+    type: FieldType.ValueCollection,
+    unique: value.unique,
+  }
+}
+
+/**
+ * Validate one non-entity collection element descriptor.
+ * @param entityName - Owning entity name.
+ * @param fieldName - Collection field name.
+ * @param value - Element candidate.
+ * @returns The validated element descriptor.
+ */
+function parseValueCollectionElement(
+  entityName: string,
+  fieldName: string,
+  value: Readonly<Record<string, unknown>>,
+): ValueCollectionElementDefinition {
+  if (!isRecord(value) || typeof value.type !== 'string') {
+    throw invalid(`value collection "${entityName}.${fieldName}" items must have a type`)
+  }
+  if (value.type === 'Structured') {
+    assertKnownKeys(value, ['fields', 'type'], 'value collection item')
+    if (!Array.isArray(value.fields) || value.fields.length === 0) {
+      throw invalid(`value collection "${entityName}.${fieldName}" structured fields must be non-empty`)
+    }
+    const names = new Set<string>()
+    const fields: StructuredValueFieldDefinition[] = value.fields.map((field, index) => {
+      if (!isRecord(field)) {
+        throw invalid(`structured field ${index} in "${entityName}.${fieldName}" must be an object`)
+      }
+      if (typeof field.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(field.field)) {
+        throw invalid(`structured field in "${entityName}.${fieldName}" must be camelCase`)
+      }
+      if (names.has(field.field)) {
+        throw invalid(`duplicate structured field "${field.field}" in "${entityName}.${fieldName}"`)
+      }
+      names.add(field.field)
+      if (field.type === FieldType.JSON) {
+        assertKnownKeys(field, ['field', 'type'], 'structured field')
+        return { name: field.field, type: FieldType.JSON }
+      }
+      if (typeof field.type !== 'string' || !SCALAR_FIELD_TYPES.has(field.type)) {
+        throw invalid(`unsupported structured field type in "${entityName}.${fieldName}.${field.field}"`)
+      }
+      if (field.type === FieldType.ID) {
+        assertKnownKeys(field, ['field', 'format', 'type'], 'structured field')
+        if (
+          field.format !== undefined
+          && (typeof field.format !== 'string' || !IDENTITY_FORMATS.has(field.format))
+        ) {
+          throw invalid(
+            `structured field "${entityName}.${fieldName}.${field.field}" ID format must be UUID or Snowflake`,
+          )
+        }
+        return {
+          ...(field.format !== undefined ? { format: field.format as IdentityFormat } : {}),
+          name: field.field,
+          type: FieldType.ID,
+        }
+      }
+      assertKnownKeys(field, ['field', 'type'], 'structured field')
+      return { name: field.field, type: field.type as ScalarFieldType }
+    })
+    return { fields, type: 'Structured' }
+  }
+  if (!SCALAR_FIELD_TYPES.has(value.type)) {
+    throw invalid(`unsupported value collection item type "${value.type}" in "${entityName}.${fieldName}"`)
+  }
+  if (value.type === FieldType.ID) {
+    assertKnownKeys(value, ['format', 'type'], 'value collection item')
+    if (value.format !== undefined && (typeof value.format !== 'string' || !IDENTITY_FORMATS.has(value.format))) {
+      throw invalid(`value collection "${entityName}.${fieldName}" ID format must be UUID or Snowflake`)
+    }
+    return {
+      ...(value.format !== undefined ? { format: value.format as IdentityFormat } : {}),
+      type: FieldType.ID,
+    }
+  }
+  assertKnownKeys(value, ['type'], 'value collection item')
+  return { type: value.type as ScalarFieldType }
 }
 
 /**
@@ -1167,11 +1335,19 @@ function entityTable(
   entity: EntityDefinition,
   indexes: readonly TableIndex[] = [],
 ): TableDefinition {
+  const checks: TableCheck[] = [{
+    expression: identityCheck('id', entity.idFormat),
+    name: `${entity.name}_id_format_check`,
+  }]
+  for (const field of entity.fields) {
+    if (field.type !== FieldType.ValueCollection) continue
+    checks.push({
+      expression: `jsonb_typeof(${quoteIdentifier(field.name)}) = 'array'`,
+      name: `${entity.name}_${field.name}_array_check`,
+    })
+  }
   return {
-    checks: [{
-      expression: identityCheck('id', entity.idFormat),
-      name: `${entity.name}_id_format_check`,
-    }],
+    checks,
     columns: entity.fields.flatMap((field): TableColumn[] => {
       if (field.type === FieldType.Collection) return []
       if (field.type === FieldType.Entity) {
@@ -1181,8 +1357,8 @@ function entityTable(
       if (field.type === FieldType.Array) {
         return [{ arrayType: field.items.type, name: field.name, type: FieldType.Array }]
       }
-      if (field.type === FieldType.JSON) {
-        return [{ name: field.name, type: FieldType.JSON }]
+      if (field.type === FieldType.JSON || field.type === FieldType.ValueCollection) {
+        return [{ name: field.name, type: field.type }]
       }
       return [{ name: field.name, type: field.type }]
     }),
@@ -1704,7 +1880,7 @@ function columnType(column: TableColumn): string {
     if (!column.arrayType) throw new Error(`Array column "${column.name}" has no element type`)
     return `${scalarColumnType(column.arrayType)}[]`
   }
-  if (column.type === FieldType.JSON) return 'jsonb'
+  if (column.type === FieldType.JSON || column.type === FieldType.ValueCollection) return 'jsonb'
   return scalarColumnType(column.type)
 }
 

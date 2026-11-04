@@ -134,6 +134,37 @@ const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
   ],
 }))
 
+const valueCollectionDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [{
+    fields: [
+      { field: 'id', format: 'UUID' },
+      {
+        field: 'labels',
+        items: { type: 'String' },
+        ordered: true,
+        storage: 'jsonb',
+        type: 'ValueCollection',
+        unique: false,
+      },
+      {
+        field: 'events',
+        items: {
+          fields: [
+            { field: 'kind', type: 'String' },
+            { field: 'count', type: 'Number' },
+          ],
+          type: 'Structured',
+        },
+        ordered: false,
+        storage: 'jsonb',
+        type: 'ValueCollection',
+        unique: true,
+      },
+    ],
+    name: 'Document',
+  }],
+}))
+
 const incompatibleDefinitions = EntityDefinitions.load(JSON.stringify({
   entities: [
     { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
@@ -478,6 +509,26 @@ describe('SQL.where', () => {
       fields: ['id'],
       orderBy: 'payload',
     })).toThrow('JSON fields cannot be used in predicates or ordering')
+  })
+
+  test('projects bounded typed value-collection envelopes', () => {
+    const compiled = compileEntityQuery(valueCollectionDefinitions, 'Document', {
+      collections: { events: { limit: 1 }, labels: { limit: 2, offset: 1 } },
+      fields: ['id', 'labels', 'events'],
+    })
+    expect(compiled.sql).toContain('"labels__items"')
+    expect(compiled.sql).toContain('"labels__total"')
+    expect(compiled.sql).toContain('"events__items"')
+    expect(compiled.sql).toContain('jsonb_array_elements')
+    expect(compiled.values).toEqual([2, 1, 3, 1, 0, 1, 25, 0])
+    expect(() => compileEntityQuery(valueCollectionDefinitions, 'Document', {
+      fields: ['labels'],
+      where: { labels: 'x' },
+    })).toThrow('value collections cannot be used in predicates or ordering')
+    expect(() => compileEntityQuery(valueCollectionDefinitions, 'Document', {
+      fields: ['labels'],
+      orderBy: 'labels',
+    })).toThrow('value collections cannot be used in predicates or ordering')
   })
 
   test('rejects incompatible descendant-only declarations', () => {
