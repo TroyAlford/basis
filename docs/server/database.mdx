@@ -180,9 +180,9 @@ A many-to-many mapping names its junction table and columns explicitly:
 }
 ```
 
-Inverse mappings resolve against the forward FK during metadata validation. Multiple inverse collections on one owner must use distinct forward edges; for example, `Pet.visits` uses `Visit.pet` and `Pet.updatedVisits` uses `Visit.updatedPet`. Uniqueness is scoped to the declaring owner and uses the forward field's physical owner, so descendant targets cannot reuse an inherited forward FK. Reusing one forward edge for two inverse collections on the same owner is rejected, and inverse collections never create a membership column.
+Inverse mappings resolve against the forward FK during metadata validation and generate a deduplicated index on each referenced physical FK column. Multiple inverse collections on one owner must use distinct forward edges; for example, `Pet.visits` uses `Visit.pet` and `Pet.updatedVisits` uses `Visit.updatedPet`. Uniqueness is scoped to the declaring owner and uses the forward field's physical owner, so descendant targets cannot reuse an inherited forward FK. Reusing one forward edge for two inverse collections on the same owner is rejected, and inverse collections never create a membership column.
 
-Junction mappings create a dedicated table with the declared source and target text columns, a composite primary key, and deferrable foreign keys to the owner and target tables. An optional ordering column is a non-null `double precision` column. Junction table names and columns are explicit; no join table is inferred from a field name. Collection query execution and collection value validation remain deferred.
+Junction mappings create a dedicated table with the declared source and target text columns, a composite primary key, and deferrable foreign keys to the owner and target tables. An optional ordering column is a non-null `double precision` column. Junction table names and columns are explicit; no join table is inferred from a field name. Entity-collection projection is supported on root queries; collection value validation remains deferred.
 
 Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `vet` is selectable as a singular projection, but it is not filterable or sortable; its physical `vetId` column is never a logical field. Direct `db.sql` remains physical SQL and may use generated columns normally.
 
@@ -201,7 +201,7 @@ const entities = EntityDefinitions.load(await Bun.file('./entities.json').text()
 await server.db.tx(async sql => entities.createTables(sql))
 ```
 
-`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, creates one ordinary PostgreSQL table per entity, and creates explicit junction tables for `Collection` mappings. Local scalar fields use their logical field name; a singular reference field uses its explicit `column` name; a scalar array uses its logical field name with the matching native PostgreSQL array type. Every table gets generated `id text primary key` storage. `String` maps to `text`; `Number` to `double precision`; `Date` to `date`; `Timestamp` to `timestamptz`; `Boolean` to `boolean`; array types append `[]`. Entity `Collection` fields are relationship metadata and do not create a membership column. Format checks apply to the effective `id` format.
+`createTables` enables `pg_trgm`, creates the universal `"Entity"` identity root, creates one ordinary PostgreSQL table per entity, creates explicit junction tables for `Collection` mappings, and indexes physical FK columns used by inverse collections. Local scalar fields use their logical field name; a singular reference field uses its explicit `column` name; a scalar array uses its logical field name with the matching native PostgreSQL array type. Every table gets generated `id text primary key` storage. `String` maps to `text`; `Number` to `double precision`; `Date` to `date`; `Timestamp` to `timestamptz`; `Boolean` to `boolean`; array types append `[]`. Entity `Collection` fields are relationship metadata and do not create a membership column. Format checks apply to the effective `id` format.
 
 Each entity table has a real primary key and an MTI parent foreign key to the system `Entity` root or its parent table. Shared fields are stored only in the table that owns them. The root alone stores `name` and the concrete-leaf `entity` discriminator. Multi-tier chains therefore use ordinary PostgreSQL PK/FK joins, not `INHERITS`.
 
@@ -290,7 +290,25 @@ const visits = await server.db.query<{
 })
 ```
 
-`fields: ['pet.vet.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, repeated reference expansion, and paths deeper than eight reference hops fail before SQL runs. Reference fields cannot be used in `where` or `orderBy`; graph predicates and collection projections remain deferred.
+`fields: ['pet.vet.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, repeated reference expansion, and paths deeper than eight reference hops fail before SQL runs. Reference fields cannot be used in `where` or `orderBy`; graph predicates and nested collection projections remain deferred.
+
+Entity collection fields project a bounded envelope. The default preview is three lightweight `{ id, name, entity }` items; `total` is the exact collection count and `remaining` is the count after the requested page. `collections` overrides the preview limit and offset per selected collection:
+
+```ts
+const pets = await server.db.query<{
+  id: string,
+  visits: {
+    items: { entity: string, id: string, name: string }[],
+    remaining: number,
+    total: number,
+  },
+}>('Pet', {
+  collections: { visits: { limit: 5, offset: 10 } },
+  fields: ['id', 'visits'],
+})
+```
+
+The envelope is computed in the same SQL statement for both inverse and junction-backed collections; there is no per-parent lookup. Junction items follow the declared ordering column when present, otherwise the target identity order. Collection predicates, nested collection projections, and non-entity collection values remain deferred.
 
 `$contains` is a case-insensitive literal substring match on `String` fields. It escapes `%`, `_`, and the escape character before binding, so user input is never interpreted as a wildcard. Abstract display-name searches use the root `pg_trgm` GIN index.
 
@@ -326,7 +344,7 @@ Unquoted literals are typed from the target field, and quoted values remain stri
 
 UUID and Snowflake values remain canonical text in `db.query` results; there is no implicit bigint conversion for identity values. Ordering and comparisons operate on the physical text identity.
 
-`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar and native scalar-array projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections and dotted paths. Reference collections, inverse/many-to-many edges, graph predicates, and collection SQL remain deferred.
+`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar and native scalar-array projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections, dotted paths, and bounded root entity-collection envelopes. Collection predicates, nested collection projections, collection value validation, and graph expansion budgets remain deferred.
 
 ## `db.sql`
 

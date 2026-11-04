@@ -1,4 +1,4 @@
-import type { EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import type { CollectionFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
@@ -10,7 +10,12 @@ const MAX_REFERENCE_DEPTH = 8
 
 /** Options accepted by a polymorphic entity query. */
 export interface PolymorphicQueryOptions {
-  /** Effective scalar fields or singular reference paths to project. */
+  /** Per-collection preview and pagination overrides. */
+  readonly collections?: Readonly<Record<string, {
+    readonly limit?: number,
+    readonly offset?: number,
+  }>>,
+  /** Effective scalar, scalar-array, collection, or singular-reference paths to project. */
   readonly fields: readonly string[],
   /** Maximum rows to return; defaults to 25, or `null` for unlimited. */
   readonly limit?: number | null,
@@ -50,6 +55,18 @@ interface IdentityProjection {
   readonly name: string,
 }
 
+/** One entity collection projection. */
+interface CollectionProjection {
+  /** SQL alias for the JSON items array. */
+  readonly itemsAlias: string,
+  /** Output field name. */
+  readonly name: string,
+  /** SQL alias for the remaining count. */
+  readonly remainingAlias: string,
+  /** SQL alias for the total count. */
+  readonly totalAlias: string,
+}
+
 /** One nested singular reference. */
 interface ReferenceProjection {
   /** Output reference field name. */
@@ -60,6 +77,10 @@ interface ReferenceProjection {
 
 /** One entity occurrence in a projection tree. */
 interface ProjectionNode {
+  /** Collection field names already selected at this node. */
+  readonly collectionNames: Set<string>,
+  /** Entity collections selected at this node. */
+  readonly collections: CollectionProjection[],
   /** Effective-field and descendant metadata for this occurrence. */
   readonly context: EntityContext,
   /** Field names already selected at this node. */
@@ -95,6 +116,11 @@ interface DescendantVariant {
   /** Concrete leaves that expose this declaration. */
   readonly leaves: readonly string[],
   /** Physical owner table. */
+  readonly owner: string,
+}
+
+/** One effective collection field with its owning table. */
+type EffectiveCollectionField = CollectionFieldDefinition & {
   readonly owner: string,
 }
 
@@ -138,14 +164,32 @@ class QueryProjection {
   readonly #entities: EntityDefinitions
   /** Next generated table alias number. */
   #alias = 0
+  /** Collection configuration overrides. */
+  readonly #collections: Readonly<Record<string, {
+    readonly limit?: number,
+    readonly offset?: number,
+  }>> | undefined
+  /** Values bound by collection subqueries. */
+  readonly values: unknown[] = []
+  /** Starting placeholder index for collection values. */
+  #valueStart = 1
 
   /**
    * Create the root occurrence for one query.
    * @param entities - Canonical definitions.
    * @param definition - Root entity being queried.
+   * @param collections - Per-collection preview overrides.
    */
-  constructor(entities: EntityDefinitions, definition: EntityDefinition) {
+  constructor(
+    entities: EntityDefinitions,
+    definition: EntityDefinition,
+    collections?: Readonly<Record<string, {
+      readonly limit?: number,
+      readonly offset?: number,
+    }>>,
+  ) {
     this.#entities = entities
+    this.#collections = collections
     this.root = {
       baseAlias: 't',
       definition,
@@ -162,13 +206,23 @@ class QueryProjection {
   /**
    * Build the requested projection paths.
    * @param fields - Effective scalar names or dotted singular-reference paths.
+   * @param valueStart - First placeholder index available to collection queries.
    * @returns A row hydrator for the requested nested shape.
    * @throws {Error} When a path is invalid or an expansion is not supported.
    */
-  build(fields: readonly string[]): (row: Record<string, unknown>) => Record<string, unknown> {
+  build(
+    fields: readonly string[],
+    valueStart: number,
+  ): (row: Record<string, unknown>) => Record<string, unknown> {
     if (fields.length === 0) throw new Error('Query fields must be a non-empty array')
+    this.#valueStart = valueStart
     const root = this.#node(this.root, [])
     for (const field of fields) this.#addPath(root, field.split('.'), new Set(), 0)
+    for (const name of Object.keys(this.#collections ?? {})) {
+      if (!root.collectionNames.has(name)) {
+        throw new Error(`Collection options were provided for unselected field "${name}"`)
+      }
+    }
     return row => hydrateRoot(row, root)
   }
 
@@ -211,10 +265,11 @@ class QueryProjection {
 
     if (effective) {
       if (effective.type === FieldType.Collection) {
-        throw new Error(
-          `Query field "${node.context.definition.name}.${name}" is a collection; ` +
-          'collection projections are not supported yet',
-        )
+        if (rest.length > 0) {
+          throw new Error(`Cannot traverse collection field "${node.context.definition.name}.${segments.join('.')}"`)
+        }
+        this.#addCollection(node, effective as EffectiveCollectionField)
+        return
       }
       if (effective.type === FieldType.Entity) {
         const path = [...node.path, ...segments].join('.')
@@ -247,7 +302,7 @@ class QueryProjection {
       if (descendant.type === FieldType.Collection) {
         throw new Error(
           `Query field "${node.context.definition.name}.${name}" is a collection; ` +
-          'collection projections are not supported yet',
+          'descendant collection projections are not supported yet',
         )
       }
       if (descendant.contracts.size > 1) {
@@ -344,6 +399,151 @@ class QueryProjection {
     return child
   }
 
+  /**
+   * Add one root entity collection envelope projection.
+   * @param node - Projection occurrence.
+   * @param field - Effective collection field.
+   */
+  #addCollection(node: ProjectionNode, field: EffectiveCollectionField): void {
+    if (field.type !== FieldType.Collection) throw new Error(`Field "${field.name}" is not a collection`)
+    if (node.path.length > 0) {
+      throw new Error('Nested collection projections are not supported yet')
+    }
+    if (node.collectionNames.has(field.name)) return
+    const config = this.#collections?.[field.name]
+    const limit = config?.limit ?? 3
+    const offset = config?.offset ?? 0
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error(`Collection "${field.name}" limit must be a positive integer`)
+    }
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error(`Collection "${field.name}" offset must be a non-negative integer`)
+    }
+    const target = field.items.target
+    const targetDefinition = target === 'Entity' ? null : this.#entities.entity(target)
+    if (target !== 'Entity' && !targetDefinition) throw new Error(`Unknown target entity "${target}"`)
+    if (field.mapping.kind === 'Inverse') {
+      this.#addInverseCollection(node, field, targetDefinition, target, limit, offset)
+    } else {
+      this.#addJunctionCollection(node, field, targetDefinition, target, limit, offset)
+    }
+    node.collectionNames.add(field.name)
+  }
+
+  /**
+   * Add an inverse collection subquery.
+   * @param node - Root projection occurrence.
+   * @param field - Collection field.
+   * @param targetDefinition - Target entity, unless the target is `Entity`.
+   * @param target - Target entity name.
+   * @param limit - Preview row limit.
+   * @param offset - Preview row offset.
+   */
+  #addInverseCollection(
+    node: ProjectionNode,
+    field: EffectiveCollectionField,
+    targetDefinition: EntityDefinition | null,
+    target: string,
+    limit: number,
+    offset: number,
+  ): void {
+    const mapping = field.mapping
+    if (mapping.kind !== 'Inverse') throw new Error('Expected an inverse collection mapping')
+    if (!targetDefinition) throw new Error('Inverse collection targets must declare an entity')
+    const forward = targetDefinition.effectiveFields.find(candidate => candidate.name === mapping.field)
+    if (!forward || forward.type !== FieldType.Entity) {
+      throw new Error(`Unknown forward reference "${target}.${mapping.field}"`)
+    }
+    const owner = forward.owner
+    const relation = owner === target
+      ? `"${target}" "ct" JOIN "Entity" "cr" ON "cr"."id" = "ct"."id"`
+      : `"${owner}" "fo" JOIN "${target}" "ct" ON "ct"."id" = "fo"."id" ` +
+        'JOIN "Entity" "cr" ON "cr"."id" = "ct"."id"'
+    const condition = `"${owner === target ? 'ct' : 'fo'}".${quote(forward.column)} = ` +
+      `"${node.context.baseAlias}"."id"`
+    this.#addCollectionColumns(node, field, 'cr', relation, condition, '"cr"."id"', limit, offset)
+  }
+
+  #addJunctionCollection(
+    node: ProjectionNode,
+    field: EffectiveCollectionField,
+    targetDefinition: EntityDefinition | null,
+    target: string,
+    limit: number,
+    offset: number,
+  ): void {
+    const mapping = field.mapping
+    if (mapping.kind !== 'Junction') throw new Error('Expected a junction collection mapping')
+    const source = `"${mapping.table}" "cj"`
+    const relation = target === 'Entity'
+      ? `${source} JOIN "Entity" "cr" ON "cr"."id" = "cj".${quote(mapping.targetColumn)}`
+      : `${source} JOIN "${target}" "ct" ON "ct"."id" = "cj".${quote(mapping.targetColumn)} ` +
+        'JOIN "Entity" "cr" ON "cr"."id" = "ct"."id"'
+    if (target !== 'Entity' && !targetDefinition) throw new Error(`Unknown target entity "${target}"`)
+    const condition = `"cj".${quote(mapping.sourceColumn)} = "${node.context.baseAlias}"."id"`
+    const orderBy = mapping.orderingColumn
+      ? `"cj".${quote(mapping.orderingColumn)}`
+      : '"cr"."id"'
+    this.#addCollectionColumns(node, field, 'cr', relation, condition, orderBy, limit, offset)
+  }
+
+  /**
+   * Add collection count and preview columns using correlated subqueries.
+   * @param node - Root projection occurrence.
+   * @param field - Collection field.
+   * @param targetRoot - Target root alias inside the collection relation.
+   * @param relation - Collection relation SQL.
+   * @param condition - Correlated relation condition.
+   * @param orderBy - Declared collection ordering expression.
+   * @param limit - Preview row limit.
+   * @param offset - Preview row offset.
+   */
+  #addCollectionColumns(
+    node: ProjectionNode,
+    field: EffectiveCollectionField,
+    targetRoot: string,
+    relation: string,
+    condition: string,
+    orderBy: string,
+    limit: number,
+    offset: number,
+  ): void {
+    const itemsAlias = `${field.name}__items`
+    const totalAlias = `${field.name}__total`
+    const remainingAlias = `${field.name}__remaining`
+    const items = this.#bind(limit)
+    const itemOffset = this.#bind(offset)
+    const remainingOffset = this.#bind(offset + limit)
+    const countAlias = this.#nextAlias('c')
+    this.joins.push(
+      `LEFT JOIN LATERAL (SELECT count(*)::int AS "total" FROM ${relation} WHERE ${condition}) ` +
+      `"${countAlias}" ON TRUE`,
+    )
+    this.columns.push(
+      'COALESCE((' +
+      'SELECT json_agg(json_build_object(\'id\', collection_page."id", \'name\', collection_page."name", ' +
+      '\'entity\', collection_page."entity") ' +
+      'ORDER BY collection_page."order_by", collection_page."id") ' +
+      `FROM (SELECT "${targetRoot}"."id" AS "id", "${targetRoot}"."name" AS "name", ` +
+      `"${targetRoot}"."entity" AS "entity", ${orderBy} AS "order_by" FROM ${relation} ` +
+      `WHERE ${condition} ORDER BY ${orderBy} ASC, "${targetRoot}"."id" ASC ` +
+      `LIMIT ${items} OFFSET ${itemOffset}) AS collection_page), ` +
+      `'[]'::json) AS "${itemsAlias}"`,
+      `"${countAlias}"."total" AS "${totalAlias}"`,
+      `GREATEST("${countAlias}"."total" - ${remainingOffset}, 0) AS "${remainingAlias}"`,
+    )
+    node.collections.push({ itemsAlias, name: field.name, remainingAlias, totalAlias })
+  }
+
+  /**
+   * Bind one collection-subquery value after predicate bindings.
+   * @param value - Value to bind.
+   * @returns Placeholder.
+   */
+  #bind(value: unknown): string {
+    this.values.push(value)
+    return `$${this.#valueStart + this.values.length - 1}`
+  }
   /**
    * Select one effective scalar field.
    * @param node - Projection occurrence.
@@ -461,6 +661,8 @@ class QueryProjection {
    */
   #node(context: EntityContext, path: readonly string[]): ProjectionNode {
     return {
+      collectionNames: new Set(),
+      collections: [],
       context,
       fieldNames: new Set(),
       fields: [],
@@ -494,9 +696,8 @@ export function compilePolymorphicQuery(
   definition: EntityDefinition,
   options: PolymorphicQueryOptions,
 ): CompiledPolymorphicQuery {
-  const projection = new QueryProjection(entities, definition)
+  const projection = new QueryProjection(entities, definition, options.collections)
   if (definition.abstract) projection.ensureRoot()
-  const hydrate = projection.build(options.fields)
   const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
   const field = (name: string): ScalarFieldDefinition => {
     const value = projection.root.effective.get(name)
@@ -510,7 +711,7 @@ export function compilePolymorphicQuery(
     if (value.type === FieldType.Collection) {
       throw new Error(
         `Query field "${definition.name}.${name}" is a collection; ` +
-        'collection projections are not supported yet',
+        'collection fields cannot be used in predicates or ordering',
       )
     }
     if (value.type === FieldType.Array) {
@@ -539,6 +740,8 @@ export function compilePolymorphicQuery(
     ordering = `ORDER BY ${projection.root.rootAlias}."name" ASC, ` +
       `${projection.root.rootAlias}."id" ASC`
   }
+  const hydrate = projection.build(options.fields, predicate.values.length + 1)
+
   const leaves: string[] = []
   if (definition.abstract) {
     for (const entity of entities.entities) {
@@ -560,7 +763,7 @@ export function compilePolymorphicQuery(
       ? `WHERE ${conditions[0]}`
       : `WHERE ${conditions.map(condition => `(${condition})`).join(' AND ')}`
   const limit = options.limit === undefined ? 25 : options.limit
-  const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length)
+  const pagination = SQL.paginate(limit, options.offset ?? 0, predicate.values.length + projection.values.length)
   return {
     hydrate,
     sql: [
@@ -571,7 +774,7 @@ export function compilePolymorphicQuery(
       ordering,
       pagination.sql,
     ].filter(part => part !== '').join(' '),
-    values: [...predicate.values, ...pagination.values],
+    values: [...predicate.values, ...projection.values, ...pagination.values],
   }
 }
 
@@ -772,10 +975,36 @@ function hydrateRoot(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {}
   for (const field of node.fields) result[field.name] = row[field.alias]
+  for (const collection of node.collections) {
+    result[collection.name] = hydrateCollection(row, collection)
+  }
   for (const reference of node.references) {
     result[reference.name] = hydrateReferenceVariants(row, reference)
   }
   return result
+}
+
+/**
+ * Hydrate one collection envelope.
+ * @param row - Flat SQL row.
+ * @param collection - Collection projection metadata.
+ * @returns The `{ items, total, remaining }` envelope.
+ */
+function hydrateCollection(
+  row: Record<string, unknown>,
+  collection: CollectionProjection,
+): { items: unknown[], remaining: number, total: number } {
+  const raw = row[collection.itemsAlias]
+  const items = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? JSON.parse(raw) as unknown[]
+      : []
+  return {
+    items,
+    remaining: Number(row[collection.remainingAlias] ?? 0),
+    total: Number(row[collection.totalAlias] ?? 0),
+  }
 }
 
 /**

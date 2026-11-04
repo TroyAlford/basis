@@ -1085,6 +1085,11 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
       WHERE table_schema = current_schema() AND table_name = 'Pet'
       ORDER BY ordinal_position
     `).toEqual([{ columnName: 'id' }])
+    expect(await database.sql<{ indexName: string }[]>`
+      SELECT indexname AS "indexName"
+      FROM pg_indexes
+WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Visit_petId_fk_idx'
+    `).toEqual([{ indexName: 'Visit_petId_fk_idx' }])
     expect(await database.sql<{
       columnName: string,
       dataType: string,
@@ -1120,6 +1125,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
 
     const userId = randomUUID()
     const playmateId = randomUUID()
+    const secondPlaymateId = randomUUID()
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
 VALUES (${userId},
@@ -1128,13 +1134,16 @@ VALUES (${userId},
   (${playmateId},
   ${'Playmate'},
   ${'Pet'}),
+  (${secondPlaymateId},
+  ${'Second Playmate'},
+  ${'Pet'}),
   (${'1001'},
   ${'Visit One'},
   ${'Visit'})
     `
     await database.sql`
       INSERT INTO "Pet" ("id")
-      VALUES (${userId}), (${playmateId})
+      VALUES (${userId}), (${playmateId}), (${secondPlaymateId})
     `
     await database.sql`
       INSERT INTO "Visit" ("id", "tags", "petId")
@@ -1147,7 +1156,7 @@ VALUES (${userId},
     })).toEqual([{ id: '1001', tags: ['one', 'two'] }])
     await database.sql`
       INSERT INTO "PetPlaymate" ("petId", "playmateId", "position")
-      VALUES (${userId}, ${playmateId}, ${1})
+      VALUES (${userId}, ${playmateId}, ${2}), (${userId}, ${secondPlaymateId}, ${1})
     `
     expect(await database.captureError(async db => {
       await db.sql`
@@ -1155,12 +1164,136 @@ VALUES (${userId},
         VALUES (${userId}, ${randomUUID()}, ${2})
       `
     })).toMatchObject({ errno: '23503' })
-    await expect(queryEntity(database.sql, entities, 'Pet', {
-      fields: ['ownedVisits'],
-    })).rejects.toThrow('collection projections are not supported yet')
-    await expect(queryEntity(database.sql, entities, 'Pet', {
-      fields: ['playmates'],
-    })).rejects.toThrow('collection projections are not supported yet')
+
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      SELECT value::text, 'Visit ' || value, 'Visit'
+      FROM generate_series(2000, 6999) AS series(value)
+    `
+    await database.sql`
+      INSERT INTO "Visit" ("id", "tags", "petId")
+      SELECT value::text, ARRAY['fanout'], ${userId}
+      FROM generate_series(2000, 6999) AS series(value)
+    `
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
+      fields: ['id', 'ownedVisits', 'playmates'],
+      where: { id: userId },
+    })).toEqual([{
+      id: userId,
+      ownedVisits: {
+        items: [
+          { entity: 'Visit', id: '1001', name: 'Visit One' },
+          { entity: 'Visit', id: '2000', name: 'Visit 2000' },
+          { entity: 'Visit', id: '2001', name: 'Visit 2001' },
+        ],
+        remaining: 4998,
+        total: 5001,
+      },
+      playmates: {
+        items: [
+          { entity: 'Pet', id: secondPlaymateId, name: 'Second Playmate' },
+          { entity: 'Pet', id: playmateId, name: 'Playmate' },
+        ],
+        remaining: 0,
+        total: 2,
+      },
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
+      collections: { ownedVisits: { limit: 1, offset: 1 } },
+      fields: ['id', 'ownedVisits'],
+      where: { id: userId },
+    })).toEqual([{
+      id: userId,
+      ownedVisits: {
+        items: [{ entity: 'Visit', id: '2000', name: 'Visit 2000' }],
+        remaining: 4999,
+        total: 5001,
+      },
+    }])
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
+      fields: ['id', 'ownedVisits', 'playmates'],
+      where: { id: playmateId },
+    })).toEqual([{
+      id: playmateId,
+      ownedVisits: { items: [], remaining: 0, total: 0 },
+      playmates: { items: [], remaining: 0, total: 0 },
+    }])
+
+    const collectionQuery = compileEntityQuery(entities, 'Pet', {
+      fields: ['id', 'ownedVisits'],
+      where: { id: userId },
+    })
+    const plan = await database.sql.unsafe<Record<string, string>[]>(
+      `EXPLAIN (FORMAT TEXT) ${collectionQuery.sql}`,
+      [...collectionQuery.values],
+    )
+    expect(plan.map(row => Object.values(row).join('\n')).join('\n'))
+      .toContain('Visit_petId_fk_idx')
+  }, 120_000)
+
+  isolatedTest('projects inherited forward-reference inverse collections', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              field: 'specialVisits',
+              items: { target: 'SpecialVisit', type: 'Entity' },
+              mapping: { field: 'pet', kind: 'Inverse' },
+              type: 'Collection',
+            },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'Snowflake' },
+            { column: 'petId', field: 'pet', target: 'Pet', type: 'Entity' },
+          ],
+          name: 'Visit',
+        },
+        {
+          extends: 'Visit',
+          fields: [{ field: 'notes', type: 'String' }],
+          name: 'SpecialVisit',
+        },
+      ],
+    }))
+    await entities.createTables(database.sql)
+    const petId = randomUUID()
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${petId}, ${'Pet'}, ${'Pet'}), (${'1001'}, ${'Special Visit'}, ${'SpecialVisit'})
+    `
+    await database.sql`
+      INSERT INTO "Pet" ("id")
+      VALUES (${petId})
+    `
+    await database.sql`
+      INSERT INTO "Visit" ("id", "petId")
+      VALUES (${'1001'}, ${petId})
+    `
+    await database.sql`
+      INSERT INTO "SpecialVisit" ("id", "notes")
+      VALUES (${'1001'}, ${'note'})
+    `
+    expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Pet', {
+      fields: ['id', 'specialVisits'],
+      where: { id: petId },
+    })).toEqual([{
+      id: petId,
+      specialVisits: {
+        items: [{ entity: 'SpecialVisit', id: '1001', name: 'Special Visit' }],
+        remaining: 0,
+        total: 1,
+      },
+    }])
+    expect(await database.sql<{ indexName: string }[]>`
+      SELECT indexname AS "indexName"
+      FROM pg_indexes
+WHERE schemaname = current_schema() AND tablename = 'Visit' AND indexname = 'Visit_petId_fk_idx'
+    `).toEqual([{ indexName: 'Visit_petId_fk_idx' }])
   }, 120_000)
 
   durableTest('enforces MTI final-state integrity for direct SQL', async database => {
