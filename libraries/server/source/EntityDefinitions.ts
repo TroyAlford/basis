@@ -661,6 +661,7 @@ function parseEntities(value: unknown): readonly EntityDefinition[] {
  */
 function validateCollectionMappings(entities: readonly EntityDefinition[]): void {
   const byName = new Map(entities.map(entity => [entity.name, entity]))
+  const inverseEdges = new Map<string, string>()
   for (const entity of entities) {
     for (const field of entity.fields) {
       if (field.type !== FieldType.Collection) continue
@@ -690,6 +691,15 @@ function validateCollectionMappings(entities: readonly EntityDefinition[]): void
           `"${forward.target}" must be "${entity.name}" or an ancestor`,
         )
       }
+      const edge = `${field.items.target}.${mapping.field}`
+      const existing = inverseEdges.get(edge)
+      if (existing) {
+        throw invalid(
+          `forward reference "${edge}" is already inverted by "${existing}"; ` +
+          'inverse collections must use distinct forward edges',
+        )
+      }
+      inverseEdges.set(edge, `${entity.name}.${field.name}`)
     }
   }
 }
