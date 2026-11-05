@@ -909,6 +909,20 @@ VALUES (${'1001'},
     }))).toEqual([{ id: '1001' }])
     expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'Article', {
       fields: ['id'],
+      where: {
+        filters: [
+          { field: 'owner', operator: Operator.Comparison.Equal, value: systemUserId },
+          { field: 'favorite', operator: Operator.Comparison.Equal, value: systemUserId },
+        ],
+        operator: Operator.Logical.And,
+      },
+    }))).toEqual([{ id: '1001' }])
+    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'Article', {
+      fields: ['id'],
+      where: { 'owner.manager': clientManagerId },
+    }))).toEqual([{ id: '1001' }])
+    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'Article', {
+      fields: ['id'],
       orderBy: 'id',
       where: { owner: null },
     }))).toEqual([{ id: '1003' }, { id: '1004' }])

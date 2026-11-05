@@ -332,7 +332,8 @@ class QueryProjection {
           }
           const target = this.#entities.entity(field.target)
           const sourceAlias = this.#ownerAlias(context, field.owner, false)
-          const targetOccurrence = this.#filterTarget(field, sourceAlias, contextKey)
+          const childKey = contextKey === '' ? segment : `${contextKey}.${segment}`
+          const targetOccurrence = this.#filterTarget(field, sourceAlias, childKey)
           return {
             expression: `${targetOccurrence.rootAlias}.${quote('id')}`,
             field: {

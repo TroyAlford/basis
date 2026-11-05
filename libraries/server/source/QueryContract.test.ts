@@ -44,6 +44,7 @@ const definitions = EntityDefinitions.load(JSON.stringify({
     {
       fields: [
         { field: 'id', format: 'UUID' },
+        { field: 'favorite', target: 'User', type: 'Entity' },
         { field: 'owner', inverse: 'pets', target: 'User', type: 'Entity' },
         { field: 'payload', type: 'JSON' },
         { field: 'tags', items: { type: 'String' }, type: 'Array' },
@@ -263,6 +264,48 @@ describe('Query contract', () => {
       fields: ['id'],
       where: { field: 'owner', operator: Operator.Comparison.Contains, value: 'Ada' },
     })).toThrow('reference identity')
+  })
+
+  test('keys terminal reference identities independently', () => {
+    const identity = '00000000-0000-4000-8000-000000000001'
+    const second = '00000000-0000-4000-8000-000000000002'
+    const two = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: {
+        filters: [
+          { field: 'owner', operator: Operator.Comparison.Equal, value: identity },
+          { field: 'favorite', operator: Operator.Comparison.Equal, value: second },
+        ],
+        operator: Operator.Logical.And,
+      },
+    })
+    expect(two.sql.match(/LEFT JOIN "User"/g)).toHaveLength(2)
+    expect(two.values).toEqual([identity, second, 25, 0])
+
+    const nestedDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'manager', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Person',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+      ],
+    }))
+    const nested = compileEntityQuery(nestedDefinitions, 'Pet', {
+      fields: ['id'],
+      where: { 'owner.manager': identity },
+    })
+    expect(nested.sql.match(/LEFT JOIN "Person"/g)).toHaveLength(2)
+    expect(nested.values).toEqual([identity, 25, 0])
   })
 
   test('shares filter joins without projecting filter-only identities', () => {
