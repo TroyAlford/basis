@@ -17,6 +17,7 @@ import ReferenceDoc from '../../docs/reference.mdx'
 import ReviewDoc from '../../docs/review.mdx'
 import DatabaseDoc from '../../docs/server/database.mdx'
 import ServerDoc from '../../docs/server/index.mdx'
+import QueryLanguageDoc from '../../docs/server/query-language.mdx'
 import TestingDoc from '../../docs/testing.md'
 import TypeScriptDoc from '../../docs/typescript.mdx'
 import UtilitiesDoc from '../../docs/utilities.mdx'
@@ -177,6 +178,13 @@ export const routes = [
     parent: 'section:server',
     path: '/server/database',
     title: 'Database & Transactions',
+  }),
+  docs({
+    component: QueryLanguageDoc,
+    markdown: true,
+    parent: 'section:server',
+    path: '/server/query-language',
+    title: 'Query Language',
   }),
   docs({
     component: ConfigurationDoc,
