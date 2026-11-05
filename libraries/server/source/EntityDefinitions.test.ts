@@ -546,6 +546,53 @@ describe('EntityDefinitions', () => {
     })).toThrow('do not name each other')
     expect(() => load({
       entities: [
+        {
+          fields: [
+            { field: 'owner', inverse: 'pet', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Person' },
+        {
+          extends: 'Person',
+          fields: [{
+            cardinality: 'One',
+            field: 'pet',
+            inverse: 'owner',
+            target: 'Pet',
+            type: 'Inverse',
+          }],
+          name: 'SpecialPerson',
+        },
+      ],
+    })).toThrow('must be declared on forward target')
+    const inherited = load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { cardinality: 'One', field: 'pet', inverse: 'owner', target: 'Pet', type: 'Inverse' },
+          ],
+          name: 'Person',
+        },
+        {
+          extends: 'Person',
+          fields: [],
+          name: 'SpecialPerson',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', inverse: 'pet', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+      ],
+    })
+    expect(inherited.entity('SpecialPerson')?.singularNavigations.map(navigation => navigation.name))
+      .toEqual(['pet'])
+    expect(() => load({
+      entities: [
         { fields: [{ field: 'owner', target: 'Person', type: 'Entity' }], name: 'Pet' },
         {
           fields: [{ field: 'pets', inverse: 'owner', target: 'Pet', type: 'Inverse' }],

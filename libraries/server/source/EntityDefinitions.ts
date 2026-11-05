@@ -649,7 +649,7 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_sch
       const created = !rows[0]?.present
       if (created) await sql.unsafe(createTable(table)).simple()
       for (const index of table.indexes ?? []) {
-        if (!created && await indexExists(sql, index.name, index.unique === true)) continue
+        if (!created && await indexExists(sql, table.name, index)) continue
         await sql.unsafe(createIndex(table, index)).simple()
       }
     }
@@ -887,10 +887,10 @@ function resolveAssociations(
           `must be the forward owner "${forward.owner}"`,
         )
       }
-      if (!isSameOrDescendant(entities, entity.name, forward.target)) {
+      if (!isSameOrDescendant(entities, forward.target, entity.name)) {
         throw invalid(
-          `inverse field "${entity.name}.${inverse.name}" target direction ` +
-          `"${forward.target}" does not cover "${entity.name}"`,
+          `inverse field "${entity.name}.${inverse.name}" must be declared on ` +
+          `forward target "${forward.target}" or an ancestor`,
         )
       }
       const key = `${forward.owner}\u0000${forward.name}`
@@ -1942,24 +1942,39 @@ function constraintName(entity: EntityDefinition, field: EntityReferenceFieldDef
 }
 
 /**
- * Whether an index exists in the current schema.
+ * Whether an index exists and matches its canonical table, columns and uniqueness.
  * @param sql - SQL client.
- * @param name - Index name.
- * @param unique - Whether the canonical index must be unique.
- * @returns `true` when present.
+ * @param tableName - Expected owning table.
+ * @param index - Canonical index metadata.
+ * @returns `true` when present and matching.
  */
-async function indexExists(sql: SQL, name: string, unique: boolean): Promise<boolean> {
-  const rows = await sql<{ present: boolean, unique: boolean }[]>`
-    SELECT TRUE AS present, i.indisunique AS UNIQUE
+async function indexExists(sql: SQL, tableName: string, index: TableIndex): Promise<boolean> {
+  const rows = await sql<{
+    columns: string[],
+    tableName: string,
+    unique: boolean,
+  }[]>`
+    SELECT t.relname AS "tableName",
+      i.indisunique AS UNIQUE,
+      array_agg(a.attname ORDER BY KEY.ordinality) AS columns
     FROM pg_catalog.pg_index i
     JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = current_schema() AND c.relname = ${name}
+    JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
+    JOIN unnest(i.indkey)
+    WITH ORDINALITY AS KEY(attnum, ordinality) ON TRUE
+    JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = KEY.attnum
+    WHERE n.nspname = current_schema() AND c.relname = ${index.name}
+    GROUP BY t.relname, i.indisunique
   `
   const existing = rows[0]
   if (!existing) return false
-  if (existing.unique !== unique) {
-    throw new Error(`Existing index "${name}" does not match the canonical model`)
+  if (
+    existing.tableName !== tableName
+    || existing.unique !== (index.unique === true)
+    || existing.columns.join('\u0000') !== index.columns.join('\u0000')
+  ) {
+    throw new Error(`Existing index "${index.name}" does not match the canonical model`)
   }
   return true
 }
