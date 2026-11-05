@@ -56,8 +56,12 @@ export interface QueryScope {
   readonly definition: EntityDefinition,
   /** Render a field expression with physical table qualification. */
   readonly expression: (field: ScalarFieldDefinition) => string,
-  /** Resolve a logical field by name. */
+  /** Resolve a root ordering field by name. */
   readonly field: (name: string) => ScalarFieldDefinition,
+  /** Optional filter-only resolver for dotted reference paths and descendant fields. */
+  readonly filterField?: (name: string) => ScalarFieldDefinition,
+  /** Optional filter-only classification for reference identities. */
+  readonly filterKind?: (name: string) => 'identity' | undefined,
 }
 
 /**
@@ -184,7 +188,10 @@ function whereClause(
   scope?: QueryScope,
 ): SQLPredicate {
   const entity = scope?.definition ?? definition(entities, entityName)
-  const filter = Predicate.normalize(entity, where)
+  const resolve = scope?.filterField ?? (name => (
+    scope ? scope.field(name) : scalarField(entity, name)
+  ))
+  const filter = Predicate.normalize(entity, where, resolve)
   if (!filter) return { sql: '', values: [] }
 
   const values: BoundScalar[] = []
@@ -197,7 +204,16 @@ function whereClause(
     const comparison = comparisonDefinitions.get(node.operator as Operator.Comparison)
     if (comparison) {
       const comparisonFilter = node as ComparisonFilter
-      const field = scope ? scope.field(comparisonFilter.field) : scalarField(entity, comparisonFilter.field)
+      const field = resolve(comparisonFilter.field)
+      if (
+        scope?.filterKind?.(comparisonFilter.field) === 'identity'
+        && comparisonFilter.operator !== Operator.Comparison.Equal
+      ) {
+        throw new Error(
+          `Query operator "${comparisonFilter.operator}" is not valid for reference identity ` +
+          `"${comparisonFilter.field}"`,
+        )
+      }
       if (!comparison.allowedFieldTypes.has(field.type)) {
         throw new Error(
           `Query operator "${comparisonFilter.operator}" is not valid for field "${entity.name}.${field.name}"`,

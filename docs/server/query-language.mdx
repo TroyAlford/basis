@@ -31,7 +31,7 @@ No input form gets its own executor or database path. A query is either compiled
 - There is no separate identity field such as `ownerId`; identity is the reference's canonical target `id`.
 - Unknown, incompatible, navigation-only, and physical storage names are rejected before SQL execution.
 
-Current scalar predicates deliberately resolve only root/effective scalar fields. Dotted reference paths are the next query stage. Collection quantifiers and Array/JSON operators follow in the order below.
+Current scalar predicates resolve root/effective/descendant scalar fields and model-validated singular reference paths. Collection quantifiers and Array/JSON operators remain later stages.
 
 ## Input forms
 
@@ -149,9 +149,9 @@ Scalar predicates are two-valued, including SQL `NULL`:
 
 These rules are shared by the structured and string forms.
 
-## Stage 17 — reference paths
+## Stage 17 — reference paths (implemented)
 
-Reference predicates are not implemented in the current scalar grammar. The accepted end-state pairs every form:
+Reference predicates are now supported through the shared `db.query` path. Structured and string forms normalize through the same field-aware resolver and SQL compiler:
 
 ```ts
 const referencePaths = [
@@ -349,10 +349,10 @@ Explicit exclusions for this contract:
 
 ## Current implementation audit
 
-- `QueryLexer` already recognizes dotted field tokens, quoted strings, numbers, booleans, null, bracket ranges, grouping, and the supported symbolic operators. Dotted tokens are syntax only; they are not yet query semantics.
-- `QueryParser` owns the current comparison/logical/group grammar and source spans. It does not parse collection quantifiers, Array value lists, or JSON literals yet.
-- `QueryNormalizer` applies scalar field metadata and lowers source conveniences to canonical filters. It currently delegates field resolution to `Predicate.field`, which intentionally rejects references, `Inverse`, Array, and JSON.
-- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, and null/empty lowering. It has no dotted path, collection, Array, or JSON operators yet.
-- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; the remaining stages must extend this path rather than add an executor.
+- `QueryLexer` recognizes dotted field tokens, quoted strings, numbers, booleans, null, bracket ranges, grouping, and the supported symbolic operators. Dotted paths are now model-resolved by the query compiler.
+- `QueryParser` owns the current comparison/logical/group grammar and source spans. It does not parse collection quantifiers or first-class JSON/Array literals yet.
+- `QueryNormalizer` applies scalar metadata and now accepts the query compiler’s field resolver for dotted reference paths and descendant scalars.
+- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, and null/empty lowering. `QueryProjection.filterField` supplies path resolution and join construction for `db.query`.
+- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection and Array/JSON predicates must extend this path rather than add an executor.
 
 The target end-state is therefore one grammar, two input spellings, one canonical filter tree, one SQL compiler, and one finite-work execution path.

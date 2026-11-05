@@ -895,6 +895,36 @@ VALUES (${'1001'},
       },
     }])
 
+    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'Article', {
+      fields: ['id'],
+      where: { 'owner.name': 'System User' },
+    }))).toEqual([{ id: '1001' }])
+    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'Article', {
+      fields: ['id'],
+      where: "owner.permissions = 'admin'",
+    }))).toEqual([{ id: '1001' }])
+    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'Article', {
+      fields: ['id'],
+      where: { 'owner.manager.name': 'Client Manager' },
+    }))).toEqual([{ id: '1001' }])
+    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'Article', {
+      fields: ['id'],
+      orderBy: 'id',
+      where: { owner: null },
+    }))).toEqual([{ id: '1003' }, { id: '1004' }])
+    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'Article', {
+      fields: ['id'],
+      where: { owner: systemUserId },
+    }))).toEqual([{ id: '1001' }])
+    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'User', {
+      fields: ['id'],
+      where: "permissions = 'admin'",
+    }))).toEqual([{ id: systemUserId }])
+    expect(await database.tx(async sql => queryEntity<{ id: string }>(sql, entities, 'Article', {
+      fields: ['id'],
+      where: { 'owner.name': 'Missing' },
+    }))).toEqual([])
+
     await expect(database.tx(async sql => queryEntity(sql, entities, 'Article', {
       fields: ['title.value'],
     }))).rejects.toThrow('Cannot traverse scalar field')
@@ -2304,7 +2334,8 @@ VALUES (${invalidUserId},
     expect(invalid).toMatchObject({ errno: '23503' })
   }, 120_000)
 
-  isolatedTest('rejects physical reference columns and graph predicates', async database => {
+  isolatedTest('rejects physical reference columns and invalid graph paths', async database => {
+    await database.entities.createTables(database.sql)
     await expect(database.query('Article', { fields: ['ownerId'] }))
       .rejects.toThrow('Unknown field "Article.ownerId"')
     expect(compileEntityQuery(database.entities, 'Article', { fields: ['owner'] }).sql)
@@ -2314,14 +2345,18 @@ VALUES (${invalidUserId},
       fields: ['id'],
       where: { ownerId: '1' },
     })).rejects.toThrow('Unknown field "Article.ownerId"')
-    await expect(database.query('Article', {
+    expect(await database.query<{ id: string }>('Article', {
       fields: ['id'],
-      where: { field: 'owner', operator: Operator.Comparison.Equal, value: '1' },
-    })).rejects.toThrow('references cannot be used in predicates or ordering')
-    await expect(database.query('Article', {
+      where: { owner: '00000000-0000-4000-8000-000000000001' },
+    })).toBeArray()
+    expect(await database.query<{ id: string }>('Article', {
       fields: ['id'],
-      where: 'owner = "1"',
-    })).rejects.toThrow('references cannot be used in predicates or ordering')
+      where: "owner = '00000000-0000-4000-8000-000000000001'",
+    })).toBeArray()
+    expect(await database.query<{ id: string }>('Article', {
+      fields: ['id'],
+      where: 'owner = null',
+    })).toBeArray()
     await expect(database.query('Article', {
       fields: ['id'],
       where: 'ownerId = "1"',

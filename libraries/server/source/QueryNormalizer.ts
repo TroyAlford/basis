@@ -17,17 +17,22 @@ export const QueryNormalizer = {
    * Normalize string query source for one entity.
    * @param entity - Entity whose fields are referenced.
    * @param source - Query expression source.
+   * @param resolve - Resolve a logical field or path to its scalar definition.
    * @returns The canonical filter, or null for empty source.
    * @throws {Error} When the source is invalid or references incompatible metadata.
    */
-  normalize(entity: EntityDefinition, source: string): Filter | null {
+  normalize(
+    entity: EntityDefinition,
+    source: string,
+    resolve: (name: string) => ScalarFieldDefinition = name => Predicate.field(entity, name),
+  ): Filter | null {
     const result = QueryParser.parse(source)
     if (!result.expression) {
       if (result.diagnostics.length === 0) return null
       const [first] = result.diagnostics
       throw new Error(`Invalid where query at ${first?.start ?? 0}: ${first?.message ?? 'Invalid syntax'}`)
     }
-    return expression(entity, result.expression)
+    return expression(entity, result.expression, resolve)
   },
 }
 
@@ -35,27 +40,37 @@ export const QueryNormalizer = {
  * Normalize one syntax expression.
  * @param entity - Entity whose fields are referenced.
  * @param node - Syntax expression.
+ * @param resolve - Resolve a logical field or path to its scalar definition.
  * @returns The canonical filter.
  */
-function expression(entity: EntityDefinition, node: QueryExpression): Filter {
-  if (node.kind === 'group') return expression(entity, node.expression)
+function expression(
+  entity: EntityDefinition,
+  node: QueryExpression,
+  resolve: (name: string) => ScalarFieldDefinition,
+): Filter {
+  if (node.kind === 'group') return expression(entity, node.expression, resolve)
   if (node.kind === 'logical') {
     return Predicate.logical(
       node.operator,
-      node.filters.map(filter => expression(entity, filter)),
+      node.filters.map(filter => expression(entity, filter, resolve)),
     )
   }
-  return comparison(entity, node)
+  return comparison(entity, node, resolve)
 }
 
 /**
  * Normalize one comparison expression.
  * @param entity - Entity whose fields are referenced.
  * @param node - Comparison syntax expression.
+ * @param resolve - Resolve a logical field or path to its scalar definition.
  * @returns The canonical comparison filter.
  */
-function comparison(entity: EntityDefinition, node: QueryComparison): Filter {
-  const field = Predicate.field(entity, node.field)
+function comparison(
+  entity: EntityDefinition,
+  node: QueryComparison,
+  resolve: (name: string) => ScalarFieldDefinition,
+): Filter {
+  const field = resolve(node.field)
 
   if (node.operator === Operator.Comparison.Empty) {
     assertValues(node, 0)

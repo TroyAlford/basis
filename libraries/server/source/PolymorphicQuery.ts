@@ -178,6 +178,12 @@ class QueryProjection {
   readonly #entities: EntityDefinitions
   /** Next generated table alias number. */
   #alias = 0
+  /** Filter-only expression overrides keyed by logical path. */
+  readonly #filterExpressions = new Map<string, string>()
+  /** Filter-only resolved fields keyed by logical path. */
+  readonly #filterFields = new Map<string, ScalarFieldDefinition>()
+  /** Filter paths that resolve to reference identities. */
+  readonly #filterIdentities = new Set<string>()
   /** Graph work consumed while expanding the projection. */
   #work = 0
   /** Collection configuration overrides. */
@@ -289,9 +295,179 @@ class QueryProjection {
    * @returns Physical SQL expression.
    */
   expression(field: ScalarFieldDefinition): string {
+    const filtered = this.#filterExpressions.get(field.name)
+    if (filtered) return filtered
     const effective = this.root.effective.get(field.name)
     if (!effective) throw new Error(`Unknown field "${this.root.definition.name}.${field.name}"`)
     return this.#expression(this.root, effective, false)
+  }
+
+  /**
+   * Resolve one filter path and its SQL expression.
+   * @param context - Occurrence where traversal starts.
+   * @param segments - Remaining path segments.
+   * @param fullName - Full logical filter path.
+   * @returns The SQL expression, scalar field, and identity classification.
+   */
+  #resolveFilterPath(
+    context: EntityContext,
+    segments: readonly string[],
+    fullName: string,
+  ): { expression: string, field: ScalarFieldDefinition, identity: boolean } {
+    const [segment] = segments
+    if (segment === undefined) throw new Error(`Invalid filter path "${fullName}"`)
+    const rest = segments.slice(1)
+    const field = context.effective.get(segment)
+    if (field) {
+      if (rest.length === 0) {
+        if (field.type === FieldType.Entity) {
+          const target = this.#reference(this.#node(context, []), field)
+          return {
+            expression: `${target.context.rootAlias}.${quote('id')}`,
+            field: { name: fullName, type: FieldType.ID },
+            identity: true,
+          }
+        }
+        if (field.type === FieldType.Array) {
+          throw new Error(
+            `Query field "${fullName}" is an array; array fields cannot be used in predicates or ordering`,
+          )
+        }
+        if (field.type === FieldType.JSON) {
+          throw new Error(
+            `Query field "${fullName}" is JSON; JSON fields cannot be used in predicates or ordering`,
+          )
+        }
+        return {
+          expression: this.#expression(context, field, false, false),
+          field: (fullName.includes('.') ? { ...field, name: fullName } : field) as ScalarFieldDefinition,
+          identity: false,
+        }
+      }
+      if (field.type !== FieldType.Entity) {
+        throw new Error(`Filter path "${fullName}" traverses non-reference field "${segment}"`)
+      }
+      const target = this.#reference(this.#node(context, []), field)
+      return this.#resolveFilterPath(target.context, rest, fullName)
+    }
+
+    const descendant = context.descendants.get(segment)
+    if (!descendant) throw new Error(`Unknown field "${context.definition.name}.${segment}"`)
+    if (descendant.contracts.size > 1) {
+      throw new Error(`Descendant field "${context.definition.name}.${segment}" has incompatible declarations`)
+    }
+    if (rest.length === 0) {
+      if (descendant.type === FieldType.Entity) {
+        const branches = descendant.variants.map(variant => {
+          const owner = this.#ownerAlias(context, variant.owner, true)
+          const target = this.#target(
+            variant.field,
+            [segment],
+            owner,
+          )
+          const leaves = variant.leaves.map(quoteLiteral).join(', ')
+          return `WHEN ${this.#ensureRoot(context)}.${quote('entity')} IN (${leaves}) ` +
+            `THEN ${target.context.rootAlias}.${quote('id')}`
+        })
+        return {
+          expression: `CASE ${branches.join(' ')} ELSE NULL END`,
+          field: { name: fullName, type: FieldType.ID },
+          identity: true,
+        }
+      }
+      const variant = descendant.variants[0]
+      if (!variant) throw new Error(`Descendant field "${context.definition.name}.${segment}" has no declaration`)
+      if (variant.field.type === FieldType.Array) {
+        throw new Error(
+          `Query field "${fullName}" is an array; array fields cannot be used in predicates or ordering`,
+        )
+      }
+      if (variant.field.type === FieldType.JSON) {
+        throw new Error(
+          `Query field "${fullName}" is JSON; JSON fields cannot be used in predicates or ordering`,
+        )
+      }
+      return {
+        expression: this.#descendantExpression(context, descendant),
+        field: { ...variant.field, name: fullName } as ScalarFieldDefinition,
+        identity: false,
+      }
+    }
+    if (descendant.type !== FieldType.Entity) {
+      throw new Error(`Filter path "${fullName}" traverses non-reference field "${segment}"`)
+    }
+    const root = this.#ensureRoot(context)
+    let resolvedField: ScalarFieldDefinition | undefined
+    let resolvedIdentity = false
+    const branches = descendant.variants.map((variant, index) => {
+      const owner = this.#ownerAlias(context, variant.owner, true)
+      const target = this.#target(
+        variant.field,
+        [`${segment}__v${index}`],
+        owner,
+      )
+      const resolved = this.#resolveFilterPath(target.context, rest, fullName)
+      resolvedIdentity = resolved.identity
+      if (!resolvedField) resolvedField = resolved.field
+      else if (
+        resolvedField.type !== resolved.field.type
+        || resolvedField.format !== resolved.field.format
+      ) {
+        throw new Error(`Filter path "${fullName}" has incompatible descendant declarations`)
+      }
+      const leaves = variant.leaves.map(quoteLiteral).join(', ')
+      return `WHEN ${root}.${quote('entity')} IN (${leaves}) THEN ${resolved.expression}`
+    })
+    if (!resolvedField) throw new Error(`Filter path "${fullName}" has no descendant declaration`)
+    return {
+      expression: `CASE ${branches.join(' ')} ELSE NULL END`,
+      field: { ...resolvedField, name: fullName },
+      identity: resolvedIdentity,
+    }
+  }
+
+  /**
+   * Build the conditional expression for one descendant scalar field.
+   * @param context - Occurrence exposing the descendant.
+   * @param descendant - Descendant field metadata.
+   * @returns SQL expression selecting the field value by concrete leaf.
+   */
+  #descendantExpression(context: EntityContext, descendant: DescendantField): string {
+    const root = this.#ensureRoot(context)
+    const branches = descendant.variants.map(variant => {
+      const owner = this.#ownerAlias(context, variant.owner, true)
+      const leaves = variant.leaves.map(quoteLiteral).join(', ')
+      return `WHEN ${root}.${quote('entity')} IN (${leaves}) THEN ${owner}.${quote(variant.field.name)}`
+    })
+    return `CASE ${branches.join(' ')} ELSE NULL END`
+  }
+
+  /**
+   * Resolve one filter path, adding required reference joins.
+   * @param name - Logical root field or dotted singular-reference path.
+   * @returns The effective scalar or identity field.
+   */
+  filterField(name: string): ScalarFieldDefinition {
+    const cached = this.#filterFields.get(name)
+    if (cached) return cached
+    const segments = name.split('.')
+    if (segments.some(segment => segment.length === 0)) {
+      throw new Error(`Invalid filter path "${name}"`)
+    }
+    const resolved = this.#resolveFilterPath(this.root, segments, name)
+    this.#filterExpressions.set(name, resolved.expression)
+    this.#filterFields.set(name, resolved.field)
+    if (resolved.identity) this.#filterIdentities.add(name)
+    return resolved.field
+  }
+
+  /**
+   * Resolve whether a filter path is a reference identity.
+   * @param name - Logical filter path.
+   * @returns `identity` for reference endpoints, otherwise undefined.
+   */
+  filterKind(name: string): 'identity' | undefined {
+    return this.#filterIdentities.has(name) ? 'identity' : undefined
   }
 
   /**
@@ -830,9 +1006,17 @@ class QueryProjection {
    * @param context - Entity occurrence.
    * @param field - Effective field.
    * @param forceLeft - Whether an owner join must preserve absent rows.
+   * @param useFilterOverride - Whether a pre-resolved filter expression takes precedence.
    * @returns Qualified SQL expression.
    */
-  #expression(context: EntityContext, field: EffectiveFieldDefinition, forceLeft: boolean): string {
+  #expression(
+    context: EntityContext,
+    field: EffectiveFieldDefinition,
+    forceLeft: boolean,
+    useFilterOverride = true,
+  ): string {
+    const filtered = useFilterOverride ? this.#filterExpressions.get(field.name) : undefined
+    if (filtered) return filtered
     if (field.name === 'id') return `${context.baseAlias}.${quote(field.name)}`
     if (field.owner === 'Entity') {
       return `${this.#ensureRoot(context)}.${quote(field.name)}`
@@ -963,9 +1147,11 @@ export function compilePolymorphicQuery(
     definition: synthetic,
     expression: value => projection.expression(value),
     field,
+    filterField: name => projection.filterField(name),
+    filterKind: name => projection.filterKind(name),
   }
   const where = typeof options.where === 'string'
-    ? QueryNormalizer.normalize(synthetic, options.where) ?? undefined
+    ? QueryNormalizer.normalize(synthetic, options.where, scope.filterField) ?? undefined
     : options.where
   const predicate = SQL.where(entities, definition.name, where, scope)
   let ordering = ''
