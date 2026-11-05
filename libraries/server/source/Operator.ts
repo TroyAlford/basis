@@ -11,9 +11,9 @@ export namespace Operator {
   export enum Comparison {
     /** Inclusive range convenience for a paired comparison. */
     Between = '$between',
-    /** Case-insensitive substring containment for string fields. */
+    /** Case-insensitive substring containment for string fields, or collection membership. */
     Contains = '$contains',
-    /** Empty string or null convenience for string fields. */
+    /** Empty string or null convenience for string fields, or zero collection members. */
     Empty = '$empty',
     /** Equal. */
     Equal = '$eq',
@@ -27,6 +27,12 @@ export namespace Operator {
     LessThanOrEqual = '$lte',
     /** Not-equal convenience for `Not(Equal)`. */
     NotEqual = '$ne',
+  }
+
+  /** Collection universal operator. */
+  export enum Collection {
+    /** Every related item must match. */
+    All = '$all',
   }
 
   /** Logical expression operators. */

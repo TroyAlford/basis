@@ -31,7 +31,7 @@ No input form gets its own executor or database path. A query is either compiled
 - There is no separate identity field such as `ownerId`; identity is the reference's canonical target `id`.
 - Unknown, incompatible, navigation-only, and physical storage names are rejected before SQL execution.
 
-Current scalar predicates resolve root/effective/descendant scalar fields and model-validated singular reference paths. Collection quantifiers and Array/JSON operators remain later stages.
+Current predicates resolve root/effective/descendant scalar fields, model-validated singular reference paths, and collection comparisons over inverse and named N:M navigations. Array and JSON operators remain later stages.
 
 ## Input forms
 
@@ -60,7 +60,7 @@ The source form expresses the same predicate tree with `$` operators or their sy
 where: "score >= 5 $and score < 10 $and title != 'Draft'"
 ```
 
-`$and` and `$or` require a non-empty `filters` array. `$not` is unary and requires exactly one child. String source supports `!` and `$not`, grouping parentheses, and the symbolic aliases `=`, `>`, `>=`, `<`, `<=`, `!=`, and `<>`. Empty or whitespace-only source is equivalent to an empty structured object: it adds no predicate.
+`$and` and `$or` require a non-empty `filters` array. `$not` is unary and requires exactly one child. String source supports `!` and `$not` as compositional negation, grouping parentheses, and the symbolic aliases `=`, `>`, `>=`, `<`, `<=`, `!=`, `<>`, and `~=` (the exact alias of `$contains`). Empty or whitespace-only source is equivalent to an empty structured object: it adds no predicate.
 
 Source errors retain lexer/parser offsets. Current normalizer errors throw the first diagnostic with its source offset; the accepted end-state remains fail-closed for every diagnostic and never executes a partially normalized query.
 
@@ -133,7 +133,7 @@ const scalarOperators = [
 ]
 ```
 
-`$between` has exactly two bounds. A `null` bound is open; `[null, null]` is invalid. `$empty` is valid only for `String` and means exactly SQL `NULL` or the empty string, never whitespace. `$contains` is case-insensitive substring matching for `String`; wildcard characters are escaped before binding. Ranges are limited to `String`, `Number`, `Date`, `Timestamp`, and `ID`; booleans use equality only.
+`$between` has exactly two bounds. A `null` bound is open; `[null, null]` is invalid. String `$empty` means exactly SQL `NULL` or the empty string, never whitespace; relationship `$empty` means zero related rows and is documented in stage 18. `$contains` is case-insensitive substring matching for `String`; wildcard characters are escaped before binding. Ranges are limited to `String`, `Number`, `Date`, `Timestamp`, and `ID`; booleans use equality only.
 
 `$ne` lowers to `Not(Equal)`. `$between` lowers to the applicable `And` of inclusive bounds. `$empty` lowers to `Or(Equal(null), Equal(''))`. The canonical filter tree therefore has only primitive comparisons and logical groups; source-only conveniences never reach SQL as special cases.
 
@@ -145,7 +145,7 @@ Scalar predicates are two-valued, including SQL `NULL`:
 - `$eq null` matches only SQL `NULL`; `$ne null` matches only non-null values.
 - Range and `$contains` comparisons are false for `NULL`.
 - `Not` complements the two-valued result, so `$ne 5` also matches `NULL`.
-- `$empty` matches only `NULL` or `''`; `$not $empty` matches non-null non-empty strings, including whitespace-only strings.
+- String `$empty` matches only `NULL` or `''`; `$not $empty` matches non-null non-empty strings, including whitespace-only strings.
 
 These rules are shared by the structured and string forms.
 
@@ -206,33 +206,36 @@ const referencePaths = [
 - All scalar operators above apply to a scalar-ending path; reference identity accepts equality/inequality and `null`, not ordering, substring, range, or `$empty`.
 - The path must be unambiguous across abstract/descendant targets. A field with incompatible target declarations is rejected rather than guessed per row.
 - A missing or null reference behaves as `NULL` for the terminal scalar. Non-null comparisons are false; `$eq null` matches absent/null, and `$ne null` matches present non-null values.
-- `$empty` remains string-only and treats a null/missing reference as empty.
+- For a scalar-ending reference path, `$empty` remains String-only and treats a null/missing reference as empty; collection `$empty` is defined separately in stage 18.
 - The path uses the existing single-statement reference joins and finite work budget, including the same eight-reference-hop limit as projection. Runtime row identity is never inspected to detect cycles.
 - Sorting by a dotted reference path remains excluded in stages 16–20; `orderBy` continues to accept only root/effective scalar fields.
 
-## Stage 18 — collection predicates
+## Stage 18 — collection comparisons (implemented)
 
-Collection predicates are not implemented in the current scalar grammar. The accepted end-state uses explicit quantifiers over inverse and named N:M navigations:
+Relationship collections use the same model-aware matching idiom that native arrays will use in stage 19. The operator states the intent; the canonical field type selects the physical implementation. `$contains` has the symbolic alias `~=`.
 
 ```ts
-const collectionQuantifiers = [
+const collectionComparisons = [
   {
-    meaning: 'any related item matches',
+    meaning: 'at least one related item matches',
     structured: {
       field: 'pets',
-      operator: '$any',
+      operator: '$contains',
       filters: [{ field: 'name', operator: '$eq', value: 'Ada' }],
     },
-    source: "pets $any (name = 'Ada')",
+    source: "pets $contains (name = 'Ada')",
   },
   {
     meaning: 'no related item matches',
     structured: {
-      field: 'pets',
-      operator: '$none',
-      filters: [{ field: 'name', operator: '$eq', value: 'Ada' }],
+      filters: [{
+        field: 'pets',
+        operator: '$contains',
+        filters: [{ field: 'name', operator: '$eq', value: 'Ada' }],
+      }],
+      operator: '$not',
     },
-    source: "pets $none (name = 'Ada')",
+    source: "pets !$contains (name = 'Ada')",
   },
   {
     meaning: 'every related item matches',
@@ -244,32 +247,66 @@ const collectionQuantifiers = [
     source: "pets $all (name = 'Ada')",
   },
   {
+    meaning: 'each independent requirement has a match',
+    structured: {
+      field: 'pets',
+      operator: '$contains',
+      filters: [
+        { field: 'name', operator: '$eq', value: 'Ada' },
+        { field: 'name', operator: '$eq', value: 'Grace' },
+      ],
+    },
+    source: "pets $contains [(name = 'Ada'), (name = 'Grace')]",
+  },
+  {
+    meaning: 'one related item satisfies both requirements',
+    structured: {
+      field: 'pets',
+      operator: '$contains',
+      filters: [{
+        operator: '$and',
+        filters: [
+          { field: 'name', operator: '$eq', value: 'Ada' },
+          { field: 'name', operator: '$eq', value: 'Grace' },
+        ],
+      }],
+    },
+    source: "pets $contains (name = 'Ada' $and name = 'Grace')",
+  },
+  {
     meaning: 'named relationship property',
     structured: {
       field: 'members',
-      operator: '$any',
+      operator: '$contains',
       filters: [{
         field: 'membership.role',
         operator: '$eq',
         value: 'GM',
       }],
     },
-    source: "members $any (membership.role = 'GM')",
+    source: "members $contains (membership.role = 'GM')",
+  },
+  {
+    meaning: 'zero related items',
+    structured: { field: 'pets', operator: '$empty' },
+    source: 'pets $empty',
   },
 ]
 ```
 
-The three quantifiers have exact empty-set semantics:
+- `$contains` (`~=`) is existential: at least one related item satisfies the requirement.
+- `$not $contains` is the only "none" form. There is no `$none`, `$any`, `$some`, or `$notContains` operator. `pets !$contains (P)` composes the same negation.
+- `$all` is universal: every related item satisfies its one member predicate, true for zero items. It normalizes to the shared counterexample form `Not(Contains(Not(P)))`; there is no separate universal execution engine.
+- `$empty` tests zero related items. On a relationship navigation, `$eq null` is invalid; `pets !$empty` means at least one related item, independent of any inner predicate.
+- `pets $contains [(P), (Q)]` means `Contains(P) AND Contains(Q)`. P and Q may be satisfied by different items. `pets $contains (P $and Q)` means one item satisfies both. `pets $contains (P $or Q)` means one item satisfies either. Empty bracketed requirement lists are rejected.
+- A structured `filters` array contains independent requirements. A one-item `filters` array containing an `$and`, `$or`, or `$not` tree applies that whole tree to one member. `$all` accepts exactly one member predicate.
+- Inner predicates are relative to the collection item and may use the item’s scalar or singular-reference paths, including terminal identity equality and `null`; reference paths retain the same eight-hop limit as projection. Named N:M relationship properties use the established lowercase prefix, such as `membership.role`. The prefix is not available on inverse collections, and Array or JSON relationship properties are rejected as predicate targets.
+- Collection comparisons preserve two-valued null behavior. A null inner scalar makes a non-null comparison false; its negation is true, and a null field is a counterexample to `$all`.
+- Each independent requirement compiles to its own correlated `EXISTS`; negation uses the shared logical operator with null-safe two-valued semantics. The query remains one parameterized SQL statement with the same finite work budget. Nested collection comparisons, unbounded traversal, N+1 lookups, and application-side child hydration are rejected.
 
-- `$any`: true when at least one related item satisfies every inner filter; false for an empty collection.
-- `$none`: true when no related item satisfies the inner filters; true for an empty collection.
-- `$all`: true when every related item satisfies the inner filters; true for an empty collection (vacuous truth), false if any item does not match.
+## Stage 19 — native Array and opaque JSON (accepted destination, not implemented)
 
-Inner filters are relative to the collection item and may use the item’s scalar/reference paths. For a named N:M relationship, relationship-owned scalar properties use the same lowercase relationship prefix as projection: `membership.role`. The prefix is not available on inverse collections. A quantifier accepts a non-empty `filters` array, cannot be nested through another collection in this contract, and cannot use an unbounded traversal. It compiles to a correlated `EXISTS`/`NOT EXISTS` or equivalent single-statement predicate under the same finite work budget; no N+1 query or unbounded join is permitted.
-
-## Stage 19 — native Array and opaque JSON
-
-Array and JSON predicates are not implemented in the current scalar grammar. The accepted end-state is type-directed by the canonical field type and keeps JSON opaque. All forms use the same comparison node `{ field, operator, value }`; there is no separate `values` node for arrays.
+Array and JSON predicates are the next query stage. The accepted destination is type-directed by the canonical field type and keeps JSON opaque. Arrays use the same `$contains`/`~=` and `$all` collection idiom as relationships, with item-appropriate operand typing; there is no separate array predicate engine. All comparison forms continue to use the canonical comparison node `{ field, operator, value }` unless a stage-19 grammar explicitly adds a member-requirement list.
 
 ```ts
 const arrayOperators = [
@@ -284,14 +321,9 @@ const arrayOperators = [
     source: "tags $contains ['urgent', 'important']",
   },
   {
-    meaning: 'overlaps at least one listed element',
+    meaning: 'optional overlap sugar: OR across matching requirements',
     structured: { field: 'tags', operator: '$overlaps', value: ['urgent', 'important'] },
     source: "tags $overlaps ['urgent', 'important']",
-  },
-  {
-    meaning: 'singleton overlaps convenience',
-    structured: { field: 'tags', operator: '$overlaps', value: 'urgent' },
-    source: "tags $overlaps 'urgent'",
   },
 ]
 
@@ -317,11 +349,13 @@ const jsonOperators = [
 Array semantics are type-directed:
 
 - `$contains` on `Array<T>` means PostgreSQL array containment `@>`. A scalar operand is normalized to a one-element array; an array operand requires every element to be contained.
-- `$overlaps` on `Array<T>` means PostgreSQL array overlap `&&`. A scalar operand is normalized to a one-element array; an array operand requires at least one element to overlap.
+- `$overlaps`, if retained, is convenience sugar for an OR of matching requirements; it is not a separate array executor. A scalar operand is normalized to a one-element requirement.
 - A scalar operand is valid for both array operators. The operand type must match the canonical array element type, including ID format and numeric finiteness.
 - `$contains []` is true for every non-null array (the empty set is contained); `$overlaps []` is false. Array columns remain non-null; empty arrays are values, not missing values.
 - Null operands are invalid for array membership. Stored null array elements do not match a non-null operand and cannot be targeted by this contract’s array predicates.
 - String `$contains` remains case-insensitive substring matching. JSON `$contains` means structural containment `jsonb @>`. The operator vocabulary is deliberately type-directed, not a second operator registry or a second executor.
+- Native array equality is staged for the same vocabulary: `tags == ['b', 'a']` means unordered set equality ignoring order and multiplicity, while `tags === ['b', 'a']` means exact sequence equality. `===` is invalid for inherently unordered relationship collections. These are Basis DSL semantics, not JavaScript reference equality or ordinary PostgreSQL array equality.
+- `tags $empty` tests SQL null or zero elements; `tags $all (P)` is vacuously true for zero logical members. A null array has no matching members for `$contains`. JSON missing versus JSON null remains a stage-19 concern.
 
 JSON source literals are first-class:
 
@@ -339,20 +373,19 @@ Explicit exclusions for this contract:
 
 - No raw SQL fragments, arbitrary JSONPath, regex operators, `$blank`, `$notblank`, `$nor`, `$xor`, or a second predicate grammar.
 - No predicates on physical columns, `Inverse` fields as scalar values, or implicitly inferred inverse edges.
-- No collection predicates that fetch all children into application code, perform N+1 lookups, or recursively traverse collection elements.
+- No collection predicates that fetch all children into application code, perform N+1 lookups, nest collection comparisons, or recursively traverse collection elements.
 - No runtime row-identity cycle detection; only canonical static traversal and reciprocal-backtrack rules apply.
 - No schema generation, migrations, ORM writes, or automatic CRUD routes from the query language.
 
 ## Executable contract fixtures
 
-`libraries/server/source/QueryContract.test.ts` locks the current implemented scalar contract: structured and string forms normalize to the same canonical filter and compile to the same SQL, and the deferred forms above are explicitly rejected until their stages land. The fixture names are the approval boundary for subsequent query-stage changes: extending an operator or field kind requires changing the contract fixture and the implementation together.
+`libraries/server/source/QueryContract.test.ts` locks the implemented contract: structured and string forms normalize to the same canonical filter and compile to the same SQL, and the deferred forms above are explicitly rejected until their stages land. The fixture names are the approval boundary for subsequent query-stage changes: extending an operator or field kind requires changing the contract fixture and the implementation together.
 
 ## Current implementation audit
 
-- `QueryLexer` recognizes dotted field tokens, quoted strings, numbers, booleans, null, bracket ranges, grouping, and the supported symbolic operators. Dotted paths are now model-resolved by the query compiler.
-- `QueryParser` owns the current comparison/logical/group grammar and source spans. It does not parse collection quantifiers or first-class JSON/Array literals yet.
-- `QueryNormalizer` applies scalar metadata and now accepts the query compiler’s field resolver for dotted reference paths and descendant scalars.
-- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, and null/empty lowering. `QueryProjection.filterField` supplies path resolution and join construction for `db.query`.
-- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection and Array/JSON predicates must extend this path rather than add an executor.
+- `QueryLexer` and `QueryParser` own field, comparison, logical, grouping, and collection-comparison syntax and source spans. They do not parse first-class JSON/Array literals yet.
+- `QueryNormalizer` applies scalar metadata and accepts the query compiler’s field, reference-path, and collection resolvers. It lowers `$all` to the shared counterexample canonical form.
+- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, collection validation, and null/empty lowering. `QueryProjection.filterField` and `QueryProjection.collectionScope` supply path resolution and correlated relation construction for `db.query`.
+- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection comparisons compile as correlated `EXISTS`/`NOT EXISTS` inside that same statement, with independent `EXISTS` per bracketed requirement. Array/JSON predicates must extend this path rather than add an executor.
 
 The target end-state is therefore one grammar, two input spellings, one canonical filter tree, one SQL compiler, and one finite-work execution path.

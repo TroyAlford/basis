@@ -36,7 +36,7 @@ export interface Token {
   /** Exclusive source offset. */
   readonly end: number,
   /** Resolved operator identity for operator tokens. */
-  readonly operator?: QueryOperator.Comparison | QueryOperator.Logical,
+  readonly operator?: QueryOperator.Collection | QueryOperator.Comparison | QueryOperator.Logical,
   /** Original source text for the token. */
   readonly raw: string,
   /** Inclusive source offset. */
@@ -66,8 +66,9 @@ export interface LexResult {
 }
 
 /** Recognized operator spellings, resolved once from the public enums. */
-const OPERATORS = new Map<string, QueryOperator.Comparison | QueryOperator.Logical>([
+const OPERATORS = new Map<string, QueryOperator.Collection | QueryOperator.Comparison | QueryOperator.Logical>([
   ...Object.values(QueryOperator.Comparison).map(operator => [operator, operator] as const),
+  ...Object.values(QueryOperator.Collection).map(operator => [operator, operator] as const),
   ...Object.values(QueryOperator.Logical).map(operator => [operator, operator] as const),
   ['=', QueryOperator.Comparison.Equal],
   ['>', QueryOperator.Comparison.GreaterThan],
@@ -75,6 +76,7 @@ const OPERATORS = new Map<string, QueryOperator.Comparison | QueryOperator.Logic
   ['<', QueryOperator.Comparison.LessThan],
   ['<=', QueryOperator.Comparison.LessThanOrEqual],
   ['!=', QueryOperator.Comparison.NotEqual],
+  ['~=', QueryOperator.Comparison.Contains],
   ['<>', QueryOperator.Comparison.NotEqual],
   ['!', QueryOperator.Logical.Not],
 ])
@@ -118,7 +120,7 @@ export const QueryLexer = {
         continue
       }
 
-      if ('=<>!'.includes(character)) {
+      if ('=<>!~'.includes(character)) {
         const token = symbolicOperatorToken(source, index, diagnostics)
         tokens.push(token)
         index = token.end
@@ -307,8 +309,34 @@ function symbolicOperatorToken(
   start: number,
   diagnostics: QueryDiagnostic[],
 ): Token {
+  if (source[start] === '!') {
+    if (source[start + 1] === '=') {
+      const raw = '!='
+      return {
+        end: start + 2,
+        operator: QueryOperator.Comparison.NotEqual,
+        raw,
+        start,
+        type: TokenType.Operator,
+        value: raw,
+      }
+    }
+    return {
+      end: start + 1,
+      operator: QueryOperator.Logical.Not,
+      raw: '!',
+      start,
+      type: TokenType.Operator,
+      value: '!',
+    }
+  }
+
   let end = start + 1
-  while (end < source.length && /[=<>!]/.test(source[end] as string)) end += 1
+  if (source[start] === '~') {
+    if (source[start + 1] === '=') end = start + 2
+  } else {
+    while (end < source.length && /[=<>]/.test(source[end] as string)) end += 1
+  }
   const raw = source.slice(start, end)
   const operator = OPERATORS.get(raw)
 

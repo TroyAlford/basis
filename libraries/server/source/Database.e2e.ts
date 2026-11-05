@@ -1641,6 +1641,368 @@ VALUES (${petOne},
     }])
   }, 120_000)
 
+  isolatedTest('evaluates collection contains, universal, and empty semantics on real edges', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'title', type: 'String' },
+            {
+              cardinality: 'Many',
+              field: 'pets',
+              inverse: 'owner',
+              target: 'Pet',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Person',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'title', type: 'String' },
+            { field: 'nickname', type: 'String' },
+            { field: 'owner', inverse: 'pets', target: 'Person', type: 'Entity' },
+            { field: 'vet', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Campaign' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'person', inverse: 'campaigns', target: 'Person' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    const ada = '00000000-0000-4000-8000-000000000001'
+    const grace = '00000000-0000-4000-8000-000000000002'
+    const linus = '00000000-0000-4000-8000-000000000003'
+    const dana = '00000000-0000-4000-8000-000000000004'
+    const rex = '00000000-0000-4000-8000-000000000011'
+    const fido = '00000000-0000-4000-8000-000000000012'
+    const rexTwo = '00000000-0000-4000-8000-000000000013'
+    const fidoTwo = '00000000-0000-4000-8000-000000000014'
+    const one = '00000000-0000-4000-8000-000000000021'
+    const two = '00000000-0000-4000-8000-000000000022'
+    const three = '00000000-0000-4000-8000-000000000023'
+    const four = '00000000-0000-4000-8000-000000000024'
+    const five = '00000000-0000-4000-8000-000000000025'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${ada},
+        'Ada',
+        'Person'),
+        (${grace},
+        'Grace',
+        'Person'),
+        (${linus},
+        'Linus',
+        'Person'),
+        (${dana},
+        'Dana',
+        'Person'),
+        (${rex},
+        'Rex',
+        'Pet'),
+        (${fido},
+        'Fido',
+        'Pet'),
+        (${rexTwo},
+        'Rex Two',
+        'Pet'),
+        (${fidoTwo},
+        'Fido Two',
+        'Pet'),
+        (${one},
+        'Campaign One',
+        'Campaign'),
+        (${two},
+        'Campaign Two',
+        'Campaign'),
+        (${three},
+        'Campaign Three',
+        'Campaign'),
+        (${four},
+        'Campaign Four',
+        'Campaign'),
+        (${five},
+        'Campaign Five',
+        'Campaign')
+    `
+    await database.sql`
+      INSERT INTO "Person" ("id", "title")
+      VALUES (${ada}, 'Ada'), (${grace}, 'Grace'), (${linus}, 'Linus'), (${dana}, 'Dana')
+    `
+    await database.sql`
+      INSERT INTO "Pet" ("id", "title", "nickname", "owner.id", "vet.id")
+      VALUES (${rex},
+        'Rex',
+        'Loud',
+        ${ada},
+        ${grace}),
+        (${fido},
+        'Fido',
+        'Quiet',
+        ${ada},
+        ${null}),
+        (${rexTwo},
+        'Rex',
+        'Special',
+        ${grace},
+        ${grace}),
+        (${fidoTwo},
+        'Fido',
+        'Other',
+        ${dana},
+        ${null})
+    `
+    await database.sql`
+      INSERT INTO "Campaign" ("id")
+      VALUES (${one}), (${two}), (${three}), (${four}), (${five})
+    `
+    await database.sql`
+      INSERT INTO "Membership" ("person.id", "campaign.id", "role")
+      VALUES (${ada},
+        ${one},
+        'GM'),
+        (${grace},
+        ${one},
+        'Player'),
+        (${linus},
+        ${one},
+        'Player'),
+        (${linus},
+        ${two},
+        'GM'),
+        (${grace},
+        ${three},
+        'Player'),
+        (${dana},
+        ${four},
+        'Player')
+    `
+
+    const ids = async (entity: string, where: string): Promise<unknown[]> => (
+      await queryEntity<{ id: string }>(database.sql, entities, entity, {
+        fields: ['id'],
+        orderBy: 'id',
+        where,
+      })
+    ).map(row => row.id)
+
+    expect(await ids('Person', "pets $contains (title = 'Rex')")).toEqual([ada, grace])
+    expect(await ids('Person', "pets ~= (title = 'Rex')")).toEqual([ada, grace])
+    expect(await ids('Person', "pets !$contains (title = 'Rex')")).toEqual([linus, dana])
+    expect(await ids('Person', "pets $not $contains (title = 'Rex')")).toEqual([linus, dana])
+    expect(await ids('Person', "pets $all (title = 'Rex')")).toEqual([grace, linus])
+    expect(await ids('Person', "pets $all (nickname = 'Special')")).toEqual([grace, linus])
+    expect(await ids('Person', 'pets $empty')).toEqual([linus])
+    expect(await ids('Person', 'pets !$empty')).toEqual([ada, grace, dana])
+    expect(await ids('Person', "pets $contains (owner.title = 'Ada')")).toEqual([ada])
+    expect(await ids('Person', `pets $contains (owner = '${ada}')`)).toEqual([ada])
+    expect(await ids('Person', "pets $contains (title = 'Rex' $or title = 'Fido')"))
+      .toEqual([ada, grace, dana])
+    expect(await ids('Person', 'pets $contains (vet = null)')).toEqual([ada, dana])
+    expect(await ids('Person', "pets $all (vet.title = 'Grace')")).toEqual([grace, linus])
+    expect(await ids('Person', "pets $all (vet.title > 'A')")).toEqual([grace, linus])
+    expect(await ids('Person', "pets $contains ($not (vet.title > 'A'))")).toEqual([ada, dana])
+
+    expect(await ids('Person', "pets $contains [(title = 'Rex'), (nickname = 'Quiet')]"))
+      .toEqual([ada])
+    expect(await ids('Person', "pets $contains (title = 'Rex' $and nickname = 'Quiet')"))
+      .toEqual([])
+    expect(await ids('Person', "pets $contains (title = 'Rex' $and nickname = 'Special')"))
+      .toEqual([grace])
+
+    expect(await ids('Campaign', "members $contains (membership.role = 'GM')"))
+      .toEqual([one, two])
+    expect(await ids('Campaign', "members !$contains (membership.role = 'GM')"))
+      .toEqual([three, four, five])
+    expect(await ids('Campaign', 'members $empty')).toEqual([five])
+    expect(await ids('Campaign', "members $all (membership.role = 'Player')"))
+      .toEqual([three, four, five])
+    expect(await ids('Campaign', "members $contains [(membership.role = 'Player'), (title = 'Grace')]"))
+      .toEqual([one, three])
+    expect(await ids('Campaign', "members $contains (membership.role = 'GM' $and title = 'Linus')"))
+      .toEqual([two])
+
+    const projected = await queryEntity<{ id: string, pets: { total: number } }>(
+      database.sql,
+      entities,
+      'Person',
+      {
+        collections: { pets: { limit: 1 } },
+        fields: ['id', 'pets'],
+        orderBy: 'id',
+        where: "pets $contains (title = 'Rex')",
+      },
+    )
+    expect(projected.map(row => row.id)).toEqual([ada, grace])
+    expect(projected[0]?.pets.total).toBe(2)
+  }, 120_000)
+
+  isolatedTest('evaluates descendant fields and references inside collection predicates', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'title', type: 'String' },
+            { field: 'manager', target: 'Person', type: 'Entity' },
+            {
+              cardinality: 'Many',
+              field: 'pets',
+              inverse: 'owner',
+              target: 'Base',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Person',
+        },
+        {
+          fields: [
+            { field: 'owner', inverse: 'pets', target: 'Person', type: 'Entity' },
+            { field: 'label', type: 'String' },
+          ],
+          name: 'Base',
+        },
+        {
+          extends: 'Base',
+          fields: [
+            { field: 'trait', type: 'String' },
+            { field: 'mentor', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Dog',
+        },
+        {
+          extends: 'Base',
+          fields: [{ field: 'lives', type: 'Number' }],
+          name: 'Cat',
+        },
+      ],
+    }))
+    await entities.createTables(database.sql)
+    const ada = '00000000-0000-4000-8000-000000000001'
+    const grace = '00000000-0000-4000-8000-000000000002'
+    const linus = '00000000-0000-4000-8000-000000000003'
+    const dana = '00000000-0000-4000-8000-000000000004'
+    const dogOne = '00000000-0000-4000-8000-000000000011'
+    const dogTwo = '00000000-0000-4000-8000-000000000012'
+    const dogThree = '00000000-0000-4000-8000-000000000013'
+    const catOne = '00000000-0000-4000-8000-000000000014'
+    const catTwo = '00000000-0000-4000-8000-000000000015'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${ada},
+        'Ada',
+        'Person'),
+        (${grace},
+        'Grace',
+        'Person'),
+        (${linus},
+        'Linus',
+        'Person'),
+        (${dana},
+        'Dana',
+        'Person'),
+        (${dogOne},
+        'Dog One',
+        'Dog'),
+        (${dogTwo},
+        'Dog Two',
+        'Dog'),
+        (${dogThree},
+        'Dog Three',
+        'Dog'),
+        (${catOne},
+        'Cat One',
+        'Cat'),
+        (${catTwo},
+        'Cat Two',
+        'Cat')
+    `
+    await database.sql`
+      INSERT INTO "Person" ("id", "title", "manager.id")
+VALUES (${ada},
+  'Ada',
+  ${null}),
+  (${grace},
+  'Grace',
+  ${ada}),
+  (${linus},
+  'Linus',
+  ${null}),
+  (${dana},
+  'Dana',
+  ${null})
+    `
+    await database.sql`
+      INSERT INTO "Base" ("id", "owner.id", "label")
+      VALUES (${dogOne},
+        ${ada},
+        'Dog One'),
+        (${dogTwo},
+        ${grace},
+        'Dog Two'),
+        (${dogThree},
+        ${grace},
+        'Dog Three'),
+        (${catOne},
+        ${ada},
+        'Cat One'),
+        (${catTwo},
+        ${dana},
+        'Cat Two')
+    `
+    await database.sql`
+      INSERT INTO "Dog" ("id", "trait", "mentor.id")
+VALUES (${dogOne},
+  'good',
+  ${grace}),
+  (${dogTwo},
+  'good',
+  ${ada}),
+  (${dogThree},
+  'good',
+  ${null})
+    `
+    await database.sql`
+      INSERT INTO "Cat" ("id", "lives")
+      VALUES (${catOne}, 9), (${catTwo}, 9)
+    `
+
+    const ids = async (entity: string, where: string): Promise<unknown[]> => (
+      await queryEntity<{ id: string }>(database.sql, entities, entity, {
+        fields: ['id'],
+        orderBy: 'id',
+        where,
+      })
+    ).map(row => row.id)
+
+    expect(await ids('Person', "pets $contains (trait = 'good')")).toEqual([ada, grace])
+    expect(await ids('Person', "pets $all (trait = 'good')")).toEqual([grace, linus])
+    expect(await ids('Person', "pets !$contains (trait = 'good')")).toEqual([linus, dana])
+    expect(await ids('Person', 'pets $empty')).toEqual([linus])
+    expect(await ids('Person', 'pets $contains (lives = 9)')).toEqual([ada, dana])
+    expect(await ids('Person', "pets $contains (mentor.title = 'Grace')")).toEqual([ada])
+    expect(await ids('Person', `pets $contains (mentor = '${grace}')`)).toEqual([ada])
+    expect(await ids('Person', "pets $contains (mentor.manager.title = 'Ada')")).toEqual([ada])
+    expect(await ids('Person', "pets $contains (mentor.title = 'Ada')")).toEqual([grace])
+    expect(await ids('Person', "pets $all (mentor.title = 'Grace')")).toEqual([linus])
+
+    const nineHops = Array.from({ length: 8 }, () => 'manager').join('.')
+    expect(() => compileEntityQuery(entities, 'Person', {
+      fields: ['id'],
+      where: `pets $contains (mentor.${nineHops}.title = 'x')`,
+    })).toThrow('maximum depth')
+  }, 120_000)
+
   isolatedTest('rejects index name collisions on fresh tables', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [

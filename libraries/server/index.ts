@@ -6,7 +6,7 @@ export type { Database, DatabaseOptions, QueryOptions } from './source/Database'
 export { SortDirection } from './source/SortDirection'
 export { FieldType, EntityDefinitions } from './source/EntityDefinitions'
 export { Operator } from './source/Operator'
-export type { ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
+export type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
 export type {
   ArrayFieldDefinition,
   AssociationDefinition,
