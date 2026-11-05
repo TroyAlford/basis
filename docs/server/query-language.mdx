@@ -31,7 +31,7 @@ No input form gets its own executor or database path. A query is either compiled
 - There is no separate identity field such as `ownerId`; identity is the reference's canonical target `id`.
 - Unknown, incompatible, navigation-only, and physical storage names are rejected before SQL execution.
 
-Current scalar predicates resolve root/effective/descendant scalar fields and model-validated singular reference paths. Collection quantifiers and Array/JSON operators remain later stages.
+Current predicates resolve root/effective/descendant scalar fields, model-validated singular reference paths, and collection quantifiers over inverse and named N:M navigations. Array and JSON operators remain later stages.
 
 ## Input forms
 
@@ -210,9 +210,9 @@ const referencePaths = [
 - The path uses the existing single-statement reference joins and finite work budget, including the same eight-reference-hop limit as projection. Runtime row identity is never inspected to detect cycles.
 - Sorting by a dotted reference path remains excluded in stages 16–20; `orderBy` continues to accept only root/effective scalar fields.
 
-## Stage 18 — collection predicates
+## Stage 18 — collection predicates (implemented)
 
-Collection predicates are not implemented in the current scalar grammar. The accepted end-state uses explicit quantifiers over inverse and named N:M navigations:
+Collection predicates use explicit quantifiers over inverse and named N:M navigations:
 
 ```ts
 const collectionQuantifiers = [
@@ -265,7 +265,9 @@ The three quantifiers have exact empty-set semantics:
 - `$none`: true when no related item satisfies the inner filters; true for an empty collection.
 - `$all`: true when every related item satisfies the inner filters; true for an empty collection (vacuous truth), false if any item does not match.
 
-Inner filters are relative to the collection item and may use the item’s scalar/reference paths. For a named N:M relationship, relationship-owned scalar properties use the same lowercase relationship prefix as projection: `membership.role`. The prefix is not available on inverse collections. A quantifier accepts a non-empty `filters` array, cannot be nested through another collection in this contract, and cannot use an unbounded traversal. It compiles to a correlated `EXISTS`/`NOT EXISTS` or equivalent single-statement predicate under the same finite work budget; no N+1 query or unbounded join is permitted.
+A quantifier’s `field` is a collection navigation exposed by the queried entity. Inner filters are relative to the collection item and may use the item’s scalar or singular-reference paths, including terminal reference identity equality and `null`; reference paths retain the same eight-hop limit as projection. For a named N:M relationship, relationship-owned scalar properties use the same lowercase relationship prefix as projection: `membership.role`. The prefix is not available on inverse collections, and Array or JSON relationship properties are rejected as predicate targets.
+
+A quantifier accepts a non-empty `filters` array. In source form it accepts one parenthesized expression, so `pets $any (title = 'Ada' $and owner.title = 'Grace')` normalizes to one inner `$and` filter. Quantifiers cannot be nested through another collection or through a collection element, and reference traversal is finite. Each quantifier compiles to a correlated `EXISTS`/`NOT EXISTS` predicate in the same single SQL statement; `$all` is the vacuous-truth form `NOT EXISTS (… WHERE NOT COALESCE(inner, FALSE))`. There is no N+1 query, unbounded join, or application-side child fetch.
 
 ## Stage 19 — native Array and opaque JSON
 
@@ -339,20 +341,20 @@ Explicit exclusions for this contract:
 
 - No raw SQL fragments, arbitrary JSONPath, regex operators, `$blank`, `$notblank`, `$nor`, `$xor`, or a second predicate grammar.
 - No predicates on physical columns, `Inverse` fields as scalar values, or implicitly inferred inverse edges.
-- No collection predicates that fetch all children into application code, perform N+1 lookups, or recursively traverse collection elements.
+- No collection predicates that fetch all children into application code, perform N+1 lookups, nest quantifiers, or recursively traverse collection elements.
 - No runtime row-identity cycle detection; only canonical static traversal and reciprocal-backtrack rules apply.
 - No schema generation, migrations, ORM writes, or automatic CRUD routes from the query language.
 
 ## Executable contract fixtures
 
-`libraries/server/source/QueryContract.test.ts` locks the current implemented scalar contract: structured and string forms normalize to the same canonical filter and compile to the same SQL, and the deferred forms above are explicitly rejected until their stages land. The fixture names are the approval boundary for subsequent query-stage changes: extending an operator or field kind requires changing the contract fixture and the implementation together.
+`libraries/server/source/QueryContract.test.ts` locks the implemented contract: structured and string forms normalize to the same canonical filter and compile to the same SQL, and the deferred forms above are explicitly rejected until their stages land. The fixture names are the approval boundary for subsequent query-stage changes: extending an operator or field kind requires changing the contract fixture and the implementation together.
 
 ## Current implementation audit
 
 - `QueryLexer` recognizes dotted field tokens, quoted strings, numbers, booleans, null, bracket ranges, grouping, and the supported symbolic operators. Dotted paths are now model-resolved by the query compiler.
-- `QueryParser` owns the current comparison/logical/group grammar and source spans. It does not parse collection quantifiers or first-class JSON/Array literals yet.
-- `QueryNormalizer` applies scalar metadata and now accepts the query compiler’s field resolver for dotted reference paths and descendant scalars.
-- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, and null/empty lowering. `QueryProjection.filterField` supplies path resolution and join construction for `db.query`.
-- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection and Array/JSON predicates must extend this path rather than add an executor.
+- `QueryLexer` and `QueryParser` own field, comparison, logical, grouping, and collection-quantifier syntax and source spans. They do not parse first-class JSON/Array literals yet.
+- `QueryNormalizer` applies scalar metadata and accepts the query compiler’s field, reference-path, and collection resolvers.
+- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, collection validation, and null/empty lowering. `QueryProjection.filterField` and `QueryProjection.collectionScope` supply path resolution and correlated relation construction for `db.query`.
+- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection predicates compile as correlated `EXISTS`/`NOT EXISTS` inside that same statement. Array/JSON predicates must extend this path rather than add an executor.
 
 The target end-state is therefore one grammar, two input spellings, one canonical filter tree, one SQL compiler, and one finite-work execution path.

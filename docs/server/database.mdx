@@ -283,7 +283,7 @@ const visits = await server.db.query<{
 })
 ```
 
-`fields: ['pet.vet.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, reciprocal backtracking, paths deeper than eight reference hops, and projections exceeding the finite path or work budget fail before SQL runs. Singular reference paths are supported in `where`; reference fields cannot be used in `orderBy`, and collection predicates remain deferred. Relation cycles are allowed in the canonical model and physical foreign keys; a query rejects only guaranteed immediate backtracking through a declared reciprocal pair. The compiler caps requested paths and both authored path work and actual expanded projection/join work, rejecting an over-budget projection before SQL execution.
+`fields: ['pet.vet.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, reciprocal backtracking, paths deeper than eight reference hops, and projections exceeding the finite path or work budget fail before SQL runs. Singular reference paths and collection quantifiers are supported in `where`; reference fields cannot be used in `orderBy`. Relation cycles are allowed in the canonical model and physical foreign keys; a query rejects only guaranteed immediate backtracking through a declared reciprocal pair. The compiler caps requested paths and both authored path work and actual expanded projection/join work, rejecting an over-budget projection before SQL execution.
 
 Derived collection navigations project a bounded envelope. The default preview is three lightweight `{ id, name, entity }` items; `total` is the exact collection count and `remaining` is the count after the requested page. `collections` overrides the preview limit and offset per selected collection. The navigation name is the authored `Inverse` field name, or the declared endpoint inverse for a named relationship:
 
@@ -324,7 +324,7 @@ const campaigns = await server.db.query<{
 })
 ```
 
-`relationshipFields` accepts only direct scalar property names of the named relationship; target entity fields, nested graph paths, arrays, JSON, and unknown names are rejected. The same physical `Membership` row produces `User.campaigns` in the other direction. Inverse-only navigations such as `User.articles` reject `relationshipFields` because there is no intervening relationship. The envelope is computed in the same SQL statement for both inverse and relationship-backed collections; there is no per-parent lookup. Collections follow stable target identity order.
+`relationshipFields` accepts only direct scalar property names of the named relationship; target entity fields, nested graph paths, arrays, JSON, and unknown names are rejected. A collection predicate may filter a direct scalar relationship property with the same lowercase prefix, for example `members $any (membership.role = 'GM')`. The same physical `Membership` row produces `User.campaigns` in the other direction. Inverse-only navigations such as `User.articles` reject `relationshipFields` because there is no intervening relationship. The envelope is computed in the same SQL statement for both inverse and relationship-backed collections; there is no per-parent lookup. Collections follow stable target identity order.
 
 A terminal nested collection is allowed beneath a singular forward reference, using the natural dotted collection key:
 
@@ -343,7 +343,9 @@ const pets = await server.db.query<{
 })
 ```
 
-`Pet.owner.pets` is legal and bounded. `Pet.owner.pets.owner` is rejected as reciprocal backtracking because the collection item’s `owner` returns to the already traversed Person. A singular reciprocal navigation follows the same rule: `Pet.owner.pet` and `Person.pet.owner` are rejected for a `One` pair, while `Person.manager.manager` remains legal because repeating a forward-only reference is not reciprocal backtracking. Arbitrary recursion through collection elements and collection predicates remain deferred.
+`Pet.owner.pets` is legal and bounded. `Pet.owner.pets.owner` is rejected as reciprocal backtracking because the collection item’s `owner` returns to the already traversed Person. A singular reciprocal navigation follows the same rule: `Pet.owner.pet` and `Person.pet.owner` are rejected for a `One` pair, while `Person.manager.manager` remains legal because repeating a forward-only reference is not reciprocal backtracking. Arbitrary recursion through collection elements remains deferred.
+
+Collection navigations also participate in `where` through the `$any`, `$none`, and `$all` quantifiers. Inner filters resolve against each collection item, including singular-reference paths and named-relationship properties. Empty collections satisfy `$none` and `$all`, and fail `$any`.
 
 `$contains` is a case-insensitive literal substring match on `String` fields. It escapes `%`, `_`, and the escape character before binding, so user input is never interpreted as a wildcard. Abstract display-name searches use the root `pg_trgm` GIN index.
 

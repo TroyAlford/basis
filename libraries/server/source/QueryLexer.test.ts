@@ -4,7 +4,7 @@ import { QueryLexer, TokenType } from './QueryLexer'
 
 /** One expected non-EOF token. */
 interface ExpectedToken {
-  readonly operator?: Operator.Comparison | Operator.Logical,
+  readonly operator?: Operator.Collection | Operator.Comparison | Operator.Logical,
   readonly raw: string,
   readonly type: TokenType,
   readonly value: string | boolean | null,
@@ -76,7 +76,7 @@ const number = (raw: string): ExpectedToken => ({ raw, type: TokenType.Number, v
 const string = (raw: string, value: string): ExpectedToken => ({ raw, type: TokenType.String, value })
 const operator = (
   raw: string,
-  identity: Operator.Comparison | Operator.Logical,
+  identity: Operator.Collection | Operator.Comparison | Operator.Logical,
 ): ExpectedToken => ({ operator: identity, raw, type: TokenType.Operator, value: raw })
 const boolean = (raw: string, value: boolean): ExpectedToken => ({ raw, type: TokenType.Boolean, value })
 const nullToken: ExpectedToken = { raw: 'null', type: TokenType.Null, value: null }
@@ -175,7 +175,7 @@ describe('QueryLexer', () => {
   })
 
   test('recognizes the extended operator vocabulary and between delimiters', () => {
-    assertLex('!= <> $ne $between [1, 5] $empty $or $not', [
+    assertLex('!= <> $ne $between [1, 5] $empty $any $all $none $or $not', [
       operator('!=', Operator.Comparison.NotEqual),
       operator('<>', Operator.Comparison.NotEqual),
       operator('$ne', Operator.Comparison.NotEqual),
@@ -186,6 +186,9 @@ describe('QueryLexer', () => {
       number('5'),
       rightBracket(),
       operator('$empty', Operator.Comparison.Empty),
+      operator('$any', Operator.Collection.Any),
+      operator('$all', Operator.Collection.All),
+      operator('$none', Operator.Collection.None),
       operator('$or', Operator.Logical.Or),
       operator('$not', Operator.Logical.Not),
     ])

@@ -20,8 +20,29 @@ export interface LogicalFilter {
   readonly operator: Operator.Logical,
 }
 
+/** A canonical collection quantifier filter group. */
+export interface CollectionFilter {
+  /** Collection navigation name. */
+  readonly field: string,
+  /** Inner predicates relative to each related item. */
+  readonly filters: readonly Filter[],
+  /** Collection quantifier identity. */
+  readonly operator: Operator.Collection,
+}
+
+/** Entity-shaped context used to normalize a collection's inner predicates. */
+export interface CollectionFilterScope {
+  /** Related item entity type. */
+  readonly definition: EntityDefinition,
+  /** Resolve one inner scalar field or path. */
+  readonly field: (name: string) => ScalarFieldDefinition,
+}
+
+/** Resolve a collection navigation for filter normalization. */
+export type CollectionResolver = (name: string) => CollectionFilterScope | undefined
+
 /** A canonical serializable where filter. */
-export type Filter = ComparisonFilter | LogicalFilter
+export type Filter = CollectionFilter | ComparisonFilter | LogicalFilter
 
 /** Primitive comparison operators retained in the canonical filter tree. */
 const BASE_COMPARISON_OPERATORS = new Set<Operator.Comparison>([
@@ -138,6 +159,7 @@ export const Predicate = {
    * @param entity - Entity whose fields are referenced.
    * @param input - A single-field equality shorthand or an explicit filter.
    * @param resolve - Resolve a logical field or path to its scalar definition.
+   * @param collection - Resolve collection navigations to related-item metadata.
    * @returns The canonical filter, or null for an empty object.
    * @throws {Error} When the input shape, field, or operator is invalid.
    */
@@ -145,9 +167,10 @@ export const Predicate = {
     entity: EntityDefinition,
     input: Filter | Readonly<Record<string, unknown>>,
     resolve: (name: string) => ScalarFieldDefinition = name => Predicate.field(entity, name),
+    collection?: CollectionResolver,
   ): Filter | null {
     if (!isPlainRecord(input)) throw new Error('Query where must be a plain object')
-    if (Object.hasOwn(input, 'operator')) return explicit(entity, input, resolve)
+    if (Object.hasOwn(input, 'operator')) return explicit(entity, input, resolve, collection)
     return shorthand(entity, input, resolve)
   },
 
@@ -201,15 +224,34 @@ function shorthand(
  * @param entity - Entity whose fields are referenced.
  * @param input - Explicit node input.
  * @param resolve - Resolve a logical field or path to its scalar definition.
+ * @param collection - Resolve collection navigations to related-item metadata.
  * @returns The canonical filter node.
  */
 function explicit(
   entity: EntityDefinition,
   input: Readonly<Record<string, unknown>>,
   resolve: (name: string) => ScalarFieldDefinition,
+  collection?: CollectionResolver,
 ): Filter {
   const operator = input.operator
   if (typeof operator !== 'string') throw new Error('Query operator must be a string')
+
+  if (Object.values(Operator.Collection).includes(operator as Operator.Collection)) {
+    assertKeys(input, ['field', 'filters', 'operator'])
+    if (typeof input.field !== 'string') throw new Error('Query collection field must be a string')
+    const scope = collection?.(input.field)
+    if (!scope) throw new Error(`Unknown collection navigation "${input.field}"`)
+    if (!Array.isArray(input.filters) || input.filters.length === 0) {
+      throw new Error(`Query ${operator} requires a non-empty filters array`)
+    }
+    return {
+      field: input.field,
+      filters: input.filters.map(filter => (
+        child(scope.definition, operator, filter, scope.field)
+      )),
+      operator: operator as Operator.Collection,
+    }
+  }
 
   if (operator === Operator.Logical.And || operator === Operator.Logical.Or) {
     assertKeys(input, ['operator', 'filters'])
@@ -218,7 +260,7 @@ function explicit(
     }
     return Predicate.logical(
       operator,
-      input.filters.map(filter => child(entity, operator, filter, resolve)),
+      input.filters.map(filter => child(entity, operator, filter, resolve, collection)),
     )
   }
 
@@ -227,7 +269,7 @@ function explicit(
     if (!Array.isArray(input.filters) || input.filters.length !== 1) {
       throw new Error(`Query ${Operator.Logical.Not} requires exactly one filter`)
     }
-    return Predicate.not(child(entity, operator, input.filters[0], resolve))
+    return Predicate.not(child(entity, operator, input.filters[0], resolve, collection))
   }
 
   if (operator === Operator.Comparison.NotEqual) {
@@ -269,6 +311,7 @@ function explicit(
  * @param operator - Parent logical operator identity.
  * @param filter - Child filter input.
  * @param resolve - Resolve a logical field or path to its scalar definition.
+ * @param collection - Resolve collection navigations to related-item metadata.
  * @returns The normalized child filter.
  */
 function child(
@@ -276,9 +319,10 @@ function child(
   operator: string,
   filter: unknown,
   resolve: (name: string) => ScalarFieldDefinition,
+  collection?: CollectionResolver,
 ): Filter {
   if (!isPlainRecord(filter)) throw new Error(`Query ${operator} filters must be plain objects`)
-  const normalized = Predicate.normalize(entity, filter, resolve)
+  const normalized = Predicate.normalize(entity, filter, resolve, collection)
   if (!normalized) throw new Error(`Query ${operator} filters must be non-empty objects`)
   return normalized
 }

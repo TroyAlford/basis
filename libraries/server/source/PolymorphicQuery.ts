@@ -2,7 +2,7 @@ import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingula
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
-import type { OrderBy, QueryScope } from './SQL'
+import type { CollectionScope, OrderBy, QueryScope } from './SQL'
 import { SQL } from './SQL'
 
 /** Maximum number of singular reference hops in one requested path. */
@@ -182,6 +182,8 @@ class QueryProjection {
   readonly #filterExpressions = new Map<string, string>()
   /** Filter-only resolved fields keyed by logical path. */
   readonly #filterFields = new Map<string, ScalarFieldDefinition>()
+  /** Collection predicate scopes keyed by root navigation name. */
+  readonly #collectionScopes = new Map<string, CollectionScope>()
   /** Stable filter/projection reference contexts keyed by logical path. */
   readonly #filterContexts = new Map<string, EntityContext>()
   /** Filter paths that resolve to reference identities. */
@@ -467,6 +469,197 @@ class QueryProjection {
       return `WHEN ${root}.${quote('entity')} IN (${leaves}) THEN ${owner}.${quote(variant.field.name)}`
     })
     return `CASE ${branches.join(' ')} ELSE NULL END`
+  }
+
+  /**
+   * Build the correlated scope used by one collection quantifier.
+   * @param name - Root collection navigation name.
+   * @returns Collection scope, or undefined when the name is not a collection.
+   */
+  collectionScope(name: string): CollectionScope | undefined {
+    const cached = this.#collectionScopes.get(name)
+    if (cached) return cached
+    const collection = this.root.collections.get(name)
+    if (!collection) return undefined
+    const targetName = collection.target
+    const target = targetName === 'Entity' ? identityDefinition() : this.#entities.entity(targetName)
+    if (!target) throw new Error(`Unknown target entity "${targetName}"`)
+    const targetAlias = targetName === 'Entity' ? undefined : this.#nextAlias('ct')
+    const rootAlias = this.#nextAlias('cr')
+    const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
+    const relationshipAlias = relationship ? this.#nextAlias('cj') : undefined
+    let relation: string
+    let condition: string
+    if (collection.kind === 'inverse') {
+      if (targetAlias === undefined) {
+        relation = `"Entity" "${rootAlias}"`
+        condition = `"${rootAlias}".${quote('id')} = "${this.root.baseAlias}".${quote('id')}`
+      } else {
+        relation = `"${targetName}" "${targetAlias}" JOIN "Entity" "${rootAlias}" ` +
+          `ON "${rootAlias}".${quote('id')} = "${targetAlias}".${quote('id')}`
+        condition = `"${targetAlias}".${quote(collection.reference.column)} = ` +
+          `"${this.root.baseAlias}".${quote('id')}`
+      }
+    } else {
+      const local = relationship.between[collection.endpoint]
+      const remote = relationship.between[collection.endpoint === 0 ? 1 : 0]
+      const remoteColumn = quote(`${remote.field}.id`)
+      if (targetAlias === undefined) {
+        relation = `"${relationship.name}" "${relationshipAlias}" JOIN "Entity" "${rootAlias}" ` +
+          `ON "${rootAlias}".${quote('id')} = "${relationshipAlias}".${remoteColumn}`
+      } else {
+        relation = `"${relationship.name}" "${relationshipAlias}" ` +
+          `JOIN "${targetName}" "${targetAlias}" ` +
+          `ON "${targetAlias}".${quote('id')} = "${relationshipAlias}".${remoteColumn} ` +
+          `JOIN "Entity" "${rootAlias}" ON "${rootAlias}".${quote('id')} = "${targetAlias}".${quote('id')}`
+      }
+      condition = `"${relationshipAlias}".${quote(`${local.field}.id`)} = ` +
+        `"${this.root.baseAlias}".${quote('id')}`
+    }
+    const context: EntityContext = targetAlias === undefined
+      ? rootContext(this.#entities, rootAlias)
+      : targetContext(this.#entities, target, targetAlias, rootAlias)
+    const expressions = new Map<string, string>()
+    const identities = new Set<string>()
+    const resolved = new Map<string, ScalarFieldDefinition>()
+    const joinOwner = (active: EntityContext, owner: string): string => {
+      if (owner === 'Entity') return active.rootAlias
+      if (owner === active.definition.name) return active.baseAlias
+      const existing = active.ownerAliases.get(owner)
+      if (existing) return existing
+      const alias = this.#nextAlias('co')
+      this.#consume()
+      relation += ` JOIN "${owner}" "${alias}" ON "${alias}".${quote('id')} = ` +
+        `"${active.baseAlias}".${quote('id')}`
+      active.ownerAliases.set(owner, alias)
+      return alias
+    }
+    const resolve = (path: string): ScalarFieldDefinition => {
+      const cachedField = resolved.get(path)
+      if (cachedField) return cachedField
+      if (relationshipAlias !== undefined && relationship) {
+        const prefix = `${lowerFirst(relationship.name)}.`
+        if (path.startsWith(prefix)) {
+          const propertyName = path.slice(prefix.length)
+          const property = relationship.fields.find(candidate => candidate.name === propertyName)
+          if (!property) {
+            throw new Error(`Unknown relationship field "${relationship.name}.${propertyName}"`)
+          }
+          if (property.type === FieldType.Array || property.type === FieldType.JSON) {
+            throw new Error(
+              `Relationship field "${relationship.name}.${propertyName}" is not a scalar property`,
+            )
+          }
+          const field: ScalarFieldDefinition = { ...property, name: path }
+          resolved.set(path, field)
+          expressions.set(path, `"${relationshipAlias}".${quote(property.name)}`)
+          return field
+        }
+      }
+      const segments = path.split('.')
+      if (segments.some(segment => segment.length === 0)) throw new Error(`Invalid filter path "${path}"`)
+      let active = context
+      for (let index = 0; index < segments.length; index += 1) {
+        const segment = segments[index] as string
+        const field = active.effective.get(segment)
+        if (!field) {
+          const descendant = active.descendants.get(segment)
+          if (descendant && index === segments.length - 1) {
+            if (descendant.contracts.size > 1) {
+              throw new Error(`Descendant field "${active.definition.name}.${segment}" has incompatible declarations`)
+            }
+            const variant = descendant.variants[0]
+            if (!variant) throw new Error(`Descendant field "${active.definition.name}.${segment}" has no declaration`)
+            if (
+              variant.field.type === FieldType.Array
+              || variant.field.type === FieldType.Entity
+              || variant.field.type === FieldType.JSON
+            ) {
+              throw new Error(`Query field "${path}" cannot be used in predicates`)
+            }
+            const expression = `CASE ${descendant.variants.map(candidate => (
+              `WHEN "${active.rootAlias}".${quote('entity')} IN ` +
+              `(${candidate.leaves.map(quoteLiteral).join(', ')}) ` +
+              `THEN "${joinOwner(active, candidate.owner)}".${quote(candidate.field.name)}`
+            )).join(' ')} ELSE NULL END`
+            const result: ScalarFieldDefinition = { ...variant.field, name: path }
+            resolved.set(path, result)
+            expressions.set(path, expression)
+            return result
+          }
+          throw new Error(`Unknown field "${active.definition.name}.${segment}"`)
+        }
+        if (field.type === FieldType.Array || field.type === FieldType.JSON) {
+          throw new Error(`Query field "${path}" cannot be used in predicates`)
+        }
+        if (field.type !== FieldType.Entity) {
+          if (index !== segments.length - 1) {
+            throw new Error(`Filter path "${path}" traverses non-reference field "${segment}"`)
+          }
+          const ownerAlias = joinOwner(active, field.owner)
+          const expression = field.name === 'id'
+            ? `"${ownerAlias}".${quote('id')}`
+            : `"${ownerAlias}".${quote(field.name)}`
+          const result = (path.includes('.') ? { ...field, name: path } : field) as ScalarFieldDefinition
+          resolved.set(path, result)
+          expressions.set(path, expression)
+          return result
+        }
+        if (index >= MAX_REFERENCE_DEPTH) {
+          throw new Error(`Reference path "${path}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
+        }
+        const sourceAlias = joinOwner(active, field.owner)
+        const targetDefinition = this.#entities.entity(field.target)
+        if (!targetDefinition && field.target !== 'Entity') {
+          throw new Error(`Unknown target entity "${field.target}"`)
+        }
+        const nextRoot = this.#nextAlias('cr')
+        let nextBase: string | undefined
+        if (field.target === 'Entity') {
+          this.#consume()
+          relation += ` LEFT JOIN "Entity" "${nextRoot}" ON "${nextRoot}".${quote('id')} = ` +
+            `"${sourceAlias}".${quote(field.column)}`
+        } else {
+          nextBase = this.#nextAlias('cb')
+          this.#consume(2)
+          relation += ` LEFT JOIN "${field.target}" "${nextBase}" ` +
+            `ON "${nextBase}".${quote('id')} = "${sourceAlias}".${quote(field.column)} ` +
+            `LEFT JOIN "Entity" "${nextRoot}" ` +
+            `ON "${nextRoot}".${quote('id')} = "${nextBase}".${quote('id')}`
+        }
+        if (index === segments.length - 1) {
+          const result: ScalarFieldDefinition = {
+            ...(targetDefinition?.idFormat ? { format: targetDefinition.idFormat } : {}),
+            name: path,
+            type: FieldType.ID,
+          }
+          identities.add(path)
+          resolved.set(path, result)
+          expressions.set(path, `"${nextRoot}".${quote('id')}`)
+          return result
+        }
+        if (targetDefinition && field.target !== 'Entity') {
+          active = targetContext(this.#entities, targetDefinition, nextBase as string, nextRoot)
+        } else {
+          active = rootContext(this.#entities, nextRoot)
+        }
+      }
+      throw new Error(`Invalid filter path "${path}"`)
+    }
+    const scope: CollectionScope = {
+      condition,
+      definition: target,
+      expression: field => {
+        const expression = expressions.get(field.name)
+        if (!expression) throw new Error(`Unresolved collection field "${field.name}"`)
+        return expression
+      },
+      field: resolve,
+      filterKind: path => (identities.has(path) ? 'identity' : undefined),
+      get relation() { return relation },
+    }
+    this.#collectionScopes.set(name, scope)
+    return scope
   }
 
   /**
@@ -1211,6 +1404,7 @@ export function compilePolymorphicQuery(
     return value
   }
   const scope: QueryScope = {
+    collection: name => projection.collectionScope(name),
     definition: synthetic,
     expression: value => projection.expression(value),
     field,
@@ -1218,7 +1412,7 @@ export function compilePolymorphicQuery(
     filterKind: name => projection.filterKind(name),
   }
   const where = typeof options.where === 'string'
-    ? QueryNormalizer.normalize(synthetic, options.where, scope.filterField) ?? undefined
+    ? QueryNormalizer.normalize(synthetic, options.where, scope.filterField, scope.collection) ?? undefined
     : options.where
   const predicate = SQL.where(entities, definition.name, where, scope)
   let ordering = ''

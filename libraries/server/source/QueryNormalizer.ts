@@ -1,7 +1,7 @@
 import type { EntityDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
-import type { Filter } from './Predicate'
+import type { CollectionResolver, Filter } from './Predicate'
 import { Predicate } from './Predicate'
 import type { QueryComparison, QueryExpression, QueryLiteral } from './QueryParser'
 import { QueryParser } from './QueryParser'
@@ -18,6 +18,7 @@ export const QueryNormalizer = {
    * @param entity - Entity whose fields are referenced.
    * @param source - Query expression source.
    * @param resolve - Resolve a logical field or path to its scalar definition.
+   * @param collection - Resolve collection navigations to related-item metadata.
    * @returns The canonical filter, or null for empty source.
    * @throws {Error} When the source is invalid or references incompatible metadata.
    */
@@ -25,6 +26,7 @@ export const QueryNormalizer = {
     entity: EntityDefinition,
     source: string,
     resolve: (name: string) => ScalarFieldDefinition = name => Predicate.field(entity, name),
+    collection?: CollectionResolver,
   ): Filter | null {
     const result = QueryParser.parse(source)
     if (!result.expression) {
@@ -32,7 +34,7 @@ export const QueryNormalizer = {
       const [first] = result.diagnostics
       throw new Error(`Invalid where query at ${first?.start ?? 0}: ${first?.message ?? 'Invalid syntax'}`)
     }
-    return expression(entity, result.expression, resolve)
+    return expression(entity, result.expression, resolve, collection)
   },
 }
 
@@ -41,19 +43,30 @@ export const QueryNormalizer = {
  * @param entity - Entity whose fields are referenced.
  * @param node - Syntax expression.
  * @param resolve - Resolve a logical field or path to its scalar definition.
+ * @param collection - Resolve collection navigations to related-item metadata.
  * @returns The canonical filter.
  */
 function expression(
   entity: EntityDefinition,
   node: QueryExpression,
   resolve: (name: string) => ScalarFieldDefinition,
+  collection?: CollectionResolver,
 ): Filter {
-  if (node.kind === 'group') return expression(entity, node.expression, resolve)
+  if (node.kind === 'group') return expression(entity, node.expression, resolve, collection)
   if (node.kind === 'logical') {
     return Predicate.logical(
       node.operator,
-      node.filters.map(filter => expression(entity, filter, resolve)),
+      node.filters.map(filter => expression(entity, filter, resolve, collection)),
     )
+  }
+  if (node.kind === 'collection') {
+    const scope = collection?.(node.field)
+    if (!scope) throw new Error(`Unknown collection navigation "${node.field}"`)
+    return {
+      field: node.field,
+      filters: node.filters.map(filter => expression(scope.definition, filter, scope.field)),
+      operator: node.operator,
+    }
   }
   return comparison(entity, node, resolve)
 }

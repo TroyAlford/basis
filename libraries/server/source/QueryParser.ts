@@ -59,6 +59,22 @@ export interface QueryLogical {
   readonly start: number,
 }
 
+/** A transient collection quantifier expression. */
+export interface QueryCollection {
+  /** Exclusive source offset. */
+  readonly end: number,
+  /** Root collection navigation name. */
+  readonly field: string,
+  /** Inner expressions relative to the collection item. */
+  readonly filters: readonly QueryExpression[],
+  /** Syntax node discriminator. */
+  readonly kind: 'collection',
+  /** Quantifier operator identity. */
+  readonly operator: Operator.Collection,
+  /** Inclusive source offset. */
+  readonly start: number,
+}
+
 /** An explicitly parenthesized expression, including its delimiters. */
 export interface QueryGroup {
   /** Exclusive source offset. */
@@ -72,7 +88,7 @@ export interface QueryGroup {
 }
 
 /** A non-executable query syntax expression. */
-export type QueryExpression = QueryComparison | QueryLogical | QueryGroup
+export type QueryExpression = QueryComparison | QueryLogical | QueryCollection | QueryGroup
 
 /** The bounds parsed from a bracketed range. */
 interface ParsedBetween {
@@ -222,11 +238,32 @@ class Parser {
     while (this.#matchOperator(Operator.Logical.Not)) negations += 1
     const token = this.#expect(TokenType.Operator, 'Expected an operator after field')
     if (!token || !token.operator) return null
-    const operator = token.operator as Operator.Comparison | Operator.Logical
+    const operator = token.operator as Operator.Collection | Operator.Comparison | Operator.Logical
 
     if (operator === Operator.Logical.And || operator === Operator.Logical.Or || operator === Operator.Logical.Not) {
       this.#error(`Unexpected logical operator ${JSON.stringify(token.raw)}`, token)
       return null
+    }
+
+    if (Object.values(Operator.Collection).includes(operator as Operator.Collection)) {
+      const opening = this.#expect(TokenType.LeftParen, 'Expected "(" after collection operator')
+      if (!opening) return null
+      const inner = this.#parseOr()
+      if (!inner) return null
+      const closing = this.#expect(TokenType.RightParen, 'Expected ")" after collection expression')
+      if (!closing) return null
+      let expression: QueryExpression = {
+        end: closing.end,
+        field: field.value as string,
+        filters: [inner],
+        kind: 'collection',
+        operator: operator as Operator.Collection,
+        start: field.start,
+      }
+      for (let count = 0; count < negations; count += 1) {
+        expression = logical(Operator.Logical.Not, [expression], expression.start, expression.end)
+      }
+      return expression
     }
 
     let end: number
@@ -250,7 +287,7 @@ class Parser {
       end,
       field: field.value as string,
       kind: 'comparison',
-      operator,
+      operator: operator as Operator.Comparison,
       start: field.start,
       values,
     }

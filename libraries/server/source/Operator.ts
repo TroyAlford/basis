@@ -29,6 +29,16 @@ export namespace Operator {
     NotEqual = '$ne',
   }
 
+  /** Collection quantifier operators. */
+  export enum Collection {
+    /** Every related item must match. */
+    All = '$all',
+    /** At least one related item must match. */
+    Any = '$any',
+    /** No related item may match. */
+    None = '$none',
+  }
+
   /** Logical expression operators. */
   export enum Logical {
     /** All operands must match. */

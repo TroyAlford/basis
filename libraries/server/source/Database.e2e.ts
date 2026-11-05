@@ -1641,6 +1641,150 @@ VALUES (${petOne},
     }])
   }, 120_000)
 
+  isolatedTest('evaluates collection quantifiers against real inverse and relationship edges', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'title', type: 'String' },
+            {
+              cardinality: 'Many',
+              field: 'pets',
+              inverse: 'owner',
+              target: 'Pet',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Person',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'title', type: 'String' },
+            { field: 'owner', inverse: 'pets', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Campaign' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'person', inverse: 'campaigns', target: 'Person' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    const ada = '00000000-0000-4000-8000-000000000001'
+    const grace = '00000000-0000-4000-8000-000000000002'
+    const linus = '00000000-0000-4000-8000-000000000003'
+    const rex = '00000000-0000-4000-8000-000000000011'
+    const fido = '00000000-0000-4000-8000-000000000012'
+    const rexTwo = '00000000-0000-4000-8000-000000000013'
+    const one = '00000000-0000-4000-8000-000000000021'
+    const two = '00000000-0000-4000-8000-000000000022'
+    const three = '00000000-0000-4000-8000-000000000023'
+    const four = '00000000-0000-4000-8000-000000000024'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${ada},
+        'Ada',
+        'Person'),
+        (${grace},
+        'Grace',
+        'Person'),
+        (${linus},
+        'Linus',
+        'Person'),
+        (${rex},
+        'Rex',
+        'Pet'),
+        (${fido},
+        'Fido',
+        'Pet'),
+        (${rexTwo},
+        'Rex Two',
+        'Pet'),
+        (${one},
+        'Campaign One',
+        'Campaign'),
+        (${two},
+        'Campaign Two',
+        'Campaign'),
+        (${three},
+        'Campaign Three',
+        'Campaign'),
+        (${four},
+        'Campaign Four',
+        'Campaign')
+    `
+    await database.sql`
+      INSERT INTO "Person" ("id", "title")
+      VALUES (${ada}, 'Ada'), (${grace}, 'Grace'), (${linus}, 'Linus')
+    `
+    await database.sql`
+      INSERT INTO "Pet" ("id", "title", "owner.id")
+      VALUES (${rex}, 'Rex', ${ada}), (${fido}, 'Fido', ${ada}), (${rexTwo}, 'Rex', ${grace})
+    `
+    await database.sql`
+      INSERT INTO "Campaign" ("id")
+      VALUES (${one}), (${two}), (${three}), (${four})
+    `
+    await database.sql`
+      INSERT INTO "Membership" ("person.id", "campaign.id", "role")
+      VALUES (${ada},
+        ${one},
+        'GM'),
+        (${grace},
+        ${one},
+        'Player'),
+        (${linus},
+        ${one},
+        'Player'),
+        (${linus},
+        ${two},
+        'GM'),
+        (${grace},
+        ${three},
+        'Player')
+    `
+
+    const ids = async (entity: string, where: string): Promise<unknown[]> => (
+      await queryEntity<{ id: string }>(database.sql, entities, entity, {
+        fields: ['id'],
+        orderBy: 'id',
+        where,
+      })
+    ).map(row => row.id)
+
+    expect(await ids('Person', "pets $any (title = 'Rex')")).toEqual([ada, grace])
+    expect(await ids('Person', "pets $none (title = 'Rex')")).toEqual([linus])
+    expect(await ids('Person', "pets $all (title = 'Rex')")).toEqual([grace, linus])
+    expect(await ids('Person', "pets $any (owner.title = 'Ada')")).toEqual([ada])
+    expect(await ids('Person', "pets $any (owner.title = 'Missing')")).toEqual([])
+    expect(await ids('Campaign', "members $any (membership.role = 'GM')")).toEqual([one, two])
+    expect(await ids('Campaign', "members $none (membership.role = 'GM')")).toEqual([three, four])
+    expect(await ids('Campaign', "members $all (membership.role = 'GM')")).toEqual([two, four])
+    expect(await ids('Campaign', "members $any (title = 'Ada')")).toEqual([one])
+
+    const projected = await queryEntity<{ id: string, pets: { total: number } }>(
+      database.sql,
+      entities,
+      'Person',
+      {
+        collections: { pets: { limit: 1 } },
+        fields: ['id', 'pets'],
+        orderBy: 'id',
+        where: "pets $any (title = 'Rex')",
+      },
+    )
+    expect(projected.map(row => row.id)).toEqual([ada, grace])
+    expect(projected[0]?.pets.total).toBe(2)
+  }, 120_000)
+
   isolatedTest('rejects index name collisions on fresh tables', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [

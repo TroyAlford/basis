@@ -1,7 +1,7 @@
 import type { EntityDefinition, EntityDefinitions, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
-import type { ComparisonFilter, Filter, LogicalFilter } from './Predicate'
+import type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './Predicate'
 import { Predicate } from './Predicate'
 import { normalizeScalar } from './ScalarNormalization'
 import { SortDirection } from './SortDirection'
@@ -50,8 +50,26 @@ export interface SQLPredicate {
   readonly values: readonly unknown[],
 }
 
+/** Scoped relation used to evaluate one collection quantifier. */
+export interface CollectionScope {
+  /** Correlated join condition against the root occurrence. */
+  readonly condition: string,
+  /** Related item entity definition. */
+  readonly definition: EntityDefinition,
+  /** Render one inner field expression. */
+  readonly expression: (field: ScalarFieldDefinition) => string,
+  /** Resolve one inner field by name. */
+  readonly field: (name: string) => ScalarFieldDefinition,
+  /** Classify terminal reference identities inside the collection. */
+  readonly filterKind?: (name: string) => 'identity' | undefined,
+  /** SQL relation containing the related items. */
+  readonly relation: string,
+}
+
 /** Optional effective-field scope for polymorphic entity queries. */
 export interface QueryScope {
+  /** Resolve a collection navigation for quantifier compilation. */
+  readonly collection?: (name: string) => CollectionScope | undefined,
   /** Effective entity metadata used for validation. */
   readonly definition: EntityDefinition,
   /** Render a field expression with physical table qualification. */
@@ -191,7 +209,7 @@ function whereClause(
   const resolve = scope?.filterField ?? (name => (
     scope ? scope.field(name) : scalarField(entity, name)
   ))
-  const filter = Predicate.normalize(entity, where, resolve)
+  const filter = Predicate.normalize(entity, where, resolve, scope?.collection)
   if (!filter) return { sql: '', values: [] }
 
   const values: BoundScalar[] = []
@@ -200,13 +218,37 @@ function whereClause(
     return `$${values.length}`
   }
 
-  const compile = (node: Filter): string => {
+  const base: QueryScope = scope ?? {
+    definition: entity,
+    expression: field => quoteIdentifier(field.name),
+    field: name => scalarField(entity, name),
+  }
+  const compile = (node: Filter, active: QueryScope): string => {
+    if (
+      Object.values(Operator.Collection).includes(node.operator as Operator.Collection)
+      && 'field' in node
+    ) {
+      const collection = active.collection?.(node.field)
+      if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
+      const collectionFilter = node as CollectionFilter
+      const inner = collectionFilter.filters.map(childFilter => compile(childFilter, collection)).join(' AND ')
+      const condition = `${collection.condition} AND (${inner})`
+      if (collectionFilter.operator === Operator.Collection.Any) {
+        return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${condition})`
+      }
+      if (collectionFilter.operator === Operator.Collection.None) {
+        return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${condition})`
+      }
+      return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${collection.condition} ` +
+        `AND NOT COALESCE((${inner}), FALSE))`
+    }
+
     const comparison = comparisonDefinitions.get(node.operator as Operator.Comparison)
     if (comparison) {
       const comparisonFilter = node as ComparisonFilter
-      const field = resolve(comparisonFilter.field)
+      const field = (active.filterField ?? active.field)(comparisonFilter.field)
       if (
-        scope?.filterKind?.(comparisonFilter.field) === 'identity'
+        active.filterKind?.(comparisonFilter.field) === 'identity'
         && comparisonFilter.operator !== Operator.Comparison.Equal
       ) {
         throw new Error(
@@ -220,7 +262,7 @@ function whereClause(
         )
       }
       const operand = comparison.validateOperand(field, comparisonFilter.value)
-      return comparison.build(scope ? scope.expression(field) : quoteIdentifier(field.name), operand, bind)
+      return comparison.build(active.expression(field), operand, bind)
     }
 
     const logical = logicalDefinitions.get(node.operator as Operator.Logical)
@@ -236,10 +278,10 @@ function whereClause(
         `Query operator "${logicalFilter.operator}" requires at most ${logical.maximumOperands} operand(s)`,
       )
     }
-    return logical.build(logicalFilter.filters.map(compile))
+    return logical.build(logicalFilter.filters.map(childNode => compile(childNode, active)))
   }
 
-  return { sql: `WHERE ${compile(filter)}`, values }
+  return { sql: `WHERE ${compile(filter, base)}`, values }
 }
 
 /**

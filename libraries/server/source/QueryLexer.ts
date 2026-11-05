@@ -36,7 +36,7 @@ export interface Token {
   /** Exclusive source offset. */
   readonly end: number,
   /** Resolved operator identity for operator tokens. */
-  readonly operator?: QueryOperator.Comparison | QueryOperator.Logical,
+  readonly operator?: QueryOperator.Collection | QueryOperator.Comparison | QueryOperator.Logical,
   /** Original source text for the token. */
   readonly raw: string,
   /** Inclusive source offset. */
@@ -66,8 +66,9 @@ export interface LexResult {
 }
 
 /** Recognized operator spellings, resolved once from the public enums. */
-const OPERATORS = new Map<string, QueryOperator.Comparison | QueryOperator.Logical>([
+const OPERATORS = new Map<string, QueryOperator.Collection | QueryOperator.Comparison | QueryOperator.Logical>([
   ...Object.values(QueryOperator.Comparison).map(operator => [operator, operator] as const),
+  ...Object.values(QueryOperator.Collection).map(operator => [operator, operator] as const),
   ...Object.values(QueryOperator.Logical).map(operator => [operator, operator] as const),
   ['=', QueryOperator.Comparison.Equal],
   ['>', QueryOperator.Comparison.GreaterThan],

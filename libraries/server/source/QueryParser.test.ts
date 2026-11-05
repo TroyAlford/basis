@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { Operator } from './Operator'
 import { TokenType } from './QueryLexer'
-import type { QueryComparison, QueryExpression, QueryGroup, QueryLiteral, QueryLogical } from './QueryParser'
+import type { QueryCollection, QueryComparison, QueryExpression, QueryGroup, QueryLiteral, QueryLogical } from './QueryParser'
 import { QueryParser } from './QueryParser'
 
 type BareLiteral = Omit<QueryLiteral, 'end' | 'start'>
@@ -24,7 +24,14 @@ interface BareGroup {
   readonly kind: 'group',
 }
 
-type BareExpression = BareComparison | BareGroup | BareLogical
+interface BareCollection {
+  readonly field: string,
+  readonly filters: readonly BareExpression[],
+  readonly kind: 'collection',
+  readonly operator: Operator.Collection,
+}
+
+type BareExpression = BareCollection | BareComparison | BareGroup | BareLogical
 
 const number = (raw: string): BareLiteral => ({ kind: 'number', raw, value: raw })
 const string = (raw: string, value: string): BareLiteral => ({ kind: 'string', raw, value })
@@ -43,6 +50,22 @@ const logical = (
 ): BareLogical => ({ filters, kind: 'logical', operator })
 
 const group = (expression: BareExpression): BareGroup => ({ expression, kind: 'group' })
+
+const collection = (
+  field: string,
+  operator: Operator.Collection,
+  filters: readonly BareExpression[],
+): BareCollection => ({ field, filters, kind: 'collection', operator })
+
+/**
+ * Require a parsed collection node.
+ * @param expression - Parsed expression.
+ * @returns The collection node.
+ */
+function collectionNode(expression: QueryExpression | null): QueryCollection {
+  if (expression?.kind !== 'collection') throw new Error('Expected collection expression')
+  return expression
+}
 
 /**
  * Require a parsed comparison node.
@@ -174,6 +197,28 @@ describe('QueryParser', () => {
           comparison('score', Operator.Comparison.Equal, [number('2')]),
         ])),
       ]))
+  })
+
+  test('parses collection quantifiers as scoped expression groups', () => {
+    const source = "pets $any (title = 'Ada' $and owner.title = 'Grace')"
+    const parsed = collectionNode(QueryParser.parse(source).expression)
+    expect(slice(source, parsed)).toBe(source)
+    expect(withoutSpans(parsed)).toEqual(collection('pets', Operator.Collection.Any, [
+      logical(Operator.Logical.And, [
+        comparison('title', Operator.Comparison.Equal, [string("'Ada'", 'Ada')]),
+        comparison('owner.title', Operator.Comparison.Equal, [string("'Grace'", 'Grace')]),
+      ]),
+    ]))
+    expect(withoutSpans(QueryParser.parse("members $all (membership.role = 'GM')").expression))
+      .toEqual(collection('members', Operator.Collection.All, [
+        comparison('membership.role', Operator.Comparison.Equal, [string("'GM'", 'GM')]),
+      ]))
+    expect(withoutSpans(QueryParser.parse("pets !$any (title = 'Ada')").expression)).toEqual(logical(
+      Operator.Logical.Not,
+      [collection('pets', Operator.Collection.Any, [
+        comparison('title', Operator.Comparison.Equal, [string("'Ada'", 'Ada')]),
+      ])],
+    ))
   })
 
   test('preserves literal kind, raw spelling, and dotted field names', () => {

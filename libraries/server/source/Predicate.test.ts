@@ -36,7 +36,9 @@ function normalize(input: Readonly<Record<string, unknown>>): Filter | null {
  * @returns The logical filter.
  */
 function logical(filter: Filter | null): LogicalFilter {
-  if (!filter || !('filters' in filter)) throw new Error('expected logical filter')
+  if (!filter || !('filters' in filter) || 'field' in filter) {
+    throw new Error('expected logical filter')
+  }
   return filter
 }
 
