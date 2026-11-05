@@ -203,12 +203,17 @@ describe('Query contract', () => {
       },
       {
         entity: 'Pet',
-        source: "tags $has 'urgent'",
-        structured: { field: 'tags', operator: '$has', value: 'urgent' },
+        source: "tags $contains 'urgent'",
+        structured: { field: 'tags', operator: Operator.Comparison.Contains, value: 'urgent' },
       },
       {
         entity: 'Pet',
-        source: "payload $contains '{\"kind\":\"note\"}'",
+        source: "tags $overlaps ['urgent', 'important']",
+        structured: { field: 'tags', operator: '$overlaps', value: ['urgent', 'important'] },
+      },
+      {
+        entity: 'Pet',
+        source: 'payload $contains {kind: "note"}',
         structured: { field: 'payload', operator: Operator.Comparison.Contains, value: { kind: 'note' } },
       },
       {

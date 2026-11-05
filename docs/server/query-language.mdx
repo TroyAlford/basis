@@ -269,24 +269,29 @@ Inner filters are relative to the collection item and may use the item’s scala
 
 ## Stage 19 — native Array and opaque JSON
 
-Array and JSON predicates are not implemented in the current scalar grammar. The accepted end-state is type-specific and keeps JSON opaque:
+Array and JSON predicates are not implemented in the current scalar grammar. The accepted end-state is type-directed by the canonical field type and keeps JSON opaque. All forms use the same comparison node `{ field, operator, value }`; there is no separate `values` node for arrays.
 
 ```ts
 const arrayOperators = [
   {
-    meaning: 'one array member',
-    structured: { field: 'tags', operator: '$has', value: 'urgent' },
-    source: "tags $has 'urgent'",
+    meaning: 'contains one element',
+    structured: { field: 'tags', operator: '$contains', value: 'urgent' },
+    source: "tags $contains 'urgent'",
   },
   {
-    meaning: 'any of several members',
-    structured: { field: 'tags', operator: '$hasAny', values: ['urgent', 'pinned'] },
-    source: "tags $hasAny ['urgent', 'pinned']",
+    meaning: 'contains every listed element',
+    structured: { field: 'tags', operator: '$contains', value: ['urgent', 'important'] },
+    source: "tags $contains ['urgent', 'important']",
   },
   {
-    meaning: 'all of several members',
-    structured: { field: 'tags', operator: '$hasAll', values: ['urgent', 'reviewed'] },
-    source: "tags $hasAll ['urgent', 'reviewed']",
+    meaning: 'overlaps at least one listed element',
+    structured: { field: 'tags', operator: '$overlaps', value: ['urgent', 'important'] },
+    source: "tags $overlaps ['urgent', 'important']",
+  },
+  {
+    meaning: 'singleton overlaps convenience',
+    structured: { field: 'tags', operator: '$overlaps', value: 'urgent' },
+    source: "tags $overlaps 'urgent'",
   },
 ]
 
@@ -294,32 +299,37 @@ const jsonOperators = [
   {
     meaning: 'object containment',
     structured: { field: 'payload', operator: '$contains', value: { kind: 'note' } },
-    source: "payload $contains '{\"kind\":\"note\"}'",
+    source: 'payload $contains {kind: "note"}',
+  },
+  {
+    meaning: 'nested object containment',
+    structured: { field: 'payload', operator: '$contains', value: { meta: { active: true } } },
+    source: 'payload $contains {meta: {active: true}}',
   },
   {
     meaning: 'array containment',
     structured: { field: 'payload', operator: '$contains', value: ['a', 'b'] },
-    source: "payload $contains '[\"a\",\"b\"]'",
-  },
-  {
-    meaning: 'JSON string containment',
-    structured: { field: 'payload', operator: '$contains', value: 'note' },
-    source: "payload $contains '\"note\"'",
-  },
-  {
-    meaning: 'JSON null containment',
-    structured: { field: 'payload', operator: '$contains', value: null },
-    source: 'payload $contains null',
+    source: "payload $contains ['a', 'b']",
   },
 ]
 ```
 
-- Array membership uses `$has` with exactly one `value`; `$hasAny` and `$hasAll` use a non-empty `values` array of scalar values. There is no `values` form for `$has` and no `value` form for `$hasAny`/`$hasAll`.
-- `$has` and `$hasAny` are false for an empty array. `$hasAll` is false when the requested value list is non-empty and the array does not contain every requested value. Null array elements are not treated as a match for a scalar operand.
-- String `$contains` remains substring matching. Array membership is expressed only with `$has*`; it is not overloaded onto `$contains`.
-- JSON uses the exact comparison node `{ field, operator: '$contains', value }`, never `values`. Structured operands are JSON-compatible objects, arrays, strings, numbers, booleans, or JSON null. Source operands are quoted JSON text; a JSON string value uses quoted JSON string text as shown above.
-- JSON null and an absent key are distinct. `$contains` performs structural containment without path traversal or schema validation; JSON remains opaque and is never treated as an entity graph.
-- JSON and Array fields remain non-null columns; a missing value is SQL `NULL` only where the canonical field contract allows it. Empty arrays and empty JSON objects are values, not missing values.
+Array semantics are type-directed:
+
+- `$contains` on `Array<T>` means PostgreSQL array containment `@>`. A scalar operand is normalized to a one-element array; an array operand requires every element to be contained.
+- `$overlaps` on `Array<T>` means PostgreSQL array overlap `&&`. A scalar operand is normalized to a one-element array; an array operand requires at least one element to overlap.
+- A scalar operand is valid for both array operators. The operand type must match the canonical array element type, including ID format and numeric finiteness.
+- `$contains []` is true for every non-null array (the empty set is contained); `$overlaps []` is false. Array columns remain non-null; empty arrays are values, not missing values.
+- Null operands are invalid for array membership. Stored null array elements do not match a non-null operand and cannot be targeted by this contract’s array predicates.
+- String `$contains` remains case-insensitive substring matching. JSON `$contains` means structural containment `jsonb @>`. The operator vocabulary is deliberately type-directed, not a second operator registry or a second executor.
+
+JSON source literals are first-class:
+
+- The lexer/parser for stage 19 must produce literal AST nodes for objects, arrays, strings, numbers, booleans, and null without evaluating JavaScript.
+- Object keys may be quoted or bare identifiers. Nested objects and arrays are allowed. Computed keys, spreads, functions, and arbitrary expressions are rejected.
+- `payload $contains {kind: "note"}` and `payload $contains {meta: {active: true}}` parse without requiring a serialized JSON string. A JSON string operand uses an ordinary quoted literal; JSON null uses `null`.
+- Structured and source operands normalize to the same comparison node and the same field-type-aware predicate. JSON null and an absent key are distinct; `$contains` performs structural containment without path traversal, schema validation, or treating JSON as an entity graph.
+- JSON fields remain non-null columns. Empty objects and empty arrays are values, not missing values; no JSON empty operator is introduced.
 
 ## Ordering, pagination, and exclusions
 
