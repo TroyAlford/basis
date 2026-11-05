@@ -207,7 +207,7 @@ const referencePaths = [
 - The path must be unambiguous across abstract/descendant targets. A field with incompatible target declarations is rejected rather than guessed per row.
 - A missing or null reference behaves as `NULL` for the terminal scalar. Non-null comparisons are false; `$eq null` matches absent/null, and `$ne null` matches present non-null values.
 - `$empty` remains string-only and treats a null/missing reference as empty.
-- The path uses the existing single-statement reference joins and finite work budget. Runtime row identity is never inspected to detect cycles.
+- The path uses the existing single-statement reference joins and finite work budget, including the same eight-reference-hop limit as projection. Runtime row identity is never inspected to detect cycles.
 - Sorting by a dotted reference path remains excluded in stages 16–20; `orderBy` continues to accept only root/effective scalar fields.
 
 ## Stage 18 — collection predicates

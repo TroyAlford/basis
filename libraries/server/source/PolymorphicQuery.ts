@@ -182,6 +182,8 @@ class QueryProjection {
   readonly #filterExpressions = new Map<string, string>()
   /** Filter-only resolved fields keyed by logical path. */
   readonly #filterFields = new Map<string, ScalarFieldDefinition>()
+  /** Stable filter/projection reference contexts keyed by logical path. */
+  readonly #filterContexts = new Map<string, EntityContext>()
   /** Filter paths that resolve to reference identities. */
   readonly #filterIdentities = new Set<string>()
   /** Graph work consumed while expanding the projection. */
@@ -307,12 +309,16 @@ class QueryProjection {
    * @param context - Occurrence where traversal starts.
    * @param segments - Remaining path segments.
    * @param fullName - Full logical filter path.
+   * @param contextKey - Stable logical prefix used for shared joins.
+   * @param depth - Number of reference hops already traversed.
    * @returns The SQL expression, scalar field, and identity classification.
    */
   #resolveFilterPath(
     context: EntityContext,
     segments: readonly string[],
     fullName: string,
+    contextKey = '',
+    depth = 0,
   ): { expression: string, field: ScalarFieldDefinition, identity: boolean } {
     const [segment] = segments
     if (segment === undefined) throw new Error(`Invalid filter path "${fullName}"`)
@@ -321,10 +327,19 @@ class QueryProjection {
     if (field) {
       if (rest.length === 0) {
         if (field.type === FieldType.Entity) {
-          const target = this.#reference(this.#node(context, []), field)
+          if (depth >= MAX_REFERENCE_DEPTH) {
+            throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
+          }
+          const target = this.#entities.entity(field.target)
+          const sourceAlias = this.#ownerAlias(context, field.owner, false)
+          const targetOccurrence = this.#filterTarget(field, sourceAlias, contextKey)
           return {
-            expression: `${target.context.rootAlias}.${quote('id')}`,
-            field: { name: fullName, type: FieldType.ID },
+            expression: `${targetOccurrence.rootAlias}.${quote('id')}`,
+            field: {
+              ...(target?.idFormat ? { format: target.idFormat } : {}),
+              name: fullName,
+              type: FieldType.ID,
+            },
             identity: true,
           }
         }
@@ -347,8 +362,13 @@ class QueryProjection {
       if (field.type !== FieldType.Entity) {
         throw new Error(`Filter path "${fullName}" traverses non-reference field "${segment}"`)
       }
-      const target = this.#reference(this.#node(context, []), field)
-      return this.#resolveFilterPath(target.context, rest, fullName)
+      if (depth >= MAX_REFERENCE_DEPTH) {
+        throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
+      }
+      const childKey = contextKey === '' ? segment : `${contextKey}.${segment}`
+      const sourceAlias = this.#ownerAlias(context, field.owner, false)
+      const targetOccurrence = this.#filterTarget(field, sourceAlias, childKey)
+      return this.#resolveFilterPath(targetOccurrence, rest, fullName, childKey, depth + 1)
     }
 
     const descendant = context.descendants.get(segment)
@@ -358,20 +378,26 @@ class QueryProjection {
     }
     if (rest.length === 0) {
       if (descendant.type === FieldType.Entity) {
+        if (depth >= MAX_REFERENCE_DEPTH) {
+          throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
+        }
         const branches = descendant.variants.map(variant => {
           const owner = this.#ownerAlias(context, variant.owner, true)
-          const target = this.#target(
-            variant.field,
-            [segment],
-            owner,
-          )
+          const variantKey = `${contextKey}.${segment}#${variant.owner}`
+          const targetOccurrence = this.#filterTarget(variant.field, owner, variantKey)
           const leaves = variant.leaves.map(quoteLiteral).join(', ')
           return `WHEN ${this.#ensureRoot(context)}.${quote('entity')} IN (${leaves}) ` +
-            `THEN ${target.context.rootAlias}.${quote('id')}`
+            `THEN ${targetOccurrence.rootAlias}.${quote('id')}`
         })
+        const targetField = descendant.variants[0]?.field
+        const target = targetField?.type === FieldType.Entity ? this.#entities.entity(targetField.target) : undefined
         return {
           expression: `CASE ${branches.join(' ')} ELSE NULL END`,
-          field: { name: fullName, type: FieldType.ID },
+          field: {
+            ...(target?.idFormat ? { format: target.idFormat } : {}),
+            name: fullName,
+            type: FieldType.ID,
+          },
           identity: true,
         }
       }
@@ -396,17 +422,17 @@ class QueryProjection {
     if (descendant.type !== FieldType.Entity) {
       throw new Error(`Filter path "${fullName}" traverses non-reference field "${segment}"`)
     }
+    if (depth >= MAX_REFERENCE_DEPTH) {
+      throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
+    }
     const root = this.#ensureRoot(context)
     let resolvedField: ScalarFieldDefinition | undefined
     let resolvedIdentity = false
-    const branches = descendant.variants.map((variant, index) => {
+    const branches = descendant.variants.map(variant => {
       const owner = this.#ownerAlias(context, variant.owner, true)
-      const target = this.#target(
-        variant.field,
-        [`${segment}__v${index}`],
-        owner,
-      )
-      const resolved = this.#resolveFilterPath(target.context, rest, fullName)
+      const variantKey = `${contextKey}.${segment}#${variant.owner}`
+      const targetOccurrence = this.#filterTarget(variant.field, owner, variantKey)
+      const resolved = this.#resolveFilterPath(targetOccurrence, rest, fullName, variantKey, depth + 1)
       resolvedIdentity = resolved.identity
       if (!resolvedField) resolvedField = resolved.field
       else if (
@@ -454,7 +480,7 @@ class QueryProjection {
     if (segments.some(segment => segment.length === 0)) {
       throw new Error(`Invalid filter path "${name}"`)
     }
-    const resolved = this.#resolveFilterPath(this.root, segments, name)
+    const resolved = this.#resolveFilterPath(this.root, segments, name, '', 0)
     this.#filterExpressions.set(name, resolved.expression)
     this.#filterFields.set(name, resolved.field)
     if (resolved.identity) this.#filterIdentities.add(name)
@@ -699,32 +725,72 @@ class QueryProjection {
     sourceAlias: string,
   ): ProjectionNode {
     if (field.type !== FieldType.Entity) throw new Error(`Field "${field.name}" is not a reference`)
+    const key = path.some(segment => /__v\d+$/u.test(segment))
+      ? path.join('.')
+      : this.#filterPathKey(path)
+    let context = this.#filterContexts.get(key)
+    if (!context) {
+      context = this.#joinTarget(field, sourceAlias)
+      this.#filterContexts.set(key, context)
+    }
+    const child = this.#node(context, path)
+    this.#identity(child)
+    return child
+  }
+
+  /**
+   * Join one reference target without creating hydratable identity columns.
+   * @param field - Effective reference field.
+   * @param sourceAlias - Source table alias containing the reference column.
+   * @returns The target occurrence.
+   */
+  #joinTarget(field: EffectiveFieldDefinition, sourceAlias: string): EntityContext {
+    if (field.type !== FieldType.Entity) throw new Error(`Field "${field.name}" is not a reference`)
     this.#consume()
-    let context: EntityContext
     if (field.target === 'Entity') {
       const rootAlias = this.#nextAlias('r')
       this.joins.push(
         `LEFT JOIN "Entity" "${rootAlias}" ON ` +
         `"${rootAlias}"."id" = ${sourceAlias}.${quote(field.column)}`,
       )
-      context = rootContext(this.#entities, rootAlias)
-    } else {
-      const target = this.#entities.entity(field.target)
-      if (!target) throw new Error(`Unknown target entity "${field.target}"`)
-      const baseAlias = this.#nextAlias('b')
-      const rootAlias = this.#nextAlias('r')
-      this.joins.push(
-        `LEFT JOIN "${target.name}" "${baseAlias}" ON ` +
-        `"${baseAlias}"."id" = ${sourceAlias}.${quote(field.column)}`,
-      )
-      this.joins.push(
-        `LEFT JOIN "Entity" "${rootAlias}" ON "${rootAlias}"."id" = "${baseAlias}"."id"`,
-      )
-      context = targetContext(this.#entities, target, baseAlias, rootAlias)
+      return rootContext(this.#entities, rootAlias)
     }
-    const child = this.#node(context, path)
-    this.#identity(child)
-    return child
+    const target = this.#entities.entity(field.target)
+    if (!target) throw new Error(`Unknown target entity "${field.target}"`)
+    const baseAlias = this.#nextAlias('b')
+    const rootAlias = this.#nextAlias('r')
+    this.joins.push(
+      `LEFT JOIN "${target.name}" "${baseAlias}" ON ` +
+      `"${baseAlias}"."id" = ${sourceAlias}.${quote(field.column)}`,
+    )
+    this.joins.push(
+      `LEFT JOIN "Entity" "${rootAlias}" ON "${rootAlias}"."id" = "${baseAlias}"."id"`,
+    )
+    return targetContext(this.#entities, target, baseAlias, rootAlias)
+  }
+
+  /**
+   * Resolve or create a filter-only reference context.
+   * @param field - Effective reference field.
+   * @param sourceAlias - Source table alias.
+   * @param key - Stable logical prefix key.
+   * @returns The target occurrence.
+   */
+  #filterTarget(field: EffectiveFieldDefinition, sourceAlias: string, key: string): EntityContext {
+    const cached = this.#filterContexts.get(key)
+    if (cached) return cached
+    const context = this.#joinTarget(field, sourceAlias)
+    this.#filterContexts.set(key, context)
+    return context
+  }
+
+  /**
+   * Build a stable key for one logical reference path.
+   * @param path - Internal or logical path segments.
+   * @returns Dotted logical path without variant suffixes.
+   */
+  #filterPathKey(path: readonly string[]): string {
+    return path.map(segment => segment.replace(/__v\d+$/u, '')).join('.')
   }
 
   /**

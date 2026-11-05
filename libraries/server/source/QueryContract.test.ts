@@ -265,6 +265,66 @@ describe('Query contract', () => {
     })).toThrow('reference identity')
   })
 
+  test('shares filter joins without projecting filter-only identities', () => {
+    const filterOnly = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: {
+        filters: [
+          { field: 'owner.name', operator: Operator.Comparison.Equal, value: 'Ada' },
+          { field: 'owner.permissions', operator: Operator.Comparison.Equal, value: 'admin' },
+        ],
+        operator: Operator.Logical.And,
+      },
+    })
+    expect(filterOnly.sql).not.toContain('owner__id')
+    expect(filterOnly.sql.match(/LEFT JOIN "User"/g)).toHaveLength(1)
+    expect(filterOnly.sql.match(/LEFT JOIN "SystemUser"/g)).toHaveLength(1)
+
+    const combined = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id', 'owner'],
+      where: { 'owner.name': 'Ada' },
+    })
+    expect(combined.sql.match(/LEFT JOIN "User"/g)).toHaveLength(1)
+    expect(combined.sql.match(/LEFT JOIN "Entity"/g)).toHaveLength(1)
+    expect(combined.sql).toContain('owner__id')
+  })
+
+  test('enforces reference depth and target identity format in filters', () => {
+    const treeDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+          { field: 'parent', target: 'TreeNode', type: 'Entity' },
+        ],
+        name: 'TreeNode',
+      }],
+    }))
+    const eight = `${Array.from({ length: 8 }, () => 'parent').join('.')}.label`
+    const nine = `${Array.from({ length: 9 }, () => 'parent').join('.')}.label`
+    expect(() => compileEntityQuery(treeDefinitions, 'TreeNode', {
+      fields: ['id'],
+      where: `${eight} = 'x'`,
+    })).not.toThrow()
+    expect(() => compileEntityQuery(treeDefinitions, 'TreeNode', {
+      fields: ['id'],
+      where: `${nine} = 'x'`,
+    })).toThrow('maximum depth')
+    expect(() => compileEntityQuery(treeDefinitions, 'TreeNode', {
+      fields: ['id'],
+      where: { [nine]: 'x' },
+    })).toThrow('maximum depth')
+
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { owner: '9223372036854775807' },
+    })).toThrow('not a valid id value')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'owner = \'9223372036854775807\'',
+    })).toThrow('not a valid id value')
+  })
+
   test('rejects deferred collection, Array, JSON and sort forms explicitly', () => {
     const deferred = [
       {
