@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { EntityDefinitions } from './EntityDefinitions'
+import { EntityDefinitions, FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
-import type { ComparisonFilter, Filter, LogicalFilter } from './Predicate'
+import type { CollectionFilter, CollectionResolver, ComparisonFilter, Filter, LogicalFilter } from './Predicate'
 import { Predicate } from './Predicate'
 
 const definitions = EntityDefinitions.load(JSON.stringify({
@@ -20,6 +20,82 @@ const definitions = EntityDefinitions.load(JSON.stringify({
 
 const entity = definitions.entity('Note')
 if (!entity) throw new Error('missing Note entity')
+
+const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        {
+          cardinality: 'Many',
+          field: 'pets',
+          inverse: 'owner',
+          target: 'Pet',
+          type: 'Inverse',
+        },
+      ],
+      name: 'User',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'title', type: 'String' },
+        { field: 'owner', inverse: 'pets', target: 'User', type: 'Entity' },
+      ],
+      name: 'Pet',
+    },
+  ],
+}))
+const collectionUser = collectionDefinitions.entity('User')
+if (!collectionUser) throw new Error('missing User entity')
+
+/**
+ * Resolve one collection navigation for predicate tests.
+ * @param name - Collection navigation name.
+ * @returns Related-item field resolver, or undefined.
+ */
+const collection: CollectionResolver = name => {
+  const navigation = collectionUser.collections.find(candidate => candidate.name === name)
+  if (!navigation) return undefined
+  const target = collectionDefinitions.entity(navigation.target)
+  if (!target) throw new Error(`missing ${navigation.target} entity`)
+  return {
+    definition: target,
+    field: fieldName => {
+      const field = target.effectiveFields.find(candidate => candidate.name === fieldName)
+      if (
+        !field
+        || field.type === FieldType.Entity
+        || field.type === FieldType.Array
+        || field.type === FieldType.JSON
+      ) {
+        throw new Error(`unknown scalar field ${fieldName}`)
+      }
+      return field
+    },
+  }
+}
+
+/**
+ * Normalize a collection where input with the test resolver.
+ * @param input - Filter input.
+ * @returns The normalized filter.
+ */
+function normalizeCollection(input: Readonly<Record<string, unknown>>): Filter | null {
+  return Predicate.normalize(collectionUser, input, name => Predicate.field(collectionUser, name), collection)
+}
+
+/**
+ * Require a collection filter.
+ * @param filter - Filter candidate.
+ * @returns The collection filter.
+ */
+function collectionFilter(filter: Filter | null): CollectionFilter {
+  if (!filter || !('filters' in filter) || !('field' in filter)) {
+    throw new Error('expected collection filter')
+  }
+  return filter
+}
 
 /**
  * Normalize where input for the test entity.
@@ -291,5 +367,55 @@ describe('Predicate.normalize', () => {
       operator: Operator.Comparison.Empty,
       value: 'ignored',
     })).toThrow('requires exactly operator, field')
+  })
+
+  test('normalizes collection contains, independent requirements, universal, and empty', () => {
+    const title = { field: 'title', operator: Operator.Comparison.Equal, value: 'Ada' }
+    expect(collectionFilter(normalizeCollection({
+      field: 'pets',
+      filters: [title],
+      operator: Operator.Comparison.Contains,
+    }))).toEqual({
+      field: 'pets',
+      filters: [title],
+      operator: Operator.Comparison.Contains,
+    })
+    expect(collectionFilter(normalizeCollection({
+      field: 'pets',
+      filters: [title, { field: 'title', operator: Operator.Comparison.Equal, value: 'Grace' }],
+      operator: Operator.Comparison.Contains,
+    }))).toEqual({
+      field: 'pets',
+      filters: [title, { field: 'title', operator: Operator.Comparison.Equal, value: 'Grace' }],
+      operator: Operator.Comparison.Contains,
+    })
+    expect(collectionFilter(normalizeCollection({
+      field: 'pets',
+      filters: [{ filters: [title], operator: Operator.Logical.And }],
+      operator: Operator.Comparison.Contains,
+    }))).toEqual({
+      field: 'pets',
+      filters: [{ filters: [title], operator: Operator.Logical.And }],
+      operator: Operator.Comparison.Contains,
+    })
+    expect(normalizeCollection({ field: 'pets', operator: Operator.Comparison.Empty })).toEqual({
+      field: 'pets',
+      filters: [],
+      operator: Operator.Comparison.Empty,
+    })
+    expect(normalizeCollection({ field: 'pets', filters: [title], operator: Operator.Collection.All }))
+      .toEqual(Predicate.universal('pets', [title]))
+    expect(() => normalizeCollection({ field: 'pets', filters: [], operator: Operator.Collection.All }))
+      .toThrow('non-empty filters')
+    expect(() => normalizeCollection({
+      field: 'pets',
+      filters: [title, title],
+      operator: Operator.Collection.All,
+    })).toThrow('exactly one member predicate')
+    expect(() => normalizeCollection({
+      field: 'pets',
+      operator: Operator.Comparison.Equal,
+      value: null,
+    })).toThrow('not valid for collection navigation')
   })
 })

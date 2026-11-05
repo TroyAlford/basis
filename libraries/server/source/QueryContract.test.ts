@@ -443,20 +443,20 @@ describe('Query contract', () => {
     })).toThrow()
   })
 
-  test('compiles collection quantifiers over inverse and named relationship edges', () => {
+  test('compiles collection contains, universal, empty, and bracketed requirements', () => {
     const cases = [
       {
         entity: 'User',
-        source: "pets $any (owner.title = 'Ada')",
+        source: "pets $contains (owner.title = 'Ada')",
         structured: {
           field: 'pets',
           filters: [{ field: 'owner.title', operator: Operator.Comparison.Equal, value: 'Ada' }],
-          operator: Operator.Collection.Any,
+          operator: Operator.Comparison.Contains,
         },
       },
       {
         entity: 'User',
-        source: "pets $any (owner = '00000000-0000-4000-8000-000000000001')",
+        source: "pets ~= (owner = '00000000-0000-4000-8000-000000000001')",
         structured: {
           field: 'pets',
           filters: [{
@@ -464,16 +464,19 @@ describe('Query contract', () => {
             operator: Operator.Comparison.Equal,
             value: '00000000-0000-4000-8000-000000000001',
           }],
-          operator: Operator.Collection.Any,
+          operator: Operator.Comparison.Contains,
         },
       },
       {
         entity: 'User',
-        source: "pets $none (title = 'Ada')",
+        source: "pets !$contains (title = 'Ada')",
         structured: {
-          field: 'pets',
-          filters: [{ field: 'title', operator: Operator.Comparison.Equal, value: 'Ada' }],
-          operator: Operator.Collection.None,
+          filters: [{
+            field: 'pets',
+            filters: [{ field: 'title', operator: Operator.Comparison.Equal, value: 'Ada' }],
+            operator: Operator.Comparison.Contains,
+          }],
+          operator: Operator.Logical.Not,
         },
       },
       {
@@ -493,20 +496,24 @@ describe('Query contract', () => {
       },
       {
         entity: 'Campaign',
-        source: "members $any (membership.role = 'GM')",
+        source: "members $contains (membership.role = 'GM')",
         structured: {
           field: 'members',
           filters: [{ field: 'membership.role', operator: Operator.Comparison.Equal, value: 'GM' }],
-          operator: Operator.Collection.Any,
+          operator: Operator.Comparison.Contains,
         },
       },
       {
-        entity: 'Campaign',
-        source: "members $none (title = 'Ada')",
+        entity: 'User',
+        source: 'pets $empty',
+        structured: { field: 'pets', operator: Operator.Comparison.Empty },
+      },
+      {
+        entity: 'User',
+        source: 'pets !$empty',
         structured: {
-          field: 'members',
-          filters: [{ field: 'title', operator: Operator.Comparison.Equal, value: 'Ada' }],
-          operator: Operator.Collection.None,
+          filters: [{ field: 'pets', operator: Operator.Comparison.Empty }],
+          operator: Operator.Logical.Not,
         },
       },
     ]
@@ -522,64 +529,113 @@ describe('Query contract', () => {
       expect(fromSource.sql).toBe(fromStructure.sql)
       expect(fromSource.values).toEqual(fromStructure.values)
     }
-    const any = compileEntityQuery(relationshipDefinitions, 'User', {
+
+    const bracketed = compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
-      where: "pets $any (title = 'Ada')",
+      where: "pets $contains [(title = 'Ada'), (owner.title = 'Grace')]",
     })
-    const none = compileEntityQuery(relationshipDefinitions, 'User', {
+    const grouped = compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
-      where: "pets $none (title = 'Ada')",
+      where: "pets $contains (title = 'Ada' $and owner.title = 'Grace')",
     })
+    expect(bracketed.sql.match(/EXISTS \(SELECT 1 FROM "Pet"/gu)).toHaveLength(2)
+    expect(grouped.sql.match(/EXISTS \(SELECT 1 FROM "Pet"/gu)).toHaveLength(1)
+    expect(bracketed.values).toEqual(['Ada', 'Grace', 25, 0])
+
     const all = compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: "pets $all (title = 'Ada')",
     })
-    expect(any.sql).toContain('WHERE EXISTS (SELECT 1 FROM "Pet"')
-    expect(none.sql).toContain('WHERE NOT EXISTS (SELECT 1 FROM "Pet"')
-    expect(all.sql).toContain('AND NOT COALESCE((')
+    const counterexample = compileEntityQuery(relationshipDefinitions, 'User', {
+      fields: ['id'],
+      where: "pets !$contains ($not (title = 'Ada'))",
+    })
+    expect(all.sql).toBe(counterexample.sql)
+    expect(all.values).toEqual(counterexample.values)
+
     expect(compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
-      where: "pets $any (owner.title = 'Ada')",
+      where: "pets $contains (owner.title = 'Ada')",
     }).sql).toContain('LEFT JOIN "User"')
     expect(compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id'],
-      where: "members $any (membership.role = 'GM')",
+      where: "members $contains (membership.role = 'GM')",
     }).sql).toContain('"cj')
+    expect(compileEntityQuery(relationshipDefinitions, 'User', {
+      fields: ['id'],
+      where: 'pets $empty',
+    }).sql).toContain('NOT EXISTS (SELECT 1 FROM "Pet"')
   })
 
   test('rejects invalid collection predicates without changing the SQL path', () => {
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
-      where: { field: 'pets', filters: [], operator: Operator.Collection.Any },
+      where: { field: 'pets', filters: [], operator: Operator.Comparison.Contains },
     })).toThrow('non-empty filters')
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
-      where: "friends $any (title = 'Ada')",
+      where: "friends $contains (title = 'Ada')",
     })).toThrow('Unknown collection navigation')
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
-      where: "pets $any (tags $any (title = 'Ada'))",
+      where: "pets $contains (tags $contains (title = 'Ada'))",
     })).toThrow('Unknown collection navigation')
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id'],
-      where: "members $any (membership.tags = 'urgent')",
+      where: "members $contains (membership.tags = 'urgent')",
     })).toThrow('not a scalar property')
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id'],
-      where: "members $any (membership.unknown = 'x')",
+      where: "members $contains (membership.unknown = 'x')",
     })).toThrow('Unknown relationship field')
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
-      where: "pets $any (tags = 'urgent')",
+      where: "pets $contains (tags = 'urgent')",
     })).toThrow('cannot be used in predicates')
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
-      where: "pets $any (owner.unknown = 'x')",
+      where: "pets $contains (owner.unknown = 'x')",
     })).toThrow('Unknown field')
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
-      where: "pets $any (owner > '00000000-0000-4000-8000-000000000001')",
+      where: "pets $contains (owner > '00000000-0000-4000-8000-000000000001')",
     })).toThrow('not valid for reference identity')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
+      fields: ['id'],
+      where: { field: 'pets', operator: Operator.Comparison.Equal, value: null },
+    })).toThrow('not valid for collection navigation')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
+      fields: ['id'],
+      where: {
+        field: 'pets',
+        filters: [{ field: 'title', operator: Operator.Comparison.Equal, value: 'Ada' }],
+        operator: Operator.Collection.All,
+      },
+    })).not.toThrow()
+    expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
+      fields: ['id'],
+      where: { field: 'pets', filters: [], operator: Operator.Collection.All },
+    })).toThrow('non-empty filters')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
+      fields: ['id'],
+      where: 'pets $contains []',
+    })).toThrow('at least one requirement')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
+      fields: ['id'],
+      where: 'pets $all [(title = \'Ada\')]',
+    })).toThrow('Expected "(" after $all')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
+      fields: ['id'],
+      where: {
+        field: 'pets',
+        filters: Array.from({ length: 130 }, () => ({
+          field: 'title',
+          operator: Operator.Comparison.Equal,
+          value: 'Ada',
+        })),
+        operator: Operator.Comparison.Contains,
+      },
+    })).toThrow('maximum graph work budget')
   })
 
   test('rejects malformed or incompatible scalar operators before execution', () => {

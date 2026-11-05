@@ -62,13 +62,11 @@ function expression(
   if (node.kind === 'collection') {
     const scope = collection?.(node.field)
     if (!scope) throw new Error(`Unknown collection navigation "${node.field}"`)
-    return {
-      field: node.field,
-      filters: node.filters.map(filter => expression(scope.definition, filter, scope.field)),
-      operator: node.operator,
-    }
+    const filters = node.filters.map(filter => expression(scope.definition, filter, scope.field))
+    if (node.operator === Operator.Collection.All) return Predicate.universal(node.field, filters)
+    return { field: node.field, filters, operator: node.operator }
   }
-  return comparison(entity, node, resolve)
+  return comparison(entity, node, resolve, collection)
 }
 
 /**
@@ -76,17 +74,24 @@ function expression(
  * @param entity - Entity whose fields are referenced.
  * @param node - Comparison syntax expression.
  * @param resolve - Resolve a logical field or path to its scalar definition.
+ * @param collection - Resolve collection navigations to related-item metadata.
  * @returns The canonical comparison filter.
  */
 function comparison(
   entity: EntityDefinition,
   node: QueryComparison,
   resolve: (name: string) => ScalarFieldDefinition,
+  collection?: CollectionResolver,
 ): Filter {
+  if (node.operator === Operator.Comparison.Empty) {
+    assertValues(node, 0)
+    const scope = collection?.(node.field)
+    if (scope) return { field: node.field, filters: [], operator: node.operator }
+  }
+
   const field = resolve(node.field)
 
   if (node.operator === Operator.Comparison.Empty) {
-    assertValues(node, 0)
     return Predicate.empty(entity, field)
   }
 

@@ -270,7 +270,7 @@ describe('SQL.where', () => {
       filters: [{ field: 'score', operator: Operator.Comparison.Equal, value: 5 }],
       operator: Operator.Logical.Not,
     })).toEqual({
-      sql: 'WHERE (NOT ("score" IS NOT DISTINCT FROM $1))',
+      sql: 'WHERE (NOT COALESCE(("score" IS NOT DISTINCT FROM $1), FALSE))',
       values: [5],
     })
     expect(SQL.where(definitions, entity, {
@@ -278,7 +278,7 @@ describe('SQL.where', () => {
       operator: Operator.Comparison.NotEqual,
       value: 5,
     })).toEqual({
-      sql: 'WHERE (NOT ("score" IS NOT DISTINCT FROM $1))',
+      sql: 'WHERE (NOT COALESCE(("score" IS NOT DISTINCT FROM $1), FALSE))',
       values: [5],
     })
     expect(SQL.where(definitions, entity, {
@@ -286,7 +286,7 @@ describe('SQL.where', () => {
       operator: Operator.Comparison.NotEqual,
       value: null,
     })).toEqual({
-      sql: 'WHERE (NOT ("score" IS NULL))',
+      sql: 'WHERE (NOT COALESCE(("score" IS NULL), FALSE))',
       values: [],
     })
     expect(SQL.where(definitions, entity, {
@@ -311,7 +311,7 @@ describe('SQL.where', () => {
       }],
       operator: Operator.Logical.Not,
     })).toEqual({
-      sql: 'WHERE (NOT (("title" IS NULL OR "title" IS NOT DISTINCT FROM $1)))',
+      sql: 'WHERE (NOT COALESCE((("title" IS NULL OR "title" IS NOT DISTINCT FROM $1)), FALSE))',
       values: [''],
     })
   })
@@ -344,7 +344,7 @@ describe('SQL.where', () => {
     )
 
     expect(where('$not (score = 5 $or score = 10)')).toEqual({
-      sql: 'WHERE (NOT (("score" IS NOT DISTINCT FROM $1 OR "score" IS NOT DISTINCT FROM $2)))',
+      sql: 'WHERE (NOT COALESCE((("score" IS NOT DISTINCT FROM $1 OR "score" IS NOT DISTINCT FROM $2)), FALSE))',
       values: [5, 10],
     })
     expect(where('score $between [3, 6]')).toEqual({
@@ -356,11 +356,11 @@ describe('SQL.where', () => {
       values: [''],
     })
     expect(where('score != 5')).toEqual({
-      sql: 'WHERE (NOT ("score" IS NOT DISTINCT FROM $1))',
+      sql: 'WHERE (NOT COALESCE(("score" IS NOT DISTINCT FROM $1), FALSE))',
       values: [5],
     })
     expect(where('score != null')).toEqual({
-      sql: 'WHERE (NOT ("score" IS NULL))',
+      sql: 'WHERE (NOT COALESCE(("score" IS NULL), FALSE))',
       values: [],
     })
   })
@@ -759,9 +759,9 @@ describe('SQL.where', () => {
     expect(compiled.sql).toMatchSQL(`
       SELECT t."title" AS "title", t."score" AS "score"
       FROM "Note" "t"
-      WHERE (NOT ((
+      WHERE (NOT COALESCE(((
         t."score" IS NOT DISTINCT FROM $1 OR t."score" IS NOT DISTINCT FROM $2
-      )))
+      )), FALSE))
       ORDER BY t."score" DESC, t."title" ASC
       LIMIT $3 OFFSET $4
     `)

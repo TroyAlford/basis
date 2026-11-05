@@ -28,7 +28,7 @@ interface BareCollection {
   readonly field: string,
   readonly filters: readonly BareExpression[],
   readonly kind: 'collection',
-  readonly operator: Operator.Collection,
+  readonly operator: Operator.Collection.All | Operator.Comparison.Contains,
 }
 
 type BareExpression = BareCollection | BareComparison | BareGroup | BareLogical
@@ -53,7 +53,7 @@ const group = (expression: BareExpression): BareGroup => ({ expression, kind: 'g
 
 const collection = (
   field: string,
-  operator: Operator.Collection,
+  operator: Operator.Collection.All | Operator.Comparison.Contains,
   filters: readonly BareExpression[],
 ): BareCollection => ({ field, filters, kind: 'collection', operator })
 
@@ -199,26 +199,51 @@ describe('QueryParser', () => {
       ]))
   })
 
-  test('parses collection quantifiers as scoped expression groups', () => {
-    const source = "pets $any (title = 'Ada' $and owner.title = 'Grace')"
+  test('parses collection contains, universal, bracketed, and negated forms', () => {
+    const source = "pets $contains (title = 'Ada' $and owner.title = 'Grace')"
     const parsed = collectionNode(QueryParser.parse(source).expression)
     expect(slice(source, parsed)).toBe(source)
-    expect(withoutSpans(parsed)).toEqual(collection('pets', Operator.Collection.Any, [
+    expect(withoutSpans(parsed)).toEqual(collection('pets', Operator.Comparison.Contains, [
       logical(Operator.Logical.And, [
         comparison('title', Operator.Comparison.Equal, [string("'Ada'", 'Ada')]),
         comparison('owner.title', Operator.Comparison.Equal, [string("'Grace'", 'Grace')]),
       ]),
     ]))
+    expect(withoutSpans(QueryParser.parse("pets ~= (title = 'Ada')").expression))
+      .toEqual(withoutSpans(QueryParser.parse("pets $contains (title = 'Ada')").expression))
     expect(withoutSpans(QueryParser.parse("members $all (membership.role = 'GM')").expression))
       .toEqual(collection('members', Operator.Collection.All, [
         comparison('membership.role', Operator.Comparison.Equal, [string("'GM'", 'GM')]),
       ]))
-    expect(withoutSpans(QueryParser.parse("pets !$any (title = 'Ada')").expression)).toEqual(logical(
+    expect(withoutSpans(QueryParser.parse("pets $contains [(title = 'Ada'), (owner.title = 'Grace')]").expression))
+      .toEqual(collection('pets', Operator.Comparison.Contains, [
+        group(comparison('title', Operator.Comparison.Equal, [string("'Ada'", 'Ada')])),
+        group(comparison('owner.title', Operator.Comparison.Equal, [string("'Grace'", 'Grace')])),
+      ]))
+    expect(withoutSpans(QueryParser.parse("pets !$contains (title = 'Ada')").expression)).toEqual(logical(
       Operator.Logical.Not,
-      [collection('pets', Operator.Collection.Any, [
+      [collection('pets', Operator.Comparison.Contains, [
         comparison('title', Operator.Comparison.Equal, [string("'Ada'", 'Ada')]),
       ])],
     ))
+    const empty = comparison('pets', Operator.Comparison.Empty, [])
+    expect(withoutSpans(QueryParser.parse('pets !$empty').expression))
+      .toEqual(logical(Operator.Logical.Not, [empty]))
+  })
+
+  test('rejects bare negation, questions, invented operators, and malformed collection lists', () => {
+    for (const source of [
+      '!title',
+      'title = ?',
+      "pets $any (title = 'Ada')",
+      "pets $contains [(title = 'Ada')",
+      'pets $contains []',
+      'pets $all [(title = \'Ada\')]',
+    ]) {
+      const parsed = QueryParser.parse(source)
+      expect(parsed.expression).toBeNull()
+      expect(parsed.diagnostics.length).toBeGreaterThan(0)
+    }
   })
 
   test('preserves literal kind, raw spelling, and dotted field names', () => {

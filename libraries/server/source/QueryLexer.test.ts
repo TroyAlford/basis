@@ -175,10 +175,12 @@ describe('QueryLexer', () => {
   })
 
   test('recognizes the extended operator vocabulary and between delimiters', () => {
-    assertLex('!= <> $ne $between [1, 5] $empty $any $all $none $or $not', [
+    assertLex('!= <> $ne ~= $contains $between [1, 5] $empty $all $or $not', [
       operator('!=', Operator.Comparison.NotEqual),
       operator('<>', Operator.Comparison.NotEqual),
       operator('$ne', Operator.Comparison.NotEqual),
+      operator('~=', Operator.Comparison.Contains),
+      operator('$contains', Operator.Comparison.Contains),
       operator('$between', Operator.Comparison.Between),
       leftBracket(),
       number('1'),
@@ -186,9 +188,7 @@ describe('QueryLexer', () => {
       number('5'),
       rightBracket(),
       operator('$empty', Operator.Comparison.Empty),
-      operator('$any', Operator.Collection.Any),
       operator('$all', Operator.Collection.All),
-      operator('$none', Operator.Collection.None),
       operator('$or', Operator.Logical.Or),
       operator('$not', Operator.Logical.Not),
     ])
@@ -232,6 +232,43 @@ describe('QueryLexer', () => {
         number('5'),
       ])
     }
+  })
+
+  test('treats symbolic negation as composition and recognizes ~=', () => {
+    assertLex("tags ~= 'urgent'", [
+      field('tags'),
+      operator('~=', Operator.Comparison.Contains),
+      string("'urgent'", 'urgent'),
+    ])
+    for (const source of ['tags !~= \'urgent\'', 'tags ! ~= \'urgent\'']) {
+      assertLex(source, [
+        field('tags'),
+        operator('!', Operator.Logical.Not),
+        operator('~=', Operator.Comparison.Contains),
+        string("'urgent'", 'urgent'),
+      ])
+    }
+    for (const source of ['age !> 10', 'age ! > 10']) {
+      assertLex(source, [
+        field('age'),
+        operator('!', Operator.Logical.Not),
+        operator('>', Operator.Comparison.GreaterThan),
+        number('10'),
+      ])
+    }
+    assertLex('age !<= 10', [
+      field('age'),
+      operator('!', Operator.Logical.Not),
+      operator('<=', Operator.Comparison.LessThanOrEqual),
+      number('10'),
+    ])
+    assertLex('age !!> 10', [
+      field('age'),
+      operator('!', Operator.Logical.Not),
+      operator('!', Operator.Logical.Not),
+      operator('>', Operator.Comparison.GreaterThan),
+      number('10'),
+    ])
   })
 
   test('reports unsupported operators without splitting them', () => {

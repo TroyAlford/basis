@@ -50,10 +50,12 @@ export interface SQLPredicate {
   readonly values: readonly unknown[],
 }
 
-/** Scoped relation used to evaluate one collection quantifier. */
+/** Scoped relation used to evaluate one collection comparison. */
 export interface CollectionScope {
   /** Correlated join condition against the root occurrence. */
   readonly condition: string,
+  /** Consume finite compiler work for one emitted correlated predicate. */
+  readonly consume?: (units?: number) => void,
   /** Related item entity definition. */
   readonly definition: EntityDefinition,
   /** Render one inner field expression. */
@@ -68,7 +70,7 @@ export interface CollectionScope {
 
 /** Optional effective-field scope for polymorphic entity queries. */
 export interface QueryScope {
-  /** Resolve a collection navigation for quantifier compilation. */
+  /** Resolve a collection navigation for collection comparison compilation. */
   readonly collection?: (name: string) => CollectionScope | undefined,
   /** Effective entity metadata used for validation. */
   readonly definition: EntityDefinition,
@@ -180,7 +182,7 @@ const logicalDefinitions = new Map<Operator.Logical, LogicalDefinition>([
     minimumOperands: 1,
   }],
   [Operator.Logical.Not, {
-    build: children => `(NOT (${children[0]}))`,
+    build: children => `(NOT COALESCE((${children[0]}), FALSE))`,
     maximumOperands: 1,
     minimumOperands: 1,
   }],
@@ -224,23 +226,27 @@ function whereClause(
     field: name => scalarField(entity, name),
   }
   const compile = (node: Filter, active: QueryScope): string => {
-    if (
-      Object.values(Operator.Collection).includes(node.operator as Operator.Collection)
-      && 'field' in node
-    ) {
+    if ('field' in node && 'filters' in node) {
       const collection = active.collection?.(node.field)
       if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
       const collectionFilter = node as CollectionFilter
-      const inner = collectionFilter.filters.map(childFilter => compile(childFilter, collection)).join(' AND ')
-      const condition = `${collection.condition} AND (${inner})`
-      if (collectionFilter.operator === Operator.Collection.Any) {
-        return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${condition})`
+      if (collectionFilter.operator === Operator.Comparison.Empty) {
+        collection.consume?.(1)
+        return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${collection.condition})`
       }
-      if (collectionFilter.operator === Operator.Collection.None) {
-        return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${condition})`
+      if (collectionFilter.operator !== Operator.Comparison.Contains) {
+        throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical collection comparison`)
       }
-      return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${collection.condition} ` +
-        `AND NOT COALESCE((${inner}), FALSE))`
+      if (collectionFilter.filters.length === 0) {
+        throw new Error(`Query ${Operator.Comparison.Contains} requires at least one member requirement`)
+      }
+      const requirements = collectionFilter.filters.map(requirement => {
+        collection.consume?.(1)
+        const inner = compile(requirement, collection)
+        return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
+          `${collection.condition} AND (${inner}))`
+      })
+      return requirements.join(' AND ')
     }
 
     const comparison = comparisonDefinitions.get(node.operator as Operator.Comparison)

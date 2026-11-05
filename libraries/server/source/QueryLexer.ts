@@ -76,6 +76,7 @@ const OPERATORS = new Map<string, QueryOperator.Collection | QueryOperator.Compa
   ['<', QueryOperator.Comparison.LessThan],
   ['<=', QueryOperator.Comparison.LessThanOrEqual],
   ['!=', QueryOperator.Comparison.NotEqual],
+  ['~=', QueryOperator.Comparison.Contains],
   ['<>', QueryOperator.Comparison.NotEqual],
   ['!', QueryOperator.Logical.Not],
 ])
@@ -119,7 +120,7 @@ export const QueryLexer = {
         continue
       }
 
-      if ('=<>!'.includes(character)) {
+      if ('=<>!~'.includes(character)) {
         const token = symbolicOperatorToken(source, index, diagnostics)
         tokens.push(token)
         index = token.end
@@ -308,8 +309,34 @@ function symbolicOperatorToken(
   start: number,
   diagnostics: QueryDiagnostic[],
 ): Token {
+  if (source[start] === '!') {
+    if (source[start + 1] === '=') {
+      const raw = '!='
+      return {
+        end: start + 2,
+        operator: QueryOperator.Comparison.NotEqual,
+        raw,
+        start,
+        type: TokenType.Operator,
+        value: raw,
+      }
+    }
+    return {
+      end: start + 1,
+      operator: QueryOperator.Logical.Not,
+      raw: '!',
+      start,
+      type: TokenType.Operator,
+      value: '!',
+    }
+  }
+
   let end = start + 1
-  while (end < source.length && /[=<>!]/.test(source[end] as string)) end += 1
+  if (source[start] === '~') {
+    if (source[start + 1] === '=') end = start + 2
+  } else {
+    while (end < source.length && /[=<>]/.test(source[end] as string)) end += 1
+  }
   const raw = source.slice(start, end)
   const operator = OPERATORS.get(raw)
 

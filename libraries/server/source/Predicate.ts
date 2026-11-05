@@ -20,14 +20,17 @@ export interface LogicalFilter {
   readonly operator: Operator.Logical,
 }
 
-/** A canonical collection quantifier filter group. */
+/** A canonical collection comparison filter. */
 export interface CollectionFilter {
   /** Collection navigation name. */
   readonly field: string,
-  /** Inner predicates relative to each related item. */
+  /** Independent member requirements, or empty for an emptiness test. */
   readonly filters: readonly Filter[],
-  /** Collection quantifier identity. */
-  readonly operator: Operator.Collection,
+  /** Collection comparison identity. */
+  readonly operator:
+    | Operator.Collection.All
+    | Operator.Comparison.Contains
+    | Operator.Comparison.Empty,
 }
 
 /** Entity-shaped context used to normalize a collection's inner predicates. */
@@ -192,6 +195,28 @@ export const Predicate = {
   notEqual(field: string, value: unknown): LogicalFilter {
     return Predicate.not({ field, operator: Operator.Comparison.Equal, value })
   },
+
+  /**
+   * Build a canonical universal collection predicate.
+   *
+   * The canonical form is `Not(Contains(Not(P)))`, so universal and
+   * existential collection predicates share one SQL mechanism.
+   * @param field - Collection navigation name.
+   * @param filters - Exactly one member requirement.
+   * @returns The canonical universal collection filter.
+   * @throws {Error} When the requirement count is not one.
+   */
+  universal(field: string, filters: readonly Filter[]): Filter {
+    if (filters.length !== 1) {
+      throw new Error('Query $all requires exactly one member predicate')
+    }
+    const [filter] = filters
+    return Predicate.not({
+      field,
+      filters: [Predicate.not(filter as Filter)],
+      operator: Operator.Comparison.Contains,
+    })
+  },
 }
 
 /**
@@ -236,21 +261,36 @@ function explicit(
   const operator = input.operator
   if (typeof operator !== 'string') throw new Error('Query operator must be a string')
 
-  if (Object.values(Operator.Collection).includes(operator as Operator.Collection)) {
-    assertKeys(input, ['field', 'filters', 'operator'])
-    if (typeof input.field !== 'string') throw new Error('Query collection field must be a string')
-    const scope = collection?.(input.field)
-    if (!scope) throw new Error(`Unknown collection navigation "${input.field}"`)
-    if (!Array.isArray(input.filters) || input.filters.length === 0) {
-      throw new Error(`Query ${operator} requires a non-empty filters array`)
+  const collectionScope = typeof input.field === 'string'
+    ? collection?.(input.field)
+    : undefined
+  if (collectionScope) {
+    if (operator === Operator.Comparison.Empty) {
+      const canonical = Array.isArray(input.filters) && input.filters.length === 0
+      assertKeys(input, canonical ? ['field', 'filters', 'operator'] : ['field', 'operator'])
+      return { field: input.field as string, filters: [], operator }
     }
-    return {
-      field: input.field,
-      filters: input.filters.map(filter => (
-        child(scope.definition, operator, filter, scope.field)
-      )),
-      operator: operator as Operator.Collection,
+    if (operator === Operator.Comparison.Contains || operator === Operator.Collection.All) {
+      assertKeys(input, ['field', 'filters', 'operator'])
+      if (!Array.isArray(input.filters) || input.filters.length === 0) {
+        throw new Error(`Query ${operator} requires a non-empty filters array`)
+      }
+      const filters = input.filters.map(filter => (
+        child(collectionScope.definition, operator, filter, collectionScope.field)
+      ))
+      if (operator === Operator.Collection.All) return Predicate.universal(input.field as string, filters)
+      return {
+        field: input.field as string,
+        filters,
+        operator,
+      }
     }
+    throw new Error(
+      `Query operator "${operator}" is not valid for collection navigation "${input.field}"`,
+    )
+  }
+  if (operator === Operator.Collection.All) {
+    throw new Error(`Unknown collection navigation "${String(input.field)}"`)
   }
 
   if (operator === Operator.Logical.And || operator === Operator.Logical.Or) {

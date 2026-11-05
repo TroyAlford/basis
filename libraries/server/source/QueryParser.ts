@@ -59,18 +59,18 @@ export interface QueryLogical {
   readonly start: number,
 }
 
-/** A transient collection quantifier expression. */
+/** A transient collection comparison expression. */
 export interface QueryCollection {
   /** Exclusive source offset. */
   readonly end: number,
   /** Root collection navigation name. */
   readonly field: string,
-  /** Inner expressions relative to the collection item. */
+  /** Independent member requirements, or one grouped requirement. */
   readonly filters: readonly QueryExpression[],
   /** Syntax node discriminator. */
   readonly kind: 'collection',
-  /** Quantifier operator identity. */
-  readonly operator: Operator.Collection,
+  /** Collection comparison identity. */
+  readonly operator: Operator.Collection.All | Operator.Comparison.Contains,
   /** Inclusive source offset. */
   readonly start: number,
 }
@@ -245,19 +245,17 @@ class Parser {
       return null
     }
 
-    if (Object.values(Operator.Collection).includes(operator as Operator.Collection)) {
-      const opening = this.#expect(TokenType.LeftParen, 'Expected "(" after collection operator')
-      if (!opening) return null
-      const inner = this.#parseOr()
-      if (!inner) return null
-      const closing = this.#expect(TokenType.RightParen, 'Expected ")" after collection expression')
-      if (!closing) return null
+    const collectionContains = operator === Operator.Comparison.Contains
+      && (this.#peek().type === TokenType.LeftParen || this.#peek().type === TokenType.LeftBracket)
+    if (operator === Operator.Collection.All || collectionContains) {
+      const rhs = this.#parseCollectionRhs(operator)
+      if (!rhs) return null
       let expression: QueryExpression = {
-        end: closing.end,
+        end: rhs.end,
         field: field.value as string,
-        filters: [inner],
+        filters: rhs.filters,
         kind: 'collection',
-        operator: operator as Operator.Collection,
+        operator: operator as Operator.Collection.All | Operator.Comparison.Contains,
         start: field.start,
       }
       for (let count = 0; count < negations; count += 1) {
@@ -295,6 +293,46 @@ class Parser {
       expression = logical(Operator.Logical.Not, [expression], expression.start, expression.end)
     }
     return expression
+  }
+
+  /**
+   * Parse the right-hand side of a collection comparison.
+   * @param operator - Collection comparison operator.
+   * @returns Independent requirements and end offset, or null on failure.
+   */
+  #parseCollectionRhs(
+    operator: Operator.Collection.All | Operator.Comparison.Contains,
+  ): { readonly end: number, readonly filters: readonly QueryExpression[] } | null {
+    if (this.#peek().type === TokenType.LeftBracket) {
+      if (operator === Operator.Collection.All) {
+        this.#error('Expected "(" after $all', this.#peek())
+        return null
+      }
+      const opening = this.#expect(TokenType.LeftBracket, 'Expected "["')
+      if (!opening) return null
+      if (this.#peek().type === TokenType.RightBracket) {
+        this.#error('Collection $contains requires at least one requirement', this.#peek())
+        return null
+      }
+      const filters: QueryExpression[] = []
+      while (true) {
+        const filter = this.#parsePrimary()
+        if (!filter) return null
+        filters.push(filter)
+        if (!this.#match(TokenType.Comma)) break
+      }
+      const closing = this.#expect(TokenType.RightBracket, 'Expected "]" after collection requirements')
+      if (!closing) return null
+      return { end: closing.end, filters }
+    }
+
+    const opening = this.#expect(TokenType.LeftParen, 'Expected "(" after collection operator')
+    if (!opening) return null
+    const inner = this.#parseOr()
+    if (!inner) return null
+    const closing = this.#expect(TokenType.RightParen, 'Expected ")" after collection expression')
+    if (!closing) return null
+    return { end: closing.end, filters: [inner] }
   }
 
   /**
@@ -389,6 +427,17 @@ class Parser {
     }
     this.#error(message, token)
     return null
+  }
+
+  /**
+   * Consume a token when its type matches.
+   * @param type - Expected token type.
+   * @returns Whether the token was consumed.
+   */
+  #match(type: TokenType): boolean {
+    if (this.#peek().type !== type) return false
+    this.#index += 1
+    return true
   }
 
   /**
