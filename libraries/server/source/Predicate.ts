@@ -137,13 +137,18 @@ export const Predicate = {
    * Normalize a where input.
    * @param entity - Entity whose fields are referenced.
    * @param input - A single-field equality shorthand or an explicit filter.
+   * @param resolve - Resolve a logical field or path to its scalar definition.
    * @returns The canonical filter, or null for an empty object.
    * @throws {Error} When the input shape, field, or operator is invalid.
    */
-  normalize(entity: EntityDefinition, input: Filter | Readonly<Record<string, unknown>>): Filter | null {
+  normalize(
+    entity: EntityDefinition,
+    input: Filter | Readonly<Record<string, unknown>>,
+    resolve: (name: string) => ScalarFieldDefinition = name => Predicate.field(entity, name),
+  ): Filter | null {
     if (!isPlainRecord(input)) throw new Error('Query where must be a plain object')
-    if (Object.hasOwn(input, 'operator')) return explicit(entity, input)
-    return shorthand(entity, input)
+    if (Object.hasOwn(input, 'operator')) return explicit(entity, input, resolve)
+    return shorthand(entity, input, resolve)
   },
 
   /**
@@ -170,9 +175,14 @@ export const Predicate = {
  * Normalize a single-field equality shorthand object.
  * @param entity - Entity whose fields are referenced.
  * @param input - Shorthand object.
+ * @param resolve - Resolve a logical field or path to its scalar definition.
  * @returns The comparison filter, or null for an empty object.
  */
-function shorthand(entity: EntityDefinition, input: Readonly<Record<string, unknown>>): Filter | null {
+function shorthand(
+  entity: EntityDefinition,
+  input: Readonly<Record<string, unknown>>,
+  resolve: (name: string) => ScalarFieldDefinition,
+): Filter | null {
   const entries = Object.entries(input)
   if (entries.length === 0) return null
   if (entries.length > 1) {
@@ -182,7 +192,7 @@ function shorthand(entity: EntityDefinition, input: Readonly<Record<string, unkn
   }
 
   const [field, value] = entries[0] as [string, unknown]
-  Predicate.field(entity, field)
+  resolve(field)
   return { field, operator: Operator.Comparison.Equal, value }
 }
 
@@ -190,9 +200,14 @@ function shorthand(entity: EntityDefinition, input: Readonly<Record<string, unkn
  * Normalize an explicit operator-tagged filter node.
  * @param entity - Entity whose fields are referenced.
  * @param input - Explicit node input.
+ * @param resolve - Resolve a logical field or path to its scalar definition.
  * @returns The canonical filter node.
  */
-function explicit(entity: EntityDefinition, input: Readonly<Record<string, unknown>>): Filter {
+function explicit(
+  entity: EntityDefinition,
+  input: Readonly<Record<string, unknown>>,
+  resolve: (name: string) => ScalarFieldDefinition,
+): Filter {
   const operator = input.operator
   if (typeof operator !== 'string') throw new Error('Query operator must be a string')
 
@@ -203,7 +218,7 @@ function explicit(entity: EntityDefinition, input: Readonly<Record<string, unkno
     }
     return Predicate.logical(
       operator,
-      input.filters.map(filter => child(entity, operator, filter)),
+      input.filters.map(filter => child(entity, operator, filter, resolve)),
     )
   }
 
@@ -212,17 +227,17 @@ function explicit(entity: EntityDefinition, input: Readonly<Record<string, unkno
     if (!Array.isArray(input.filters) || input.filters.length !== 1) {
       throw new Error(`Query ${Operator.Logical.Not} requires exactly one filter`)
     }
-    return Predicate.not(child(entity, operator, input.filters[0]))
+    return Predicate.not(child(entity, operator, input.filters[0], resolve))
   }
 
   if (operator === Operator.Comparison.NotEqual) {
     assertKeys(input, ['operator', 'field', 'value'])
-    return Predicate.notEqual(requireField(entity, input).name, input.value)
+    return Predicate.notEqual(requireField(entity, input, resolve).name, input.value)
   }
 
   if (operator === Operator.Comparison.Between) {
     assertKeys(input, ['operator', 'field', 'values'])
-    const definition = requireField(entity, input)
+    const definition = requireField(entity, input, resolve)
     if (!Array.isArray(input.values) || input.values.length !== 2) {
       throw new Error(`Query ${Operator.Comparison.Between} requires exactly two values`)
     }
@@ -232,7 +247,7 @@ function explicit(entity: EntityDefinition, input: Readonly<Record<string, unkno
 
   if (operator === Operator.Comparison.Empty) {
     assertKeys(input, ['operator', 'field'])
-    return Predicate.empty(entity, requireField(entity, input))
+    return Predicate.empty(entity, requireField(entity, input, resolve))
   }
 
   if (!BASE_COMPARISON_OPERATORS.has(operator as Operator.Comparison)) {
@@ -240,7 +255,7 @@ function explicit(entity: EntityDefinition, input: Readonly<Record<string, unkno
   }
 
   assertKeys(input, ['operator', 'field', 'value'])
-  const definition = requireField(entity, input)
+  const definition = requireField(entity, input, resolve)
   return {
     field: definition.name,
     operator: operator as Operator.Comparison,
@@ -253,15 +268,17 @@ function explicit(entity: EntityDefinition, input: Readonly<Record<string, unkno
  * @param entity - Entity whose fields are referenced.
  * @param operator - Parent logical operator identity.
  * @param filter - Child filter input.
+ * @param resolve - Resolve a logical field or path to its scalar definition.
  * @returns The normalized child filter.
  */
 function child(
   entity: EntityDefinition,
   operator: string,
   filter: unknown,
+  resolve: (name: string) => ScalarFieldDefinition,
 ): Filter {
   if (!isPlainRecord(filter)) throw new Error(`Query ${operator} filters must be plain objects`)
-  const normalized = Predicate.normalize(entity, filter)
+  const normalized = Predicate.normalize(entity, filter, resolve)
   if (!normalized) throw new Error(`Query ${operator} filters must be non-empty objects`)
   return normalized
 }
@@ -270,14 +287,16 @@ function child(
  * Require and return a field named by an explicit filter.
  * @param entity - Entity whose fields are referenced.
  * @param input - Explicit node input.
+ * @param resolve - Resolve a logical field or path to its scalar definition.
  * @returns The field definition.
  */
 function requireField(
   entity: EntityDefinition,
   input: Readonly<Record<string, unknown>>,
+  resolve: (name: string) => ScalarFieldDefinition,
 ): ScalarFieldDefinition {
   if (typeof input.field !== 'string') throw new Error('Query comparison field must be a string')
-  return Predicate.field(entity, input.field)
+  return resolve(input.field)
 }
 
 /**

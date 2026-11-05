@@ -34,8 +34,17 @@ const definitions = EntityDefinitions.load(JSON.stringify({
       name: 'User',
     },
     {
+      extends: 'User',
+      fields: [
+        { field: 'manager', target: 'User', type: 'Entity' },
+        { field: 'permissions', type: 'String' },
+      ],
+      name: 'SystemUser',
+    },
+    {
       fields: [
         { field: 'id', format: 'UUID' },
+        { field: 'favorite', target: 'User', type: 'Entity' },
         { field: 'owner', inverse: 'pets', target: 'User', type: 'Entity' },
         { field: 'payload', type: 'JSON' },
         { field: 'tags', items: { type: 'String' }, type: 'Array' },
@@ -194,13 +203,173 @@ describe('Query contract', () => {
     expect(QueryNormalizer.normalize(note, '   ')).toBeNull()
   })
 
-  test('rejects deferred reference, collection, Array, JSON and sort forms explicitly', () => {
-    const deferred = [
-      {
-        entity: 'Pet',
-        source: "owner.name = 'Ada'",
-        structured: { field: 'owner.name', operator: Operator.Comparison.Equal, value: 'Ada' },
+  test('supports model-validated singular reference paths and descendant predicates', () => {
+    const structured = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { 'owner.name': 'Ada' },
+    })
+    const source = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: "owner.name = 'Ada'",
+    })
+    expect(source).toEqual(structured)
+    expect(structured.sql).toContain('JOIN "User"')
+    expect(structured.sql).toContain('WHERE')
+
+    expect(compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { 'owner.permissions': 'admin' },
+    })).toEqual(compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: "owner.permissions = 'admin'",
+    }))
+
+    expect(compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { 'owner.manager.name': 'Manager' },
+    })).toEqual(compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: "owner.manager.name = 'Manager'",
+    }))
+
+    expect(compileEntityQuery(definitions, 'User', {
+      fields: ['id'],
+      where: { permissions: 'admin' },
+    })).toEqual(compileEntityQuery(definitions, 'User', {
+      fields: ['id'],
+      where: "permissions = 'admin'",
+    }))
+
+    const identity = '00000000-0000-4000-8000-000000000001'
+    expect(compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { owner: identity },
+    })).toEqual(compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: `owner = '${identity}'`,
+    }))
+    expect(compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { owner: null },
+    })).toEqual(compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'owner = null',
+    }))
+
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { field: 'owner', operator: '$gt', value: identity },
+    })).toThrow('reference identity')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { field: 'owner', operator: Operator.Comparison.Contains, value: 'Ada' },
+    })).toThrow('reference identity')
+  })
+
+  test('keys terminal reference identities independently', () => {
+    const identity = '00000000-0000-4000-8000-000000000001'
+    const second = '00000000-0000-4000-8000-000000000002'
+    const two = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: {
+        filters: [
+          { field: 'owner', operator: Operator.Comparison.Equal, value: identity },
+          { field: 'favorite', operator: Operator.Comparison.Equal, value: second },
+        ],
+        operator: Operator.Logical.And,
       },
+    })
+    expect(two.sql.match(/LEFT JOIN "User"/g)).toHaveLength(2)
+    expect(two.values).toEqual([identity, second, 25, 0])
+
+    const nestedDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'manager', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Person',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+      ],
+    }))
+    const nested = compileEntityQuery(nestedDefinitions, 'Pet', {
+      fields: ['id'],
+      where: { 'owner.manager': identity },
+    })
+    expect(nested.sql.match(/LEFT JOIN "Person"/g)).toHaveLength(2)
+    expect(nested.values).toEqual([identity, 25, 0])
+  })
+
+  test('shares filter joins without projecting filter-only identities', () => {
+    const filterOnly = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: {
+        filters: [
+          { field: 'owner.name', operator: Operator.Comparison.Equal, value: 'Ada' },
+          { field: 'owner.permissions', operator: Operator.Comparison.Equal, value: 'admin' },
+        ],
+        operator: Operator.Logical.And,
+      },
+    })
+    expect(filterOnly.sql).not.toContain('owner__id')
+    expect(filterOnly.sql.match(/LEFT JOIN "User"/g)).toHaveLength(1)
+    expect(filterOnly.sql.match(/LEFT JOIN "SystemUser"/g)).toHaveLength(1)
+
+    const combined = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id', 'owner'],
+      where: { 'owner.name': 'Ada' },
+    })
+    expect(combined.sql.match(/LEFT JOIN "User"/g)).toHaveLength(1)
+    expect(combined.sql.match(/LEFT JOIN "Entity"/g)).toHaveLength(1)
+    expect(combined.sql).toContain('owner__id')
+  })
+
+  test('enforces reference depth and target identity format in filters', () => {
+    const treeDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+          { field: 'parent', target: 'TreeNode', type: 'Entity' },
+        ],
+        name: 'TreeNode',
+      }],
+    }))
+    const eight = `${Array.from({ length: 8 }, () => 'parent').join('.')}.label`
+    const nine = `${Array.from({ length: 9 }, () => 'parent').join('.')}.label`
+    expect(() => compileEntityQuery(treeDefinitions, 'TreeNode', {
+      fields: ['id'],
+      where: `${eight} = 'x'`,
+    })).not.toThrow()
+    expect(() => compileEntityQuery(treeDefinitions, 'TreeNode', {
+      fields: ['id'],
+      where: `${nine} = 'x'`,
+    })).toThrow('maximum depth')
+    expect(() => compileEntityQuery(treeDefinitions, 'TreeNode', {
+      fields: ['id'],
+      where: { [nine]: 'x' },
+    })).toThrow('maximum depth')
+
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { owner: '9223372036854775807' },
+    })).toThrow('not a valid id value')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'owner = \'9223372036854775807\'',
+    })).toThrow('not a valid id value')
+  })
+
+  test('rejects deferred collection, Array, JSON and sort forms explicitly', () => {
+    const deferred = [
       {
         entity: 'Pet',
         source: "tags $contains 'urgent'",
