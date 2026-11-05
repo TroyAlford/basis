@@ -66,22 +66,72 @@ Source errors retain lexer/parser offsets. Current normalizer errors throw the f
 
 ## Implemented scalar operators
 
-The following table is the current executable contract. Every row has both structured and string input.
+The following code block is the current executable contract. Each entry pairs the structured and string spelling of the same canonical filter.
 
-| Meaning               | Structured                                                  | String                     |
-| --------------------- | ----------------------------------------------------------- | -------------------------- |
-| equality              | `{ field: 'title', operator: '$eq', value: 'Hello' }`       | `title = 'Hello'`          |
-| inequality            | `{ field: 'title', operator: '$ne', value: 'Hello' }`       | `title != 'Hello'`         |
-| less than             | `{ field: 'score', operator: '$lt', value: 10 }`            | `score < 10`               |
-| less than or equal    | `{ field: 'score', operator: '$lte', value: 10 }`           | `score <= 10`              |
-| greater than          | `{ field: 'score', operator: '$gt', value: 5 }`             | `score > 5`                |
-| greater than or equal | `{ field: 'score', operator: '$gte', value: 5 }`            | `score >= 5`               |
-| inclusive range       | `{ field: 'score', operator: '$between', values: [5, 10] }` | `score $between [5, 10]`   |
-| substring             | `{ field: 'title', operator: '$contains', value: 'Ada' }`   | `title $contains 'Ada'`    |
-| empty string or NULL  | `{ field: 'title', operator: '$empty' }`                    | `title $empty`             |
-| logical AND           | `{ operator: '$and', filters: [...] }`                      | `a $and b`                 |
-| logical OR            | `{ operator: '$or', filters: [...] }`                       | `a $or b`                  |
-| logical NOT           | `{ operator: '$not', filters: [filter] }`                   | `!filter` or `$not filter` |
+```ts
+const scalarOperators = [
+  {
+    meaning: 'equality',
+    structured: { field: 'title', operator: '$eq', value: 'Hello' },
+    source: "title = 'Hello'",
+  },
+  {
+    meaning: 'inequality',
+    structured: { field: 'title', operator: '$ne', value: 'Hello' },
+    source: "title != 'Hello'",
+  },
+  {
+    meaning: 'less than',
+    structured: { field: 'score', operator: '$lt', value: 10 },
+    source: 'score < 10',
+  },
+  {
+    meaning: 'less than or equal',
+    structured: { field: 'score', operator: '$lte', value: 10 },
+    source: 'score <= 10',
+  },
+  {
+    meaning: 'greater than',
+    structured: { field: 'score', operator: '$gt', value: 5 },
+    source: 'score > 5',
+  },
+  {
+    meaning: 'greater than or equal',
+    structured: { field: 'score', operator: '$gte', value: 5 },
+    source: 'score >= 5',
+  },
+  {
+    meaning: 'inclusive range',
+    structured: { field: 'score', operator: '$between', values: [5, 10] },
+    source: 'score $between [5, 10]',
+  },
+  {
+    meaning: 'substring',
+    structured: { field: 'title', operator: '$contains', value: 'Ada' },
+    source: "title $contains 'Ada'",
+  },
+  {
+    meaning: 'empty string or NULL',
+    structured: { field: 'title', operator: '$empty' },
+    source: 'title $empty',
+  },
+  {
+    meaning: 'logical AND',
+    structured: { operator: '$and', filters: [/* filters */] },
+    source: 'a $and b',
+  },
+  {
+    meaning: 'logical OR',
+    structured: { operator: '$or', filters: [/* filters */] },
+    source: 'a $or b',
+  },
+  {
+    meaning: 'logical NOT',
+    structured: { operator: '$not', filters: [/* one filter */] },
+    source: '!filter or $not filter',
+  },
+]
+```
 
 `$between` has exactly two bounds. A `null` bound is open; `[null, null]` is invalid. `$empty` is valid only for `String` and means exactly SQL `NULL` or the empty string, never whitespace. `$contains` is case-insensitive substring matching for `String`; wildcard characters are escaped before binding. Ranges are limited to `String`, `Number`, `Date`, `Timestamp`, and `ID`; booleans use equality only.
 
