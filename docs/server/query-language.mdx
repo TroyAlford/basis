@@ -151,11 +151,59 @@ These rules are shared by the structured and string forms.
 
 ## Stage 17 — reference paths
 
-Reference predicates are not implemented in the current scalar grammar. The accepted end-state is:
+Reference predicates are not implemented in the current scalar grammar. The accepted end-state pairs every form:
+
+```ts
+const referencePaths = [
+  {
+    meaning: 'scalar equality',
+    structured: { field: 'owner.name', operator: '$eq', value: 'Ada' },
+    source: "owner.name = 'Ada'",
+  },
+  {
+    meaning: 'scalar inequality',
+    structured: { field: 'owner.name', operator: '$ne', value: 'Ada' },
+    source: "owner.name != 'Ada'",
+  },
+  {
+    meaning: 'scalar ordered comparison',
+    structured: { field: 'owner.score', operator: '$gte', value: 5 },
+    source: 'owner.score >= 5',
+  },
+  {
+    meaning: 'scalar range',
+    structured: { field: 'owner.score', operator: '$between', values: [5, 10] },
+    source: 'owner.score $between [5, 10]',
+  },
+  {
+    meaning: 'scalar substring',
+    structured: { field: 'owner.name', operator: '$contains', value: 'Ada' },
+    source: "owner.name $contains 'Ada'",
+  },
+  {
+    meaning: 'scalar empty',
+    structured: { field: 'owner.name', operator: '$empty' },
+    source: 'owner.name $empty',
+  },
+  {
+    meaning: 'identity equality',
+    structured: {
+      field: 'owner',
+      operator: '$eq',
+      value: '00000000-0000-4000-8000-000000000001',
+    },
+    source: "owner = '00000000-0000-4000-8000-000000000001'",
+  },
+  {
+    meaning: 'missing reference',
+    structured: { field: 'owner', operator: '$eq', value: null },
+    source: 'owner = null',
+  },
+]
+```
 
 - A dotted path such as `owner.name` traverses stored singular `Entity` references and ends in a scalar or reference identity.
-- The same structured example is `{ field: 'owner.name', operator: '$eq', value: 'Ada' }`; the string example is `owner.name = 'Ada'`.
-- A path ending at a reference compares its canonical target identity, for example `{ field: 'owner', operator: '$eq', value: '00000000-0000-4000-8000-000000000001' }`.
+- All scalar operators above apply to a scalar-ending path; reference identity accepts equality/inequality and `null`, not ordering, substring, range, or `$empty`.
 - The path must be unambiguous across abstract/descendant targets. A field with incompatible target declarations is rejected rather than guessed per row.
 - A missing or null reference behaves as `NULL` for the terminal scalar. Non-null comparisons are false; `$eq null` matches absent/null, and `$ne null` matches present non-null values.
 - `$empty` remains string-only and treats a null/missing reference as empty.
@@ -167,17 +215,48 @@ Reference predicates are not implemented in the current scalar grammar. The acce
 Collection predicates are not implemented in the current scalar grammar. The accepted end-state uses explicit quantifiers over inverse and named N:M navigations:
 
 ```ts
-where: {
-  field: 'pets',
-  operator: '$any',
-  filters: [{ field: 'name', operator: '$eq', value: 'Ada' }],
-}
-```
-
-Equivalent source:
-
-```ts
-where: "pets $any (name = 'Ada')"
+const collectionQuantifiers = [
+  {
+    meaning: 'any related item matches',
+    structured: {
+      field: 'pets',
+      operator: '$any',
+      filters: [{ field: 'name', operator: '$eq', value: 'Ada' }],
+    },
+    source: "pets $any (name = 'Ada')",
+  },
+  {
+    meaning: 'no related item matches',
+    structured: {
+      field: 'pets',
+      operator: '$none',
+      filters: [{ field: 'name', operator: '$eq', value: 'Ada' }],
+    },
+    source: "pets $none (name = 'Ada')",
+  },
+  {
+    meaning: 'every related item matches',
+    structured: {
+      field: 'pets',
+      operator: '$all',
+      filters: [{ field: 'name', operator: '$eq', value: 'Ada' }],
+    },
+    source: "pets $all (name = 'Ada')",
+  },
+  {
+    meaning: 'named relationship property',
+    structured: {
+      field: 'members',
+      operator: '$any',
+      filters: [{
+        field: 'membership.role',
+        operator: '$eq',
+        value: 'GM',
+      }],
+    },
+    source: "members $any (membership.role = 'GM')",
+  },
+]
 ```
 
 The three quantifiers have exact empty-set semantics:
@@ -192,12 +271,53 @@ Inner filters are relative to the collection item and may use the item’s scala
 
 Array and JSON predicates are not implemented in the current scalar grammar. The accepted end-state is type-specific and keeps JSON opaque:
 
-- Array membership uses `$has` with one scalar value.
-- Array any/all uses `$hasAny` and `$hasAll` with a non-empty array of scalar values.
-- Source examples are `tags $has 'urgent'`, `tags $hasAny ['urgent', 'pinned']`, and `tags $hasAll ['urgent', 'reviewed']`.
+```ts
+const arrayOperators = [
+  {
+    meaning: 'one array member',
+    structured: { field: 'tags', operator: '$has', value: 'urgent' },
+    source: "tags $has 'urgent'",
+  },
+  {
+    meaning: 'any of several members',
+    structured: { field: 'tags', operator: '$hasAny', values: ['urgent', 'pinned'] },
+    source: "tags $hasAny ['urgent', 'pinned']",
+  },
+  {
+    meaning: 'all of several members',
+    structured: { field: 'tags', operator: '$hasAll', values: ['urgent', 'reviewed'] },
+    source: "tags $hasAll ['urgent', 'reviewed']",
+  },
+]
+
+const jsonOperators = [
+  {
+    meaning: 'object containment',
+    structured: { field: 'payload', operator: '$contains', value: { kind: 'note' } },
+    source: "payload $contains '{\"kind\":\"note\"}'",
+  },
+  {
+    meaning: 'array containment',
+    structured: { field: 'payload', operator: '$contains', value: ['a', 'b'] },
+    source: "payload $contains '[\"a\",\"b\"]'",
+  },
+  {
+    meaning: 'JSON string containment',
+    structured: { field: 'payload', operator: '$contains', value: 'note' },
+    source: "payload $contains '\"note\"'",
+  },
+  {
+    meaning: 'JSON null containment',
+    structured: { field: 'payload', operator: '$contains', value: null },
+    source: 'payload $contains null',
+  },
+]
+```
+
+- Array membership uses `$has` with exactly one `value`; `$hasAny` and `$hasAll` use a non-empty `values` array of scalar values. There is no `values` form for `$has` and no `value` form for `$hasAny`/`$hasAll`.
 - `$has` and `$hasAny` are false for an empty array. `$hasAll` is false when the requested value list is non-empty and the array does not contain every requested value. Null array elements are not treated as a match for a scalar operand.
 - String `$contains` remains substring matching. Array membership is expressed only with `$has*`; it is not overloaded onto `$contains`.
-- JSON uses `$contains` for PostgreSQL `jsonb` structural containment. Structured operands are JSON-compatible objects, arrays, strings, numbers, booleans, or JSON null. Source operands are quoted JSON text, for example `payload $contains '{"kind":"note"}'`; a JSON string value uses a quoted JSON string such as `payload $contains '"note"'`.
+- JSON uses the exact comparison node `{ field, operator: '$contains', value }`, never `values`. Structured operands are JSON-compatible objects, arrays, strings, numbers, booleans, or JSON null. Source operands are quoted JSON text; a JSON string value uses quoted JSON string text as shown above.
 - JSON null and an absent key are distinct. `$contains` performs structural containment without path traversal or schema validation; JSON remains opaque and is never treated as an entity graph.
 - JSON and Array fields remain non-null columns; a missing value is SQL `NULL` only where the canonical field contract allows it. Empty arrays and empty JSON objects are values, not missing values.
 
