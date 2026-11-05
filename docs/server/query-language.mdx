@@ -1,0 +1,358 @@
+---
+title: Query Language
+---
+
+# Query Language
+
+`db.query` has one semantic contract and two input spellings: structured JSON filters and source string expressions. Both normalize to the same canonical filter tree and compile through the same `SQL.where` path. This page is the contract for the query language: what is implemented now, the accepted end-state grammar for the remaining query stages, and the boundaries that are deliberately excluded.
+
+## Pipeline and ownership
+
+The components have distinct jobs:
+
+- `QueryLexer` tokenizes source text and records source spans.
+- `QueryParser` builds a transient, non-executable syntax tree and reports syntax diagnostics.
+- `QueryNormalizer` applies entity metadata to parsed syntax and lowers string forms to canonical filters.
+- `Predicate` validates structured filters and performs shared logical/operator expansion.
+- `compilePolymorphicQuery` owns field resolution, projection joins, collection envelopes, finite work budgets, and the one SQL statement that is executed through Bun SQL.
+
+No input form gets its own executor or database path. A query is either compiled completely or rejected before execution.
+
+## Field universe
+
+`where` and `orderBy` resolve against the effective fields of the queried entity:
+
+- Root scalars: `id`, `name`, `String`, `Number`, `Boolean`, `Date`, `Timestamp`.
+- Inherited scalars, including fields owned by an MTI ancestor.
+- Descendant-only scalars on abstract queries when their declarations are compatible across the concrete leaves.
+- Stored `Entity` references and their `Inverse` navigations are navigation metadata, not scalar columns. They are never accepted as predicates or sort fields merely because they appear in `fields`.
+- `Array` and `JSON` fields remain value fields with the type-specific operators defined below.
+- A dotted path may appear only where the current stage explicitly accepts reference or collection traversal.
+- There is no separate identity field such as `ownerId`; identity is the reference's canonical target `id`.
+- Unknown, incompatible, navigation-only, and physical storage names are rejected before SQL execution.
+
+Current scalar predicates deliberately resolve only root/effective scalar fields. Dotted reference paths are the next query stage. Collection quantifiers and Array/JSON operators follow in the order below.
+
+## Input forms
+
+Structured shorthand is a single equality:
+
+```ts
+where: { title: 'Hello' }
+```
+
+An explicit structured comparison uses a closed operator vocabulary:
+
+```ts
+where: {
+  operator: '$and',
+  filters: [
+    { field: 'score', operator: '$gte', value: 5 },
+    { field: 'score', operator: '$lt', value: 10 },
+    { field: 'title', operator: '$ne', value: 'Draft' },
+  ],
+}
+```
+
+The source form expresses the same predicate tree with `$` operators or their symbolic aliases:
+
+```ts
+where: "score >= 5 $and score < 10 $and title != 'Draft'"
+```
+
+`$and` and `$or` require a non-empty `filters` array. `$not` is unary and requires exactly one child. String source supports `!` and `$not`, grouping parentheses, and the symbolic aliases `=`, `>`, `>=`, `<`, `<=`, `!=`, and `<>`. Empty or whitespace-only source is equivalent to an empty structured object: it adds no predicate.
+
+Source errors retain lexer/parser offsets. Current normalizer errors throw the first diagnostic with its source offset; the accepted end-state remains fail-closed for every diagnostic and never executes a partially normalized query.
+
+## Implemented scalar operators
+
+The following code block is the current executable contract. Each entry pairs the structured and string spelling of the same canonical filter.
+
+```ts
+const scalarOperators = [
+  {
+    meaning: 'equality',
+    structured: { field: 'title', operator: '$eq', value: 'Hello' },
+    source: "title = 'Hello'",
+  },
+  {
+    meaning: 'inequality',
+    structured: { field: 'title', operator: '$ne', value: 'Hello' },
+    source: "title != 'Hello'",
+  },
+  {
+    meaning: 'less than',
+    structured: { field: 'score', operator: '$lt', value: 10 },
+    source: 'score < 10',
+  },
+  {
+    meaning: 'less than or equal',
+    structured: { field: 'score', operator: '$lte', value: 10 },
+    source: 'score <= 10',
+  },
+  {
+    meaning: 'greater than',
+    structured: { field: 'score', operator: '$gt', value: 5 },
+    source: 'score > 5',
+  },
+  {
+    meaning: 'greater than or equal',
+    structured: { field: 'score', operator: '$gte', value: 5 },
+    source: 'score >= 5',
+  },
+  {
+    meaning: 'inclusive range',
+    structured: { field: 'score', operator: '$between', values: [5, 10] },
+    source: 'score $between [5, 10]',
+  },
+  {
+    meaning: 'substring',
+    structured: { field: 'title', operator: '$contains', value: 'Ada' },
+    source: "title $contains 'Ada'",
+  },
+  {
+    meaning: 'empty string or NULL',
+    structured: { field: 'title', operator: '$empty' },
+    source: 'title $empty',
+  },
+  {
+    meaning: 'logical AND',
+    structured: { operator: '$and', filters: [/* filters */] },
+    source: 'a $and b',
+  },
+  {
+    meaning: 'logical OR',
+    structured: { operator: '$or', filters: [/* filters */] },
+    source: 'a $or b',
+  },
+  {
+    meaning: 'logical NOT',
+    structured: { operator: '$not', filters: [/* one filter */] },
+    source: '!filter or $not filter',
+  },
+]
+```
+
+`$between` has exactly two bounds. A `null` bound is open; `[null, null]` is invalid. `$empty` is valid only for `String` and means exactly SQL `NULL` or the empty string, never whitespace. `$contains` is case-insensitive substring matching for `String`; wildcard characters are escaped before binding. Ranges are limited to `String`, `Number`, `Date`, `Timestamp`, and `ID`; booleans use equality only.
+
+`$ne` lowers to `Not(Equal)`. `$between` lowers to the applicable `And` of inclusive bounds. `$empty` lowers to `Or(Equal(null), Equal(''))`. The canonical filter tree therefore has only primitive comparisons and logical groups; source-only conveniences never reach SQL as special cases.
+
+### Null and missing semantics
+
+Scalar predicates are two-valued, including SQL `NULL`:
+
+- Equality to a non-null value is false for `NULL`.
+- `$eq null` matches only SQL `NULL`; `$ne null` matches only non-null values.
+- Range and `$contains` comparisons are false for `NULL`.
+- `Not` complements the two-valued result, so `$ne 5` also matches `NULL`.
+- `$empty` matches only `NULL` or `''`; `$not $empty` matches non-null non-empty strings, including whitespace-only strings.
+
+These rules are shared by the structured and string forms.
+
+## Stage 17 — reference paths
+
+Reference predicates are not implemented in the current scalar grammar. The accepted end-state pairs every form:
+
+```ts
+const referencePaths = [
+  {
+    meaning: 'scalar equality',
+    structured: { field: 'owner.name', operator: '$eq', value: 'Ada' },
+    source: "owner.name = 'Ada'",
+  },
+  {
+    meaning: 'scalar inequality',
+    structured: { field: 'owner.name', operator: '$ne', value: 'Ada' },
+    source: "owner.name != 'Ada'",
+  },
+  {
+    meaning: 'scalar ordered comparison',
+    structured: { field: 'owner.score', operator: '$gte', value: 5 },
+    source: 'owner.score >= 5',
+  },
+  {
+    meaning: 'scalar range',
+    structured: { field: 'owner.score', operator: '$between', values: [5, 10] },
+    source: 'owner.score $between [5, 10]',
+  },
+  {
+    meaning: 'scalar substring',
+    structured: { field: 'owner.name', operator: '$contains', value: 'Ada' },
+    source: "owner.name $contains 'Ada'",
+  },
+  {
+    meaning: 'scalar empty',
+    structured: { field: 'owner.name', operator: '$empty' },
+    source: 'owner.name $empty',
+  },
+  {
+    meaning: 'identity equality',
+    structured: {
+      field: 'owner',
+      operator: '$eq',
+      value: '00000000-0000-4000-8000-000000000001',
+    },
+    source: "owner = '00000000-0000-4000-8000-000000000001'",
+  },
+  {
+    meaning: 'missing reference',
+    structured: { field: 'owner', operator: '$eq', value: null },
+    source: 'owner = null',
+  },
+]
+```
+
+- A dotted path such as `owner.name` traverses stored singular `Entity` references and ends in a scalar or reference identity.
+- All scalar operators above apply to a scalar-ending path; reference identity accepts equality/inequality and `null`, not ordering, substring, range, or `$empty`.
+- The path must be unambiguous across abstract/descendant targets. A field with incompatible target declarations is rejected rather than guessed per row.
+- A missing or null reference behaves as `NULL` for the terminal scalar. Non-null comparisons are false; `$eq null` matches absent/null, and `$ne null` matches present non-null values.
+- `$empty` remains string-only and treats a null/missing reference as empty.
+- The path uses the existing single-statement reference joins and finite work budget. Runtime row identity is never inspected to detect cycles.
+- Sorting by a dotted reference path remains excluded in stages 16–20; `orderBy` continues to accept only root/effective scalar fields.
+
+## Stage 18 — collection predicates
+
+Collection predicates are not implemented in the current scalar grammar. The accepted end-state uses explicit quantifiers over inverse and named N:M navigations:
+
+```ts
+const collectionQuantifiers = [
+  {
+    meaning: 'any related item matches',
+    structured: {
+      field: 'pets',
+      operator: '$any',
+      filters: [{ field: 'name', operator: '$eq', value: 'Ada' }],
+    },
+    source: "pets $any (name = 'Ada')",
+  },
+  {
+    meaning: 'no related item matches',
+    structured: {
+      field: 'pets',
+      operator: '$none',
+      filters: [{ field: 'name', operator: '$eq', value: 'Ada' }],
+    },
+    source: "pets $none (name = 'Ada')",
+  },
+  {
+    meaning: 'every related item matches',
+    structured: {
+      field: 'pets',
+      operator: '$all',
+      filters: [{ field: 'name', operator: '$eq', value: 'Ada' }],
+    },
+    source: "pets $all (name = 'Ada')",
+  },
+  {
+    meaning: 'named relationship property',
+    structured: {
+      field: 'members',
+      operator: '$any',
+      filters: [{
+        field: 'membership.role',
+        operator: '$eq',
+        value: 'GM',
+      }],
+    },
+    source: "members $any (membership.role = 'GM')",
+  },
+]
+```
+
+The three quantifiers have exact empty-set semantics:
+
+- `$any`: true when at least one related item satisfies every inner filter; false for an empty collection.
+- `$none`: true when no related item satisfies the inner filters; true for an empty collection.
+- `$all`: true when every related item satisfies the inner filters; true for an empty collection (vacuous truth), false if any item does not match.
+
+Inner filters are relative to the collection item and may use the item’s scalar/reference paths. For a named N:M relationship, relationship-owned scalar properties use the same lowercase relationship prefix as projection: `membership.role`. The prefix is not available on inverse collections. A quantifier accepts a non-empty `filters` array, cannot be nested through another collection in this contract, and cannot use an unbounded traversal. It compiles to a correlated `EXISTS`/`NOT EXISTS` or equivalent single-statement predicate under the same finite work budget; no N+1 query or unbounded join is permitted.
+
+## Stage 19 — native Array and opaque JSON
+
+Array and JSON predicates are not implemented in the current scalar grammar. The accepted end-state is type-directed by the canonical field type and keeps JSON opaque. All forms use the same comparison node `{ field, operator, value }`; there is no separate `values` node for arrays.
+
+```ts
+const arrayOperators = [
+  {
+    meaning: 'contains one element',
+    structured: { field: 'tags', operator: '$contains', value: 'urgent' },
+    source: "tags $contains 'urgent'",
+  },
+  {
+    meaning: 'contains every listed element',
+    structured: { field: 'tags', operator: '$contains', value: ['urgent', 'important'] },
+    source: "tags $contains ['urgent', 'important']",
+  },
+  {
+    meaning: 'overlaps at least one listed element',
+    structured: { field: 'tags', operator: '$overlaps', value: ['urgent', 'important'] },
+    source: "tags $overlaps ['urgent', 'important']",
+  },
+  {
+    meaning: 'singleton overlaps convenience',
+    structured: { field: 'tags', operator: '$overlaps', value: 'urgent' },
+    source: "tags $overlaps 'urgent'",
+  },
+]
+
+const jsonOperators = [
+  {
+    meaning: 'object containment',
+    structured: { field: 'payload', operator: '$contains', value: { kind: 'note' } },
+    source: 'payload $contains {kind: "note"}',
+  },
+  {
+    meaning: 'nested object containment',
+    structured: { field: 'payload', operator: '$contains', value: { meta: { active: true } } },
+    source: 'payload $contains {meta: {active: true}}',
+  },
+  {
+    meaning: 'array containment',
+    structured: { field: 'payload', operator: '$contains', value: ['a', 'b'] },
+    source: "payload $contains ['a', 'b']",
+  },
+]
+```
+
+Array semantics are type-directed:
+
+- `$contains` on `Array<T>` means PostgreSQL array containment `@>`. A scalar operand is normalized to a one-element array; an array operand requires every element to be contained.
+- `$overlaps` on `Array<T>` means PostgreSQL array overlap `&&`. A scalar operand is normalized to a one-element array; an array operand requires at least one element to overlap.
+- A scalar operand is valid for both array operators. The operand type must match the canonical array element type, including ID format and numeric finiteness.
+- `$contains []` is true for every non-null array (the empty set is contained); `$overlaps []` is false. Array columns remain non-null; empty arrays are values, not missing values.
+- Null operands are invalid for array membership. Stored null array elements do not match a non-null operand and cannot be targeted by this contract’s array predicates.
+- String `$contains` remains case-insensitive substring matching. JSON `$contains` means structural containment `jsonb @>`. The operator vocabulary is deliberately type-directed, not a second operator registry or a second executor.
+
+JSON source literals are first-class:
+
+- The lexer/parser for stage 19 must produce literal AST nodes for objects, arrays, strings, numbers, booleans, and null without evaluating JavaScript.
+- Object keys may be quoted or bare identifiers. Nested objects and arrays are allowed. Computed keys, spreads, functions, and arbitrary expressions are rejected.
+- `payload $contains {kind: "note"}` and `payload $contains {meta: {active: true}}` parse without requiring a serialized JSON string. A JSON string operand uses an ordinary quoted literal; JSON null uses `null`.
+- Structured and source operands normalize to the same comparison node and the same field-type-aware predicate. JSON null and an absent key are distinct; `$contains` performs structural containment without path traversal, schema validation, or treating JSON as an entity graph.
+- JSON fields remain non-null columns. Empty objects and empty arrays are values, not missing values; no JSON empty operator is introduced.
+
+## Ordering, pagination, and exclusions
+
+`orderBy` accepts only effective root/inherited/descendant scalar fields. It rejects references, inverse/N:M collections, dotted reference paths, Array, and JSON. Abstract queries append the stable `id` tie-break and use `name, id` when no ordering is supplied. `limit` defaults to 25 and must be a non-negative integer or `null`; `offset` must be non-negative. Pagination bindings preserve the predicate/collection/work-budget ordering.
+
+Explicit exclusions for this contract:
+
+- No raw SQL fragments, arbitrary JSONPath, regex operators, `$blank`, `$notblank`, `$nor`, `$xor`, or a second predicate grammar.
+- No predicates on physical columns, `Inverse` fields as scalar values, or implicitly inferred inverse edges.
+- No collection predicates that fetch all children into application code, perform N+1 lookups, or recursively traverse collection elements.
+- No runtime row-identity cycle detection; only canonical static traversal and reciprocal-backtrack rules apply.
+- No schema generation, migrations, ORM writes, or automatic CRUD routes from the query language.
+
+## Executable contract fixtures
+
+`libraries/server/source/QueryContract.test.ts` locks the current implemented scalar contract: structured and string forms normalize to the same canonical filter and compile to the same SQL, and the deferred forms above are explicitly rejected until their stages land. The fixture names are the approval boundary for subsequent query-stage changes: extending an operator or field kind requires changing the contract fixture and the implementation together.
+
+## Current implementation audit
+
+- `QueryLexer` already recognizes dotted field tokens, quoted strings, numbers, booleans, null, bracket ranges, grouping, and the supported symbolic operators. Dotted tokens are syntax only; they are not yet query semantics.
+- `QueryParser` owns the current comparison/logical/group grammar and source spans. It does not parse collection quantifiers, Array value lists, or JSON literals yet.
+- `QueryNormalizer` applies scalar field metadata and lowers source conveniences to canonical filters. It currently delegates field resolution to `Predicate.field`, which intentionally rejects references, `Inverse`, Array, and JSON.
+- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, and null/empty lowering. It has no dotted path, collection, Array, or JSON operators yet.
+- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; the remaining stages must extend this path rather than add an executor.
+
+The target end-state is therefore one grammar, two input spellings, one canonical filter tree, one SQL compiler, and one finite-work execution path.

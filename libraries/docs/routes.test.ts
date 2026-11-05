@@ -59,6 +59,7 @@ describe('docs routes', () => {
     expect(pages).toContain('/installation')
     expect(pages).toContain('/server')
     expect(pages).toContain('/server/database')
+    expect(pages).toContain('/server/query-language')
     expect(pages).toContain('/configuration')
     expect(pages).toContain('/logging')
     expect(pages).toContain('/oauth')
