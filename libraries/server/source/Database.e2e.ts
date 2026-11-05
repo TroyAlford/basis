@@ -1475,6 +1475,23 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     await database.sql`
       DROP INDEX "Pet_guardian_fk_idx"
     `
+    await database.sql`
+      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" ("guardian.id")
+      WHERE FALSE
+    `
+    await expect(entities.createTables(database.sql))
+      .rejects.toThrow('does not match the canonical model')
+    await database.sql`
+      DROP INDEX "Pet_guardian_fk_idx"
+    `
+    await database.sql`
+      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" ("guardian.id", lower("id"))
+    `
+    await expect(entities.createTables(database.sql))
+      .rejects.toThrow('does not match the canonical model')
+    await database.sql`
+      DROP INDEX "Pet_guardian_fk_idx"
+    `
     await entities.createTables(database.sql)
 
     const personOne = '00000000-0000-4000-8000-000000000001'

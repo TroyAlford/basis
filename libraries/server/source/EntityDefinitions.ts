@@ -1950,29 +1950,46 @@ function constraintName(entity: EntityDefinition, field: EntityReferenceFieldDef
  */
 async function indexExists(sql: SQL, tableName: string, index: TableIndex): Promise<boolean> {
   const rows = await sql<{
-    columns: string[],
+    attributeCount: number,
+    columns: string[] | null,
+    keyCount: number,
+    noExpressions: boolean,
+    noPredicate: boolean,
+    ready: boolean,
     tableName: string,
     unique: boolean,
+    valid: boolean,
   }[]>`
     SELECT t.relname AS "tableName",
       i.indisunique AS UNIQUE,
-      array_agg(a.attname ORDER BY KEY.ordinality) AS columns
+      i.indisvalid AS valid,
+      i.indisready AS ready,
+      i.indpred IS NULL AS "noPredicate",
+      i.indexprs IS NULL AS "noExpressions",
+      i.indnkeyatts AS "keyCount",
+      i.indnatts AS "attributeCount",
+(SELECT array_agg(a.attname ORDER BY KEY.ordinality) FROM unnest(i.indkey) WITH ORDINALITY AS
+  KEY(attnum,
+ordinality) JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = KEY.attnum ) AS
+  columns
     FROM pg_catalog.pg_index i
     JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
     JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
-    JOIN unnest(i.indkey)
-    WITH ORDINALITY AS KEY(attnum, ordinality) ON TRUE
-    JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = KEY.attnum
     WHERE n.nspname = current_schema() AND c.relname = ${index.name}
-    GROUP BY t.relname, i.indisunique
   `
   const existing = rows[0]
   if (!existing) return false
   if (
     existing.tableName !== tableName
     || existing.unique !== (index.unique === true)
-    || existing.columns.join('\u0000') !== index.columns.join('\u0000')
+    || !existing.valid
+    || !existing.ready
+    || !existing.noPredicate
+    || !existing.noExpressions
+    || existing.keyCount !== index.columns.length
+    || existing.attributeCount !== index.columns.length
+    || (existing.columns ?? []).join('\u0000') !== index.columns.join('\u0000')
   ) {
     throw new Error(`Existing index "${index.name}" does not match the canonical model`)
   }
