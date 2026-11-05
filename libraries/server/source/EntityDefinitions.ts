@@ -651,6 +651,9 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_sch
       for (const index of table.indexes ?? []) {
         if (await indexExists(sql, table.name, index)) continue
         await sql.unsafe(createIndex(table, index)).simple()
+        if (!await indexExists(sql, table.name, index)) {
+          throw new Error(`Index "${index.name}" was not created by the canonical schema compiler`)
+        }
       }
     }
 

@@ -1629,6 +1629,35 @@ VALUES (${petOne},
       .rejects.toThrow('does not match the canonical model')
   }, 120_000)
 
+  isolatedTest('rejects nonindex relation names reserved for canonical indexes', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [{
+            cardinality: 'One',
+            field: 'pet',
+            inverse: 'owner',
+            target: 'Pet',
+            type: 'Inverse',
+          }, { field: 'id', format: 'UUID' }],
+          name: 'Person',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', inverse: 'pet', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+      ],
+    }))
+    await database.sql`
+      CREATE TABLE "Pet_owner_fk_idx" ("id" text PRIMARY KEY)
+    `
+    await expect(entities.createTables(database.sql))
+      .rejects.toThrow('was not created by the canonical schema compiler')
+  }, 120_000)
+
   isolatedTest('projects inverse navigations for inherited and multiple roots', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
