@@ -56,7 +56,13 @@ describe('entityDefinitionFormat', () => {
         ],
         name: 'Article',
       }, {
-        fields: [],
+        fields: [{
+          cardinality: 'Many',
+          field: 'articles',
+          inverse: 'author',
+          target: 'Article',
+          type: 'Inverse',
+        }],
         name: 'User',
       }, {
         fields: [],
@@ -79,6 +85,10 @@ describe('entityDefinitionFormat', () => {
     expect(output.output).toContain('"type": "Array"')
     expect(output.output).toContain('"field": "author"')
     expect(output.output).toContain('"inverse": "articles"')
+    expect(output.output).toContain('"cardinality": "Many"')
+    expect(output.output.indexOf('"inverse": "author"')).toBeLessThan(
+      output.output.indexOf('"cardinality": "Many"'),
+    )
     expect(output.output).toContain('"relationships": [')
     expect(output.output).toContain('"between": [')
     expect(output.output).toContain('"field": "user"')

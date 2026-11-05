@@ -367,6 +367,12 @@ function scalarField(entity: EntityDefinition, name: string): ScalarFieldDefinit
       'references cannot be used in predicates or ordering',
     )
   }
+  if (field.type === FieldType.Inverse) {
+    throw new Error(
+      `Query field "${entity.name}.${name}" is an inverse navigation; ` +
+      'navigation fields cannot be used in predicates or ordering',
+    )
+  }
   if (field.type === FieldType.Array) {
     throw new Error(
       `Query field "${entity.name}.${name}" is an array; ` +

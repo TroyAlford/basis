@@ -9,11 +9,15 @@ export { Operator } from './source/Operator'
 export type { ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
 export type {
   ArrayFieldDefinition,
+  AssociationDefinition,
   DerivedCollectionDefinition,
+  DerivedSingularDefinition,
   EntityDefinition,
   EntityReferenceFieldDefinition,
   FieldDefinition,
+  InverseCardinality,
   InverseDerivedCollectionDefinition,
+  InverseFieldDefinition,
   JSONFieldDefinition,
   RelationshipDefinition,
   RelationshipDerivedCollectionDefinition,

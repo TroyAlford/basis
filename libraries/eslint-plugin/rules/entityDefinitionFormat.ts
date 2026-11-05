@@ -4,7 +4,7 @@ import { EntityDefinitions } from '../../server/source/EntityDefinitions'
 /** Canonical entity property order. */
 const ENTITY_KEYS = ['name', 'extends', 'fields'] as const
 /** Canonical field property order. */
-const FIELD_KEYS = ['field', 'type', 'format', 'target', 'inverse', 'items'] as const
+const FIELD_KEYS = ['field', 'type', 'format', 'target', 'inverse', 'cardinality', 'items'] as const
 /** Canonical array element property order. */
 const ELEMENT_KEYS = ['type', 'format'] as const
 /** Canonical relationship property order. */

@@ -22,6 +22,8 @@ export enum FieldType {
   Entity = 'Entity',
   /** Universal text identity. */
   ID = 'ID',
+  /** Navigation-only reciprocal field. */
+  Inverse = 'Inverse',
   /** Opaque JSON value. */
   JSON = 'JSON',
   /** Numeric value, including integers and floating point numbers. */
@@ -76,6 +78,23 @@ export interface EntityReferenceFieldDefinition {
   readonly type: FieldType.Entity,
 }
 
+/** Supported reciprocal navigation cardinalities. */
+export type InverseCardinality = 'Many' | 'One'
+
+/** One navigation-only reciprocal field. */
+export interface InverseFieldDefinition {
+  /** Cardinality exposed by this reverse navigation. */
+  readonly cardinality: InverseCardinality,
+  /** Forward field name on the target entity. */
+  readonly inverse: string,
+  /** Logical navigation name used by entity-rooted queries. */
+  readonly name: string,
+  /** Entity declaring the forward field. */
+  readonly target: string,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Inverse,
+}
+
 /** One opaque JSON field. */
 export interface JSONFieldDefinition {
   /** Logical field name used by entity-rooted queries. */
@@ -100,6 +119,7 @@ export type FieldDefinition =
   | JSONFieldDefinition
   | ScalarFieldDefinition
   | EntityReferenceFieldDefinition
+  | InverseFieldDefinition
 
 /** One endpoint of a named relationship. */
 export interface RelationshipEndpointDefinition {
@@ -127,10 +147,40 @@ export interface RelationshipDefinition {
   readonly name: string,
 }
 
+/** One validated reciprocal Entity/Inverse association. */
+export interface AssociationDefinition {
+  /** Cardinality exposed by the inverse navigation. */
+  readonly cardinality: InverseCardinality,
+  /** Stored forward reference field. */
+  readonly forward: EntityReferenceFieldDefinition,
+  /** Entity declaring the forward reference. */
+  readonly forwardOwner: string,
+  /** Navigation-only inverse field. */
+  readonly inverse: InverseFieldDefinition,
+  /** Entity declaring the inverse field. */
+  readonly inverseOwner: string,
+}
+
 /** A collection navigation derived from an inverse reference. */
 export interface InverseDerivedCollectionDefinition {
+  /** Validated reciprocal association. */
+  readonly association: AssociationDefinition,
   /** Derivation-kind discriminator. */
   readonly kind: 'inverse',
+  /** Navigation name exposed on the target entity. */
+  readonly name: string,
+  /** The singular forward reference that owns this navigation. */
+  readonly reference: EntityReferenceFieldDefinition,
+  /** Entity type returned by the navigation. */
+  readonly target: string,
+}
+
+/** A singular navigation derived from a reciprocal One inverse. */
+export interface DerivedSingularDefinition {
+  /** Validated reciprocal association. */
+  readonly association: AssociationDefinition,
+  /** Derivation-kind discriminator. */
+  readonly kind: 'inverse-one',
   /** Navigation name exposed on the target entity. */
   readonly name: string,
   /** The singular forward reference that owns this navigation. */
@@ -158,19 +208,20 @@ export type DerivedCollectionDefinition =
   | InverseDerivedCollectionDefinition
   | RelationshipDerivedCollectionDefinition
 
-/** One effective inherited field and its owning entity table. */
-export type EffectiveFieldDefinition = FieldDefinition & {
-  /** Entity table that physically owns this field. */
-  readonly owner: string,
-}
+/** One effective physical field and its owning entity table. */
+export type EffectiveFieldDefinition =
+  Exclude<FieldDefinition, InverseFieldDefinition> & {
+    /** Entity table that physically owns this field. */
+    readonly owner: string,
+  }
 
 /** One entity definition. */
 export interface EntityDefinition {
   /** Whether this entity has descendants and cannot be a concrete leaf. */
   readonly abstract: boolean,
-  /** Derived inverse and relationship navigations exposed on this entity. */
+  /** Derived inverse and relationship collection navigations exposed on this entity. */
   readonly collections: readonly DerivedCollectionDefinition[],
-  /** Effective inherited and locally owned fields. */
+  /** Effective inherited and locally owned physical fields. */
   readonly effectiveFields: readonly EffectiveFieldDefinition[],
   /** Declared parent entity, when present. */
   readonly extends?: string,
@@ -178,10 +229,14 @@ export interface EntityDefinition {
   readonly fields: readonly FieldDefinition[],
   /** Effective inherited ID format. */
   readonly idFormat?: IdentityFormat,
+  /** Effective inherited and locally owned reciprocal navigation fields. */
+  readonly inverseFields: readonly InverseFieldDefinition[],
   /** Entity type name, in PascalCase. */
   readonly name: string,
   /** Parent entity name, or the system `Entity` root. */
   readonly parent: string,
+  /** Effective singular inverse navigations exposed on this entity. */
+  readonly singularNavigations: readonly DerivedSingularDefinition[],
 }
 
 /** One physical table column compiled from canonical or system metadata. */
@@ -208,6 +263,8 @@ interface TableIndex {
   readonly name: string,
   /** Optional operator class applied to every column. */
   readonly opclass?: string,
+  /** Whether the index enforces uniqueness. */
+  readonly unique?: boolean,
 }
 
 /** Internal physical table metadata shared by system and model-owned tables. */
@@ -383,8 +440,10 @@ export function identityDefinition(): EntityDefinition {
     collections: [],
     effectiveFields: rootFields(undefined),
     fields: [],
+    inverseFields: [],
     name: 'Entity',
     parent: 'Entity',
+    singularNavigations: [],
   }
 }
 
@@ -427,12 +486,16 @@ function identityRoot(entities: readonly EntityDefinition[]): TableDefinition {
 
 /** Parsed and validated canonical entity definitions. */
 export class EntityDefinitions {
+  /** Validated reciprocal associations in declaration order. */
+  readonly associations: readonly AssociationDefinition[]
   /** Entities in their declared order. */
   readonly entities: readonly EntityDefinition[]
   /** Named first-class relationships in their declared order. */
   readonly relationships: readonly RelationshipDefinition[]
-  /** Derived navigations exposed by the universal identity root. */
+  /** Derived collection navigations exposed by the universal identity root. */
   readonly #rootCollections: readonly DerivedCollectionDefinition[]
+  /** Derived singular navigations exposed by the universal identity root. */
+  readonly #rootSingularNavigations: readonly DerivedSingularDefinition[]
 
   /**
    * Parse and validate canonical entity JSON.
@@ -448,23 +511,35 @@ export class EntityDefinitions {
       throw new Error('Invalid entity JSON', { cause: error })
     }
     const document = parseEntityDocument(value)
-    return new EntityDefinitions(document.entities, document.relationships, document.rootCollections)
+    return new EntityDefinitions(
+      document.associations,
+      document.entities,
+      document.relationships,
+      document.rootCollections,
+      document.rootSingularNavigations,
+    )
   }
 
   /**
    * Creates entity definitions from already-validated definitions.
+   * @param associations - Validated reciprocal associations.
    * @param entities - Validated entity definitions.
    * @param relationships - Named relationship definitions.
-   * @param rootCollections - Navigations exposed by the universal identity root.
+   * @param rootCollections - Collection navigations exposed by the universal identity root.
+   * @param rootSingularNavigations - Singular navigations exposed by the universal identity root.
    */
   private constructor(
+    associations: readonly AssociationDefinition[],
     entities: readonly EntityDefinition[],
     relationships: readonly RelationshipDefinition[],
     rootCollections: readonly DerivedCollectionDefinition[],
+    rootSingularNavigations: readonly DerivedSingularDefinition[],
   ) {
+    this.associations = associations
     this.entities = entities
     this.relationships = relationships
     this.#rootCollections = rootCollections
+    this.#rootSingularNavigations = rootSingularNavigations
   }
 
   /**
@@ -472,7 +547,7 @@ export class EntityDefinitions {
    * @returns System-owned root followed by model-owned tables in order.
    */
   private get tables(): readonly TableDefinition[] {
-    const inverseIndexes = inverseReferenceIndexes(this.entities)
+    const inverseIndexes = inverseReferenceIndexes(this.associations)
     return [
       identityRoot(this.entities),
       ...this.entities.map(entity => entityTable(entity, inverseIndexes.get(entity.name) ?? [])),
@@ -489,6 +564,29 @@ export class EntityDefinitions {
     return name === 'Entity'
       ? this.#rootCollections
       : this.entity(name)?.collections ?? []
+  }
+
+  /**
+   * Resolve effective singular inverse navigations exposed by one entity.
+   * @param name - Exact entity name, or `Entity` for the universal root.
+   * @returns Effective singular navigations in canonical order.
+   */
+  singularNavigations(name: string): readonly DerivedSingularDefinition[] {
+    return name === 'Entity'
+      ? this.#rootSingularNavigations
+      : this.entity(name)?.singularNavigations ?? []
+  }
+
+  /**
+   * Find the reciprocal association for one stored forward reference.
+   * @param owner - Entity owning the physical forward field.
+   * @param field - Forward field name.
+   * @returns The association, or undefined for an independent forward-only reference.
+   */
+  association(owner: string, field: string): AssociationDefinition | undefined {
+    return this.associations.find(candidate => (
+      candidate.forwardOwner === owner && candidate.forward.name === field
+    ))
   }
 
   /**
@@ -551,8 +649,11 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_sch
       const created = !rows[0]?.present
       if (created) await sql.unsafe(createTable(table)).simple()
       for (const index of table.indexes ?? []) {
-        if (!created && await indexExists(sql, index.name)) continue
+        if (await indexExists(sql, table.name, index)) continue
         await sql.unsafe(createIndex(table, index)).simple()
+        if (!await indexExists(sql, table.name, index)) {
+          throw new Error(`Index "${index.name}" was not created by the canonical schema compiler`)
+        }
       }
     }
 
@@ -691,12 +792,16 @@ function normalizeBody(body: string): string {
 
 /** Parsed canonical document, including derived navigations. */
 interface ParsedEntityDocument {
+  /** Validated reciprocal associations. */
+  readonly associations: readonly AssociationDefinition[],
   /** Resolved entities in declaration order. */
   readonly entities: readonly EntityDefinition[],
   /** Named relationships in declaration order. */
   readonly relationships: readonly RelationshipDefinition[],
-  /** Derived navigations exposed by the universal identity root. */
+  /** Derived collection navigations exposed by the universal identity root. */
   readonly rootCollections: readonly DerivedCollectionDefinition[],
+  /** Derived singular navigations exposed by the universal identity root. */
+  readonly rootSingularNavigations: readonly DerivedSingularDefinition[],
 }
 
 /**
@@ -720,7 +825,7 @@ function parseEntityDocument(value: unknown): ParsedEntityDocument {
   validateAncestry(seeds, byName)
   for (const seed of seeds) {
     for (const field of seed.fields) {
-      if (field.type !== FieldType.Entity) continue
+      if (field.type !== FieldType.Entity && field.type !== FieldType.Inverse) continue
       if (field.target !== 'Entity' && !byName.has(field.target)) {
         throw invalid(`unknown target entity "${field.target}" for field "${seed.name}.${field.name}"`)
       }
@@ -731,15 +836,125 @@ function parseEntityDocument(value: unknown): ParsedEntityDocument {
   const resolved = seeds.map(seed => resolveEntity(seed, byName, formats, children))
   const relationships = parseRelationships(value.relationships, byName)
   validateRelationshipPhysicalNames(relationships)
-  const collections = deriveCollections(resolved, relationships)
+  const associations = resolveAssociations(resolved)
+  const navigations = deriveNavigations(resolved, relationships, associations)
   return {
+    associations,
     entities: resolved.map(entity => ({
       ...entity,
-      collections: collections.get(entity.name) ?? [],
+      collections: navigations.collections.get(entity.name) ?? [],
+      singularNavigations: navigations.singular.get(entity.name) ?? [],
     })),
     relationships,
-    rootCollections: collections.get('Entity') ?? [],
+    rootCollections: navigations.collections.get('Entity') ?? [],
+    rootSingularNavigations: navigations.singular.get('Entity') ?? [],
   }
+}
+
+/**
+ * Validate reciprocal Entity/Inverse declarations and build associations.
+ * @param entities - Resolved entity graph.
+ * @returns Validated associations in declaration order.
+ */
+function resolveAssociations(
+  entities: readonly EntityDefinition[],
+): readonly AssociationDefinition[] {
+  const byName = new Map(entities.map(entity => [entity.name, entity]))
+  const associations: AssociationDefinition[] = []
+  const byForward = new Map<string, AssociationDefinition>()
+  for (const entity of entities) {
+    for (const inverse of entity.fields.filter(field => field.type === FieldType.Inverse)) {
+      const target = byName.get(inverse.target)
+      if (!target) {
+        throw invalid(`inverse field "${entity.name}.${inverse.name}" targets unknown entity "${inverse.target}"`)
+      }
+      const candidates = target.effectiveFields.filter(field => (
+        field.type === FieldType.Entity && field.name === inverse.inverse
+      ))
+      if (candidates.length !== 1) {
+        throw invalid(
+          `inverse field "${entity.name}.${inverse.name}" requires one forward ` +
+          `"${inverse.target}.${inverse.inverse}" reference, found ${candidates.length}`,
+        )
+      }
+      const forward = candidates[0] as EffectiveFieldDefinition & EntityReferenceFieldDefinition
+      if (forward.inverse !== inverse.name) {
+        throw invalid(
+          `inverse field "${entity.name}.${inverse.name}" and forward ` +
+          `"${forward.owner}.${forward.name}" do not name each other`,
+        )
+      }
+      if (inverse.target !== forward.owner) {
+        throw invalid(
+          `inverse field "${entity.name}.${inverse.name}" target "${inverse.target}" ` +
+          `must be the forward owner "${forward.owner}"`,
+        )
+      }
+      if (!isSameOrDescendant(entities, forward.target, entity.name)) {
+        throw invalid(
+          `inverse field "${entity.name}.${inverse.name}" must be declared on ` +
+          `forward target "${forward.target}" or an ancestor`,
+        )
+      }
+      const key = `${forward.owner}\u0000${forward.name}`
+      if (byForward.has(key)) {
+        throw invalid(
+          `forward reference "${forward.owner}.${forward.name}" has more than one inverse navigation`,
+        )
+      }
+      const association: AssociationDefinition = {
+        cardinality: inverse.cardinality,
+        forward,
+        forwardOwner: forward.owner,
+        inverse,
+        inverseOwner: entity.name,
+      }
+      byForward.set(key, association)
+      associations.push(association)
+    }
+  }
+  for (const entity of entities) {
+    for (const field of entity.fields) {
+      if (field.type !== FieldType.Entity || field.inverse === undefined) continue
+      const key = `${entity.name}\u0000${field.name}`
+      if (!byForward.has(key)) {
+        throw invalid(
+          `forward reference "${entity.name}.${field.name}" names inverse ` +
+          `"${field.inverse}" on "${field.target}" but no reciprocal Inverse field was declared`,
+        )
+      }
+    }
+  }
+  return associations
+}
+
+/**
+ * Whether an entity is the ancestor or a descendant of another entity.
+ * @param entities - Resolved entity graph.
+ * @param entityName - Candidate descendant.
+ * @param ancestor - Candidate ancestor.
+ * @returns `true` when the ancestor covers the entity.
+ */
+function isSameOrDescendant(
+  entities: readonly EntityDefinition[],
+  entityName: string,
+  ancestor: string,
+): boolean {
+  let current: string | undefined = entityName
+  while (current !== undefined) {
+    if (current === ancestor) return true
+    current = entities.find(entity => entity.name === current)?.parent
+    if (current === 'Entity') return ancestor === 'Entity'
+  }
+  return false
+}
+
+/** Effective collection and singular navigation maps. */
+interface DerivedNavigations {
+  /** Effective collection navigations by entity. */
+  readonly collections: ReadonlyMap<string, readonly DerivedCollectionDefinition[]>,
+  /** Effective singular navigations by entity. */
+  readonly singular: ReadonlyMap<string, readonly DerivedSingularDefinition[]>,
 }
 
 /**
@@ -888,7 +1103,7 @@ function parseRelationshipField(
   if ('idRefinement' in parsed) {
     throw invalid(`relationship "${relationshipName}" may not declare an id refinement`)
   }
-  if (parsed.field.type === FieldType.Entity) {
+  if (parsed.field.type === FieldType.Entity || parsed.field.type === FieldType.Inverse) {
     throw invalid(
       `relationship field "${relationshipName}.${parsed.field.name}" must be a scalar, array or JSON field`,
     )
@@ -900,15 +1115,17 @@ function parseRelationshipField(
 }
 
 /**
- * Derive reverse 1:N and relationship navigations from canonical metadata.
+ * Derive reciprocal and relationship navigations from canonical metadata.
  * @param entities - Resolved entity graph.
  * @param relationships - Named relationships.
- * @returns Effective navigations by exposing entity name.
+ * @param associations - Validated reciprocal associations.
+ * @returns Effective collection and singular navigations by entity name.
  */
-function deriveCollections(
+function deriveNavigations(
   entities: readonly EntityDefinition[],
   relationships: readonly RelationshipDefinition[],
-): ReadonlyMap<string, readonly DerivedCollectionDefinition[]> {
+  associations: readonly AssociationDefinition[],
+): DerivedNavigations {
   const byName = new Map(entities.map(entity => [entity.name, entity]))
   const fields = new Map<string, Set<string>>([
     ['Entity', new Set(['id', 'name', 'entity'])],
@@ -916,33 +1133,58 @@ function deriveCollections(
   for (const entity of entities) {
     fields.set(entity.name, new Set(entity.effectiveFields.map(field => field.name)))
   }
-  const direct = new Map<string, DerivedCollectionDefinition[]>()
-  const addDirect = (owner: string, collection: DerivedCollectionDefinition): void => {
+  const directCollections = new Map<string, DerivedCollectionDefinition[]>()
+  const directSingular = new Map<string, DerivedSingularDefinition[]>()
+  const directNames = new Map<string, Set<string>>()
+  const addDirect = (owner: string, navigation: DerivedCollectionDefinition | DerivedSingularDefinition): void => {
     const names = fields.get(owner)
     if (!names) throw invalid(`derived navigation target entity "${owner}" is not declared`)
-    if (names.has(collection.name)) {
-      throw invalid(`derived navigation "${owner}.${collection.name}" conflicts with a field`)
+    if (names.has(navigation.name)) {
+      throw invalid(`derived navigation "${owner}.${navigation.name}" conflicts with a field`)
     }
-    const existing = direct.get(owner) ?? []
-    if (existing.some(candidate => candidate.name === collection.name)) {
-      throw invalid(`duplicate derived navigation "${owner}.${collection.name}"`)
+    const used = directNames.get(owner) ?? new Set<string>()
+    if (used.has(navigation.name)) {
+      throw invalid(`duplicate derived navigation "${owner}.${navigation.name}"`)
     }
-    existing.push(collection)
-    direct.set(owner, existing)
+    used.add(navigation.name)
+    directNames.set(owner, used)
+    if (navigation.kind === 'inverse-one') {
+      const existing = directSingular.get(owner) ?? []
+      existing.push(navigation)
+      directSingular.set(owner, existing)
+    } else {
+      const existing = directCollections.get(owner) ?? []
+      existing.push(navigation)
+      directCollections.set(owner, existing)
+    }
+  }
+  const byAssociation = new Map<string, AssociationDefinition>()
+  for (const association of associations) {
+    byAssociation.set(`${association.inverseOwner}\u0000${association.inverse.name}`, association)
   }
   for (const entity of entities) {
-    for (const field of entity.fields) {
-      if (field.type !== FieldType.Entity || field.inverse === undefined) continue
-      validatePhysicalIdentifier(
-        `${entity.name}_${field.name}_fk_idx`,
-        `inverse index for "${field.target}.${field.inverse}"`,
-      )
-      addDirect(field.target, {
-        kind: 'inverse',
-        name: field.inverse,
-        reference: field,
-        target: entity.name,
-      })
+    for (const inverse of entity.fields.filter(field => field.type === FieldType.Inverse)) {
+      const association = byAssociation.get(`${entity.name}\u0000${inverse.name}`)
+      if (!association) {
+        throw invalid(`inverse field "${entity.name}.${inverse.name}" has no validated association`)
+      }
+      if (inverse.cardinality === 'One') {
+        addDirect(entity.name, {
+          association,
+          kind: 'inverse-one',
+          name: inverse.name,
+          reference: association.forward,
+          target: association.forwardOwner,
+        })
+      } else {
+        addDirect(entity.name, {
+          association,
+          kind: 'inverse',
+          name: inverse.name,
+          reference: association.forward,
+          target: association.forwardOwner,
+        })
+      }
     }
   }
   for (const relationship of relationships) {
@@ -960,10 +1202,13 @@ function deriveCollections(
     }
   }
 
-  const result = new Map<string, readonly DerivedCollectionDefinition[]>()
-  const root = direct.get('Entity') ?? []
-  validateEffectiveNavigations('Entity', fields.get('Entity') ?? new Set(), root)
-  result.set('Entity', root)
+  const collections = new Map<string, readonly DerivedCollectionDefinition[]>()
+  const singular = new Map<string, readonly DerivedSingularDefinition[]>()
+  const rootCollections = directCollections.get('Entity') ?? []
+  const rootSingular = directSingular.get('Entity') ?? []
+  validateEffectiveNavigations('Entity', fields.get('Entity') ?? new Set(), rootCollections, rootSingular)
+  collections.set('Entity', rootCollections)
+  singular.set('Entity', rootSingular)
   for (const entity of entities) {
     const chain: EntityDefinition[] = []
     let current: string | undefined = entity.name
@@ -973,33 +1218,41 @@ function deriveCollections(
       chain.unshift(definition)
       current = definition.parent
     }
-    const navigations = [
-      ...root,
-      ...chain.flatMap(definition => direct.get(definition.name) ?? []),
+    const entityCollections = [
+      ...rootCollections,
+      ...chain.flatMap(definition => directCollections.get(definition.name) ?? []),
+    ]
+    const entitySingular = [
+      ...rootSingular,
+      ...chain.flatMap(definition => directSingular.get(definition.name) ?? []),
     ]
     validateEffectiveNavigations(
       entity.name,
       fields.get(entity.name) ?? new Set(),
-      navigations,
+      entityCollections,
+      entitySingular,
     )
-    result.set(entity.name, navigations)
+    collections.set(entity.name, entityCollections)
+    singular.set(entity.name, entitySingular)
   }
-  return result
+  return { collections, singular }
 }
 
 /**
  * Validate effective navigations against fields and each other.
  * @param entityName - Exposing entity name.
  * @param fields - Effective field names.
- * @param navigations - Inherited and local navigations.
+ * @param collections - Inherited and local collection navigations.
+ * @param singular - Inherited and local singular navigations.
  */
 function validateEffectiveNavigations(
   entityName: string,
   fields: ReadonlySet<string>,
-  navigations: readonly DerivedCollectionDefinition[],
+  collections: readonly DerivedCollectionDefinition[],
+  singular: readonly DerivedSingularDefinition[],
 ): void {
   const names = new Set<string>()
-  for (const navigation of navigations) {
+  for (const navigation of [...collections, ...singular]) {
     if (fields.has(navigation.name)) {
       throw invalid(
         `derived navigation "${entityName}.${navigation.name}" ` +
@@ -1060,13 +1313,14 @@ function validateAncestry(
       if (!parent) break
       for (const field of parent.fields) {
         names.set(field.name, parent.name)
-        columns.set(fieldColumn(field), parent.name)
+        if (field.type !== FieldType.Inverse) columns.set(fieldColumn(field), parent.name)
       }
       parentName = parent.extends
     }
     for (const field of seed.fields) {
       const owner = names.get(field.name)
       if (owner) throw invalid(`field "${seed.name}.${field.name}" is already owned by "${owner}"`)
+      if (field.type === FieldType.Inverse) continue
       const column = fieldColumn(field)
       const columnOwner = columns.get(column)
       if (columnOwner) {
@@ -1142,6 +1396,10 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
     return { field: parseArrayField(entityName, value) }
   }
 
+  if (value.type === FieldType.Inverse) {
+    return { field: parseInverseField(entityName, value) }
+  }
+
   if (value.type === FieldType.JSON) {
     return { field: parseJSONField(entityName, value) }
   }
@@ -1196,6 +1454,39 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
       name: value.field,
       type: type as ScalarFieldType,
     },
+  }
+}
+
+/**
+ * Validate one reciprocal navigation field descriptor.
+ * @param entityName - Owning entity name.
+ * @param value - Field candidate.
+ * @returns The validated inverse field.
+ */
+function parseInverseField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+): InverseFieldDefinition {
+  assertKnownKeys(value, ['cardinality', 'field', 'inverse', 'target', 'type'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (typeof value.target !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.target)) {
+    throw invalid(`inverse field "${entityName}.${name}" target must be a PascalCase entity name`)
+  }
+  if (typeof value.inverse !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.inverse)) {
+    throw invalid(`inverse field "${entityName}.${name}" inverse must be a camelCase identifier`)
+  }
+  if (value.cardinality !== 'One' && value.cardinality !== 'Many') {
+    throw invalid(`inverse field "${entityName}.${name}" cardinality must be One or Many`)
+  }
+  return {
+    cardinality: value.cardinality,
+    inverse: value.inverse,
+    name,
+    target: value.target,
+    type: FieldType.Inverse,
   }
 }
 
@@ -1283,6 +1574,7 @@ function resolveEntity(
   children: ReadonlyMap<string, readonly string[]>,
 ): EntityDefinition {
   const effective: EffectiveFieldDefinition[] = [...rootFields(formats.get(seed.name))]
+  const inverseFields: InverseFieldDefinition[] = []
   const ancestors: EntitySeed[] = []
   let current = seed.extends ? byName.get(seed.extends) : undefined
   while (current) {
@@ -1290,9 +1582,15 @@ function resolveEntity(
     current = current.extends ? byName.get(current.extends) : undefined
   }
   for (const ancestor of ancestors) {
-    for (const field of ancestor.fields) effective.push({ ...field, owner: ancestor.name })
+    for (const field of ancestor.fields) {
+      if (field.type === FieldType.Inverse) inverseFields.push(field)
+      else effective.push({ ...field, owner: ancestor.name })
+    }
   }
-  for (const field of seed.fields) effective.push({ ...field, owner: seed.name })
+  for (const field of seed.fields) {
+    if (field.type === FieldType.Inverse) inverseFields.push(field)
+    else effective.push({ ...field, owner: seed.name })
+  }
   const idField: ScalarFieldDefinition = {
     ...(formats.get(seed.name) ? { format: formats.get(seed.name) } : {}),
     name: 'id',
@@ -1304,9 +1602,11 @@ function resolveEntity(
     effectiveFields: effective,
     ...(seed.extends ? { extends: seed.extends } : {}),
     fields: [idField, ...seed.fields],
+    inverseFields,
     ...(formats.get(seed.name) ? { idFormat: formats.get(seed.name) } : {}),
     name: seed.name,
     parent: seed.extends ?? 'Entity',
+    singularNavigations: [],
   }
 }
 
@@ -1325,18 +1625,30 @@ function entityTable(
       expression: identityCheck('id', entity.idFormat),
       name: `${entity.name}_id_format_check`,
     }],
-    columns: entity.fields.map(fieldTableColumn),
+    columns: entity.fields.filter(isPhysicalField).map(fieldTableColumn),
     ...(indexes.length > 0 ? { indexes } : {}),
     name: entity.name,
   }
 }
 
+/** One authored field that owns PostgreSQL storage. */
+type PhysicalFieldDefinition = Exclude<FieldDefinition, InverseFieldDefinition>
+
+/**
+ * Whether a field owns physical storage.
+ * @param field - Authored field.
+ * @returns `true` for scalar, array, JSON or forward-reference fields.
+ */
+function isPhysicalField(field: FieldDefinition): field is PhysicalFieldDefinition {
+  return field.type !== FieldType.Inverse
+}
+
 /**
  * Build one physical table column from a scalar, array, JSON or reference field.
- * @param field - Logical field.
+ * @param field - Logical physical field.
  * @returns Physical column metadata.
  */
-function fieldTableColumn(field: FieldDefinition): TableColumn {
+function fieldTableColumn(field: PhysicalFieldDefinition): TableColumn {
   if (field.type === FieldType.Entity) {
     return { name: field.column, nullable: true, type: FieldType.String }
   }
@@ -1348,28 +1660,27 @@ function fieldTableColumn(field: FieldDefinition): TableColumn {
 }
 
 /**
- * Derive indexes for physical forward FKs used by inverse navigations.
- * @param entities - Resolved canonical definitions.
+ * Derive indexes for physical forward FKs used by reciprocal navigations.
+ * @param associations - Validated reciprocal associations.
  * @returns Deduplicated indexes by owning entity table.
  */
 function inverseReferenceIndexes(
-  entities: readonly EntityDefinition[],
+  associations: readonly AssociationDefinition[],
 ): ReadonlyMap<string, readonly TableIndex[]> {
   const result = new Map<string, TableIndex[]>()
   const seen = new Set<string>()
-  for (const entity of entities) {
-    for (const field of entity.fields) {
-      if (field.type !== FieldType.Entity || field.inverse === undefined) continue
-      const key = `${entity.name}\u0000${field.column}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      const indexes = result.get(entity.name) ?? []
-      indexes.push({
-        columns: [field.column],
-        name: `${entity.name}_${field.name}_fk_idx`,
-      })
-      result.set(entity.name, indexes)
-    }
+  for (const association of associations) {
+    const field = association.forward
+    const key = `${association.forwardOwner}\u0000${field.column}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const indexes = result.get(association.forwardOwner) ?? []
+    indexes.push({
+      columns: [field.column],
+      name: `${association.forwardOwner}_${field.name}_fk_idx`,
+      ...(association.cardinality === 'One' ? { unique: true } : {}),
+    })
+    result.set(association.forwardOwner, indexes)
   }
   return result
 }
@@ -1513,7 +1824,8 @@ function createIndex(table: TableDefinition, index: TableIndex): string {
   const columns = index.columns.map(column => (
     `${quoteIdentifier(column)}${index.opclass ? ` ${index.opclass}` : ''}`
   ))
-  return `create index if not exists ${quoteIdentifier(index.name)} ` +
+  const unique = index.unique ? 'unique ' : ''
+  return `create ${unique}index if not exists ${quoteIdentifier(index.name)} ` +
     `on ${quoteIdentifier(table.name)}${method} (${columns.join(', ')})`
 }
 
@@ -1633,17 +1945,61 @@ function constraintName(entity: EntityDefinition, field: EntityReferenceFieldDef
 }
 
 /**
- * Whether an index exists in the current schema.
+ * Whether an index exists and matches its canonical table, columns and uniqueness.
  * @param sql - SQL client.
- * @param name - Index name.
- * @returns `true` when present.
+ * @param tableName - Expected owning table.
+ * @param index - Canonical index metadata.
+ * @returns `true` when present and matching.
  */
-async function indexExists(sql: SQL, name: string): Promise<boolean> {
-  const rows = await sql<{ present: boolean }[]>`
-SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_indexes WHERE schemaname = current_schema() AND indexname
-      = ${name} ) AS present
+async function indexExists(sql: SQL, tableName: string, index: TableIndex): Promise<boolean> {
+  const rows = await sql<{
+    attributeCount: number,
+    columns: string[] | null,
+    keyCount: number,
+    noExpressions: boolean,
+    noPredicate: boolean,
+    nullsNotDistinct: boolean,
+    ready: boolean,
+    tableName: string,
+    unique: boolean,
+    valid: boolean,
+  }[]>`
+    SELECT t.relname AS "tableName",
+      i.indisunique AS UNIQUE,
+      i.indisvalid AS valid,
+      i.indisready AS ready,
+      i.indpred IS NULL AS "noPredicate",
+      i.indexprs IS NULL AS "noExpressions",
+      i.indnullsnotdistinct AS "nullsNotDistinct",
+      i.indnkeyatts AS "keyCount",
+      i.indnatts AS "attributeCount",
+(SELECT array_agg(a.attname ORDER BY KEY.ordinality) FROM unnest(i.indkey) WITH ORDINALITY AS
+  KEY(attnum,
+ordinality) JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = KEY.attnum ) AS
+  columns
+    FROM pg_catalog.pg_index i
+    JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
+    WHERE n.nspname = current_schema() AND c.relname = ${index.name}
   `
-  return rows[0]?.present === true
+  const existing = rows[0]
+  if (!existing) return false
+  if (
+    existing.tableName !== tableName
+    || existing.unique !== (index.unique === true)
+    || !existing.valid
+    || !existing.ready
+    || !existing.noPredicate
+    || !existing.noExpressions
+    || existing.nullsNotDistinct
+    || existing.keyCount !== index.columns.length
+    || existing.attributeCount !== index.columns.length
+    || (existing.columns ?? []).join('\u0000') !== index.columns.join('\u0000')
+  ) {
+    throw new Error(`Existing index "${index.name}" does not match the canonical model`)
+  }
+  return true
 }
 
 /**

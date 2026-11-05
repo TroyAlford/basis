@@ -106,6 +106,13 @@ const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
         { field: 'id', format: 'UUID' },
         { field: 'tags', items: { type: 'String' }, type: 'Array' },
         { field: 'payload', type: 'JSON' },
+        {
+          cardinality: 'Many',
+          field: 'visits',
+          inverse: 'pet',
+          target: 'Visit',
+          type: 'Inverse',
+        },
       ],
       name: 'Pet',
     },
@@ -121,7 +128,16 @@ const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
 
 const relationshipDefinitions = EntityDefinitions.load(JSON.stringify({
   entities: [
-    { fields: [], name: 'User' },
+    {
+      fields: [{
+        cardinality: 'Many',
+        field: 'articles',
+        inverse: 'author',
+        target: 'Article',
+        type: 'Inverse',
+      }],
+      name: 'User',
+    },
     { fields: [], name: 'Campaign' },
     {
       fields: [
@@ -144,6 +160,61 @@ const relationshipDefinitions = EntityDefinitions.load(JSON.stringify({
     ],
     name: 'Membership',
   }],
+}))
+
+const reciprocalDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        {
+          cardinality: 'Many',
+          field: 'pets',
+          inverse: 'owner',
+          target: 'Pet',
+          type: 'Inverse',
+        },
+        { field: 'manager', target: 'Person', type: 'Entity' },
+        { field: 'spouse', target: 'Person', type: 'Entity' },
+        { field: 'child', target: 'Person', type: 'Entity' },
+        { field: 'primaryCampaign', target: 'Campaign', type: 'Entity' },
+      ],
+      name: 'Person',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'owner', inverse: 'pets', target: 'Person', type: 'Entity' },
+      ],
+      name: 'Pet',
+    },
+    {
+      fields: [
+        { field: 'owner', target: 'Person', type: 'Entity' },
+        { field: 'primaryCampaign', target: 'Campaign', type: 'Entity' },
+      ],
+      name: 'Campaign',
+    },
+  ],
+}))
+
+const oneDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { cardinality: 'One', field: 'pet', inverse: 'owner', target: 'Pet', type: 'Inverse' },
+      ],
+      name: 'Person',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'owner', inverse: 'pet', target: 'Person', type: 'Entity' },
+      ],
+      name: 'Pet',
+    },
+  ],
 }))
 
 const incompatibleDefinitions = EntityDefinitions.load(JSON.stringify({
@@ -550,7 +621,116 @@ describe('SQL.where', () => {
     })).toThrow('Unknown field "User.missing"')
     expect(() => compileEntityQuery(graphDefinitions, 'Article', {
       fields: ['owner.manager.manager.name'],
-    })).toThrow('Repeated reference expansion')
+    })).not.toThrow()
+  })
+
+  test('validates graph budgets, repeated edges and collection boundaries', () => {
+    expect(() => compileEntityQuery(definitions, entity, {
+      fields: Array.from({ length: 65 }, () => 'id'),
+    })).toThrow('maximum path count')
+    expect(() => compileEntityQuery(definitions, entity, {
+      fields: Array.from({ length: 64 }, () => 'a.b.c'),
+    })).toThrow('maximum graph work budget')
+    expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
+      collections: {
+        members: { relationshipFields: Array.from({ length: 128 }, () => 'role') },
+      },
+      fields: ['id', 'members'],
+    })).toThrow('maximum graph work budget')
+
+    const edgeDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'link', target: 'Middle', type: 'Entity' },
+          ],
+          name: 'Root',
+        },
+        {
+          fields: [
+            { field: 'link', target: 'Root', type: 'Entity' },
+          ],
+          name: 'Middle',
+        },
+      ],
+    }))
+    expect(() => compileEntityQuery(edgeDefinitions, 'Root', {
+      fields: ['link.link'],
+    })).not.toThrow()
+    expect(() => compileEntityQuery(edgeDefinitions, 'Root', {
+      fields: ['link.link.link'],
+    })).not.toThrow()
+
+    expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
+      collections: { articles: {} },
+      fields: ['id', 'articles.author'],
+    })).toThrow('Reciprocal reference backtracking')
+    const fanoutDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'entry', target: 'Entity', type: 'Entity' }], name: 'Start' },
+        ...['x', 'y', 'z', 'w'].flatMap(field => (
+          Array.from({ length: 4 }, (_, index) => ({
+            fields: [{ field, target: 'Entity', type: 'Entity' }],
+            name: `${field.toUpperCase()}${index}`,
+          }))
+        )),
+      ],
+    }))
+    expect(() => compileEntityQuery(fanoutDefinitions, 'Start', {
+      fields: ['entry.x.y.z.w.name'],
+    })).toThrow('maximum graph work budget')
+    expect(() => compileEntityQuery(fanoutDefinitions, 'Start', {
+      fields: ['entry.x.name'],
+    })).not.toThrow()
+
+    const deepDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: Array.from({ length: 10 }, (_, index) => ({
+        fields: index === 9 ? [] : [{ field: 'next', target: `Node${index + 1}`, type: 'Entity' }],
+        name: `Node${index}`,
+      })),
+    }))
+    expect(() => compileEntityQuery(deepDefinitions, 'Node0', {
+      fields: [Array.from({ length: 9 }, () => 'next').join('.')],
+    })).toThrow('exceeds the maximum depth')
+  })
+
+  test('validates reciprocal One/Many traversal without banning repeated forward refs', () => {
+    expect(() => compileEntityQuery(reciprocalDefinitions, 'Person', {
+      collections: { pets: { limit: 2 } },
+      fields: ['id', 'pets'],
+    })).not.toThrow()
+    expect(() => compileEntityQuery(reciprocalDefinitions, 'Pet', {
+      collections: { 'owner.pets': { limit: 2 } },
+      fields: ['id', 'owner.pets'],
+    })).not.toThrow()
+    expect(() => compileEntityQuery(oneDefinitions, 'Person', {
+      fields: ['id', 'pet'],
+    })).not.toThrow()
+
+    expect(() => compileEntityQuery(reciprocalDefinitions, 'Person', {
+      collections: { pets: {} },
+      fields: ['id', 'pets.owner'],
+    })).toThrow('Reciprocal reference backtracking')
+    expect(() => compileEntityQuery(reciprocalDefinitions, 'Pet', {
+      collections: { 'owner.pets': {} },
+      fields: ['id', 'owner.pets.owner'],
+    })).toThrow('Reciprocal reference backtracking')
+    expect(() => compileEntityQuery(oneDefinitions, 'Pet', {
+      fields: ['id', 'owner.pet'],
+    })).toThrow('Reciprocal reference backtracking')
+    expect(() => compileEntityQuery(oneDefinitions, 'Person', {
+      fields: ['id', 'pet.owner'],
+    })).toThrow('Reciprocal reference backtracking')
+
+    expect(() => compileEntityQuery(reciprocalDefinitions, 'Person', {
+      fields: ['id', 'manager.manager'],
+    })).not.toThrow()
+    expect(() => compileEntityQuery(reciprocalDefinitions, 'Person', {
+      fields: ['id', 'spouse.child'],
+    })).not.toThrow()
+    expect(() => compileEntityQuery(reciprocalDefinitions, 'Campaign', {
+      fields: ['id', 'owner.primaryCampaign'],
+    })).not.toThrow()
   })
 
   test('compiles substring predicates and escapes wildcard characters', () => {

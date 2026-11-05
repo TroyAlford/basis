@@ -159,6 +159,13 @@ const ontology = {
       fields: [
         { field: 'id', format: 'UUID' },
         { field: 'email', type: 'String' },
+        {
+          cardinality: 'Many',
+          field: 'managedUsers',
+          inverse: 'manager',
+          target: 'SystemUser',
+          type: 'Inverse',
+        },
       ],
       name: 'User',
     },
@@ -181,7 +188,16 @@ const ontology = {
 /** The exact canonical relationship fixture from the accepted ontology. */
 const relationshipOntology = {
   entities: [
-    { fields: [], name: 'User' },
+    {
+      fields: [{
+        cardinality: 'Many',
+        field: 'articles',
+        inverse: 'author',
+        target: 'Article',
+        type: 'Inverse',
+      }],
+      name: 'User',
+    },
     { fields: [], name: 'Campaign' },
     {
       fields: [
@@ -221,6 +237,7 @@ describe('EntityDefinitions', () => {
       'Date',
       'Entity',
       'ID',
+      'Inverse',
       'JSON',
       'Number',
       'String',
@@ -439,7 +456,206 @@ describe('EntityDefinitions', () => {
         },
         base.entities[1],
       ],
-    })).toThrow('duplicate derived navigation')
+    })).toThrow()
+  })
+
+  test('validates reciprocal Inverse declarations and 1:1 uniqueness', () => {
+    const many = load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', inverse: 'pets', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { cardinality: 'Many', field: 'pets', inverse: 'owner', target: 'Pet', type: 'Inverse' },
+          ],
+          name: 'Person',
+        },
+      ],
+    })
+    expect(many.entity('Person')?.fields).toContainEqual({
+      cardinality: 'Many',
+      inverse: 'owner',
+      name: 'pets',
+      target: 'Pet',
+      type: FieldType.Inverse,
+    })
+    expect(many.entity('Person')?.collections).toMatchObject([{
+      association: { cardinality: 'Many' },
+      kind: 'inverse',
+      name: 'pets',
+      target: 'Pet',
+    }])
+    expect(many.entity('Person')?.singularNavigations).toEqual([])
+    expect(many.entity('Pet')?.effectiveFields.map(field => field.name)).not.toContain('pets')
+    expect(many.ddl.join('\n')).toContain('Pet_owner_fk_idx')
+    expect(many.ddl.join('\n')).not.toContain('create unique index')
+
+    const one = load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', inverse: 'pet', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { cardinality: 'One', field: 'pet', inverse: 'owner', target: 'Pet', type: 'Inverse' },
+          ],
+          name: 'Person',
+        },
+      ],
+    })
+    expect(one.entity('Person')?.collections).toEqual([])
+    expect(one.entity('Person')?.singularNavigations).toMatchObject([{
+      association: { cardinality: 'One' },
+      kind: 'inverse-one',
+      name: 'pet',
+      target: 'Pet',
+    }])
+    expect(one.ddl.join('\n')).toContain('create unique index if not exists "Pet_owner_fk_idx"')
+
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'owner', inverse: 'pets', target: 'Person', type: 'Entity' }], name: 'Pet' },
+        { fields: [], name: 'Person' },
+      ],
+    })).toThrow('no reciprocal Inverse field')
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'owner', target: 'Person', type: 'Entity' }], name: 'Pet' },
+        {
+          fields: [{
+            cardinality: 'Many',
+            field: 'pets',
+            inverse: 'owner',
+            target: 'Pet',
+            type: 'Inverse',
+          }],
+          name: 'Person',
+        },
+      ],
+    })).toThrow('do not name each other')
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { field: 'owner', inverse: 'pet', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Person' },
+        {
+          extends: 'Person',
+          fields: [{
+            cardinality: 'One',
+            field: 'pet',
+            inverse: 'owner',
+            target: 'Pet',
+            type: 'Inverse',
+          }],
+          name: 'SpecialPerson',
+        },
+      ],
+    })).toThrow('must be declared on forward target')
+    const inherited = load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { cardinality: 'One', field: 'pet', inverse: 'owner', target: 'Pet', type: 'Inverse' },
+          ],
+          name: 'Person',
+        },
+        {
+          extends: 'Person',
+          fields: [],
+          name: 'SpecialPerson',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', inverse: 'pet', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+      ],
+    })
+    expect(inherited.entity('SpecialPerson')?.singularNavigations.map(navigation => navigation.name))
+      .toEqual(['pet'])
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'owner', target: 'Person', type: 'Entity' }], name: 'Pet' },
+        {
+          fields: [{ field: 'pets', inverse: 'owner', target: 'Pet', type: 'Inverse' }],
+          name: 'Person',
+        },
+      ],
+    })).toThrow('cardinality must be One or Many')
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { field: 'owner', inverse: 'different', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [{
+            cardinality: 'Many',
+            field: 'pets',
+            inverse: 'owner',
+            target: 'Pet',
+            type: 'Inverse',
+          }],
+          name: 'Person',
+        },
+      ],
+    })).toThrow('do not name each other')
+    expect(() => load({
+      entities: [
+        {
+          fields: [
+            { field: 'owner', inverse: 'pets', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+        {
+          fields: [{
+            cardinality: 'Many',
+            field: 'pets',
+            inverse: 'owner',
+            target: 'Campaign',
+            type: 'Inverse',
+          }],
+          name: 'Person',
+        },
+        { fields: [], name: 'Campaign' },
+      ],
+    })).toThrow('requires one forward')
+    expect(() => load({
+      entities: [
+        { fields: [{ field: 'owner', target: 'Person', type: 'Entity' }], name: 'Pet' },
+        {
+          fields: [{
+            cardinality: 'Several',
+            field: 'pets',
+            inverse: 'owner',
+            target: 'Pet',
+            type: 'Inverse',
+          }],
+          name: 'Person',
+        },
+      ],
+    })).toThrow('cardinality must be One or Many')
   })
 
   test('supports abstract relationship targets and distinct self-relations', () => {
@@ -471,7 +687,19 @@ describe('EntityDefinitions', () => {
   test('inherits derived navigations through ancestry and rejects field shadowing', () => {
     const model = {
       entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              cardinality: 'Many',
+              field: 'articles',
+              inverse: 'author',
+              target: 'Article',
+              type: 'Inverse',
+            },
+          ],
+          name: 'User',
+        },
         { extends: 'User', fields: [], name: 'SystemUser' },
         { fields: [], name: 'Campaign' },
         {
@@ -529,11 +757,20 @@ describe('EntityDefinitions', () => {
     expect(entities.ddl.join('\n')).toContain('"payload" jsonb not null')
   })
 
-  test('derives inverse navigations from forward references only', () => {
+  test('derives reciprocal navigations from explicit Inverse declarations', () => {
     const entities = load({
       entities: [
         {
-          fields: [{ field: 'id', format: 'UUID' }],
+          fields: [
+            { field: 'id', format: 'UUID' },
+            {
+              cardinality: 'Many',
+              field: 'visits',
+              inverse: 'pet',
+              target: 'Visit',
+              type: 'Inverse',
+            },
+          ],
           name: 'Pet',
         },
         {
@@ -555,7 +792,8 @@ describe('EntityDefinitions', () => {
       name: 'visits',
       target: 'Visit',
     }])
-    expect(entities.entity('Pet')?.fields.map(field => field.name)).not.toContain('visits')
+    expect(entities.entity('Pet')?.fields.map(field => field.name)).toContain('visits')
+    expect(entities.entity('Pet')?.effectiveFields.map(field => field.name)).not.toContain('visits')
     expect(entities.ddl.join('\n')).not.toContain('"visits"')
     expect(entities.ddl.join('\n')).toContain('Visit_pet_fk_idx')
   })
@@ -570,6 +808,13 @@ describe('EntityDefinitions', () => {
     expect(user?.fields).toEqual([
       { format: 'UUID', name: 'id', type: FieldType.ID },
       { name: 'email', type: FieldType.String },
+      {
+        cardinality: 'Many',
+        inverse: 'manager',
+        name: 'managedUsers',
+        target: 'SystemUser',
+        type: FieldType.Inverse,
+      },
     ])
     expect(systemUser?.effectiveFields).toEqual([
       { format: 'UUID', name: 'id', owner: 'Entity', type: FieldType.ID },
@@ -587,6 +832,7 @@ describe('EntityDefinitions', () => {
       },
     ])
     expect(user?.collections).toMatchObject([{ kind: 'inverse', name: 'managedUsers', target: 'SystemUser' }])
+    expect(systemUser?.inverseFields.map(field => field.name)).toContain('managedUsers')
   })
 
   test('accepts empty fields for a standalone concrete entity', () => {
