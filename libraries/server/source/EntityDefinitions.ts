@@ -649,7 +649,7 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_sch
       const created = !rows[0]?.present
       if (created) await sql.unsafe(createTable(table)).simple()
       for (const index of table.indexes ?? []) {
-        if (!created && await indexExists(sql, table.name, index)) continue
+        if (await indexExists(sql, table.name, index)) continue
         await sql.unsafe(createIndex(table, index)).simple()
       }
     }
@@ -1955,6 +1955,7 @@ async function indexExists(sql: SQL, tableName: string, index: TableIndex): Prom
     keyCount: number,
     noExpressions: boolean,
     noPredicate: boolean,
+    nullsNotDistinct: boolean,
     ready: boolean,
     tableName: string,
     unique: boolean,
@@ -1966,6 +1967,7 @@ async function indexExists(sql: SQL, tableName: string, index: TableIndex): Prom
       i.indisready AS ready,
       i.indpred IS NULL AS "noPredicate",
       i.indexprs IS NULL AS "noExpressions",
+      i.indnullsnotdistinct AS "nullsNotDistinct",
       i.indnkeyatts AS "keyCount",
       i.indnatts AS "attributeCount",
 (SELECT array_agg(a.attname ORDER BY KEY.ordinality) FROM unnest(i.indkey) WITH ORDINALITY AS
@@ -1987,6 +1989,7 @@ ordinality) JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attn
     || !existing.ready
     || !existing.noPredicate
     || !existing.noExpressions
+    || existing.nullsNotDistinct
     || existing.keyCount !== index.columns.length
     || existing.attributeCount !== index.columns.length
     || (existing.columns ?? []).join('\u0000') !== index.columns.join('\u0000')

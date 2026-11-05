@@ -1492,6 +1492,14 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     await database.sql`
       DROP INDEX "Pet_guardian_fk_idx"
     `
+    await database.sql`
+      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" ("guardian.id") NULLS NOT DISTINCT
+    `
+    await expect(entities.createTables(database.sql))
+      .rejects.toThrow('does not match the canonical model')
+    await database.sql`
+      DROP INDEX "Pet_guardian_fk_idx"
+    `
     await entities.createTables(database.sql)
 
     const personOne = '00000000-0000-4000-8000-000000000001'
@@ -1587,6 +1595,38 @@ VALUES (${petOne},
         },
       },
     }])
+  }, 120_000)
+
+  isolatedTest('rejects index name collisions on fresh tables', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [{
+            cardinality: 'One',
+            field: 'pet',
+            inverse: 'owner',
+            target: 'Pet',
+            type: 'Inverse',
+          }, { field: 'id', format: 'UUID' }],
+          name: 'Person',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', inverse: 'pet', target: 'Person', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+      ],
+    }))
+    await database.sql`
+      CREATE TABLE "Other" ("id" text PRIMARY KEY)
+    `
+    await database.sql`
+      CREATE UNIQUE INDEX "Pet_owner_fk_idx" ON "Other" ("id")
+    `
+    await expect(entities.createTables(database.sql))
+      .rejects.toThrow('does not match the canonical model')
   }, 120_000)
 
   isolatedTest('projects inverse navigations for inherited and multiple roots', async database => {
