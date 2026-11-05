@@ -636,6 +636,54 @@ describe('Query contract', () => {
         operator: Operator.Comparison.Contains,
       },
     })).toThrow('maximum graph work budget')
+
+    const deep = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'manager', target: 'User', type: 'Entity' },
+            {
+              cardinality: 'Many',
+              field: 'pets',
+              inverse: 'owner',
+              target: 'Pet',
+              type: 'Inverse',
+            },
+          ],
+          name: 'User',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', inverse: 'pets', target: 'User', type: 'Entity' },
+          ],
+          name: 'Pet',
+        },
+      ],
+    }))
+    const deepPath = ['owner', ...Array.from({ length: 7 }, () => 'manager'), 'name'].join('.')
+    const deepRequirement = (): Readonly<Record<string, unknown>> => ({
+      field: deepPath,
+      operator: Operator.Comparison.Equal,
+      value: 'Ada',
+    })
+    expect(() => compileEntityQuery(deep, 'User', {
+      fields: ['id'],
+      where: {
+        field: 'pets',
+        filters: Array.from({ length: 16 }, deepRequirement),
+        operator: Operator.Comparison.Contains,
+      },
+    })).toThrow('maximum graph work budget')
+    expect(() => compileEntityQuery(deep, 'User', {
+      fields: ['id'],
+      where: {
+        field: 'pets',
+        filters: Array.from({ length: 4 }, deepRequirement),
+        operator: Operator.Comparison.Contains,
+      },
+    })).not.toThrow()
   })
 
   test('rejects malformed or incompatible scalar operators before execution', () => {

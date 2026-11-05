@@ -551,7 +551,10 @@ class QueryProjection {
     const context: EntityContext = targetAlias === undefined
       ? rootContext(this.#entities, rootAlias)
       : targetContext(this.#entities, target, targetAlias, rootAlias)
-    this.#consume(collection.kind === 'relationship' ? 3 : 2)
+    const initialWork = collection.kind === 'inverse'
+      ? targetAlias === undefined ? 1 : 2
+      : targetAlias === undefined ? 2 : 3
+    this.#consume(initialWork)
     const expressions = new Map<string, string>()
     const identities = new Set<string>()
     const resolved = new Map<string, ScalarFieldDefinition>()
@@ -604,6 +607,7 @@ class QueryProjection {
       field: resolve,
       filterKind: path => (identities.has(path) ? 'identity' : undefined),
       get relation() { return [relation, ...joins].join(' ') },
+      get work() { return initialWork + joins.length },
     }
     this.#collectionScopes.set(name, scope)
     return scope

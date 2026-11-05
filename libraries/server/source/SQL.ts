@@ -66,6 +66,8 @@ export interface CollectionScope {
   readonly filterKind?: (name: string) => 'identity' | undefined,
   /** SQL relation containing the related items. */
   readonly relation: string,
+  /** Expanded relation join work emitted by this scope. */
+  readonly work?: number,
 }
 
 /** Optional effective-field scope for polymorphic entity queries. */
@@ -231,7 +233,7 @@ function whereClause(
       if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
       const collectionFilter = node as CollectionFilter
       if (collectionFilter.operator === Operator.Comparison.Empty) {
-        collection.consume?.(1)
+        collection.consume?.(collection.work ?? 1)
         return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${collection.condition})`
       }
       if (collectionFilter.operator !== Operator.Comparison.Contains) {
@@ -241,8 +243,8 @@ function whereClause(
         throw new Error(`Query ${Operator.Comparison.Contains} requires at least one member requirement`)
       }
       const requirements = collectionFilter.filters.map(requirement => {
-        collection.consume?.(1)
         const inner = compile(requirement, collection)
+        collection.consume?.(collection.work ?? 1)
         return `EXISTS (SELECT 1 FROM ${collection.relation} WHERE ` +
           `${collection.condition} AND (${inner}))`
       })
