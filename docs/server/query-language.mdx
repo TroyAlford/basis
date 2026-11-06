@@ -456,6 +456,21 @@ const scopedMemberPredicates = [
 - `$all` is vacuously true for an empty array or collection; `$contains` is false. Existing two-valued NULL behavior applies to member comparisons. Literal array membership, `$empty`, array set/sequence equality, and opaque JSON containment retain their stage-19 semantics.
 - Arrays compile with `unnest` and entity collections with the existing correlated semijoin. Nested collection correlation, outer-context captures, JSON structural equality, and implicit `@` operands are rejected. A quantifier must contain a non-empty member predicate list.
 
+## Stage 20 — query parity gate (implemented)
+
+The full query language is now covered by an integration parity gate. Equivalent structured filters and string expressions must produce the same canonical filter semantics, SQL, bindings, results, and applicable errors.
+
+The gate covers:
+
+- root, inherited, and descendant scalar fields, including abstract-query leaves;
+- singular reference paths, reference identities, nullable/missing references, and descendant reference targets;
+- inverse and named N:M collections, relationship properties, literal `$empty`/`$contains`/`$all`, and explicit `@`/relative member paths;
+- native Array literal membership, set/sequence equality, `@` member predicates, and opaque JSON containment;
+- two-valued NULL behavior, source diagnostic offsets, finite reference depth, array operand bounds, and query work budgets;
+- stable source ordering, pagination, collection-preview bindings, and real PostgreSQL result parity.
+
+`QueryParity.test.ts` owns compiler/error/diagnostic/budget parity; `QueryParity.e2e.ts` owns the real PostgreSQL inherited/abstract, dotted-path, relationship, Array/JSON, NULL, scoped-member, and pagination matrix. Existing stage-specific contract and E2E suites remain the detailed behavior fixtures. Authorization, RLS, and collection `$count` are deliberately outside this gate; `$count` and relational-planning validation belong to stage 20a, and security deployment to 20b–20e.
+
 ## Ordering, pagination, and exclusions
 
 `orderBy` accepts only effective root/inherited/descendant scalar fields. It rejects references, inverse/N:M collections, dotted reference paths, Array, and JSON. Abstract queries append the stable `id` tie-break and use `name, id` when no ordering is supplied. `limit` defaults to 25 and must be a non-negative integer or `null`; `offset` must be non-negative. Pagination bindings preserve the predicate/collection/work-budget ordering.
@@ -475,8 +490,13 @@ Explicit exclusions for this contract:
 ## Current implementation audit
 
 - `QueryLexer` and `QueryParser` own field, scoped `@` member, comparison, logical, grouping, collection-comparison, and first-class Array/JSON literal syntax and source spans.
+
 - `QueryNormalizer` applies scalar metadata and accepts the query compiler’s field, reference-path, and collection resolvers. It lowers `$all` to the shared counterexample canonical form.
+
 - `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, collection/array member validation, Array/JSON operand validation, and null/empty lowering. `QueryProjection.filterField` and `QueryProjection.collectionScope` supply path resolution and correlated relation construction for `db.query`.
+
 - `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection comparisons compile as correlated `EXISTS`/`NOT EXISTS` inside that same statement, with independent `EXISTS` per bracketed requirement. Array/JSON predicates compile through the same comparison registry with parameterized array elements and opaque JSON values. Scoped `@` members compile as array `unnest` predicates or entity-collection semijoins in the same statement.
+
+- `QueryParity.test.ts` and `QueryParity.e2e.ts` lock source/structured parity across compiler errors, diagnostics, budgets, real PostgreSQL results, inherited paths, relationships, Array/JSON, scoped members, and pagination.
 
 The target end-state is therefore one grammar, two input spellings, one canonical filter tree, one SQL compiler, and one finite-work execution path.
