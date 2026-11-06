@@ -32,6 +32,15 @@ Guidance for humans and coding agents working in this repository.
 
 - **Do not skip repository checks** when committing (for example `--no-verify` or other flags that bypass Husky). Let lint, typecheck, and tests run; fix failures instead of silencing hooks.
 
+## Verification
+
+- **Use the narrowest check while editing.** Run the specific unit test file(s) that exercise the change, and run a database or browser E2E file only when the change actually requires PostgreSQL or a real browser. `bun run test`, `bun run test:e2e`, and `bun run test:all` are completion gates, not an edit loop. A server query change starts with `bun test libraries/server/source/<Affected>.test.ts`; add one affected `*.e2e.ts` only for real SQL behavior. Docs-only changes use `bun run docs:check`; export or install changes use `bun run test:consumer` once.
+- **One full gate per revision.** Run the repository-wide checks once against the final head, after the last code change. Do not repeat a full unit, E2E, consumer, docs-build, lint, or Knip run for formatting-only, docs-only, or comment-only follow-ups. If that exact head already passed a gate, cite the earlier result instead of rerunning it.
+- **Do not retry a full run automatically.** If a completion gate is interrupted or times out, inspect the partial output and report it; rerun only the failing scope, or ask before repeating the whole gate.
+- **E2E invocations are cold runs.** The fixtures are run-scoped: the database fixture starts one managed PostgreSQL container per `bun test` process, application fixtures start one server per entry, and all of them are torn down when the run ends. They do not stay alive between commands and do not use HMR. Every separate E2E invocation pays startup again, so iterate with one file-scoped run and run full E2E once at the checkpoint.
+- **Know the expensive suites.** `DatabaseFixture.lifecycle.e2e.ts` spawns child `bun test` processes to prove lifecycle and cleanup; `Database.e2e.ts` includes independent-install and restart cases; `QueryPlanning.e2e.ts` is a measured benchmark; visual E2E starts the Playwright container. Do not use these as inner-loop tests. Select the behavior suite when the change does not touch those contracts.
+- **Report the verification boundary.** State which focused checks passed, which completion gate ran, and which suites were deliberately not rerun. Never imply a full suite passed when only a focused file did.
+
 ## CI and releases
 
 - **Pull requests** to `main` run `.github/workflows/ci.yml` (ESLint, tests, TypeScript, and the consumer self-install contract). That workflow must pass before merge.
