@@ -26,7 +26,7 @@ No input form gets its own executor or database path. A query is either compiled
 - Inherited scalars, including fields owned by an MTI ancestor.
 - Descendant-only scalars on abstract queries when their declarations are compatible across the concrete leaves.
 - Stored `Entity` references and their `Inverse` navigations are navigation metadata, not scalar columns. They are never accepted as predicates or sort fields merely because they appear in `fields`.
-- `Array` and `JSON` fields remain value fields with the type-specific operators defined below.
+- `Array` and `JSON` fields remain value fields with the type-specific operators defined below. `collection.$count` is a read-only intrinsic count pseudo-field, never an authored ontology field.
 - A dotted path may appear only where the current stage explicitly accepts reference or collection traversal.
 - There is no separate identity field such as `ownerId`; identity is the reference's canonical target `id`.
 - Unknown, incompatible, navigation-only, and physical storage names are rejected before SQL execution.
@@ -469,7 +469,25 @@ The gate covers:
 - two-valued NULL behavior, source diagnostic offsets, finite reference depth, array operand bounds, and query work budgets;
 - stable source ordering, pagination, collection-preview bindings, and real PostgreSQL result parity.
 
-`QueryParity.test.ts` owns compiler/error/diagnostic/budget parity; `QueryParity.e2e.ts` owns the real PostgreSQL inherited/abstract, dotted-path, relationship, Array/JSON, NULL, scoped-member, and pagination matrix. Existing stage-specific contract and E2E suites remain the detailed behavior fixtures. Authorization, RLS, and collection `$count` are deliberately outside this gate; `$count` and relational-planning validation belong to stage 20a, and security deployment to 20b–20e.
+`QueryParity.test.ts` owns compiler/error/diagnostic/budget parity; `QueryParity.e2e.ts` owns the real PostgreSQL inherited/abstract, dotted-path, relationship, Array/JSON, NULL, scoped-member, and pagination matrix. Existing stage-specific contract and E2E suites remain the detailed behavior fixtures. Authorization and RLS are deliberately outside this gate; collection `$count` and relational-planning validation are covered by stage 20a, and security deployment by 20b–20e.
+
+## Stage 20a — collection counts and relational planning (implemented)
+
+Inverse, named-relationship, and native-array collections expose a read-only `$count` intrinsic:
+
+```ts
+const countPredicates = [
+  { structured: { field: 'pets.$count', operator: '$gte', value: 3 }, source: 'pets.$count >= 3' },
+  { structured: { field: 'scores.$count', operator: '$gt', value: 0 }, source: 'scores.$count > 0' },
+]
+```
+
+- `$count` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references.
+- Relationship counts count complete logical member/edge rows, independent of collection preview limit/offset. Native-array counts include duplicates and stored null elements; a NULL array counts as zero.
+- `collection.$count = 0` canonicalizes to `NOT EXISTS` and `collection.$count > 0` to `EXISTS` when equivalent. Other thresholds use a bounded correlated aggregate.
+- Collection relation planning is shared by predicate scopes, collection previews, counts, and count ordering. A one logical collection path is built once and reused; emitted subquery work remains charged to the finite compiler budget.
+- The planning benchmark fixture runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over correlated and CTE default/`MATERIALIZED`/`NOT MATERIALIZED` variants on representative parent/child cardinalities. All variants must return the same rows and the recorded planning/execution time, row count, and buffer evidence inform the rendering choice; no blanket CTE materialization rule is applied.
+- The exported `QueryScope`, `CollectionScope`, `ArrayScope`, and `CountScope` types form the reusable entity/relationship scope boundary for later authorization work. They do not implement permission policies, RLS, or request actor binding in this stage.
 
 ## Ordering, pagination, and exclusions
 
@@ -497,6 +515,6 @@ Explicit exclusions for this contract:
 
 - `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection comparisons compile as correlated `EXISTS`/`NOT EXISTS` inside that same statement, with independent `EXISTS` per bracketed requirement. Array/JSON predicates compile through the same comparison registry with parameterized array elements and opaque JSON values. Scoped `@` members compile as array `unnest` predicates or entity-collection semijoins in the same statement.
 
-- `QueryParity.test.ts` and `QueryParity.e2e.ts` lock source/structured parity across compiler errors, diagnostics, budgets, real PostgreSQL results, inherited paths, relationships, Array/JSON, scoped members, and pagination.
+- `QueryParity.test.ts` and `QueryParity.e2e.ts` lock source/structured parity across compiler errors, diagnostics, budgets, real PostgreSQL results, inherited paths, relationships, Array/JSON, scoped members, and pagination. `QueryPlanning.e2e.ts` measures correlated and CTE count strategies with PostgreSQL plan evidence.
 
 The target end-state is therefore one grammar, two input spellings, one canonical filter tree, one SQL compiler, and one finite-work execution path.

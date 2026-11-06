@@ -417,6 +417,42 @@ const cases: readonly ParityCase[] = [
   {
     entity: 'Person',
     expected: [ada],
+    source: 'pets.$count >= 2',
+    structured: { field: 'pets.$count', operator: Operator.Comparison.GreaterThanOrEqual, value: 2 },
+  },
+  {
+    entity: 'Person',
+    expected: [linus],
+    source: 'pets.$count = 0',
+    structured: { field: 'pets.$count', operator: Operator.Comparison.Equal, value: 0 },
+  },
+  {
+    entity: 'Person',
+    expected: [ada, grace],
+    source: 'scores.$count > 0',
+    structured: { field: 'scores.$count', operator: Operator.Comparison.GreaterThan, value: 0 },
+  },
+  {
+    entity: 'Person',
+    expected: [linus],
+    source: 'scores.$count = 0',
+    structured: { field: 'scores.$count', operator: Operator.Comparison.Equal, value: 0 },
+  },
+  {
+    entity: 'Campaign',
+    expected: [campaignOne],
+    source: 'members.$count >= 3',
+    structured: { field: 'members.$count', operator: Operator.Comparison.GreaterThanOrEqual, value: 3 },
+  },
+  {
+    entity: 'Campaign',
+    expected: [campaignThree],
+    source: 'members.$count = 0',
+    structured: { field: 'members.$count', operator: Operator.Comparison.Equal, value: 0 },
+  },
+  {
+    entity: 'Person',
+    expected: [ada],
     source: 'payload $contains {kind: "note"}',
     structured: { field: 'payload', operator: Operator.Comparison.Contains, value: { kind: 'note' } },
   },
@@ -471,6 +507,27 @@ describe('Query parity gate', () => {
       const result = await execute(database, paged)
       expect(result.source).toEqual(result.structured)
       expect(result.source.map(row => row.id)).toEqual([...(paged.expected ?? [])])
+
+      const projected = await queryEntity<{
+        readonly 'id': string,
+        readonly 'pets.$count': number,
+        readonly 'scores.$count': number,
+      }>(database.sql, definitions, 'Person', {
+        fields: ['id', 'pets.$count', 'scores.$count'],
+        orderBy: 'id',
+      })
+      expect(projected).toEqual([
+        { 'id': ada, 'pets.$count': 2, 'scores.$count': 3 },
+        { 'id': grace, 'pets.$count': 1, 'scores.$count': 1 },
+        { 'id': linus, 'pets.$count': 0, 'scores.$count': 0 },
+      ])
+
+      const ordered = await queryEntity<{ id: string }>(database.sql, definitions, 'Person', {
+        fields: ['id'],
+        orderBy: 'pets.$count',
+        where: 'pets.$count >= 0',
+      })
+      expect(ordered.map(row => row.id)).toEqual([linus, grace, ada])
     })
   }, 120_000)
 })

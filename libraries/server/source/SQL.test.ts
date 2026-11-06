@@ -569,9 +569,9 @@ describe('SQL.where', () => {
       fields: ['id', 'members'],
     })
     expect(members.sql).toContain('FROM "Campaign" "t"')
-    expect(members.sql).toContain('"Membership" "cj"')
-    expect(members.sql).toContain('"cj"."campaign.id" = "t"."id"')
-    expect(members.sql).toContain('"cj"."user.id"')
+    expect(members.sql).toMatch(/"Membership" "cj\d+"/)
+    expect(members.sql).toMatch(/"cj\d+"\."campaign\.id" = "t"\."id"/)
+    expect(members.sql).toMatch(/"cj\d+"\."user\.id"/)
     expect(members.sql).toContain('"members__items"')
     expect(members.sql).toContain("'membership'")
     expect(members.sql).toContain("'role'")
@@ -582,8 +582,8 @@ describe('SQL.where', () => {
       collections: { articles: { limit: 1 } },
       fields: ['id', 'articles'],
     })
-    expect(articles.sql).toContain('"Article" "ct"')
-    expect(articles.sql).toContain('"ct"."author.id" = "t"."id"')
+    expect(articles.sql).toMatch(/"Article" "ct\d+"/)
+    expect(articles.sql).toMatch(/"ct\d+"\."author\.id" = "t"\."id"/)
     expect(articles.sql).not.toContain('"Membership"')
   })
 
