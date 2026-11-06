@@ -580,6 +580,22 @@ describe('Query contract', () => {
       fields: ['id'],
       where: 'payload $contains {account: 9007199254740993}',
     })).toThrow('safe integer range')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 1.0000000000000001}',
+    })).toThrow('cannot be represented exactly')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 9007199254740991.1}',
+    })).toThrow('cannot be represented exactly')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 1.0}',
+    })).not.toThrow()
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 1e2}',
+    })).not.toThrow()
 
     expect(() => compileEntityQuery(definitions, 'Pet', {
       fields: ['id'],

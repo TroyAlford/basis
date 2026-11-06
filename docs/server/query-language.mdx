@@ -377,7 +377,7 @@ JSON source literals are first-class:
 
 - The lexer/parser produces literal AST nodes for objects, arrays, strings, numbers, booleans, and null without evaluating JavaScript.
 - Object keys may be quoted or bare identifiers. Nested objects and arrays are allowed. Computed keys, spreads, functions, and arbitrary expressions are rejected.
-- `payload $contains {kind: "note"}` and `payload $contains {meta: {active: true}}` parse without requiring a serialized JSON string. A JSON string operand uses an ordinary quoted literal; JSON null uses `null`; object keys may be quoted or bare. Source numeric literals that fall outside JavaScript's safe integer range are rejected instead of being silently rounded; PostgreSQL `jsonb` retains exact numeric values.
+- `payload $contains {kind: "note"}` and `payload $contains {meta: {active: true}}` parse without requiring a serialized JSON string. A JSON string operand uses an ordinary quoted literal; JSON null uses `null`; object keys may be quoted or bare. Source numeric literals that fall outside JavaScript's safe integer range, or whose exact decimal value cannot survive Number plus JSON serialization, are rejected instead of being silently rounded; PostgreSQL `jsonb` retains exact numeric values.
 - Structured and source operands normalize to the same comparison node and the same field-type-aware predicate. JSON null and an absent key are distinct; `$contains` performs structural containment without path traversal, schema validation, or treating JSON as an entity graph. JSON `$eq`/`===` equality and JSON path predicates are not part of this contract.
 - JSON fields remain non-null columns. Empty objects and empty arrays are values, not missing values; no JSON empty operator is introduced.
 

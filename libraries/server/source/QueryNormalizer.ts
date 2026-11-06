@@ -197,6 +197,52 @@ function scalarLiteral(field: ScalarFieldDefinition, node: QueryLiteral): unknow
 }
 
 /**
+ * Convert one source JSON number without silently changing its decimal meaning.
+ * @param raw - Exact source numeric lexeme.
+ * @returns The finite JavaScript number safe for canonical JSON serialization.
+ */
+function jsonNumber(raw: string): number {
+  const value = Number(raw)
+  if (!Number.isFinite(value)) throw new Error('JSON number literals must be finite')
+  if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+    throw new Error(`JSON integer literal ${raw} exceeds the safe integer range`)
+  }
+  if (!sameDecimal(raw, String(value))) {
+    throw new Error(`JSON numeric literal ${raw} cannot be represented exactly`)
+  }
+  return value
+}
+
+/**
+ * Compare two decimal lexemes by exact numeric value.
+ * @param left - First decimal or scientific-notation lexeme.
+ * @param right - Second decimal or scientific-notation lexeme.
+ * @returns Whether both denote the same exact decimal value.
+ */
+function sameDecimal(left: string, right: string): boolean {
+  return canonicalDecimal(left) === canonicalDecimal(right)
+}
+
+/**
+ * Canonicalize one decimal lexeme as sign, significant digits, and exponent.
+ * @param value - Decimal or scientific-notation lexeme.
+ * @returns Canonical numeric identity.
+ */
+function canonicalDecimal(value: string): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/u.exec(value)
+  if (!match) return value
+  const [, sign = '', whole = '0', fraction = '', exponentText = '0'] = match
+  let digits = `${whole}${fraction}`.replace(/^0+/u, '')
+  let exponent = Number(exponentText) - fraction.length
+  if (digits === '') return '0'
+  while (digits.endsWith('0')) {
+    digits = digits.slice(0, -1)
+    exponent += 1
+  }
+  return `${sign}${digits}e${exponent}`
+}
+
+/**
  * Convert one parsed JSON literal recursively.
  * @param node - JSON syntax literal.
  * @returns A JSON-compatible value.
@@ -210,13 +256,6 @@ function jsonLiteral(node: QueryLiteral): unknown {
         .map(([key, value]) => [key, jsonLiteral(value)]),
     )
   }
-  if (node.kind === 'number') {
-    const value = Number(node.raw)
-    if (!Number.isFinite(value)) throw new Error('JSON number literals must be finite')
-    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
-      throw new Error(`JSON integer literal ${node.raw} exceeds the safe integer range`)
-    }
-    return value
-  }
+  if (node.kind === 'number') return jsonNumber(node.raw)
   return node.value
 }

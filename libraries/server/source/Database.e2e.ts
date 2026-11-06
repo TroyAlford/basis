@@ -2122,7 +2122,7 @@ VALUES (${dogOne},
     })).toThrow('not valid')
   }, 120_000)
 
-  isolatedTest('rejects unsafe JSON integer literals without matching neighbors', async database => {
+  isolatedTest('rejects unsafe JSON numeric literals without matching neighbors', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [{
         fields: [
@@ -2135,25 +2135,50 @@ VALUES (${dogOne},
     await entities.createTables(database.sql)
     const exact = '00000000-0000-4000-8000-000000000001'
     const unsafe = '00000000-0000-4000-8000-000000000002'
+    const decimal = '00000000-0000-4000-8000-000000000003'
+    const precise = '00000000-0000-4000-8000-000000000004'
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${exact}, 'Exact', 'Note'), (${unsafe}, 'Unsafe', 'Note')
+      VALUES (${exact},
+        'Exact',
+        'Note'),
+        (${unsafe},
+        'Unsafe',
+        'Note'),
+        (${decimal},
+        'Decimal',
+        'Note'),
+        (${precise},
+        'Precise',
+        'Note')
     `
     await database.sql`
       INSERT INTO "Note" ("id", "payload")
-VALUES (${exact},
-  '{"account":9007199254740991}'::jsonb),
-  (${unsafe},
-  '{"account":9007199254740993}'::jsonb)
+      VALUES (${exact},
+        '{"account":9007199254740991}'::jsonb),
+        (${unsafe},
+        '{"account":9007199254740993}'::jsonb),
+        (${decimal},
+        '{"amount":1}'::jsonb),
+        (${precise},
+        '{"amount":1.0000000000000001}'::jsonb)
     `
     expect(await queryEntity<{ id: string }>(database.sql, entities, 'Note', {
       fields: ['id'],
       where: 'payload $contains {account: 9007199254740991}',
     })).toEqual([{ id: exact }])
+    expect(await queryEntity<{ id: string }>(database.sql, entities, 'Note', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 1}',
+    })).toEqual([{ id: decimal }])
     expect(() => compileEntityQuery(entities, 'Note', {
       fields: ['id'],
       where: 'payload $contains {account: 9007199254740993}',
     })).toThrow('safe integer range')
+    expect(() => compileEntityQuery(entities, 'Note', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 1.0000000000000001}',
+    })).toThrow('cannot be represented exactly')
     expect(() => compileEntityQuery(entities, 'Note', {
       fields: ['id'],
       where: {
