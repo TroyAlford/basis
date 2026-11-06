@@ -48,6 +48,9 @@ export type CollectionResolver = (name: string) => CollectionFilterScope | undef
 /** A canonical serializable where filter. */
 export type Filter = CollectionFilter | ComparisonFilter | LogicalFilter
 
+/** Maximum number of elements accepted in one array operand. */
+const MAX_ARRAY_OPERAND = 128
+
 /** Primitive comparison operators retained in the canonical filter tree. */
 const BASE_COMPARISON_OPERATORS = new Set<Operator.Comparison>([
   Operator.Comparison.Contains,
@@ -454,6 +457,9 @@ function arrayOperand(
   const allowScalar = operator === Operator.Comparison.Contains || operator === Operator.Comparison.Overlaps
   const values = Array.isArray(raw) ? raw : allowScalar ? [raw] : undefined
   if (!values) throw new Error(`Query operator "${operator}" requires an array operand for "${field.name}"`)
+  if (values.length > MAX_ARRAY_OPERAND) {
+    throw new Error(`Array operand for "${field.name}" exceeds the maximum of ${MAX_ARRAY_OPERAND} elements`)
+  }
   const item = arrayItemField(field)
   return values.map(value => {
     if (value === null) throw new Error(`Array operands for "${field.name}" cannot contain null`)
@@ -486,6 +492,9 @@ export function normalizeJSON(value: unknown, seen = new Set<object>()): unknown
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new Error('JSON number operands must be finite')
+    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+      throw new Error('JSON integer operands exceed the safe integer range')
+    }
     return value
   }
   if (Array.isArray(value)) {

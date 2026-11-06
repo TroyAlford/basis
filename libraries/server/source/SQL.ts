@@ -161,9 +161,8 @@ const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>
     build: (field, column, operand, bind) => {
       if (field.type === FieldType.Array) {
         if (operand === null) return `${column} IS NULL`
-        return `(${column} IS NOT NULL AND ` +
-          `ARRAY(SELECT DISTINCT unnest(${column}) ORDER BY 1) IS NOT DISTINCT FROM ` +
-          `ARRAY(SELECT DISTINCT unnest(${arrayExpression(field, operand, bind)}) ORDER BY 1))`
+        const rhs = arrayExpression(field, operand, bind)
+        return `(${column} IS NOT NULL AND ${column} @> ${rhs} AND ${column} <@ ${rhs})`
       }
       if (operand === null) return `${column} IS NULL`
       return `${column} IS NOT DISTINCT FROM ${bind(operand as BoundScalar)}`

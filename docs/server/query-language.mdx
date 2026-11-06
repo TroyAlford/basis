@@ -369,14 +369,15 @@ Array semantics are type-directed:
 - `$contains []` is true for every non-null array (the empty set is contained); `$overlaps []` is false. Array columns remain non-null; empty arrays are values, not missing values. Array operand elements cannot be null.
 - Null operands are invalid for array membership. Stored null array elements do not match a non-null operand and cannot be targeted by this contract’s array predicates.
 - String `$contains` remains case-insensitive substring matching. JSON `$contains` means structural containment `jsonb @>`. The operator vocabulary is deliberately type-directed, not a second operator registry or a second executor.
-- `tags == [...]` and `$eq` mean unordered set equality ignoring order and multiplicity; `tags === [...]` and `$sequenceEqual` mean exact sequence equality. `===` is invalid for inherently unordered relationship collections. These are Basis DSL semantics, not JavaScript reference equality or ordinary PostgreSQL array equality.
-- `tags $empty` tests SQL null or zero elements; `tags !$empty` is its negation. Array universal predicates using an element-variable predicate remain future work; `$all` remains relationship-collection syntax.
+- `tags == [...]` and `$eq` mean unordered set equality ignoring order and multiplicity; `tags === [...]` and `$sequenceEqual` mean exact sequence equality. Set equality uses PostgreSQL native `@>`/`<@` equivalence rather than per-row sorting. `===` is invalid for inherently unordered relationship collections. These are Basis DSL semantics, not JavaScript reference equality or ordinary PostgreSQL array equality.
+- Array operands are capped at **128 elements** so one predicate cannot expand into an unbounded SQL statement or exhaust the driver parameter budget.
+- `tags $empty` tests SQL null or zero elements; `tags !$empty` is its negation. **Operator decision:** native-array `$all` is deferred beyond stage 19 until an element-variable predicate syntax is approved; `$all` remains relationship-collection syntax in this stage.
 
 JSON source literals are first-class:
 
 - The lexer/parser produces literal AST nodes for objects, arrays, strings, numbers, booleans, and null without evaluating JavaScript.
 - Object keys may be quoted or bare identifiers. Nested objects and arrays are allowed. Computed keys, spreads, functions, and arbitrary expressions are rejected.
-- `payload $contains {kind: "note"}` and `payload $contains {meta: {active: true}}` parse without requiring a serialized JSON string. A JSON string operand uses an ordinary quoted literal; JSON null uses `null`; object keys may be quoted or bare.
+- `payload $contains {kind: "note"}` and `payload $contains {meta: {active: true}}` parse without requiring a serialized JSON string. A JSON string operand uses an ordinary quoted literal; JSON null uses `null`; object keys may be quoted or bare. Source numeric literals that fall outside JavaScript's safe integer range are rejected instead of being silently rounded; PostgreSQL `jsonb` retains exact numeric values.
 - Structured and source operands normalize to the same comparison node and the same field-type-aware predicate. JSON null and an absent key are distinct; `$contains` performs structural containment without path traversal, schema validation, or treating JSON as an entity graph. JSON `$eq`/`===` equality and JSON path predicates are not part of this contract.
 - JSON fields remain non-null columns. Empty objects and empty arrays are values, not missing values; no JSON empty operator is introduced.
 

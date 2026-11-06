@@ -510,6 +510,15 @@ describe('Query contract', () => {
     expect(array.sql).toContain('"tags" @> ARRAY[$1::text, $2::text]')
     expect(array.values).toEqual(['urgent', 'important', 25, 0])
 
+    const setEqual = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: "tags == ['b', 'a']",
+    })
+    expect(setEqual.sql).toContain('"tags" @>')
+    expect(setEqual.sql).toContain('"tags" <@')
+    expect(setEqual.sql).not.toContain('unnest')
+    expect(setEqual.values).toEqual(['b', 'a', 25, 0])
+
     const json = compileEntityQuery(definitions, 'Pet', {
       fields: ['id'],
       where: 'payload $contains {kind: "note"}',
@@ -556,6 +565,21 @@ describe('Query contract', () => {
       fields: ['id'],
       where: { field: 'payload', operator: Operator.Comparison.Empty },
     })).toThrow('not valid for field')
+
+    const moderate = Array.from({ length: 16 }, (_, index) => `tag-${index}`)
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { field: 'tags', operator: Operator.Comparison.Contains, value: moderate },
+    })).not.toThrow()
+    const excessive = Array.from({ length: 129 }, (_, index) => `tag-${index}`)
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { field: 'tags', operator: Operator.Comparison.Contains, value: excessive },
+    })).toThrow('maximum of 128 elements')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {account: 9007199254740993}',
+    })).toThrow('safe integer range')
 
     expect(() => compileEntityQuery(definitions, 'Pet', {
       fields: ['id'],

@@ -213,6 +213,9 @@ function jsonLiteral(node: QueryLiteral): unknown {
   if (node.kind === 'number') {
     const value = Number(node.raw)
     if (!Number.isFinite(value)) throw new Error('JSON number literals must be finite')
+    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+      throw new Error(`JSON integer literal ${node.raw} exceeds the safe integer range`)
+    }
     return value
   }
   return node.value

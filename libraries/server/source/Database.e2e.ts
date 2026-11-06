@@ -2097,6 +2097,9 @@ VALUES (${dogOne},
     expect(await ids('tags !$empty')).toEqual([one, two, four, five, six])
     expect(await ids("tags == ['b', 'a']")).toEqual([four, five])
     expect(await ids("tags === ['b', 'a']")).toEqual([four])
+    expect(await ids('tags == []')).toEqual([three])
+    expect(await ids('tags === []')).toEqual([three])
+    expect(await ids("tags == ['missing']")).toEqual([])
     expect(await ids('scores == [1, 2]')).toEqual([one, four, five])
     expect(await ids('scores === [1, 2]')).toEqual([five])
     expect(await ids('scores $contains [2]')).toEqual([one, four, five])
@@ -2117,6 +2120,48 @@ VALUES (${dogOne},
       fields: ['id'],
       where: 'payload $eq {}',
     })).toThrow('not valid')
+  }, 120_000)
+
+  isolatedTest('rejects unsafe JSON integer literals without matching neighbors', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'payload', type: 'JSON' },
+        ],
+        name: 'Note',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    const exact = '00000000-0000-4000-8000-000000000001'
+    const unsafe = '00000000-0000-4000-8000-000000000002'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${exact}, 'Exact', 'Note'), (${unsafe}, 'Unsafe', 'Note')
+    `
+    await database.sql`
+      INSERT INTO "Note" ("id", "payload")
+VALUES (${exact},
+  '{"account":9007199254740991}'::jsonb),
+  (${unsafe},
+  '{"account":9007199254740993}'::jsonb)
+    `
+    expect(await queryEntity<{ id: string }>(database.sql, entities, 'Note', {
+      fields: ['id'],
+      where: 'payload $contains {account: 9007199254740991}',
+    })).toEqual([{ id: exact }])
+    expect(() => compileEntityQuery(entities, 'Note', {
+      fields: ['id'],
+      where: 'payload $contains {account: 9007199254740993}',
+    })).toThrow('safe integer range')
+    expect(() => compileEntityQuery(entities, 'Note', {
+      fields: ['id'],
+      where: {
+        field: 'payload',
+        operator: Operator.Comparison.Contains,
+        value: { account: 9007199254740992 },
+      },
+    })).toThrow('safe integer range')
   }, 120_000)
 
   isolatedTest('rejects index name collisions on fresh tables', async database => {
