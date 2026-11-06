@@ -189,6 +189,10 @@ interface CollectionRelationPlan {
   readonly collection: DerivedCollectionDefinition,
   /** Correlated condition against the owning occurrence. */
   readonly condition: string,
+  /** Alias of the owning occurrence. */
+  readonly parentAlias: string,
+  /** Expression yielding the owning identity for grouped counts. */
+  readonly parentId: string,
   /** Base SQL relation containing target rows. */
   readonly relation: string,
   /** Relationship table alias for relationship-owned properties. */
@@ -213,6 +217,8 @@ interface CollectionRelationPlan {
 class QueryProjection {
   /** Selected SQL column expressions. */
   readonly columns: string[] = []
+  /** Common table expressions required by count plans. */
+  readonly ctes: string[] = []
   /** Additional joins required by the projection. */
   readonly joins: string[] = []
   /** Root query occurrence. */
@@ -231,6 +237,8 @@ class QueryProjection {
   readonly #collectionScopes = new Map<string, CollectionScope>()
   /** Count expressions and existence forms keyed by logical count path. */
   readonly #countFields = new Map<string, CountExpression>()
+  /** Count CTE definitions keyed by physical count path. */
+  readonly #countCtes = new Map<string, CountExpression>()
   /** Stable filter/projection reference contexts keyed by logical path. */
   readonly #filterContexts = new Map<string, EntityContext>()
   /** Filter paths that resolve to reference identities. */
@@ -359,6 +367,8 @@ class QueryProjection {
    * @returns Physical SQL expression.
    */
   expression(field: QueryFieldDefinition): string {
+    const count = this.#countFields.get(field.name)
+    if (count) return count.expression
     const filtered = this.#filterExpressions.get(field.name)
     if (filtered) return filtered
     const effective = this.root.effective.get(field.name)
@@ -393,9 +403,9 @@ class QueryProjection {
         const key = fullName.slice(0, -7)
         const plan = this.#collectionPlan(collection, context.baseAlias, key)
         this.#consume(plan.work)
-        const count = this.#collectionCountExpression(plan)
+        const count = this.#collectionCountExpression(plan, fullName)
         this.#countFields.set(fullName, count)
-        return { expression: count.expression, field: { name: fullName, type: FieldType.Number }, identity: false }
+        return { expression: '', field: { name: fullName, type: FieldType.Number }, identity: false }
       }
       const countField = context.effective.get(segment)
       if (countField?.type === FieldType.Array) {
@@ -407,7 +417,7 @@ class QueryProjection {
         }
         this.#countFields.set(fullName, count)
         this.#consume()
-        return { expression: count.expression, field: { name: fullName, type: FieldType.Number }, identity: false }
+        return { expression: '', field: { name: fullName, type: FieldType.Number }, identity: false }
       }
       throw new Error(`Query count path "${fullName}" requires a collection or native array field`)
     }
@@ -555,7 +565,8 @@ class QueryProjection {
     parentAlias: string,
     key: string,
   ): CollectionRelationPlan {
-    const cached = this.#collectionPlans.get(key)
+    const planKey = `${key}\u0000${parentAlias}`
+    const cached = this.#collectionPlans.get(planKey)
     if (cached) return cached
     const targetName = collection.target
     const target = targetName === 'Entity' ? undefined : this.#entities.entity(targetName)
@@ -566,6 +577,7 @@ class QueryProjection {
     const relationshipAlias = relationship ? this.#nextAlias('cj') : undefined
     let relation: string
     let condition: string
+    let parentId: string
     if (collection.kind === 'inverse') {
       if (targetAlias === undefined) {
         relation = `"Entity" "${rootAlias}"`
@@ -576,6 +588,9 @@ class QueryProjection {
         condition = `"${targetAlias}".${quote(collection.reference.column)} = ` +
           `"${parentAlias}".${quote('id')}`
       }
+      parentId = targetAlias === undefined
+        ? `"${rootAlias}".${quote('id')}`
+        : `"${targetAlias}".${quote(collection.reference.column)}`
     } else {
       const local = relationship.between[collection.endpoint]
       const remote = relationship.between[collection.endpoint === 0 ? 1 : 0]
@@ -591,10 +606,13 @@ class QueryProjection {
       }
       condition = `"${relationshipAlias}".${quote(`${local.field}.id`)} = ` +
         `"${parentAlias}".${quote('id')}`
+      parentId = `"${relationshipAlias}".${quote(`${local.field}.id`)}`
     }
     const plan: CollectionRelationPlan = {
       collection,
       condition,
+      parentAlias,
+      parentId,
       relation,
       relationshipAlias,
       rootAlias,
@@ -604,7 +622,7 @@ class QueryProjection {
         ? targetAlias === undefined ? 1 : 2
         : targetAlias === undefined ? 2 : 3,
     }
-    this.#collectionPlans.set(key, plan)
+    this.#collectionPlans.set(planKey, plan)
     return plan
   }
 
@@ -625,7 +643,7 @@ class QueryProjection {
     const condition = plan.condition
     this.#countFields.set(
       `${name}.$count`,
-      this.#collectionCountExpression(plan),
+      this.#collectionCountExpression(plan, `${name}.$count`),
     )
     const context: EntityContext = plan.target === undefined
       ? rootContext(this.#entities, plan.rootAlias)
@@ -693,14 +711,36 @@ class QueryProjection {
   /**
    * Build count SQL metadata for one collection plan.
    * @param plan - Reusable collection relation plan.
+   * @param key - Stable physical count path.
    * @returns Count expression and canonical existence forms.
    */
-  #collectionCountExpression(plan: CollectionRelationPlan): CountExpression {
-    return {
+  #collectionCountExpression(plan: CollectionRelationPlan, key: string): CountExpression {
+    const cached = this.#countCtes.get(key)
+    if (cached) return cached
+    let expression: string | undefined
+    const ensureCte = (): string => {
+      if (expression) return expression
+      const cteName = this.#nextAlias('cc')
+      const joinAlias = this.#nextAlias('c')
+      this.ctes.push(
+        `"${cteName}" AS (` +
+        `SELECT ${plan.parentId} AS "parent_id", count(*)::int AS "total" ` +
+        `FROM ${plan.relation} GROUP BY ${plan.parentId})`,
+      )
+      this.joins.push(
+        `LEFT JOIN "${cteName}" "${joinAlias}" ` +
+        `ON "${joinAlias}"."parent_id" = "${plan.parentAlias}".${quote('id')}`,
+      )
+      expression = `COALESCE("${joinAlias}"."total", 0)`
+      return expression
+    }
+    const count: CountExpression = {
       empty: `NOT EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition})`,
       exists: `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition})`,
-      expression: `(SELECT count(*)::int FROM ${plan.relation} WHERE ${plan.condition})`,
+      get expression() { return ensureCte() },
     }
+    this.#countCtes.set(key, count)
+    return count
   }
 
   /**
@@ -779,7 +819,7 @@ class QueryProjection {
       throw new Error(`Invalid filter path "${name}"`)
     }
     const resolved = this.#resolveFilterPath(this.root, segments, name, '', 0)
-    this.#filterExpressions.set(name, resolved.expression)
+    if (!this.#countFields.has(name)) this.#filterExpressions.set(name, resolved.expression)
     this.#filterFields.set(name, resolved.field)
     if (resolved.identity) this.#filterIdentities.add(name)
     return resolved.field
@@ -817,7 +857,7 @@ class QueryProjection {
         const key = collectionKey(node.path, collection.name)
         const plan = this.#collectionPlan(collection, node.context.baseAlias, key)
         this.#consume(plan.work)
-        const count = this.#collectionCountExpression(plan)
+        const count = this.#collectionCountExpression(plan, path)
         this.#addComputedScalar(node, `${name}.$count`, count.expression)
         return
       }
@@ -1555,6 +1595,7 @@ export function compilePolymorphicQuery(
   return {
     hydrate,
     sql: [
+      ...(projection.ctes.length === 0 ? [] : [`WITH ${projection.ctes.join(', ')}`]),
       `SELECT ${projection.columns.join(', ')}`,
       `FROM ${quote(definition.name)} "${projection.root.baseAlias}"`,
       ...projection.joins,

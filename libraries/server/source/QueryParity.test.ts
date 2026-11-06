@@ -280,7 +280,7 @@ describe('Query parity gate', () => {
     expect(source('Note', 'scores.$count = 0', { fields: ['id', 'scores.$count'] }).sql)
       .toContain('AS "scores.$count"')
     expect(source('User', 'pets.$count >= 1', { orderBy: 'pets.$count' }).sql)
-      .toContain('ORDER BY (SELECT count(*)::int')
+      .toContain('ORDER BY COALESCE(')
     expect(() => source('Note', 'title.$count > 0')).toThrow('requires a collection or native array field')
     expect(() => source('Pet', 'owner.$count > 0')).toThrow('requires a collection or native array field')
     expect(() => source('Note', 'tags.$count.foo > 0')).toThrow('traverses non-reference field')

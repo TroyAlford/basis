@@ -484,9 +484,9 @@ const countPredicates = [
 
 - `$count` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references.
 - Relationship counts count complete logical member/edge rows, independent of collection preview limit/offset. Native-array counts include duplicates and stored null elements; a NULL array counts as zero.
-- `collection.$count = 0` canonicalizes to `NOT EXISTS` and `collection.$count > 0` to `EXISTS` when equivalent. Other thresholds use a bounded correlated aggregate.
+- `collection.$count = 0` canonicalizes to `NOT EXISTS` and `collection.$count > 0` to `EXISTS` when equivalent. Other count thresholds use the shared grouped count CTE selected by the measured stage-20a renderer.
 - Collection relation planning is shared by predicate scopes, collection previews, counts, and count ordering. A one logical collection path is built once and reused; emitted subquery work remains charged to the finite compiler budget.
-- The planning benchmark fixture runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over correlated and CTE default/`MATERIALIZED`/`NOT MATERIALIZED` variants on representative parent/child cardinalities. All variants must return the same rows and the recorded planning/execution time, row count, and buffer evidence inform the rendering choice; no blanket CTE materialization rule is applied.
+- The planning benchmark fixture runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over correlated and CTE default/`MATERIALIZED`/`NOT MATERIALIZED` variants on representative parent/child cardinalities, including selective and nonselective count thresholds. All variants return the same rows; the evidence selects default CTE rendering for count aggregates while correlated rendering remains in use for collection predicates/previews. No blanket `MATERIALIZED` rule is applied.
 - The exported `QueryScope`, `CollectionScope`, `ArrayScope`, and `CountScope` types form the reusable entity/relationship scope boundary for later authorization work. They do not implement permission policies, RLS, or request actor binding in this stage.
 
 ## Ordering, pagination, and exclusions
