@@ -91,7 +91,11 @@ No hosted GitHub Actions run was triggered.
 Run the repository's real checks locally before pushing:
   bun run lint
   bun run lint:ts
-  bun test
+  bun run test:unit
+  bun run test:component
+  bun run test:contract
+  bun run test:server
+  bun run test:lifecycle
   bun run test:screenshots
   bun run test:e2e:all
   bun run test:consumer

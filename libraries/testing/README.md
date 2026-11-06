@@ -28,7 +28,13 @@ The consumer scripts follow the same shape:
 ```json
 {
   "scripts": {
-    "test": "bun test",
+    "test": "bun run test:unit",
+    "test:unit": "bun test ./source/unit/**/*.test.ts",
+    "test:coverage": "bun run test:unit --coverage",
+    "test:component": "bun test ./source/components/**/*.test.tsx",
+    "test:contract": "bun test ./source/contract/*.test.ts",
+    "test:server": "bun test ./source/server/*.test.ts",
+    "test:lifecycle": "bun test ./source/lifecycle/*.test.ts",
     "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
     "test:e2e": "bun test ./source/e2e/*.e2e.ts",
     "test:e2e:visual": "bun test ./source/e2e/visual/*.e2e.ts",
@@ -39,7 +45,7 @@ The consumer scripts follow the same shape:
 }
 ```
 
-Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots`, `test:e2e`, `test:e2e:visual`, and `test:e2e:fixtures` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots`, `test:e2e`, `test:e2e:visual`, and `test:e2e:fixtures` as separate steps in the impact-selected Visual job. `test:unit` is the ordinary warm lane; contract/server/lifecycle tests have their own commands. Coverage is opt-in with `test:coverage`. `test:all` is deliberate full acceptance, not the ordinary edit loop.
 
 Visual snapshots assert appearance; mounted component tests assert behavior; end-to-end journeys validate actual browser and integration boundaries.
 

@@ -109,7 +109,16 @@ describe('Basis Code CI', () => {
     expect(eslint.some(step => step.run === 'bun run lint:md')).toBe(true)
     expect(eslint.some(step => step.run === 'bun test consumer/cli.test.ts')).toBe(true)
 
-    expect(code.jobs?.['run-tests']?.steps?.some(step => step.run === 'bun run test')).toBe(true)
+    const runTests = code.jobs?.['run-tests']?.steps ?? []
+    for (const command of [
+      'bun run test:unit',
+      'bun run test:component',
+      'bun run test:contract',
+      'bun run test:server',
+      'bun run test:lifecycle',
+    ]) {
+      expect(runTests.some(step => step.run === command)).toBe(true)
+    }
     expect(code.jobs?.['type-check']?.steps?.some(step => step.run === 'bun run lint:ts')).toBe(true)
     expect(code.jobs?.['consumer-install']?.steps?.some(step => step.run === 'bun run test:consumer')).toBe(true)
     expect(code.jobs?.knip?.steps?.some(step => step.uses?.includes('/knip'))).toBe(true)

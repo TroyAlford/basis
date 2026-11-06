@@ -49,8 +49,16 @@ jobs:
         run: |
           image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
           docker pull "$image"
-      - name: Run tests
-        run: bun run test
+      - name: Run unit tests
+        run: bun run test:unit
+      - name: Run component tests
+        run: bun run test:component
+      - name: Run contract tests
+        run: bun run test:contract
+      - name: Run server integration tests
+        run: bun run test:server
+      - name: Run test lifecycle tests
+        run: bun run test:lifecycle
       - name: Run screenshot tests
         run: bun run test:screenshots
       - name: Run end-to-end tests
