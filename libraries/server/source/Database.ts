@@ -19,6 +19,8 @@ const POOL_DEFAULTS = {
 const MANAGED_IMAGE = 'postgres:17-alpine'
 /** The managed database's user and database name. */
 const MANAGED_NAME = 'basis'
+/** The restricted application login role. */
+const APP_ROLE = 'basis_app'
 /** The PostgreSQL port inside the managed container. */
 const MANAGED_PORT = 5432
 /** How long to wait for the managed container to accept connections. */
@@ -33,12 +35,13 @@ const PASSWORD_MOUNT = '/run/secrets/basis-postgres-password'
 
 /** Options for a server-owned database capability. */
 export interface DatabaseOptions {
+  /** Explicit administrative PostgreSQL URL used only for trusted provisioning. */
+  adminUrl?: string | URL,
+  /** Enable restricted application-role provisioning and RLS-ready operation. */
+  authorization?: boolean,
   /** Canonical entity definitions used to validate and build `db.query`. */
   entities?: EntityDefinitions,
-  /**
-   * External PostgreSQL connection URL. When omitted, the server manages a
-   * local PostgreSQL service with an application-scoped identity.
-   */
+  /** Restricted application PostgreSQL URL. */
   url?: string | URL,
 }
 
@@ -337,6 +340,7 @@ class ManagedDatabase implements Database {
   #closed = false
   #closing: Promise<void> | null = null
   #connecting: Promise<void> | null = null
+  #authorization: boolean
   #containerName: string
   #database: PostgresDatabase | null = null
   #entities: EntityDefinitions | undefined
@@ -347,8 +351,10 @@ class ManagedDatabase implements Database {
   /**
    * Creates the managed database capability. The service starts on {@link connect}.
    * @param entities - Canonical definitions used for entity queries.
+   * @param authorization - Whether to provision and use a restricted app role.
    */
-  constructor(entities?: EntityDefinitions) {
+  constructor(entities?: EntityDefinitions, authorization = false) {
+    this.#authorization = authorization
     this.#entities = entities
     this.#installation = resolve(process.cwd())
     this.#identity = managedDatabaseIdentity(this.#installation)
@@ -445,9 +451,69 @@ class ManagedDatabase implements Database {
     }
 
     const port = await this.#publishedPort()
-    const url = `postgres://${MANAGED_NAME}:${encodeURIComponent(secret.password)}` +
+    const ownerUrl = `postgres://${MANAGED_NAME}:${encodeURIComponent(secret.password)}` +
       `@127.0.0.1:${port}/${MANAGED_NAME}`
-    await this.#connectWhenReady(url)
+    if (!this.#authorization) {
+      await this.#connectWhenReady(ownerUrl)
+      return
+    }
+
+    const appPassword = await this.#appSecret()
+    await this.#provisionApplicationRole(ownerUrl, appPassword)
+    const appUrl = `postgres://${APP_ROLE}:${encodeURIComponent(appPassword)}` +
+      `@127.0.0.1:${port}/${MANAGED_NAME}`
+    await this.#connectWhenReady(appUrl)
+  }
+
+  /**
+   * Read or create the managed restricted-application password.
+   * @returns The application password.
+   */
+  async #appSecret(): Promise<string> {
+    const directory = join(this.#installation, '.basis', 'database')
+    const file = join(directory, 'app-password')
+    try {
+      const handle = await open(file, 'wx', 0o600)
+      try {
+        await handle.writeFile(randomUUID())
+      } finally {
+        await handle.close()
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+    const password = (await readFile(file, 'utf8')).trim()
+    if (!password) throw new Error('Managed application credentials are empty')
+    await chmod(file, 0o600)
+    return password
+  }
+
+  /**
+   * Provision the restricted application role using the owner connection.
+   * @param ownerUrl - The owner connection URL.
+   * @param password - The restricted application password.
+   */
+  async #provisionApplicationRole(ownerUrl: string, password: string): Promise<void> {
+    const admin = new PostgresDatabase(ownerUrl)
+    try {
+      await admin.connect()
+      const quoted = password.replaceAll("'", "''")
+      await admin.sql.unsafe(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN
+            CREATE ROLE "${APP_ROLE}" LOGIN PASSWORD '${quoted}'
+              NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+          ELSE
+            ALTER ROLE "${APP_ROLE}" WITH LOGIN PASSWORD '${quoted}'
+              NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+          END IF;
+        END $$;
+      `).simple()
+      await admin.sql.unsafe(`GRANT CONNECT ON DATABASE "${MANAGED_NAME}" TO "${APP_ROLE}"`).simple()
+    } finally {
+      await admin.close()
+    }
   }
 
   /**
@@ -660,5 +726,5 @@ class ManagedDatabase implements Database {
  */
 export function createDatabase(options: DatabaseOptions = {}): Database {
   if (options.url) return new PostgresDatabase(options.url, options.entities)
-  return new ManagedDatabase(options.entities)
+  return new ManagedDatabase(options.entities, options.authorization ?? false)
 }
