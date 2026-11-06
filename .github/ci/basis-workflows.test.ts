@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -61,6 +62,35 @@ function runGate(script: string, needs: Record<string, { result: string }>): {
   return {
     code: process.exitCode ?? -1,
     output: `${new TextDecoder().decode(process.stdout)}${new TextDecoder().decode(process.stderr)}`,
+  }
+}
+
+/**
+ * Run the actual lane-decision shell step against a synthetic decision file.
+ * @param decision - Decision JSON written to `impact-decision.json`.
+ * @returns The process exit code and output.
+ */
+function runLaneStep(decision: unknown): { code: number, output: string } {
+  const step = code.jobs?.['run-tests']?.steps?.find(entry => entry.name === 'Derive test-lane decisions')
+  if (!step?.run) throw new Error('lane decision step is missing')
+  const directory = mkdtempSync(join(tmpdir(), 'basis-impact-lanes-'))
+  const outputFile = join(directory, 'github-output')
+  try {
+    writeFileSync(join(directory, 'impact-decision.json'), JSON.stringify(decision))
+    writeFileSync(outputFile, '')
+    const process = Bun.spawnSync(['bash', '-c', step.run], {
+      cwd: directory,
+      env: { ...Bun.env, GITHUB_OUTPUT: outputFile, POLICY_PRESENT: 'true' },
+      stderr: 'pipe',
+      stdout: 'pipe',
+    })
+    return {
+      code: process.exitCode ?? -1,
+      output: `${new TextDecoder().decode(process.stdout)}${new TextDecoder().decode(process.stderr)}` +
+        readFileSync(outputFile, 'utf8'),
+    }
+  } finally {
+    rmSync(directory, { force: true, recursive: true })
   }
 }
 
@@ -152,6 +182,22 @@ describe('Basis Code CI', () => {
     for (const lane of laneNames) {
       expect(runTests.some(step => step.if === `steps.lanes.outputs.${lane}-needed == 'true'`)).toBe(true)
     }
+  })
+
+  test('preserves false lane decisions and rejects malformed decisions', () => {
+    const laneNames = [
+      'unit', 'component', 'contract', 'server', 'lifecycle', 'docs',
+      'screenshots', 'e2e', 'visual', 'database-fixtures', 'fixture-lifecycle', 'hmr',
+    ]
+    const suites = Object.fromEntries(laneNames.map(lane => [lane, { needed: lane !== 'unit' }]))
+    const valid = runLaneStep({ suites })
+    expect(valid.code).toBe(0)
+    expect(valid.output).toContain('unit-needed=false')
+    expect(valid.output).toContain('e2e-needed=true')
+
+    const malformed = runLaneStep({ suites: { ...suites, unit: { needed: 'yes' } } })
+    expect(malformed.code).not.toBe(0)
+    expect(malformed.output).toContain('is not a boolean')
   })
 
   test('uses a per-PR concurrency group that ignores the event action', () => {

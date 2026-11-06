@@ -85,7 +85,11 @@ jobs:
             exit 0
           fi
           for lane in "${lanes[@]}"; do
-            value=$(jq -r --arg lane "$lane" '.suites[$lane].needed // true' impact-decision.json)
+            value=$(jq -r --arg lane "$lane" '.suites[$lane].needed' impact-decision.json)
+            if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+              echo "::error::Impact decision for lane '$lane' is not a boolean" >&2
+              exit 1
+            fi
             echo "$lane-needed=$value" >> "$GITHUB_OUTPUT"
           done
       - name: Warm the Playwright container image

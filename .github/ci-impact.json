@@ -263,12 +263,8 @@
     },
     "e2e": {
       "testGlobs": [
-        "libraries/server/source/Database.e2e.ts",
-        "libraries/server/source/QueryParity.e2e.ts",
-        "libraries/server/source/QueryPlanning.e2e.ts",
-        "libraries/testing/application.e2e.ts",
-        "libraries/react/components/OverlayProvider/OverlayProvider.e2e.ts",
-        "libraries/react/components/Table/Table.e2e.ts"
+        "libraries/**/*.e2e.ts",
+        "libraries/**/*.e2e.tsx"
       ],
       "testExcludeGlobs": [
         "libraries/server/source/DatabaseFixture.lifecycle.e2e.ts",

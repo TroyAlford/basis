@@ -38,6 +38,16 @@ describe('Basis change-impact policy', () => {
     expect(result.suites.e2e.needed).toBe(true)
   })
 
+  test('new and excluded E2E filenames follow the real behavior lane discovery', () => {
+    const added = decision('libraries/server/source/Authorization.e2e.ts')
+    expect(added.suites.e2e.needed).toBe(true)
+    expect(added.suites.e2e.selectedTests).toContain('libraries/server/source/Authorization.e2e.ts')
+
+    const excluded = decision('libraries/server/source/DatabaseFixture.lifecycle.e2e.ts')
+    expect(excluded.suites.e2e.needed).toBe(false)
+    expect(excluded.suites['fixture-lifecycle'].needed).toBe(true)
+  })
+
   test('React component changes select component and screenshot coverage', () => {
     const result = decision('libraries/react/components/Button/Button.tsx')
     expect(result.suites.component.needed).toBe(true)
