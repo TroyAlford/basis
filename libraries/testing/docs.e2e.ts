@@ -9,9 +9,9 @@ import { describe, test } from './test'
 const root = join(import.meta.dir, '..', '..')
 
 /*
- * The docs `Code` component loads Shiki from esm.sh and the Mermaid component
- * loads its runtime from esm.sh; the network policy blocks both by default, so
- * the visits allow that host and the pages render their real output.
+ * Docs code highlighting uses the locally pinned Shiki package and Mermaid
+ * renders through beautiful-mermaid, so these browser visits require no live
+ * external asset host.
  */
 const NETWORK = {}
 

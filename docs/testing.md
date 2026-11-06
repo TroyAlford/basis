@@ -92,7 +92,7 @@ test('renders the application', async () => {
 })
 ```
 
-Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. The behavior lane excludes the browser-heavy docs captures and the fixture lifecycle proofs; run those with `bun run test:e2e:visual` and `bun run test:e2e:fixtures`. `test:e2e:all` aggregates all three. Component appearance belongs in `*.screenshot.tsx` and runs with `bun run test:screenshots`; none of these are part of the default `bun test` lane.
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Docs highlighting is locally pinned through `shiki` and Mermaid uses the local SSR-capable renderer, so visual journeys do not fetch a CDN. The behavior lane excludes the browser-heavy docs captures and the fixture lifecycle proofs; run those with `bun run test:e2e:visual` and `bun run test:e2e:fixtures`. `test:e2e:all` aggregates all three. Component appearance belongs in `*.screenshot.tsx` and runs with `bun run test:screenshots`; none of these are part of the default `bun test` lane.
 
 ## Run-scoped cleanup
 
