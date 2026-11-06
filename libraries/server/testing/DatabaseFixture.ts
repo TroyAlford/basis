@@ -1,8 +1,10 @@
 import { run } from 'basis/configuration'
 import { Logger } from 'basis/logger'
-import { registerRunCleanup, tempDirectory } from 'basis/testing'
-import { randomUUID } from 'node:crypto'
-import { appendFileSync } from 'node:fs'
+import { registerRunCleanup } from 'basis/testing'
+import { createHash, randomUUID } from 'node:crypto'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { EntityDefinitions } from '../source/EntityDefinitions'
 import { Server } from '../source/Server'
 
@@ -93,6 +95,8 @@ export interface DatabaseFixture {
   readonly entities: EntityDefinitions,
   /** Installation whose managed service is shared. */
   readonly install: string,
+  /** Resolve or create the schema for one exact entity definition set. */
+  readonly schemaFor: (entities: EntityDefinitions) => Promise<string>,
   /** Started server owning the shared managed service. */
   readonly server: Server,
   /** Managed service name used for cleanup and activity evidence. */
@@ -161,8 +165,9 @@ function record(event: string): void {
  *
  * The first caller in any test file starts one in-process server and managed
  * PostgreSQL service. Later callers, including callers in other test files,
- * await the same process-wide promise. Teardown is registered with the testing
- * preload, so it runs once after the suite and on signal shutdown.
+ * await the same process-wide promise. The pool closes at run cleanup; the
+ * managed service stays available for the next run unless the fixture is
+ * explicitly configured as ephemeral.
  * @param label - Short caller label recorded in the optional activity log.
  * @returns The shared running fixture.
  * @throws {Error} When called after run cleanup has started.
@@ -196,26 +201,48 @@ export async function useDatabaseFixture(label: string): Promise<DatabaseFixture
  */
 async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFixture> {
   const service = `basis-database-fixture-${randomUUID()}`
-  const install = tempDirectory('basis-database-fixture-')
+  const install = fixtureInstall()
+  const existing = containers(install).length > 0
+  const schemas = new Map<string, Promise<string>>()
   scope.pending = { install, service }
   const server = startForInstall(
     new Server().root(install).database({ entities: sharedEntities }),
     install,
   )
+  const schemaFor = (entities: EntityDefinitions): Promise<string> => {
+    const schema = fixtureSchemaName(entities)
+    let pending = schemas.get(schema)
+    if (!pending) {
+      pending = ensureSchema(server, schema, entities)
+      schemas.set(schema, pending)
+      void pending.catch(() => schemas.delete(schema))
+    }
+    return pending
+  }
 
   try {
     await server.ready()
-    record(`start ${service} ${install} ${process.pid}`)
-    return { entities: sharedEntities, install, server, service }
+    const fixture: DatabaseFixture = {
+      entities: sharedEntities,
+      install,
+      schemaFor,
+      server,
+      service,
+    }
+    await fixture.schemaFor(sharedEntities)
+    record(`${existing ? 'attach' : 'start'} ${service} ${install} ${process.pid}`)
+    return fixture
   } catch (error) {
     await server.shutdown()
-    scope.serviceRemoved = removeService(install)
+    if (Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
+      scope.serviceRemoved = removeService(install)
+    }
     throw error
   }
 }
 
 /**
- * Stop the shared fixture and remove its managed service exactly once.
+ * Close the fixture pool; remove the managed service only for ephemeral runs.
  * @param scope - The process-wide fixture registry.
  */
 async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
@@ -226,7 +253,9 @@ async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
   if (fixture) await fixture.server.shutdown()
 
   const service = fixture ?? scope.pending
-  if (service) removeManagedService(scope, service)
+  if (service && Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
+    removeManagedService(scope, service)
+  }
 }
 
 /**
@@ -239,6 +268,7 @@ async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
  * @param scope - The process-wide fixture registry.
  */
 function cleanupOnExit(scope: DatabaseFixtureRegistry): void {
+  if (Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL !== '1') return
   const service = scope.value ?? scope.pending
   if (service) removeManagedService(scope, service)
 }
@@ -277,6 +307,72 @@ function startForInstall(server: Server, install: string): Server {
   } finally {
     process.chdir(previous)
   }
+}
+
+/**
+ * Resolve the persistent fixture installation for this checkout.
+ * @returns The stable installation directory.
+ */
+function fixtureInstall(): string {
+  const configured = Bun.env.BASIS_TEST_FIXTURE_ROOT
+  if (configured) {
+    const install = resolve(configured)
+    mkdirSync(install, { mode: 0o700, recursive: true })
+    return install
+  }
+
+  const cache = Bun.env.XDG_CACHE_HOME ?? join(homedir(), '.cache')
+  const checkout = createHash('sha1').update(resolve(process.cwd())).digest('hex').slice(0, 16)
+  const install = join(cache, 'basis', 'test-fixture', checkout)
+  mkdirSync(install, { mode: 0o700, recursive: true })
+  return install
+}
+
+/**
+ * Derive the schema name for one exact entity definition set.
+ * @param entities - Canonical definitions.
+ * @returns A stable schema identifier.
+ */
+function fixtureSchemaName(entities: EntityDefinitions): string {
+  const hash = createHash('sha256').update(entities.ddl.join('\n')).digest('hex').slice(0, 16)
+  return `basis_fixture_${hash}`
+}
+
+/**
+ * Ensure the cached schema exists and contains the requested definitions.
+ * @param server - Started fixture server.
+ * @param schema - Stable schema name.
+ * @param entities - Canonical definitions.
+ * @returns The schema identifier once initialization is complete.
+ */
+async function ensureSchema(
+  server: Server,
+  schema: string,
+  entities: EntityDefinitions,
+): Promise<string> {
+  await server.db.tx(async sql => {
+    await sql`
+      SELECT pg_advisory_xact_lock(hashtext(${schema}))
+    `
+    const present = await sql<{ present: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema} ) AS present
+    `
+    if (present[0]?.present) return
+
+    await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
+    await sql.unsafe(`set local search_path to ${quoteIdentifier(schema)}`).simple()
+    await entities.createTables(sql)
+  })
+  return schema
+}
+
+/**
+ * Quote a generated PostgreSQL identifier.
+ * @param identifier - Safe generated identifier.
+ * @returns The quoted identifier.
+ */
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`
 }
 
 /**

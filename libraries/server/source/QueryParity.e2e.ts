@@ -98,7 +98,7 @@ const campaignThree = '00000000-0000-4000-8000-000000000023'
  * @param database - Isolated PostgreSQL database.
  */
 async function seed(database: IsolatedDatabase): Promise<void> {
-  await definitions.createTables(database.sql)
+  await database.use(definitions)
   await database.sql`
     INSERT INTO "Entity" ("id", "name", "entity")
     VALUES (${ada},

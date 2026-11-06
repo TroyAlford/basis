@@ -208,7 +208,7 @@ async function seedFixture(
 describe('Query planning', () => {
   test('measures correlated and CTE count strategies on representative parents and children', async () => {
     await withIsolatedDatabase('query-planning', async database => {
-      await definitions.createTables(database.sql)
+      await database.use(definitions)
       const people = await seedFixture(database, 24, index => (index % 5) + 1)
       const allMetrics: MeasuredPlan[] = []
       for (const threshold of [1, 2, 4]) {
@@ -325,7 +325,7 @@ describe('Query planning', () => {
 
   test('measures count strategies at a larger parent/child scale', async () => {
     await withIsolatedDatabase('query-planning-scale', async database => {
-      await definitions.createTables(database.sql)
+      await database.use(definitions)
       await seedFixture(database, 120, index => (index % 8) + 1)
       const threshold = 4
       const production = compileEntityQuery(definitions, 'Person', {
@@ -387,7 +387,7 @@ describe('Query planning', () => {
       ],
     }))
     await withIsolatedDatabase('query-planning-variants', async database => {
-      await variantDefinitions.createTables(database.sql)
+      await database.use(variantDefinitions)
       const alpha = '00000000-0000-4000-8000-000000000001'
       const beta = '00000000-0000-4000-8000-000000000002'
       const targetA = '00000000-0000-4000-8000-000000000011'
