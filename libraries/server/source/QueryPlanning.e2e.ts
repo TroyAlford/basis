@@ -116,71 +116,100 @@ async function measure(
   }
 }
 
+/**
+ * Build one grouped count CTE comparison statement.
+ * @param modifier - Optional CTE materialization modifier.
+ * @param threshold - Minimum child count.
+ * @param parentId - Optional single parent identity.
+ * @returns SQL statement.
+ */
+function countCteSql(modifier: string, threshold: number, parentId?: string): string {
+  return `
+    WITH pet_counts AS ${modifier} (
+      SELECT "owner.id" AS "owner_id", count(*)::int AS "total"
+      FROM "Pet"
+      GROUP BY "owner.id"
+    )
+    SELECT t."id" AS "id"
+    FROM "Person" t
+    LEFT JOIN pet_counts c ON c."owner_id" = t."id"
+    WHERE ${parentId ? `t."id" = '${parentId}' AND ` : ''}COALESCE(c."total", 0) >= ${threshold}
+    ORDER BY t."id" ASC
+    LIMIT 25
+  `
+}
+
+/**
+ * Build one correlated count comparison statement.
+ * @param threshold - Minimum child count.
+ * @param parentId - Optional single parent identity.
+ * @returns SQL statement.
+ */
+function correlatedCountSql(threshold: number, parentId?: string): string {
+  return `
+    SELECT t."id" AS "id"
+    FROM "Person" t
+    WHERE ${parentId ? `t."id" = '${parentId}' AND ` : ''}
+      (SELECT count(*)::int FROM "Pet" WHERE "owner.id" = t."id") >= ${threshold}
+    ORDER BY t."id" ASC
+    LIMIT 25
+  `
+}
+
+/**
+ * Seed one parent/child cardinality and analyze both tables.
+ * @param database - Isolated PostgreSQL database.
+ * @param parentCount - Number of parents to create.
+ * @param childrenFor - Child count for a parent index.
+ * @returns Parent identities in insertion order.
+ */
+async function seedFixture(
+  database: IsolatedDatabase,
+  parentCount: number,
+  childrenFor: (index: number) => number,
+): Promise<readonly string[]> {
+  const people = Array.from({ length: parentCount }, () => randomUUID())
+  for (const [index, id] of people.entries()) {
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${id}, ${`person-${String(index).padStart(6, '0')}`}, 'Person')
+    `
+    await database.sql`
+      INSERT INTO "Person" ("id", "title")
+      VALUES (${id}, ${`Person ${index}`})
+    `
+  }
+  const pets = people.flatMap((owner, personIndex) => (
+    Array.from({ length: childrenFor(personIndex) }, (_, petIndex) => ({
+      id: randomUUID(),
+      owner,
+      title: `Pet ${personIndex}-${petIndex}`,
+    }))
+  ))
+  for (const pet of pets) {
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${pet.id}, ${pet.title}, 'Pet')
+    `
+    await database.sql`
+      INSERT INTO "Pet" ("id", "title", "owner.id")
+      VALUES (${pet.id}, ${pet.title}, ${pet.owner})
+    `
+  }
+  await database.sql`
+    ANALYZE "Person"
+  `
+  await database.sql`
+    ANALYZE "Pet"
+  `
+  return people
+}
+
 describe('Query planning', () => {
   test('measures correlated and CTE count strategies on representative parents and children', async () => {
     await withIsolatedDatabase('query-planning', async database => {
       await definitions.createTables(database.sql)
-      const people = Array.from({ length: 24 }, () => randomUUID())
-      const entities = people.map((id, index) => ({
-        id,
-        name: `person-${String(index).padStart(6, '0')}`,
-      }))
-      for (const [index, { id, name }] of entities.entries()) {
-        await database.sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
-          VALUES (${id}, ${name}, 'Person')
-        `
-        await database.sql`
-          INSERT INTO "Person" ("id", "title")
-          VALUES (${id}, ${`Person ${index}`})
-        `
-      }
-      const pets = people.flatMap((owner, personIndex) => (
-        Array.from({ length: (personIndex % 5) + 1 }, (_, petIndex) => ({
-          id: randomUUID(),
-          owner,
-          title: `Pet ${personIndex}-${petIndex}`,
-        }))
-      ))
-      for (const pet of pets) {
-        await database.sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
-          VALUES (${pet.id}, ${pet.title}, 'Pet')
-        `
-        await database.sql`
-          INSERT INTO "Pet" ("id", "title", "owner.id")
-          VALUES (${pet.id}, ${pet.title}, ${pet.owner})
-        `
-      }
-
-      await database.sql`
-        ANALYZE "Person"
-      `
-      await database.sql`
-        ANALYZE "Pet"
-      `
-
-      const countCte = (modifier: string, threshold: number, parentId?: string) => `
-        WITH pet_counts AS ${modifier} (
-          SELECT "owner.id" AS "owner_id", count(*)::int AS "total"
-          FROM "Pet"
-          GROUP BY "owner.id"
-        )
-        SELECT t."id" AS "id"
-        FROM "Person" t
-        LEFT JOIN pet_counts c ON c."owner_id" = t."id"
-        WHERE ${parentId ? `t."id" = '${parentId}' AND ` : ''}COALESCE(c."total", 0) >= ${threshold}
-        ORDER BY t."id" ASC
-        LIMIT 25
-      `
-      const correlatedSql = (threshold: number, parentId?: string) => `
-        SELECT t."id" AS "id"
-        FROM "Person" t
-        WHERE ${parentId ? `t."id" = '${parentId}' AND ` : ''}
-          (SELECT count(*)::int FROM "Pet" WHERE "owner.id" = t."id") >= ${threshold}
-        ORDER BY t."id" ASC
-        LIMIT 25
-      `
+      const people = await seedFixture(database, 24, index => (index % 5) + 1)
       const allMetrics: MeasuredPlan[] = []
       for (const threshold of [1, 2, 4]) {
         const production = compileEntityQuery(definitions, 'Person', {
@@ -195,10 +224,10 @@ describe('Query planning', () => {
             sql: production.sql,
             values: production.values,
           },
-          { name: `correlated@${threshold}`, sql: correlatedSql(threshold), values: [] },
-          { name: `cte-default@${threshold}`, sql: countCte('', threshold), values: [] },
-          { name: `cte-materialized@${threshold}`, sql: countCte('MATERIALIZED', threshold), values: [] },
-          { name: `cte-not-materialized@${threshold}`, sql: countCte('NOT MATERIALIZED', threshold), values: [] },
+          { name: `correlated@${threshold}`, sql: correlatedCountSql(threshold), values: [] },
+          { name: `cte-default@${threshold}`, sql: countCteSql('', threshold), values: [] },
+          { name: `cte-materialized@${threshold}`, sql: countCteSql('MATERIALIZED', threshold), values: [] },
+          { name: `cte-not-materialized@${threshold}`, sql: countCteSql('NOT MATERIALIZED', threshold), values: [] },
         ]
         const results = []
         const metrics: MeasuredPlan[] = []
@@ -234,10 +263,14 @@ describe('Query planning', () => {
       })
       const selectiveVariants = [
         { name: 'selective-production@2', sql: selectiveProduction.sql, values: selectiveProduction.values },
-        { name: 'selective-correlated@2', sql: correlatedSql(2, selectiveParent), values: [] },
-        { name: 'selective-cte-default@2', sql: countCte('', 2, selectiveParent), values: [] },
-        { name: 'selective-cte-materialized@2', sql: countCte('MATERIALIZED', 2, selectiveParent), values: [] },
-        { name: 'selective-cte-not-materialized@2', sql: countCte('NOT MATERIALIZED', 2, selectiveParent), values: [] },
+        { name: 'selective-correlated@2', sql: correlatedCountSql(2, selectiveParent), values: [] },
+        { name: 'selective-cte-default@2', sql: countCteSql('', 2, selectiveParent), values: [] },
+        { name: 'selective-cte-materialized@2', sql: countCteSql('MATERIALIZED', 2, selectiveParent), values: [] },
+        {
+          name: 'selective-cte-not-materialized@2',
+          sql: countCteSql('NOT MATERIALIZED', 2, selectiveParent),
+          values: [],
+        },
       ]
       const selectiveResults = []
       for (const variant of selectiveVariants) {
@@ -256,7 +289,8 @@ describe('Query planning', () => {
           sql: selectiveProduction.sql,
           values: selectiveProduction.values,
         },
-        { name: 'unindexed-cte-default@2', sql: countCte('', 2, selectiveParent), values: [] },
+        { name: 'unindexed-correlated@2', sql: correlatedCountSql(2, selectiveParent), values: [] },
+        { name: 'unindexed-cte-default@2', sql: countCteSql('', 2, selectiveParent), values: [] },
       ]
       const unindexedResults = []
       for (const variant of unindexed) {
@@ -265,7 +299,7 @@ describe('Query planning', () => {
         allMetrics.push(await measure(database, variant.name, variant.sql, variant.values))
       }
       expect(unindexedResults.every(ids => ids.join(',') === unindexedResults[0]?.join(','))).toBe(true)
-      expect(allMetrics).toHaveLength(22)
+      expect(allMetrics).toHaveLength(23)
       process.stdout.write(`query-plan-evidence ${JSON.stringify(allMetrics)}\n`)
 
       const projected = await queryEntity<{
@@ -286,6 +320,36 @@ describe('Query planning', () => {
       expect(projected.every(row => row['pets.$count'] >= 2)).toBe(true)
       expect(projected.every(row => row.pets.total >= 2)).toBe(true)
       expect(projected.every(row => row.pets.items.length <= 1)).toBe(true)
+    })
+  }, 120_000)
+
+  test('measures count strategies at a larger parent/child scale', async () => {
+    await withIsolatedDatabase('query-planning-scale', async database => {
+      await definitions.createTables(database.sql)
+      await seedFixture(database, 120, index => (index % 8) + 1)
+      const threshold = 4
+      const production = compileEntityQuery(definitions, 'Person', {
+        fields: ['id'],
+        limit: 25,
+        orderBy: 'id',
+        where: `pets.$count >= ${threshold}`,
+      })
+      const variants = [
+        { name: `scale-production@${threshold}`, sql: production.sql, values: production.values },
+        { name: `scale-correlated@${threshold}`, sql: correlatedCountSql(threshold), values: [] },
+        { name: `scale-cte-default@${threshold}`, sql: countCteSql('', threshold), values: [] },
+      ]
+      const results = []
+      const metrics: MeasuredPlan[] = []
+      for (const variant of variants) {
+        const rows = await database.sql.unsafe<{ id: string }[]>(variant.sql, [...variant.values])
+        results.push(rows.map(row => row.id))
+        metrics.push(await measure(database, variant.name, variant.sql, variant.values))
+      }
+      expect(results.every(ids => ids.join(',') === results[0]?.join(','))).toBe(true)
+      expect(results[0]?.length).toBeGreaterThan(0)
+      expect(metrics).toHaveLength(3)
+      process.stdout.write(`query-plan-evidence-scale ${JSON.stringify(metrics)}\n`)
     })
   }, 120_000)
 
