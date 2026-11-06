@@ -204,6 +204,20 @@ function createVisit(url: string): ApplicationHandle['visit'] {
   }
 }
 
+/** The normalized identity of one application fixture. */
+interface ApplicationIdentity {
+  /** Resolved application working directory. */
+  readonly cwd: string,
+  /** Effective server development mode. */
+  readonly development: boolean,
+  /** Resolved application entry. */
+  readonly entry: string,
+  /** Effective child environment. */
+  readonly env: Readonly<Record<string, string>>,
+  /** Whether the server is persistent across runs. */
+  readonly persistent: boolean,
+}
+
 /** A persisted application fixture lease. */
 interface ApplicationLease {
   /** Process id of the development server. */
@@ -216,32 +230,49 @@ interface ApplicationLease {
 
 /**
  * Resolve the persistent fixture directory for one application identity.
- * @param cwd - Resolved application working directory.
- * @param entry - Resolved application entry.
- * @param options - Startup options.
+ * @param identity - Normalized application identity.
  * @returns The fixture directory.
  */
-function applicationFixtureDirectory(
-  cwd: string,
-  entry: string,
-  options: StartApplicationOptions,
-): string {
+function applicationFixtureDirectory(identity: ApplicationIdentity): string {
   const configured = Bun.env.BASIS_APPLICATION_FIXTURE_ROOT
   const base = configured
     ? resolvePath(configured)
     : join(Bun.env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'basis', 'test-app')
-  const identity = createHash('sha256')
-    .update(JSON.stringify({
-      cwd,
-      development: options.development ?? true,
-      entry,
-      env: options.env ?? {},
-    }))
-    .digest('hex')
-    .slice(0, 16)
-  const directory = join(base, identity)
+  const key = applicationIdentityKey(identity).slice(0, 16)
+  const directory = join(base, key)
   mkdirSync(directory, { mode: 0o700, recursive: true })
   return directory
+}
+
+/**
+ * Build the normalized identity for one application.
+ * @param options - Startup options.
+ * @param cwd - Resolved working directory.
+ * @param entry - Resolved entry.
+ * @returns The normalized identity.
+ */
+function applicationIdentity(
+  options: StartApplicationOptions,
+  cwd: string,
+  entry: string,
+): ApplicationIdentity {
+  const persistent = options.persistent ?? Bun.env.BASIS_APPLICATION_FIXTURE_EPHEMERAL !== '1'
+  return {
+    cwd,
+    development: options.development ?? persistent,
+    entry,
+    env: options.env ?? {},
+    persistent,
+  }
+}
+
+/**
+ * Hash one normalized application identity.
+ * @param identity - Normalized identity.
+ * @returns A stable key.
+ */
+function applicationIdentityKey(identity: ApplicationIdentity): string {
+  return createHash('sha256').update(JSON.stringify(identity)).digest('hex')
 }
 
 /**
@@ -322,28 +353,67 @@ async function stopLease(directory: string, pid: number): Promise<void> {
   rmSync(join(directory, 'lease.json'), { force: true })
 }
 
+/** Metadata written by the process that owns the lease lock. */
+interface LeaseLockOwner {
+  /** Owning process id. */
+  readonly pid: number,
+  /** Ownership start time in epoch milliseconds. */
+  readonly startedAt: number,
+}
+
+/**
+ * Read the owner metadata from one lease lock.
+ * @param path - Lock file path.
+ * @returns The owner, or undefined when the lock is malformed.
+ */
+function readLeaseLock(path: string): LeaseLockOwner | undefined {
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf8')) as Partial<LeaseLockOwner>
+    if (typeof value.pid !== 'number' || typeof value.startedAt !== 'number') return undefined
+    return value as LeaseLockOwner
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Serialize persistent fixture startup for one application identity.
  * @param directory - Fixture directory.
+ * @param timeoutMs - Readiness timeout of the owner being waited on.
  * @param work - Startup work.
  * @returns The work result.
  */
-async function withLeaseLock<T>(directory: string, work: () => Promise<T>): Promise<T> {
+async function withLeaseLock<T>(
+  directory: string,
+  timeoutMs: number,
+  work: () => Promise<T>,
+): Promise<T> {
   const lock = join(directory, 'lease.lock')
-  const deadline = Date.now() + 30_000
+  const staleAfter = timeoutMs + 30_000
+  const deadline = Date.now() + staleAfter + 30_000
   while (true) {
     try {
-      mkdirSync(lock)
+      writeFileSync(lock, JSON.stringify({
+        pid: process.pid,
+        startedAt: Date.now(),
+      }), { flag: 'wx' })
       break
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      const owner = readLeaseLock(lock)
+      let age = Number.POSITIVE_INFINITY
       try {
-        if (Date.now() - statSync(lock).mtimeMs > 30_000) {
-          rmSync(lock, { force: true, recursive: true })
-          continue
-        }
+        age = Date.now() - statSync(lock).mtimeMs
       } catch {
         // A concurrent release won the race; retry immediately.
+      }
+      if (
+        (!owner && age > 1_000)
+        || (owner && !isAlive(owner.pid))
+        || (owner && Date.now() - owner.startedAt > staleAfter)
+      ) {
+        rmSync(lock, { force: true })
+        continue
       }
       if (Date.now() >= deadline) {
         throw new Error('Application fixture lease lock timed out', { cause: error })
@@ -354,7 +424,7 @@ async function withLeaseLock<T>(directory: string, work: () => Promise<T>): Prom
   try {
     return await work()
   } finally {
-    rmSync(lock, { force: true, recursive: true })
+    rmSync(lock, { force: true })
   }
 }
 
@@ -377,21 +447,20 @@ async function leaseHealthy(lease: ApplicationLease, readyPath: string): Promise
 /**
  * Attach to a persistent development server, or start one.
  * @param options - Startup options.
- * @param cwd - Resolved application working directory.
- * @param entry - Resolved application entry.
+ * @param identity - Normalized application identity.
  * @returns The persistent application handle.
  */
 async function usePersistentApplication(
   options: StartApplicationOptions,
-  cwd: string,
-  entry: string,
+  identity: ApplicationIdentity,
 ): Promise<ApplicationHandle> {
-  const directory = applicationFixtureDirectory(cwd, entry, options)
+  const directory = applicationFixtureDirectory(identity)
   const readyPath = options.readyPath ?? '/api/health'
   const timeoutMs = options.timeoutMs ?? 30_000
-  const development = options.development ?? true
+  const temp = join(directory, 'tmp')
+  mkdirSync(temp, { mode: 0o700, recursive: true })
 
-  return await withLeaseLock(directory, async () => {
+  return await withLeaseLock(directory, timeoutMs, async () => {
     const lease = readLease(directory)
     if (lease && await leaseHealthy(lease, readyPath)) {
       return {
@@ -406,15 +475,18 @@ async function usePersistentApplication(
 
     const port = await freePort()
     const url = `http://127.0.0.1:${port}`
-    const proc = Bun.spawn([process.execPath, entry], {
-      cwd,
+    const proc = Bun.spawn([process.execPath, identity.entry], {
+      cwd: identity.cwd,
       detached: true,
       env: {
         ...process.env,
-        ...options.env,
+        ...identity.env,
         HOST: '127.0.0.1',
-        NODE_ENV: options.env?.NODE_ENV ?? (development ? 'development' : 'production'),
+        NODE_ENV: identity.env.NODE_ENV ?? (identity.development ? 'development' : 'production'),
         PORT: String(port),
+        TEMP: identity.env.TEMP ?? temp,
+        TMP: identity.env.TMP ?? temp,
+        TMPDIR: identity.env.TMPDIR ?? temp,
       },
       stderr: 'ignore',
       stdin: 'ignore',
@@ -516,16 +588,16 @@ export async function useApplication(
 
   const cwd = resolvePath(options.cwd ?? process.cwd())
   const entry = resolvePath(cwd, options.entry)
-  const key = `${cwd}\u0000${entry}`
+  const identity = applicationIdentity(options, cwd, entry)
+  const key = applicationIdentityKey(identity)
   const existing = handles.get(key)
   if (existing) return await existing
 
-  const reuse = options.persistent ?? Bun.env.BASIS_APPLICATION_FIXTURE_EPHEMERAL !== '1'
-  const booting = reuse
-    ? usePersistentApplication(options, cwd, entry)
-    : startApplication(options)
+  const booting = identity.persistent
+    ? usePersistentApplication(options, identity)
+    : startApplication({ ...options, cwd, development: identity.development, entry })
   handles.set(key, booting)
-  if (reuse) persistent.add(key)
+  if (identity.persistent) persistent.add(key)
 
   try {
     return await booting

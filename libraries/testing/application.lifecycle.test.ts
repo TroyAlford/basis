@@ -42,6 +42,9 @@ const APP_SOURCE = [
   "process.on('SIGINT', stop)",
 ].join('\n')
 
+/** A fixture server that holds the lease open while its initial build completes. */
+const SLOW_APP_SOURCE = APP_SOURCE.replace("record('boot')", "record('boot')\nawait Bun.sleep(500)")
+
 /**
  * A test file that imports the fixture helpers.
  * @param body - The test declarations to include.
@@ -220,6 +223,37 @@ async function run(
   }
 }
 
+/**
+ * Start two child test processes at once against one persistent fixture.
+ * @param target - Fixture to run.
+ * @param env - Extra child-process environment.
+ * @returns The child exit codes and combined output.
+ */
+async function runConcurrent(
+  target: Fixture,
+  env: Record<string, string>,
+): Promise<{ code: number, output: string }[]> {
+  const spawn = () => Bun.spawn([process.execPath, 'test'], {
+    cwd: target.dir,
+    env: {
+      ...process.env,
+      ACTIVITY_LOG: target.activity,
+      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '1',
+      ...env,
+    },
+    stderr: 'pipe',
+    stdout: 'pipe',
+  })
+  const first = spawn()
+  const second = spawn()
+  const outputs = [new Response(first.stdout).text(), new Response(second.stdout).text()]
+  const [firstCode, secondCode] = await Promise.all([first.exited, second.exited])
+  return [
+    { code: firstCode, output: await outputs[0] },
+    { code: secondCode, output: await outputs[1] },
+  ]
+}
+
 describe('useApplication lifecycle', () => {
   test('boots once and stops once across several files sharing an entry', async () => {
     const target = fixture({
@@ -255,6 +289,55 @@ describe('useApplication lifecycle', () => {
     expect(isAlive(pid)).toBe(true)
 
     try {
+      process.kill(pid, 'SIGTERM')
+      await waitFor(() => readActivity(target.activity).stops > 0)
+    } finally {
+      if (isAlive(pid)) process.kill(pid, 'SIGKILL')
+    }
+  }, 30_000)
+
+  test('keeps environment and persistence identities distinct', async () => {
+    const target = fixture({
+      'a.test.ts': suite(
+        "test('identities', async () => {\n" +
+        '  const [first, second, third] = await Promise.all([\n' +
+        "    useApplication({ entry: './app.ts', env: { MODE: 'a' }, persistent: false }),\n" +
+        "    useApplication({ entry: './app.ts', env: { MODE: 'b' }, persistent: false }),\n" +
+        "    useApplication({ entry: './app.ts', env: { MODE: 'a' }, persistent: false }),\n" +
+        '  ])\n' +
+        '  expect(first).not.toBe(second)\n' +
+        '  expect(first).toBe(third)\n' +
+        '})',
+      ),
+    })
+    const { activity, code } = await run(target)
+    expect(code).toBe(0)
+    expect(activity.boot).toBe(2)
+    expect(activity.stops).toBe(2)
+  }, 30_000)
+
+  test('serializes concurrent first attach during a slow build', async () => {
+    const target = fixture({
+      'a.test.ts': bootSuite('concurrent-a'),
+      'app.ts': SLOW_APP_SOURCE,
+      'b.test.ts': bootSuite('concurrent-b'),
+    })
+    const root = tempDirectory('basis-application-concurrent-')
+    created.push(root)
+    const env = {
+      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '0',
+      BASIS_APPLICATION_FIXTURE_ROOT: join(root, 'fixture'),
+    }
+
+    const results = await runConcurrent(target, env)
+    expect(results.map(result => result.code)).toEqual([0, 0])
+    const activity = readActivity(target.activity)
+    expect(activity.boot).toBe(1)
+    expect(activity.stops).toBe(0)
+    const pid = activity.pid
+    if (pid === null) throw new Error('persistent application has no pid')
+    try {
+      expect(isAlive(pid)).toBe(true)
       process.kill(pid, 'SIGTERM')
       await waitFor(() => readActivity(target.activity).stops > 0)
     } finally {
