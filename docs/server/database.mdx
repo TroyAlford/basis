@@ -222,7 +222,7 @@ A separate reviewable `DDL.plan`/`DDL.apply` workflow is the intended next schem
 
 ## `db.query`
 
-Attach the same canonical definitions to the database capability, then project effective scalar fields and singular reference paths from one entity. See [Query Language](./query-language.mdx) for the complete predicate contract, staged reference/collection/Array/JSON grammar, diagnostics, and explicit exclusions. Querying an abstract entity reads its shared ancestor table and returns one row per concrete descendant, including the actual leaf `entity` discriminator and shared `id`/`name`. Inherited fields and reference targets are joined in the same SQL statement, never by a per-row follow-up query:
+Attach the same canonical definitions to the database capability, then project effective scalar fields and singular reference paths from one entity. See [Query Language](./query-language.mdx) for the complete predicate contract, reference/collection/Array/JSON and scoped-member grammar, the stage-20 source/structured parity gate, diagnostics, and explicit exclusions. Querying an abstract entity reads its shared ancestor table and returns one row per concrete descendant, including the actual leaf `entity` discriminator and shared `id`/`name`. Inherited fields and reference targets are joined in the same SQL statement, never by a per-row follow-up query:
 
 ```ts
 import { EntityDefinitions, Operator, Server, SortDirection } from 'basis/server'
