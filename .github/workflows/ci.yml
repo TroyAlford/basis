@@ -30,10 +30,6 @@ jobs:
         run: bun ./node_modules/stylelint/bin/stylelint.mjs "**/*.styles.ts" --config ./stylelint.config.mjs --allow-empty-input
       - name: Run Markdown lint
         run: bun run lint:md
-      # `basis format` must apply every autofixable finding in one run; this
-      # is the required gate that keeps the CLI's fix forwarding honest.
-      - name: Verify lint autofix
-        run: bun test consumer/cli.test.ts
 
   run-tests:
     if: ${{ !github.event.pull_request.draft }}

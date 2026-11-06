@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
@@ -141,12 +142,17 @@ const RUN_SERVER_PORT = 3000
 const SNAPSHOT_EPHEMERAL = 'BASIS_SNAPSHOT_FIXTURE_EPHEMERAL'
 
 /**
- * Resolve the stable container name for one Playwright version.
- * @param version - Installed Playwright version.
+ * Resolve the stable container name for one mounted Playwright runtime.
+ * @param mount - Mounted Playwright package identity.
  * @returns The Docker container name.
  */
-function containerName(version: string): string {
-  const base = `basis-playwright-${version.replace(/[^a-z0-9]+/gi, '-')}`
+function containerName(mount: PlaywrightMount): string {
+  const version = mount.version.replace(/[^a-z0-9]+/gi, '-')
+  const identity = createHash('sha256')
+    .update(`${mount.version}\u0000${mount.dir}\u0000${mount.core}`)
+    .digest('hex')
+    .slice(0, 12)
+  const base = `basis-playwright-${version}-${identity}`
   return process.env[SNAPSHOT_EPHEMERAL] === '1' ? `${base}-${process.pid}` : base
 }
 
@@ -182,6 +188,35 @@ const READY_POLL_MS = 50
 const CONNECT_TIMEOUT_MS = 60_000
 
 /**
+ * Observe one Playwright container's Docker state.
+ * @param name - Container name.
+ * @returns The state, or an empty string when absent.
+ */
+function containerState(name: string): string {
+  return docker([
+    'ps', '-a', '--filter', `name=^/${name}$`, '--format', '{{.State}}',
+  ]).stdout.trim()
+}
+
+/**
+ * Attach to an existing Playwright container.
+ * @param name - Container name.
+ * @param state - Observed Docker state.
+ * @returns The browser endpoint and container identity.
+ */
+async function attachContainer(name: string, state: string): Promise<{ endpoint: string, id: string }> {
+  if (state !== 'running') {
+    const started = docker(['start', name])
+    if (started.code !== 0) {
+      throw dockerUnavailableError(started.stderr.trim() || `docker start exited with ${started.code}`)
+    }
+  }
+  const endpoint = await endpointFor(name)
+  record(`container-attach ${name}`)
+  return { endpoint, id: name }
+}
+
+/**
  * Start the one snapshot container and resolve its published browser endpoint.
  *
  * The container is detached and unnamed (Docker assigns the identity). Its
@@ -196,26 +231,10 @@ const CONNECT_TIMEOUT_MS = 60_000
 async function startContainer(): Promise<{ endpoint: string, id: string }> {
   const mount = playwrightMount()
   const image = playwrightImage(mount.version)
-  const name = containerName(mount.version)
-  const state = docker([
-    'ps', '-a', '--filter', `name=^/${name}$`, '--format', '{{.State}}',
-  ]).stdout.trim()
+  const name = containerName(mount)
+  const state = containerState(name)
 
-  if (state === 'running' || state === 'exited' || state === 'created') {
-    if (state !== 'running') {
-      const started = docker(['start', name])
-      if (started.code !== 0) {
-        throw dockerUnavailableError(started.stderr.trim() || `docker start exited with ${started.code}`)
-      }
-    }
-    const endpoint = await endpointFor(name)
-    record(`container-attach ${name}`)
-    return { endpoint, id: name }
-  }
-
-  if (state !== '') {
-    docker(['rm', '-f', name])
-  }
+  if (state !== '') return await attachContainer(name, state)
 
   const args = [
     'run', '-d', '--pull', 'missing', '--ipc=host',
@@ -236,6 +255,12 @@ async function startContainer(): Promise<{ endpoint: string, id: string }> {
     throw dockerUnavailableError(error)
   }
   if (run.code !== 0) {
+    /*
+     * Two first-time callers can race on the same name. The loser must attach
+     * to the winner rather than reporting a name conflict.
+     */
+    const winner = containerState(name)
+    if (winner !== '') return await attachContainer(name, winner)
     throw dockerUnavailableError(run.stderr.trim() || `docker run exited with ${run.code}`)
   }
 

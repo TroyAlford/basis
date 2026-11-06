@@ -45,18 +45,18 @@ Visual snapshots assert appearance; mounted component tests assert behavior; end
 
 A test-lane run is fast and deterministic because the expensive part — the browser — is paid for once and reused:
 
-- exactly **one Docker container** runs Chromium for the whole run;
+- one version-and-runtime-named Docker container serves Chromium for the run and is reused by later runs;
 - exactly **one browser connection** serves every capture;
 - component/JSX snapshots and `app.visit` snapshots share that one browser;
 - the runtime starts on the first capture, never per file, test, assertion, visit, or component;
-- the testing preload tears it down **once**, when the run ends.
+- the testing preload closes the browser and contexts once when the run ends; the container is removed only in explicit ephemeral mode.
 
 ## Lifecycle
 
 ```mermaid
 flowchart TD
     Run["One test-lane run"] --> First["First capture"]
-    First --> Runtime["Run-scoped runtime"]
+    First --> Runtime["Process runtime + persistent Docker"]
     Runtime --> Container["One Docker container<br/>pinned Playwright image"]
     Container --> Server["playwright run-server<br/>published localhost port"]
     Server --> Browser["One browser<br/>chromium.connect(ws)"]
@@ -64,7 +64,7 @@ flowchart TD
     Browser --> Visit["Application captures<br/>app.visit opens a fresh context per visit"]
     Component --> Compare["Compare with the committed PNG<br/>or write it when missing or updating"]
     Visit --> Compare
-    Compare --> Teardown["Preload afterAll<br/>close the browser and remove the container once"]
+    Compare --> Teardown["Preload afterAll<br/>close browser; remove container only when ephemeral"]
 ```
 
 The runtime is memoised on `globalThis`, so every test file in the process resolves the same instance. There is no per-file, per-test, or per-capture browser startup; a run that never captures a screenshot never starts Docker at all.
@@ -142,7 +142,7 @@ The matcher normalizes only insignificant whitespace outside quoted text; quotin
 
 ## Docker and determinism
 
-Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime publishes the container's `run-server` to a random localhost port and connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server; the container has no fixed name and no host-network assumption.
+Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime publishes the container's `run-server` to a random localhost port and connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server; the container is named from the installed Playwright version and the mounted Playwright runtime identity, and uses no host-network assumption.
 
 The container is named from the installed Playwright version. A normal development run reconnects to that healthy named run-server; an explicit ephemeral run uses a process-unique name and removes it at teardown. Browser contexts remain isolated per visit, and the component capture page remains reused within the process.
 

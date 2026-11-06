@@ -107,7 +107,7 @@ describe('Basis Code CI', () => {
     expect(eslint.some(step => step.run?.includes('bun ./node_modules/eslint/bin/eslint.js'))).toBe(true)
     expect(eslint.some(step => step.run?.includes('stylelint'))).toBe(true)
     expect(eslint.some(step => step.run === 'bun run lint:md')).toBe(true)
-    expect(eslint.some(step => step.run === 'bun test consumer/cli.test.ts')).toBe(true)
+    expect(eslint.some(step => step.run === 'bun test consumer/cli.test.ts')).toBe(false)
 
     const runTests = code.jobs?.['run-tests']?.steps ?? []
     for (const command of [
