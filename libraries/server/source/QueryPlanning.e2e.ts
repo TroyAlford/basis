@@ -225,7 +225,7 @@ describe('Query planning', () => {
       expect(allMetrics.map(metric => metric.name)).toContain('correlated@1')
       expect(allMetrics.map(metric => metric.name)).toContain('cte-materialized@4')
 
-      const selectiveParent = people[0] as string
+      const selectiveParent = people[3] as string
       const selectiveProduction = compileEntityQuery(definitions, 'Person', {
         fields: ['id'],
         limit: 25,

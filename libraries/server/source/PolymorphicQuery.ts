@@ -3,7 +3,7 @@ import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { arrayItemField } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
-import type { ArrayScope, CollectionScope, OrderBy, QueryScope } from './SQL'
+import type { ArrayScope, CollectionScope, CountScope, OrderBy, QueryScope } from './SQL'
 import { SQL } from './SQL'
 
 /** Maximum number of singular reference hops in one requested path. */
@@ -173,16 +173,6 @@ interface EntityContext {
   readonly singularNavigations: ReadonlyMap<string, DerivedSingularDefinition>,
 }
 
-/** Count expression and canonical existence forms for one logical path. */
-interface CountExpression {
-  /** Zero-count predicate. */
-  readonly empty: string,
-  /** Non-zero existence predicate. */
-  readonly exists: string,
-  /** Numeric count expression. */
-  readonly expression: string,
-}
-
 /** One reusable collection relation and its correlated condition. */
 interface CollectionRelationPlan {
   /** Collection navigation being planned. */
@@ -236,9 +226,9 @@ class QueryProjection {
   /** Collection predicate scopes keyed by root navigation name. */
   readonly #collectionScopes = new Map<string, CollectionScope>()
   /** Count expressions and existence forms keyed by logical count path. */
-  readonly #countFields = new Map<string, CountExpression>()
+  readonly #countFields = new Map<string, CountScope>()
   /** Count CTE definitions keyed by physical count path. */
-  readonly #countCtes = new Map<string, CountExpression>()
+  readonly #countCtes = new Map<string, CountScope>()
   /** Stable filter/projection reference contexts keyed by logical path. */
   readonly #filterContexts = new Map<string, EntityContext>()
   /** Filter paths that resolve to reference identities. */
@@ -393,7 +383,7 @@ class QueryProjection {
     contextKey = '',
     depth = 0,
     scope: FilterJoinScope = this.#outerFilterScope(),
-  ): { count?: CountExpression, expression: string, field: QueryFieldDefinition, identity: boolean } {
+  ): { count?: CountScope, expression: string, field: QueryFieldDefinition, identity: boolean } {
     const [segment] = segments
     if (segment === undefined) throw new Error(`Invalid filter path "${fullName}"`)
     const rest = segments.slice(1)
@@ -515,7 +505,7 @@ class QueryProjection {
     const root = this.#ensureRoot(context, scope)
     let resolvedField: QueryFieldDefinition | undefined
     let resolvedIdentity = false
-    let resolvedCount: CountExpression | undefined
+    let resolvedCount: CountScope | undefined
     const branches = descendant.variants.map(variant => {
       const owner = this.#ownerAlias(context, variant.owner, true, scope)
       const variantKey = `${contextKey}.${segment}#${variant.owner}`
@@ -738,7 +728,7 @@ class QueryProjection {
    * @param key - Stable physical count path.
    * @returns Count expression and canonical existence forms.
    */
-  #collectionCountExpression(plan: CollectionRelationPlan, key: string): CountExpression {
+  #collectionCountExpression(plan: CollectionRelationPlan, key: string): CountScope {
     const cached = this.#countCtes.get(key)
     if (cached) return cached
     let expression: string | undefined
@@ -758,7 +748,7 @@ class QueryProjection {
       expression = `COALESCE("${joinAlias}"."total", 0)`
       return expression
     }
-    const count: CountExpression = {
+    const count: CountScope = {
       empty: `NOT EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition})`,
       exists: `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition})`,
       get expression() { return ensureCte() },
@@ -808,7 +798,7 @@ class QueryProjection {
    * @param name - Logical count path.
    * @returns Count expression forms, or undefined for ordinary fields.
    */
-  filterCount(name: string): CountExpression | undefined {
+  filterCount(name: string): CountScope | undefined {
     return this.#countFields.get(name)
   }
 

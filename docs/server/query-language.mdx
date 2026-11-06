@@ -484,24 +484,24 @@ const countPredicates = [
 
 - `$count` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references.
 - Relationship counts count complete logical member/edge rows, independent of collection preview limit/offset. Native-array counts include duplicates and stored null elements; a NULL array counts as zero.
-- `collection.$count = 0` canonicalizes to `NOT EXISTS` and `collection.$count > 0` to `EXISTS` when equivalent. Other count thresholds use the shared grouped count CTE selected by the measured stage-20a renderer.
-- Collection relation planning is shared by predicate scopes, collection previews, counts, and count ordering. A one logical collection path is built once and reused; emitted subquery work remains charged to the finite compiler budget.
+- Relationship `collection.$count = 0` canonicalizes to `NOT EXISTS` and `collection.$count > 0` to `EXISTS` when equivalent; native-array counts use `cardinality`. Other count thresholds use the shared grouped count CTE selected by the measured stage-20a renderer.
+- Collection relation planning is shared by predicate scopes, collection previews, counts, and count ordering. Plans are keyed by logical path and physical parent occurrence, so sibling descendant-reference variants do not share the wrong parent alias; emitted subquery work remains charged to the finite compiler budget.
 - The planning benchmark fixture runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over correlated and CTE default/`MATERIALIZED`/`NOT MATERIALIZED` variants on representative parent/child cardinalities, including selective and nonselective count thresholds. All variants return the same rows; the evidence selects default CTE rendering for count aggregates while correlated rendering remains in use for collection predicates/previews. No blanket `MATERIALIZED` rule is applied.
 - The exported `QueryScope`, `CollectionScope`, `ArrayScope`, and `CountScope` types form the reusable entity/relationship scope boundary for later authorization work. They do not implement permission policies, RLS, or request actor binding in this stage.
 
-Representative evidence from the analyzed 24-parent / 60-child fixture (local PostgreSQL; timings are illustrative, not CI thresholds):
+Representative evidence from the analyzed 24-parent / 70-child fixture (local PostgreSQL; timings are illustrative, not CI thresholds):
 
 | Variant                  | Buffers | Execution ms | Planning ms | SQL bytes | Rows |
 | ------------------------ | ------: | -----------: | ----------: | --------: | ---: |
-| production @2            |       3 |        0.279 |       0.165 |       356 |   19 |
-| correlated @2            |      25 |        0.288 |       0.061 |       196 |   19 |
-| CTE default @2           |       2 |        0.163 |       0.079 |       363 |   19 |
-| CTE materialized @2      |       2 |        0.212 |       0.103 |       375 |   19 |
-| CTE not materialized @2  |       2 |        0.160 |       0.078 |       379 |   19 |
-| unindexed production @2  |       3 |        0.220 |       0.155 |       393 |    0 |
-| unindexed CTE default @2 |       2 |        0.072 |       0.105 |       415 |    0 |
+| production @2            |       3 |        0.330 |       0.301 |       356 |   19 |
+| correlated @2            |      25 |        0.270 |       0.064 |       196 |   19 |
+| CTE default @2           |       2 |        0.164 |       0.085 |       363 |   19 |
+| CTE materialized @2      |       2 |        0.252 |       0.079 |       375 |   19 |
+| CTE not materialized @2  |       2 |        0.159 |       0.077 |       379 |   19 |
+| unindexed production @2  |       3 |        0.213 |       0.173 |       393 |    1 |
+| unindexed CTE default @2 |       2 |        0.066 |       0.073 |       415 |    1 |
 
-The default grouped CTE is selected for numeric count thresholds because it avoided the correlated per-row scans in both indexed and deliberately unindexed runs; materialized CTE was not consistently better. Collection predicates and previews remain correlated, and canonical zero/nonzero counts remain `NOT EXISTS`/`EXISTS`. The benchmark emits its full 22-measurement matrix through `QueryPlanning.e2e.ts` for re-checking.
+The default grouped CTE is selected for numeric count thresholds because it avoided the correlated per-row scans in both indexed and deliberately unindexed runs; materialized CTE was not consistently better. Collection predicates and previews remain correlated, and canonical relationship-collection zero/nonzero counts remain `NOT EXISTS`/`EXISTS`. The benchmark emits its full 22-measurement matrix through `QueryPlanning.e2e.ts` for re-checking.
 
 ## Ordering, pagination, and exclusions
 
