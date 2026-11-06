@@ -31,12 +31,15 @@ The consumer scripts follow the same shape:
     "test": "bun test",
     "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
     "test:e2e": "bun test ./source/e2e/*.e2e.ts",
-    "test:all": "bun run test && bun run test:screenshots && bun run test:e2e"
+    "test:e2e:visual": "bun test ./source/e2e/visual/*.e2e.ts",
+    "test:e2e:fixtures": "bun test ./source/e2e/fixtures/*.e2e.ts",
+    "test:e2e:all": "bun run test:e2e && bun run test:e2e:visual && bun run test:e2e:fixtures",
+    "test:all": "bun run test && bun run test:screenshots && bun run test:e2e:all"
   }
 }
 ```
 
-Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots` and `test:e2e` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots`, `test:e2e`, `test:e2e:visual`, and `test:e2e:fixtures` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
 
 Visual snapshots assert appearance; mounted component tests assert behavior; end-to-end journeys validate actual browser and integration boundaries.
 
@@ -119,9 +122,9 @@ test('renders the application', async () => {
 })
 ```
 
-Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`, not the default test command. `useApplication({ entry })` spawns the entry on a free loopback port and waits for readiness on `/api/health`. It is **run-scoped**: memoised per `(cwd, entry)` on `globalThis`, so every test file in the run shares one server (concurrent callers await the same boot instead of racing), and the testing preload stops it exactly once when the run ends — success, failure, thrown error, or `SIGINT`/`SIGTERM`. No test file needs `afterAll` or `finally`, and the server boots once per run rather than once per file.
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`, not the default test command. The behavior lane excludes browser-heavy docs captures and fixture lifecycle proofs; use `bun run test:e2e:visual` and `bun run test:e2e:fixtures` for those, or `test:e2e:all` for the aggregate. `useApplication({ entry })` attaches to one detached development server per `(cwd, entry, env, development)` identity, starting it on a free loopback port and `/api/health` when needed. The server stays alive between runs with HMR enabled and is shared by every test file in the run (concurrent callers await the same boot instead of racing). Set `BASIS_APPLICATION_FIXTURE_EPHEMERAL=1` for a run-scoped server that the preload stops; `BASIS_APPLICATION_FIXTURE_ROOT` overrides the persistent fixture directory. `startApplication` remains the dedicated per-call primitive.
 
-`startApplication({ entry })` is the low-level primitive behind it, with the same shape but a per-call lifecycle (`stop()` is idempotent). Use it only when a test needs a dedicated server of its own.
+`startApplication({ entry })` is the low-level primitive behind it, with the same shape but a dedicated per-call lifecycle (`stop()` is idempotent). Use it only when a test needs a clean server of its own.
 
 ### Eager startup
 
@@ -148,7 +151,7 @@ The browser side stays deterministic: `visit(path, options?, fn)` opens a fresh 
 
 ### Run-scoped cleanup
 
-`registerRunCleanup(callback)` registers teardown for an in-process resource that needs the same process-wide ownership as `useApplication` but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. It is intended for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
+`registerRunCleanup(callback)` registers teardown for an in-process resource that needs process-wide cleanup but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. It is intended for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
 
 Network is deterministic by default — requests are blocked unless they target loopback or Google Fonts (allowed so text renders the real web type instead of a host-dependent fallback), so a snapshot cannot silently depend on an arbitrary CDN:
 

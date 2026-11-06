@@ -93,7 +93,7 @@ Run the repository's real checks locally before pushing:
   bun run lint:ts
   bun test
   bun run test:screenshots
-  bun run test:e2e
+  bun run test:e2e:all
   bun run test:consumer
 
 For the snapshot runtime on its own:

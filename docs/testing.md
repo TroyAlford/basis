@@ -22,12 +22,15 @@ A test file's suffix selects its lane. Bun's default discovery runs only `.test`
     "test": "bun test",
     "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
     "test:e2e": "bun test ./source/e2e/*.e2e.ts",
-    "test:all": "bun run test && bun run test:screenshots && bun run test:e2e"
+    "test:e2e:visual": "bun test ./source/e2e/visual/*.e2e.ts",
+    "test:e2e:fixtures": "bun test ./source/e2e/fixtures/*.e2e.ts",
+    "test:e2e:all": "bun run test:e2e && bun run test:e2e:visual && bun run test:e2e:fixtures",
+    "test:all": "bun run test && bun run test:screenshots && bun run test:e2e:all"
   }
 }
 ```
 
-Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots` and `test:e2e` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots`, `test:e2e`, `test:e2e:visual`, and `test:e2e:fixtures` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
 
 Basis recognizes all three lanes when it attributes a caller, registers a test, and scopes orphan pruning. That recognition never makes a heavy lane a default test: Bun still discovers only `.test` and `.spec`.
 
@@ -67,7 +70,7 @@ Components whose meaningful state only exists after mount — the resolved `Awai
 
 ## Application captures
 
-`useApplication({ entry })` boots the real server once per run on a free loopback port and waits for readiness. `app.visit(path, options?, fn)` opens a fresh browser context on the shared browser, applies the deterministic network policy, navigates, and runs the callback. Contexts are cheap: they keep server and browser state from leaking between visits without paying for a new browser.
+`useApplication({ entry })` attaches to one detached development server per application identity, starts it on a free loopback port when necessary, waits for readiness, and reuses it across runs with HMR enabled. `app.visit(path, options?, fn)` opens a fresh browser context on the shared browser, applies the deterministic network policy, navigates, and runs the callback. Contexts are cheap: they keep server and browser state from leaking between visits without paying for a new browser. Set `BASIS_APPLICATION_FIXTURE_EPHEMERAL=1` for a run-scoped server that the preload stops; `BASIS_APPLICATION_FIXTURE_ROOT` overrides the persistent fixture directory.
 
 ```tsx
 // Deck.e2e.ts
@@ -82,11 +85,11 @@ test('renders the application', async () => {
 })
 ```
 
-Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Component appearance belongs in `*.screenshot.tsx` and runs with `bun run test:screenshots`; neither is part of the default `bun test` lane.
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. The behavior lane excludes the browser-heavy docs captures and the fixture lifecycle proofs; run those with `bun run test:e2e:visual` and `bun run test:e2e:fixtures`. `test:e2e:all` aggregates all three. Component appearance belongs in `*.screenshot.tsx` and runs with `bun run test:screenshots`; none of these are part of the default `bun test` lane.
 
 ## Run-scoped cleanup
 
-`registerRunCleanup(callback)` registers teardown for an in-process resource that needs the same process-wide ownership as `useApplication` but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. Use it for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
+`registerRunCleanup(callback)` registers teardown for an in-process resource that needs process-wide cleanup but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. Use it for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
 
 ## Database isolation
 

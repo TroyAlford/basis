@@ -183,12 +183,23 @@ interface RunResult {
  * @param target - The fixture to run.
  * @param args - Extra `bun test` arguments (for example a single file).
  * @param signal - A signal to send once the fixture server has booted.
+ * @param env - Extra child-process environment.
  * @returns The exit code, activity, and output.
  */
-async function run(target: Fixture, args: string[] = [], signal?: NodeJS.Signals): Promise<RunResult> {
+async function run(
+  target: Fixture,
+  args: string[] = [],
+  signal?: NodeJS.Signals,
+  env: Record<string, string> = {},
+): Promise<RunResult> {
   const proc = Bun.spawn([process.execPath, 'test', ...args], {
     cwd: target.dir,
-    env: { ...process.env, ACTIVITY_LOG: target.activity },
+    env: {
+      ...process.env,
+      ACTIVITY_LOG: target.activity,
+      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '1',
+      ...env,
+    },
     stderr: 'pipe',
     stdout: 'pipe',
   })
@@ -219,6 +230,36 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
+  }, 30_000)
+
+  test('reuses one persistent development server across runs', async () => {
+    const target = fixture({ 'a.test.ts': bootSuite('persistent') })
+    const root = tempDirectory('basis-application-persistent-')
+    created.push(root)
+    const env = {
+      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '0',
+      BASIS_APPLICATION_FIXTURE_ROOT: join(root, 'fixture'),
+    }
+
+    const first = await run(target, [], undefined, env)
+    expect(first.code).toBe(0)
+    expect(first.activity.boot).toBe(1)
+    expect(first.activity.stops).toBe(0)
+
+    const second = await run(target, [], undefined, env)
+    expect(second.code).toBe(0)
+    expect(second.activity.boot).toBe(1)
+    expect(second.activity.stops).toBe(0)
+    const pid = second.activity.pid
+    if (pid === null) throw new Error('persistent application has no pid')
+    expect(isAlive(pid)).toBe(true)
+
+    try {
+      process.kill(pid, 'SIGTERM')
+      await waitFor(() => readActivity(target.activity).stops > 0)
+    } finally {
+      if (isAlive(pid)) process.kill(pid, 'SIGKILL')
+    }
   }, 30_000)
 
   test('allows two genuinely different entries to boot separately', async () => {
