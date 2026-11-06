@@ -3,8 +3,6 @@ import type { QueryDiagnostic, Token } from './QueryLexer'
 import { QueryLexer, TokenType } from './QueryLexer'
 
 /** Literal categories retained from source syntax. */
-export type QueryLiteralKind = 'array' | 'boolean' | 'null' | 'number' | 'object' | 'string'
-
 /** Fields shared by every transient syntax literal. */
 interface QueryLiteralBase {
   /** Exclusive source offset. */
@@ -16,7 +14,7 @@ interface QueryLiteralBase {
 }
 
 /** A primitive syntax literal. */
-export interface QueryScalarLiteral extends QueryLiteralBase {
+interface QueryScalarLiteral extends QueryLiteralBase {
   /** Literal category. */
   readonly kind: 'boolean' | 'null' | 'number' | 'string',
   /** Decoded scalar value, or raw source spelling for numbers. */
@@ -24,7 +22,7 @@ export interface QueryScalarLiteral extends QueryLiteralBase {
 }
 
 /** A recursive array syntax literal. */
-export interface QueryArrayLiteral extends QueryLiteralBase {
+interface QueryArrayLiteral extends QueryLiteralBase {
   /** Literal category. */
   readonly kind: 'array',
   /** Element literals. */
@@ -32,7 +30,7 @@ export interface QueryArrayLiteral extends QueryLiteralBase {
 }
 
 /** A recursive object syntax literal. */
-export interface QueryObjectLiteral extends QueryLiteralBase {
+interface QueryObjectLiteral extends QueryLiteralBase {
   /** Literal category. */
   readonly kind: 'object',
   /** Object entries, keyed by decoded key name. */

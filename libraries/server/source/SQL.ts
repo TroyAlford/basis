@@ -107,7 +107,7 @@ function select(
 }
 
 /** A validated scalar value bound into a query. */
-type BoundScalar = string | number | boolean | bigint | Date | readonly (string | number | boolean | bigint | Date)[]
+type BoundScalar = string | number | boolean | bigint | Date
 
 /** A per-comparison definition used by the closed operator registry. */
 interface ComparisonDefinition {
@@ -466,15 +466,7 @@ function queryField(entity: EntityDefinition, name: string): QueryFieldDefinitio
  * @returns Its declared PostgreSQL array type.
  */
 function arraySQLType(field: ArrayFieldDefinition): string {
-  switch (field.items.type) {
-    case FieldType.Boolean: return 'boolean[]'
-    case FieldType.Date: return 'date[]'
-    case FieldType.ID: return 'text[]'
-    case FieldType.Number: return 'double precision[]'
-    case FieldType.String: return 'text[]'
-    case FieldType.Timestamp: return 'timestamptz[]'
-    default: throw new Error(`Unsupported array element type: ${String(field.items.type)}`)
-  }
+  return `${scalarSQLType(field.items.type)}[]`
 }
 
 /**

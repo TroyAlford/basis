@@ -488,7 +488,7 @@ export function arrayItemField(field: ArrayFieldDefinition): ScalarFieldDefiniti
  * @param seen - Cycle detector.
  * @returns A JSON-compatible clone.
  */
-export function normalizeJSON(value: unknown, seen = new Set<object>()): unknown {
+function normalizeJSON(value: unknown, seen = new Set<object>()): unknown {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new Error('JSON number operands must be finite')
