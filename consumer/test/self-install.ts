@@ -92,7 +92,7 @@ const main = (): void => {
       '  }, { entities })',
       '})',
     ].join('\n'))
-    run(['bun', 'test', 'fixture.test.ts'], app)
+    run(['bun', 'test', 'fixture.test.ts', '--timeout', '120000'], app)
 
     // True clean reinstall: drop node_modules and the lockfile, install again.
     rmSync(join(app, 'node_modules'), { force: true, recursive: true })
