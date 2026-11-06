@@ -84,6 +84,9 @@ const leftBracket = (): ExpectedToken => ({ raw: '[', type: TokenType.LeftBracke
 const rightBracket = (): ExpectedToken => ({ raw: ']', type: TokenType.RightBracket, value: ']' })
 const leftParen = (): ExpectedToken => ({ raw: '(', type: TokenType.LeftParen, value: '(' })
 const rightParen = (): ExpectedToken => ({ raw: ')', type: TokenType.RightParen, value: ')' })
+const leftBrace = (): ExpectedToken => ({ raw: '{', type: TokenType.LeftBrace, value: '{' })
+const rightBrace = (): ExpectedToken => ({ raw: '}', type: TokenType.RightBrace, value: '}' })
+const colon = (): ExpectedToken => ({ raw: ':', type: TokenType.Colon, value: ':' })
 const comma = (): ExpectedToken => ({ raw: ',', type: TokenType.Comma, value: ',' })
 const unknown = (raw: string): ExpectedToken => ({ raw, type: TokenType.Unknown, value: raw })
 
@@ -194,6 +197,34 @@ describe('QueryLexer', () => {
     ])
   })
 
+  test('recognizes array equality, overlaps, and JSON punctuation', () => {
+    assertLex('tags == tags === $overlaps $sequenceEqual', [
+      field('tags'),
+      operator('==', Operator.Comparison.Equal),
+      field('tags'),
+      operator('===', Operator.Comparison.SequenceEqual),
+      operator('$overlaps', Operator.Comparison.Overlaps),
+      operator('$sequenceEqual', Operator.Comparison.SequenceEqual),
+    ])
+    assertLex('payload $contains {kind: "note", tags: ["a", 2]}', [
+      field('payload'),
+      operator('$contains', Operator.Comparison.Contains),
+      leftBrace(),
+      field('kind'),
+      colon(),
+      string('"note"', 'note'),
+      comma(),
+      field('tags'),
+      colon(),
+      leftBracket(),
+      string('"a"', 'a'),
+      comma(),
+      number('2'),
+      rightBracket(),
+      rightBrace(),
+    ])
+  })
+
   test('tokenizes grouping parentheses with exact source spans', () => {
     assertLex('(score = 1 $or (score = 2 $and active = true))', [
       leftParen(),
@@ -272,10 +303,8 @@ describe('QueryLexer', () => {
   })
 
   test('reports unsupported operators without splitting them', () => {
-    assertLex('score == 5 $blank 1 $notblank 2 $nor 3 $xor 4', [
+    assertLex('score $blank 1 $notblank 2 $nor 3 $xor 4', [
       field('score'),
-      unknown('=='),
-      number('5'),
       unknown('$blank'),
       number('1'),
       unknown('$notblank'),
@@ -285,7 +314,6 @@ describe('QueryLexer', () => {
       unknown('$xor'),
       number('4'),
     ], [
-      { message: 'Unsupported operator "=="', raw: '==' },
       { message: 'Unknown operator "$blank"', raw: '$blank' },
       { message: 'Unknown operator "$notblank"', raw: '$notblank' },
       { message: 'Unknown operator "$nor"', raw: '$nor' },

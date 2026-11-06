@@ -237,13 +237,44 @@ describe('QueryParser', () => {
       'title = ?',
       "pets $any (title = 'Ada')",
       "pets $contains [(title = 'Ada')",
-      'pets $contains []',
       'pets $all [(title = \'Ada\')]',
     ]) {
       const parsed = QueryParser.parse(source)
       expect(parsed.expression).toBeNull()
       expect(parsed.diagnostics.length).toBeGreaterThan(0)
     }
+  })
+
+  test('parses recursive array and object literals', () => {
+    const source = 'payload $contains {kind: "note", meta: {active: true}, tags: ["a", 2, null]}'
+    const parsed = comparisonNode(QueryParser.parse(source).expression)
+    expect(slice(source, parsed)).toBe(source)
+    expect(withoutSpans(parsed)).toEqual({
+      field: 'payload',
+      kind: 'comparison',
+      operator: Operator.Comparison.Contains,
+      values: [{
+        kind: 'object',
+        raw: '{kind: "note", meta: {active: true}, tags: ["a", 2, null]}',
+        value: {
+          kind: { kind: 'string', raw: '"note"', value: 'note' },
+          meta: {
+            kind: 'object',
+            raw: '{active: true}',
+            value: { active: { kind: 'boolean', raw: 'true', value: true } },
+          },
+          tags: {
+            kind: 'array',
+            raw: '["a", 2, null]',
+            value: [
+              { kind: 'string', raw: '"a"', value: 'a' },
+              { kind: 'number', raw: '2', value: '2' },
+              { kind: 'null', raw: 'null', value: null },
+            ],
+          },
+        },
+      }],
+    })
   })
 
   test('preserves literal kind, raw spelling, and dotted field names', () => {

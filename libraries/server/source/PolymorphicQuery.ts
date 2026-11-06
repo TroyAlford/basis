@@ -1,4 +1,4 @@
-import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, InverseDerivedCollectionDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, InverseDerivedCollectionDefinition, QueryFieldDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
@@ -193,7 +193,7 @@ class QueryProjection {
   /** Filter-only expression overrides keyed by logical path. */
   readonly #filterExpressions = new Map<string, string>()
   /** Filter-only resolved fields keyed by logical path. */
-  readonly #filterFields = new Map<string, ScalarFieldDefinition>()
+  readonly #filterFields = new Map<string, QueryFieldDefinition>()
   /** Collection predicate scopes keyed by root navigation name. */
   readonly #collectionScopes = new Map<string, CollectionScope>()
   /** Stable filter/projection reference contexts keyed by logical path. */
@@ -323,7 +323,7 @@ class QueryProjection {
    * @param field - Effective scalar field.
    * @returns Physical SQL expression.
    */
-  expression(field: ScalarFieldDefinition): string {
+  expression(field: QueryFieldDefinition): string {
     const filtered = this.#filterExpressions.get(field.name)
     if (filtered) return filtered
     const effective = this.root.effective.get(field.name)
@@ -348,7 +348,7 @@ class QueryProjection {
     contextKey = '',
     depth = 0,
     scope: FilterJoinScope = this.#outerFilterScope(),
-  ): { expression: string, field: ScalarFieldDefinition, identity: boolean } {
+  ): { expression: string, field: QueryFieldDefinition, identity: boolean } {
     const [segment] = segments
     if (segment === undefined) throw new Error(`Invalid filter path "${fullName}"`)
     const rest = segments.slice(1)
@@ -373,19 +373,9 @@ class QueryProjection {
             identity: true,
           }
         }
-        if (field.type === FieldType.Array) {
-          throw new Error(
-            `Query field "${fullName}" is an array; array fields cannot be used in predicates or ordering`,
-          )
-        }
-        if (field.type === FieldType.JSON) {
-          throw new Error(
-            `Query field "${fullName}" is JSON; JSON fields cannot be used in predicates or ordering`,
-          )
-        }
         return {
           expression: this.#expression(context, field, false, false, scope),
-          field: (fullName.includes('.') ? { ...field, name: fullName } : field) as ScalarFieldDefinition,
+          field: (fullName.includes('.') ? { ...field, name: fullName } : field) as QueryFieldDefinition,
           identity: false,
         }
       }
@@ -433,19 +423,9 @@ class QueryProjection {
       }
       const variant = descendant.variants[0]
       if (!variant) throw new Error(`Descendant field "${context.definition.name}.${segment}" has no declaration`)
-      if (variant.field.type === FieldType.Array) {
-        throw new Error(
-          `Query field "${fullName}" is an array; array fields cannot be used in predicates or ordering`,
-        )
-      }
-      if (variant.field.type === FieldType.JSON) {
-        throw new Error(
-          `Query field "${fullName}" is JSON; JSON fields cannot be used in predicates or ordering`,
-        )
-      }
       return {
         expression: this.#descendantExpression(context, descendant, scope),
-        field: { ...variant.field, name: fullName } as ScalarFieldDefinition,
+        field: { ...variant.field, name: fullName } as QueryFieldDefinition,
         identity: false,
       }
     }
@@ -456,7 +436,7 @@ class QueryProjection {
       throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
     }
     const root = this.#ensureRoot(context, scope)
-    let resolvedField: ScalarFieldDefinition | undefined
+    let resolvedField: QueryFieldDefinition | undefined
     let resolvedIdentity = false
     const branches = descendant.variants.map(variant => {
       const owner = this.#ownerAlias(context, variant.owner, true, scope)
@@ -467,7 +447,8 @@ class QueryProjection {
       if (!resolvedField) resolvedField = resolved.field
       else if (
         resolvedField.type !== resolved.field.type
-        || resolvedField.format !== resolved.field.format
+        || ('format' in resolvedField ? resolvedField.format : undefined) !==
+          ('format' in resolved.field ? resolved.field.format : undefined)
       ) {
         throw new Error(`Filter path "${fullName}" has incompatible descendant declarations`)
       }
@@ -557,7 +538,7 @@ class QueryProjection {
     this.#consume(initialWork)
     const expressions = new Map<string, string>()
     const identities = new Set<string>()
-    const resolved = new Map<string, ScalarFieldDefinition>()
+    const resolved = new Map<string, QueryFieldDefinition>()
     const joins: string[] = []
     const sink: FilterJoinScope = {
       alias: prefix => this.#nextAlias(prefix),
@@ -565,7 +546,7 @@ class QueryProjection {
       consume: units => this.#consume(units),
       join: sql => joins.push(sql),
     }
-    const resolve = (path: string): ScalarFieldDefinition => {
+    const resolve = (path: string): QueryFieldDefinition => {
       const cachedField = resolved.get(path)
       if (cachedField) return cachedField
       if (relationshipAlias !== undefined && relationship) {
@@ -618,7 +599,7 @@ class QueryProjection {
    * @param name - Logical root field or dotted singular-reference path.
    * @returns The effective scalar or identity field.
    */
-  filterField(name: string): ScalarFieldDefinition {
+  filterField(name: string): QueryFieldDefinition {
     const cached = this.#filterFields.get(name)
     if (cached) return cached
     const segments = name.split('.')
@@ -1354,25 +1335,13 @@ export function compilePolymorphicQuery(
   const projection = new QueryProjection(entities, definition, options.collections)
   if (definition.abstract) projection.ensureRoot()
   const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
-  const field = (name: string): ScalarFieldDefinition => {
+  const field = (name: string): QueryFieldDefinition => {
     const value = projection.root.effective.get(name)
     if (!value) throw new Error(`Unknown field "${definition.name}.${name}"`)
     if (value.type === FieldType.Entity) {
       throw new Error(
         `Query field "${definition.name}.${name}" is an entity reference; ` +
         'references cannot be used in predicates or ordering',
-      )
-    }
-    if (value.type === FieldType.Array) {
-      throw new Error(
-        `Query field "${definition.name}.${name}" is an array; ` +
-        'array fields cannot be used in predicates or ordering',
-      )
-    }
-    if (value.type === FieldType.JSON) {
-      throw new Error(
-        `Query field "${definition.name}.${name}" is JSON; ` +
-        'JSON fields cannot be used in predicates or ordering',
       )
     }
     return value

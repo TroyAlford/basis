@@ -1,6 +1,7 @@
-import type { EntityDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import type { ArrayFieldDefinition, EntityDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
+import { normalizeScalar } from './ScalarNormalization'
 
 /** A canonical comparison filter. */
 export interface ComparisonFilter {
@@ -37,8 +38,8 @@ export interface CollectionFilter {
 export interface CollectionFilterScope {
   /** Related item entity type. */
   readonly definition: EntityDefinition,
-  /** Resolve one inner scalar field or path. */
-  readonly field: (name: string) => ScalarFieldDefinition,
+  /** Resolve one inner value field or path. */
+  readonly field: (name: string) => QueryFieldDefinition,
 }
 
 /** Resolve a collection navigation for filter normalization. */
@@ -51,6 +52,8 @@ export type Filter = CollectionFilter | ComparisonFilter | LogicalFilter
 const BASE_COMPARISON_OPERATORS = new Set<Operator.Comparison>([
   Operator.Comparison.Contains,
   Operator.Comparison.Equal,
+  Operator.Comparison.Overlaps,
+  Operator.Comparison.SequenceEqual,
   Operator.Comparison.GreaterThan,
   Operator.Comparison.GreaterThanOrEqual,
   Operator.Comparison.LessThan,
@@ -91,7 +94,10 @@ export const Predicate = {
    * @returns `Or(Equal(null), Equal(''))`.
    * @throws {Error} When the field is not a string.
    */
-  empty(entity: EntityDefinition, field: ScalarFieldDefinition): LogicalFilter {
+  empty(entity: EntityDefinition, field: QueryFieldDefinition): Filter {
+    if (field.type === FieldType.Array) {
+      return { field: field.name, operator: Operator.Comparison.Empty, value: null }
+    }
     if (field.type !== FieldType.String) {
       throw new Error(
         `Query operator "${Operator.Comparison.Empty}" is not valid for field "${entity.name}.${field.name}"`,
@@ -110,7 +116,7 @@ export const Predicate = {
    * @returns The scalar field definition.
    * @throws {Error} When the field is unknown or is an entity reference.
    */
-  field(entity: EntityDefinition, name: string): ScalarFieldDefinition {
+  field(entity: EntityDefinition, name: string): QueryFieldDefinition {
     const field = entity.fields.find(candidate => candidate.name === name)
     if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
     if (field.type === FieldType.Entity) {
@@ -123,18 +129,6 @@ export const Predicate = {
       throw new Error(
         `Query field "${entity.name}.${name}" is an inverse navigation; ` +
         'navigation fields cannot be used in predicates or ordering',
-      )
-    }
-    if (field.type === FieldType.Array) {
-      throw new Error(
-        `Query field "${entity.name}.${name}" is an array; ` +
-        'array fields cannot be used in predicates or ordering',
-      )
-    }
-    if (field.type === FieldType.JSON) {
-      throw new Error(
-        `Query field "${entity.name}.${name}" is JSON; ` +
-        'JSON fields cannot be used in predicates or ordering',
       )
     }
     return field
@@ -169,7 +163,7 @@ export const Predicate = {
   normalize(
     entity: EntityDefinition,
     input: Filter | Readonly<Record<string, unknown>>,
-    resolve: (name: string) => ScalarFieldDefinition = name => Predicate.field(entity, name),
+    resolve: (name: string) => QueryFieldDefinition = name => Predicate.field(entity, name),
     collection?: CollectionResolver,
   ): Filter | null {
     if (!isPlainRecord(input)) throw new Error('Query where must be a plain object')
@@ -194,6 +188,40 @@ export const Predicate = {
    */
   notEqual(field: string, value: unknown): LogicalFilter {
     return Predicate.not({ field, operator: Operator.Comparison.Equal, value })
+  },
+
+  /**
+   * Validate and normalize one comparison operand against its field.
+   * @param field - Target value field.
+   * @param operator - Comparison operator identity.
+   * @param raw - Raw structured or source operand.
+   * @returns The canonical scalar, array, or JSON operand.
+   * @throws {Error} When the operand is incompatible with the field.
+   */
+  operand(
+    field: QueryFieldDefinition,
+    operator: Operator.Comparison,
+    raw: unknown,
+  ): unknown {
+    if (field.type === FieldType.Array) return arrayOperand(field, operator, raw)
+    if (field.type === FieldType.JSON) {
+      if (operator !== Operator.Comparison.Contains) {
+        throw new Error(`Query operator "${operator}" is not valid for JSON field "${field.name}"`)
+      }
+      return normalizeJSON(raw)
+    }
+    if (operator === Operator.Comparison.Overlaps || operator === Operator.Comparison.SequenceEqual) {
+      throw new Error(`Query operator "${operator}" is not valid for scalar field "${field.name}"`)
+    }
+    if (raw === undefined) throw new Error(`Query operand for "${field.name}" must not be undefined`)
+    if (field.type === FieldType.ID && operator === Operator.Comparison.Contains) return raw
+    if (raw === null) {
+      if (operator === Operator.Comparison.Equal || operator === Operator.Comparison.NotEqual) return null
+      throw new Error(`Query operand for "${field.name}" must not be null`)
+    }
+    const normalized = normalizeScalar(field, raw)
+    if (normalized === undefined) invalidOperand(field)
+    return normalized
   },
 
   /**
@@ -229,7 +257,7 @@ export const Predicate = {
 function shorthand(
   entity: EntityDefinition,
   input: Readonly<Record<string, unknown>>,
-  resolve: (name: string) => ScalarFieldDefinition,
+  resolve: (name: string) => QueryFieldDefinition,
 ): Filter | null {
   const entries = Object.entries(input)
   if (entries.length === 0) return null
@@ -255,7 +283,7 @@ function shorthand(
 function explicit(
   entity: EntityDefinition,
   input: Readonly<Record<string, unknown>>,
-  resolve: (name: string) => ScalarFieldDefinition,
+  resolve: (name: string) => QueryFieldDefinition,
   collection?: CollectionResolver,
 ): Filter {
   const operator = input.operator
@@ -314,12 +342,19 @@ function explicit(
 
   if (operator === Operator.Comparison.NotEqual) {
     assertKeys(input, ['operator', 'field', 'value'])
-    return Predicate.notEqual(requireField(entity, input, resolve).name, input.value)
+    const definition = requireField(entity, input, resolve)
+    return Predicate.notEqual(
+      definition.name,
+      Predicate.operand(definition, Operator.Comparison.NotEqual, input.value),
+    )
   }
 
   if (operator === Operator.Comparison.Between) {
     assertKeys(input, ['operator', 'field', 'values'])
     const definition = requireField(entity, input, resolve)
+    if (definition.type === FieldType.Array || definition.type === FieldType.JSON) {
+      throw new Error(`Query ${Operator.Comparison.Between} is not valid for field "${definition.name}"`)
+    }
     if (!Array.isArray(input.values) || input.values.length !== 2) {
       throw new Error(`Query ${Operator.Comparison.Between} requires exactly two values`)
     }
@@ -328,8 +363,12 @@ function explicit(
   }
 
   if (operator === Operator.Comparison.Empty) {
-    assertKeys(input, ['operator', 'field'])
-    return Predicate.empty(entity, requireField(entity, input, resolve))
+    const definition = requireField(entity, input, resolve)
+    const canonical = definition.type === FieldType.Array
+      && input.value === null
+      && Object.hasOwn(input, 'value')
+    assertKeys(input, canonical ? ['operator', 'field', 'value'] : ['operator', 'field'])
+    return Predicate.empty(entity, definition)
   }
 
   if (!BASE_COMPARISON_OPERATORS.has(operator as Operator.Comparison)) {
@@ -341,7 +380,7 @@ function explicit(
   return {
     field: definition.name,
     operator: operator as Operator.Comparison,
-    value: input.value,
+    value: Predicate.operand(definition, operator as Operator.Comparison, input.value),
   }
 }
 
@@ -358,7 +397,7 @@ function child(
   entity: EntityDefinition,
   operator: string,
   filter: unknown,
-  resolve: (name: string) => ScalarFieldDefinition,
+  resolve: (name: string) => QueryFieldDefinition,
   collection?: CollectionResolver,
 ): Filter {
   if (!isPlainRecord(filter)) throw new Error(`Query ${operator} filters must be plain objects`)
@@ -377,8 +416,8 @@ function child(
 function requireField(
   entity: EntityDefinition,
   input: Readonly<Record<string, unknown>>,
-  resolve: (name: string) => ScalarFieldDefinition,
-): ScalarFieldDefinition {
+  resolve: (name: string) => QueryFieldDefinition,
+): QueryFieldDefinition {
   if (typeof input.field !== 'string') throw new Error('Query comparison field must be a string')
   return resolve(input.field)
 }
@@ -394,6 +433,93 @@ function assertKeys(value: Readonly<Record<string, unknown>>, keys: readonly str
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
     throw new Error(`Query ${String(value.operator)} requires exactly ${keys.join(', ')}`)
   }
+}
+
+/**
+ * Normalize one array operand.
+ * @param field - Native array field.
+ * @param operator - Comparison operator identity.
+ * @param raw - Raw scalar or array operand.
+ * @returns Normalized element values in operand order.
+ */
+function arrayOperand(
+  field: ArrayFieldDefinition,
+  operator: Operator.Comparison,
+  raw: unknown,
+): unknown {
+  if (raw === null) {
+    if (operator === Operator.Comparison.Equal || operator === Operator.Comparison.NotEqual) return null
+    throw new Error(`Query operand for "${field.name}" must not be null`)
+  }
+  const allowScalar = operator === Operator.Comparison.Contains || operator === Operator.Comparison.Overlaps
+  const values = Array.isArray(raw) ? raw : allowScalar ? [raw] : undefined
+  if (!values) throw new Error(`Query operator "${operator}" requires an array operand for "${field.name}"`)
+  const item = arrayItemField(field)
+  return values.map(value => {
+    if (value === null) throw new Error(`Array operands for "${field.name}" cannot contain null`)
+    const normalized = normalizeScalar(item, value)
+    if (normalized === undefined) invalidOperand(item)
+    return normalized
+  })
+}
+
+/**
+ * Build the scalar definition for one array element.
+ * @param field - Native array field.
+ * @returns Its scalar element definition.
+ */
+export function arrayItemField(field: ArrayFieldDefinition): ScalarFieldDefinition {
+  return {
+    ...(field.items.format ? { format: field.items.format } : {}),
+    name: field.name,
+    type: field.items.type,
+  }
+}
+
+/**
+ * Normalize a JSON-compatible operand recursively.
+ * @param value - Candidate JSON value.
+ * @param seen - Cycle detector.
+ * @returns A JSON-compatible clone.
+ */
+export function normalizeJSON(value: unknown, seen = new Set<object>()): unknown {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('JSON number operands must be finite')
+    return value
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) throw new Error('JSON operands cannot be cyclic')
+    seen.add(value)
+    const normalized = value.map(item => normalizeJSON(item, seen))
+    seen.delete(value)
+    return normalized
+  }
+  if (typeof value !== 'object') {
+    throw new Error('JSON operands must contain only JSON-compatible values')
+  }
+  if (seen.has(value)) throw new Error('JSON operands cannot be cyclic')
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('JSON operands must contain only plain objects')
+  }
+  seen.add(value)
+  const normalized = Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, normalizeJSON(entry, seen)]),
+  )
+  seen.delete(value)
+  return normalized
+}
+
+/**
+ * Throw the standard operand error.
+ * @param field - Field whose operand is invalid.
+ * @throws {Error} Always, naming the invalid operand.
+ */
+function invalidOperand(field: ScalarFieldDefinition): never {
+  throw new Error(`Query operand for "${field.name}" is not a valid ${field.type.toLowerCase()} value`)
 }
 
 /**

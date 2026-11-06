@@ -19,6 +19,7 @@ export type {
   InverseDerivedCollectionDefinition,
   InverseFieldDefinition,
   JSONFieldDefinition,
+  QueryFieldDefinition,
   RelationshipDefinition,
   RelationshipDerivedCollectionDefinition,
   RelationshipEndpointDefinition,

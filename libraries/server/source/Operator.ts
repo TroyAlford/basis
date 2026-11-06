@@ -27,6 +27,10 @@ export namespace Operator {
     LessThanOrEqual = '$lte',
     /** Not-equal convenience for `Not(Equal)`. */
     NotEqual = '$ne',
+    /** At least one array element overlaps the operand. */
+    Overlaps = '$overlaps',
+    /** Exact ordered array sequence equality. */
+    SequenceEqual = '$sequenceEqual',
   }
 
   /** Collection universal operator. */

@@ -31,7 +31,7 @@ No input form gets its own executor or database path. A query is either compiled
 - There is no separate identity field such as `ownerId`; identity is the reference's canonical target `id`.
 - Unknown, incompatible, navigation-only, and physical storage names are rejected before SQL execution.
 
-Current predicates resolve root/effective/descendant scalar fields, model-validated singular reference paths, and collection comparisons over inverse and named N:M navigations. Array and JSON operators remain later stages.
+Current predicates resolve root/effective/descendant scalar fields, model-validated singular reference paths, collection comparisons over inverse and named N:M navigations, and native Array/opaque JSON operations.
 
 ## Input forms
 
@@ -304,9 +304,9 @@ const collectionComparisons = [
 - Collection comparisons preserve two-valued null behavior. A null inner scalar makes a non-null comparison false; its negation is true, and a null field is a counterexample to `$all`.
 - Each independent requirement compiles to its own correlated `EXISTS`; negation uses the shared logical operator with null-safe two-valued semantics. The query remains one parameterized SQL statement with the same finite work budget. Nested collection comparisons, unbounded traversal, N+1 lookups, and application-side child hydration are rejected.
 
-## Stage 19 — native Array and opaque JSON (accepted destination, not implemented)
+## Stage 19 — native Array and opaque JSON (implemented)
 
-Array and JSON predicates are the next query stage. The accepted destination is type-directed by the canonical field type and keeps JSON opaque. Arrays use the same `$contains`/`~=` and `$all` collection idiom as relationships, with item-appropriate operand typing; there is no separate array predicate engine. All comparison forms continue to use the canonical comparison node `{ field, operator, value }` unless a stage-19 grammar explicitly adds a member-requirement list.
+Array and JSON predicates are type-directed by the canonical field type and keep JSON opaque. Arrays use `$contains`/`~=`, `$overlaps`, `$empty`, `$eq` set equality, and `$sequenceEqual` sequence equality; JSON uses opaque `$contains`. There is no separate array/JSON predicate engine and all forms use the canonical comparison node `{ field, operator, value }`.
 
 ```ts
 const arrayOperators = [
@@ -321,9 +321,24 @@ const arrayOperators = [
     source: "tags $contains ['urgent', 'important']",
   },
   {
-    meaning: 'optional overlap sugar: OR across matching requirements',
+    meaning: 'overlaps at least one listed element',
     structured: { field: 'tags', operator: '$overlaps', value: ['urgent', 'important'] },
     source: "tags $overlaps ['urgent', 'important']",
+  },
+  {
+    meaning: 'unordered set equality',
+    structured: { field: 'tags', operator: '$eq', value: ['b', 'a'] },
+    source: "tags == ['b', 'a']",
+  },
+  {
+    meaning: 'exact sequence equality',
+    structured: { field: 'tags', operator: '$sequenceEqual', value: ['b', 'a'] },
+    source: "tags === ['b', 'a']",
+  },
+  {
+    meaning: 'empty array or NULL',
+    structured: { field: 'tags', operator: '$empty' },
+    source: 'tags $empty',
   },
 ]
 
@@ -349,20 +364,20 @@ const jsonOperators = [
 Array semantics are type-directed:
 
 - `$contains` on `Array<T>` means PostgreSQL array containment `@>`. A scalar operand is normalized to a one-element array; an array operand requires every element to be contained.
-- `$overlaps`, if retained, is convenience sugar for an OR of matching requirements; it is not a separate array executor. A scalar operand is normalized to a one-element requirement.
-- A scalar operand is valid for both array operators. The operand type must match the canonical array element type, including ID format and numeric finiteness.
-- `$contains []` is true for every non-null array (the empty set is contained); `$overlaps []` is false. Array columns remain non-null; empty arrays are values, not missing values.
+- `$overlaps` means PostgreSQL array overlap `&&`; a scalar operand is normalized to a one-element requirement.
+- A scalar operand is valid for both array membership operators. The operand type must match the canonical array element type, including ID format and numeric finiteness.
+- `$contains []` is true for every non-null array (the empty set is contained); `$overlaps []` is false. Array columns remain non-null; empty arrays are values, not missing values. Array operand elements cannot be null.
 - Null operands are invalid for array membership. Stored null array elements do not match a non-null operand and cannot be targeted by this contract’s array predicates.
 - String `$contains` remains case-insensitive substring matching. JSON `$contains` means structural containment `jsonb @>`. The operator vocabulary is deliberately type-directed, not a second operator registry or a second executor.
-- Native array equality is staged for the same vocabulary: `tags == ['b', 'a']` means unordered set equality ignoring order and multiplicity, while `tags === ['b', 'a']` means exact sequence equality. `===` is invalid for inherently unordered relationship collections. These are Basis DSL semantics, not JavaScript reference equality or ordinary PostgreSQL array equality.
-- `tags $empty` tests SQL null or zero elements; `tags $all (P)` is vacuously true for zero logical members. A null array has no matching members for `$contains`. JSON missing versus JSON null remains a stage-19 concern.
+- `tags == [...]` and `$eq` mean unordered set equality ignoring order and multiplicity; `tags === [...]` and `$sequenceEqual` mean exact sequence equality. `===` is invalid for inherently unordered relationship collections. These are Basis DSL semantics, not JavaScript reference equality or ordinary PostgreSQL array equality.
+- `tags $empty` tests SQL null or zero elements; `tags !$empty` is its negation. Array universal predicates using an element-variable predicate remain future work; `$all` remains relationship-collection syntax.
 
 JSON source literals are first-class:
 
-- The lexer/parser for stage 19 must produce literal AST nodes for objects, arrays, strings, numbers, booleans, and null without evaluating JavaScript.
+- The lexer/parser produces literal AST nodes for objects, arrays, strings, numbers, booleans, and null without evaluating JavaScript.
 - Object keys may be quoted or bare identifiers. Nested objects and arrays are allowed. Computed keys, spreads, functions, and arbitrary expressions are rejected.
-- `payload $contains {kind: "note"}` and `payload $contains {meta: {active: true}}` parse without requiring a serialized JSON string. A JSON string operand uses an ordinary quoted literal; JSON null uses `null`.
-- Structured and source operands normalize to the same comparison node and the same field-type-aware predicate. JSON null and an absent key are distinct; `$contains` performs structural containment without path traversal, schema validation, or treating JSON as an entity graph.
+- `payload $contains {kind: "note"}` and `payload $contains {meta: {active: true}}` parse without requiring a serialized JSON string. A JSON string operand uses an ordinary quoted literal; JSON null uses `null`; object keys may be quoted or bare.
+- Structured and source operands normalize to the same comparison node and the same field-type-aware predicate. JSON null and an absent key are distinct; `$contains` performs structural containment without path traversal, schema validation, or treating JSON as an entity graph. JSON `$eq`/`===` equality and JSON path predicates are not part of this contract.
 - JSON fields remain non-null columns. Empty objects and empty arrays are values, not missing values; no JSON empty operator is introduced.
 
 ## Ordering, pagination, and exclusions
@@ -373,19 +388,19 @@ Explicit exclusions for this contract:
 
 - No raw SQL fragments, arbitrary JSONPath, regex operators, `$blank`, `$notblank`, `$nor`, `$xor`, or a second predicate grammar.
 - No predicates on physical columns, `Inverse` fields as scalar values, or implicitly inferred inverse edges.
-- No collection predicates that fetch all children into application code, perform N+1 lookups, nest collection comparisons, or recursively traverse collection elements.
+- No collection predicates that fetch all children into application code, perform N+1 lookups, nest collection comparisons, or recursively traverse collection elements. No JSON path traversal, JSON equality, or array element-variable predicate syntax.
 - No runtime row-identity cycle detection; only canonical static traversal and reciprocal-backtrack rules apply.
 - No schema generation, migrations, ORM writes, or automatic CRUD routes from the query language.
 
 ## Executable contract fixtures
 
-`libraries/server/source/QueryContract.test.ts` locks the implemented contract: structured and string forms normalize to the same canonical filter and compile to the same SQL, and the deferred forms above are explicitly rejected until their stages land. The fixture names are the approval boundary for subsequent query-stage changes: extending an operator or field kind requires changing the contract fixture and the implementation together.
+`libraries/server/source/QueryContract.test.ts` locks the implemented contract: structured and string forms normalize to the same canonical filter and compile to the same SQL, and unsupported forms above are rejected before execution. The fixture names are the approval boundary for subsequent query-stage changes: extending an operator or field kind requires changing the contract fixture and the implementation together.
 
 ## Current implementation audit
 
-- `QueryLexer` and `QueryParser` own field, comparison, logical, grouping, and collection-comparison syntax and source spans. They do not parse first-class JSON/Array literals yet.
+- `QueryLexer` and `QueryParser` own field, comparison, logical, grouping, collection-comparison, and first-class Array/JSON literal syntax and source spans.
 - `QueryNormalizer` applies scalar metadata and accepts the query compiler’s field, reference-path, and collection resolvers. It lowers `$all` to the shared counterexample canonical form.
-- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, collection validation, and null/empty lowering. `QueryProjection.filterField` and `QueryProjection.collectionScope` supply path resolution and correlated relation construction for `db.query`.
-- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection comparisons compile as correlated `EXISTS`/`NOT EXISTS` inside that same statement, with independent `EXISTS` per bracketed requirement. Array/JSON predicates must extend this path rather than add an executor.
+- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, collection validation, Array/JSON operand validation, and null/empty lowering. `QueryProjection.filterField` and `QueryProjection.collectionScope` supply path resolution and correlated relation construction for `db.query`.
+- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection comparisons compile as correlated `EXISTS`/`NOT EXISTS` inside that same statement, with independent `EXISTS` per bracketed requirement. Array/JSON predicates compile through the same comparison registry with parameterized array elements and opaque JSON values.
 
 The target end-state is therefore one grammar, two input spellings, one canonical filter tree, one SQL compiler, and one finite-work execution path.

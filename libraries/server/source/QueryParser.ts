@@ -3,7 +3,41 @@ import type { QueryDiagnostic, Token } from './QueryLexer'
 import { QueryLexer, TokenType } from './QueryLexer'
 
 /** Literal categories retained from source syntax. */
-export type QueryLiteralKind = 'boolean' | 'null' | 'number' | 'string'
+export type QueryLiteralKind = 'array' | 'boolean' | 'null' | 'number' | 'object' | 'string'
+
+/** Fields shared by every transient syntax literal. */
+interface QueryLiteralBase {
+  /** Exclusive source offset. */
+  readonly end: number,
+  /** Exact source spelling. */
+  readonly raw: string,
+  /** Inclusive source offset. */
+  readonly start: number,
+}
+
+/** A primitive syntax literal. */
+export interface QueryScalarLiteral extends QueryLiteralBase {
+  /** Literal category. */
+  readonly kind: 'boolean' | 'null' | 'number' | 'string',
+  /** Decoded scalar value, or raw source spelling for numbers. */
+  readonly value: string | boolean | null,
+}
+
+/** A recursive array syntax literal. */
+export interface QueryArrayLiteral extends QueryLiteralBase {
+  /** Literal category. */
+  readonly kind: 'array',
+  /** Element literals. */
+  readonly value: readonly QueryLiteral[],
+}
+
+/** A recursive object syntax literal. */
+export interface QueryObjectLiteral extends QueryLiteralBase {
+  /** Literal category. */
+  readonly kind: 'object',
+  /** Object entries, keyed by decoded key name. */
+  readonly value: Readonly<Record<string, QueryLiteral>>,
+}
 
 /**
  * A transient syntax literal.
@@ -11,18 +45,7 @@ export type QueryLiteralKind = 'boolean' | 'null' | 'number' | 'string'
  * Numbers retain their exact source spelling; canonical typed values are built
  * later at the field-aware normalization boundary.
  */
-export interface QueryLiteral {
-  /** Exclusive source offset. */
-  readonly end: number,
-  /** Literal category. */
-  readonly kind: QueryLiteralKind,
-  /** Exact source spelling. */
-  readonly raw: string,
-  /** Inclusive source offset. */
-  readonly start: number,
-  /** Decoded string or boolean, null for null, and raw spelling for numbers. */
-  readonly value: string | boolean | null,
-}
+export type QueryLiteral = QueryArrayLiteral | QueryObjectLiteral | QueryScalarLiteral
 
 /** A transient field comparison expression. */
 export interface QueryComparison {
@@ -123,7 +146,7 @@ export const QueryParser = {
    */
   parse(source: string): QueryParseResult {
     const lexed = QueryLexer.tokenize(source)
-    const parser = new Parser(lexed.tokens, lexed.diagnostics)
+    const parser = new Parser(lexed.tokens, lexed.diagnostics, source)
     const expression = parser.parse()
     const diagnostics = [...parser.diagnostics].sort((left, right) => (
       left.start - right.start || left.end - right.end
@@ -145,10 +168,12 @@ class Parser {
    * Create a parser over lexer tokens.
    * @param tokens - Tokens ending in EOF.
    * @param diagnostics - Lexer diagnostics to preserve.
+   * @param source - Complete query source used for literal spans.
    */
   constructor(
     private readonly tokens: readonly Token[],
     diagnostics: readonly QueryDiagnostic[],
+    private readonly source: string,
   ) {
     this.diagnostics = [...diagnostics]
   }
@@ -246,7 +271,7 @@ class Parser {
     }
 
     const collectionContains = operator === Operator.Comparison.Contains
-      && (this.#peek().type === TokenType.LeftParen || this.#peek().type === TokenType.LeftBracket)
+      && (this.#peek().type === TokenType.LeftParen || this.#isCollectionRequirementList())
     if (operator === Operator.Collection.All || collectionContains) {
       const rhs = this.#parseCollectionRhs(operator)
       if (!rhs) return null
@@ -293,6 +318,19 @@ class Parser {
       expression = logical(Operator.Logical.Not, [expression], expression.start, expression.end)
     }
     return expression
+  }
+
+  /**
+   * Whether a bracketed right-hand side starts with predicate requirements.
+   * @returns `true` when the list contains expressions rather than literal values.
+   */
+  #isCollectionRequirementList(): boolean {
+    if (this.#peek().type !== TokenType.LeftBracket) return false
+    const next = this.tokens[this.#index + 1]
+    if (!next) return false
+    return next.type === TokenType.LeftParen
+      || next.type === TokenType.Field
+      || (next.type === TokenType.Operator && next.operator === Operator.Logical.Not)
   }
 
   /**
@@ -362,6 +400,8 @@ class Parser {
    */
   #parseLiteral(): QueryLiteral | undefined {
     const token = this.#peek()
+    if (token.type === TokenType.LeftBracket) return this.#parseArrayLiteral()
+    if (token.type === TokenType.LeftBrace) return this.#parseObjectLiteral()
     switch (token.type) {
       case TokenType.Boolean:
         this.#index += 1
@@ -402,6 +442,83 @@ class Parser {
       default:
         this.#error('Expected a literal value', token)
         return undefined
+    }
+  }
+
+  /**
+   * Parse one array literal.
+   * @returns The array literal, or undefined on failure.
+   */
+  #parseArrayLiteral(): QueryLiteral | undefined {
+    const opening = this.#expect(TokenType.LeftBracket, 'Expected "["')
+    if (!opening) return undefined
+    const values: QueryLiteral[] = []
+    if (this.#match(TokenType.RightBracket)) {
+      const end = this.tokens[this.#index - 1]?.end ?? opening.end
+      return { end, kind: 'array', raw: this.source.slice(opening.start, end), start: opening.start, value: values }
+    }
+    while (true) {
+      const value = this.#parseLiteral()
+      if (!value) return undefined
+      values.push(value)
+      if (!this.#match(TokenType.Comma)) break
+    }
+    const closing = this.#expect(TokenType.RightBracket, 'Expected "]" after array literal')
+    if (!closing) return undefined
+    return {
+      end: closing.end,
+      kind: 'array',
+      raw: this.source.slice(opening.start, closing.end),
+      start: opening.start,
+      value: values,
+    }
+  }
+
+  /**
+   * Parse one object literal.
+   * @returns The object literal, or undefined on failure.
+   */
+  #parseObjectLiteral(): QueryLiteral | undefined {
+    const opening = this.#expect(TokenType.LeftBrace, 'Expected "{"')
+    if (!opening) return undefined
+    const values = Object.create(null) as Record<string, QueryLiteral>
+    if (this.#match(TokenType.RightBrace)) {
+      const end = this.tokens[this.#index - 1]?.end ?? opening.end
+      return { end, kind: 'object', raw: this.source.slice(opening.start, end), start: opening.start, value: values }
+    }
+    while (true) {
+      const keyToken = this.#peek()
+      if (
+        keyToken.type !== TokenType.Field
+        && keyToken.type !== TokenType.String
+        && keyToken.type !== TokenType.Boolean
+        && keyToken.type !== TokenType.Null
+      ) {
+        this.#error('Expected an object key', keyToken)
+        return undefined
+      }
+      this.#index += 1
+      const key = keyToken.type === TokenType.Field || keyToken.type === TokenType.String
+        ? String(keyToken.value)
+        : keyToken.raw
+      if (Object.hasOwn(values, key)) {
+        this.#error(`Duplicate object key ${JSON.stringify(key)}`, keyToken)
+        return undefined
+      }
+      if (!this.#expect(TokenType.Colon, 'Expected ":" after object key')) return undefined
+      const value = this.#parseLiteral()
+      if (!value) return undefined
+      values[key] = value
+      if (!this.#match(TokenType.Comma)) break
+    }
+    const closing = this.#expect(TokenType.RightBrace, 'Expected "}" after object literal')
+    if (!closing) return undefined
+    return {
+      end: closing.end,
+      kind: 'object',
+      raw: this.source.slice(opening.start, closing.end),
+      start: opening.start,
+      value: values,
     }
   }
 

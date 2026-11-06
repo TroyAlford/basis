@@ -113,6 +113,12 @@ export interface ArrayFieldDefinition {
   readonly type: FieldType.Array,
 }
 
+/** A scalar, native array, or opaque JSON field usable in a predicate. */
+export type QueryFieldDefinition =
+  | ArrayFieldDefinition
+  | JSONFieldDefinition
+  | ScalarFieldDefinition
+
 /** One logical entity field. */
 export type FieldDefinition =
   | ArrayFieldDefinition
