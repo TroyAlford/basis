@@ -124,6 +124,36 @@ describe('Basis Code CI', () => {
     expect(code.jobs?.knip?.steps?.some(step => step.uses?.includes('/knip'))).toBe(true)
   })
 
+  test('preflights trusted change impact before conditional test lanes', () => {
+    const runTests = code.jobs?.['run-tests']?.steps ?? []
+    const checkout = runTests.find(step => step.uses?.startsWith('actions/checkout'))
+    expect(checkout?.with?.ref).toBe('${{ github.event.pull_request.base.sha }}')
+    expect(checkout?.with?.['fetch-depth']).toBe(0)
+
+    const fetch = runTests.find(step => step.name === 'Fetch pull-request head and base')
+    expect(fetch?.env?.BASE_REF).toBe('${{ github.event.pull_request.base.ref }}')
+    expect(fetch?.env?.HEAD_SHA).toBe('${{ github.event.pull_request.head.sha }}')
+    expect(fetch?.run).toContain('refs/pull/${PR_NUMBER}/head')
+    expect(fetch?.run).toContain('git checkout --detach refs/remotes/origin/pr-head')
+
+    const impact = runTests.find(step => step.name === 'Analyze change impact')
+    expect(impact?.uses).toBe('TroyAlford/basis/.github/actions/change-impact@v7.11.0')
+    expect(impact?.with?.['config-path']).toBe('.github/ci-impact.json')
+    expect(impact?.with?.['head-sha']).toBe('${{ github.event.pull_request.head.sha }}')
+
+    const lanes = runTests.find(step => step.name === 'Derive test-lane decisions')
+    expect(lanes?.run).toContain('impact-decision.json')
+    expect(lanes?.run).toContain('$lane-needed=true')
+
+    const laneNames = [
+      'unit', 'component', 'contract', 'server', 'lifecycle', 'docs',
+      'screenshots', 'e2e', 'visual', 'database-fixtures', 'fixture-lifecycle', 'hmr',
+    ]
+    for (const lane of laneNames) {
+      expect(runTests.some(step => step.if === `steps.lanes.outputs.${lane}-needed == 'true'`)).toBe(true)
+    }
+  })
+
   test('uses a per-PR concurrency group that ignores the event action', () => {
     expect(code.concurrency?.group).toContain('github.workflow')
     expect(code.concurrency?.group).toContain('github.event.pull_request.number')

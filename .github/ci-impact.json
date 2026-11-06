@@ -1,0 +1,466 @@
+{
+  "version": 1,
+  "maxGraphFiles": 20000,
+  "aliases": {
+    "basis/": "./consumer/",
+    "@basis/": "./libraries/"
+  },
+  "docs": {
+    "globs": [
+      "**/*.md",
+      "**/*.mdx",
+      "docs/**"
+    ]
+  },
+  "suites": {
+    "quality": {
+      "mode": "paths",
+      "testGlobs": [],
+      "sourceGlobs": [
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.json",
+        "**/*.yml",
+        "**/*.yaml"
+      ],
+      "alwaysRunGlobs": [
+        ".github/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json",
+        ".tool-versions",
+        "scripts/**"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.png",
+        "**/*.svg",
+        "**/*.woff*"
+      ],
+      "unreachableSource": "run"
+    },
+    "docs": {
+      "mode": "paths",
+      "testGlobs": [],
+      "sourceGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "README.md"
+      ],
+      "alwaysRunGlobs": [],
+      "ignoreGlobs": [
+        "**"
+      ],
+      "unreachableSource": "run"
+    },
+    "unit": {
+      "testGlobs": [
+        "libraries/**/*.test.ts",
+        "libraries/**/*.test.tsx",
+        "testing/**/*.test.ts",
+        "consumer/**/*.test.ts",
+        "packages/**/*.test.ts",
+        ".github/**/*.test.ts"
+      ],
+      "testExcludeGlobs": [
+        "libraries/react/components/**/*.test.tsx",
+        "libraries/react/icons/**/*.test.tsx",
+        "libraries/server/source/Server.test.ts",
+        "libraries/testing/application.lifecycle.test.ts",
+        "libraries/testing/lanes.test.ts",
+        "consumer/cli.test.ts",
+        ".github/ci/**/*.test.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/**/*.ts",
+        "testing/**/*.ts",
+        "consumer/**/*.ts",
+        "packages/**/*.ts"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json",
+        ".tool-versions"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.png",
+        "**/*.svg",
+        "**/*.woff*"
+      ],
+      "unreachableSource": "skip"
+    },
+    "component": {
+      "testGlobs": [
+        "libraries/react/components/**/*.test.tsx",
+        "libraries/react/icons/**/*.test.tsx"
+      ],
+      "sourceGlobs": [
+        "libraries/react/**/*.ts",
+        "libraries/react/**/*.tsx"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "unreachableSource": "run"
+    },
+    "contract": {
+      "testGlobs": [
+        "consumer/cli.test.ts",
+        ".github/ci/**/*.test.ts",
+        "libraries/testing/lanes.test.ts"
+      ],
+      "sourceGlobs": [
+        ".github/**/*.ts",
+        "consumer/**/*.ts",
+        "libraries/testing/**/*.ts"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json",
+        "scripts/**"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "unreachableSource": "run"
+    },
+    "server": {
+      "testGlobs": [
+        "libraries/server/source/Server.test.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/server/**/*.ts"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "unreachableSource": "run"
+    },
+    "lifecycle": {
+      "testGlobs": [
+        "libraries/testing/application.lifecycle.test.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/testing/application.ts",
+        "libraries/testing/browser.ts",
+        "libraries/testing/lifecycle.ts",
+        "libraries/testing/temp.ts"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json"
+      ],
+      "ignoreGlobs": [
+        ".github/**",
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "consumer/**",
+        "packages/**",
+        "testing/**",
+        "libraries/configuration/**",
+        "libraries/docs/**",
+        "libraries/eslint-plugin/**",
+        "libraries/markdown-plugin/**",
+        "libraries/react/**",
+        "libraries/server/source/**",
+        "libraries/stylelint-plugin/**",
+        "libraries/testing/**",
+        "libraries/utilities/**",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.png",
+        "**/*.svg",
+        "**/*.woff*"
+      ],
+      "unreachableSource": "run",
+      "mode": "paths"
+    },
+    "screenshots": {
+      "testGlobs": [
+        "libraries/**/*.screenshot.tsx",
+        "libraries/**/*.screenshot.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/react/**/*.ts",
+        "libraries/react/**/*.tsx",
+        "libraries/react/**/*.styles.ts",
+        "libraries/testing/browser.ts",
+        "libraries/testing/matchScreenshot.ts",
+        "libraries/testing/snapshots.ts"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "playwright.config.*",
+        "**/__screenshots__/**"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "unreachableSource": "run"
+    },
+    "e2e": {
+      "testGlobs": [
+        "libraries/server/source/Database.e2e.ts",
+        "libraries/server/source/QueryParity.e2e.ts",
+        "libraries/server/source/QueryPlanning.e2e.ts",
+        "libraries/testing/application.e2e.ts",
+        "libraries/react/components/OverlayProvider/OverlayProvider.e2e.ts",
+        "libraries/react/components/Table/Table.e2e.ts"
+      ],
+      "testExcludeGlobs": [
+        "libraries/server/source/DatabaseFixture.lifecycle.e2e.ts",
+        "libraries/testing/runtime.lifecycle.e2e.ts",
+        "libraries/testing/docs.e2e.ts",
+        "libraries/react/components/visual.live.e2e.ts",
+        "libraries/testing/application.hmr.e2e.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/server/**/*.ts",
+        "libraries/testing/**/*.ts",
+        "libraries/react/**/*.ts",
+        "libraries/react/**/*.tsx"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "tsconfig*.json"
+      ],
+      "ignoreGlobs": [
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "unreachableSource": "run"
+    },
+    "visual": {
+      "testGlobs": [
+        "libraries/testing/docs.e2e.ts",
+        "libraries/react/components/visual.live.e2e.ts"
+      ],
+      "sourceGlobs": [
+        "docs/**",
+        "libraries/docs/**",
+        "libraries/testing/docs.e2e.ts",
+        "libraries/testing/application.ts",
+        "libraries/react/**/*.tsx"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml",
+        "**/__screenshots__/**"
+      ],
+      "ignoreGlobs": [
+        "**/*.md",
+        "**/*.mdx"
+      ],
+      "unreachableSource": "run"
+    },
+    "database-fixtures": {
+      "testGlobs": [
+        "libraries/server/source/Database.e2e.ts"
+      ],
+      "testExcludeGlobs": [],
+      "sourceGlobs": [
+        "libraries/server/testing/DatabaseFixture.ts",
+        "libraries/server/testing/DatabaseIsolation.ts",
+        "libraries/server/testing/DatabaseSeed.ts",
+        "testing/database/**"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml"
+      ],
+      "ignoreGlobs": [
+        ".github/**",
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "consumer/**",
+        "packages/**",
+        "testing/**",
+        "libraries/configuration/**",
+        "libraries/docs/**",
+        "libraries/eslint-plugin/**",
+        "libraries/markdown-plugin/**",
+        "libraries/react/**",
+        "libraries/server/source/**",
+        "libraries/stylelint-plugin/**",
+        "libraries/testing/**",
+        "libraries/utilities/**",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.png",
+        "**/*.svg",
+        "**/*.woff*"
+      ],
+      "unreachableSource": "run",
+      "mode": "paths"
+    },
+    "fixture-lifecycle": {
+      "testGlobs": [
+        "libraries/server/source/DatabaseFixture.lifecycle.e2e.ts",
+        "libraries/testing/runtime.lifecycle.e2e.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/server/testing/DatabaseFixture.ts",
+        "libraries/server/testing/DatabaseIsolation.ts",
+        "libraries/testing/browser.ts",
+        "libraries/testing/lifecycle.ts"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml"
+      ],
+      "ignoreGlobs": [
+        ".github/**",
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "consumer/**",
+        "packages/**",
+        "testing/**",
+        "libraries/configuration/**",
+        "libraries/docs/**",
+        "libraries/eslint-plugin/**",
+        "libraries/markdown-plugin/**",
+        "libraries/react/**",
+        "libraries/server/source/**",
+        "libraries/stylelint-plugin/**",
+        "libraries/testing/**",
+        "libraries/utilities/**",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.png",
+        "**/*.svg",
+        "**/*.woff*"
+      ],
+      "unreachableSource": "run",
+      "mode": "paths"
+    },
+    "hmr": {
+      "testGlobs": [
+        "libraries/testing/application.hmr.e2e.ts"
+      ],
+      "sourceGlobs": [
+        "libraries/testing/application.ts",
+        "libraries/server/source/Server.ts",
+        "testing/e2e/**"
+      ],
+      "alwaysRunGlobs": [
+        ".github/ci-impact.json",
+        ".github/actions/change-impact/**",
+        ".github/workflows/**",
+        "package.json",
+        "bun.lock",
+        "bunfig.toml"
+      ],
+      "ignoreGlobs": [
+        ".github/**",
+        "docs/**",
+        "**/*.md",
+        "**/*.mdx",
+        "consumer/**",
+        "packages/**",
+        "testing/**",
+        "libraries/configuration/**",
+        "libraries/docs/**",
+        "libraries/eslint-plugin/**",
+        "libraries/markdown-plugin/**",
+        "libraries/react/**",
+        "libraries/server/source/**",
+        "libraries/stylelint-plugin/**",
+        "libraries/testing/**",
+        "libraries/utilities/**",
+        "**/*.css",
+        "**/*.scss",
+        "**/*.less",
+        "**/*.png",
+        "**/*.svg",
+        "**/*.woff*"
+      ],
+      "unreachableSource": "run",
+      "mode": "paths"
+    }
+  }
+}
