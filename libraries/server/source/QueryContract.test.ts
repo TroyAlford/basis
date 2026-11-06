@@ -408,30 +408,194 @@ describe('Query contract', () => {
     })).toThrow('not a valid id value')
   })
 
-  test('rejects deferred Array, JSON and sort forms explicitly', () => {
-    const deferred = [
+  test('compiles native Array and opaque JSON predicates through one path', () => {
+    const cases = [
       {
-        entity: 'Pet',
         source: "tags $contains 'urgent'",
         structured: { field: 'tags', operator: Operator.Comparison.Contains, value: 'urgent' },
       },
       {
-        entity: 'Pet',
-        source: "tags $overlaps ['urgent', 'important']",
-        structured: { field: 'tags', operator: '$overlaps', value: ['urgent', 'important'] },
+        source: "tags $contains ['urgent', 'important']",
+        structured: {
+          field: 'tags',
+          operator: Operator.Comparison.Contains,
+          value: ['urgent', 'important'],
+        },
       },
       {
-        entity: 'Pet',
+        source: "tags ~= ['urgent']",
+        structured: { field: 'tags', operator: Operator.Comparison.Contains, value: ['urgent'] },
+      },
+      {
+        source: "tags $overlaps ['urgent', 'important']",
+        structured: {
+          field: 'tags',
+          operator: Operator.Comparison.Overlaps,
+          value: ['urgent', 'important'],
+        },
+      },
+      {
+        source: "tags $overlaps 'urgent'",
+        structured: { field: 'tags', operator: Operator.Comparison.Overlaps, value: 'urgent' },
+      },
+      {
+        source: 'tags $empty',
+        structured: { field: 'tags', operator: Operator.Comparison.Empty },
+      },
+      {
+        source: 'tags !$empty',
+        structured: {
+          filters: [{ field: 'tags', operator: Operator.Comparison.Empty }],
+          operator: Operator.Logical.Not,
+        },
+      },
+      {
+        source: "tags == ['b', 'a']",
+        structured: { field: 'tags', operator: Operator.Comparison.Equal, value: ['b', 'a'] },
+      },
+      {
+        source: "tags === ['b', 'a']",
+        structured: {
+          field: 'tags',
+          operator: Operator.Comparison.SequenceEqual,
+          value: ['b', 'a'],
+        },
+      },
+      {
         source: 'payload $contains {kind: "note"}',
-        structured: { field: 'payload', operator: Operator.Comparison.Contains, value: { kind: 'note' } },
+        structured: {
+          field: 'payload',
+          operator: Operator.Comparison.Contains,
+          value: { kind: 'note' },
+        },
+      },
+      {
+        source: 'payload $contains {meta: {active: true}}',
+        structured: {
+          field: 'payload',
+          operator: Operator.Comparison.Contains,
+          value: { meta: { active: true } },
+        },
+      },
+      {
+        source: "payload $contains ['a', 'b']",
+        structured: { field: 'payload', operator: Operator.Comparison.Contains, value: ['a', 'b'] },
+      },
+      {
+        source: 'payload $contains {kind: null}',
+        structured: {
+          field: 'payload',
+          operator: Operator.Comparison.Contains,
+          value: { kind: null },
+        },
       },
     ]
-    for (const queryCase of deferred) {
-      const entity = definitions.entity(queryCase.entity)
-      if (!entity) throw new Error(`missing ${queryCase.entity} entity`)
-      expect(() => Predicate.normalize(entity, queryCase.structured)).toThrow()
-      expect(() => QueryNormalizer.normalize(entity, queryCase.source)).toThrow()
+    for (const queryCase of cases) {
+      const fromSource = compileEntityQuery(definitions, 'Pet', {
+        fields: ['id'],
+        where: queryCase.source,
+      })
+      const fromStructure = compileEntityQuery(definitions, 'Pet', {
+        fields: ['id'],
+        where: queryCase.structured,
+      })
+      expect(fromSource.sql).toBe(fromStructure.sql)
+      expect(fromSource.values).toEqual(fromStructure.values)
     }
+
+    const array = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: "tags $contains ['urgent', 'important']",
+    })
+    expect(array.sql).toContain('"tags" @> ARRAY[$1::text, $2::text]')
+    expect(array.values).toEqual(['urgent', 'important', 25, 0])
+
+    const setEqual = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: "tags == ['b', 'a']",
+    })
+    expect(setEqual.sql).toContain('"tags" @>')
+    expect(setEqual.sql).toContain('"tags" <@')
+    expect(setEqual.sql).not.toContain('unnest')
+    expect(setEqual.values).toEqual(['b', 'a', 25, 0])
+
+    const json = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {kind: "note"}',
+    })
+    expect(json.sql).toContain('"payload" @> $1::text::jsonb')
+    expect(json.values).toEqual([JSON.stringify({ kind: 'note' }), 25, 0])
+
+    const ordered = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {kind: "note", meta: {active: true}}',
+    })
+    const reordered = compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: {
+        field: 'payload',
+        operator: Operator.Comparison.Contains,
+        value: { kind: 'note', meta: { active: true } },
+      },
+    })
+    expect(ordered.sql).toBe(reordered.sql)
+    expect(ordered.values).toEqual(reordered.values)
+
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'tags $contains [null]',
+    })).toThrow('cannot contain null')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: "tags $eq 'urgent'",
+    })).toThrow('requires an array operand')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: "tags === 'urgent'",
+    })).toThrow('requires an array operand')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { field: 'tags', operator: Operator.Comparison.Between, values: ['a', 'z'] },
+    })).toThrow('not valid')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { field: 'payload', operator: Operator.Comparison.Equal, value: {} },
+    })).toThrow('not valid for JSON')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { field: 'payload', operator: Operator.Comparison.Empty },
+    })).toThrow('not valid for field')
+
+    const moderate = Array.from({ length: 16 }, (_, index) => `tag-${index}`)
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { field: 'tags', operator: Operator.Comparison.Contains, value: moderate },
+    })).not.toThrow()
+    const excessive = Array.from({ length: 129 }, (_, index) => `tag-${index}`)
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: { field: 'tags', operator: Operator.Comparison.Contains, value: excessive },
+    })).toThrow('maximum of 128 elements')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {account: 9007199254740993}',
+    })).toThrow('safe integer range')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 1.0000000000000001}',
+    })).toThrow('cannot be represented exactly')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 9007199254740991.1}',
+    })).toThrow('cannot be represented exactly')
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 1.0}',
+    })).not.toThrow()
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 1e2}',
+    })).not.toThrow()
 
     expect(() => compileEntityQuery(definitions, 'Pet', {
       fields: ['id'],
@@ -591,7 +755,7 @@ describe('Query contract', () => {
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: "pets $contains (tags = 'urgent')",
-    })).toThrow('cannot be used in predicates')
+    })).toThrow('requires an array operand')
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: "pets $contains (owner.unknown = 'x')",

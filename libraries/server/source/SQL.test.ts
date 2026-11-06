@@ -548,19 +548,19 @@ describe('SQL.where', () => {
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { tags: 'x' },
-    })).toThrow('array fields cannot be used in predicates or ordering')
+    })).toThrow('requires an array operand')
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       orderBy: 'tags',
-    })).toThrow('array fields cannot be used in predicates or ordering')
+    })).toThrow('cannot be used in ordering')
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       where: { payload: 'x' },
-    })).toThrow('JSON fields cannot be used in predicates or ordering')
+    })).toThrow('not valid for field "Pet.payload"')
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
       fields: ['id'],
       orderBy: 'payload',
-    })).toThrow('JSON fields cannot be used in predicates or ordering')
+    })).toThrow('cannot be used in ordering')
   })
 
   test('projects relationship-backed collections and nested relationship fields', () => {

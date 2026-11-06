@@ -40,6 +40,8 @@ const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
       fields: [
         { field: 'id', format: 'UUID' },
         { field: 'title', type: 'String' },
+        { field: 'tags', items: { type: 'String' }, type: 'Array' },
+        { field: 'payload', type: 'JSON' },
         { field: 'owner', inverse: 'pets', target: 'User', type: 'Entity' },
       ],
       name: 'Pet',
@@ -47,7 +49,9 @@ const collectionDefinitions = EntityDefinitions.load(JSON.stringify({
   ],
 }))
 const collectionUser = collectionDefinitions.entity('User')
+const valuePet = collectionDefinitions.entity('Pet')
 if (!collectionUser) throw new Error('missing User entity')
+if (!valuePet) throw new Error('missing Pet entity')
 
 /**
  * Resolve one collection navigation for predicate tests.
@@ -367,6 +371,60 @@ describe('Predicate.normalize', () => {
       operator: Operator.Comparison.Empty,
       value: 'ignored',
     })).toThrow('requires exactly operator, field')
+  })
+
+  test('normalizes native Array and JSON operands by field type', () => {
+    expect(Predicate.normalize(valuePet, {
+      field: 'tags',
+      operator: Operator.Comparison.Contains,
+      value: 'urgent',
+    })).toEqual({
+      field: 'tags',
+      operator: Operator.Comparison.Contains,
+      value: ['urgent'],
+    })
+    expect(Predicate.normalize(valuePet, {
+      field: 'tags',
+      operator: Operator.Comparison.Overlaps,
+      value: ['urgent', 'important'],
+    })).toEqual({
+      field: 'tags',
+      operator: Operator.Comparison.Overlaps,
+      value: ['urgent', 'important'],
+    })
+    expect(Predicate.normalize(valuePet, {
+      field: 'tags',
+      operator: Operator.Comparison.Empty,
+    })).toEqual({ field: 'tags', operator: Operator.Comparison.Empty, value: null })
+    expect(Predicate.normalize(valuePet, {
+      field: 'tags',
+      operator: Operator.Comparison.Equal,
+      value: ['b', 'a'],
+    })).toEqual({ field: 'tags', operator: Operator.Comparison.Equal, value: ['b', 'a'] })
+    expect(Predicate.normalize(valuePet, {
+      field: 'tags',
+      operator: Operator.Comparison.SequenceEqual,
+      value: ['b', 'a'],
+    })).toEqual({ field: 'tags', operator: Operator.Comparison.SequenceEqual, value: ['b', 'a'] })
+    expect(Predicate.normalize(valuePet, {
+      field: 'payload',
+      operator: Operator.Comparison.Contains,
+      value: { kind: 'note' },
+    })).toEqual({
+      field: 'payload',
+      operator: Operator.Comparison.Contains,
+      value: { kind: 'note' },
+    })
+    expect(() => Predicate.normalize(valuePet, {
+      field: 'tags',
+      operator: Operator.Comparison.Contains,
+      value: [null],
+    })).toThrow('cannot contain null')
+    expect(() => Predicate.normalize(valuePet, {
+      field: 'payload',
+      operator: Operator.Comparison.Equal,
+      value: {},
+    })).toThrow('not valid for JSON')
   })
 
   test('normalizes collection contains, independent requirements, universal, and empty', () => {

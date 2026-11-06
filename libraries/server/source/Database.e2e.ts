@@ -2003,6 +2003,192 @@ VALUES (${dogOne},
     })).toThrow('maximum depth')
   }, 120_000)
 
+  isolatedTest('evaluates native Array and opaque JSON predicates', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'tags', items: { type: 'String' }, type: 'Array' },
+          { field: 'scores', items: { type: 'Number' }, type: 'Array' },
+          { field: 'payload', type: 'JSON' },
+        ],
+        name: 'Note',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    const one = '00000000-0000-4000-8000-000000000001'
+    const two = '00000000-0000-4000-8000-000000000002'
+    const three = '00000000-0000-4000-8000-000000000003'
+    const four = '00000000-0000-4000-8000-000000000004'
+    const five = '00000000-0000-4000-8000-000000000005'
+    const six = '00000000-0000-4000-8000-000000000006'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${one},
+        'One',
+        'Note'),
+        (${two},
+        'Two',
+        'Note'),
+        (${three},
+        'Three',
+        'Note'),
+        (${four},
+        'Four',
+        'Note'),
+        (${five},
+        'Five',
+        'Note'),
+        (${six},
+        'Six',
+        'Note')
+    `
+    await database.sql`
+      INSERT INTO "Note" ("id", "tags", "scores", "payload")
+      VALUES (${one},
+        ARRAY['urgent',
+        'important'],
+        ARRAY[1,
+        2,
+        2],
+        '{"kind":"note","meta":{"active":true}}'::jsonb),
+        (${two},
+        ARRAY['urgent'],
+        ARRAY[3],
+        '{"kind":"other"}'::jsonb),
+        (${three},
+        ARRAY[]::text[],
+        ARRAY[]::double precision[],
+        '{}'::jsonb),
+        (${four},
+        ARRAY['b',
+        'a'],
+        ARRAY[2,
+        1,
+        1],
+        '["a","b"]'::jsonb),
+        (${five},
+        ARRAY['a',
+        'b'],
+        ARRAY[1,
+        2],
+        '{"kind":"note"}'::jsonb),
+        (${six},
+        ARRAY['c'],
+        ARRAY[4],
+        '{"kind":null}'::jsonb)
+    `
+
+    const ids = async (where: string): Promise<unknown[]> => (
+      await queryEntity<{ id: string }>(database.sql, entities, 'Note', {
+        fields: ['id'],
+        orderBy: 'id',
+        where,
+      })
+    ).map(row => row.id)
+
+    expect(await ids("tags $contains 'urgent'")).toEqual([one, two])
+    expect(await ids("tags $contains ['urgent', 'important']")).toEqual([one])
+    expect(await ids("tags ~= ['urgent']")).toEqual([one, two])
+    expect(await ids("tags $overlaps ['important', 'missing']")).toEqual([one])
+    expect(await ids('tags $overlaps []')).toEqual([])
+    expect(await ids('tags $contains []')).toEqual([one, two, three, four, five, six])
+    expect(await ids('tags $empty')).toEqual([three])
+    expect(await ids('tags !$empty')).toEqual([one, two, four, five, six])
+    expect(await ids("tags == ['b', 'a']")).toEqual([four, five])
+    expect(await ids("tags === ['b', 'a']")).toEqual([four])
+    expect(await ids('tags == []')).toEqual([three])
+    expect(await ids('tags === []')).toEqual([three])
+    expect(await ids("tags == ['missing']")).toEqual([])
+    expect(await ids('scores == [1, 2]')).toEqual([one, four, five])
+    expect(await ids('scores === [1, 2]')).toEqual([five])
+    expect(await ids('scores $contains [2]')).toEqual([one, four, five])
+    expect(await ids("payload $contains {kind: 'note'}")).toEqual([one, five])
+    expect(await ids('payload $contains {meta: {active: true}}')).toEqual([one])
+    expect(await ids('payload $contains {meta: {active: false}}')).toEqual([])
+    expect(await ids("payload $contains ['a', 'b']")).toEqual([four])
+    expect(await ids('payload $contains {kind: null}')).toEqual([six])
+    expect(() => compileEntityQuery(entities, 'Note', {
+      fields: ['id'],
+      where: "scores $contains 'urgent'",
+    })).toThrow('not a valid number value')
+    expect(() => compileEntityQuery(entities, 'Note', {
+      fields: ['id'],
+      where: 'tags $contains [null]',
+    })).toThrow('cannot contain null')
+    expect(() => compileEntityQuery(entities, 'Note', {
+      fields: ['id'],
+      where: 'payload $eq {}',
+    })).toThrow('not valid')
+  }, 120_000)
+
+  isolatedTest('rejects unsafe JSON numeric literals without matching neighbors', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'payload', type: 'JSON' },
+        ],
+        name: 'Note',
+      }],
+    }))
+    await entities.createTables(database.sql)
+    const exact = '00000000-0000-4000-8000-000000000001'
+    const unsafe = '00000000-0000-4000-8000-000000000002'
+    const decimal = '00000000-0000-4000-8000-000000000003'
+    const precise = '00000000-0000-4000-8000-000000000004'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${exact},
+        'Exact',
+        'Note'),
+        (${unsafe},
+        'Unsafe',
+        'Note'),
+        (${decimal},
+        'Decimal',
+        'Note'),
+        (${precise},
+        'Precise',
+        'Note')
+    `
+    await database.sql`
+      INSERT INTO "Note" ("id", "payload")
+      VALUES (${exact},
+        '{"account":9007199254740991}'::jsonb),
+        (${unsafe},
+        '{"account":9007199254740993}'::jsonb),
+        (${decimal},
+        '{"amount":1}'::jsonb),
+        (${precise},
+        '{"amount":1.0000000000000001}'::jsonb)
+    `
+    expect(await queryEntity<{ id: string }>(database.sql, entities, 'Note', {
+      fields: ['id'],
+      where: 'payload $contains {account: 9007199254740991}',
+    })).toEqual([{ id: exact }])
+    expect(await queryEntity<{ id: string }>(database.sql, entities, 'Note', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 1}',
+    })).toEqual([{ id: decimal }])
+    expect(() => compileEntityQuery(entities, 'Note', {
+      fields: ['id'],
+      where: 'payload $contains {account: 9007199254740993}',
+    })).toThrow('safe integer range')
+    expect(() => compileEntityQuery(entities, 'Note', {
+      fields: ['id'],
+      where: 'payload $contains {amount: 1.0000000000000001}',
+    })).toThrow('cannot be represented exactly')
+    expect(() => compileEntityQuery(entities, 'Note', {
+      fields: ['id'],
+      where: {
+        field: 'payload',
+        operator: Operator.Comparison.Contains,
+        value: { account: 9007199254740992 },
+      },
+    })).toThrow('safe integer range')
+  }, 120_000)
+
   isolatedTest('rejects index name collisions on fresh tables', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [

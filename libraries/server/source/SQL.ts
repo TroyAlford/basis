@@ -1,9 +1,8 @@
-import type { EntityDefinition, EntityDefinitions, ScalarFieldDefinition } from './EntityDefinitions'
+import type { ArrayFieldDefinition, EntityDefinition, EntityDefinitions, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './Predicate'
 import { Predicate } from './Predicate'
-import { normalizeScalar } from './ScalarNormalization'
 import { SortDirection } from './SortDirection'
 
 /** A validated ordering clause. */
@@ -59,9 +58,9 @@ export interface CollectionScope {
   /** Related item entity definition. */
   readonly definition: EntityDefinition,
   /** Render one inner field expression. */
-  readonly expression: (field: ScalarFieldDefinition) => string,
+  readonly expression: (field: QueryFieldDefinition) => string,
   /** Resolve one inner field by name. */
-  readonly field: (name: string) => ScalarFieldDefinition,
+  readonly field: (name: string) => QueryFieldDefinition,
   /** Classify terminal reference identities inside the collection. */
   readonly filterKind?: (name: string) => 'identity' | undefined,
   /** SQL relation containing the related items. */
@@ -77,11 +76,11 @@ export interface QueryScope {
   /** Effective entity metadata used for validation. */
   readonly definition: EntityDefinition,
   /** Render a field expression with physical table qualification. */
-  readonly expression: (field: ScalarFieldDefinition) => string,
+  readonly expression: (field: QueryFieldDefinition) => string,
   /** Resolve a root ordering field by name. */
-  readonly field: (name: string) => ScalarFieldDefinition,
+  readonly field: (name: string) => QueryFieldDefinition,
   /** Optional filter-only resolver for dotted reference paths and descendant fields. */
-  readonly filterField?: (name: string) => ScalarFieldDefinition,
+  readonly filterField?: (name: string) => QueryFieldDefinition,
   /** Optional filter-only classification for reference identities. */
   readonly filterKind?: (name: string) => 'identity' | undefined,
 }
@@ -116,12 +115,13 @@ interface ComparisonDefinition {
   readonly allowedFieldTypes: ReadonlySet<FieldType>,
   /** Build the SQL fragment and bind its value. */
   readonly build: (
+    field: QueryFieldDefinition,
     column: string,
-    operand: BoundScalar | null,
+    operand: unknown,
     bind: (value: BoundScalar) => string,
   ) => string,
   /** Validate and normalize the raw operand. */
-  readonly validateOperand: (field: ScalarFieldDefinition, raw: unknown) => BoundScalar | null,
+  readonly validateOperand: (field: QueryFieldDefinition, operator: Operator.Comparison, raw: unknown) => unknown,
 }
 
 /** A per-logical-operator definition used by the closed operator registry. */
@@ -143,6 +143,8 @@ const ALL_FIELD_TYPES = new Set<FieldType>([
   FieldType.String,
   FieldType.Timestamp,
 ])
+/** Scalar and native array fields support equality. */
+const EQUAL_FIELD_TYPES = new Set<FieldType>([...ALL_FIELD_TYPES, FieldType.Array])
 /** Only ordered scalar field types support range comparisons. */
 const RANGE_FIELD_TYPES = new Set<FieldType>([
   FieldType.Date,
@@ -155,21 +157,62 @@ const RANGE_FIELD_TYPES = new Set<FieldType>([
 /** The complete comparison operator registry. */
 const comparisonDefinitions = new Map<Operator.Comparison, ComparisonDefinition>([
   [Operator.Comparison.Equal, {
-    allowedFieldTypes: ALL_FIELD_TYPES,
-    build: (column, operand, bind) => (operand === null
-      ? `${column} IS NULL`
-      : `${column} IS NOT DISTINCT FROM ${bind(operand)}`),
-    validateOperand: scalarValidator(true),
+    allowedFieldTypes: EQUAL_FIELD_TYPES,
+    build: (field, column, operand, bind) => {
+      if (field.type === FieldType.Array) {
+        if (operand === null) return `${column} IS NULL`
+        const rhs = arrayExpression(field, operand, bind)
+        return `(${column} IS NOT NULL AND ${column} @> ${rhs} AND ${column} <@ ${rhs})`
+      }
+      if (operand === null) return `${column} IS NULL`
+      return `${column} IS NOT DISTINCT FROM ${bind(operand as BoundScalar)}`
+    },
+    validateOperand: (field, operator, raw) => Predicate.operand(field, operator, raw),
+  }],
+  [Operator.Comparison.SequenceEqual, {
+    allowedFieldTypes: new Set([FieldType.Array]),
+    build: (field, column, operand, bind) => {
+      if (field.type !== FieldType.Array) {
+        throw new Error(`Query operator "${Operator.Comparison.SequenceEqual}" requires an array field`)
+      }
+      return `${column} IS NOT DISTINCT FROM ${arrayExpression(field, operand, bind)}`
+    },
+    validateOperand: (field, operator, raw) => Predicate.operand(field, operator, raw),
   }],
   [Operator.Comparison.Contains, {
-    allowedFieldTypes: new Set([FieldType.String]),
-    build: (column, operand, bind) => {
-      if (operand === null) throw new Error('Query operator "$contains" requires a non-null value')
-      if (typeof operand !== 'string') throw new Error('Query operator "$contains" requires a string value')
-      const pattern = `%${operand.replace(/[\\%_]/gu, '\\$&')}%`
+    allowedFieldTypes: new Set([FieldType.Array, FieldType.JSON, FieldType.String]),
+    build: (field, column, operand, bind) => {
+      if (field.type === FieldType.Array) {
+        return `${column} @> ${arrayExpression(field, operand, bind)}`
+      }
+      if (field.type === FieldType.JSON) {
+        return `${column} @> ${bind(JSON.stringify(operand))}::text::jsonb`
+      }
+      const value = operand as string
+      const pattern = `%${value.replace(/[\\%_]/gu, '\\$&')}%`
       return `(${column} IS NOT NULL AND ${column} ILIKE ${bind(pattern)} ESCAPE '\\')`
     },
-    validateOperand: scalarValidator(false),
+    validateOperand: (field, operator, raw) => Predicate.operand(field, operator, raw),
+  }],
+  [Operator.Comparison.Overlaps, {
+    allowedFieldTypes: new Set([FieldType.Array]),
+    build: (field, column, operand, bind) => {
+      if (field.type !== FieldType.Array) {
+        throw new Error(`Query operator "${Operator.Comparison.Overlaps}" requires an array field`)
+      }
+      return `${column} && ${arrayExpression(field, operand, bind)}`
+    },
+    validateOperand: (field, operator, raw) => Predicate.operand(field, operator, raw),
+  }],
+  [Operator.Comparison.Empty, {
+    allowedFieldTypes: new Set([FieldType.Array]),
+    build: (field, column) => {
+      if (field.type !== FieldType.Array) {
+        throw new Error(`Query operator "${Operator.Comparison.Empty}" requires an array field`)
+      }
+      return `COALESCE(cardinality(${column}), 0) = 0`
+    },
+    validateOperand: () => null,
   }],
   [Operator.Comparison.GreaterThan, rangeDefinition('>', RANGE_FIELD_TYPES)],
   [Operator.Comparison.GreaterThanOrEqual, rangeDefinition('>=', RANGE_FIELD_TYPES)],
@@ -211,7 +254,7 @@ function whereClause(
 ): SQLPredicate {
   const entity = scope?.definition ?? definition(entities, entityName)
   const resolve = scope?.filterField ?? (name => (
-    scope ? scope.field(name) : scalarField(entity, name)
+    scope ? scope.field(name) : queryField(entity, name)
   ))
   const filter = Predicate.normalize(entity, where, resolve, scope?.collection)
   if (!filter) return { sql: '', values: [] }
@@ -225,7 +268,7 @@ function whereClause(
   const base: QueryScope = scope ?? {
     definition: entity,
     expression: field => quoteIdentifier(field.name),
-    field: name => scalarField(entity, name),
+    field: name => queryField(entity, name),
   }
   const compile = (node: Filter, active: QueryScope): string => {
     if ('field' in node && 'filters' in node) {
@@ -269,8 +312,8 @@ function whereClause(
           `Query operator "${comparisonFilter.operator}" is not valid for field "${entity.name}.${field.name}"`,
         )
       }
-      const operand = comparison.validateOperand(field, comparisonFilter.value)
-      return comparison.build(active.expression(field), operand, bind)
+      const operand = comparison.validateOperand(field, comparisonFilter.operator, comparisonFilter.value)
+      return comparison.build(field, active.expression(field), operand, bind)
     }
 
     const logical = logicalDefinitions.get(node.operator as Operator.Logical)
@@ -304,40 +347,12 @@ function rangeDefinition(
 ): ComparisonDefinition {
   return {
     allowedFieldTypes,
-    build: (column, operand, bind) => {
+    build: (_field, column, operand, bind) => {
       if (operand === null) throw new Error(`Query operator "${operator}" requires a non-null value`)
-      return `COALESCE(${column} ${operator} ${bind(operand)}, FALSE)`
+      return `COALESCE(${column} ${operator} ${bind(operand as BoundScalar)}, FALSE)`
     },
-    validateOperand: scalarValidator(false),
+    validateOperand: (field, compare, raw) => Predicate.operand(field, compare, raw),
   }
-}
-
-/**
- * Create the shared scalar operand validator.
- * @param allowNull - Whether null equality is valid.
- * @returns The validator.
- */
-function scalarValidator(allowNull: boolean): ComparisonDefinition['validateOperand'] {
-  return (field, raw) => {
-    if (raw === undefined) throw new Error(`Query operand for "${field.name}" must not be undefined`)
-    if (raw === null) {
-      if (allowNull) return null
-      throw new Error(`Query operand for "${field.name}" must not be null`)
-    }
-
-    const normalized = normalizeScalar(field, raw)
-    if (normalized === undefined) invalidOperand(field)
-    return normalized
-  }
-}
-
-/**
- * Throw the standard operand error.
- * @param field - Field whose operand is invalid.
- * @throws {Error} Always, naming the invalid operand.
- */
-function invalidOperand(field: ScalarFieldDefinition): never {
-  throw new Error(`Query operand for "${field.name}" is not a valid ${field.type.toLowerCase()} value`)
 }
 
 /**
@@ -365,6 +380,9 @@ function orderByClause(
     const name = typeof entry === 'string' ? entry : entry.field
     const direction = typeof entry === 'string' ? SortDirection.Ascending : entry.direction ?? SortDirection.Ascending
     const field = scope ? scope.field(name) : scalarField(entity, name)
+    if (field.type === FieldType.Array || field.type === FieldType.JSON) {
+      throw new Error(`Query field "${entity.name}.${name}" cannot be used in ordering`)
+    }
 
     if (direction !== SortDirection.Ascending && direction !== SortDirection.Descending) {
       throw new Error('Query orderBy direction must be "asc" or "desc"')
@@ -416,6 +434,75 @@ function paginate(
  * validated entity metadata.
  */
 export const SQL = { orderBy: orderByClause, paginate, select, where: whereClause }
+
+/**
+ * Require a predicate-capable field from an entity.
+ * @param entity - Entity whose fields are referenced.
+ * @param name - Logical field name.
+ * @returns The value field definition.
+ * @throws {Error} When the field is unknown or is a navigation/reference.
+ */
+function queryField(entity: EntityDefinition, name: string): QueryFieldDefinition {
+  const field = entity.fields.find(candidate => candidate.name === name)
+  if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
+  if (field.type === FieldType.Entity) {
+    throw new Error(
+      `Query field "${entity.name}.${name}" is an entity reference; ` +
+      'references cannot be used in predicates or ordering',
+    )
+  }
+  if (field.type === FieldType.Inverse) {
+    throw new Error(
+      `Query field "${entity.name}.${name}" is an inverse navigation; ` +
+      'navigation fields cannot be used in predicates or ordering',
+    )
+  }
+  return field
+}
+
+/**
+ * Resolve the PostgreSQL array type for one array field.
+ * @param field - Native array field.
+ * @returns Its declared PostgreSQL array type.
+ */
+function arraySQLType(field: ArrayFieldDefinition): string {
+  return `${scalarSQLType(field.items.type)}[]`
+}
+
+/**
+ * Render one array operand as parameterized PostgreSQL elements.
+ * @param field - Native array field.
+ * @param operand - Normalized array elements.
+ * @param bind - Parameter binder.
+ * @returns PostgreSQL array expression.
+ */
+function arrayExpression(
+  field: ArrayFieldDefinition,
+  operand: unknown,
+  bind: (value: BoundScalar) => string,
+): string {
+  const values = operand as readonly BoundScalar[]
+  if (values.length === 0) return `ARRAY[]::${arraySQLType(field)}`
+  const elementType = scalarSQLType(field.items.type)
+  return `ARRAY[${values.map(value => `${bind(value)}::${elementType}`).join(', ')}]`
+}
+
+/**
+ * Resolve the PostgreSQL scalar type for one array element.
+ * @param type - Scalar element type.
+ * @returns PostgreSQL scalar type.
+ */
+function scalarSQLType(type: FieldType): string {
+  switch (type) {
+    case FieldType.Boolean: return 'boolean'
+    case FieldType.Date: return 'date'
+    case FieldType.ID: return 'text'
+    case FieldType.Number: return 'double precision'
+    case FieldType.String: return 'text'
+    case FieldType.Timestamp: return 'timestamptz'
+    default: throw new Error(`Unsupported array element type: ${String(type)}`)
+  }
+}
 
 /**
  * Require a selectable scalar field from an entity.

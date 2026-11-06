@@ -1,8 +1,8 @@
-import type { EntityDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import type { EntityDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { CollectionResolver, Filter } from './Predicate'
-import { Predicate } from './Predicate'
+import { arrayItemField, Predicate } from './Predicate'
 import type { QueryComparison, QueryExpression, QueryLiteral } from './QueryParser'
 import { QueryParser } from './QueryParser'
 
@@ -25,7 +25,7 @@ export const QueryNormalizer = {
   normalize(
     entity: EntityDefinition,
     source: string,
-    resolve: (name: string) => ScalarFieldDefinition = name => Predicate.field(entity, name),
+    resolve: (name: string) => QueryFieldDefinition = name => Predicate.field(entity, name),
     collection?: CollectionResolver,
   ): Filter | null {
     const result = QueryParser.parse(source)
@@ -49,7 +49,7 @@ export const QueryNormalizer = {
 function expression(
   entity: EntityDefinition,
   node: QueryExpression,
-  resolve: (name: string) => ScalarFieldDefinition,
+  resolve: (name: string) => QueryFieldDefinition,
   collection?: CollectionResolver,
 ): Filter {
   if (node.kind === 'group') return expression(entity, node.expression, resolve, collection)
@@ -80,7 +80,7 @@ function expression(
 function comparison(
   entity: EntityDefinition,
   node: QueryComparison,
-  resolve: (name: string) => ScalarFieldDefinition,
+  resolve: (name: string) => QueryFieldDefinition,
   collection?: CollectionResolver,
 ): Filter {
   if (node.operator === Operator.Comparison.Empty) {
@@ -89,13 +89,26 @@ function comparison(
     if (scope) return { field: node.field, filters: [], operator: node.operator }
   }
 
-  const field = resolve(node.field)
-
-  if (node.operator === Operator.Comparison.Empty) {
-    return Predicate.empty(entity, field)
+  if (node.operator === Operator.Comparison.Contains && collection?.(node.field)) {
+    const value = node.values[0]
+    if (value?.kind === 'array' && value.value.length === 0) {
+      throw new Error('Collection $contains requires at least one requirement')
+    }
+    throw new Error('Collection $contains requires parenthesized requirements')
   }
 
+  const field = resolve(node.field)
+
+  if (node.operator === Operator.Comparison.Empty) return Predicate.empty(entity, field)
+
   if (node.operator === Operator.Comparison.Between) {
+    if (field.type !== FieldType.String
+      && field.type !== FieldType.Number
+      && field.type !== FieldType.Date
+      && field.type !== FieldType.Timestamp
+      && field.type !== FieldType.ID) {
+      throw new Error(`Query ${node.operator} is not valid for field "${node.field}"`)
+    }
     assertValues(node, 2)
     const [lower, upper] = node.values as readonly [QueryLiteral, QueryLiteral]
     return Predicate.between(
@@ -106,7 +119,8 @@ function comparison(
   }
 
   assertValues(node, 1)
-  const value = literal(field, node.values[0] as QueryLiteral)
+  const raw = literal(field, node.values[0] as QueryLiteral)
+  const value = Predicate.operand(field, node.operator, raw)
   if (node.operator === Operator.Comparison.NotEqual) return Predicate.notEqual(field.name, value)
   return { field: field.name, operator: node.operator, value }
 }
@@ -124,11 +138,38 @@ function assertValues(node: QueryComparison, count: number): void {
 
 /**
  * Convert one syntax literal using the target field type.
- * @param field - Target field definition.
+ * @param field - Target value field.
  * @param node - Syntax literal.
  * @returns The typed canonical operand.
  */
-function literal(field: ScalarFieldDefinition, node: QueryLiteral): unknown {
+function literal(field: QueryFieldDefinition, node: QueryLiteral): unknown {
+  if (node.kind === 'array') {
+    if (field.type === FieldType.Array) {
+      const item = arrayItemField(field)
+      return node.value.map(element => scalarLiteral(item, element))
+    }
+    if (field.type === FieldType.JSON) return jsonLiteral(node)
+    throw new Error(`Query operand for "${field.name}" must not be an array literal`)
+  }
+  if (node.kind === 'object') {
+    if (field.type === FieldType.JSON) return jsonLiteral(node)
+    throw new Error(`Query operand for "${field.name}" must not be an object literal`)
+  }
+  if (field.type === FieldType.Array) return scalarLiteral(arrayItemField(field), node)
+  if (field.type === FieldType.JSON) return jsonLiteral(node)
+  return scalarLiteral(field, node)
+}
+
+/**
+ * Convert one scalar syntax literal using its target field.
+ * @param field - Target scalar field.
+ * @param node - Scalar syntax literal.
+ * @returns The typed scalar value.
+ */
+function scalarLiteral(field: ScalarFieldDefinition, node: QueryLiteral): unknown {
+  if (node.kind === 'array' || node.kind === 'object') {
+    throw new Error(`Query operand for "${field.name}" must be a scalar literal`)
+  }
   if (node.kind === 'null') return null
 
   if (field.type === FieldType.ID) {
@@ -153,4 +194,68 @@ function literal(field: ScalarFieldDefinition, node: QueryLiteral): unknown {
   }
 
   throw new Error(`Query operand for "${field.name}" is not a valid ${field.type.toLowerCase()} value`)
+}
+
+/**
+ * Convert one source JSON number without silently changing its decimal meaning.
+ * @param raw - Exact source numeric lexeme.
+ * @returns The finite JavaScript number safe for canonical JSON serialization.
+ */
+function jsonNumber(raw: string): number {
+  const value = Number(raw)
+  if (!Number.isFinite(value)) throw new Error('JSON number literals must be finite')
+  if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+    throw new Error(`JSON integer literal ${raw} exceeds the safe integer range`)
+  }
+  if (!sameDecimal(raw, String(value))) {
+    throw new Error(`JSON numeric literal ${raw} cannot be represented exactly`)
+  }
+  return value
+}
+
+/**
+ * Compare two decimal lexemes by exact numeric value.
+ * @param left - First decimal or scientific-notation lexeme.
+ * @param right - Second decimal or scientific-notation lexeme.
+ * @returns Whether both denote the same exact decimal value.
+ */
+function sameDecimal(left: string, right: string): boolean {
+  return canonicalDecimal(left) === canonicalDecimal(right)
+}
+
+/**
+ * Canonicalize one decimal lexeme as sign, significant digits, and exponent.
+ * @param value - Decimal or scientific-notation lexeme.
+ * @returns Canonical numeric identity.
+ */
+function canonicalDecimal(value: string): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/u.exec(value)
+  if (!match) return value
+  const [, sign = '', whole = '0', fraction = '', exponentText = '0'] = match
+  let digits = `${whole}${fraction}`.replace(/^0+/u, '')
+  let exponent = Number(exponentText) - fraction.length
+  if (digits === '') return '0'
+  while (digits.endsWith('0')) {
+    digits = digits.slice(0, -1)
+    exponent += 1
+  }
+  return `${sign}${digits}e${exponent}`
+}
+
+/**
+ * Convert one parsed JSON literal recursively.
+ * @param node - JSON syntax literal.
+ * @returns A JSON-compatible value.
+ */
+function jsonLiteral(node: QueryLiteral): unknown {
+  if (node.kind === 'array') return node.value.map(jsonLiteral)
+  if (node.kind === 'object') {
+    return Object.fromEntries(
+      Object.entries(node.value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => [key, jsonLiteral(value)]),
+    )
+  }
+  if (node.kind === 'number') return jsonNumber(node.raw)
+  return node.value
 }

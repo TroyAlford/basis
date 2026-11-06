@@ -5,12 +5,16 @@ import { Operator as QueryOperator } from './Operator'
 export enum TokenType {
   /** Boolean literal. */
   Boolean = 'boolean',
+  /** Object key/value separator. */
+  Colon = 'colon',
   /** Argument separator. */
   Comma = 'comma',
   /** End of input. */
   EOF = 'eof',
   /** Rooted field path. */
   Field = 'field',
+  /** Opening brace. */
+  LeftBrace = 'leftBrace',
   /** Opening bracket. */
   LeftBracket = 'leftBracket',
   /** Opening grouping parenthesis. */
@@ -21,6 +25,8 @@ export enum TokenType {
   Number = 'number',
   /** Comparison or logical operator. */
   Operator = 'operator',
+  /** Closing brace. */
+  RightBrace = 'rightBrace',
   /** Closing bracket. */
   RightBracket = 'rightBracket',
   /** Closing grouping parenthesis. */
@@ -77,6 +83,8 @@ const OPERATORS = new Map<string, QueryOperator.Collection | QueryOperator.Compa
   ['<=', QueryOperator.Comparison.LessThanOrEqual],
   ['!=', QueryOperator.Comparison.NotEqual],
   ['~=', QueryOperator.Comparison.Contains],
+  ['==', QueryOperator.Comparison.Equal],
+  ['===', QueryOperator.Comparison.SequenceEqual],
   ['<>', QueryOperator.Comparison.NotEqual],
   ['!', QueryOperator.Logical.Not],
 ])
@@ -127,12 +135,15 @@ export const QueryLexer = {
         continue
       }
 
-      if ('[](),'.includes(character)) {
+      if ('[](),{}:'.includes(character)) {
         const type = match(character)
           .when('[').then(TokenType.LeftBracket)
           .when(']').then(TokenType.RightBracket)
+          .when('{').then(TokenType.LeftBrace)
+          .when('}').then(TokenType.RightBrace)
           .when('(').then(TokenType.LeftParen)
           .when(')').then(TokenType.RightParen)
+          .when(':').then(TokenType.Colon)
           .else(TokenType.Comma)
         tokens.push({
           end: index + 1,
