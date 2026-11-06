@@ -13,7 +13,7 @@ const root = join(import.meta.dir, '..', '..')
  * loads its runtime from esm.sh; the network policy blocks both by default, so
  * the visits allow that host and the pages render their real output.
  */
-const NETWORK = { allow: ['esm.sh'] }
+const NETWORK = {}
 
 /**
  * Wait until every Code example and Markdown fence on the page has been

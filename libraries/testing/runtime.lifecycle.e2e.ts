@@ -181,6 +181,7 @@ describe('snapshot runtime lifecycle', () => {
       env: {
         ...process.env,
         BASIS_APPLICATION_FIXTURE_EPHEMERAL: '1',
+        BASIS_SNAPSHOT_FIXTURE_EPHEMERAL: '1',
         [SNAPSHOT_ACTIVITY_LOG]: target.activity,
         UPDATE_SNAPSHOTS: '1',
       },

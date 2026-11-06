@@ -137,6 +137,41 @@ function docker(args: string[]): DockerResult {
 /** The run-server port inside the container; published to a random host port. */
 const RUN_SERVER_PORT = 3000
 
+/** Environment variable used by lifecycle proofs to request disposable browser state. */
+const SNAPSHOT_EPHEMERAL = 'BASIS_SNAPSHOT_FIXTURE_EPHEMERAL'
+
+/**
+ * Resolve the stable container name for one Playwright version.
+ * @param version - Installed Playwright version.
+ * @returns The Docker container name.
+ */
+function containerName(version: string): string {
+  const base = `basis-playwright-${version.replace(/[^a-z0-9]+/gi, '-')}`
+  return process.env[SNAPSHOT_EPHEMERAL] === '1' ? `${base}-${process.pid}` : base
+}
+
+/**
+ * Wait for one running container to publish its run-server port.
+ * @param id - Container id or name.
+ * @returns The browser endpoint.
+ */
+async function endpointFor(id: string): Promise<string> {
+  const deadline = Date.now() + READY_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    const logs = docker(['logs', id])
+    const output = `${logs.stdout}${logs.stderr}`
+    if (parseServerEndpoint(output)) {
+      const port = parsePublishedPort(docker(['port', id, `${RUN_SERVER_PORT}/tcp`]).stdout)
+      if (port !== null) return `ws://127.0.0.1:${port}/`
+    }
+    if (logs.code !== 0) {
+      throw dockerUnavailableError(output.trim() || 'the Playwright container exited before it was ready')
+    }
+    await Bun.sleep(READY_POLL_MS)
+  }
+  throw dockerUnavailableError(`the Playwright container did not publish an endpoint within ${READY_TIMEOUT_MS}ms`)
+}
+
 /** How long to wait for the container to announce its browser endpoint. */
 const READY_TIMEOUT_MS = 60_000
 
@@ -161,8 +196,30 @@ const CONNECT_TIMEOUT_MS = 60_000
 async function startContainer(): Promise<{ endpoint: string, id: string }> {
   const mount = playwrightMount()
   const image = playwrightImage(mount.version)
+  const name = containerName(mount.version)
+  const state = docker([
+    'ps', '-a', '--filter', `name=^/${name}$`, '--format', '{{.State}}',
+  ]).stdout.trim()
+
+  if (state === 'running' || state === 'exited' || state === 'created') {
+    if (state !== 'running') {
+      const started = docker(['start', name])
+      if (started.code !== 0) {
+        throw dockerUnavailableError(started.stderr.trim() || `docker start exited with ${started.code}`)
+      }
+    }
+    const endpoint = await endpointFor(name)
+    record(`container-attach ${name}`)
+    return { endpoint, id: name }
+  }
+
+  if (state !== '') {
+    docker(['rm', '-f', name])
+  }
+
   const args = [
-    'run', '-d', '--rm', '--pull', 'missing', '--ipc=host',
+    'run', '-d', '--pull', 'missing', '--ipc=host',
+    '--name', name,
     '-p', `127.0.0.1::${RUN_SERVER_PORT}`,
     '-e', 'PLAYWRIGHT_BROWSERS_PATH=/ms-playwright',
     '-v', `${mount.dir}:/opt/pw/node_modules/playwright:ro`,
@@ -182,33 +239,11 @@ async function startContainer(): Promise<{ endpoint: string, id: string }> {
     throw dockerUnavailableError(run.stderr.trim() || `docker run exited with ${run.code}`)
   }
 
-  const id = run.stdout.trim()
+  const id = run.stdout.trim() || name
   record(`container-start ${id}`)
-
-  const deadline = Date.now() + READY_TIMEOUT_MS
-  while (Date.now() < deadline) {
-    const logs = docker(['logs', id])
-    const output = `${logs.stdout}${logs.stderr}`
-    /*
-     * The run-server log is the readiness signal; the endpoint the client uses
-     * is the published localhost port, not the address the server prints.
-     */
-    if (parseServerEndpoint(output)) {
-      const port = parsePublishedPort(docker(['port', id, `${RUN_SERVER_PORT}/tcp`]).stdout)
-      if (port !== null) return { endpoint: `ws://127.0.0.1:${port}/`, id }
-    }
-    if (logs.code !== 0) {
-      throw dockerUnavailableError(output.trim() || 'the snapshot container exited before it was ready')
-    }
-    await Bun.sleep(READY_POLL_MS)
-  }
-
-  docker(['rm', '-f', id])
-  throw dockerUnavailableError(
-    `the snapshot container did not report an endpoint within ${READY_TIMEOUT_MS}ms`,
-  )
+  const endpoint = await endpointFor(id)
+  return { endpoint, id }
 }
-
 /** The process-wide snapshot runtime, created on first capture. */
 interface SnapshotRuntime {
   /** The one connected browser. */
@@ -281,7 +316,7 @@ async function startRuntime(): Promise<SnapshotRuntime> {
       timeout: CONNECT_TIMEOUT_MS,
     })
   } catch (error) {
-    docker(['rm', '-f', id])
+    if (process.env[SNAPSHOT_EPHEMERAL] === '1') docker(['rm', '-f', id])
     throw dockerUnavailableError(error)
   }
 
@@ -347,7 +382,9 @@ export async function closeRuntime(): Promise<void> {
 
   await runtime.captureContext?.close().catch(() => undefined)
   await runtime.browser.close().catch(() => undefined)
-  docker(['rm', '-f', runtime.containerId])
+  if (process.env[SNAPSHOT_EPHEMERAL] === '1') {
+    docker(['rm', '-f', runtime.containerId])
+  }
   record('teardown')
 }
 

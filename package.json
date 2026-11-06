@@ -59,6 +59,7 @@
     "eslint-plugin-perfectionist": "^5.11.1",
     "eslint-plugin-simple-import-sort": "^14.0.0",
     "eslint-plugin-sort-destructure-keys": "^3.0.0",
+    "jsonc-eslint-parser": "^3.3.0",
     "less": "^4.6.4",
     "pixelmatch": "^7.2.0",
     "playwright": "^1.63.0",
@@ -77,6 +78,7 @@
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
     "sass": "1.98.0",
+    "shiki": "3.0.0",
     "stylelint": "^17.15.0",
     "stylelint-order": "^8.1.1",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
@@ -84,8 +86,7 @@
     "unified": "^11.0.5",
     "unified-lint-rule": "^3.0.1",
     "unist-util-visit": "^5.1.0",
-    "vfile": "^6.0.3",
-    "jsonc-eslint-parser": "^3.3.0"
+    "vfile": "^6.0.3"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
@@ -122,9 +123,10 @@
     "test:server": "bun test ./libraries/server/source/Server.test.ts",
     "test:lifecycle": "bun test ./libraries/testing/application.lifecycle.test.ts",
     "test:screenshots": "files=$(find ./libraries -type f \\( -name '*.screenshot.tsx' -o -name '*.screenshot.ts' \\) -not -path '*/node_modules/*'); if [ -n \"$files\" ]; then bun test $files; fi",
-    "test:e2e": "files=$(find ./libraries -type f \\( -name '*.e2e.ts' -o -name '*.e2e.tsx' \\) -not -path '*/node_modules/*' ! -name 'DatabaseFixture.lifecycle.e2e.ts' ! -name 'runtime.lifecycle.e2e.ts' ! -name 'docs.e2e.ts' ! -name 'visual.live.e2e.ts'); if [ -n \"$files\" ]; then bun test $files; fi",
+    "test:e2e": "files=$(find ./libraries -type f \\( -name '*.e2e.ts' -o -name '*.e2e.tsx' \\) -not -path '*/node_modules/*' ! -name 'DatabaseFixture.lifecycle.e2e.ts' ! -name 'runtime.lifecycle.e2e.ts' ! -name 'docs.e2e.ts' ! -name 'visual.live.e2e.ts'); if [ -n \"$files\" ]; then BASIS_E2E_FAST=1 bun test $files; fi",
     "test:e2e:visual": "bun test ./libraries/testing/docs.e2e.ts ./libraries/react/components/visual.live.e2e.ts",
-    "test:e2e:fixtures": "bun test ./libraries/server/source/DatabaseFixture.lifecycle.e2e.ts ./libraries/testing/runtime.lifecycle.e2e.ts",
+    "test:e2e:database-fixtures": "bun test ./libraries/server/source/Database.e2e.ts -t \"supports independent installs\" && bun test ./libraries/server/source/Database.e2e.ts -t \"queries prebuilt polymorphic\"",
+    "test:e2e:fixtures": "bun run test:e2e:database-fixtures && bun test ./libraries/server/source/DatabaseFixture.lifecycle.e2e.ts ./libraries/testing/runtime.lifecycle.e2e.ts",
     "test:e2e:all": "bun run test:e2e && bun run test:e2e:visual && bun run test:e2e:fixtures",
     "test:all": "bun run test:unit && bun run test:component && bun run test:contract && bun run test:server && bun run test:lifecycle && bun run test:screenshots && bun run test:e2e:all",
     "test:consumer": "bun ./consumer/test/self-install.ts && bun ./consumer/test/cache-isolation.ts && bun ./consumer/test/react-runtime.ts",
