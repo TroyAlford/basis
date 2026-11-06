@@ -234,7 +234,9 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
     return fixture
   } catch (error) {
     await server.shutdown()
-    scope.serviceRemoved = removeService(install)
+    if (!existing || Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
+      scope.serviceRemoved = removeService(install)
+    }
     throw error
   }
 }

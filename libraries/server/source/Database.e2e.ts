@@ -1102,6 +1102,35 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     })).toMatchObject({ errno: '23514' })
   }, 120_000)
 
+  isolatedTest('uses the entity model selected by use for queries', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+        ],
+        name: 'Actor',
+      }],
+    }))
+    await database.use(entities)
+    const id = randomUUID()
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES (${id}, 'Actor', 'Actor')
+    `
+    await database.sql`
+      INSERT INTO "Actor" ("id", "label")
+      VALUES (${id}, 'Selected')
+    `
+
+    expect(await database.query<{ id: string, label: string }>('Actor', {
+      fields: ['id', 'label'],
+      where: { id },
+    })).toEqual([{ id, label: 'Selected' }])
+    await expect(database.query('Note', { fields: ['id'] }))
+      .rejects.toThrow('Unknown entity "Note"')
+  }, 120_000)
+
   isolatedTest('stores and queries named relationships and inverse references', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [

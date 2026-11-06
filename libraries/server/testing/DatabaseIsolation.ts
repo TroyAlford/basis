@@ -169,6 +169,7 @@ export async function withDurableDatabase<T>(
 
 /** A transaction-bound isolated database context. */
 class IsolatedDatabaseContext implements IsolatedDatabase {
+  #entities: EntityDefinitions
   #savepoint = 0
   #schema: string
 
@@ -181,11 +182,20 @@ class IsolatedDatabaseContext implements IsolatedDatabase {
    */
   constructor(
     private readonly connection: ReservedSQL,
-    readonly entities: EntityDefinitions,
+    entities: EntityDefinitions,
     schema: string,
     private readonly schemaFor: (entities: EntityDefinitions) => Promise<string>,
   ) {
+    this.#entities = entities
     this.#schema = schema
+  }
+
+  /**
+   * The active entity definitions for this schema.
+   * @returns The selected definitions.
+   */
+  get entities(): EntityDefinitions {
+    return this.#entities
   }
 
   /**
@@ -210,9 +220,11 @@ class IsolatedDatabaseContext implements IsolatedDatabase {
    */
   async use(entities: EntityDefinitions): Promise<void> {
     const schema = await this.schemaFor(entities)
-    if (schema === this.#schema) return
-    await setSearchPath(this.connection, schema)
-    this.#schema = schema
+    if (schema !== this.#schema) {
+      await setSearchPath(this.connection, schema)
+      this.#schema = schema
+    }
+    this.#entities = entities
   }
 
   /**

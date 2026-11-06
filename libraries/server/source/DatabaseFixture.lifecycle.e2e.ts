@@ -229,6 +229,34 @@ describe('database fixture lifecycle', () => {
     expect(removeService(install)).toBe(true)
   }, 120_000)
 
+  test('preserves an existing persistent fixture when startup fails', async () => {
+    const target = fixture({ 'a.test.ts': suite('persistent-failure') })
+    const root = tempDirectory('basis-database-fixture-preserve-')
+    created.push(root)
+    const env = {
+      BASIS_DATABASE_FIXTURE_EPHEMERAL: '0',
+      BASIS_TEST_FIXTURE_ROOT: join(root, 'fixture'),
+    }
+
+    const first = await run(target, [], undefined, 60_000, env)
+    expect(first.code).toBe(0)
+    const install = first.activity.starts[0]?.split(' ')[2]
+    if (!install) throw new Error('persistent fixture never started')
+    const password = join(install, '.basis', 'database', 'password')
+    const saved = readFileSync(password, 'utf8')
+    rmSync(password)
+
+    try {
+      const failed = await run(target, [], undefined, 60_000, env)
+      expect(failed.code).not.toBe(0)
+      expect(failed.activity.stops).toHaveLength(0)
+      expect(managedContainers(install)).toHaveLength(1)
+    } finally {
+      writeFileSync(password, saved)
+      expect(removeService(install)).toBe(true)
+    }
+  }, 120_000)
+
   test('tears down after a failing test', async () => {
     const target = fixture({
       'a.test.ts': suite('failure', '  expect(1).toBe(2)'),
