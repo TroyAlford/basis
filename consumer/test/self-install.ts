@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { assert, assertDoctorOk, assertEslintSurface, assertMarkdownSurface, assertNodeFree, assertPatchesActive, assertStylelintSurface, initApp, makeTempDir, makeToolPath, run, runAllowFailure } from './harness'
 
@@ -63,6 +63,36 @@ const main = (): void => {
     run(['bun', basisBin, 'lint'], app, env)
 
     run(['bun', basisBin, 'typecheck'], app, env)
+
+    writeFileSync(join(app, 'fixture.test.ts'), [
+      "import { expect, test } from 'bun:test'",
+      "import { EntityDefinitions } from 'basis/server'",
+      "import { withIsolatedDatabase } from 'basis/testing'",
+      '',
+      'const entities = EntityDefinitions.load(JSON.stringify({',
+      '  entities: [{',
+      "    fields: [{ field: 'id', format: 'UUID' }, { field: 'label', type: 'String' }],",
+      "    name: 'ConsumerNote',",
+      '  }],',
+      '}))',
+      '',
+      "test('consumer fixture uses provided entities', async () => {",
+      "  await withIsolatedDatabase('consumer-fixture', async database => {",
+      "    const id = '00000000-0000-4000-8000-000000000001'",
+      '    await database.sql`',
+      '      INSERT INTO "Entity" ("id", "name", "entity")',
+      "      VALUES (${id}, 'Consumer', 'ConsumerNote')",
+      '    `',
+      '    await database.sql`',
+      '      INSERT INTO "ConsumerNote" ("id", "label")',
+      "      VALUES (${id}, 'isolated')",
+      '    `',
+      "    expect(await database.query('ConsumerNote', { fields: ['id', 'label'] }))",
+      "      .toEqual([{ id, label: 'isolated' }])",
+      '  }, { entities })',
+      '})',
+    ].join('\n'))
+    run(['bun', 'test', 'fixture.test.ts'], app)
 
     // True clean reinstall: drop node_modules and the lockfile, install again.
     rmSync(join(app, 'node_modules'), { force: true, recursive: true })

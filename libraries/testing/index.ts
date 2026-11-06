@@ -17,3 +17,12 @@ export { matchScreenshot } from './matchScreenshot'
 export type { ScreenshotSubject } from './matchScreenshot'
 export { comparePng } from './snapshots'
 export type { ScreenshotComparison, ScreenshotOptions } from './snapshots'
+
+export { useDatabaseFixture } from '../server/testing/DatabaseFixture'
+export type { DatabaseFixture } from '../server/testing/DatabaseFixture'
+export { withDurableDatabase, withIsolatedDatabase } from '../server/testing/DatabaseIsolation'
+export type {
+  DurableDatabase,
+  IsolatedDatabase,
+  IsolatedDatabaseOptions,
+} from '../server/testing/DatabaseIsolation'

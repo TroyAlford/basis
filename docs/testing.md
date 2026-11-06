@@ -98,6 +98,30 @@ Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run t
 
 `registerRunCleanup(callback)` registers teardown for an in-process resource that needs process-wide cleanup but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. Use it for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
 
+## Consumer database fixtures
+
+`basis/testing` exports `withIsolatedDatabase` and `withDurableDatabase` with the same fixture implementation Basis uses. Pass the consumer's entity definitions explicitly to prepare and query that model in a transaction-isolated schema:
+
+```ts
+import { EntityDefinitions } from 'basis/server'
+import { withIsolatedDatabase } from 'basis/testing'
+
+const entities = EntityDefinitions.load(JSON.stringify({
+  entities: [{
+    fields: [{ field: 'id', format: 'UUID' }, { field: 'label', type: 'String' }],
+    name: 'ConsumerNote',
+  }],
+}))
+
+await withIsolatedDatabase('consumer', async database => {
+  await database.sql`INSERT INTO "Entity" ("id", "name", "entity") VALUES (... )`
+  await database.sql`INSERT INTO "ConsumerNote" ("id", "label") VALUES (... )`
+  const rows = await database.query('ConsumerNote', { fields: ['id', 'label'] })
+}, { entities })
+```
+
+`test:consumer` proves this import and a real PostgreSQL transaction from a fresh Git-dependency install.
+
 ## Database isolation
 
 Server database tests reuse one managed PostgreSQL service per checkout. The fixture keeps the container between runs and caches one migrated schema per exact entity-definition set; the first run creates it and later runs reuse it. Ordinary tests run inside one reserved transaction, set the cached schema, use savepoints for expected failures, and roll everything back whether the test succeeds or fails. DDL, data, `db.sql`, and entity-rooted `db.query` share that transaction. Cross-transaction tests use an explicitly committed unique schema and drop it in cleanup instead of pretending commit behavior can roll back. Fixture lifecycle proofs set `BASIS_DATABASE_FIXTURE_EPHEMERAL=1` when they need explicit container removal; `BASIS_TEST_FIXTURE_ROOT` overrides the persistent fixture directory.

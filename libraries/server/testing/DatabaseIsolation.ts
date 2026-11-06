@@ -60,6 +60,8 @@ const SAVEPOINT_PREFIX = 'basis_test_savepoint_'
 
 /** Options for one isolated database test. */
 export interface IsolatedDatabaseOptions {
+  /** Entity definitions to prepare and query; defaults to the fixture's shared model. */
+  readonly entities?: EntityDefinitions,
   /** Allocate a unique schema instead of using the cached fixture schema. */
   readonly fresh?: boolean,
 }
@@ -81,7 +83,8 @@ export async function withIsolatedDatabase<T>(
   options: IsolatedDatabaseOptions = {},
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
-  const schema = options.fresh ? schemaName() : await fixture.schemaFor(fixture.entities)
+  const entities = options.entities ?? fixture.entities
+  const schema = options.fresh ? schemaName() : await fixture.schemaFor(entities)
   const reserved = await fixture.server.db.sql.reserve()
   let transactionStarted = false
   try {
@@ -93,7 +96,7 @@ export async function withIsolatedDatabase<T>(
     await setSearchPath(reserved, schema)
     return await callback(new IsolatedDatabaseContext(
       reserved,
-      fixture.entities,
+      entities,
       schema,
       fixture.schemaFor,
     ))
