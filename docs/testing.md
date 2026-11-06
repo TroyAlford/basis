@@ -144,11 +144,11 @@ The matcher normalizes only insignificant whitespace outside quoted text; quotin
 
 Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime publishes the container's `run-server` to a random localhost port and connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server; the container has no fixed name and no host-network assumption.
 
-With no fixed identity, no lock files, no reference counts, and no PID protocols, there is nothing to coordinate between runs: each run owns exactly one container and removes it when it finishes.
+The container is named from the installed Playwright version. A normal development run reconnects to that healthy named run-server; an explicit ephemeral run uses a process-unique name and removes it at teardown. Browser contexts remain isolated per visit, and the component capture page remains reused within the process.
 
 ## Proving the contract
 
-`libraries/testing/runtime.lifecycle.test.ts` is the benchmark. It generates several test files — dozens of component snapshots, repeated captures within one test, and multiple `app.visit` snapshots — and runs them in one real child `bun test` process. The runtime records its lifecycle events to `BASIS_SNAPSHOT_ACTIVITY_LOG`, and the test asserts **one container start, one browser connection, and one teardown** for the run, reporting the measured runtime.
+`libraries/testing/runtime.lifecycle.e2e.ts` is the benchmark. It generates several test files — dozens of component snapshots, repeated captures within one test, and multiple `app.visit` snapshots — and runs them in one real child `bun test` process with `BASIS_SNAPSHOT_FIXTURE_EPHEMERAL=1`. The runtime records its lifecycle events to `BASIS_SNAPSHOT_ACTIVITY_LOG`, and the test asserts **one ephemeral container start, one browser connection, and one teardown** for the run, reporting the measured runtime. Normal visual runs attach to the version-named persistent container instead of launching again.
 
 ## Temp directories
 

@@ -159,32 +159,37 @@ describe('testing/docs', () => {
 
   test('captures table pinned columns and header actions at a narrow width', async () => {
     await app.visit('/components/table', { ...NETWORK }, async page => {
-      const example = page.locator('[data-table-header-example]')
-      await example.waitFor()
-      await example.locator('.table.component').waitFor()
-      // Settle the code blocks above the example before measuring the capture.
+      const narrow = page.locator('[data-table-header-example]')
+      await narrow.waitFor()
+      await narrow.locator('.table.component').waitFor()
       await waitForHighlightedCode(page)
       await page.waitForTimeout(100)
-      await matchScreenshot(example, 'narrow pinned header actions', {
+      await matchScreenshot(narrow, 'narrow pinned header actions', {
         maxDiffPixelRatio: 0.02,
       })
-    })
-  }, 60_000)
 
-  test('captures table selection with pinned name and actions', async () => {
-    await app.visit('/components/table', { ...NETWORK }, async page => {
       const example = page.locator('[data-table-selection-example]')
       await example.waitFor()
       const table = example.locator('.table.component')
       await table.waitFor()
       await waitForHighlightedCode(page)
-
-      // Select two rows so the header checkbox is indeterminate.
+      const checkbox = example.locator('tbody input[type="checkbox"]').first()
+      await checkbox.focus()
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
+      await page.keyboard.press('Space')
+      await page.waitForFunction(() => (
+        document.querySelector('[data-table-selection-example] strong')?.textContent === '1 selected'
+      ))
+      expect(await checkbox.isChecked()).toBe(true)
+      await checkbox.focus()
+      await page.keyboard.press('Space')
+      await page.waitForFunction(() => (
+        document.querySelector('[data-table-selection-example] strong')?.textContent === '0 selected'
+      ))
+      expect(await checkbox.isChecked()).toBe(false)
       const rows = example.locator('tbody .checkbox-editor')
       await rows.nth(0).click()
       await rows.nth(1).click()
-
-      // Align the last middle column with the pinned Name column.
       await table.evaluate(element => {
         const notes = element.querySelector('th[data-field="notes"]') as HTMLElement
         const name = element.querySelector('th[data-field="name"]') as HTMLElement
@@ -192,39 +197,15 @@ describe('testing/docs', () => {
         const notesLeft = notes.getBoundingClientRect().left -
           element.getBoundingClientRect().left +
           element.scrollLeft
-
         element.scrollLeft = notesLeft - name.offsetWidth - selection.offsetWidth
       })
       await page.waitForTimeout(100)
       await matchScreenshot(example, 'selection pinned', {
         maxDiffPixelRatio: 0.02,
       })
+
     })
-  }, 60_000)
-
-  test('supports keyboard selection in the table example', async () => {
-    await app.visit('/components/table', { ...NETWORK }, async page => {
-      const example = page.locator('[data-table-selection-example]')
-      await example.waitFor()
-      const checkbox = example.locator('tbody input[type="checkbox"]').first()
-
-      await checkbox.focus()
-      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
-
-      await page.keyboard.press('Space')
-      await page.waitForFunction(() => (
-        document.querySelector('[data-table-selection-example] strong')?.textContent === '1 selected'
-      ))
-      expect(await checkbox.isChecked()).toBe(true)
-
-      await checkbox.focus()
-      await page.keyboard.press('Space')
-      await page.waitForFunction(() => (
-        document.querySelector('[data-table-selection-example] strong')?.textContent === '0 selected'
-      ))
-      expect(await checkbox.isChecked()).toBe(false)
-    })
-  }, 60_000)
+  }, 90_000)
 
   test('captures the icon grid', async () => {
     await app.visit('/icons', { ...NETWORK }, async page => {
@@ -232,17 +213,6 @@ describe('testing/docs', () => {
       await matchScreenshot(page.locator('.icon-grid'), 'icon grid', {
         maxDiffPixelRatio: 0.01,
       })
-    })
-  }, 60_000)
-
-  test('captures the whole icons page', async () => {
-    await app.visit('/icons', { ...NETWORK }, async page => {
-      await page.waitForSelector('.icon-grid')
-      /*
-       * The docs shell is `100vh` with an inner scroll region, so a full-page
-       * capture would otherwise be the viewport. Release the shell height so the
-       * snapshot is the whole page.
-       */
       await page.addStyleTag({
         content: `
           html, body, #root, .documentation-shell.component {
@@ -255,17 +225,12 @@ describe('testing/docs', () => {
           }
         `,
       })
-      // Wait for the real Shiki output so the captured code is highlighted.
       await waitForHighlightedCode(page)
-      /*
-       * The tall page is mostly prose, so give it a slightly wider budget to
-       * absorb small cross-machine rasterisation differences.
-       */
       await matchScreenshot(page, 'full page', {
         maxDiffPixelRatio: 0.02,
       })
     })
-  }, 60_000)
+  }, 90_000)
 
   /*
    * The Popup boundary example anchors the same tooltip in two panes: one clips
@@ -452,26 +417,15 @@ describe('testing/docs', () => {
    */
   test('captures the Mermaid gallery', async () => {
     await app.visit('/components/mermaid', { ...NETWORK }, async page => {
-      // 1 basic usage + 2 theming examples + 6 gallery diagrams.
       await page.waitForFunction(
         () => document.querySelectorAll('.mermaid-diagram .diagram svg').length >= 9,
         undefined,
         { timeout: 60_000 },
       )
-      // Wait for the real Shiki output so the captured code is highlighted.
       await waitForHighlightedCode(page)
       await releaseShell(page)
       await matchScreenshot(page, 'mermaid gallery', { maxDiffPixelRatio: 0.02 })
-    })
-  }, 120_000)
 
-  /*
-   * A diagram follows the `Theme` around it. The default capture is the page
-   * theme; the named capture is the same diagram inside a scoped dark `Theme`,
-   * proving the tokens flow into the rendered SVG.
-   */
-  test('captures the Mermaid theming', async () => {
-    await app.visit('/components/mermaid', { ...NETWORK }, async page => {
       await page.waitForFunction(
         () => document.querySelectorAll('[data-theme-example] .diagram svg').length >= 2,
         undefined,
@@ -484,15 +438,7 @@ describe('testing/docs', () => {
           { maxDiffPixelRatio: 0.02 },
         )
       }
-    })
-  }, 120_000)
 
-  /*
-   * Each diagram type on its own, so a reviewer can read the themed output
-   * without the full-page capture's scale.
-   */
-  test('captures the Mermaid diagram types', async () => {
-    await app.visit('/components/mermaid', { ...NETWORK }, async page => {
       await page.waitForFunction(
         () => document.querySelectorAll('[data-diagram] .diagram svg').length >= 6,
         undefined,
@@ -511,4 +457,5 @@ describe('testing/docs', () => {
       }
     })
   }, 120_000)
+
 })
