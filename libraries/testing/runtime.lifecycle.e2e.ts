@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { SNAPSHOT_ACTIVITY_LOG, snapshotImage } from './browser'
+import { SNAPSHOT_ACTIVITY_LOG } from './browser'
 import { tempDirectory } from './temp'
 
 /*
@@ -159,13 +159,6 @@ describe('snapshot runtime lifecycle', () => {
       'components-a.screenshot.tsx': componentSuite('a', FIRST_COMPONENTS),
       'components-b.screenshot.tsx': componentSuite('b', SECOND_COMPONENTS),
     })
-
-    /*
-     * Measure warm-runtime performance: ensure the pinned image is present so a
-     * cold pull never counts as a snapshot regression. The run must start the
-     * container itself, so this only warms the image, not the runtime.
-     */
-    Bun.spawnSync(['docker', 'pull', snapshotImage()], { stderr: 'ignore', stdout: 'ignore' })
 
     const start = Bun.nanoseconds()
     const proc = Bun.spawn([

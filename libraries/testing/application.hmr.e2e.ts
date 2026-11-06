@@ -139,6 +139,7 @@ test('serves updated browser source through native HMR without restarting', asyn
         undefined,
         { timeout: 30_000 },
       )
+      await page.waitForTimeout(1_000)
       writeFileSync(
         join(directory, 'Application.tsx'),
         source.replace('Application</h1>', 'Application Recovered</h1>'),
