@@ -129,6 +129,20 @@ function isolatedTest(
 }
 
 /**
+ * Register a database test that needs a fresh schema, not the fixture schema.
+ * @param name - Test name and fixture label.
+ * @param callback - Test work.
+ * @param timeout - Test timeout in milliseconds.
+ */
+function freshIsolatedTest(
+  name: string,
+  callback: (database: IsolatedDatabase) => Promise<void>,
+  timeout = 120_000,
+): void {
+  test(name, () => withIsolatedDatabase(name, callback, { fresh: true }), timeout)
+}
+
+/**
  * Register a cross-transaction database test in a durable unique schema.
  * @param name - Test name and fixture label.
  * @param callback - Test work.
@@ -336,6 +350,7 @@ describe('Server database lifecycle', () => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [noteDefinition, accountDefinition],
     }))
+    await database.use(entities)
     await entities.createTables(database.sql)
 
     const noteColumns = await database.sql<{
@@ -349,7 +364,7 @@ describe('Server database lifecycle', () => {
         data_type AS "dataType",
         is_nullable AS "isNullable"
       FROM information_schema.columns
-      WHERE table_name = ${'Note'}
+      WHERE table_schema = current_schema() AND table_name = ${'Note'}
       ORDER BY ordinal_position
     `
     const accountColumns = await database.sql<{
@@ -363,7 +378,7 @@ describe('Server database lifecycle', () => {
         data_type AS "dataType",
         is_nullable AS "isNullable"
       FROM information_schema.columns
-      WHERE table_name = ${'Account'}
+      WHERE table_schema = current_schema() AND table_name = ${'Account'}
       ORDER BY ordinal_position
     `
     expect([...noteColumns, ...accountColumns]).toEqual([
@@ -380,7 +395,9 @@ describe('Server database lifecycle', () => {
     const primaryKeys = await database.sql<{ tableName: string }[]>`
       SELECT tc.table_name AS "tableName"
       FROM information_schema.table_constraints tc
-      WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_name IN (${'Note'}, ${'Account'})
+WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = current_schema() AND tc.table_name IN
+  (${'Note'},
+        ${'Account'})
       ORDER BY tc.table_name
     `
     expect(primaryKeys.map(row => row.tableName)).toEqual(['Account', 'Note'])
@@ -1040,6 +1057,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
 
   isolatedTest('creates and indexes the universal identity root', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
+    await database.use(entities)
     await entities.createTables(database.sql)
 
     expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
@@ -1119,7 +1137,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
         name: 'Membership',
       }],
     }))
-    await entities.createTables(database.sql)
+    await database.use(entities)
 
     expect(await database.sql<{
       columnName: string,
@@ -1401,7 +1419,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
         name: 'Membership',
       }],
     }))
-    await entities.createTables(database.sql)
+    await database.use(entities)
     const userId = '00000000-0000-4000-8000-000000000001'
     const campaignId = '00000000-0000-4000-8000-000000000002'
     const articleId = '00000000-0000-4000-8000-000000000003'
@@ -1494,13 +1512,15 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
         },
       ],
     }))
+    await database.use(entities)
     await entities.createTables(database.sql)
     await entities.createTables(database.sql)
 
     expect(await database.sql<{ indexName: string, isUnique: boolean }[]>`
       SELECT indexname AS "indexName", indisunique AS "isUnique"
       FROM pg_indexes
-      JOIN pg_class ON pg_class.relname = indexname
+      JOIN pg_class ON pg_class.relname = indexname AND pg_class.relnamespace =
+        current_schema()::regnamespace
       JOIN pg_index ON pg_index.indexrelid = pg_class.oid
       WHERE schemaname = current_schema() AND tablename = 'Pet' AND indexname LIKE 'Pet_%_fk_idx'
       ORDER BY indexname
@@ -1681,7 +1701,7 @@ VALUES (${petOne},
         name: 'Membership',
       }],
     }))
-    await entities.createTables(database.sql)
+    await database.use(entities)
     const ada = '00000000-0000-4000-8000-000000000001'
     const grace = '00000000-0000-4000-8000-000000000002'
     const linus = '00000000-0000-4000-8000-000000000003'
@@ -1909,7 +1929,7 @@ VALUES (${petOne},
         },
       ],
     }))
-    await entities.createTables(database.sql)
+    await database.use(entities)
     const ada = '00000000-0000-4000-8000-000000000001'
     const grace = '00000000-0000-4000-8000-000000000002'
     const linus = '00000000-0000-4000-8000-000000000003'
@@ -2037,7 +2057,7 @@ VALUES (${dogOne},
         name: 'Note',
       }],
     }))
-    await entities.createTables(database.sql)
+    await database.use(entities)
     const one = '00000000-0000-4000-8000-000000000001'
     const two = '00000000-0000-4000-8000-000000000002'
     const three = '00000000-0000-4000-8000-000000000003'
@@ -2163,7 +2183,7 @@ VALUES (${dogOne},
         name: 'Note',
       }],
     }))
-    await entities.createTables(database.sql)
+    await database.use(entities)
     const exact = '00000000-0000-4000-8000-000000000001'
     const unsafe = '00000000-0000-4000-8000-000000000002'
     const decimal = '00000000-0000-4000-8000-000000000003'
@@ -2311,7 +2331,7 @@ VALUES (${dogOne},
         },
       ],
     }))
-    await entities.createTables(database.sql)
+    await database.use(entities)
     const petOne = '00000000-0000-4000-8000-000000000001'
     const petTwo = '00000000-0000-4000-8000-000000000002'
     await database.sql`
@@ -2609,7 +2629,7 @@ VALUES (${dogOne},
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [numberRowDefinition],
     }))
-    await entities.createTables(database.sql)
+    await database.use(entities)
     await database.sql`
       WITH rows AS (SELECT gen_random_uuid()::text AS id,
         value FROM generate_series(1,
@@ -2672,7 +2692,7 @@ VALUES (${dogOne},
       ],
     }))
 
-    await entities.createTables(database.sql)
+    await database.use(entities)
 
     const constraints = await database.sql<{ definition: string }[]>`
       SELECT pg_get_constraintdef(oid) AS definition
@@ -2928,7 +2948,6 @@ VALUES (${invalidUserId},
   }, 120_000)
 
   isolatedTest('rejects physical reference columns and invalid graph paths', async database => {
-    await database.entities.createTables(database.sql)
     await expect(database.query('Article', { fields: ['ownerId'] }))
       .rejects.toThrow('Unknown field "Article.ownerId"')
     expect(compileEntityQuery(database.entities, 'Article', { fields: ['owner'] }).sql)
@@ -2965,7 +2984,7 @@ VALUES (${invalidUserId},
     })).rejects.toThrow('references cannot be used in predicates or ordering')
   }, 120_000)
 
-  isolatedTest('matches string and structured predicates with two-valued null semantics', async database => {
+  freshIsolatedTest('matches string and structured predicates with two-valued null semantics', async database => {
     // Raw nullable DDL exercises NULL semantics while the canonical entity drives query validation.
     await database.sql`
       CREATE TABLE "QueryRow" ("id" uuid PRIMARY KEY,
@@ -3159,7 +3178,7 @@ VALUES (${invalidUserId},
         fields: ['value'],
         limit: null,
       })).toEqual([{ value: 1.5 }])
-    })
+    }, { fresh: true })
 
     const { server } = await useDatabaseFixture('rollback-success-check')
     expect(await server.db.sql<{ present: boolean }[]>`
@@ -3175,7 +3194,7 @@ VALUES (${invalidUserId},
         CREATE TABLE "FailureProbe" ("id" uuid PRIMARY KEY)
       `
       throw new Error('forced isolated failure')
-    })).rejects.toThrow('forced isolated failure')
+    }, { fresh: true })).rejects.toThrow('forced isolated failure')
 
     const { server } = await useDatabaseFixture('rollback-failure-check')
     expect(await server.db.sql<{ present: boolean }[]>`
@@ -3198,7 +3217,7 @@ VALUES (${invalidUserId},
           limit: null,
         })).toEqual([{ value: 1 }])
         return database.schema
-      }),
+      }, { fresh: true }),
       withIsolatedDatabase('concurrent-b', async database => {
         await database.sql`
           CREATE TABLE "NumberRow" ("id" uuid PRIMARY KEY, "value" double precision NOT NULL)
@@ -3212,7 +3231,7 @@ VALUES (${invalidUserId},
           limit: null,
         })).toEqual([{ value: 2 }])
         return database.schema
-      }),
+      }, { fresh: true }),
     ])
 
     expect(new Set(schemas).size).toBe(2)

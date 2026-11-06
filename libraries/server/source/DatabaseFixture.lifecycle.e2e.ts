@@ -3,9 +3,10 @@ import { tempDirectory, waitFor } from 'basis/testing'
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { containers as managedContainers, removeService } from '../testing/DatabaseFixture'
 
 /*
- * Lifecycle proof for the run-scoped in-process database fixture.
+ * Lifecycle proof for the shared in-process database fixture.
  *
  * These run real child `bun test` processes so the process-wide fixture is
  * exercised the way consumers meet it: several test files, failure cleanup, and
@@ -133,6 +134,7 @@ function expectRemoved(events: Activity): void {
  * @param args - Extra test file arguments.
  * @param signal - Optional signal to send after the fixture starts.
  * @param readyTimeoutMs - How long to wait for a signal target to start.
+ * @param env - Extra child-process environment.
  * @returns The exit code and observed activity.
  */
 async function run(
@@ -140,10 +142,16 @@ async function run(
   args: string[] = [],
   signal?: NodeJS.Signals,
   readyTimeoutMs = 60_000,
+  env: Record<string, string> = {},
 ): Promise<{ activity: Activity, code: number, output: string }> {
   const proc = Bun.spawn([process.execPath, 'test', ...args], {
     cwd: target.dir,
-    env: { ...process.env, BASIS_DATABASE_ACTIVITY_LOG: target.activity },
+    env: {
+      ...process.env,
+      BASIS_DATABASE_ACTIVITY_LOG: target.activity,
+      BASIS_DATABASE_FIXTURE_EPHEMERAL: '1',
+      ...env,
+    },
     stderr: 'pipe',
     stdout: 'pipe',
   })
@@ -194,6 +202,31 @@ describe('database fixture lifecycle', () => {
     expect(result.activity.stops).toHaveLength(1)
     expect(result.activity.starts[0]?.split(' ')[1]).toBe(result.activity.stops[0]?.split(' ')[1])
     expectRemoved(result.activity)
+  }, 120_000)
+
+  test('reuses a persistent fixture across independent test runs', async () => {
+    const target = fixture({ 'a.test.ts': suite('persistent') })
+    const root = tempDirectory('basis-database-fixture-persistent-')
+    created.push(root)
+    const env = {
+      BASIS_DATABASE_FIXTURE_EPHEMERAL: '0',
+      BASIS_TEST_FIXTURE_ROOT: join(root, 'fixture'),
+    }
+
+    const first = await run(target, [], undefined, 60_000, env)
+    expect(first.code).toBe(0)
+    expect(first.activity.starts).toHaveLength(1)
+    const install = first.activity.starts[0]?.split(' ')[2]
+    if (!install) throw new Error('persistent fixture never started')
+    expect(managedContainers(install)).toHaveLength(1)
+
+    const second = await run(target, [], undefined, 60_000, env)
+    expect(second.code).toBe(0)
+    expect(second.activity.starts).toHaveLength(1)
+    expect(second.activity.stops).toHaveLength(0)
+    expect(managedContainers(install)).toHaveLength(1)
+
+    expect(removeService(install)).toBe(true)
   }, 120_000)
 
   test('tears down after a failing test', async () => {

@@ -90,7 +90,7 @@ Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run t
 
 ## Database isolation
 
-Server database tests reuse one run-scoped managed PostgreSQL service, but each ordinary test gets a unique schema inside one reserved transaction. DDL, data, `db.sql`, and entity-rooted `db.query` all run through that same transaction, and the schema is rolled back whether the test succeeds or fails. Expected constraint errors recover through savepoints so the rest of the test can continue. Cross-transaction tests use an explicitly committed unique schema and drop it in cleanup instead of pretending commit behavior can roll back.
+Server database tests reuse one managed PostgreSQL service per checkout. The fixture keeps the container between runs and caches one migrated schema per exact entity-definition set; the first run creates it and later runs reuse it. Ordinary tests run inside one reserved transaction, set the cached schema, use savepoints for expected failures, and roll everything back whether the test succeeds or fails. DDL, data, `db.sql`, and entity-rooted `db.query` share that transaction. Cross-transaction tests use an explicitly committed unique schema and drop it in cleanup instead of pretending commit behavior can roll back. Fixture lifecycle proofs set `BASIS_DATABASE_FIXTURE_EPHEMERAL=1` when they need explicit container removal; `BASIS_TEST_FIXTURE_ROOT` overrides the persistent fixture directory.
 
 ### Golden SQL assertions
 

@@ -26,10 +26,12 @@ export interface IsolatedDatabase {
    * @returns The selected rows.
    */
   query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]>,
-  /** Unique schema owned by this test transaction. */
+  /** Schema selected by this test transaction. */
   readonly schema: string,
   /** The transaction-bound Bun SQL client. */
   readonly sql: BunSQL,
+  /** Select a cached schema for one exact entity definition set. */
+  use(entities: EntityDefinitions): Promise<void>,
 }
 
 /** A committed, unique schema used by a cross-transaction test. */
@@ -56,29 +58,45 @@ export interface DurableDatabase {
 /** Saved savepoint name prefix. */
 const SAVEPOINT_PREFIX = 'basis_test_savepoint_'
 
+/** Options for one isolated database test. */
+export interface IsolatedDatabaseOptions {
+  /** Allocate a unique schema instead of using the cached fixture schema. */
+  readonly fresh?: boolean,
+}
+
 /**
- * Run an ordinary database test inside one transaction with a unique schema.
+ * Run an ordinary database test inside one transaction.
  *
- * Both successful and failing callbacks roll back all DDL and row changes. The
- * transaction-bound query and SQL surfaces share the same connection.
+ * The default path uses a pre-migrated fixture schema and rolls every test back.
+ * `fresh` allocates a unique schema for tests that intentionally exercise
+ * schema creation, rollback, or concurrent schema ownership.
  * @param label - Fixture acquisition label.
  * @param callback - Test work using the isolated database.
+ * @param options - Isolation options.
  * @returns The callback result.
  */
 export async function withIsolatedDatabase<T>(
   label: string,
   callback: (database: IsolatedDatabase) => Promise<T>,
+  options: IsolatedDatabaseOptions = {},
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
-  const schema = schemaName()
+  const schema = options.fresh ? schemaName() : await fixture.schemaFor(fixture.entities)
   const reserved = await fixture.server.db.sql.reserve()
   let transactionStarted = false
   try {
     await reserved.unsafe('begin').simple()
     transactionStarted = true
-    await reserved.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
+    if (options.fresh) {
+      await reserved.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
+    }
     await setSearchPath(reserved, schema)
-    return await callback(new IsolatedDatabaseContext(reserved, fixture.entities, schema))
+    return await callback(new IsolatedDatabaseContext(
+      reserved,
+      fixture.entities,
+      schema,
+      fixture.schemaFor,
+    ))
   } finally {
     try {
       if (transactionStarted) await reserved.unsafe('rollback').simple()
@@ -152,18 +170,23 @@ export async function withDurableDatabase<T>(
 /** A transaction-bound isolated database context. */
 class IsolatedDatabaseContext implements IsolatedDatabase {
   #savepoint = 0
+  #schema: string
 
   /**
    * Create a transaction-bound context.
    * @param connection - Reserved connection in a transaction.
    * @param entities - Shared entity definitions.
-   * @param schema - Unique schema name.
+   * @param schema - Selected schema name.
+   * @param schemaFor - Cached schema resolver.
    */
   constructor(
     private readonly connection: ReservedSQL,
     readonly entities: EntityDefinitions,
-    readonly schema: string,
-  ) {}
+    schema: string,
+    private readonly schemaFor: (entities: EntityDefinitions) => Promise<string>,
+  ) {
+    this.#schema = schema
+  }
 
   /**
    * The transaction-bound SQL client.
@@ -171,6 +194,25 @@ class IsolatedDatabaseContext implements IsolatedDatabase {
    */
   get sql(): BunSQL {
     return this.connection
+  }
+
+  /**
+   * The currently selected schema.
+   * @returns The schema name.
+   */
+  get schema(): string {
+    return this.#schema
+  }
+
+  /**
+   * Select the cached schema for one exact entity definition set.
+   * @param entities - Canonical definitions.
+   */
+  async use(entities: EntityDefinitions): Promise<void> {
+    const schema = await this.schemaFor(entities)
+    if (schema === this.#schema) return
+    await setSearchPath(this.connection, schema)
+    this.#schema = schema
   }
 
   /**
