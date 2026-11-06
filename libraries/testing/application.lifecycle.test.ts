@@ -353,6 +353,56 @@ describe('useApplication lifecycle', () => {
     }
   }, 30_000)
 
+  test('does not steal a live slower owner lock', async () => {
+    const timed = suite(
+      "test('timed', async () => {\n" +
+      "  await useApplication({ entry: './app.ts', timeoutMs: Number(process.env.TIMEOUT) })\n" +
+      '})',
+    )
+    const target = fixture({
+      'a.test.ts': timed,
+      'app.ts': SLOW_APP_SOURCE,
+    })
+    const root = tempDirectory('basis-application-mixed-timeout-')
+    created.push(root)
+    const env = {
+      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '0',
+      BASIS_APPLICATION_FIXTURE_ROOT: join(root, 'fixture'),
+    }
+    const owner = Bun.spawn([process.execPath, 'test', 'a.test.ts'], {
+      cwd: target.dir,
+      env: {
+        ...process.env,
+        ACTIVITY_LOG: target.activity,
+        BASIS_APPLICATION_FIXTURE_EPHEMERAL: '0',
+        BASIS_APPLICATION_FIXTURE_ROOT: join(root, 'fixture'),
+        TIMEOUT: '120000',
+      },
+      stderr: 'pipe',
+      stdout: 'pipe',
+    })
+    const output = new Response(owner.stdout).text()
+    const errors = new Response(owner.stderr).text()
+    try {
+      await waitFor(() => readActivity(target.activity).boot > 0, 5_000)
+      const waiter = await run(target, [], undefined, { ...env, TIMEOUT: '50' })
+      expect(waiter.code).not.toBe(0)
+      expect(await owner.exited).toBe(0)
+      expect(readActivity(target.activity).boot).toBe(1)
+    } finally {
+      const pid = readActivity(target.activity).pid
+      if (pid !== null) {
+        try {
+          process.kill(pid, 'SIGTERM')
+        } catch {
+          // The detached process may already be gone.
+        }
+      }
+      await output
+      await errors
+    }
+  }, 30_000)
+
   test('allows two genuinely different entries to boot separately', async () => {
     const target = fixture({
       'a.test.ts': suite(

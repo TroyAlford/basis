@@ -389,8 +389,7 @@ async function withLeaseLock<T>(
   work: () => Promise<T>,
 ): Promise<T> {
   const lock = join(directory, 'lease.lock')
-  const staleAfter = timeoutMs + 30_000
-  const deadline = Date.now() + staleAfter + 30_000
+  const deadline = Date.now() + timeoutMs
   while (true) {
     try {
       writeFileSync(lock, JSON.stringify({
@@ -407,11 +406,11 @@ async function withLeaseLock<T>(
       } catch {
         // A concurrent release won the race; retry immediately.
       }
-      if (
-        (!owner && age > 1_000)
-        || (owner && !isAlive(owner.pid))
-        || (owner && Date.now() - owner.startedAt > staleAfter)
-      ) {
+      if (!owner && age > 1_000) {
+        rmSync(lock, { force: true })
+        continue
+      }
+      if (owner && !isAlive(owner.pid)) {
         rmSync(lock, { force: true })
         continue
       }
