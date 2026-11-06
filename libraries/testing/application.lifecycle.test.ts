@@ -27,6 +27,7 @@ const APP_SOURCE = [
   '}',
   '',
   "record('boot')",
+  "record(`temp ${process.env.TMPDIR ?? ''}`)",
   'Bun.serve({',
   "  hostname: process.env.HOST ?? '127.0.0.1',",
   '  port: Number(process.env.PORT ?? 0),',
@@ -287,6 +288,13 @@ describe('useApplication lifecycle', () => {
     const pid = second.activity.pid
     if (pid === null) throw new Error('persistent application has no pid')
     expect(isAlive(pid)).toBe(true)
+    const temporary = readFileSync(target.activity, 'utf8')
+      .split('\n')
+      .filter(line => line.startsWith('temp '))
+      .map(line => line.slice(5).split(' ')[0] ?? '')
+    expect(temporary[0]).toContain(join(root, 'fixture'))
+    expect(existsSync(temporary[0] ?? '')).toBe(true)
+    expect(temporary[0]).not.toBe(process.env.TMPDIR)
 
     try {
       process.kill(pid, 'SIGTERM')
