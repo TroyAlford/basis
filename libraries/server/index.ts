@@ -7,6 +7,7 @@ export { SortDirection } from './source/SortDirection'
 export { FieldType, EntityDefinitions } from './source/EntityDefinitions'
 export { Operator } from './source/Operator'
 export type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
+export type { ArrayScope, CollectionScope, CountScope, QueryScope } from './source/SQL'
 export type {
   ArrayFieldDefinition,
   AssociationDefinition,

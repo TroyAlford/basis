@@ -412,6 +412,12 @@ function fieldToken(source: string, start: number, diagnostics: QueryDiagnostic[
 
   let dotted = false
   while (source[end] === '.') {
+    if (source.startsWith('$count', end + 1)
+      && !IDENTIFIER_PART.test(source[end + 7] ?? '')) {
+      dotted = true
+      end += 7
+      continue
+    }
     if (!IDENTIFIER_START.test(source[end + 1] ?? '')) {
       diagnostics.push({
         end: end + 1,

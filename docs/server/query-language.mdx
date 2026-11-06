@@ -26,7 +26,7 @@ No input form gets its own executor or database path. A query is either compiled
 - Inherited scalars, including fields owned by an MTI ancestor.
 - Descendant-only scalars on abstract queries when their declarations are compatible across the concrete leaves.
 - Stored `Entity` references and their `Inverse` navigations are navigation metadata, not scalar columns. They are never accepted as predicates or sort fields merely because they appear in `fields`.
-- `Array` and `JSON` fields remain value fields with the type-specific operators defined below.
+- `Array` and `JSON` fields remain value fields with the type-specific operators defined below. `collection.$count` is a read-only intrinsic count pseudo-field, never an authored ontology field.
 - A dotted path may appear only where the current stage explicitly accepts reference or collection traversal.
 - There is no separate identity field such as `ownerId`; identity is the reference's canonical target `id`.
 - Unknown, incompatible, navigation-only, and physical storage names are rejected before SQL execution.
@@ -469,7 +469,46 @@ The gate covers:
 - two-valued NULL behavior, source diagnostic offsets, finite reference depth, array operand bounds, and query work budgets;
 - stable source ordering, pagination, collection-preview bindings, and real PostgreSQL result parity.
 
-`QueryParity.test.ts` owns compiler/error/diagnostic/budget parity; `QueryParity.e2e.ts` owns the real PostgreSQL inherited/abstract, dotted-path, relationship, Array/JSON, NULL, scoped-member, and pagination matrix. Existing stage-specific contract and E2E suites remain the detailed behavior fixtures. Authorization, RLS, and collection `$count` are deliberately outside this gate; `$count` and relational-planning validation belong to stage 20a, and security deployment to 20b–20e.
+`QueryParity.test.ts` owns compiler/error/diagnostic/budget parity; `QueryParity.e2e.ts` owns the real PostgreSQL inherited/abstract, dotted-path, relationship, Array/JSON, NULL, scoped-member, and pagination matrix. Existing stage-specific contract and E2E suites remain the detailed behavior fixtures. Authorization and RLS are deliberately outside this gate; collection `$count` and relational-planning validation are covered by stage 20a, and security deployment by 20b–20e.
+
+## Stage 20a — collection counts and relational planning (implemented)
+
+Inverse, named-relationship, and native-array collections expose a read-only `$count` intrinsic:
+
+```ts
+const countPredicates = [
+  { structured: { field: 'pets.$count', operator: '$gte', value: 3 }, source: 'pets.$count >= 3' },
+  { structured: { field: 'scores.$count', operator: '$gt', value: 0 }, source: 'scores.$count > 0' },
+]
+```
+
+- `$count` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references.
+- Relationship counts count complete logical member/edge rows, independent of collection preview limit/offset. Native-array counts include duplicates and stored null elements; a NULL array counts as zero.
+- Relationship `collection.$count = 0` canonicalizes to `NOT EXISTS` and `collection.$count > 0` to `EXISTS` when equivalent; native-array counts use `cardinality`. Other count thresholds use the shared grouped count CTE selected by the measured stage-20a renderer.
+- Collection relation planning is shared by predicate scopes, collection previews, counts, and count ordering. Plans are keyed by logical path and physical parent occurrence, so sibling descendant-reference variants do not share the wrong parent alias; emitted subquery work remains charged to the finite compiler budget.
+- The planning benchmark fixture runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over correlated and CTE default/`MATERIALIZED`/`NOT MATERIALIZED` variants at 24-parent/70-child and 120-parent/540-child cardinalities, including selective, nonselective, indexed, and unindexed count conditions. All variants return the same rows; the evidence selects default CTE rendering for count aggregates while correlated rendering remains in use for collection predicates/previews. No blanket `MATERIALIZED` rule is applied.
+- The exported `QueryScope`, `CollectionScope`, `ArrayScope`, and `CountScope` types form the reusable entity/relationship scope boundary for later authorization work. They do not implement permission policies, RLS, or request actor binding in this stage.
+
+Representative evidence from the analyzed 24-parent / 70-child fixture (local PostgreSQL; timings are illustrative, not CI thresholds):
+
+| Variant                     | Buffers | Execution ms | Planning ms | SQL bytes | Rows |
+| --------------------------- | ------: | -----------: | ----------: | --------: | ---: |
+| production @2               |       3 |        0.216 |       0.155 |       356 |   19 |
+| correlated @2               |      25 |        0.255 |       0.057 |       168 |   19 |
+| CTE default @2              |       2 |        0.193 |       0.079 |       315 |   19 |
+| CTE materialized @2         |       2 |        0.193 |       0.078 |       327 |   19 |
+| CTE not materialized @2     |       2 |        0.161 |       0.078 |       331 |   19 |
+| selective production @2     |       3 |        0.218 |       0.153 |       393 |    1 |
+| selective correlated @2     |       3 |        0.069 |       0.078 |       220 |    1 |
+| selective CTE default @2    |       2 |        0.061 |       0.095 |       367 |    1 |
+| unindexed production @2     |       3 |        0.216 |       0.188 |       393 |    1 |
+| unindexed correlated @2     |       3 |        0.094 |       0.055 |       220 |    1 |
+| unindexed CTE default @2    |       2 |        0.106 |       0.076 |       367 |    1 |
+| scale production @4         |      17 |        0.871 |       0.193 |       356 |   25 |
+| scale correlated @4         |     127 |        0.304 |       0.066 |       168 |   25 |
+| scale CTE default @4        |      10 |        0.426 |       0.083 |       315 |   25 |
+
+The default grouped CTE is selected for numeric count thresholds because it held buffer use to 2 blocks versus 25 for correlated in the indexed small-scale run and 10 versus 127 in the larger-scale run, avoiding per-parent index probes. It is not a blanket latency win: correlated execution was lower for the selective and unindexed conditions and for the larger scale, while the CTE was lower in the nonselective @2 run. Materialized CTE was not consistently better. Collection predicates and previews remain correlated, and canonical relationship-collection zero/nonzero counts remain `NOT EXISTS`/`EXISTS`. The benchmark emits its 23-measurement small-scale matrix and 3-measurement larger-scale matrix through `QueryPlanning.e2e.ts` for re-checking.
 
 ## Ordering, pagination, and exclusions
 
@@ -497,6 +536,6 @@ Explicit exclusions for this contract:
 
 - `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection comparisons compile as correlated `EXISTS`/`NOT EXISTS` inside that same statement, with independent `EXISTS` per bracketed requirement. Array/JSON predicates compile through the same comparison registry with parameterized array elements and opaque JSON values. Scoped `@` members compile as array `unnest` predicates or entity-collection semijoins in the same statement.
 
-- `QueryParity.test.ts` and `QueryParity.e2e.ts` lock source/structured parity across compiler errors, diagnostics, budgets, real PostgreSQL results, inherited paths, relationships, Array/JSON, scoped members, and pagination.
+- `QueryParity.test.ts` and `QueryParity.e2e.ts` lock source/structured parity across compiler errors, diagnostics, budgets, real PostgreSQL results, inherited paths, relationships, Array/JSON, scoped members, and pagination. `QueryPlanning.e2e.ts` measures correlated and CTE count strategies with PostgreSQL plan evidence.
 
 The target end-state is therefore one grammar, two input spellings, one canonical filter tree, one SQL compiler, and one finite-work execution path.

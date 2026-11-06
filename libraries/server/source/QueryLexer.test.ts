@@ -197,11 +197,13 @@ describe('QueryLexer', () => {
     ])
   })
 
-  test('tokenizes scoped member fields', () => {
-    assertLex('@ @.age @.owner.name', [
+  test('tokenizes scoped member and collection count fields', () => {
+    assertLex('@ @.age @.owner.name pets.$count scores.$count', [
       field('@'),
       field('@.age'),
       field('@.owner.name'),
+      field('pets.$count'),
+      field('scores.$count'),
     ])
   })
 

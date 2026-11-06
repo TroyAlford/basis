@@ -69,6 +69,16 @@ export interface CollectionScope {
   readonly work?: number,
 }
 
+/** Count expression forms used to canonicalize collection counts. */
+export interface CountScope {
+  /** Zero-count predicate. */
+  readonly empty: string,
+  /** Non-zero existence predicate. */
+  readonly exists: string,
+  /** Numeric count expression. */
+  readonly expression: string,
+}
+
 /** Scoped native-array relation used to evaluate one member predicate. */
 export interface ArrayScope {
   /** Consume finite compiler work for one emitted member predicate. */
@@ -93,10 +103,14 @@ export interface QueryScope {
   readonly expression: (field: QueryFieldDefinition) => string,
   /** Resolve a root ordering field by name. */
   readonly field: (name: string) => QueryFieldDefinition,
+  /** Optional count expression metadata for canonical zero/existence forms. */
+  readonly filterCount?: (name: string) => CountScope | undefined,
   /** Optional filter-only resolver for dotted reference paths and descendant fields. */
   readonly filterField?: (name: string) => QueryFieldDefinition,
   /** Optional filter-only classification for reference identities. */
   readonly filterKind?: (name: string) => 'identity' | undefined,
+  /** Optional root scalar or count resolver for ordering. */
+  readonly orderField?: (name: string) => QueryFieldDefinition,
 }
 
 /**
@@ -362,6 +376,13 @@ function whereClause(
     if (comparison) {
       const comparisonFilter = node as ComparisonFilter
       const field = (active.filterField ?? active.field)(comparisonFilter.field)
+      const count = active.filterCount?.(comparisonFilter.field)
+      if (count && comparisonFilter.operator === Operator.Comparison.Equal && comparisonFilter.value === 0) {
+        return count.empty
+      }
+      if (count && comparisonFilter.operator === Operator.Comparison.GreaterThan && comparisonFilter.value === 0) {
+        return count.exists
+      }
       if (
         active.filterKind?.(comparisonFilter.field) === 'identity'
         && comparisonFilter.operator !== Operator.Comparison.Equal
@@ -443,7 +464,7 @@ function orderByClause(
   const clauses = entries.map(entry => {
     const name = typeof entry === 'string' ? entry : entry.field
     const direction = typeof entry === 'string' ? SortDirection.Ascending : entry.direction ?? SortDirection.Ascending
-    const field = scope ? scope.field(name) : scalarField(entity, name)
+    const field = scope ? (scope.orderField ?? scope.field)(name) : scalarField(entity, name)
     if (field.type === FieldType.Array || field.type === FieldType.JSON) {
       throw new Error(`Query field "${entity.name}.${name}" cannot be used in ordering`)
     }

@@ -231,6 +231,16 @@ describe('Query parity gate', () => {
         },
       },
       {
+        entity: 'Note',
+        source: 'scores.$count >= 2',
+        structured: { field: 'scores.$count', operator: Operator.Comparison.GreaterThanOrEqual, value: 2 },
+      },
+      {
+        entity: 'User',
+        source: 'pets.$count = 0',
+        structured: { field: 'pets.$count', operator: Operator.Comparison.Equal, value: 0 },
+      },
+      {
         entity: 'User',
         source: 'pets $contains (@.age > 10)',
         structured: {
@@ -250,6 +260,30 @@ describe('Query parity gate', () => {
         structured(queryCase.entity, queryCase.structured),
       )
     }
+  })
+
+  test('supports count paths in predicates, projections, and ordering', () => {
+    expect(source('Note', 'scores.$count >= 2')).toEqual(
+      structured('Note', {
+        field: 'scores.$count',
+        operator: Operator.Comparison.GreaterThanOrEqual,
+        value: 2,
+      }),
+    )
+    expect(source('User', 'pets.$count > 0')).toMatchObject({
+      sql: expect.stringContaining('EXISTS (SELECT 1 FROM "Pet"'),
+    })
+    expect(source('User', 'pets.$count = 0')).toMatchObject({
+      sql: expect.stringContaining('NOT EXISTS (SELECT 1 FROM "Pet"'),
+    })
+    expect(source('Note', 'scores.$count = 0').sql).toContain('COALESCE(cardinality')
+    expect(source('Note', 'scores.$count = 0', { fields: ['id', 'scores.$count'] }).sql)
+      .toContain('AS "scores.$count"')
+    expect(source('User', 'pets.$count >= 1', { orderBy: 'pets.$count' }).sql)
+      .toContain('ORDER BY COALESCE(')
+    expect(() => source('Note', 'title.$count > 0')).toThrow('requires a collection or native array field')
+    expect(() => source('Pet', 'owner.$count > 0')).toThrow('requires a collection or native array field')
+    expect(() => source('Note', 'tags.$count.foo > 0')).toThrow('traverses non-reference field')
   })
 
   test('rejects collection member lists without requirements in both forms', () => {
