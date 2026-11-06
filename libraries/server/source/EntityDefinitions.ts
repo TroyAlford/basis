@@ -527,6 +527,43 @@ export class EntityDefinitions {
   }
 
   /**
+   * Compose validated definition sets into one canonical ontology.
+   *
+   * Entity and relationship names are shared into one namespace; a duplicate
+   * is an authoring conflict rather than a silent override.
+   * @param definitions - Validated definition sets in composition order.
+   * @returns The combined definitions.
+   * @throws {Error} When two sets define the same entity or relationship name.
+   */
+  static combine(...definitions: readonly EntityDefinitions[]): EntityDefinitions {
+    const names = new Set<string>()
+    const entities: EntityDefinition[] = []
+    const relationships: RelationshipDefinition[] = []
+    for (const definition of definitions) {
+      for (const entity of definition.entities) {
+        if (entity.name === 'User' && names.has('User')) {
+          throw new Error('Entity name "User" is reserved by Basis authorization')
+        }
+        if (names.has(entity.name)) throw new Error(`Duplicate entity "${entity.name}"`)
+        names.add(entity.name)
+        entities.push(entity)
+      }
+      for (const relationship of definition.relationships) {
+        if (names.has(relationship.name)) throw new Error(`Duplicate relationship "${relationship.name}"`)
+        names.add(relationship.name)
+        relationships.push(relationship)
+      }
+    }
+    return new EntityDefinitions(
+      definitions.flatMap(definition => [...definition.associations]),
+      entities,
+      relationships,
+      definitions.flatMap(definition => [...definition.#rootCollections]),
+      definitions.flatMap(definition => [...definition.#rootSingularNavigations]),
+    )
+  }
+
+  /**
    * Creates entity definitions from already-validated definitions.
    * @param associations - Validated reciprocal associations.
    * @param entities - Validated entity definitions.

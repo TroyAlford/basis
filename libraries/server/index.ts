@@ -1,6 +1,8 @@
 export type { APIRoute } from './types/APIRoute'
 export type { HealthOptions, HealthStatus } from './apis/health'
 export { HttpVerb } from '../utilities'
+export { Authorization, Action } from './source/Authorization'
+export type { AuthorizationOptions, BootstrapResult, EffectiveGrant, GrantInput } from './source/Authorization'
 export { NullDatabase } from './source/Database'
 export type { Database, DatabaseOptions, QueryOptions } from './source/Database'
 export { SortDirection } from './source/SortDirection'

@@ -128,6 +128,14 @@ export class Identity {
   }
 
   /**
+   * The provider slug used by this identity cookie.
+   * @returns The provider slug.
+   */
+  get provider(): string {
+    return this.#options.provider
+  }
+
+  /**
    * Resolve the OAuth client credentials, for the sibling OAuth flow.
    *
    * Internal: reached only through {@link IDENTITY_CREDENTIALS}, which the
