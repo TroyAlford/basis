@@ -1,10 +1,10 @@
 import { run } from 'basis/configuration'
 import { Logger } from 'basis/logger'
-import { registerRunCleanup } from 'basis/testing'
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { registerRunCleanup } from '../../testing/lifecycle'
 import { EntityDefinitions } from '../source/EntityDefinitions'
 import { Server } from '../source/Server'
 

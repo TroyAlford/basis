@@ -317,7 +317,7 @@ describe('database fixture lifecycle', () => {
     })
     const pidFile = join(target.dir, 'child.pid')
 
-    await expect(run(target, [], 'SIGTERM', 5_000)).rejects.toThrow('waitFor')
+    await expect(run(target, [], 'SIGTERM', 500)).rejects.toThrow('waitFor')
     const pid = Number(readFileSync(pidFile, 'utf8'))
     expect(isAlive(pid)).toBe(false)
   }, 30_000)

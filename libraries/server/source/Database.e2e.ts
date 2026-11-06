@@ -21,6 +21,7 @@ import { Server } from './Server'
  */
 
 const root = join(import.meta.dir, '..', '..', '..')
+const FAST_E2E = Bun.env.BASIS_E2E_FAST === '1'
 const silent = new Logger({ silent: true })
 
 /** A container mount from `docker inspect`. */
@@ -157,7 +158,7 @@ function durableTest(
 }
 
 describe('Server database lifecycle', () => {
-  test('supports independent installs, durable restart, and same-install reconnection', async () => {
+  test.skipIf(FAST_E2E)('supports independent installs, durable restart, and same-install reconnection', async () => {
     const service = `basis-e2e-${randomUUID()}`
     const installA = tempDirectory('basis-checkout-a-')
     const installB = tempDirectory('basis-checkout-b-')
@@ -964,7 +965,7 @@ VALUES (${'1001'},
     }))
   }, 120_000)
 
-  test('queries prebuilt polymorphic descendants with indexed names', async () => {
+  test.skipIf(FAST_E2E)('queries prebuilt polymorphic descendants with indexed names', async () => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
         {

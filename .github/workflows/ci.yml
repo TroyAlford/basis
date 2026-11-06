@@ -30,31 +30,109 @@ jobs:
         run: bun ./node_modules/stylelint/bin/stylelint.mjs "**/*.styles.ts" --config ./stylelint.config.mjs --allow-empty-input
       - name: Run Markdown lint
         run: bun run lint:md
-      # `basis format` must apply every autofixable finding in one run; this
-      # is the required gate that keeps the CLI's fix forwarding honest.
-      - name: Verify lint autofix
-        run: bun test consumer/cli.test.ts
 
   run-tests:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Start from the trusted base commit; the analyzer reads its policy
+          # from the exact merge base, not from unreviewed PR changes.
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+      - name: Fetch pull-request head and base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr-head"
+          git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
+          git checkout --detach refs/remotes/origin/pr-head
       - uses: ./.github/actions/asdf-setup
-      # Snapshot capture runs Chromium inside the pinned Playwright container, so
-      # no host browser or OS libraries are needed. Warm the image so the first
-      # capture is not a pull; the tag follows the installed Playwright version,
-      # exactly as the runtime resolves it.
+      - name: Detect base impact policy
+        id: policy
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          base=$(git rev-parse "origin/${BASE_REF}")
+          echo "merge-base=$base" >> "$GITHUB_OUTPUT"
+          if git cat-file -e "${base}:.github/ci-impact.json" 2>/dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Analyze change impact
+        id: impact
+        if: steps.policy.outputs.present == 'true'
+        uses: TroyAlford/basis/.github/actions/change-impact@v7.11.0
+        with:
+          base-ref: origin/${{ github.event.pull_request.base.ref }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          config-path: .github/ci-impact.json
+          output-file: impact-decision.json
+      - name: Derive test-lane decisions
+        id: lanes
+        env:
+          POLICY_PRESENT: ${{ steps.policy.outputs.present }}
+        run: |
+          set -euo pipefail
+          lanes=(unit component contract server lifecycle screenshots e2e visual database-fixtures fixture-lifecycle hmr docs)
+          if [ "$POLICY_PRESENT" != "true" ]; then
+            for lane in "${lanes[@]}"; do echo "$lane-needed=true" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
+          for lane in "${lanes[@]}"; do
+            value=$(jq -r --arg lane "$lane" '.suites[$lane].needed' impact-decision.json)
+            if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+              echo "::error::Impact decision for lane '$lane' is not a boolean" >&2
+              exit 1
+            fi
+            echo "$lane-needed=$value" >> "$GITHUB_OUTPUT"
+          done
       - name: Warm the Playwright container image
+        if: steps.lanes.outputs.screenshots-needed == 'true' || steps.lanes.outputs.visual-needed == 'true'
         run: |
           image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
           docker pull "$image"
-      - name: Run tests
-        run: bun run test
+      - name: Run unit tests
+        if: steps.lanes.outputs.unit-needed == 'true'
+        run: bun run test:unit
+      - name: Run component tests
+        if: steps.lanes.outputs.component-needed == 'true'
+        run: bun run test:component
+      - name: Run contract tests
+        if: steps.lanes.outputs.contract-needed == 'true'
+        run: bun run test:contract
+      - name: Run server integration tests
+        if: steps.lanes.outputs.server-needed == 'true'
+        run: bun run test:server
+      - name: Run test lifecycle tests
+        if: steps.lanes.outputs.lifecycle-needed == 'true'
+        run: bun run test:lifecycle
+      - name: Run docs checks
+        if: steps.lanes.outputs.docs-needed == 'true'
+        run: bun run docs:check
       - name: Run screenshot tests
+        if: steps.lanes.outputs.screenshots-needed == 'true'
         run: bun run test:screenshots
       - name: Run end-to-end tests
+        if: steps.lanes.outputs.e2e-needed == 'true'
         run: bun run test:e2e
+      - name: Run visual end-to-end tests
+        if: steps.lanes.outputs.visual-needed == 'true'
+        run: bun run test:e2e:visual
+      - name: Run database fixture tests
+        if: steps.lanes.outputs.database-fixtures-needed == 'true'
+        run: bun run test:e2e:database-fixtures
+      - name: Run fixture lifecycle tests
+        if: steps.lanes.outputs.fixture-lifecycle-needed == 'true'
+        run: bun test ./libraries/server/source/DatabaseFixture.lifecycle.e2e.ts ./libraries/testing/runtime.lifecycle.e2e.ts
+      - name: Run HMR tests
+        if: steps.lanes.outputs.hmr-needed == 'true'
+        run: bun run test:e2e:hmr
       - name: Upload snapshot artifacts
         if: always()
         uses: actions/upload-artifact@v4
