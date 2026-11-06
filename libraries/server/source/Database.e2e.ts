@@ -1661,9 +1661,11 @@ VALUES (${petOne},
         {
           fields: [
             { field: 'id', format: 'UUID' },
+            { field: 'age', type: 'Number' },
             { field: 'title', type: 'String' },
             { field: 'nickname', type: 'String' },
             { field: 'owner', inverse: 'pets', target: 'Person', type: 'Entity' },
+            { field: 'vaccinated', type: 'Boolean' },
             { field: 'vet', target: 'Person', type: 'Entity' },
           ],
           name: 'Pet',
@@ -1740,26 +1742,34 @@ VALUES (${petOne},
       VALUES (${ada}, 'Ada'), (${grace}, 'Grace'), (${linus}, 'Linus'), (${dana}, 'Dana')
     `
     await database.sql`
-      INSERT INTO "Pet" ("id", "title", "nickname", "owner.id", "vet.id")
+      INSERT INTO "Pet" ("id", "age", "title", "nickname", "owner.id", "vaccinated", "vet.id")
       VALUES (${rex},
+        3,
         'Rex',
         'Loud',
         ${ada},
+        TRUE,
         ${grace}),
         (${fido},
+        8,
         'Fido',
         'Quiet',
         ${ada},
+        TRUE,
         ${null}),
         (${rexTwo},
+        12,
         'Rex',
         'Special',
         ${grace},
+        FALSE,
         ${grace}),
         (${fidoTwo},
+        5,
         'Fido',
         'Other',
         ${dana},
+        TRUE,
         ${null})
     `
     await database.sql`
@@ -1806,6 +1816,14 @@ VALUES (${petOne},
     expect(await ids('Person', 'pets !$empty')).toEqual([ada, grace, dana])
     expect(await ids('Person', "pets $contains (owner.title = 'Ada')")).toEqual([ada])
     expect(await ids('Person', `pets $contains (owner = '${ada}')`)).toEqual([ada])
+    expect(await ids('Person', 'pets $contains (@.age > 10)')).toEqual([grace])
+    expect(await ids('Person', 'pets $contains (age > 10)')).toEqual([grace])
+    expect(await ids('Person', 'pets $contains (@.age >= 5)')).toEqual([ada, grace, dana])
+    expect(await ids('Person', 'pets $all (@.age > 0)')).toEqual([ada, grace, linus, dana])
+    expect(await ids('Person', 'pets $all (@.age > 5)')).toEqual([grace, linus])
+    expect(await ids('Person', 'pets $contains (@.vaccinated = true)')).toEqual([ada, dana])
+    expect(await ids('Person', `pets $contains (@ = '${rex}')`)).toEqual([ada])
+    expect(await ids('Person', `pets $contains (@.id = '${rex}')`)).toEqual([ada])
     expect(await ids('Person', "pets $contains (title = 'Rex' $or title = 'Fido')"))
       .toEqual([ada, grace, dana])
     expect(await ids('Person', 'pets $contains (vet = null)')).toEqual([ada, dana])
@@ -1822,6 +1840,10 @@ VALUES (${petOne},
 
     expect(await ids('Campaign', "members $contains (membership.role = 'GM')"))
       .toEqual([one, two])
+    expect(await ids('Campaign', "members $contains (@.membership.role = 'GM')"))
+      .toEqual([one, two])
+    expect(await ids('Campaign', "members $all (@.membership.role = 'Player')"))
+      .toEqual([three, four, five])
     expect(await ids('Campaign', "members !$contains (membership.role = 'GM')"))
       .toEqual([three, four, five])
     expect(await ids('Campaign', 'members $empty')).toEqual([five])
@@ -2103,6 +2125,15 @@ VALUES (${dogOne},
     expect(await ids('scores == [1, 2]')).toEqual([one, four, five])
     expect(await ids('scores === [1, 2]')).toEqual([five])
     expect(await ids('scores $contains [2]')).toEqual([one, four, five])
+    expect(await ids('scores $contains (@ >= 2)')).toEqual([one, two, four, five, six])
+    expect(await ids('scores $all (@ > 0)')).toEqual([one, two, three, four, five, six])
+    expect(await ids('scores $all (@ > 1)')).toEqual([two, three, six])
+    expect(await ids('scores $contains (@ > 5 $and @ < 20)')).toEqual([])
+    expect(await ids('scores $contains [(@ = 1), (@ = 2)]')).toEqual([one, four, five])
+    expect(await ids('scores $contains (@ = 1 $and @ = 2)')).toEqual([])
+    expect(await ids("tags $all (@ != 'urgent')")).toEqual([three, four, five, six])
+    expect(await ids("tags $contains (@ != 'urgent')")).toEqual([one, four, five, six])
+    expect(await ids("tags $contains (@ $contains 'port')")).toEqual([one])
     expect(await ids("payload $contains {kind: 'note'}")).toEqual([one, five])
     expect(await ids('payload $contains {meta: {active: true}}')).toEqual([one])
     expect(await ids('payload $contains {meta: {active: false}}')).toEqual([])

@@ -44,10 +44,14 @@ const definitions = EntityDefinitions.load(JSON.stringify({
     {
       fields: [
         { field: 'id', format: 'UUID' },
+        { field: 'age', type: 'Number' },
         { field: 'favorite', target: 'User', type: 'Entity' },
+        { field: 'labels', items: { type: 'String' }, type: 'Array' },
         { field: 'owner', inverse: 'pets', target: 'User', type: 'Entity' },
         { field: 'payload', type: 'JSON' },
+        { field: 'scores', items: { type: 'Number' }, type: 'Array' },
         { field: 'tags', items: { type: 'String' }, type: 'Array' },
+        { field: 'vaccinated', type: 'Boolean' },
       ],
       name: 'Pet',
     },
@@ -607,6 +611,127 @@ describe('Query contract', () => {
     })).toThrow()
   })
 
+  test('compiles explicit scoped member predicates for arrays and collections', () => {
+    const cases = [
+      {
+        entity: 'Pet',
+        source: 'scores $contains (@ >= 10)',
+        structured: {
+          field: 'scores',
+          filters: [{ field: '@', operator: Operator.Comparison.GreaterThanOrEqual, value: 10 }],
+          operator: Operator.Comparison.Contains,
+        },
+      },
+      {
+        entity: 'Pet',
+        source: 'scores $all (@ > 0)',
+        structured: {
+          field: 'scores',
+          filters: [{ field: '@', operator: Operator.Comparison.GreaterThan, value: 0 }],
+          operator: Operator.Collection.All,
+        },
+      },
+      {
+        entity: 'Pet',
+        source: 'labels $all (@ != ' + "'deprecated'" + ')',
+        structured: {
+          field: 'labels',
+          filters: [{ field: '@', operator: Operator.Comparison.NotEqual, value: 'deprecated' }],
+          operator: Operator.Collection.All,
+        },
+      },
+      {
+        entity: 'Pet',
+        source: 'scores $contains (@ > 5 $and @ < 20)',
+        structured: {
+          field: 'scores',
+          filters: [{
+            filters: [
+              { field: '@', operator: Operator.Comparison.GreaterThan, value: 5 },
+              { field: '@', operator: Operator.Comparison.LessThan, value: 20 },
+            ],
+            operator: Operator.Logical.And,
+          }],
+          operator: Operator.Comparison.Contains,
+        },
+      },
+      {
+        entity: 'Pet',
+        source: 'scores $contains [(@ = 1), (@ = 2)]',
+        structured: {
+          field: 'scores',
+          filters: [
+            { field: '@', operator: Operator.Comparison.Equal, value: 1 },
+            { field: '@', operator: Operator.Comparison.Equal, value: 2 },
+          ],
+          operator: Operator.Comparison.Contains,
+        },
+      },
+      {
+        entity: 'User',
+        source: 'pets $contains (@.age > 10)',
+        structured: {
+          field: 'pets',
+          filters: [{ field: 'age', operator: Operator.Comparison.GreaterThan, value: 10 }],
+          operator: Operator.Comparison.Contains,
+        },
+      },
+      {
+        entity: 'User',
+        source: "pets $contains (@ = '00000000-0000-4000-8000-000000000001')",
+        structured: {
+          field: 'pets',
+          filters: [{
+            field: 'id',
+            operator: Operator.Comparison.Equal,
+            value: '00000000-0000-4000-8000-000000000001',
+          }],
+          operator: Operator.Comparison.Contains,
+        },
+      },
+      {
+        entity: 'User',
+        source: 'pets $all (@.vaccinated = true)',
+        structured: {
+          field: 'pets',
+          filters: [{ field: 'vaccinated', operator: Operator.Comparison.Equal, value: true }],
+          operator: Operator.Collection.All,
+        },
+      },
+    ]
+    for (const queryCase of cases) {
+      const source = compileEntityQuery(definitions, queryCase.entity, {
+        fields: ['id'],
+        where: queryCase.source,
+      })
+      const structured = compileEntityQuery(definitions, queryCase.entity, {
+        fields: ['id'],
+        where: queryCase.structured,
+      })
+      expect(source.sql).toBe(structured.sql)
+      expect(source.values).toEqual(structured.values)
+    }
+
+    const relative = compileEntityQuery(definitions, 'User', {
+      fields: ['id'],
+      where: 'pets $contains (age > 10)',
+    })
+    const scoped = compileEntityQuery(definitions, 'User', {
+      fields: ['id'],
+      where: 'pets $contains (@.age > 10)',
+    })
+    expect(scoped.sql).toBe(relative.sql)
+    expect(scoped.values).toEqual(relative.values)
+    expect(() => compileEntityQuery(definitions, 'Pet', {
+      fields: ['id'],
+      where: 'scores $contains (@.unknown > 1)',
+    })).toThrow('Unknown scoped member field')
+    expect(() => compileEntityQuery(definitions, 'User', {
+      fields: ['id'],
+      where: 'pets $contains (@.unknown > 1)',
+    })).toThrow('Unknown field')
+  })
+
   test('compiles collection contains, universal, empty, and bracketed requirements', () => {
     const cases = [
       {
@@ -739,11 +864,11 @@ describe('Query contract', () => {
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: "friends $contains (title = 'Ada')",
-    })).toThrow('Unknown collection navigation')
+    })).toThrow('Unknown collection or array navigation')
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: "pets $contains (tags $contains (title = 'Ada'))",
-    })).toThrow('Unknown collection navigation')
+    })).toThrow('Unknown collection or array navigation')
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id'],
       where: "members $contains (membership.tags = 'urgent')",

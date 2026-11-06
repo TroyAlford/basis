@@ -1,8 +1,9 @@
 import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, InverseDerivedCollectionDefinition, QueryFieldDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
+import { arrayItemField } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
-import type { CollectionScope, OrderBy, QueryScope } from './SQL'
+import type { ArrayScope, CollectionScope, OrderBy, QueryScope } from './SQL'
 import { SQL } from './SQL'
 
 /** Maximum number of singular reference hops in one requested path. */
@@ -547,8 +548,10 @@ class QueryProjection {
       join: sql => joins.push(sql),
     }
     const resolve = (path: string): QueryFieldDefinition => {
-      const cachedField = resolved.get(path)
+      const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
+      const cachedField = resolved.get(normalized)
       if (cachedField) return cachedField
+      path = normalized
       if (relationshipAlias !== undefined && relationship) {
         const prefix = `${lowerFirst(relationship.name)}.`
         if (path.startsWith(prefix)) {
@@ -592,6 +595,27 @@ class QueryProjection {
     }
     this.#collectionScopes.set(name, scope)
     return scope
+  }
+
+  /**
+   * Build the scoped native-array relation used by one member predicate.
+   * @param name - Logical array field or dotted reference path.
+   * @returns Array scope, or undefined when the name is not an array.
+   */
+  arrayScope(name: string): ArrayScope | undefined {
+    if (this.root.collections.has(name)) return undefined
+    try {
+      const field = this.filterField(name)
+      if (field.type !== FieldType.Array) return undefined
+      return {
+        consume: units => this.#consume(units),
+        expression: this.expression(field),
+        field,
+        member: arrayItemField(field),
+      }
+    } catch {
+      return undefined
+    }
   }
 
   /**
@@ -1347,6 +1371,7 @@ export function compilePolymorphicQuery(
     return value
   }
   const scope: QueryScope = {
+    array: name => projection.arrayScope(name),
     collection: name => projection.collectionScope(name),
     definition: synthetic,
     expression: value => projection.expression(value),
@@ -1355,7 +1380,7 @@ export function compilePolymorphicQuery(
     filterKind: name => projection.filterKind(name),
   }
   const where = typeof options.where === 'string'
-    ? QueryNormalizer.normalize(synthetic, options.where, scope.filterField, scope.collection) ?? undefined
+    ? QueryNormalizer.normalize(synthetic, options.where, scope.filterField, scope.collection, scope.array) ?? undefined
     : options.where
   const predicate = SQL.where(entities, definition.name, where, scope)
   let ordering = ''

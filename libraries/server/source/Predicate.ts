@@ -45,6 +45,17 @@ export interface CollectionFilterScope {
 /** Resolve a collection navigation for filter normalization. */
 export type CollectionResolver = (name: string) => CollectionFilterScope | undefined
 
+/** Entity-shaped context used to normalize a native-array member predicate. */
+export interface ArrayFilterScope {
+  /** Native array field. */
+  readonly field: ArrayFieldDefinition,
+  /** Scalar element definition. */
+  readonly member: ScalarFieldDefinition,
+}
+
+/** Resolve a native array for filter normalization. */
+export type ArrayResolver = (name: string) => ArrayFilterScope | undefined
+
 /** A canonical serializable where filter. */
 export type Filter = CollectionFilter | ComparisonFilter | LogicalFilter
 
@@ -160,6 +171,7 @@ export const Predicate = {
    * @param input - A single-field equality shorthand or an explicit filter.
    * @param resolve - Resolve a logical field or path to its scalar definition.
    * @param collection - Resolve collection navigations to related-item metadata.
+   * @param array - Resolve native arrays to member metadata.
    * @returns The canonical filter, or null for an empty object.
    * @throws {Error} When the input shape, field, or operator is invalid.
    */
@@ -168,9 +180,10 @@ export const Predicate = {
     input: Filter | Readonly<Record<string, unknown>>,
     resolve: (name: string) => QueryFieldDefinition = name => Predicate.field(entity, name),
     collection?: CollectionResolver,
+    array?: ArrayResolver,
   ): Filter | null {
     if (!isPlainRecord(input)) throw new Error('Query where must be a plain object')
-    if (Object.hasOwn(input, 'operator')) return explicit(entity, input, resolve, collection)
+    if (Object.hasOwn(input, 'operator')) return explicit(entity, input, resolve, collection, array)
     return shorthand(entity, input, resolve)
   },
 
@@ -281,6 +294,7 @@ function shorthand(
  * @param input - Explicit node input.
  * @param resolve - Resolve a logical field or path to its scalar definition.
  * @param collection - Resolve collection navigations to related-item metadata.
+ * @param array - Resolve native arrays to member metadata.
  * @returns The canonical filter node.
  */
 function explicit(
@@ -288,6 +302,7 @@ function explicit(
   input: Readonly<Record<string, unknown>>,
   resolve: (name: string) => QueryFieldDefinition,
   collection?: CollectionResolver,
+  array?: ArrayResolver,
 ): Filter {
   const operator = input.operator
   if (typeof operator !== 'string') throw new Error('Query operator must be a string')
@@ -320,6 +335,23 @@ function explicit(
       `Query operator "${operator}" is not valid for collection navigation "${input.field}"`,
     )
   }
+  const arrayScope = typeof input.field === 'string'
+    ? array?.(input.field)
+    : undefined
+  if (arrayScope && Array.isArray(input.filters)
+    && (operator === Operator.Comparison.Contains || operator === Operator.Collection.All)) {
+    assertKeys(input, ['field', 'filters', 'operator'])
+    if (!Array.isArray(input.filters) || input.filters.length === 0) {
+      throw new Error(`Query ${operator} requires a non-empty filters array`)
+    }
+    const member = arrayMemberField(arrayScope.member)
+    const memberEntity = arrayMemberEntity(arrayScope.field, member)
+    const filters = input.filters.map(filter => (
+      child(memberEntity, operator, filter, name => arrayMemberResolver(name, member))
+    ))
+    if (operator === Operator.Collection.All) return Predicate.universal(input.field as string, filters)
+    return { field: input.field as string, filters, operator }
+  }
   if (operator === Operator.Collection.All) {
     throw new Error(`Unknown collection navigation "${String(input.field)}"`)
   }
@@ -331,7 +363,7 @@ function explicit(
     }
     return Predicate.logical(
       operator,
-      input.filters.map(filter => child(entity, operator, filter, resolve, collection)),
+      input.filters.map(filter => child(entity, operator, filter, resolve, collection, array)),
     )
   }
 
@@ -340,7 +372,7 @@ function explicit(
     if (!Array.isArray(input.filters) || input.filters.length !== 1) {
       throw new Error(`Query ${Operator.Logical.Not} requires exactly one filter`)
     }
-    return Predicate.not(child(entity, operator, input.filters[0], resolve, collection))
+    return Predicate.not(child(entity, operator, input.filters[0], resolve, collection, array))
   }
 
   if (operator === Operator.Comparison.NotEqual) {
@@ -394,6 +426,7 @@ function explicit(
  * @param filter - Child filter input.
  * @param resolve - Resolve a logical field or path to its scalar definition.
  * @param collection - Resolve collection navigations to related-item metadata.
+ * @param array - Resolve native arrays to member metadata.
  * @returns The normalized child filter.
  */
 function child(
@@ -402,9 +435,10 @@ function child(
   filter: unknown,
   resolve: (name: string) => QueryFieldDefinition,
   collection?: CollectionResolver,
+  array?: ArrayResolver,
 ): Filter {
   if (!isPlainRecord(filter)) throw new Error(`Query ${operator} filters must be plain objects`)
-  const normalized = Predicate.normalize(entity, filter, resolve, collection)
+  const normalized = Predicate.normalize(entity, filter, resolve, collection, array)
   if (!normalized) throw new Error(`Query ${operator} filters must be non-empty objects`)
   return normalized
 }
@@ -436,6 +470,51 @@ function assertKeys(value: Readonly<Record<string, unknown>>, keys: readonly str
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
     throw new Error(`Query ${String(value.operator)} requires exactly ${keys.join(', ')}`)
   }
+}
+
+/**
+ * Build the canonical synthetic entity for one array member predicate.
+ * @param field - Native array field.
+ * @param member - Canonical member field.
+ * @returns A synthetic entity whose only field is the scoped member.
+ */
+export function arrayMemberEntity(
+  field: ArrayFieldDefinition,
+  member: ScalarFieldDefinition,
+): EntityDefinition {
+  return {
+    abstract: false,
+    collections: [],
+    effectiveFields: [{ ...member, owner: 'Entity' }],
+    fields: [member],
+    inverseFields: [],
+    name: field.name,
+    parent: 'Entity',
+    singularNavigations: [],
+  }
+}
+
+/**
+ * Build the canonical scoped member field.
+ * @param member - Native array element definition.
+ * @returns The member field named `@`.
+ */
+export function arrayMemberField(member: ScalarFieldDefinition): ScalarFieldDefinition {
+  return { ...member, name: '@' }
+}
+
+/**
+ * Resolve the only field allowed in a native-array member predicate.
+ * @param name - Requested scoped path.
+ * @param member - Canonical member field.
+ * @returns The member field.
+ */
+export function arrayMemberResolver(
+  name: string,
+  member: ScalarFieldDefinition,
+): ScalarFieldDefinition {
+  if (name !== '@') throw new Error(`Unknown scoped member field "${name}"`)
+  return member
 }
 
 /**
