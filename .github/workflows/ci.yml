@@ -57,7 +57,7 @@ jobs:
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          base=$(git merge-base HEAD "origin/${BASE_REF}")
+          base=$(git rev-parse "origin/${BASE_REF}")
           echo "merge-base=$base" >> "$GITHUB_OUTPUT"
           if git cat-file -e "${base}:.github/ci-impact.json" 2>/dev/null; then
             echo "present=true" >> "$GITHUB_OUTPUT"
