@@ -2,7 +2,7 @@ import type { ArrayFieldDefinition, EntityDefinition, EntityDefinitions, QueryFi
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './Predicate'
-import { Predicate } from './Predicate'
+import { arrayItemField, Predicate } from './Predicate'
 import { SortDirection } from './SortDirection'
 
 /** A validated ordering clause. */
@@ -69,8 +69,22 @@ export interface CollectionScope {
   readonly work?: number,
 }
 
+/** Scoped native-array relation used to evaluate one member predicate. */
+export interface ArrayScope {
+  /** Consume finite compiler work for one emitted member predicate. */
+  readonly consume?: (units?: number) => void,
+  /** SQL array expression to unnest. */
+  readonly expression: string,
+  /** Native array field metadata. */
+  readonly field: ArrayFieldDefinition,
+  /** Scalar element metadata. */
+  readonly member: ScalarFieldDefinition,
+}
+
 /** Optional effective-field scope for polymorphic entity queries. */
 export interface QueryScope {
+  /** Resolve a native array navigation for member-predicate compilation. */
+  readonly array?: (name: string) => ArrayScope | undefined,
   /** Resolve a collection navigation for collection comparison compilation. */
   readonly collection?: (name: string) => CollectionScope | undefined,
   /** Effective entity metadata used for validation. */
@@ -256,7 +270,17 @@ function whereClause(
   const resolve = scope?.filterField ?? (name => (
     scope ? scope.field(name) : queryField(entity, name)
   ))
-  const filter = Predicate.normalize(entity, where, resolve, scope?.collection)
+  const array = scope?.array ?? (name => {
+    try {
+      const field = queryField(entity, name)
+      return field.type === FieldType.Array
+        ? { expression: quoteIdentifier(name), field, member: arrayItemField(field) }
+        : undefined
+    } catch {
+      return undefined
+    }
+  })
+  const filter = Predicate.normalize(entity, where, resolve, scope?.collection, array)
   if (!filter) return { sql: '', values: [] }
 
   const values: BoundScalar[] = []
@@ -266,15 +290,55 @@ function whereClause(
   }
 
   const base: QueryScope = scope ?? {
+    array,
     definition: entity,
     expression: field => quoteIdentifier(field.name),
     field: name => queryField(entity, name),
   }
+  let arrayAlias = 0
   const compile = (node: Filter, active: QueryScope): string => {
     if ('field' in node && 'filters' in node) {
       const collection = active.collection?.(node.field)
-      if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
+      const arrayScope = active.array?.(node.field)
+      if (!collection && !arrayScope) {
+        throw new Error(`Unknown collection or array navigation "${node.field}"`)
+      }
       const collectionFilter = node as CollectionFilter
+      if (arrayScope) {
+        if (collectionFilter.operator !== Operator.Comparison.Contains
+          && collectionFilter.operator !== Operator.Collection.All) {
+          throw new Error(`Query operator "${collectionFilter.operator}" is not a canonical array member comparison`)
+        }
+        if (collectionFilter.filters.length === 0) {
+          throw new Error(`Query ${collectionFilter.operator} requires at least one member requirement`)
+        }
+        arrayAlias += 1
+        const alias = quoteIdentifier(`u${arrayAlias}`)
+        const memberScope: QueryScope = {
+          definition: active.definition,
+          expression: () => alias,
+          field: name => {
+            if (name !== '@') throw new Error(`Unknown scoped member field "${name}"`)
+            return arrayScope.member
+          },
+        }
+        const source = `unnest(${arrayScope.expression}) AS ${alias}`
+        if (collectionFilter.operator === Operator.Collection.All) {
+          if (collectionFilter.filters.length !== 1) {
+            throw new Error('Query $all requires exactly one member predicate')
+          }
+          const inner = compile(collectionFilter.filters[0] as Filter, memberScope)
+          arrayScope.consume?.(1)
+          return `NOT EXISTS (SELECT 1 FROM ${source} WHERE NOT COALESCE((${inner}), FALSE))`
+        }
+        const requirements = collectionFilter.filters.map(requirement => {
+          const inner = compile(requirement, memberScope)
+          arrayScope.consume?.(1)
+          return `EXISTS (SELECT 1 FROM ${source} WHERE ${inner})`
+        })
+        return requirements.join(' AND ')
+      }
+      if (!collection) throw new Error(`Unknown collection navigation "${node.field}"`)
       if (collectionFilter.operator === Operator.Comparison.Empty) {
         collection.consume?.(collection.work ?? 1)
         return `NOT EXISTS (SELECT 1 FROM ${collection.relation} WHERE ${collection.condition})`

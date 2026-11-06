@@ -277,6 +277,17 @@ describe('QueryParser', () => {
     })
   })
 
+  test('parses scoped member predicates for arrays and collections', () => {
+    expect(withoutSpans(QueryParser.parse('scores $contains (@ >= 10)').expression))
+      .toEqual(collection('scores', Operator.Comparison.Contains, [
+        comparison('@', Operator.Comparison.GreaterThanOrEqual, [number('10')]),
+      ]))
+    expect(withoutSpans(QueryParser.parse('pets $contains (@.age > 10)').expression))
+      .toEqual(collection('pets', Operator.Comparison.Contains, [
+        comparison('@.age', Operator.Comparison.GreaterThan, [number('10')]),
+      ]))
+  })
+
   test('preserves literal kind, raw spelling, and dotted field names', () => {
     const source = 'owner.Score = "x\\ny" $and active = false $and missing = null ' +
       '$and max = 9223372036854775807 $and ratio = 1.5 $and quoted = "5"'
@@ -372,10 +383,10 @@ describe('QueryParser', () => {
   })
 
   test('propagates lexer diagnostics and rejects incomplete expressions', () => {
-    const result = QueryParser.parse('score @ 5')
+    const result = QueryParser.parse('score ? 5')
     expect(result.expression).toBeNull()
     expect(result.diagnostics).toEqual([
-      { end: 7, message: 'Unexpected character "@"', start: 6 },
+      { end: 7, message: 'Unexpected character "?"', start: 6 },
       { end: 7, message: 'Expected an operator after field', start: 6 },
     ])
   })

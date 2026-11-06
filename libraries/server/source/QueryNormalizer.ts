@@ -1,8 +1,8 @@
 import type { EntityDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
-import type { CollectionResolver, Filter } from './Predicate'
-import { arrayItemField, Predicate } from './Predicate'
+import type { ArrayResolver, CollectionResolver, Filter } from './Predicate'
+import { arrayItemField, arrayMemberEntity, arrayMemberField, arrayMemberResolver, Predicate } from './Predicate'
 import type { QueryComparison, QueryExpression, QueryLiteral } from './QueryParser'
 import { QueryParser } from './QueryParser'
 
@@ -19,6 +19,7 @@ export const QueryNormalizer = {
    * @param source - Query expression source.
    * @param resolve - Resolve a logical field or path to its scalar definition.
    * @param collection - Resolve collection navigations to related-item metadata.
+   * @param array - Resolve native arrays to member metadata.
    * @returns The canonical filter, or null for empty source.
    * @throws {Error} When the source is invalid or references incompatible metadata.
    */
@@ -27,6 +28,7 @@ export const QueryNormalizer = {
     source: string,
     resolve: (name: string) => QueryFieldDefinition = name => Predicate.field(entity, name),
     collection?: CollectionResolver,
+    array?: ArrayResolver,
   ): Filter | null {
     const result = QueryParser.parse(source)
     if (!result.expression) {
@@ -34,7 +36,7 @@ export const QueryNormalizer = {
       const [first] = result.diagnostics
       throw new Error(`Invalid where query at ${first?.start ?? 0}: ${first?.message ?? 'Invalid syntax'}`)
     }
-    return expression(entity, result.expression, resolve, collection)
+    return expression(entity, result.expression, resolve, collection, array)
   },
 }
 
@@ -44,6 +46,7 @@ export const QueryNormalizer = {
  * @param node - Syntax expression.
  * @param resolve - Resolve a logical field or path to its scalar definition.
  * @param collection - Resolve collection navigations to related-item metadata.
+ * @param array - Resolve native arrays to member metadata.
  * @returns The canonical filter.
  */
 function expression(
@@ -51,18 +54,29 @@ function expression(
   node: QueryExpression,
   resolve: (name: string) => QueryFieldDefinition,
   collection?: CollectionResolver,
+  array?: ArrayResolver,
 ): Filter {
-  if (node.kind === 'group') return expression(entity, node.expression, resolve, collection)
+  if (node.kind === 'group') return expression(entity, node.expression, resolve, collection, array)
   if (node.kind === 'logical') {
     return Predicate.logical(
       node.operator,
-      node.filters.map(filter => expression(entity, filter, resolve, collection)),
+      node.filters.map(filter => expression(entity, filter, resolve, collection, array)),
     )
   }
   if (node.kind === 'collection') {
     const scope = collection?.(node.field)
-    if (!scope) throw new Error(`Unknown collection navigation "${node.field}"`)
-    const filters = node.filters.map(filter => expression(scope.definition, filter, scope.field))
+    if (scope) {
+      const filters = node.filters.map(filter => expression(scope.definition, filter, scope.field))
+      if (node.operator === Operator.Collection.All) return Predicate.universal(node.field, filters)
+      return { field: node.field, filters, operator: node.operator }
+    }
+    const arrayScope = array?.(node.field)
+    if (!arrayScope) throw new Error(`Unknown collection or array navigation "${node.field}"`)
+    const member = arrayMemberField(arrayScope.member)
+    const memberEntity = arrayMemberEntity(arrayScope.field, member)
+    const filters = node.filters.map(filter => (
+      expression(memberEntity, filter, name => arrayMemberResolver(name, member))
+    ))
     if (node.operator === Operator.Collection.All) return Predicate.universal(node.field, filters)
     return { field: node.field, filters, operator: node.operator }
   }

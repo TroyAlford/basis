@@ -163,6 +163,13 @@ export const QueryLexer = {
         continue
       }
 
+      if (character === '@') {
+        const token = scopedFieldToken(source, index, diagnostics)
+        tokens.push(token)
+        index = token.end
+        continue
+      }
+
       if (IDENTIFIER_START.test(character)) {
         const token = fieldToken(source, index, diagnostics)
         tokens.push(token)
@@ -361,6 +368,35 @@ function symbolicOperatorToken(
     start,
   })
   return { end, raw, start, type: TokenType.Unknown, value: raw }
+}
+
+/**
+ * Read a scoped member field token (`@` or `@.path`).
+ * @param source - Query source.
+ * @param start - At-sign offset.
+ * @param diagnostics - Diagnostic sink.
+ * @returns The scoped field token.
+ */
+function scopedFieldToken(
+  source: string,
+  start: number,
+  diagnostics: QueryDiagnostic[],
+): Token {
+  let end = start + 1
+  while (source[end] === '.') {
+    if (!IDENTIFIER_START.test(source[end + 1] ?? '')) {
+      diagnostics.push({
+        end: end + 1,
+        message: 'Expected a field name after "."',
+        start: end,
+      })
+      break
+    }
+    end += 2
+    while (end < source.length && IDENTIFIER_PART.test(source[end] as string)) end += 1
+  }
+  const raw = source.slice(start, end)
+  return { end, raw, start, type: TokenType.Field, value: raw }
 }
 
 /**

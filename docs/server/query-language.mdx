@@ -306,7 +306,7 @@ const collectionComparisons = [
 
 ## Stage 19 — native Array and opaque JSON (implemented)
 
-Array and JSON predicates are type-directed by the canonical field type and keep JSON opaque. Arrays use `$contains`/`~=`, `$overlaps`, `$empty`, `$eq` set equality, and `$sequenceEqual` sequence equality; JSON uses opaque `$contains`. There is no separate array/JSON predicate engine and all forms use the canonical comparison node `{ field, operator, value }`.
+Array and JSON predicates are type-directed by the canonical field type and keep JSON opaque. Arrays use `$contains`/`~=`, `$overlaps`, `$empty`, `$eq` set equality, and `$sequenceEqual` sequence equality; JSON uses opaque `$contains`. There is no separate array/JSON predicate engine. Literal array operations use the canonical comparison node `{ field, operator, value }`; scoped member predicates use the shared collection-filter representation described in stage 19a.
 
 ```ts
 const arrayOperators = [
@@ -371,7 +371,7 @@ Array semantics are type-directed:
 - String `$contains` remains case-insensitive substring matching. JSON `$contains` means structural containment `jsonb @>`. The operator vocabulary is deliberately type-directed, not a second operator registry or a second executor.
 - `tags == [...]` and `$eq` mean unordered set equality ignoring order and multiplicity; `tags === [...]` and `$sequenceEqual` mean exact sequence equality. Set equality uses PostgreSQL native `@>`/`<@` equivalence rather than per-row sorting. `===` is invalid for inherently unordered relationship collections. These are Basis DSL semantics, not JavaScript reference equality or ordinary PostgreSQL array equality.
 - Array operands are capped at **128 elements** so one predicate cannot expand into an unbounded SQL statement or exhaust the driver parameter budget.
-- `tags $empty` tests SQL null or zero elements; `tags !$empty` is its negation. **Operator decision:** native-array `$all` is deferred beyond stage 19 until an element-variable predicate syntax is approved; `$all` remains relationship-collection syntax in this stage.
+- `tags $empty` tests SQL null or zero elements; `tags !$empty` is its negation. Native-array `$all` and existential member predicates use the approved `@` syntax in stage 19a.
 
 JSON source literals are first-class:
 
@@ -381,6 +381,81 @@ JSON source literals are first-class:
 - Structured and source operands normalize to the same comparison node and the same field-type-aware predicate. JSON null and an absent key are distinct; `$contains` performs structural containment without path traversal, schema validation, or treating JSON as an entity graph. JSON `$eq`/`===` equality and JSON path predicates are not part of this contract.
 - JSON fields remain non-null columns. Empty objects and empty arrays are values, not missing values; no JSON empty operator is introduced.
 
+## Stage 19a — scoped member predicates (implemented)
+
+`@` names the innermost current collection member. It is never inferred as an implicit left operand or resolved against an outer entity. Literal membership such as `tags $contains 'urgent'` and `tags $contains ['urgent', 'important']` remains unchanged. Bracketed member requirements are independent, so `scores $contains [(@ = 1), (@ = 2)]` requires both values across the array, while `scores $contains (@ = 1 $and @ = 2)` requires one element to be both.
+
+```ts
+const scopedMemberPredicates = [
+  {
+    meaning: 'native array existential member predicate',
+    structured: {
+      field: 'scores',
+      operator: '$contains',
+      filters: [{ field: '@', operator: '$gte', value: 10 }],
+    },
+    source: 'scores $contains (@ >= 10)',
+  },
+  {
+    meaning: 'native array universal member predicate',
+    structured: {
+      field: 'scores',
+      operator: '$all',
+      filters: [{ field: '@', operator: '$gt', value: 0 }],
+    },
+    source: 'scores $all (@ > 0)',
+  },
+  {
+    meaning: 'single member satisfying multiple conditions',
+    structured: {
+      field: 'scores',
+      operator: '$contains',
+      filters: [{
+        operator: '$and',
+        filters: [
+          { field: '@', operator: '$gt', value: 5 },
+          { field: '@', operator: '$lt', value: 20 },
+        ],
+      }],
+    },
+    source: 'scores $contains (@ > 5 $and @ < 20)',
+  },
+  {
+    meaning: 'entity collection member path',
+    structured: {
+      field: 'pets',
+      operator: '$contains',
+      filters: [{ field: 'age', operator: '$gt', value: 10 }],
+    },
+    source: 'pets $contains (@.age > 10)',
+  },
+  {
+    meaning: 'entity collection universal member predicate',
+    structured: {
+      field: 'pets',
+      operator: '$all',
+      filters: [{ field: 'vaccinated', operator: '$eq', value: true }],
+    },
+    source: 'pets $all (@.vaccinated = true)',
+  },
+  {
+    meaning: 'current entity identity',
+    structured: {
+      field: 'pets',
+      operator: '$contains',
+      filters: [{ field: 'id', operator: '$eq', value: '00000000-0000-4000-8000-000000000001' }],
+    },
+    source: "pets $contains (@ = '00000000-0000-4000-8000-000000000001')",
+  },
+]
+```
+
+- Native arrays accept `@` as a scalar member; `@.field` is invalid because array elements are scalar values. The array options are `$contains` (existential) and `$all` (universal).
+- Entity collections accept `@` or `@.path`. `@` and `@.id` both mean the current member entity identity; other paths use the same typed field/reference validation as relative syntax. `pets $contains (@.age > 10)` and `pets $contains (age > 10)` normalize identically. Relationship-owned properties remain available through the established lowercase prefix, for example `@.membership.role`.
+- Structured inner filters are relative to the member. Native-array members use the canonical pseudo-field `@`; entity collections use their normal relative field names, and `@`/`@.id` normalize to `id`.
+- `$all` is vacuously true for an empty array or collection; `$contains` is false. Existing two-valued NULL behavior applies to member comparisons. Literal array membership, `$empty`, array set/sequence equality, and opaque JSON containment retain their stage-19 semantics.
+- Arrays compile with `unnest` and entity collections with the existing correlated semijoin. Nested collection correlation, outer-context captures, JSON structural equality, and implicit `@` operands are rejected. A quantifier must contain a non-empty member predicate list.
+
 ## Ordering, pagination, and exclusions
 
 `orderBy` accepts only effective root/inherited/descendant scalar fields. It rejects references, inverse/N:M collections, dotted reference paths, Array, and JSON. Abstract queries append the stable `id` tie-break and use `name, id` when no ordering is supplied. `limit` defaults to 25 and must be a non-negative integer or `null`; `offset` must be non-negative. Pagination bindings preserve the predicate/collection/work-budget ordering.
@@ -389,7 +464,7 @@ Explicit exclusions for this contract:
 
 - No raw SQL fragments, arbitrary JSONPath, regex operators, `$blank`, `$notblank`, `$nor`, `$xor`, or a second predicate grammar.
 - No predicates on physical columns, `Inverse` fields as scalar values, or implicitly inferred inverse edges.
-- No collection predicates that fetch all children into application code, perform N+1 lookups, nest collection comparisons, or recursively traverse collection elements. No JSON path traversal, JSON equality, or array element-variable predicate syntax.
+- No collection predicates that fetch all children into application code, perform N+1 lookups, nest collection comparisons, or recursively traverse collection elements. No JSON path traversal, JSON equality, nested `@` correlation, or outer-context captures.
 - No runtime row-identity cycle detection; only canonical static traversal and reciprocal-backtrack rules apply.
 - No schema generation, migrations, ORM writes, or automatic CRUD routes from the query language.
 
@@ -399,9 +474,9 @@ Explicit exclusions for this contract:
 
 ## Current implementation audit
 
-- `QueryLexer` and `QueryParser` own field, comparison, logical, grouping, collection-comparison, and first-class Array/JSON literal syntax and source spans.
+- `QueryLexer` and `QueryParser` own field, scoped `@` member, comparison, logical, grouping, collection-comparison, and first-class Array/JSON literal syntax and source spans.
 - `QueryNormalizer` applies scalar metadata and accepts the query compiler’s field, reference-path, and collection resolvers. It lowers `$all` to the shared counterexample canonical form.
-- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, collection validation, Array/JSON operand validation, and null/empty lowering. `QueryProjection.filterField` and `QueryProjection.collectionScope` supply path resolution and correlated relation construction for `db.query`.
-- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection comparisons compile as correlated `EXISTS`/`NOT EXISTS` inside that same statement, with independent `EXISTS` per bracketed requirement. Array/JSON predicates compile through the same comparison registry with parameterized array elements and opaque JSON values.
+- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, collection/array member validation, Array/JSON operand validation, and null/empty lowering. `QueryProjection.filterField` and `QueryProjection.collectionScope` supply path resolution and correlated relation construction for `db.query`.
+- `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection comparisons compile as correlated `EXISTS`/`NOT EXISTS` inside that same statement, with independent `EXISTS` per bracketed requirement. Array/JSON predicates compile through the same comparison registry with parameterized array elements and opaque JSON values. Scoped `@` members compile as array `unnest` predicates or entity-collection semijoins in the same statement.
 
 The target end-state is therefore one grammar, two input spellings, one canonical filter tree, one SQL compiler, and one finite-work execution path.

@@ -197,6 +197,14 @@ describe('QueryLexer', () => {
     ])
   })
 
+  test('tokenizes scoped member fields', () => {
+    assertLex('@ @.age @.owner.name', [
+      field('@'),
+      field('@.age'),
+      field('@.owner.name'),
+    ])
+  })
+
   test('recognizes array equality, overlaps, and JSON punctuation', () => {
     assertLex('tags == tags === $overlaps $sequenceEqual', [
       field('tags'),
@@ -360,8 +368,8 @@ describe('QueryLexer', () => {
     assertLex('"unterminated', [string('"unterminated', 'unterminated')], [
       { message: 'Unterminated string literal', raw: '"unterminated' },
     ])
-    assertLex('score @ 5', [field('score'), unknown('@'), number('5')], [
-      { message: 'Unexpected character "@"', raw: '@' },
+    assertLex('score ? 5', [field('score'), unknown('?'), number('5')], [
+      { message: 'Unexpected character "?"', raw: '?' },
     ])
   })
 
