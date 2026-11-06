@@ -489,6 +489,20 @@ const countPredicates = [
 - The planning benchmark fixture runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over correlated and CTE default/`MATERIALIZED`/`NOT MATERIALIZED` variants on representative parent/child cardinalities, including selective and nonselective count thresholds. All variants return the same rows; the evidence selects default CTE rendering for count aggregates while correlated rendering remains in use for collection predicates/previews. No blanket `MATERIALIZED` rule is applied.
 - The exported `QueryScope`, `CollectionScope`, `ArrayScope`, and `CountScope` types form the reusable entity/relationship scope boundary for later authorization work. They do not implement permission policies, RLS, or request actor binding in this stage.
 
+Representative evidence from the analyzed 24-parent / 60-child fixture (local PostgreSQL; timings are illustrative, not CI thresholds):
+
+| Variant                  | Buffers | Execution ms | Planning ms | SQL bytes | Rows |
+| ------------------------ | ------: | -----------: | ----------: | --------: | ---: |
+| production @2            |       3 |        0.279 |       0.165 |       356 |   19 |
+| correlated @2            |      25 |        0.288 |       0.061 |       196 |   19 |
+| CTE default @2           |       2 |        0.163 |       0.079 |       363 |   19 |
+| CTE materialized @2      |       2 |        0.212 |       0.103 |       375 |   19 |
+| CTE not materialized @2  |       2 |        0.160 |       0.078 |       379 |   19 |
+| unindexed production @2  |       3 |        0.220 |       0.155 |       393 |    0 |
+| unindexed CTE default @2 |       2 |        0.072 |       0.105 |       415 |    0 |
+
+The default grouped CTE is selected for numeric count thresholds because it avoided the correlated per-row scans in both indexed and deliberately unindexed runs; materialized CTE was not consistently better. Collection predicates and previews remain correlated, and canonical zero/nonzero counts remain `NOT EXISTS`/`EXISTS`. The benchmark emits its full 22-measurement matrix through `QueryPlanning.e2e.ts` for re-checking.
+
 ## Ordering, pagination, and exclusions
 
 `orderBy` accepts only effective root/inherited/descendant scalar fields. It rejects references, inverse/N:M collections, dotted reference paths, Array, and JSON. Abstract queries append the stable `id` tie-break and use `name, id` when no ordering is supplied. `limit` defaults to 25 and must be a non-negative integer or `null`; `offset` must be non-negative. Pagination bindings preserve the predicate/collection/work-budget ordering.

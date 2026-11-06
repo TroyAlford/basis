@@ -393,7 +393,7 @@ class QueryProjection {
     contextKey = '',
     depth = 0,
     scope: FilterJoinScope = this.#outerFilterScope(),
-  ): { expression: string, field: QueryFieldDefinition, identity: boolean } {
+  ): { count?: CountExpression, expression: string, field: QueryFieldDefinition, identity: boolean } {
     const [segment] = segments
     if (segment === undefined) throw new Error(`Invalid filter path "${fullName}"`)
     const rest = segments.slice(1)
@@ -403,9 +403,13 @@ class QueryProjection {
         const key = fullName.slice(0, -7)
         const plan = this.#collectionPlan(collection, context.baseAlias, key)
         this.#consume(plan.work)
-        const count = this.#collectionCountExpression(plan, fullName)
-        this.#countFields.set(fullName, count)
-        return { expression: '', field: { name: fullName, type: FieldType.Number }, identity: false }
+        const count = this.#collectionCountExpression(plan, `${fullName}\u0000${context.baseAlias}`)
+        return {
+          count,
+          expression: '',
+          field: { name: fullName, type: FieldType.Number },
+          identity: false,
+        }
       }
       const countField = context.effective.get(segment)
       if (countField?.type === FieldType.Array) {
@@ -415,9 +419,13 @@ class QueryProjection {
           exists: `COALESCE(cardinality(${expression}), 0) > 0`,
           expression: `COALESCE(cardinality(${expression}), 0)`,
         }
-        this.#countFields.set(fullName, count)
         this.#consume()
-        return { expression: '', field: { name: fullName, type: FieldType.Number }, identity: false }
+        return {
+          count,
+          expression: '',
+          field: { name: fullName, type: FieldType.Number },
+          identity: false,
+        }
       }
       throw new Error(`Query count path "${fullName}" requires a collection or native array field`)
     }
@@ -507,12 +515,14 @@ class QueryProjection {
     const root = this.#ensureRoot(context, scope)
     let resolvedField: QueryFieldDefinition | undefined
     let resolvedIdentity = false
+    let resolvedCount: CountExpression | undefined
     const branches = descendant.variants.map(variant => {
       const owner = this.#ownerAlias(context, variant.owner, true, scope)
       const variantKey = `${contextKey}.${segment}#${variant.owner}`
       const targetOccurrence = this.#filterTarget(variant.field, owner, variantKey, scope)
       const resolved = this.#resolveFilterPath(targetOccurrence, rest, fullName, variantKey, depth + 1, scope)
       resolvedIdentity = resolved.identity
+      if (resolved.count) resolvedCount = resolved.count
       if (!resolvedField) resolvedField = resolved.field
       else if (
         resolvedField.type !== resolved.field.type
@@ -522,11 +532,25 @@ class QueryProjection {
         throw new Error(`Filter path "${fullName}" has incompatible descendant declarations`)
       }
       const leaves = variant.leaves.map(quoteLiteral).join(', ')
-      return `WHEN ${root}.${quote('entity')} IN (${leaves}) THEN ${resolved.expression}`
+      const branchExpression = resolved.count?.expression ?? resolved.expression
+      return `WHEN ${root}.${quote('entity')} IN (${leaves}) THEN ${branchExpression}`
     })
     if (!resolvedField) throw new Error(`Filter path "${fullName}" has no descendant declaration`)
+    const expression = `CASE ${branches.join(' ')} ELSE NULL END`
+    if (resolvedCount) {
+      return {
+        count: {
+          empty: `COALESCE((${expression}), 0) = 0`,
+          exists: `COALESCE((${expression}), 0) > 0`,
+          expression,
+        },
+        expression,
+        field: { ...resolvedField, name: fullName },
+        identity: resolvedIdentity,
+      }
+    }
     return {
-      expression: `CASE ${branches.join(' ')} ELSE NULL END`,
+      expression,
       field: { ...resolvedField, name: fullName },
       identity: resolvedIdentity,
     }
@@ -643,7 +667,7 @@ class QueryProjection {
     const condition = plan.condition
     this.#countFields.set(
       `${name}.$count`,
-      this.#collectionCountExpression(plan, `${name}.$count`),
+      this.#collectionCountExpression(plan, `${name}.$count\u0000${this.root.baseAlias}`),
     )
     const context: EntityContext = plan.target === undefined
       ? rootContext(this.#entities, plan.rootAlias)
@@ -819,7 +843,8 @@ class QueryProjection {
       throw new Error(`Invalid filter path "${name}"`)
     }
     const resolved = this.#resolveFilterPath(this.root, segments, name, '', 0)
-    if (!this.#countFields.has(name)) this.#filterExpressions.set(name, resolved.expression)
+    if (resolved.count) this.#countFields.set(name, resolved.count)
+    else this.#filterExpressions.set(name, resolved.expression)
     this.#filterFields.set(name, resolved.field)
     if (resolved.identity) this.#filterIdentities.add(name)
     return resolved.field
@@ -857,7 +882,7 @@ class QueryProjection {
         const key = collectionKey(node.path, collection.name)
         const plan = this.#collectionPlan(collection, node.context.baseAlias, key)
         this.#consume(plan.work)
-        const count = this.#collectionCountExpression(plan, path)
+        const count = this.#collectionCountExpression(plan, `${path}\u0000${node.context.baseAlias}`)
         this.#addComputedScalar(node, `${name}.$count`, count.expression)
         return
       }

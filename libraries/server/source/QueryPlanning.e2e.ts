@@ -4,6 +4,7 @@ import type { IsolatedDatabase } from '../testing/DatabaseIsolation'
 import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
 import { compileEntityQuery, queryEntity } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
+import { Operator } from './Operator'
 
 const definitions = EntityDefinitions.load(JSON.stringify({
   entities: [
@@ -245,7 +246,26 @@ describe('Query planning', () => {
         allMetrics.push(await measure(database, variant.name, variant.sql, variant.values))
       }
       expect(selectiveResults.every(ids => ids.join(',') === selectiveResults[0]?.join(','))).toBe(true)
-      expect(allMetrics).toHaveLength(20)
+
+      await database.sql`
+        DROP INDEX "Pet_owner_fk_idx"
+      `
+      const unindexed = [
+        {
+          name: 'unindexed-production@2',
+          sql: selectiveProduction.sql,
+          values: selectiveProduction.values,
+        },
+        { name: 'unindexed-cte-default@2', sql: countCte('', 2, selectiveParent), values: [] },
+      ]
+      const unindexedResults = []
+      for (const variant of unindexed) {
+        const rows = await database.sql.unsafe<{ id: string }[]>(variant.sql, [...variant.values])
+        unindexedResults.push(rows.map(row => row.id))
+        allMetrics.push(await measure(database, variant.name, variant.sql, variant.values))
+      }
+      expect(unindexedResults.every(ids => ids.join(',') === unindexedResults[0]?.join(','))).toBe(true)
+      expect(allMetrics).toHaveLength(22)
       process.stdout.write(`query-plan-evidence ${JSON.stringify(allMetrics)}\n`)
 
       const projected = await queryEntity<{
@@ -369,6 +389,32 @@ describe('Query planning', () => {
         orderBy: 'id',
         where: 'favorite.pets.$count >= 2',
       })).toEqual([{ id: alpha }])
+      expect(await queryEntity<{ id: string }>(database.sql, variantDefinitions, 'Source', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'favorite.pets.$count >= 1',
+      })).toEqual([{ id: alpha }, { id: beta }])
+      expect(await queryEntity<{ id: string }>(database.sql, variantDefinitions, 'Source', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'favorite.pets.$count = 1',
+      })).toEqual([{ id: beta }])
+      const structuredCount = compileEntityQuery(variantDefinitions, 'Source', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: {
+          field: 'favorite.pets.$count',
+          operator: Operator.Comparison.Equal,
+          value: 1,
+        },
+      })
+      const stringCount = compileEntityQuery(variantDefinitions, 'Source', {
+        fields: ['id'],
+        orderBy: 'id',
+        where: 'favorite.pets.$count = 1',
+      })
+      expect(stringCount.sql).toBe(structuredCount.sql)
+      expect(stringCount.values).toEqual(structuredCount.values)
 
       const previews = await queryEntity<{
         favorite: { pets: { items: unknown[], total: number } },
