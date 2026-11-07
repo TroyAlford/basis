@@ -722,23 +722,26 @@ export class EntityDefinitions {
         token := current_setting('basis.actor', true);
         IF token IS NULL OR token = '' THEN RETURN NULL; END IF;
         parts := string_to_array(token, ':');
-        IF array_length(parts, 1) <> 6 THEN RETURN NULL; END IF;
-        IF parts[2] <> txid_current()::text THEN RETURN NULL; END IF;
-        IF parts[3] <> current_database()::text OR parts[4] <> 'v1' THEN RETURN NULL; END IF;
-        expires := parts[5]::numeric;
+        IF array_length(parts, 1) <> 7 OR parts[1] <> 'actor' THEN RETURN NULL; END IF;
+        IF parts[3] <> txid_current()::text THEN RETURN NULL; END IF;
+        IF parts[4] <> current_database()::text OR parts[5] <> 'v1' THEN RETURN NULL; END IF;
+        expires := parts[6]::numeric;
         IF expires < extract(epoch FROM now()) THEN RETURN NULL; END IF;
         SELECT value INTO secret FROM basis.secret WHERE key = 'actor';
         IF secret IS NULL THEN RETURN NULL; END IF;
         expected := encode(
           hmac(
-            convert_to(parts[1] || ':' || parts[2] || ':' || parts[3] || ':' || parts[4] || ':' || parts[5], 'UTF8'),
+            convert_to(
+              parts[1] || ':' || parts[2] || ':' || parts[3] || ':' || parts[4] || ':' || parts[5] || ':' || parts[6],
+              'UTF8'
+            ),
             convert_to(secret, 'UTF8'),
             'sha256'
           ),
           'hex'
         );
-        IF expected <> parts[6] THEN RETURN NULL; END IF;
-        actor := convert_from(decode(parts[1], 'hex'), 'UTF8');
+        IF expected <> parts[7] THEN RETURN NULL; END IF;
+        actor := convert_from(decode(parts[2], 'hex'), 'UTF8');
         RETURN actor;
       EXCEPTION WHEN others THEN
         RETURN NULL;
@@ -844,11 +847,11 @@ export class EntityDefinitions {
         END IF;
         IF identity_proof IS NULL OR identity_proof = '' THEN RETURN NULL; END IF;
         proof_parts := string_to_array(identity_proof, ':');
-        IF array_length(proof_parts, 1) <> 6 THEN RETURN NULL; END IF;
-        IF proof_parts[1] <> encode(convert_to(provider_name, 'UTF8'), 'hex') THEN RETURN NULL; END IF;
-        IF proof_parts[2] <> encode(convert_to(provider_subject, 'UTF8'), 'hex') THEN RETURN NULL; END IF;
-        IF proof_parts[3] <> current_database()::text OR proof_parts[4] <> 'v1' THEN RETURN NULL; END IF;
-        proof_expires := proof_parts[5]::numeric;
+        IF array_length(proof_parts, 1) <> 7 OR proof_parts[1] <> 'identity-enrollment' THEN RETURN NULL; END IF;
+        IF proof_parts[2] <> encode(convert_to(provider_name, 'UTF8'), 'hex') THEN RETURN NULL; END IF;
+        IF proof_parts[3] <> encode(convert_to(provider_subject, 'UTF8'), 'hex') THEN RETURN NULL; END IF;
+        IF proof_parts[4] <> current_database()::text OR proof_parts[5] <> 'v1' THEN RETURN NULL; END IF;
+        proof_expires := proof_parts[6]::numeric;
         IF proof_expires < extract(epoch FROM now()) THEN RETURN NULL; END IF;
         SELECT value INTO proof_secret FROM basis.secret WHERE key = 'actor';
         IF proof_secret IS NULL THEN RETURN NULL; END IF;
@@ -856,7 +859,7 @@ export class EntityDefinitions {
           hmac(
             convert_to(
               proof_parts[1] || ':' || proof_parts[2] || ':' || proof_parts[3] || ':' ||
-              proof_parts[4] || ':' || proof_parts[5],
+              proof_parts[4] || ':' || proof_parts[5] || ':' || proof_parts[6],
               'UTF8'
             ),
             convert_to(proof_secret, 'UTF8'),
@@ -864,7 +867,7 @@ export class EntityDefinitions {
           ),
           'hex'
         );
-        IF proof_expected <> proof_parts[6] THEN RETURN NULL; END IF;
+        IF proof_expected <> proof_parts[7] THEN RETURN NULL; END IF;
         PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));
         SELECT e."revoked", e."user.id" INTO existing_revoked, existing_user
         FROM "ExternalIdentity" e

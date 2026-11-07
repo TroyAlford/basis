@@ -48,6 +48,7 @@ export function signActor(
 ): string {
   const expiry = Math.floor(Date.now() / 1000) + TOKEN_LIFETIME_SECONDS
   const payload = [
+    'actor',
     Buffer.from(actorId, 'utf8').toString('hex'),
     transactionId,
     domain,
@@ -74,6 +75,7 @@ export function signIdentity(
 ): string {
   const expiry = Math.floor(Date.now() / 1000) + 300
   const payload = [
+    'identity-enrollment',
     Buffer.from(provider, 'utf8').toString('hex'),
     Buffer.from(subject, 'utf8').toString('hex'),
     domain,

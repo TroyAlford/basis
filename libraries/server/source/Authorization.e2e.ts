@@ -211,6 +211,20 @@ describe('Authorization RLS', () => {
         SELECT basis.login_identity('evil', 'other', 'evil@example.com', 'Evil', NULL) AS id
       `))
       expect(nullProof[0]?.id).toBeNull()
+      const crossPurpose = await asActor(user, () => server.db.tx(async sql => {
+        const [row] = await sql<{ id: string, token: string }[]>`
+          SELECT current_setting('basis.actor', TRUE) AS token, txid_current()::text AS id
+        `
+        if (!row?.id || !row.token) throw new Error('actor proof was missing')
+        return sql<{ id: string | null }[]>`
+SELECT basis.login_identity(${user},
+  ${row.id},
+  'evil@example.com',
+  'Evil',
+  ${row.token}) AS id
+        `
+      }))
+      expect(crossPurpose[0]?.id).toBeNull()
       expect('login' in authorization).toBe(false)
       await expect(asActor(admin.userId, () => authorization.assignRole(admin.userId, 'admin'))).rejects.toThrow()
 
@@ -269,6 +283,17 @@ describe('Authorization RLS', () => {
       })
       const response = await server.handle(new Request('http://localhost/api/secure-articles'))
       expect(await response?.json()).toEqual([{ id: article, title: 'Updated' }])
+
+      server.api([HttpVerb.Get], 'bootstrap-attempt', async () => {
+        try {
+          await authorization.bootstrap({ provider: 'evil', subject: 'evil' })
+          return new Response('ok')
+        } catch {
+          return new Response('blocked', { status: 403 })
+        }
+      })
+      const bootstrapAttempt = await server.handle(new Request('http://localhost/api/bootstrap-attempt'))
+      expect(bootstrapAttempt?.status).toBe(403)
 
       const allowedId = randomUUID()
       await asActor(admin.userId, () => authorization.grant({

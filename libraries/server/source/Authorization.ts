@@ -231,6 +231,9 @@ export class Authorization {
     readonly provider?: string,
     readonly subject?: string,
   } = {}): Promise<BootstrapResult> {
+    if (currentActor() !== undefined) {
+      throw new Error('Authorization: bootstrap is only available outside request dispatch')
+    }
     const admin = await openAdmin(this.#database).catch(() => null)
     if (!admin) throw new Error('Authorization requires an administrative database connection')
     try {
