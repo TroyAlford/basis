@@ -219,28 +219,44 @@ export class Graph {
     const tables: PhysicalTable[] = base.tables.map(table => ({
       ...table,
       forceRowSecurity: superuser,
-      indexes: [...table.indexes, ...this.#indexes().filter(index => index.table === table.name)],
+      indexes: [
+        ...table.indexes,
+        ...this.#indexes().filter(index => (
+          index.table === table.name && !table.indexes.some(existing => existing.name === index.name)
+        )),
+      ],
       rowSecurity: true,
     }))
     const policies = this.#policies(appRole)
     const hasRoleDdl = this.#hasRoleFunction()
-    const policyFieldDdl = this.#policyFieldFunction()
-    const functions: PhysicalFunction[] = [hasRoleDdl, policyFieldDdl].map((sql, index) => ({
-      body: /\$\$([\s\S]*?)\$\$/u.exec(sql)?.[1]?.trim() ?? '',
+    const hasRole: PhysicalFunction = {
+      body: /\$\$([\s\S]*?)\$\$/u.exec(hasRoleDdl)?.[1]?.trim() ?? '',
       lifecycle: false,
-      name: index === 0 ? 'basis.has_role' : 'basis.policy_field',
-      required: [index === 0 ? 'basis.has_role' : 'basis.policy_field'],
+      name: 'basis.has_role',
+      required: ['basis.has_role'],
       searchPath: 'public, basis, pg_temp',
       securityDefiner: true,
-      signature: index === 0 ? 'role_id text' : 'root_id text, owner_name text, field_name text',
-      sql,
-    }))
+      signature: 'role_id text',
+      sql: hasRoleDdl,
+    }
     return {
       ...base,
       extensions: ['pg_trgm'],
-      functions: [...base.functions, ...functions],
+      functions: [
+        ...base.functions,
+        hasRole,
+        ...this.#policyFunctions(),
+        ...this.#identityFunctions(),
+      ],
       grants: this.#grants(appRole),
       policies,
+      roles: this.roles
+        .filter(role => role.id !== PUBLIC_ROLE_ID)
+        .map(role => ({
+          ...(role.description === undefined ? {} : { description: role.description }),
+          id: role.id,
+          name: role.name,
+        })),
       schemas: ['basis'],
       tables,
     }
@@ -258,17 +274,13 @@ export class Graph {
     const statements: string[] = ['CREATE SCHEMA IF NOT EXISTS basis']
     for (const index of this.#indexes()) statements.push(index.sql)
     for (const fn of schema.functions) {
-      if (fn.name === 'basis.has_role' || fn.name === 'basis.policy_field') statements.push(fn.sql)
+      if (!fn.lifecycle) statements.push(fn.sql)
     }
     for (const table of schema.tables) {
       const quoted = quoteIdentifier(table.name)
       statements.push(`ALTER TABLE ${quoted} ENABLE ROW LEVEL SECURITY`)
       if (superuser) statements.push(`ALTER TABLE ${quoted} FORCE ROW LEVEL SECURITY`)
     }
-    statements.push('REVOKE ALL ON FUNCTION basis.has_role(text) FROM PUBLIC')
-    statements.push('REVOKE ALL ON FUNCTION basis.policy_field(text, text, text) FROM PUBLIC')
-    statements.push(`GRANT EXECUTE ON FUNCTION basis.has_role(text) TO ${role}`)
-    statements.push(`GRANT EXECUTE ON FUNCTION basis.policy_field(text, text, text) TO ${role}`)
     statements.push('REVOKE CREATE ON SCHEMA public FROM PUBLIC')
     statements.push(`REVOKE CREATE ON SCHEMA public FROM ${role}`)
     statements.push(`GRANT USAGE ON SCHEMA public TO ${role}`)
@@ -295,10 +307,11 @@ export class Graph {
   accessExpression(
     action: Action | `${Action}`,
     target: string,
-    row: { readonly id?: string } = {},
+    row: { readonly id?: string } & Record<string, unknown> = {},
   ): string | null {
     const normalized = actionValue(action)
     if (normalized === Action.Manage) return this.#manageExpression(target)
+    if (normalized === Action.Create) return this.createExpression(target, row)
     if (target === 'Entity') {
       const expression = this.#entityRootExpression(normalized)
       return expression === null
@@ -325,6 +338,68 @@ export class Graph {
     }
     if (conditions.length === 0) return null
     return `(${conditions.join(' OR ')})`
+  }
+
+  /**
+   * Compile a create-permission expression against proposed row values.
+   * @param target - Entity or relationship being created.
+   * @param row - Proposed new-row values.
+   * @returns SQL boolean expression, or null.
+   */
+  createExpression(target: string, row: Record<string, unknown> = {}): string | null {
+    const entity = this.#policyEntity(target)
+    if (!entity) return null
+    const targets = new Set(['*', ...this.#ancestors(target)])
+    const conditions: string[] = []
+    for (const grant of this.grants) {
+      if (!targets.has(grant.target)) continue
+      const actionMatches = grant.action === Action.Create
+        || (MANAGED_ENTITIES.has(target) && grant.action === Action.Manage)
+      if (!actionMatches) continue
+      const role = roleCondition(grant.role)
+      const predicate = grant.predicate
+        ? this.#compilePredicateForRow(grant, row)
+        : 'TRUE'
+      conditions.push(`(${role} AND ${predicate})`)
+    }
+    return conditions.length === 0 ? null : `(${conditions.join(' OR ')})`
+  }
+
+  #compilePredicateForRow(grant: GraphGrant, row: Record<string, unknown>): string {
+    const entity = grant.target === 'Entity' ? ENTITY_ROOT : this.#policyEntity(grant.target)
+    if (!entity) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
+    const valueFor = (name: string): unknown => {
+      if (Object.hasOwn(row, name)) return row[name]
+      const root = name.split('.', 1)[0] ?? name
+      if (Object.hasOwn(row, root)) {
+        const value = row[root]
+        if (value && typeof value === 'object' && 'id' in value) {
+          return (value as { id?: unknown }).id
+        }
+        return value
+      }
+      return undefined
+    }
+    const scope: QueryScope = {
+      array: name => {
+        const field = policyField(entity, name)
+        if (field.type !== FieldType.Array) return undefined
+        return {
+          expression: literal(valueFor(field.name)),
+          field,
+          member: {
+            ...(field.items.format ? { format: field.items.format } : {}),
+            name: field.name,
+            type: field.items.type,
+          },
+        }
+      },
+      definition: entity,
+      expression: field => literal(valueFor(field.name)),
+      field: name => policyField(entity, name),
+    }
+    const where = SQL.where(this.definitions, entity.name, grant.predicate as Filter, scope)
+    return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
   }
 
   /**
@@ -507,6 +582,36 @@ export class Graph {
   }
 
   #compilePredicate(grant: GraphGrant, alias: string, table: string): string {
+    if (this.#requiresHelper(grant, table)) {
+      return `${this.#helperName(grant)}(${alias}.${quoteIdentifier('id')})`
+    }
+    return this.#compileDirectPredicate(grant, alias, table, false)
+  }
+
+  #requiresHelper(grant: GraphGrant, table: string): boolean {
+    if (grant.target !== table || !grant.predicate) return grant.target !== table
+    const entity = grant.target === 'Entity' ? ENTITY_ROOT : this.#policyEntity(grant.target)
+    if (!entity) return true
+    return filterFieldNames(grant.predicate).some(name => {
+      const field = entity.effectiveFields.find(candidate => candidate.name === name.split('.', 1)[0])
+      return !field || field.owner !== grant.target
+    })
+  }
+
+  #helperName(grant: GraphGrant): string {
+    const hash = createHash('sha256')
+      .update(JSON.stringify({ predicate: grant.predicate, target: grant.target }))
+      .digest('hex')
+      .slice(0, 16)
+    return `basis.policy_${hash}`
+  }
+
+  #compileDirectPredicate(
+    grant: GraphGrant,
+    alias: string,
+    table: string,
+    allowSubqueries: boolean,
+  ): string {
     const entity = grant.target === 'Entity' ? ENTITY_ROOT : this.#policyEntity(grant.target)
     if (!entity) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
     const ownerOf = (name: string): string => {
@@ -516,20 +621,12 @@ export class Graph {
     const expression = (field: QueryFieldDefinition): string => {
       const owner = ownerOf(field.name)
       if (owner === table) return `${alias}.${quoteIdentifier(field.name)}`
+      if (!allowSubqueries) throw new Error(`Graph: inherited policy field "${field.name}" requires a helper`)
       if (field.type === FieldType.Array || field.type === FieldType.JSON) {
         throw new Error(`Graph: inherited ${String(field.type)} policy field "${field.name}" is not supported`)
       }
-      const cast = field.type === FieldType.Boolean
-        ? '::boolean'
-        : field.type === FieldType.Number
-          ? '::double precision'
-          : field.type === FieldType.Date
-            ? '::date'
-            : field.type === FieldType.Timestamp
-              ? '::timestamptz'
-              : ''
-      return `basis.policy_field(${alias}.${quoteIdentifier('id')}, ${literal(owner)}, ` +
-        `${literal(field.name)})${cast}`
+      return `(SELECT ${quoteIdentifier(field.name)} FROM ${quoteIdentifier(owner)} AS __field ` +
+        `WHERE __field.${quoteIdentifier('id')} = ${alias}.${quoteIdentifier('id')})`
     }
     const scope: QueryScope = {
       array: name => {
@@ -551,6 +648,155 @@ export class Graph {
     }
     const where = SQL.where(this.definitions, entity.name, grant.predicate as Filter, scope)
     return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
+  }
+
+  #identityFunctions(): PhysicalFunction[] {
+    const userEntity = this.userLeaf()
+    const userFields = this.definitions.entity('User')?.effectiveFields ?? []
+    const email = userFields.some(field => field.name === 'email')
+    const userColumns = ['"id"', ...(email ? ['"email"'] : [])].join(', ')
+    const userValues = email ? 'user_id, coalesce(email_address, \'\')' : 'user_id'
+    const leafInsert = userEntity === 'User'
+      ? ''
+      : `INSERT INTO ${quoteIdentifier(userEntity)} ("id") VALUES (user_id);`
+    const functions: PhysicalFunction[] = []
+    const resolveSql = `
+      CREATE OR REPLACE FUNCTION basis.resolve_identity(candidate text)
+      RETURNS text
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
+        SELECT u."id"
+        FROM "User" u
+        WHERE u."id" = candidate
+          AND EXISTS (
+            SELECT 1
+            FROM "ExternalIdentity" e
+            WHERE e."user.id" = u."id" AND e."revoked" = false
+          )
+      $$;
+    `
+    functions.push({
+      body: /\$\$([\s\S]*?)\$\$/u.exec(resolveSql)?.[1]?.trim() ?? '',
+      lifecycle: false,
+      name: 'basis.resolve_identity',
+      required: ['basis.resolve_identity'],
+      searchPath: 'public, basis, pg_temp',
+      securityDefiner: true,
+      signature: 'candidate text',
+      sql: resolveSql,
+    })
+    const enrollSql = `
+      CREATE OR REPLACE FUNCTION basis.enroll_identity(
+        provider_name text,
+        provider_subject text,
+        display_name text,
+        email_address text
+      )
+      RETURNS text
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
+      DECLARE
+        existing_revoked boolean;
+        existing_user text;
+        user_id text;
+        identity_id text;
+        user_name text;
+      BEGIN
+        IF provider_name IS NULL OR provider_name = ''
+          OR provider_subject IS NULL OR provider_subject = '' THEN
+          RETURN NULL;
+        END IF;
+        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));
+        SELECT e."revoked", e."user.id" INTO existing_revoked, existing_user
+        FROM "ExternalIdentity" e
+        WHERE e."provider" = provider_name AND e."subject" = provider_subject
+        FOR UPDATE;
+        IF FOUND THEN
+          IF existing_revoked THEN RETURN NULL; END IF;
+          RETURN existing_user;
+        END IF;
+        user_id := gen_random_uuid()::text;
+        user_name := coalesce(
+          nullif(display_name, ''),
+          nullif(email_address, ''),
+          provider_name || ':' || provider_subject
+        );
+        INSERT INTO "Entity" ("id", "name", "entity") VALUES (user_id, user_name, ${literal(userEntity)});
+        INSERT INTO "User" (${userColumns}) VALUES (${userValues});
+        ${leafInsert}
+        identity_id := gen_random_uuid()::text;
+        INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');
+        INSERT INTO "ExternalIdentity" ("id", "provider", "subject", "revoked", "user.id")
+          VALUES (identity_id, provider_name, provider_subject, false, user_id);
+        RETURN user_id;
+      END $$;
+    `
+    functions.push({
+      body: /\$\$([\s\S]*?)\$\$/u.exec(enrollSql)?.[1]?.trim() ?? '',
+      lifecycle: false,
+      name: 'basis.enroll_identity',
+      required: ['basis.enroll_identity'],
+      searchPath: 'public, basis, pg_temp',
+      securityDefiner: true,
+      signature: 'provider_name text, provider_subject text, display_name text, email_address text',
+      sql: enrollSql,
+    })
+    return functions
+  }
+
+  /**
+   * Resolve the concrete canonical User leaf table.
+   * @returns The User table or its first concrete descendant.
+   */
+  userLeaf(): string {
+    const user = this.definitions.entity('User')
+    if (!user) return 'User'
+    if (!user.abstract) return 'User'
+    const leaf = this.definitions.entities.find(entity => {
+      let current = entity
+      while (current.parent !== 'Entity') {
+        const parent = this.definitions.entity(current.parent)
+        if (!parent) return false
+        if (parent.name === 'User') return !entity.abstract
+        current = parent
+      }
+      return false
+    })
+    return leaf?.name ?? 'User'
+  }
+
+  #policyFunctions(): PhysicalFunction[] {
+    const functions: PhysicalFunction[] = []
+    const seen = new Set<string>()
+    for (const grant of this.grants) {
+      if (!grant.predicate) continue
+      const name = this.#helperName(grant)
+      if (seen.has(name)) continue
+      seen.add(name)
+      const predicate = this.#compileDirectPredicate(grant, '__row', grant.target, true)
+      const sql = `
+        CREATE OR REPLACE FUNCTION ${name}(root_id text)
+        RETURNS boolean
+        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
+          SELECT EXISTS (
+            SELECT 1
+            FROM ${quoteIdentifier(grant.target)} AS "__row"
+            WHERE "__row".${quoteIdentifier('id')} = root_id
+              AND ${predicate}
+          )
+        $$;
+      `
+      functions.push({
+        body: /\$\$([\s\S]*?)\$\$/u.exec(sql)?.[1]?.trim() ?? '',
+        lifecycle: false,
+        name,
+        required: [name],
+        searchPath: 'public, basis, pg_temp',
+        securityDefiner: true,
+        signature: 'root_id text',
+        sql,
+      })
+    }
+    return functions
   }
 
   #manageExpression(target: string): string | null {
@@ -709,27 +955,52 @@ export class Graph {
       privilege: 'EXECUTE',
       sql: 'REVOKE ALL ON FUNCTION basis.has_role(text) FROM PUBLIC',
     })
-    const fieldGrant = `grant:${appRole}:function:basis.policy_field:EXECUTE`
-    grants.push({
-      function: 'basis.policy_field',
-      grantName: fieldGrant,
-      grantee: appRole,
-      kind: 'grant',
-      name: fieldGrant,
-      object: 'function',
-      privilege: 'EXECUTE',
-      sql: `GRANT EXECUTE ON FUNCTION basis.policy_field(text, text, text) TO ${role}`,
-    })
-    grants.push({
-      function: 'basis.policy_field',
-      grantName: fieldGrant,
-      grantee: 'PUBLIC',
-      kind: 'revoke',
-      name: `revoke:${fieldGrant}`,
-      object: 'function',
-      privilege: 'EXECUTE',
-      sql: 'REVOKE ALL ON FUNCTION basis.policy_field(text, text, text) FROM PUBLIC',
-    })
+    for (const fn of this.#policyFunctions()) {
+      const helperGrant = `grant:${appRole}:function:${fn.name}:EXECUTE`
+      grants.push({
+        function: fn.name,
+        grantName: helperGrant,
+        grantee: appRole,
+        kind: 'grant',
+        name: helperGrant,
+        object: 'function',
+        privilege: 'EXECUTE',
+        sql: `GRANT EXECUTE ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) TO ${role}`,
+      })
+      grants.push({
+        function: fn.name,
+        grantName: helperGrant,
+        grantee: 'PUBLIC',
+        kind: 'revoke',
+        name: `revoke:${helperGrant}`,
+        object: 'function',
+        privilege: 'EXECUTE',
+        sql: `REVOKE ALL ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) FROM PUBLIC`,
+      })
+    }
+    for (const fn of this.#identityFunctions()) {
+      const identityGrant = `grant:${appRole}:function:${fn.name}:EXECUTE`
+      grants.push({
+        function: fn.name,
+        grantName: identityGrant,
+        grantee: appRole,
+        kind: 'grant',
+        name: identityGrant,
+        object: 'function',
+        privilege: 'EXECUTE',
+        sql: `GRANT EXECUTE ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) TO ${role}`,
+      })
+      grants.push({
+        function: fn.name,
+        grantName: identityGrant,
+        grantee: 'PUBLIC',
+        kind: 'revoke',
+        name: `revoke:${identityGrant}`,
+        object: 'function',
+        privilege: 'EXECUTE',
+        sql: `REVOKE ALL ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) FROM PUBLIC`,
+      })
+    }
     grants.push({
       grantName: `grant:${appRole}:schema:public:CREATE`,
       grantee: appRole,
@@ -741,46 +1012,6 @@ export class Graph {
       table: 'public',
     })
     return grants
-  }
-
-  #policyFieldFunction(): string {
-    const pairs: string[] = []
-    const seen = new Set<string>()
-    for (const entity of this.definitions.entities) {
-      for (const field of entity.effectiveFields) {
-        if (field.type === FieldType.Array || field.type === FieldType.JSON) continue
-        const key = `${field.owner}\u0000${field.name}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        pairs.push(`(${literal(field.owner)}, ${literal(field.name)})`)
-      }
-    }
-    for (const field of ENTITY_ROOT.effectiveFields) {
-      const key = `${field.owner}\u0000${field.name}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      pairs.push(`(${literal(field.owner)}, ${literal(field.name)})`)
-    }
-    const allowed = pairs.length === 0 ? 'FALSE' : `(owner_name, field_name) IN (${pairs.join(', ')})`
-    return `
-      CREATE OR REPLACE FUNCTION basis.policy_field(
-        root_id text,
-        owner_name text,
-        field_name text
-      )
-      RETURNS text
-      LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE
-        result text;
-      BEGIN
-        IF NOT (${allowed}) THEN
-          RAISE EXCEPTION 'unknown policy field';
-        END IF;
-        EXECUTE format('SELECT %I::text FROM %I WHERE id = $1', field_name, owner_name)
-          INTO result USING root_id;
-        RETURN result;
-      END $$;
-    `
   }
 
   #hasRoleFunction(): string {
@@ -975,6 +1206,18 @@ function literal(value: unknown): string {
  */
 function inline(sql: string, values: readonly unknown[]): string {
   return sql.replace(/\$(\d+)/gu, (_match, index: string) => literal(values[Number(index) - 1]))
+}
+
+/**
+ * Collect root field names used by one canonical predicate.
+ * @param filter - Canonical predicate.
+ * @returns Root field names in traversal order.
+ */
+function filterFieldNames(filter: Filter): string[] {
+  if ('filters' in filter) {
+    return filter.filters.flatMap(child => filterFieldNames(child))
+  }
+  return 'field' in filter ? [filter.field] : []
 }
 
 /**

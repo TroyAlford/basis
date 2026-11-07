@@ -222,6 +222,16 @@ describe('Authorization RLS', () => {
         VALUES (${other}, ${ADMIN_ROLE_ID})
       `))).rejects.toThrow()
 
+      expect(await asActor(user, () => authorization.can('create', 'Article', {
+        title: 'Allowed',
+      }))).toBe(true)
+      expect(await asActor(user, () => authorization.can('create', 'Article', {
+        title: 'Denied',
+      }))).toBe(false)
+      expect(await asActor(admin.userId, () => authorization.can('create', 'Article', {
+        title: 'Denied',
+      }))).toBe(true)
+
       const allowed = randomUUID()
       await asActor(user, () => server.db.tx(async sql => {
         await sql`

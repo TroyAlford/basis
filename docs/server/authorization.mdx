@@ -75,7 +75,7 @@ The closed action vocabulary is `read`, `create`, `update`, `delete`, and `manag
 
 Graph predicates are normalized when the graph loads and compiled into PostgreSQL `CREATE POLICY ... USING (...)` and `WITH CHECK (...)` expressions. PostgreSQL validates and evaluates them as SQL; Basis does not interpret business predicates at request time. RLS covers the universal `Entity` root, every MTI ancestor and concrete table, and every named relationship table. Reads deny by returning no rows. Creates use `WITH CHECK`; updates check old and new rows; deletes check the old row. Default deny applies to tables without applicable grants.
 
-Inherited MTI predicate fields use a narrow security-definer field accessor so a policy can compare an ancestor field without recursively re-entering that ancestor's RLS policy. The accessor returns a field value by row identity; it does not evaluate predicates.
+Inherited MTI predicate fields use a narrow, row-scoped Boolean policy helper generated from the compiled predicate. The helper answers only whether the compiled predicate matches one row identity; it does not return field values or accept arbitrary expression text.
 
 ## `$me` is search shorthand
 
@@ -127,6 +127,6 @@ The administrative connection is not available to ordinary handlers. The applica
 
 `server.auth!.can(action, target, row?)` executes the compiled policy expression and returns whether PostgreSQL permits the action for the current request actor. `server.auth!.effective(userId)` lists graph grants effective for a user, including Public grants. `server.auth!.revokeIdentity(provider, subject)` revokes a provider binding.
 
-Identity enrollment maps a verified provider subject to one canonical User through the trusted server boundary. Provider subjects are never treated as canonical entity ids. Revoked bindings fail closed.
+Identity resolution and enrollment use narrow system-owned security-definer functions through the restricted application path; they do not require the owner credential at request time. Provider subjects are never treated as canonical entity ids, and revoked bindings fail closed. The administrative connection remains reserved for explicit bootstrap and schema provisioning.
 
 The graph's roles, grants, RLS policies, schemas, indexes, and security functions are part of the typed physical schema compiled by `Graph.physicalSchema` and planned by `DDL.plan`. See [Schema Inspection & Planning](./schema.mdx).

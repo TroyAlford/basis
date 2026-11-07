@@ -257,10 +257,56 @@ describe('DDL schema planning', () => {
     ))).toBe(true)
   })
 
+  test('plans graph role metadata changes while preserving role identity', () => {
+    const previous = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      roles: { editor: { name: 'Editor' } },
+    })
+    const desired = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      roles: { editor: { name: 'Editor Renamed' } },
+    })
+    const role = previous.role('editor')
+    if (!role) throw new Error('editor role was not loaded')
+    const plan = DDL.plan({
+      actual: previous.physicalSchema('basis_app', false),
+      appRole: 'basis_app',
+      desired,
+      previous,
+    })
+    expect(plan.drift).toEqual([])
+    expect(plan.blocked).toBe(false)
+    expect(plan.operations.some(operation => (
+      operation.kind === 'role' && operation.id === `role:${role.id}:replace`
+    ))).toBe(true)
+  })
+
+  test('plans a reviewed policy replacement instead of drift', () => {
+    const previous = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      grants: [{ action: 'read', predicate: "title = 'x'", role: 'public', target: 'Note' }],
+    })
+    const desired = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      grants: [{ action: 'read', predicate: "title = 'y'", role: 'public', target: 'Note' }],
+    })
+    const plan = DDL.plan({
+      actual: previous.physicalSchema('basis_app', false),
+      appRole: 'basis_app',
+      desired,
+      previous,
+    })
+    expect(plan.drift).toEqual([])
+    expect(plan.blocked).toBe(false)
+    expect(plan.operations.some(operation => (
+      operation.kind === 'policy' && operation.id.endsWith(':replace')
+    ))).toBe(true)
+  })
+
   test('plans PUBLIC EXECUTE revocations after newly created security functions', () => {
     const model = new Graph({
       entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-      grants: [{ action: 'read', role: 'public', target: 'Note' }],
+      grants: [{ action: 'read', predicate: "title = 'x'", role: 'public', target: 'Note' }],
     })
     const empty = {
       constraints: [],
@@ -275,7 +321,7 @@ describe('DDL schema planning', () => {
       operation.kind === 'grant' && operation.sql.startsWith('REVOKE ALL ON FUNCTION')
     ))
     expect(revokes.some(operation => operation.sql.includes('basis.has_role'))).toBe(true)
-    expect(revokes.some(operation => operation.sql.includes('basis.policy_field'))).toBe(true)
+    expect(revokes.some(operation => operation.sql.includes('basis.policy_'))).toBe(true)
     for (const revoke of revokes) {
       const functionTarget = revoke.dependsOn.find(dependency => dependency.startsWith('function:'))
       expect(functionTarget).toBeTruthy()

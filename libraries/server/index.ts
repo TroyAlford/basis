@@ -5,7 +5,7 @@ export { Authorization } from './source/Authorization'
 export { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID } from './source/Graph'
 export { DDL } from './source/Schema'
 export type {
-  PhysicalColumn, PhysicalConstraint, PhysicalFunction, PhysicalGrant, PhysicalIndex,
+  PhysicalColumn, PhysicalConstraint, PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalRole,
   PhysicalKind, PhysicalPolicy, PhysicalSchema, PhysicalTable, PhysicalTrigger,
   PhysicalModel, PlanOptions, SchemaOperation, SchemaPlan,
 } from './source/Schema'

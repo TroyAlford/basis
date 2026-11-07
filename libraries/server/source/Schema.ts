@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 /** The category of one physical schema object. */
 export type PhysicalKind =
   | 'constraint' | 'extension' | 'function' | 'grant' | 'index' | 'policy'
-  | 'row-security' | 'schema' | 'table' | 'trigger'
+  | 'role' | 'row-security' | 'schema' | 'table' | 'trigger'
 
 /** One typed physical column. */
 export interface PhysicalColumn {
@@ -162,6 +162,16 @@ export interface PhysicalGrant {
   readonly table?: string,
 }
 
+/** One graph-managed role row. */
+export interface PhysicalRole {
+  /** Optional role description. */
+  readonly description?: string,
+  /** Stable canonical UUID identity. */
+  readonly id: string,
+  /** Mutable human-readable role name. */
+  readonly name: string,
+}
+
 /** One typed physical schema snapshot. */
 export interface PhysicalSchema {
   /** Constraints. */
@@ -174,6 +184,8 @@ export interface PhysicalSchema {
   readonly grants?: readonly PhysicalGrant[],
   /** Policies. */
   readonly policies: readonly PhysicalPolicy[],
+  /** Graph-managed role rows. */
+  readonly roles?: readonly PhysicalRole[],
   /** Installed schemas. */
   readonly schemas?: readonly string[],
   /** Tables. */
@@ -255,6 +267,7 @@ const PHASE: Readonly<Record<string, number>> = {
   'grant': 8,
   'index': 4,
   'policy': 7,
+  'role': 9,
   'row-security': 7,
   'schema': 1,
   'table': 2,
@@ -581,6 +594,19 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       sql: '',
     }
   })
+  let roles: PhysicalRole[] = []
+  const [roleTable] = await sql<{ present: boolean }[]>`
+    SELECT to_regclass('"Role"') IS NOT NULL AS present
+  `
+  if (roleTable?.present) {
+    roles = await sql<{ description: string, id: string, name: string }[]>`
+      SELECT r."id", e."name", r."description"
+      FROM "Role" r
+      JOIN "Entity" e ON e."id" = r."id"
+      ORDER BY r."id"
+    `
+  }
+
   return {
     constraints: constraintRows.map(row => ({
       definition: row.definition,
@@ -610,6 +636,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       sql: '',
       table: row.schema === 'basis' ? `basis.${row.table}` : row.table,
     })),
+    roles,
     schemas: schemaRows.map(row => row.name),
     tables,
     triggers: triggerRows.map(row => ({
@@ -705,6 +732,8 @@ export function plan(options: PlanOptions): SchemaPlan {
     .map(grant => grant.grantee)
     .filter((grantee): grantee is string => Boolean(grantee) && grantee !== 'PUBLIC'))
   const desiredFunctionNamesForGrants = new Set(desired.functions.flatMap(fn => fn.required))
+  const removedFunctionNames = new Set([...previousFunctions]
+    .filter(name => !desiredFunctionNamesForGrants.has(name)))
   for (const grant of desired.grants ?? []) {
     const missingFunction = grant.object === 'function' && grant.function !== undefined
       && desiredFunctionNamesForGrants.has(grant.function) && !actualFunctions.has(grant.function)
@@ -735,9 +764,70 @@ export function plan(options: PlanOptions): SchemaPlan {
   for (const grant of actualGrants.values()) {
     if (desiredGrants.has(grant.name) || desiredRevokes.has(grant.name)) continue
     if (grant.table && removedTables.has(grant.table)) continue
+    if (grant.function && removedFunctionNames.has(grant.function)) continue
     if (grant.grantee && desiredGrantees.has(grant.grantee)) {
       drift.push(`unexpected grant: ${grant.name}`)
     }
+  }
+
+  const actualRoles = new Map((options.actual.roles ?? []).map(role => [role.id, role]))
+  const previousRoles = new Map((previous?.roles ?? []).map(role => [role.id, role]))
+  const desiredRoles = new Map((desired.roles ?? []).map(role => [role.id, role]))
+  for (const [id, role] of previousRoles) {
+    const actualRole = actualRoles.get(id)
+    if (!actualRole) {
+      drift.push(`missing deployed role: ${id}`)
+    } else if (!sameRole(role, actualRole)) {
+      drift.push(`out-of-band role definition change: ${id}`)
+    }
+  }
+  for (const [id, role] of desiredRoles) {
+    const actualRole = actualRoles.get(id)
+    if (!actualRole) {
+      if (previousRoles.has(id)) continue
+      operations.push({
+        dependsOn: ['table:Entity', 'table:Role'],
+        id: `role:${id}`,
+        kind: 'role',
+        risk: 'review',
+        sql: 'INSERT INTO "Entity" ("id", "name", "entity") VALUES ' +
+          `(${sqlLiteral(id)}, ${sqlLiteral(role.name)}, 'Role'); ` +
+          'INSERT INTO "Role" ("id", "description") VALUES ' +
+          `(${sqlLiteral(id)}, ${sqlLiteral(role.description ?? '')})`,
+        target: id,
+      })
+      continue
+    }
+    if (!sameRole(role, actualRole)) {
+      const previousRole = previousRoles.get(id)
+      if (!previousRole || sameRole(previousRole, actualRole)) {
+        operations.push({
+          dependsOn: ['table:Entity', 'table:Role'],
+          id: `role:${id}:replace`,
+          kind: 'role',
+          risk: 'review',
+          sql: `UPDATE "Entity" SET "name" = ${sqlLiteral(role.name)} WHERE "id" = ${sqlLiteral(id)}; ` +
+            `UPDATE "Role" SET "description" = ${sqlLiteral(role.description ?? '')} ` +
+            `WHERE "id" = ${sqlLiteral(id)}`,
+          target: id,
+        })
+      } else {
+        drift.push(`role definition changed: ${id}`)
+      }
+    }
+  }
+  for (const [id] of previousRoles) {
+    if (desiredRoles.has(id)) continue
+    if (!actualRoles.has(id)) continue
+    operations.push({
+      dependsOn: ['table:Entity', 'table:Role'],
+      id: `drop-role:${id}`,
+      kind: 'role',
+      risk: 'data',
+      sql: `DELETE FROM "Role" WHERE "id" = ${sqlLiteral(id)}; ` +
+        `DELETE FROM "Entity" WHERE "id" = ${sqlLiteral(id)}`,
+      target: id,
+    })
   }
 
   const previousTables = new Set<string>()
@@ -854,14 +944,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     const actualPolicy = actualPolicyMapForBaseline.get(previousPolicy.name)
     if (!actualPolicy) {
       drift.push(`missing deployed policy: ${previousPolicy.name}`)
-    } else if (
-      (previousPolicy.definition !== undefined && actualPolicy.definition !== undefined
-        && normalizeDefinition(previousPolicy.definition) !== normalizeDefinition(actualPolicy.definition))
-      || (previousPolicy.command !== undefined && actualPolicy.command !== previousPolicy.command)
-      || (previousPolicy.permissive !== undefined && actualPolicy.permissive !== previousPolicy.permissive)
-      || (previousPolicy.roles !== undefined
-        && [...previousPolicy.roles].sort().join(',') !== [...actualPolicy.roles ?? []].sort().join(','))
-    ) {
+    } else if (!samePolicy(previousPolicy, actualPolicy)) {
       drift.push(`out-of-band policy definition change: ${previousPolicy.name}`)
     }
   }
@@ -1225,15 +1308,20 @@ export function plan(options: PlanOptions): SchemaPlan {
       })
       continue
     }
-    if (
-      (policy.definition !== undefined && existing.definition !== undefined
-        && normalizeDefinition(existing.definition) !== normalizeDefinition(policy.definition))
-      || (policy.command !== undefined && existing.command !== policy.command)
-      || (policy.permissive !== undefined && existing.permissive !== policy.permissive)
-      || (policy.roles !== undefined
-        && [...existing.roles ?? []].sort().join(',') !== [...policy.roles].sort().join(','))
-    ) {
-      drift.push(`policy definition changed: ${policy.name}`)
+    if (!samePolicy(policy, existing)) {
+      const previousPolicy = previous?.policies.find(candidate => candidate.name === policy.name)
+      if (previousPolicy && samePolicy(previousPolicy, existing)) {
+        operations.push({
+          dependsOn: [`table:${policy.table}`],
+          id: `policy:${policy.name}:replace`,
+          kind: 'policy',
+          risk: 'review',
+          sql: `DROP POLICY IF EXISTS ${quote(policy.name)} ON ${quote(policy.table)}; ${policy.sql}`,
+          target: policy.name,
+        })
+      } else {
+        drift.push(`policy definition changed: ${policy.name}`)
+      }
     }
   }
   const desiredPolicyNames = new Set(desired.policies.map(policy => policy.name))
@@ -1341,6 +1429,49 @@ export const DDL = { hash, introspect, plan }
  */
 function normalizeSearchPath(value: string): string {
   return normalizeDefinition(value.replace(/^search_path=/iu, ''))
+}
+
+/**
+ * Compare two graph-managed role rows.
+ * @param left - Previous or desired role.
+ * @param right - Actual or desired role.
+ * @returns Whether the role metadata is equal.
+ */
+function sameRole(left: PhysicalRole, right: PhysicalRole): boolean {
+  return left.id === right.id
+    && left.name === right.name
+    && (left.description ?? '') === (right.description ?? '')
+}
+
+/**
+ * Quote one SQL string literal.
+ * @param value - Literal text.
+ * @returns Quoted SQL literal.
+ */
+function sqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
+}
+
+/**
+ * Compare two typed policy definitions semantically.
+ * @param left - Desired or previous policy.
+ * @param right - Observed or desired policy.
+ * @returns Whether the policy metadata is equivalent.
+ */
+function samePolicy(left: PhysicalPolicy, right: PhysicalPolicy): boolean {
+  const definition = left.definition === undefined || right.definition === undefined
+    ? left.definition === right.definition
+    : normalizeDefinition(left.definition) === normalizeDefinition(right.definition)
+  const command = left.command === undefined || right.command === undefined
+    ? left.command === right.command
+    : left.command === right.command
+  const permissive = left.permissive === undefined || right.permissive === undefined
+    ? left.permissive === right.permissive
+    : left.permissive === right.permissive
+  const roles = left.roles === undefined || right.roles === undefined
+    ? left.roles === right.roles
+    : [...left.roles].sort().join(',') === [...right.roles].sort().join(',')
+  return definition && command && permissive && roles
 }
 
 /**

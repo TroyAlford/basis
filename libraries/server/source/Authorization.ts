@@ -75,24 +75,13 @@ export class Authorization {
    */
   async resolve(userId: string | null): Promise<string | null> {
     if (!userId) return null
-    const admin = await openAdmin(this.#database).catch(() => null)
-    if (!admin) return null
     try {
-      const rows = await admin.sql<{ id: string }[]>`
-        SELECT u."id"
-        FROM "User" u
-        WHERE u."id" = ${userId}
-          AND EXISTS (
-            SELECT 1
-            FROM "ExternalIdentity" e
-            WHERE e."user.id" = u."id" AND e."revoked" = false
-          )
+      const rows = await this.#database.sql<{ id: string | null }[]>`
+        SELECT basis.resolve_identity(${userId}) AS "id"
       `
       return rows[0]?.id ?? null
     } catch {
       return null
-    } finally {
-      await admin.close()
     }
   }
 
@@ -172,13 +161,15 @@ export class Authorization {
     subject: string,
     profile: { readonly displayName?: string, readonly email?: string } = {},
   ): Promise<string | null> {
-    const admin = await openAdmin(this.#database).catch(() => null)
-    if (!admin) throw new Error('Authorization requires an administrative database connection')
-    try {
-      return await enrollIdentityWithAdmin(admin, provider, subject, profile, this.#userEntity())
-    } finally {
-      await admin.close()
-    }
+    const rows = await this.#database.sql<{ id: string | null }[]>`
+      SELECT basis.enroll_identity(
+        ${provider},
+        ${subject},
+        ${profile.displayName ?? null},
+        ${profile.email ?? null}
+      ) AS "id"
+    `
+    return rows[0]?.id ?? null
   }
 
   /**
@@ -364,13 +355,13 @@ export async function enrollIdentity(
   subject: string,
   profile: { readonly displayName?: string, readonly email?: string } = {},
 ): Promise<string | null> {
-  const admin = await openAdmin(database).catch(() => null)
-  if (!admin) throw new Error('Authorization requires an administrative database connection')
-  try {
-    return await enrollIdentityWithAdmin(admin, provider, subject, profile)
-  } finally {
-    await admin.close()
-  }
+  const rows = await database.sql<{ id: string | null }[]>`
+SELECT basis.enroll_identity(${provider},
+  ${subject},
+  ${profile.displayName ?? null},
+  ${profile.email ?? null} ) AS "id"
+  `
+  return rows[0]?.id ?? null
 }
 
 /**

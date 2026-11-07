@@ -13,7 +13,7 @@ const model = new Graph({ entities, relationships, roles, grants })
 const desired = model.physicalSchema('basis_app', false)
 ```
 
-`PhysicalSchema` contains typed tables and columns, primary keys and defaults, indexes, foreign-key constraints, lifecycle functions and triggers, graph security functions, RLS policies, role/table/schema/function grants, RLS flags, schemas, and extensions. `EntityDefinitions.ddl` and `EntityDefinitions.createTables` emit and reconcile the ontology's tables and lifecycle objects; `Graph.physicalSchema` adds the graph's roles and compiled policies. Both use the same physical representation.
+`PhysicalSchema` contains typed tables and columns, primary keys and defaults, indexes, foreign-key constraints, lifecycle functions and triggers, graph security functions, RLS policies, graph-managed role rows, role/table/schema/function grants, RLS flags, schemas, and extensions. `EntityDefinitions.ddl` and `EntityDefinitions.createTables` emit and reconcile the ontology's tables and lifecycle objects; `Graph.physicalSchema` adds the graph's roles and compiled policies. Both use the same physical representation.
 
 ## Read-only introspection
 
@@ -35,7 +35,7 @@ const plan = DDL.plan({
 })
 ```
 
-`DDL.plan` is deterministic and read-only. Each operation carries a stable id, target, intended SQL, dependency edges, preconditions, and risk classification. A populated-table add-column operation is marked `data`; security changes are marked `review`. New tables carry their RLS, grant, index, and constraint dependencies. Intentional previous→desired changes become operations; unexplained differences from the compiled previous physical state are drift.
+`DDL.plan` is deterministic and read-only. Each operation carries a stable id, target, intended SQL, dependency edges, preconditions, and risk classification. A populated-table add-column operation is marked `data`; security changes are marked `review`. New tables carry their RLS, grant, index, and constraint dependencies. Intentional previous→desired changes become operations, including policy replacement and graph role metadata updates; unexplained differences from the compiled previous physical state are drift.
 
 The plan reports:
 

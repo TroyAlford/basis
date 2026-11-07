@@ -50,5 +50,6 @@ describe('Graph', () => {
     expect(schema.policies.some(policy => policy.sql.includes('authorized_row'))).toBe(false)
     expect(schema.functions.some(fn => fn.name === 'basis.has_role')).toBe(true)
     expect(schema.functions.some(fn => fn.name === 'basis.matches')).toBe(false)
+    expect(schema.functions.some(fn => fn.name === 'basis.policy_field')).toBe(false)
   })
 })
