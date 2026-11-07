@@ -768,34 +768,37 @@ export class EntityDefinitions {
         const verb = /^(GRANT|REVOKE)/u.exec(sql)?.[1]
         if (!verb) continue
         const kind = verb === 'GRANT' ? 'grant' as const : 'revoke' as const
-        const schema = /^GRANT|REVOKE\s+[^]+?\s+ON SCHEMA\s+"?([^"\s]+)"?\s+(?:TO|FROM)\s+"?([^"\s]+)"?/u.exec(sql)
+        // eslint-disable-next-line @stylistic/max-len
+        const schema = /^(?:GRANT|REVOKE)\s+([A-Z, ]+?)\s+ON SCHEMA\s+"?([^"\s]+)"?\s+(?:TO|FROM)\s+"?([^"\s]+)"?/u.exec(sql)
         if (schema) {
-          const privilege = /^(?:GRANT|REVOKE)\s+([A-Z, ]+?)\s+ON SCHEMA/u.exec(sql)?.[1] ?? ''
-          const grantName = `grant:${schema[2]}:schema:${schema[1]}:${privilege}`
+          const privilege = schema[1] ?? ''
+          const schemaName = schema[2] ?? ''
+          const grantee = schema[3] ?? ''
+          const grantName = `grant:${grantee}:schema:${schemaName}:${privilege}`
           grants.push({
             grantName,
-            grantee: schema[2],
+            grantee,
             kind,
-            name: `${kind}:${grantName}`,
+            name: kind === 'grant' ? grantName : `revoke:${grantName}`,
             object: 'schema',
             privilege,
             sql,
-            table: schema[1],
+            table: schemaName,
           })
           continue
         }
         // eslint-disable-next-line @stylistic/max-len
-        const routine = /^(?:GRANT|REVOKE)\s+([A-Z, ]+?)\s+ON FUNCTION\s+([^\s]+(?:\s*,\s*[^\s]+)*)\s+(?:TO|FROM)\s+"?([^"\s]+)"?/u.exec(sql)
+        const routine = /^(?:GRANT|REVOKE)\s+([A-Z, ]+?)\s+ON FUNCTION\s+(.+?)\s+(?:TO|FROM)\s+"?([^"\s]+)"?$/u.exec(sql)
         if (routine) {
-          for (const fn of (routine[2] ?? '').split(',').map(value => value.trim()).filter(Boolean)) {
-            const privilege = routine[1] ?? ''
+          const privilege = (routine[1] ?? '').trim() === 'ALL' ? 'EXECUTE' : (routine[1] ?? '').trim()
+          for (const fn of splitFunctionList(routine[2] ?? '')) {
             const grantName = `grant:${routine[3]}:function:${fn}:${privilege}`
             grants.push({
               function: fn,
               grantName,
               grantee: routine[3],
               kind,
-              name: `${kind}:${grantName}`,
+              name: kind === 'grant' ? grantName : `revoke:${grantName}`,
               object: 'function',
               privilege,
               sql,
@@ -1584,6 +1587,28 @@ WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table
       }
     }
   }
+}
+
+/**
+ * Split a comma-separated function list without splitting argument commas.
+ * @param value - SQL function list.
+ * @returns Function names without signatures.
+ */
+function splitFunctionList(value: string): string[] {
+  const result: string[] = []
+  let depth = 0
+  let start = 0
+  for (let index = 0; index <= value.length; index += 1) {
+    const character = value[index]
+    if (character === '(') depth += 1
+    else if (character === ')') depth = Math.max(0, depth - 1)
+    if (index === value.length || (character === ',' && depth === 0)) {
+      const item = value.slice(start, index).trim().replace(/\(.*/u, '')
+      if (item) result.push(item)
+      start = index + 1
+    }
+  }
+  return result
 }
 
 /**

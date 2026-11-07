@@ -508,6 +508,23 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       sql: '',
     })
   }
+  const defaultFunctionRows = await sql<{ function: string }[]>`
+    SELECT CASE WHEN n.nspname = 'basis' THEN 'basis.' || p.proname ELSE p.proname END AS function
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname IN (current_schema(), 'basis') AND p.proacl IS NULL
+  `
+  for (const row of defaultFunctionRows) {
+    grants.push({
+      function: row.function,
+      grantee: 'PUBLIC',
+      kind: 'grant',
+      name: `grant:PUBLIC:function:${row.function}:EXECUTE`,
+      object: 'function',
+      privilege: 'EXECUTE',
+      sql: '',
+    })
+  }
 
   const columnsByTable = new Map<string, PhysicalColumn[]>()
   for (const row of columnRows) {
@@ -788,11 +805,53 @@ export function plan(options: PlanOptions): SchemaPlan {
         && normalizeBody(previousFunction.body) !== normalizeBody(actualFunction.body)) {
         drift.push(`out-of-band function definition change: ${name}`)
       }
+      if (previousFunction.securityDefiner !== undefined && actualFunction.securityDefiner !== undefined
+        && previousFunction.securityDefiner !== actualFunction.securityDefiner) {
+        drift.push(`out-of-band function security change: ${name}`)
+      }
+      if (previousFunction.signature !== undefined && actualFunction.signature !== undefined
+        && normalizeDefinition(previousFunction.signature) !== normalizeDefinition(actualFunction.signature)) {
+        drift.push(`out-of-band function signature change: ${name}`)
+      }
+      if (previousFunction.searchPath !== undefined && actualFunction.searchPath !== undefined
+        && normalizeSearchPath(previousFunction.searchPath) !== normalizeSearchPath(actualFunction.searchPath)) {
+        drift.push(`out-of-band function search path change: ${name}`)
+      }
     }
   }
   const actualGrantNames = new Set((options.actual.grants ?? []).map(grant => grant.name))
   for (const name of previousGrantNames) {
     if (!actualGrantNames.has(name)) drift.push(`missing deployed grant: ${name}`)
+  }
+  const actualTriggerMapForBaseline = new Map(options.actual.triggers.map(trigger => [trigger.name, trigger]))
+  for (const previousTrigger of previous?.triggers ?? []) {
+    const actualTrigger = actualTriggerMapForBaseline.get(previousTrigger.name)
+    if (!actualTrigger) {
+      drift.push(`missing deployed trigger: ${previousTrigger.name}`)
+    } else if (
+      (previousTrigger.functionName !== undefined && actualTrigger.functionName !== previousTrigger.functionName)
+      || (previousTrigger.type !== undefined && actualTrigger.type !== previousTrigger.type)
+      || (previousTrigger.columns !== undefined
+        && (actualTrigger.columns ?? []).join(',') !== previousTrigger.columns.join(','))
+    ) {
+      drift.push(`out-of-band trigger definition change: ${previousTrigger.name}`)
+    }
+  }
+  const actualPolicyMapForBaseline = new Map(options.actual.policies.map(policy => [policy.name, policy]))
+  for (const previousPolicy of previous?.policies ?? []) {
+    const actualPolicy = actualPolicyMapForBaseline.get(previousPolicy.name)
+    if (!actualPolicy) {
+      drift.push(`missing deployed policy: ${previousPolicy.name}`)
+    } else if (
+      (previousPolicy.definition !== undefined && actualPolicy.definition !== undefined
+        && normalizeDefinition(previousPolicy.definition) !== normalizeDefinition(actualPolicy.definition))
+      || (previousPolicy.command !== undefined && actualPolicy.command !== previousPolicy.command)
+      || (previousPolicy.permissive !== undefined && actualPolicy.permissive !== previousPolicy.permissive)
+      || (previousPolicy.roles !== undefined
+        && [...previousPolicy.roles].sort().join(',') !== [...actualPolicy.roles ?? []].sort().join(','))
+    ) {
+      drift.push(`out-of-band policy definition change: ${previousPolicy.name}`)
+    }
   }
 
   for (const table of desired.tables) {
@@ -1052,6 +1111,10 @@ export function plan(options: PlanOptions): SchemaPlan {
         && normalizeBody(prior.body) === normalizeBody(actualFunction.body)
         && (prior.securityDefiner === undefined || actualFunction.securityDefiner === undefined
           || prior.securityDefiner === actualFunction.securityDefiner)
+        && (prior.signature === undefined || actualFunction.signature === undefined
+          || normalizeDefinition(prior.signature) === normalizeDefinition(actualFunction.signature))
+        && (prior.searchPath === undefined || actualFunction.searchPath === undefined
+          || normalizeSearchPath(prior.searchPath) === normalizeSearchPath(actualFunction.searchPath))
       if (priorMatchesActual) {
         operations.push({
           dependsOn: [],
@@ -1149,15 +1212,22 @@ export function plan(options: PlanOptions): SchemaPlan {
       continue
     }
     if (
-      policy.definition !== undefined && existing.definition !== undefined
-      && normalizeDefinition(existing.definition) !== normalizeDefinition(policy.definition)
+      (policy.definition !== undefined && existing.definition !== undefined
+        && normalizeDefinition(existing.definition) !== normalizeDefinition(policy.definition))
+      || (policy.command !== undefined && existing.command !== policy.command)
+      || (policy.permissive !== undefined && existing.permissive !== policy.permissive)
+      || (policy.roles !== undefined
+        && [...existing.roles ?? []].sort().join(',') !== [...policy.roles].sort().join(','))
     ) {
       drift.push(`policy definition changed: ${policy.name}`)
     }
   }
   const desiredPolicyNames = new Set(desired.policies.map(policy => policy.name))
   for (const name of actualPolicies) {
-    if (!desiredPolicyNames.has(name)) drift.push(`unexpected policy: ${name}`)
+    if (desiredPolicyNames.has(name)) continue
+    const policy = actualPolicyMap.get(name)
+    if (policy && removedTables.has(policy.table)) continue
+    drift.push(`unexpected policy: ${name}`)
   }
 
   const plannedIds = new Set(operations.map(operation => operation.id))

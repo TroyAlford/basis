@@ -235,6 +235,20 @@ describe('DDL schema planning', () => {
     }, { fresh: true })
   })
 
+  test('compiles stable typed identities for authorization privileges', () => {
+    const model = Authorization.load(JSON.stringify({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+    }))
+    const grants = model.physicalSchema('basis_app', false, true).grants ?? []
+    expect(grants.some(grant => grant.name === 'grant:basis_app:table:Note:SELECT')).toBe(true)
+    expect(grants.some(grant => grant.name === 'grant:basis_app:schema:basis:USAGE')).toBe(true)
+    expect(grants.some(grant => grant.name === 'grant:basis_app:function:basis.actor_id:EXECUTE')).toBe(true)
+    expect(grants.some(grant => grant.name === 'grant:basis_app:function:basis.authorized:EXECUTE')).toBe(true)
+    expect(grants.some(grant => (
+      grant.kind === 'revoke' && grant.grantName?.includes('function:basis.actor_id')
+    ))).toBe(true)
+  })
+
   test('includes authorization objects in the desired physical output', async () => {
     const model = definitions()
     const empty = {
