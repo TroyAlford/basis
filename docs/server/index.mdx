@@ -80,7 +80,7 @@ Every server serves `/assets/favicon`. Configure a file, `Bun.file`, or an icon 
 
 ## Database and authorization
 
-`server.authorization()` composes the system security ontology and installs PostgreSQL row-level security. See [Authorization & Row-Level Security](./authorization.mdx) for bootstrap, grants, request actor binding, and the restricted-role boundary.
+`server.graph(graph)` composes the canonical graph and installs compiled PostgreSQL row-level security. See [Authorization & Row-Level Security](./authorization.mdx) for bootstrap, grants, request actor binding, and the restricted-role boundary.
 
 `EntityDefinitions.physicalSchema` plus `DDL.introspect`/`DDL.plan` provide the canonical read-only schema inspection and planning surface. See [Schema Inspection & Planning](./schema.mdx).
 

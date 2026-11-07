@@ -401,6 +401,15 @@ class Parser {
     if (token.type === TokenType.LeftBracket) return this.#parseArrayLiteral()
     if (token.type === TokenType.LeftBrace) return this.#parseObjectLiteral()
     switch (token.type) {
+      case TokenType.Actor:
+        this.#index += 1
+        return {
+          end: token.end,
+          kind: 'string',
+          raw: token.raw,
+          start: token.start,
+          value: '$me',
+        }
       case TokenType.Boolean:
         this.#index += 1
         return {

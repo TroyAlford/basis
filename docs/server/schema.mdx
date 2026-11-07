@@ -9,10 +9,11 @@ The canonical `EntityDefinitions` model now owns one typed physical representati
 ## Desired physical schema
 
 ```ts
-const desired = EntityDefinitions.load(source).physicalSchema('basis_app', false)
+const model = new Graph({ entities, relationships, roles, grants })
+const desired = model.physicalSchema('basis_app', false)
 ```
 
-`PhysicalSchema` contains typed tables and columns, primary keys and defaults, indexes, foreign-key constraints, lifecycle functions and triggers, authorization functions and policies, roles/grants, RLS flags, schemas, and extensions. `EntityDefinitions.ddl` and `EntityDefinitions.createTables` emit and reconcile from the same physical metadata.
+`PhysicalSchema` contains typed tables and columns, primary keys and defaults, indexes, foreign-key constraints, lifecycle functions and triggers, graph security functions, RLS policies, role/table/schema/function grants, RLS flags, schemas, and extensions. `EntityDefinitions.ddl` and `EntityDefinitions.createTables` emit and reconcile the ontology's tables and lifecycle objects; `Graph.physicalSchema` adds the graph's roles and compiled policies. Both use the same physical representation.
 
 ## Read-only introspection
 
@@ -27,8 +28,8 @@ const actual = await DDL.introspect(ownerSql) // trusted catalog connection
 ```ts
 const plan = DDL.plan({
   actual,
-  desired: nextDefinitions,
-  previous: deployedDefinitions,
+  desired: nextGraph,
+  previous: deployedGraph,
   appRole: 'basis_app',
   superuser: true,
 })

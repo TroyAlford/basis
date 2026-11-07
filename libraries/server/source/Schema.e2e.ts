@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
-import { Authorization } from './Authorization'
 import { EntityDefinitions } from './EntityDefinitions'
+import { Graph } from './Graph'
 import { DDL } from './Schema'
 
 /**
@@ -143,19 +143,24 @@ describe('DDL schema planning', () => {
   })
 
   test('includes RLS and grants for a newly authorized table', async () => {
-    const previous = Authorization.load(JSON.stringify({
+    const previous = new Graph({
       entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-    }))
-    const desired = Authorization.load(JSON.stringify({
+      grants: [{ action: 'read', role: 'public', target: 'Note' }],
+    })
+    const desired = new Graph({
       entities: [
         { fields: [{ field: 'title', type: 'String' }], name: 'Note' },
         { fields: [{ field: 'title', type: 'String' }], name: 'Tag' },
       ],
-    }))
+      grants: [
+        { action: 'read', role: 'public', target: 'Note' },
+        { action: 'read', role: 'public', target: 'Tag' },
+      ],
+    })
     await withIsolatedDatabase('schema-plan-new-auth-table', async database => {
-      await previous.createTables(database.sql)
+      await previous.definitions.createTables(database.sql)
       const actual = await DDL.introspect(database.sql)
-      const plan = DDL.plan({ actual, appRole: 'basis_app', desired, superuser: true })
+      const plan = DDL.plan({ actual, appRole: 'basis_app', desired, previous, superuser: true })
       expect(plan.operations.some(operation => (
         operation.kind === 'row-security' && operation.target === 'Tag'
       ))).toBe(true)
@@ -215,9 +220,12 @@ describe('DDL schema planning', () => {
   })
 
   test('plans missing RLS and authorization enforcement for an existing model', async () => {
-    const model = definitions()
+    const model = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      grants: [{ action: 'read', role: 'public', target: 'Note' }],
+    })
     await withIsolatedDatabase('schema-plan-rls', async database => {
-      await model.createTables(database.sql)
+      await model.definitions.createTables(database.sql)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({
         actual,
@@ -236,21 +244,24 @@ describe('DDL schema planning', () => {
   })
 
   test('compiles stable typed identities for authorization privileges', () => {
-    const model = Authorization.load(JSON.stringify({
+    const model = new Graph({
       entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-    }))
+      grants: [{ action: 'read', role: 'public', target: 'Note' }],
+    })
     const grants = model.physicalSchema('basis_app', false, true).grants ?? []
     expect(grants.some(grant => grant.name === 'grant:basis_app:table:Note:SELECT')).toBe(true)
     expect(grants.some(grant => grant.name === 'grant:basis_app:schema:basis:USAGE')).toBe(true)
-    expect(grants.some(grant => grant.name === 'grant:basis_app:function:basis.actor_id:EXECUTE')).toBe(true)
-    expect(grants.some(grant => grant.name === 'grant:basis_app:function:basis.authorized:EXECUTE')).toBe(true)
+    expect(grants.some(grant => grant.name === 'grant:basis_app:function:basis.has_role:EXECUTE')).toBe(true)
     expect(grants.some(grant => (
-      grant.kind === 'revoke' && grant.grantName?.includes('function:basis.actor_id')
+      grant.kind === 'revoke' && grant.grantName?.includes('function:basis.has_role')
     ))).toBe(true)
   })
 
   test('includes authorization objects in the desired physical output', async () => {
-    const model = definitions()
+    const model = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      grants: [{ action: 'read', role: 'public', target: 'Note' }],
+    })
     const empty = {
       constraints: [],
       extensions: [],
@@ -263,8 +274,6 @@ describe('DDL schema planning', () => {
     expect(plan.operations.some(operation => operation.kind === 'policy')).toBe(true)
     expect(plan.operations.some(operation => operation.kind === 'function')).toBe(true)
     expect(plan.operations.some(operation => operation.kind === 'grant')).toBe(true)
-    expect(plan.operations.some(operation => (
-      operation.kind === 'extension' && operation.target === 'pgcrypto'
-    ))).toBe(true)
+    expect(plan.operations.some(operation => operation.kind === 'extension')).toBe(true)
   })
 })

@@ -323,7 +323,9 @@ describe('Query contract', () => {
         operator: Operator.Logical.And,
       },
     })
-    expect(two.sql.match(/LEFT JOIN "User"/g)).toHaveLength(2)
+    expect(two.sql.match(/LEFT JOIN "User"/g)).toBeNull()
+    expect(two.sql).toContain('"owner.id"')
+    expect(two.sql).toContain('"favorite.id"')
     expect(two.values).toEqual([identity, second, 25, 0])
 
     const nestedDefinitions = EntityDefinitions.load(JSON.stringify({
@@ -348,7 +350,7 @@ describe('Query contract', () => {
       fields: ['id'],
       where: { 'owner.manager': identity },
     })
-    expect(nested.sql.match(/LEFT JOIN "Person"/g)).toHaveLength(2)
+    expect(nested.sql.match(/LEFT JOIN "Person"/g)).toHaveLength(1)
     expect(nested.values).toEqual([identity, 25, 0])
   })
 

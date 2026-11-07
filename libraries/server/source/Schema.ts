@@ -1,6 +1,5 @@
 import type { SQL as BunSQL } from 'bun'
 import { createHash } from 'node:crypto'
-import type { EntityDefinitions } from './EntityDefinitions'
 
 /** The category of one physical schema object. */
 export type PhysicalKind =
@@ -213,18 +212,34 @@ export interface SchemaPlan {
   readonly operations: readonly SchemaOperation[],
 }
 
+/** One canonical model that compiles to a physical schema. */
+export interface PhysicalModel {
+  /**
+   * Compile the model's typed physical representation.
+   * @param appRole - Restricted application role.
+   * @param superuser - Whether provisioning can force owner RLS.
+   * @param includeAuthorization - Whether security objects are requested.
+   * @returns The physical schema.
+   */
+  physicalSchema(
+    appRole?: string,
+    superuser?: boolean,
+    includeAuthorization?: boolean,
+  ): PhysicalSchema,
+}
+
 /** Planning inputs. */
 export interface PlanOptions {
   /** Live catalog snapshot. */
   readonly actual: PhysicalSchema,
   /** Restricted app role used by security DDL. */
   readonly appRole?: string,
-  /** Desired canonical definitions. */
-  readonly desired: EntityDefinitions,
-  /** Whether to include security objects in the desired schema. */
+  /** Desired canonical model. */
+  readonly desired: PhysicalModel,
+  /** Retained compatibility flag; graph models compile their security objects. */
   readonly includeAuthorization?: boolean,
-  /** Previous deployed definitions, when available. */
-  readonly previous?: EntityDefinitions,
+  /** Previous deployed model, when available. */
+  readonly previous?: PhysicalModel,
   /** Whether the provisioning connection can force owner RLS. */
   readonly superuser?: boolean,
 }
@@ -628,16 +643,8 @@ function desiredFunctionNamesForPlan(schema: PhysicalSchema): Set<string> {
  * @returns The deterministic plan.
  */
 export function plan(options: PlanOptions): SchemaPlan {
-  const desired = options.desired.physicalSchema(
-    options.appRole,
-    options.superuser,
-    options.includeAuthorization ?? true,
-  )
-  const previous = options.previous?.physicalSchema(
-    options.appRole,
-    options.superuser,
-    options.includeAuthorization ?? true,
-  )
+  const desired = options.desired.physicalSchema(options.appRole, options.superuser)
+  const previous = options.previous?.physicalSchema(options.appRole, options.superuser)
   const actualTables = new Map(options.actual.tables.map(table => [table.name, table]))
   const desiredTables = new Map(desired.tables.map(table => [table.name, table]))
   const previousTablesPhysical = new Map(previous?.tables.map(table => [table.name, table]) ?? [])
@@ -734,10 +741,10 @@ export function plan(options: PlanOptions): SchemaPlan {
   }
 
   const previousTables = new Set<string>()
-  if (options.previous) {
-    previousTables.add('Entity')
-    for (const entity of options.previous.entities) previousTables.add(entity.name)
-    for (const relationship of options.previous.relationships) previousTables.add(relationship.name)
+  if (previous) {
+    for (const table of previous.tables) {
+      if (!table.name.startsWith('basis.')) previousTables.add(table.name)
+    }
   }
   const desiredNames = new Set(desired.tables.map(table => table.name))
   const desiredOnly = [...desiredNames].filter(name => !previousTables.has(name) && !name.startsWith('basis.'))
