@@ -1,5 +1,5 @@
 import type { SQL } from 'bun'
-import type { PhysicalConstraint, PhysicalGrant, PhysicalIndex, PhysicalPolicy, PhysicalSchema, PhysicalTable } from './Schema'
+import type { PhysicalConstraint, PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalPolicy, PhysicalSchema, PhysicalTable } from './Schema'
 
 /** Enable PostgreSQL trigram search for universal names. */
 const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with schema public'
@@ -739,11 +739,6 @@ export class EntityDefinitions {
     ]
     const lifecycle = lifecycleDefinitions(this.entities)
     const functionSql = includeAuthorization ? this.#authorizationFunctionDdl() : ''
-    let requiredFunctions: string[] = []
-    if (includeAuthorization) {
-      requiredFunctions = [...functionSql.matchAll(/CREATE OR REPLACE FUNCTION\s+basis\.([a-z_]+)\s*\(/gu)]
-        .map(match => `basis.${match[1]}`)
-    }
     const authDdl = includeAuthorization ? this.authorizationDdl(appRole, superuser) : []
     const policies: PhysicalPolicy[] = []
     for (const statement of authDdl) {
@@ -760,9 +755,21 @@ export class EntityDefinitions {
     }
     let grants: PhysicalGrant[] = []
     if (includeAuthorization) {
-      grants = authDdl
-        .filter(statement => /^(?:GRANT|REVOKE)/u.test(statement))
-        .map((sql, index) => ({ name: `security-grant-${index}`, sql }))
+      grants = []
+      for (const sql of authDdl) {
+        const match = /^GRANT\s+([A-Z, ]+)\s+ON\s+(?:TABLE\s+)?"([^"]+)"\s+TO\s+"([^"]+)"/u.exec(sql)
+        if (!match) continue
+        const [, privileges, table, grantee] = match
+        for (const privilege of (privileges ?? '').split(',').map(value => value.trim()).filter(Boolean)) {
+          grants.push({
+            grantee,
+            name: `grant:${grantee}:${table}:${privilege}`,
+            privilege,
+            sql,
+            table,
+          })
+        }
+      }
     }
     return {
       constraints,
@@ -778,9 +785,7 @@ export class EntityDefinitions {
           securityDefiner: false,
           sql: fn.statement,
         })),
-        ...(includeAuthorization
-          ? [{ name: 'basis.authorization-functions', required: requiredFunctions, sql: functionSql }]
-          : []),
+        ...(includeAuthorization ? authorizationFunctions(functionSql) : []),
       ],
       policies,
       tables,
@@ -1517,6 +1522,29 @@ WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table
       }
     }
   }
+}
+
+/**
+ * Split the authorization function bundle into typed function objects.
+ * @param sql - Combined function DDL.
+ * @returns Individual function objects.
+ */
+function authorizationFunctions(sql: string): PhysicalFunction[] {
+  const chunks = sql.split(/(?=CREATE OR REPLACE FUNCTION basis\.)/u).filter(chunk => chunk.trim())
+  const functions: PhysicalFunction[] = []
+  for (const chunk of chunks) {
+    const name = /CREATE OR REPLACE FUNCTION basis\.([a-z_]+)\s*\(/u.exec(chunk)?.[1]
+    if (!name) continue
+    functions.push({
+      body: /\$\$([\s\S]*?)\$\$/u.exec(chunk)?.[1]?.trim() ?? '',
+      lifecycle: false,
+      name: `basis.${name}`,
+      required: [`basis.${name}`],
+      securityDefiner: /SECURITY DEFINER/u.test(chunk),
+      sql: chunk,
+    })
+  }
+  return functions
 }
 
 /**

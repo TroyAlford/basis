@@ -133,10 +133,16 @@ export interface PhysicalPolicy {
 
 /** One typed physical grant or revoke statement. */
 export interface PhysicalGrant {
+  /** Grantee role name. */
+  readonly grantee?: string,
   /** Stable object name. */
   readonly name: string,
+  /** Privilege name. */
+  readonly privilege?: string,
   /** Complete grant or revoke SQL. */
   readonly sql: string,
+  /** Optional target table. */
+  readonly table?: string,
 }
 
 /** One typed physical schema snapshot. */
@@ -402,6 +408,28 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     ORDER BY schemaname, tablename, policyname
   `
 
+  const grantRows = await sql<{
+    grantee: string,
+    privilege: string,
+    schema: string,
+    table: string,
+  }[]>`
+    SELECT grantee, table_schema AS schema, table_name AS TABLE, privilege_type AS privilege
+    FROM information_schema.role_table_grants
+    WHERE table_schema IN (current_schema(), 'basis')
+    ORDER BY grantee, table_schema, table_name, privilege_type
+  `
+  const grants: PhysicalGrant[] = grantRows.map(row => {
+    const table = row.schema === 'basis' ? `basis.${row.table}` : row.table
+    return {
+      grantee: row.grantee,
+      name: `grant:${row.grantee}:${table}:${row.privilege}`,
+      privilege: row.privilege,
+      sql: '',
+      table,
+    }
+  })
+
   const columnsByTable = new Map<string, PhysicalColumn[]>()
   for (const row of columnRows) {
     const name = `${row.schema === 'basis' ? 'basis.' : ''}${row.table}`
@@ -459,6 +487,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       securityDefiner: row.securityDefiner,
       sql: '',
     })),
+    grants,
     policies: policyRows.map(row => ({
       definition: row.definition,
       name: row.name,
@@ -508,6 +537,8 @@ export function plan(options: PlanOptions): SchemaPlan {
   const actualExtensions = new Set(options.actual.extensions)
   const previousTriggers = new Set(previous?.triggers.map(trigger => trigger.name) ?? [])
   const previousFunctions = new Set(previous?.functions.flatMap(fn => fn.required) ?? [])
+  const previousConstraints = new Set(previous?.constraints.map(constraint => constraint.name) ?? [])
+  const previousPolicies = new Set(previous?.policies.map(policy => policy.name) ?? [])
   const previousFunctionMap = new Map(previous?.functions.map(fn => [fn.name, fn]) ?? [])
   const operations: SchemaOperation[] = []
   const drift: string[] = []
@@ -543,8 +574,11 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
 
-  if (!actualSchemas.has('basis')) {
-    for (const grant of desired.grants ?? []) {
+  const actualGrants = new Map((options.actual.grants ?? []).map(grant => [grant.name, grant]))
+  const desiredGrants = new Set((desired.grants ?? []).map(grant => grant.name))
+  const desiredGrantees = new Set((desired.grants ?? []).map(grant => grant.grantee).filter(Boolean))
+  for (const grant of desired.grants ?? []) {
+    if (!actualGrants.has(grant.name)) {
       operations.push({
         dependsOn: [],
         id: `grant:${grant.name}`,
@@ -553,6 +587,12 @@ export function plan(options: PlanOptions): SchemaPlan {
         sql: grant.sql,
         target: grant.name,
       })
+    }
+  }
+  for (const grant of actualGrants.values()) {
+    if (desiredGrants.has(grant.name)) continue
+    if (grant.grantee && desiredGrantees.has(grant.grantee)) {
+      drift.push(`unexpected grant: ${grant.name}`)
     }
   }
 
@@ -574,6 +614,10 @@ export function plan(options: PlanOptions): SchemaPlan {
   for (const table of desired.tables) {
     const actual = actualTables.get(table.name)
     if (!actual) {
+      if (previousTablesPhysical.has(table.name)) {
+        drift.push(`missing deployed table: ${table.name}`)
+        continue
+      }
       operations.push({
         dependsOn: [],
         id: `table:${table.name}`,
@@ -590,6 +634,26 @@ export function plan(options: PlanOptions): SchemaPlan {
           risk: 'safe',
           sql: index.sql,
           target: `${table.name}.${index.name}`,
+        })
+      }
+      if (table.rowSecurity) {
+        operations.push({
+          dependsOn: [`table:${table.name}`],
+          id: `rls:${table.name}`,
+          kind: 'row-security',
+          risk: 'review',
+          sql: `ALTER TABLE ${quote(table.name)} ENABLE ROW LEVEL SECURITY`,
+          target: table.name,
+        })
+      }
+      if (table.forceRowSecurity) {
+        operations.push({
+          dependsOn: [`table:${table.name}`],
+          id: `force-rls:${table.name}`,
+          kind: 'row-security',
+          risk: 'review',
+          sql: `ALTER TABLE ${quote(table.name)} FORCE ROW LEVEL SECURITY`,
+          target: table.name,
         })
       }
       continue
@@ -621,6 +685,10 @@ export function plan(options: PlanOptions): SchemaPlan {
     for (const column of table.columns) {
       const existing = actualColumns.get(column.name)
       if (!existing) {
+        if (previousTablesPhysical.get(table.name)?.columns.some(candidate => candidate.name === column.name)) {
+          drift.push(`missing deployed column: ${table.name}.${column.name}`)
+          continue
+        }
         operations.push({
           dependsOn: [`table:${table.name}`],
           id: `column:${table.name}:${column.name}`,
@@ -639,7 +707,7 @@ export function plan(options: PlanOptions): SchemaPlan {
             dependsOn: [`table:${table.name}`],
             id: `column-type:${table.name}:${column.name}`,
             kind: 'alter-column',
-            risk: 'review',
+            risk: 'data',
             sql: `ALTER TABLE ${quote(table.name)} ALTER COLUMN ${quote(column.name)} TYPE ${column.sqlType}`,
             target: `${table.name}.${column.name}`,
           })
@@ -688,6 +756,10 @@ export function plan(options: PlanOptions): SchemaPlan {
     for (const index of table.indexes) {
       const existing = actualIndexes.get(index.name)
       if (!existing) {
+        if (previousTablesPhysical.get(table.name)?.indexes.some(candidate => candidate.name === index.name)) {
+          drift.push(`missing deployed index: ${table.name}.${index.name}`)
+          continue
+        }
         operations.push({
           dependsOn: [`table:${table.name}`],
           id: `index:${table.name}:${index.name}`,
@@ -732,6 +804,10 @@ export function plan(options: PlanOptions): SchemaPlan {
   for (const constraint of desired.constraints) {
     const existing = actualConstraints.get(constraint.name)
     if (!existing) {
+      if (previousConstraints.has(constraint.name)) {
+        drift.push(`missing deployed constraint: ${constraint.name}`)
+        continue
+      }
       operations.push({
         dependsOn: [],
         id: `constraint:${constraint.name}`,
@@ -757,6 +833,14 @@ export function plan(options: PlanOptions): SchemaPlan {
   const actualFunctionMap = new Map(options.actual.functions.map(fn => [fn.name, fn]))
   for (const fn of desired.functions) {
     if (!fn.required.every(name => actualFunctions.has(name))) {
+      if (fn.required.some(name => previousFunctions.has(name))) {
+        for (const name of fn.required) {
+          if (!actualFunctions.has(name) && previousFunctions.has(name)) {
+            drift.push(`missing deployed function: ${name}`)
+          }
+        }
+        continue
+      }
       operations.push({
         dependsOn: [],
         id: `function:${fn.name}`,
@@ -767,22 +851,29 @@ export function plan(options: PlanOptions): SchemaPlan {
       })
       continue
     }
-    if (fn.lifecycle && fn.body) {
-      const actualFunction = actualFunctionMap.get(fn.name)
-      if (actualFunction?.body && normalizeDefinition(actualFunction.body) !== normalizeDefinition(fn.body)) {
-        const prior = previousFunctionMap.get(fn.name)
-        if (prior?.body && normalizeDefinition(prior.body) === normalizeDefinition(actualFunction.body)) {
-          operations.push({
-            dependsOn: [],
-            id: `function:${fn.name}:replace`,
-            kind: 'function',
-            risk: 'review',
-            sql: fn.sql,
-            target: fn.name,
-          })
-        } else {
-          drift.push(`function definition changed: ${fn.name}`)
-        }
+    const actualFunction = actualFunctionMap.get(fn.name)
+    const changedBody = fn.body !== undefined && actualFunction?.body !== undefined
+      && normalizeDefinition(actualFunction.body) !== normalizeDefinition(fn.body)
+    const changedSecurity = fn.securityDefiner !== undefined
+      && actualFunction?.securityDefiner !== undefined
+      && actualFunction.securityDefiner !== fn.securityDefiner
+    if (actualFunction && (changedBody || changedSecurity)) {
+      const prior = previousFunctionMap.get(fn.name)
+      const priorMatchesActual = prior?.body !== undefined && actualFunction.body !== undefined
+        && normalizeDefinition(prior.body) === normalizeDefinition(actualFunction.body)
+        && (prior.securityDefiner === undefined || actualFunction.securityDefiner === undefined
+          || prior.securityDefiner === actualFunction.securityDefiner)
+      if (priorMatchesActual) {
+        operations.push({
+          dependsOn: [],
+          id: `function:${fn.name}:replace`,
+          kind: 'function',
+          risk: 'review',
+          sql: fn.sql,
+          target: fn.name,
+        })
+      } else {
+        drift.push(`function definition changed: ${fn.name}`)
       }
     }
   }
@@ -807,6 +898,10 @@ export function plan(options: PlanOptions): SchemaPlan {
   for (const trigger of desired.triggers) {
     const existing = actualTriggerMap.get(trigger.name)
     if (!existing) {
+      if (previousTriggers.has(trigger.name)) {
+        drift.push(`missing deployed trigger: ${trigger.name}`)
+        continue
+      }
       operations.push({
         dependsOn: [`table:${trigger.table}`],
         id: `trigger:${trigger.name}`,
@@ -849,6 +944,10 @@ export function plan(options: PlanOptions): SchemaPlan {
   for (const policy of desired.policies) {
     const existing = actualPolicyMap.get(policy.name)
     if (!existing) {
+      if (previousPolicies.has(policy.name)) {
+        drift.push(`missing deployed policy: ${policy.name}`)
+        continue
+      }
       operations.push({
         dependsOn: [`table:${policy.table}`],
         id: `policy:${policy.name}`,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { Authorization } from './Authorization'
 import { EntityDefinitions } from './EntityDefinitions'
 import { DDL } from './Schema'
 
@@ -136,6 +137,44 @@ describe('DDL schema planning', () => {
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
       expect(plan.operations.some(operation => operation.kind === 'alter-column')).toBe(true)
       expect(plan.blocked).toBe(false)
+    }, { fresh: true })
+  })
+
+  test('includes RLS and grants for a newly authorized table', async () => {
+    const previous = Authorization.load(JSON.stringify({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+    }))
+    const desired = Authorization.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'title', type: 'String' }], name: 'Note' },
+        { fields: [{ field: 'title', type: 'String' }], name: 'Tag' },
+      ],
+    }))
+    await withIsolatedDatabase('schema-plan-new-auth-table', async database => {
+      await previous.createTables(database.sql)
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({ actual, appRole: 'basis_app', desired, superuser: true })
+      expect(plan.operations.some(operation => (
+        operation.kind === 'row-security' && operation.target === 'Tag'
+      ))).toBe(true)
+      expect(plan.operations.some(operation => (
+        operation.kind === 'grant' && operation.sql.includes('"Tag"')
+      ))).toBe(true)
+    }, { fresh: true })
+  })
+
+  test('treats a missing previously deployed table as drift, not an addition', async () => {
+    const model = definitions()
+    await withIsolatedDatabase('schema-plan-missing-deployed', async database => {
+      await model.createTables(database.sql)
+      await database.sql`
+        DROP TABLE "Note"
+      `
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({ actual, desired: model, includeAuthorization: false, previous: model })
+      expect(plan.drift).toContain('missing deployed table: Note')
+      expect(plan.operations.some(operation => operation.id === 'table:Note')).toBe(false)
+      expect(plan.blocked).toBe(true)
     }, { fresh: true })
   })
 
