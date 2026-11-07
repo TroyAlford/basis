@@ -7,8 +7,6 @@ export interface RequestActor {
   readonly id: string | null,
 }
 
-/** The lifetime of one server-signed actor token. */
-const TOKEN_LIFETIME_SECONDS = 60 * 60
 /** The signing key version carried by actor and identity proofs. */
 export const SIGNING_KEY_VERSION = 'v1'
 
@@ -30,33 +28,6 @@ export function runAsActor<T>(actor: RequestActor, callback: () => T): T {
  */
 export function currentActor(): RequestActor | undefined {
   return storage.getStore()
-}
-
-/**
- * Sign one canonical actor id for the current PostgreSQL transaction and domain.
- * @param actorId - Canonical User id.
- * @param secret - Server-owned signing secret.
- * @param transactionId - PostgreSQL transaction id from `txid_current()`.
- * @param domain - Current PostgreSQL database/application domain.
- * @returns The transaction-bound actor token.
- */
-export function signActor(
-  actorId: string,
-  secret: string,
-  transactionId: string,
-  domain: string,
-): string {
-  const expiry = Math.floor(Date.now() / 1000) + TOKEN_LIFETIME_SECONDS
-  const payload = [
-    'actor',
-    Buffer.from(actorId, 'utf8').toString('hex'),
-    transactionId,
-    domain,
-    SIGNING_KEY_VERSION,
-    String(expiry),
-  ].join(':')
-  const signature = createHmac('sha256', secret).update(payload).digest('hex')
-  return `${payload}:${signature}`
 }
 
 /**

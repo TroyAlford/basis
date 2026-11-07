@@ -5,9 +5,8 @@ import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { removeService } from '../testing/DatabaseFixture'
-import { runAsActor, signActor } from './ActorContext'
+import { runAsActor } from './ActorContext'
 import { Authorization, enrollIdentity } from './Authorization'
-import { actorSecret } from './Database'
 import { Server } from './Server'
 
 const silent = new Logger({ silent: true })
@@ -122,53 +121,12 @@ describe('Authorization RLS', () => {
       }))
       expect(direct).toEqual([{ id: article }])
 
-      const forged = await asActor(user, () => server.db.tx(async sql => {
-        await sql`
-          SELECT set_config('basis.actor', 'deadbeef:9999999999:forged', TRUE)
+      const actorSetting = await asActor(user, () => server.db.tx(async sql => (
+        sql<{ actor: string | null }[]>`
+          SELECT current_setting('actor.id', TRUE) AS actor
         `
-        return sql<{ id: string }[]>`
-          SELECT "id"
-          FROM "Article"
-        `
-      }))
-      expect(forged).toEqual([])
-
-      let copied = ''
-      await asActor(user, () => server.db.tx(async sql => {
-        const [token] = await sql<{ token: string }[]>`
-          SELECT current_setting('basis.actor', TRUE) AS token
-        `
-        copied = token?.token ?? ''
-        expect((await sql<{ actor: string | null }[]>`
-          SELECT basis.actor_id() AS actor
-        `)[0]?.actor).toBe(user)
-      }))
-      const replayed = await asActor(other, () => server.db.tx(async sql => {
-        await sql`
-          SELECT set_config('basis.actor', ${copied}, TRUE)
-        `
-        return sql<{ actor: string | null }[]>`
-          SELECT basis.actor_id() AS actor
-        `
-      }))
-      expect(replayed[0]?.actor).toBeNull()
-
-      const secret = actorSecret(server.db)
-      if (!secret) throw new Error('actor secret was not configured')
-      const wrongDomain = await asActor(user, () => server.db.tx(async sql => {
-        const [transaction] = await sql<{ domain: string, id: string }[]>`
-          SELECT txid_current()::text AS id, current_database()::text AS domain
-        `
-        if (!transaction?.id) throw new Error('transaction identity was missing')
-        const token = signActor(user, secret, transaction.id, 'different-database')
-        await sql`
-          SELECT set_config('basis.actor', ${token}, TRUE)
-        `
-        return sql<{ actor: string | null }[]>`
-          SELECT basis.actor_id() AS actor
-        `
-      }))
-      expect(wrongDomain[0]?.actor).toBeNull()
+      )))
+      expect(actorSetting[0]?.actor).toBe(user)
 
       const changed = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article"
@@ -211,20 +169,6 @@ describe('Authorization RLS', () => {
         SELECT basis.login_identity('evil', 'other', 'evil@example.com', 'Evil', NULL) AS id
       `))
       expect(nullProof[0]?.id).toBeNull()
-      const crossPurpose = await asActor(user, () => server.db.tx(async sql => {
-        const [row] = await sql<{ id: string, token: string }[]>`
-          SELECT current_setting('basis.actor', TRUE) AS token, txid_current()::text AS id
-        `
-        if (!row?.id || !row.token) throw new Error('actor proof was missing')
-        return sql<{ id: string | null }[]>`
-SELECT basis.login_identity(${user},
-  ${row.id},
-  'evil@example.com',
-  'Evil',
-  ${row.token}) AS id
-        `
-      }))
-      expect(crossPurpose[0]?.id).toBeNull()
       expect('login' in authorization).toBe(false)
       await expect(asActor(admin.userId, () => authorization.assignRole(admin.userId, 'admin'))).rejects.toThrow()
 

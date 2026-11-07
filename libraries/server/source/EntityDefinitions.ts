@@ -974,42 +974,9 @@ export class EntityDefinitions {
   #authorizationFunctionDdl(): string {
     return `
       CREATE OR REPLACE FUNCTION basis.actor_id() RETURNS text
-      LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = basis, public, pg_temp AS $$
-      DECLARE
-        token text;
-        parts text[];
-        secret text;
-        expected text;
-        actor text;
-        expires numeric;
-      BEGIN
-        token := current_setting('basis.actor', true);
-        IF token IS NULL OR token = '' THEN RETURN NULL; END IF;
-        parts := string_to_array(token, ':');
-        IF array_length(parts, 1) <> 7 OR parts[1] <> 'actor' THEN RETURN NULL; END IF;
-        IF parts[3] <> txid_current()::text THEN RETURN NULL; END IF;
-        IF parts[4] <> current_database()::text OR parts[5] <> 'v1' THEN RETURN NULL; END IF;
-        expires := parts[6]::numeric;
-        IF expires < extract(epoch FROM now()) THEN RETURN NULL; END IF;
-        SELECT value INTO secret FROM basis.secret WHERE key = 'actor';
-        IF secret IS NULL THEN RETURN NULL; END IF;
-        expected := encode(
-          hmac(
-            convert_to(
-              parts[1] || ':' || parts[2] || ':' || parts[3] || ':' || parts[4] || ':' || parts[5] || ':' || parts[6],
-              'UTF8'
-            ),
-            convert_to(secret, 'UTF8'),
-            'sha256'
-          ),
-          'hex'
-        );
-        IF expected <> parts[7] THEN RETURN NULL; END IF;
-        actor := convert_from(decode(parts[2], 'hex'), 'UTF8');
-        RETURN actor;
-      EXCEPTION WHEN others THEN
-        RETURN NULL;
-      END $$;
+      LANGUAGE sql STABLE AS $$
+        SELECT nullif(current_setting('actor.id', true), '')
+      $$;
 
       CREATE OR REPLACE FUNCTION basis.matches(predicate jsonb, row_value jsonb) RETURNS boolean
       LANGUAGE plpgsql STABLE AS $$

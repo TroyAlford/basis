@@ -134,10 +134,7 @@ export const Predicate = {
     const field = entity.fields.find(candidate => candidate.name === name)
     if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
     if (field.type === FieldType.Entity) {
-      throw new Error(
-        `Query field "${entity.name}.${name}" is an entity reference; ` +
-        'references cannot be used in predicates or ordering',
-      )
+      return { name: field.column, type: FieldType.ID }
     }
     if (field.type === FieldType.Inverse) {
       throw new Error(
@@ -231,6 +228,10 @@ export const Predicate = {
     }
     if (raw === undefined) throw new Error(`Query operand for "${field.name}" must not be undefined`)
     if (field.type === FieldType.ID && operator === Operator.Comparison.Contains) return raw
+    if (raw === '$me') {
+      if (field.type === FieldType.ID) return raw
+      throw new Error('Query operand "$me" is only valid for identity fields')
+    }
     if (raw === null) {
       if (operator === Operator.Comparison.Equal || operator === Operator.Comparison.NotEqual) return null
       throw new Error(`Query operand for "${field.name}" must not be null`)

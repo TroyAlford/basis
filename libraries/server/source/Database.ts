@@ -3,7 +3,7 @@ import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { currentActor, signActor } from './ActorContext'
+import { currentActor } from './ActorContext'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { compilePolymorphicQuery } from './PolymorphicQuery'
 import type { Filter } from './Predicate'
@@ -314,17 +314,7 @@ class PostgresDatabase implements Database {
       const actor = currentActor()
       if (actor !== undefined) {
         if (!this.#actorSecret) throw new Error('Actor binding is not configured for this database')
-        let token = ''
-        if (actor.id !== null) {
-          const [transaction] = await tx<{ domain: string, id: string }[]>`
-            select txid_current()::text as id, current_database()::text as domain
-          `
-          if (!transaction?.id || !transaction.domain) {
-            throw new Error('PostgreSQL did not expose its transaction identity')
-          }
-          token = signActor(actor.id, this.#actorSecret, transaction.id, transaction.domain)
-        }
-        await tx`select set_config('basis.actor', ${token}, true)`
+        await tx`select set_config('actor.id', ${actor.id ?? ''}, true)`
       }
       return callback(tx)
     })
