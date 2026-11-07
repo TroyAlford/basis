@@ -1,4 +1,5 @@
 import type { SQL } from 'bun'
+import type { PhysicalConstraint, PhysicalGrant, PhysicalIndex, PhysicalPolicy, PhysicalSchema, PhysicalTable } from './Schema'
 
 /** Enable PostgreSQL trigram search for universal names. */
 const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with schema public'
@@ -606,6 +607,150 @@ export class EntityDefinitions {
       'CREATE INDEX IF NOT EXISTS "UserRole_user_idx" ON "UserRole" ("user.id")',
       'CREATE INDEX IF NOT EXISTS "UserRole_role_idx" ON "UserRole" ("role.id")',
     ]
+  }
+
+  /**
+   * Compile the canonical physical schema shared by planning and introspection.
+   * @param appRole - Restricted application role used by security DDL.
+   * @param superuser - Whether the provisioning connection can force owner RLS.
+   * @param includeAuthorization - Whether to include security DDL objects.
+   * @returns The typed desired physical schema.
+   */
+  physicalSchema(appRole = 'basis_app', superuser = false, includeAuthorization = true): PhysicalSchema {
+    const tables: PhysicalTable[] = this.tables.map(table => ({
+      columns: table.columns.map(column => ({
+        name: column.name,
+        nullable: column.nullable === true,
+        primaryKey: column.primaryKey === true,
+        sqlType: columnType(column),
+      })),
+      indexes: (table.indexes ?? []).map(index => ({
+        name: index.name,
+        sql: createIndex(table, index),
+        table: table.name,
+      })),
+      name: table.name,
+      primaryKey: table.primaryKey ?? table.columns.filter(column => column.primaryKey).map(column => column.name),
+      sql: createTable(table),
+    }))
+    if (includeAuthorization) {
+      tables.push(
+        {
+          columns: [
+            { name: 'key', nullable: false, primaryKey: true, sqlType: 'text' },
+            { name: 'value', nullable: false, primaryKey: false, sqlType: 'text' },
+          ],
+          indexes: [],
+          name: 'basis.secret',
+          primaryKey: ['key'],
+          sql: 'CREATE TABLE IF NOT EXISTS basis.secret (key text PRIMARY KEY, value text NOT NULL)',
+        },
+        {
+          columns: [
+            { name: 'entity', nullable: false, primaryKey: true, sqlType: 'text' },
+            { name: 'ancestor', nullable: false, primaryKey: true, sqlType: 'text' },
+            { name: 'depth', nullable: false, primaryKey: false, sqlType: 'integer' },
+          ],
+          indexes: [],
+          name: 'basis.entity_ancestor',
+          primaryKey: ['entity', 'ancestor'],
+          sql: 'CREATE TABLE IF NOT EXISTS basis.entity_ancestor (' +
+            'entity text NOT NULL, ancestor text NOT NULL, ' +
+            'depth integer NOT NULL DEFAULT 0, PRIMARY KEY (entity, ancestor))',
+        },
+      )
+    }
+    if (includeAuthorization) {
+      const authorizationIndexes: PhysicalIndex[] = [
+        {
+          name: 'Role_key_key',
+          sql: 'CREATE UNIQUE INDEX IF NOT EXISTS "Role_key_key" ON "Role" ("key")',
+          table: 'Role',
+        },
+        {
+          name: 'ExternalIdentity_provider_subject_key',
+          sql: 'CREATE UNIQUE INDEX IF NOT EXISTS "ExternalIdentity_provider_subject_key" ' +
+            'ON "ExternalIdentity" ("provider", "subject")',
+          table: 'ExternalIdentity',
+        },
+        {
+          name: 'Grant_role_idx',
+          sql: 'CREATE INDEX IF NOT EXISTS "Grant_role_idx" ON "Grant" ("role.id")',
+          table: 'Grant',
+        },
+        {
+          name: 'UserRole_user_idx',
+          sql: 'CREATE INDEX IF NOT EXISTS "UserRole_user_idx" ON "UserRole" ("user.id")',
+          table: 'UserRole',
+        },
+        {
+          name: 'UserRole_role_idx',
+          sql: 'CREATE INDEX IF NOT EXISTS "UserRole_role_idx" ON "UserRole" ("role.id")',
+          table: 'UserRole',
+        },
+      ]
+      for (const index of authorizationIndexes) {
+        const table = tables.find(candidate => candidate.name === index.table)
+        if (table) (table.indexes as PhysicalIndex[]).push(index)
+      }
+    }
+    const constraints: PhysicalConstraint[] = [
+      ...this.entities.map(entity => ({
+        name: parentConstraintName(entity),
+        sql: addParentConstraint(entity),
+        table: entity.name,
+      })),
+      ...this.entities.flatMap(entity => entity.fields
+        .filter(isReferenceField)
+        .map(field => ({
+          name: constraintName(entity, field),
+          sql: addConstraint(entity, field),
+          table: entity.name,
+        }))),
+      ...this.relationships.flatMap(relationship => relationshipForeignKeyDefinitions(relationship)
+        .map(definition => ({ name: definition.name, sql: definition.statement, table: relationship.name }))),
+    ]
+    const lifecycle = lifecycleDefinitions(this.entities)
+    const functionSql = includeAuthorization ? this.#authorizationFunctionDdl() : ''
+    let requiredFunctions: string[] = []
+    if (includeAuthorization) {
+      requiredFunctions = [...functionSql.matchAll(/CREATE OR REPLACE FUNCTION\s+basis\.([a-z_]+)\s*\(/gu)]
+        .map(match => `basis.${match[1]}`)
+    }
+    const authDdl = includeAuthorization ? this.authorizationDdl(appRole, superuser) : []
+    const policies: PhysicalPolicy[] = []
+    for (const statement of authDdl) {
+      const match = /^CREATE POLICY "([^"]+)" ON "([^"]+)"/u.exec(statement)
+      if (match) policies.push({ name: match[1] as string, sql: statement, table: match[2] as string })
+    }
+    let grants: PhysicalGrant[] = []
+    if (includeAuthorization) {
+      grants = authDdl
+        .filter(statement => /^(?:GRANT|REVOKE)/u.test(statement))
+        .map((sql, index) => ({ name: `security-grant-${index}`, sql }))
+    }
+    return {
+      constraints,
+      extensions: includeAuthorization ? ['pg_trgm', 'pgcrypto'] : ['pg_trgm'],
+      ...(includeAuthorization ? { grants } : {}),
+      functions: [
+        ...lifecycle.functions.map(fn => ({
+          name: fn.name,
+          required: [fn.name],
+          sql: fn.statement,
+        })),
+        ...(includeAuthorization
+          ? [{ name: 'basis.authorization-functions', required: requiredFunctions, sql: functionSql }]
+          : []),
+      ],
+      policies,
+      tables,
+      triggers: lifecycle.triggers.map(trigger => ({
+        name: trigger.name,
+        sql: trigger.statement,
+        table: trigger.table,
+      })),
+    }
   }
 
   /**
