@@ -32,6 +32,10 @@ describe('DDL schema planning', () => {
     expect(plan.operations.some(operation => operation.kind === 'table')).toBe(true)
     expect(plan.operations.some(operation => operation.kind === 'constraint')).toBe(true)
     expect(plan.blocked).toBe(false)
+    const ids = new Set(plan.operations.map(operation => operation.id))
+    expect(plan.operations.every(operation => (
+      operation.dependsOn.every(dependency => ids.has(dependency))
+    ))).toBe(true)
   })
 
   test('reports no operations for an unchanged live model', async () => {
@@ -114,8 +118,24 @@ describe('DDL schema planning', () => {
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
       expect(plan.operations.some(operation => operation.target === 'Employee')).toBe(true)
-      expect(plan.blocked).toBe(true)
-      expect(plan.drift).toContain('unexpected trigger: Profile_leaf_check')
+      expect(plan.operations.some(operation => operation.id === 'drop-trigger:Profile_leaf_check')).toBe(true)
+      expect(plan.blocked).toBe(false)
+    }, { fresh: true })
+  })
+
+  test('plans a legitimate column type change as a reviewable operation', async () => {
+    const previous = EntityDefinitions.load(JSON.stringify({
+      entities: [{ fields: [{ field: 'amount', type: 'String' }], name: 'Note' }],
+    }))
+    const desired = EntityDefinitions.load(JSON.stringify({
+      entities: [{ fields: [{ field: 'amount', type: 'Number' }], name: 'Note' }],
+    }))
+    await withIsolatedDatabase('schema-plan-column-change', async database => {
+      await previous.createTables(database.sql)
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
+      expect(plan.operations.some(operation => operation.kind === 'alter-column')).toBe(true)
+      expect(plan.blocked).toBe(false)
     }, { fresh: true })
   })
 
@@ -133,6 +153,27 @@ describe('DDL schema planning', () => {
     }, { fresh: true })
   })
 
+  test('plans missing RLS and authorization enforcement for an existing model', async () => {
+    const model = definitions()
+    await withIsolatedDatabase('schema-plan-rls', async database => {
+      await model.createTables(database.sql)
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual,
+        appRole: 'basis_app',
+        desired: model,
+        superuser: true,
+      })
+      expect(plan.operations.some(operation => operation.kind === 'row-security')).toBe(true)
+      expect(plan.operations.some(operation => operation.kind === 'policy')).toBe(true)
+      expect(plan.drift).toEqual([])
+      const ids = new Set(plan.operations.map(operation => operation.id))
+      expect(plan.operations.every(operation => (
+        operation.dependsOn.every(dependency => ids.has(dependency))
+      ))).toBe(true)
+    }, { fresh: true })
+  })
+
   test('includes authorization objects in the desired physical output', async () => {
     const model = definitions()
     const empty = {
@@ -146,6 +187,7 @@ describe('DDL schema planning', () => {
     const plan = DDL.plan({ actual: empty, appRole: 'basis_app', desired: model })
     expect(plan.operations.some(operation => operation.kind === 'policy')).toBe(true)
     expect(plan.operations.some(operation => operation.kind === 'function')).toBe(true)
+    expect(plan.operations.some(operation => operation.kind === 'grant')).toBe(true)
     expect(plan.operations.some(operation => (
       operation.kind === 'extension' && operation.target === 'pgcrypto'
     ))).toBe(true)

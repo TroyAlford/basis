@@ -3,10 +3,14 @@ import { createHash } from 'node:crypto'
 import type { EntityDefinitions } from './EntityDefinitions'
 
 /** The category of one physical schema object. */
-export type PhysicalKind = 'constraint' | 'extension' | 'function' | 'index' | 'policy' | 'table' | 'trigger'
+export type PhysicalKind =
+  | 'constraint' | 'extension' | 'function' | 'grant' | 'index' | 'policy'
+  | 'row-security' | 'schema' | 'table' | 'trigger'
 
 /** One typed physical column. */
 export interface PhysicalColumn {
+  /** Column default expression, when present. */
+  readonly default?: string | null,
   /** Stable column name. */
   readonly name: string,
   /** Whether the column accepts NULL. */
@@ -19,60 +23,106 @@ export interface PhysicalColumn {
 
 /** One typed physical index. */
 export interface PhysicalIndex {
+  /** Indexed columns, when compiled from the canonical model. */
+  readonly columns?: readonly string[],
+  /** Complete catalog definition, when introspected. */
+  readonly definition?: string,
   /** Index name. */
   readonly name: string,
   /** Complete create-index SQL when compiled from a desired model. */
   readonly sql: string,
   /** Owning table name. */
   readonly table: string,
+  /** Whether the index is unique. */
+  readonly unique?: boolean,
+  /** Whether the catalog index is valid. */
+  readonly valid?: boolean,
 }
 
 /** One typed physical constraint. */
 export interface PhysicalConstraint {
+  /** FK local column, when this is a foreign key. */
+  readonly column?: string,
+  /** Complete catalog definition, when introspected. */
+  readonly definition?: string,
   /** Constraint name. */
   readonly name: string,
   /** Complete add-constraint SQL. */
   readonly sql: string,
   /** Owning table name. */
   readonly table: string,
+  /** FK target table, when this is a foreign key. */
+  readonly target?: string,
+  /** FK target column, when this is a foreign key. */
+  readonly targetColumn?: string,
 }
 
 /** One typed physical table. */
 export interface PhysicalTable {
   /** Typed columns. */
   readonly columns: readonly PhysicalColumn[],
+  /** Whether RLS is forced for this table. */
+  readonly forceRowSecurity?: boolean,
   /** Indexes owned by the table. */
   readonly indexes: readonly PhysicalIndex[],
   /** Table name, qualified with `basis.` for internal tables. */
   readonly name: string,
   /** Primary-key columns. */
   readonly primaryKey: readonly string[],
+  /** Whether RLS is enabled for this table. */
+  readonly rowSecurity?: boolean,
   /** Complete create-table SQL. */
   readonly sql: string,
 }
 
 /** One typed function or function group. */
 export interface PhysicalFunction {
+  /** Lifecycle function body for definition reconciliation. */
+  readonly body?: string,
+  /** Complete catalog definition, when introspected. */
+  readonly definition?: string,
+  /** Whether this is a lifecycle function. */
+  readonly lifecycle?: boolean,
   /** Stable object name. */
   readonly name: string,
   /** Required PostgreSQL function names for this compiled object. */
   readonly required: readonly string[],
+  /** Whether the function is security definer. */
+  readonly securityDefiner?: boolean,
   /** Complete function DDL. */
   readonly sql: string,
 }
 
 /** One typed trigger. */
 export interface PhysicalTrigger {
+  /** Trigger columns, when declared. */
+  readonly columns?: readonly string[],
+  /** Whether this is a constraint trigger. */
+  readonly constraint?: boolean,
+  /** Whether this is deferrable. */
+  readonly deferrable?: boolean,
+  /** Complete catalog definition, when introspected. */
+  readonly definition?: string,
+  /** Whether the trigger is enabled. */
+  readonly enabled?: string,
+  /** Trigger function name. */
+  readonly functionName?: string,
+  /** Whether initially deferred. */
+  readonly initDeferred?: boolean,
   /** Trigger name. */
   readonly name: string,
   /** Complete create-trigger SQL. */
   readonly sql: string,
   /** Owning table. */
   readonly table: string,
+  /** PostgreSQL trigger type bitmask. */
+  readonly type?: number,
 }
 
 /** One typed row-level policy. */
 export interface PhysicalPolicy {
+  /** Policy definition, when introspected. */
+  readonly definition?: string,
   /** Policy name. */
   readonly name: string,
   /** Complete create-policy SQL. */
@@ -101,6 +151,8 @@ export interface PhysicalSchema {
   readonly grants?: readonly PhysicalGrant[],
   /** Policies. */
   readonly policies: readonly PhysicalPolicy[],
+  /** Installed schemas. */
+  readonly schemas?: readonly string[],
   /** Tables. */
   readonly tables: readonly PhysicalTable[],
   /** Triggers. */
@@ -110,11 +162,11 @@ export interface PhysicalSchema {
 /** One deterministic schema operation. */
 export interface SchemaOperation {
   /** Objects this operation requires first. */
-  readonly dependsOn: readonly string[],
+  dependsOn: readonly string[],
   /** Stable operation id. */
   readonly id: string,
   /** Operation category. */
-  readonly kind: PhysicalKind | 'add-column',
+  readonly kind: PhysicalKind | 'add-column' | 'alter-column' | 'drop-column',
   /** Intentional preconditions. */
   readonly preconditions?: readonly string[],
   /** Risk classification. */
@@ -156,11 +208,16 @@ export interface PlanOptions {
 /** Order operations from prerequisites to dependants. */
 const PHASE: Readonly<Record<string, number>> = {
   'add-column': 3,
+  'alter-column': 3,
   'constraint': 5,
+  'drop-column': 3,
   'extension': 0,
   'function': 6,
+  'grant': 8,
   'index': 4,
   'policy': 7,
+  'row-security': 7,
+  'schema': 1,
   'table': 2,
   'trigger': 6,
 }
@@ -177,11 +234,26 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     WHERE extname NOT IN ('plpgsql')
     ORDER BY extname
   `
-  const tableRows = await sql<{ schema: string, table: string }[]>`
-    SELECT table_schema AS schema, table_name AS TABLE
-    FROM information_schema.tables
-    WHERE table_type = 'BASE TABLE' AND table_schema IN (current_schema(), 'basis')
-    ORDER BY table_schema, table_name
+  const schemaRows = await sql<{ name: string }[]>`
+    SELECT nspname AS name
+    FROM pg_namespace
+    WHERE nspname IN ('public', 'basis', current_schema())
+    ORDER BY nspname
+  `
+  const tableRows = await sql<{
+    force: boolean,
+    rowSecurity: boolean,
+    schema: string,
+    table: string,
+  }[]>`
+    SELECT n.nspname AS schema,
+      c.relname AS TABLE,
+      c.relrowsecurity AS "rowSecurity",
+      c.relforcerowsecurity AS force
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind = 'r' AND n.nspname IN (current_schema(), 'basis')
+    ORDER BY n.nspname, c.relname
   `
   const columnRows = await sql<{
     column: string,
@@ -201,11 +273,29 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     WHERE table_schema IN (current_schema(), 'basis')
     ORDER BY table_schema, table_name, ordinal_position
   `
-  const indexRows = await sql<{ definition: string, index: string, schema: string, table: string }[]>`
-    SELECT schemaname AS schema, tablename AS TABLE, indexname AS INDEX, indexdef AS definition
-    FROM pg_indexes
-    WHERE schemaname IN (current_schema(), 'basis') AND indexname NOT LIKE '%_pkey'
-    ORDER BY schemaname, tablename, indexname
+  const indexRows = await sql<{
+    columns: string[] | null,
+    definition: string,
+    index: string,
+    schema: string,
+    table: string,
+    unique: boolean,
+    valid: boolean,
+  }[]>`
+    SELECT n.nspname AS schema,
+      t.relname AS TABLE,
+      c.relname AS INDEX,
+      i.indisunique AS UNIQUE,
+      i.indisvalid AS valid,
+      pg_get_indexdef(i.indexrelid) AS definition,
+(SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(i.indkey) WITH ORDINALITY u(attnum,
+      ordinality) JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = u.attnum) AS columns
+    FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indexrelid
+    JOIN pg_class t ON t.oid = i.indrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname IN (current_schema(), 'basis') AND NOT i.indisprimary
+    ORDER BY n.nspname, t.relname, c.relname
   `
   const constraintRows = await sql<{
     constraint: string,
@@ -223,25 +313,90 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     WHERE n.nspname IN (current_schema(), 'basis') AND con.contype = 'f'
     ORDER BY n.nspname, c.relname, con.conname
   `
-  const functionRows = await sql<{ name: string }[]>`
-    SELECT CASE WHEN n.nspname = 'basis' THEN 'basis.' || p.proname ELSE p.proname END AS name
+  const primaryRows = await sql<{
+    columns: string[],
+    schema: string,
+    table: string,
+  }[]>`
+    SELECT n.nspname AS schema,
+      c.relname AS TABLE,
+      array_agg(a.attname ORDER BY u.ordinality) AS columns
+    FROM pg_constraint con
+    JOIN pg_class c ON c.oid = con.conrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN unnest(con.conkey)
+    WITH ORDINALITY u(attnum, ordinality) ON TRUE
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = u.attnum
+    WHERE con.contype = 'p' AND n.nspname IN (current_schema(), 'basis')
+    GROUP BY n.nspname, c.relname
+    ORDER BY n.nspname, c.relname
+  `
+  const primaryByTable = new Map<string, string[]>()
+  for (const row of primaryRows) {
+    const name = `${row.schema === 'basis' ? 'basis.' : ''}${row.table}`
+    primaryByTable.set(name, row.columns)
+  }
+
+  const functionRows = await sql<{
+    body: string,
+    definition: string,
+    name: string,
+    securityDefiner: boolean,
+  }[]>`
+    SELECT CASE WHEN n.nspname = 'basis' THEN 'basis.' || p.proname ELSE p.proname END AS name,
+      p.prosrc AS body,
+      pg_get_functiondef(p.oid) AS definition,
+      p.prosecdef AS "securityDefiner"
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname IN (current_schema(), 'basis')
     ORDER BY n.nspname, p.proname
   `
-  const triggerRows = await sql<{ name: string, table: string }[]>`
-    SELECT event_object_table AS TABLE, trigger_name AS name
-    FROM information_schema.triggers
-    WHERE trigger_schema IN (current_schema(), 'basis')
-    ORDER BY event_object_schema, event_object_table, trigger_name
+  const triggerRows = await sql<{
+    columns: string[] | null,
+    constraint: number,
+    deferrable: boolean,
+    enabled: string,
+    functionName: string,
+    initDeferred: boolean,
+    name: string,
+    table: string,
+    type: number,
+  }[]>`
+    SELECT n.nspname AS schema,
+      c.relname AS TABLE,
+      t.tgname AS name,
+      t.tgenabled AS enabled,
+      t.tgtype AS type,
+      t.tgdeferrable AS DEFERRABLE,
+      t.tginitdeferred AS "initDeferred",
+      t.tgconstraint AS CONSTRAINT,
+      p.proname AS "functionName",
+(SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(t.tgattr::smallint[]) WITH ORDINALITY
+  u(attnum,
+      ordinality) JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = u.attnum) AS columns
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_proc p ON p.oid = t.tgfoid
+    WHERE NOT t.tgisinternal AND n.nspname IN (current_schema(), 'basis')
+    ORDER BY n.nspname, c.relname, t.tgname
   `
   const policyRows = await sql<{
+    definition: string,
     name: string,
     schema: string,
     table: string,
   }[]>`
-    SELECT schemaname AS schema, tablename AS TABLE, policyname AS name
+    SELECT schemaname AS schema,
+      tablename AS TABLE,
+      policyname AS name,
+      concat('USING ',
+      coalesce(qual,
+      'true'),
+      ' WITH CHECK ',
+      coalesce(with_check,
+      'true')) AS definition
     FROM pg_policies
     WHERE schemaname IN (current_schema(), 'basis')
     ORDER BY schemaname, tablename, policyname
@@ -252,6 +407,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     const name = `${row.schema === 'basis' ? 'basis.' : ''}${row.table}`
     const columns = columnsByTable.get(name) ?? []
     columns.push({
+      default: row.default,
       name: row.column,
       nullable: row.nullable === 'YES',
       primaryKey: false,
@@ -263,38 +419,66 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   for (const row of indexRows) {
     const name = `${row.schema === 'basis' ? 'basis.' : ''}${row.table}`
     const indexes = indexesByTable.get(name) ?? []
-    indexes.push({ name: row.index, sql: row.definition, table: name })
+    indexes.push({
+      columns: row.columns ?? [],
+      definition: row.definition,
+      name: row.index,
+      sql: row.definition,
+      table: name,
+      unique: row.unique,
+      valid: row.valid,
+    })
     indexesByTable.set(name, indexes)
   }
   const tables: PhysicalTable[] = tableRows.map(row => {
     const name = `${row.schema === 'basis' ? 'basis.' : ''}${row.table}`
     return {
       columns: columnsByTable.get(name) ?? [],
+      forceRowSecurity: row.force,
       indexes: indexesByTable.get(name) ?? [],
       name,
-      primaryKey: [],
+      primaryKey: primaryByTable.get(name) ?? [],
+      rowSecurity: row.rowSecurity,
       sql: '',
     }
   })
   return {
     constraints: constraintRows.map(row => ({
+      definition: row.definition,
       name: row.constraint,
       sql: `ALTER TABLE ${quote(row.schema === 'basis' ? `basis.${row.table}` : row.table)} ` +
         `ADD CONSTRAINT ${quote(row.constraint)} ${row.definition}`,
       table: row.schema === 'basis' ? `basis.${row.table}` : row.table,
     })),
     extensions: extensions.map(row => row.name),
-    functions: functionRows.map(row => ({ name: row.name, required: [row.name], sql: '' })),
+    functions: functionRows.map(row => ({
+      body: row.body,
+      definition: row.definition,
+      name: row.name,
+      required: [row.name],
+      securityDefiner: row.securityDefiner,
+      sql: '',
+    })),
     policies: policyRows.map(row => ({
+      definition: row.definition,
       name: row.name,
       sql: '',
       table: row.schema === 'basis' ? `basis.${row.table}` : row.table,
     })),
+    schemas: schemaRows.map(row => row.name),
     tables,
     triggers: triggerRows.map(row => ({
+      columns: row.columns ?? [],
+      constraint: row.constraint !== 0,
+      deferrable: row.deferrable,
+      definition: '',
+      enabled: row.enabled,
+      functionName: row.functionName,
+      initDeferred: row.initDeferred,
       name: row.name,
       sql: '',
       table: row.table,
+      type: row.type,
     })),
   }
 }
@@ -310,12 +494,21 @@ export function plan(options: PlanOptions): SchemaPlan {
     options.superuser,
     options.includeAuthorization ?? true,
   )
+  const previous = options.previous?.physicalSchema(
+    options.appRole,
+    options.superuser,
+    options.includeAuthorization ?? true,
+  )
   const actualTables = new Map(options.actual.tables.map(table => [table.name, table]))
   const desiredTables = new Map(desired.tables.map(table => [table.name, table]))
+  const previousTablesPhysical = new Map(previous?.tables.map(table => [table.name, table]) ?? [])
   const actualFunctions = new Set(options.actual.functions.flatMap(fn => fn.required))
   const actualTriggers = new Set(options.actual.triggers.map(trigger => trigger.name))
   const actualPolicies = new Set(options.actual.policies.map(policy => policy.name))
   const actualExtensions = new Set(options.actual.extensions)
+  const previousTriggers = new Set(previous?.triggers.map(trigger => trigger.name) ?? [])
+  const previousFunctions = new Set(previous?.functions.flatMap(fn => fn.required) ?? [])
+  const previousFunctionMap = new Map(previous?.functions.map(fn => [fn.name, fn]) ?? [])
   const operations: SchemaOperation[] = []
   const drift: string[] = []
   const ambiguities: string[] = []
@@ -336,6 +529,32 @@ export function plan(options: PlanOptions): SchemaPlan {
   for (const extension of actualExtensions) {
     if (!desiredExtensions.has(extension)) drift.push(`unexpected extension: ${extension}`)
   }
+  const actualSchemas = new Set(options.actual.schemas ?? [])
+  for (const schema of desired.schemas ?? []) {
+    if (!actualSchemas.has(schema)) {
+      operations.push({
+        dependsOn: [],
+        id: `schema:${schema}`,
+        kind: 'schema',
+        risk: 'safe',
+        sql: `CREATE SCHEMA IF NOT EXISTS ${quote(schema)}`,
+        target: schema,
+      })
+    }
+  }
+
+  if (!actualSchemas.has('basis')) {
+    for (const grant of desired.grants ?? []) {
+      operations.push({
+        dependsOn: [],
+        id: `grant:${grant.name}`,
+        kind: 'grant',
+        risk: 'review',
+        sql: grant.sql,
+        target: grant.name,
+      })
+    }
+  }
 
   const previousTables = new Set<string>()
   if (options.previous) {
@@ -347,8 +566,8 @@ export function plan(options: PlanOptions): SchemaPlan {
   const desiredOnly = [...desiredNames].filter(name => !previousTables.has(name) && !name.startsWith('basis.'))
   const previousOnly = [...previousTables].filter(name => !desiredNames.has(name))
   if (previousOnly.length > 0 && desiredOnly.length > 0) {
-    for (const previous of previousOnly) {
-      for (const next of desiredOnly) ambiguities.push(`${previous} -> ${next}`)
+    for (const previousName of previousOnly) {
+      for (const next of desiredOnly) ambiguities.push(`${previousName} -> ${next}`)
     }
   }
 
@@ -375,6 +594,29 @@ export function plan(options: PlanOptions): SchemaPlan {
       }
       continue
     }
+    if (actual.primaryKey.join(',') !== table.primaryKey.join(',')) {
+      drift.push(`primary key changed: ${table.name}`)
+    }
+    if (table.rowSecurity && actual.rowSecurity !== true) {
+      operations.push({
+        dependsOn: [`table:${table.name}`],
+        id: `rls:${table.name}`,
+        kind: 'row-security',
+        risk: 'review',
+        sql: `ALTER TABLE ${quote(table.name)} ENABLE ROW LEVEL SECURITY`,
+        target: table.name,
+      })
+    }
+    if (table.forceRowSecurity && actual.forceRowSecurity !== true) {
+      operations.push({
+        dependsOn: [`table:${table.name}`],
+        id: `force-rls:${table.name}`,
+        kind: 'row-security',
+        risk: 'review',
+        sql: `ALTER TABLE ${quote(table.name)} FORCE ROW LEVEL SECURITY`,
+        target: table.name,
+      })
+    }
     const actualColumns = new Map(actual.columns.map(column => [column.name, column]))
     for (const column of table.columns) {
       const existing = actualColumns.get(column.name)
@@ -389,20 +631,63 @@ export function plan(options: PlanOptions): SchemaPlan {
         })
         continue
       }
+      const previousColumn = previousTablesPhysical.get(table.name)
+        ?.columns.find(candidate => candidate.name === column.name)
       if (!sameType(existing.sqlType, column.sqlType)) {
-        drift.push(`column type changed: ${table.name}.${column.name} (${existing.sqlType} -> ${column.sqlType})`)
+        if (previousColumn && sameType(previousColumn.sqlType, existing.sqlType)) {
+          operations.push({
+            dependsOn: [`table:${table.name}`],
+            id: `column-type:${table.name}:${column.name}`,
+            kind: 'alter-column',
+            risk: 'review',
+            sql: `ALTER TABLE ${quote(table.name)} ALTER COLUMN ${quote(column.name)} TYPE ${column.sqlType}`,
+            target: `${table.name}.${column.name}`,
+          })
+        } else {
+          drift.push(`column type changed: ${table.name}.${column.name} (${existing.sqlType} -> ${column.sqlType})`)
+        }
       }
       if (existing.nullable !== column.nullable) {
-        drift.push(`column nullability changed: ${table.name}.${column.name}`)
+        if (previousColumn && previousColumn.nullable === existing.nullable) {
+          operations.push({
+            dependsOn: [`table:${table.name}`],
+            id: `column-null:${table.name}:${column.name}`,
+            kind: 'alter-column',
+            risk: 'review',
+            sql: `ALTER TABLE ${quote(table.name)} ALTER COLUMN ${quote(column.name)} ` +
+              (column.nullable ? 'DROP NOT NULL' : 'SET NOT NULL'),
+            target: `${table.name}.${column.name}`,
+          })
+        } else {
+          drift.push(`column nullability changed: ${table.name}.${column.name}`)
+        }
+      }
+      if (column.default !== undefined && existing.default !== column.default) {
+        drift.push(`column default changed: ${table.name}.${column.name}`)
       }
     }
     const desiredColumns = new Set(table.columns.map(column => column.name))
+    const previousTable = previousTablesPhysical.get(table.name)
     for (const column of actual.columns) {
-      if (!desiredColumns.has(column.name)) drift.push(`unexpected column: ${table.name}.${column.name}`)
+      if (desiredColumns.has(column.name)) continue
+      const previousColumn = previousTable?.columns.find(candidate => candidate.name === column.name)
+      if (previousColumn) {
+        operations.push({
+          dependsOn: [`table:${table.name}`],
+          id: `drop-column:${table.name}:${column.name}`,
+          kind: 'drop-column',
+          risk: 'data',
+          sql: `ALTER TABLE ${quote(table.name)} DROP COLUMN ${quote(column.name)}`,
+          target: `${table.name}.${column.name}`,
+        })
+      } else {
+        drift.push(`unexpected column: ${table.name}.${column.name}`)
+      }
     }
     const actualIndexes = new Map(actual.indexes.map(index => [index.name, index]))
     for (const index of table.indexes) {
-      if (!actualIndexes.has(index.name)) {
+      const existing = actualIndexes.get(index.name)
+      if (!existing) {
         operations.push({
           dependsOn: [`table:${table.name}`],
           id: `index:${table.name}:${index.name}`,
@@ -411,6 +696,14 @@ export function plan(options: PlanOptions): SchemaPlan {
           sql: index.sql,
           target: `${table.name}.${index.name}`,
         })
+        continue
+      }
+      if (
+        existing.valid === false
+        || (index.unique !== undefined && existing.unique !== index.unique)
+        || (index.columns !== undefined && (existing.columns ?? []).join(',') !== index.columns.join(','))
+      ) {
+        drift.push(`index definition changed: ${table.name}.${index.name}`)
       }
     }
     for (const index of actualIndexes.values()) {
@@ -420,14 +713,25 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
   for (const table of options.actual.tables) {
-    if (!desiredTables.has(table.name) && !ambiguities.some(pair => pair.startsWith(`${table.name} ->`))) {
+    if (desiredTables.has(table.name) || ambiguities.some(pair => pair.startsWith(`${table.name} ->`))) continue
+    if (previousTables.has(table.name)) {
+      operations.push({
+        dependsOn: [],
+        id: `drop-table:${table.name}`,
+        kind: 'table',
+        risk: 'data',
+        sql: `DROP TABLE ${quote(table.name)}`,
+        target: table.name,
+      })
+    } else {
       drift.push(`unexpected table: ${table.name}`)
     }
   }
 
-  const actualConstraints = new Set(options.actual.constraints.map(constraint => constraint.name))
+  const actualConstraints = new Map(options.actual.constraints.map(constraint => [constraint.name, constraint]))
   for (const constraint of desired.constraints) {
-    if (!actualConstraints.has(constraint.name)) {
+    const existing = actualConstraints.get(constraint.name)
+    if (!existing) {
       operations.push({
         dependsOn: [],
         id: `constraint:${constraint.name}`,
@@ -436,6 +740,13 @@ export function plan(options: PlanOptions): SchemaPlan {
         sql: constraint.sql,
         target: constraint.name,
       })
+      continue
+    }
+    if (
+      constraint.definition !== undefined
+      && normalizeDefinition(existing.definition ?? '') !== normalizeDefinition(constraint.definition)
+    ) {
+      drift.push(`constraint definition changed: ${constraint.name}`)
     }
   }
   const desiredConstraints = new Set(desired.constraints.map(constraint => constraint.name))
@@ -443,6 +754,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     if (!desiredConstraints.has(constraint.name)) drift.push(`unexpected constraint: ${constraint.name}`)
   }
 
+  const actualFunctionMap = new Map(options.actual.functions.map(fn => [fn.name, fn]))
   for (const fn of desired.functions) {
     if (!fn.required.every(name => actualFunctions.has(name))) {
       operations.push({
@@ -453,40 +765,105 @@ export function plan(options: PlanOptions): SchemaPlan {
         sql: fn.sql,
         target: fn.name,
       })
+      continue
+    }
+    if (fn.lifecycle && fn.body) {
+      const actualFunction = actualFunctionMap.get(fn.name)
+      if (actualFunction?.body && normalizeDefinition(actualFunction.body) !== normalizeDefinition(fn.body)) {
+        const prior = previousFunctionMap.get(fn.name)
+        if (prior?.body && normalizeDefinition(prior.body) === normalizeDefinition(actualFunction.body)) {
+          operations.push({
+            dependsOn: [],
+            id: `function:${fn.name}:replace`,
+            kind: 'function',
+            risk: 'review',
+            sql: fn.sql,
+            target: fn.name,
+          })
+        } else {
+          drift.push(`function definition changed: ${fn.name}`)
+        }
+      }
     }
   }
   const desiredFunctionNames = new Set(desired.functions.flatMap(fn => fn.required))
   for (const name of actualFunctions) {
-    if (!desiredFunctionNames.has(name)) drift.push(`unexpected function: ${name}`)
-  }
-
-  for (const trigger of desired.triggers) {
-    if (!actualTriggers.has(trigger.name)) {
+    if (desiredFunctionNames.has(name)) continue
+    if (previousFunctions.has(name)) {
       operations.push({
         dependsOn: [],
+        id: `drop-function:${name}`,
+        kind: 'function',
+        risk: 'review',
+        sql: `DROP FUNCTION ${quote(name)}()`,
+        target: name,
+      })
+    } else {
+      drift.push(`unexpected function: ${name}`)
+    }
+  }
+
+  const actualTriggerMap = new Map(options.actual.triggers.map(trigger => [trigger.name, trigger]))
+  for (const trigger of desired.triggers) {
+    const existing = actualTriggerMap.get(trigger.name)
+    if (!existing) {
+      operations.push({
+        dependsOn: [`table:${trigger.table}`],
         id: `trigger:${trigger.name}`,
         kind: 'trigger',
         risk: 'review',
         sql: trigger.sql,
         target: trigger.name,
       })
+      continue
+    }
+    if (
+      (existing.enabled !== undefined && existing.enabled !== 'O')
+      || (trigger.functionName !== undefined && existing.functionName !== trigger.functionName)
+      || (trigger.type !== undefined && existing.type !== trigger.type)
+      || (trigger.columns !== undefined
+        && (existing.columns ?? []).join(',') !== trigger.columns.join(','))
+    ) {
+      drift.push(`trigger definition changed: ${trigger.name}`)
     }
   }
   const desiredTriggerNames = new Set(desired.triggers.map(trigger => trigger.name))
   for (const name of actualTriggers) {
-    if (!desiredTriggerNames.has(name)) drift.push(`unexpected trigger: ${name}`)
-  }
-
-  for (const policy of desired.policies) {
-    if (!actualPolicies.has(policy.name)) {
+    if (desiredTriggerNames.has(name)) continue
+    const trigger = actualTriggerMap.get(name)
+    if (previousTriggers.has(name) && trigger) {
       operations.push({
         dependsOn: [],
+        id: `drop-trigger:${name}`,
+        kind: 'trigger',
+        risk: 'review',
+        sql: `DROP TRIGGER ${quote(name)} ON ${quote(trigger.table)}`,
+        target: name,
+      })
+    } else {
+      drift.push(`unexpected trigger: ${name}`)
+    }
+  }
+
+  const actualPolicyMap = new Map(options.actual.policies.map(policy => [policy.name, policy]))
+  for (const policy of desired.policies) {
+    const existing = actualPolicyMap.get(policy.name)
+    if (!existing) {
+      operations.push({
+        dependsOn: [`table:${policy.table}`],
         id: `policy:${policy.name}`,
         kind: 'policy',
         risk: 'review',
         sql: policy.sql,
         target: policy.name,
       })
+      continue
+    }
+    if (
+      policy.definition !== undefined && existing.definition !== undefined
+      && normalizeDefinition(existing.definition) !== normalizeDefinition(policy.definition)
+    ) {
+      drift.push(`policy definition changed: ${policy.name}`)
     }
   }
   const desiredPolicyNames = new Set(desired.policies.map(policy => policy.name))
@@ -494,6 +871,47 @@ export function plan(options: PlanOptions): SchemaPlan {
     if (!desiredPolicyNames.has(name)) drift.push(`unexpected policy: ${name}`)
   }
 
+  const plannedIds = new Set(operations.map(operation => operation.id))
+  const schemaOperation = operations.find(operation => operation.kind === 'schema' && operation.target === 'basis')
+  const functionOperations = operations.filter(operation => operation.kind === 'function')
+  const tableOperations = new Set(operations
+    .filter(operation => operation.kind === 'table')
+    .map(operation => operation.target))
+  for (const operation of operations) {
+    const dependencies = new Set(operation.dependsOn.filter(dependency => plannedIds.has(dependency)))
+    if (
+      schemaOperation
+      && (operation.kind === 'policy' || operation.kind === 'function'
+        || (operation.kind === 'table' && operation.target.startsWith('basis.')))
+    ) {
+      dependencies.add(schemaOperation.id)
+    }
+    if (operation.kind === 'trigger') {
+      const trigger = desired.triggers.find(candidate => candidate.name === operation.target)
+      const dependency = functionOperations.find(candidate => candidate.target === trigger?.functionName)
+      if (dependency) dependencies.add(dependency.id)
+    }
+    if (operation.kind === 'policy') {
+      for (const dependency of functionOperations) dependencies.add(dependency.id)
+    }
+    if (operation.kind === 'index' || operation.kind === 'constraint'
+      || operation.kind === 'trigger' || operation.kind === 'policy'
+      || operation.kind === 'add-column' || operation.kind === 'alter-column'
+      || operation.kind === 'drop-column') {
+      let tableTarget = operation.target.split(':')[0]?.split('.')[0] ?? ''
+      if (operation.kind === 'policy') {
+        tableTarget = desired.policies.find(policy => policy.name === operation.target)?.table ?? tableTarget
+      }
+      if (operation.kind === 'trigger') {
+        tableTarget = desired.triggers.find(trigger => trigger.name === operation.target)?.table ?? tableTarget
+      }
+      if (operation.kind === 'constraint') {
+        tableTarget = desired.constraints.find(constraint => constraint.name === operation.target)?.table ?? tableTarget
+      }
+      if (tableOperations.has(tableTarget)) dependencies.add(`table:${tableTarget}`)
+    }
+    operation.dependsOn = [...dependencies]
+  }
   operations.sort((left, right) => (
     (PHASE[left.kind] ?? 99) - (PHASE[right.kind] ?? 99)
     || left.id.localeCompare(right.id)
@@ -519,6 +937,15 @@ export function hash(source: string): string {
  * The canonical schema-planning capability.
  */
 export const DDL = { hash, introspect, plan }
+
+/**
+ * Normalize SQL for defensive catalog comparison.
+ * @param value - SQL or catalog expression.
+ * @returns Comparable text.
+ */
+function normalizeDefinition(value: string): string {
+  return value.toLowerCase().replaceAll('"', '').replace(/\s+/gu, '').replaceAll('initiallyimmediate', '').trim()
+}
 
 /**
  * Build one add-column statement.

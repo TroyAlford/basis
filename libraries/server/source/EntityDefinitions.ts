@@ -624,13 +624,17 @@ export class EntityDefinitions {
         primaryKey: column.primaryKey === true,
         sqlType: columnType(column),
       })),
+      forceRowSecurity: includeAuthorization && superuser,
       indexes: (table.indexes ?? []).map(index => ({
+        columns: index.columns,
         name: index.name,
         sql: createIndex(table, index),
         table: table.name,
+        unique: index.unique === true,
       })),
       name: table.name,
       primaryKey: table.primaryKey ?? table.columns.filter(column => column.primaryKey).map(column => column.name),
+      rowSecurity: includeAuthorization,
       sql: createTable(table),
     }))
     if (includeAuthorization) {
@@ -663,27 +667,34 @@ export class EntityDefinitions {
     if (includeAuthorization) {
       const authorizationIndexes: PhysicalIndex[] = [
         {
+          columns: ['key'],
           name: 'Role_key_key',
           sql: 'CREATE UNIQUE INDEX IF NOT EXISTS "Role_key_key" ON "Role" ("key")',
           table: 'Role',
+          unique: true,
         },
         {
+          columns: ['provider', 'subject'],
           name: 'ExternalIdentity_provider_subject_key',
           sql: 'CREATE UNIQUE INDEX IF NOT EXISTS "ExternalIdentity_provider_subject_key" ' +
             'ON "ExternalIdentity" ("provider", "subject")',
           table: 'ExternalIdentity',
+          unique: true,
         },
         {
+          columns: ['role.id'],
           name: 'Grant_role_idx',
           sql: 'CREATE INDEX IF NOT EXISTS "Grant_role_idx" ON "Grant" ("role.id")',
           table: 'Grant',
         },
         {
+          columns: ['user.id'],
           name: 'UserRole_user_idx',
           sql: 'CREATE INDEX IF NOT EXISTS "UserRole_user_idx" ON "UserRole" ("user.id")',
           table: 'UserRole',
         },
         {
+          columns: ['role.id'],
           name: 'UserRole_role_idx',
           sql: 'CREATE INDEX IF NOT EXISTS "UserRole_role_idx" ON "UserRole" ("role.id")',
           table: 'UserRole',
@@ -696,19 +707,35 @@ export class EntityDefinitions {
     }
     const constraints: PhysicalConstraint[] = [
       ...this.entities.map(entity => ({
+        column: 'id',
+        definition: constraintDefinition(addParentConstraint(entity)),
         name: parentConstraintName(entity),
         sql: addParentConstraint(entity),
         table: entity.name,
+        target: entity.parent,
+        targetColumn: 'id',
       })),
       ...this.entities.flatMap(entity => entity.fields
         .filter(isReferenceField)
         .map(field => ({
+          column: field.column,
+          definition: constraintDefinition(addConstraint(entity, field)),
           name: constraintName(entity, field),
           sql: addConstraint(entity, field),
           table: entity.name,
+          target: field.target,
+          targetColumn: 'id',
         }))),
       ...this.relationships.flatMap(relationship => relationshipForeignKeyDefinitions(relationship)
-        .map(definition => ({ name: definition.name, sql: definition.statement, table: relationship.name }))),
+        .map(definition => ({
+          column: definition.column,
+          definition: constraintDefinition(definition.statement),
+          name: definition.name,
+          sql: definition.statement,
+          table: relationship.name,
+          target: definition.target,
+          targetColumn: 'id',
+        }))),
     ]
     const lifecycle = lifecycleDefinitions(this.entities)
     const functionSql = includeAuthorization ? this.#authorizationFunctionDdl() : ''
@@ -721,7 +748,15 @@ export class EntityDefinitions {
     const policies: PhysicalPolicy[] = []
     for (const statement of authDdl) {
       const match = /^CREATE POLICY "([^"]+)" ON "([^"]+)"/u.exec(statement)
-      if (match) policies.push({ name: match[1] as string, sql: statement, table: match[2] as string })
+      if (!match) continue
+      const using = / USING \((.*?)\)(?: WITH CHECK|$)/u.exec(statement)?.[1] ?? 'true'
+      const check = / WITH CHECK \((.*?)\)$/u.exec(statement)?.[1] ?? 'true'
+      policies.push({
+        definition: `USING ${using} WITH CHECK ${check}`,
+        name: match[1] as string,
+        sql: statement,
+        table: match[2] as string,
+      })
     }
     let grants: PhysicalGrant[] = []
     if (includeAuthorization) {
@@ -732,11 +767,15 @@ export class EntityDefinitions {
     return {
       constraints,
       extensions: includeAuthorization ? ['pg_trgm', 'pgcrypto'] : ['pg_trgm'],
+      schemas: includeAuthorization ? ['basis'] : [],
       ...(includeAuthorization ? { grants } : {}),
       functions: [
         ...lifecycle.functions.map(fn => ({
+          body: fn.body,
+          lifecycle: true,
           name: fn.name,
           required: [fn.name],
+          securityDefiner: false,
           sql: fn.statement,
         })),
         ...(includeAuthorization
@@ -746,9 +785,15 @@ export class EntityDefinitions {
       policies,
       tables,
       triggers: lifecycle.triggers.map(trigger => ({
+        columns: trigger.columns,
+        constraint: trigger.constraint,
+        deferrable: trigger.deferrable,
+        functionName: trigger.function,
+        initDeferred: trigger.initDeferred,
         name: trigger.name,
         sql: trigger.statement,
         table: trigger.table,
+        type: trigger.type,
       })),
     }
   }
@@ -1326,15 +1371,16 @@ export class EntityDefinitions {
    * @returns The complete ordered DDL sequence.
    */
   get ddl(): readonly string[] {
+    const schema = this.physicalSchema('basis_app', false, false)
     return [
       IDENTITY_EXTENSION_DDL,
-      ...this.tables.flatMap(tableStatements),
-      ...this.entities.map(entity => addParentConstraint(entity)),
-      ...this.entities.flatMap(entity => entity.fields
-        .filter(isReferenceField)
-        .map(field => addConstraint(entity, field))),
-      ...this.relationships.flatMap(relationshipConstraints),
-      ...lifecycleStatements(this.entities),
+      ...schema.tables.flatMap(table => [
+        table.sql,
+        ...table.indexes.map(index => index.sql),
+      ]),
+      ...schema.constraints.map(constraint => constraint.sql),
+      ...schema.functions.map(fn => fn.sql),
+      ...schema.triggers.map(trigger => trigger.sql),
     ]
   }
 
@@ -1350,61 +1396,43 @@ export class EntityDefinitions {
    * @throws {Error} When a constraint or lifecycle definition does not match.
    */
   async createTables(sql: SQL): Promise<void> {
+    const schema = this.physicalSchema('basis_app', false, false)
     await sql.unsafe(IDENTITY_EXTENSION_DDL).simple()
-    for (const table of this.tables) {
+    for (const table of schema.tables) {
       const rows = await sql<{ present: boolean }[]>`
 SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_schema() AND tablename
           = ${table.name} ) AS present
       `
       const created = !rows[0]?.present
-      if (created) await sql.unsafe(createTable(table)).simple()
-      for (const index of table.indexes ?? []) {
-        if (await indexExists(sql, table.name, index)) continue
-        await sql.unsafe(createIndex(table, index)).simple()
-        if (!await indexExists(sql, table.name, index)) {
+      if (created) await sql.unsafe(table.sql).simple()
+      for (const index of table.indexes) {
+        const compatible = { ...index, columns: index.columns ?? [] } as unknown as TableIndex
+        if (await indexExists(sql, table.name, compatible)) continue
+        await sql.unsafe(index.sql).simple()
+        if (!await indexExists(sql, table.name, compatible)) {
           throw new Error(`Index "${index.name}" was not created by the canonical schema compiler`)
         }
       }
     }
 
-    for (const entity of this.entities) {
+    for (const constraint of schema.constraints) {
+      if (!constraint.column || !constraint.target) {
+        await sql.unsafe(constraint.sql).simple()
+        continue
+      }
       await reconcileForeignKey(
         sql,
-        entity.name,
-        parentConstraintName(entity),
-        'id',
-        entity.parent,
-        'id',
-        addParentConstraint(entity),
+        constraint.table,
+        constraint.name,
+        constraint.column,
+        constraint.target,
+        constraint.targetColumn ?? 'id',
+        constraint.sql,
       )
-      for (const field of entity.fields.filter(isReferenceField)) {
-        await reconcileForeignKey(
-          sql,
-          entity.name,
-          constraintName(entity, field),
-          field.column,
-          field.target,
-          'id',
-          addConstraint(entity, field),
-        )
-      }
-    }
-    for (const relationship of this.relationships) {
-      for (const constraint of relationshipForeignKeyDefinitions(relationship)) {
-        await reconcileForeignKey(
-          sql,
-          relationship.name,
-          constraint.name,
-          constraint.column,
-          constraint.target,
-          'id',
-          constraint.statement,
-        )
-      }
     }
 
-    const lifecycle = lifecycleDefinitions(this.entities)
-    for (const statement of lifecycle.functions) {
+    for (const fn of schema.functions) {
+      if (!fn.lifecycle || !fn.body) continue
       const existing = await sql<{
         body: string,
         normalFunction: boolean,
@@ -1419,24 +1447,24 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_sch
           p.prosecdef AS "securityDefiner"
         FROM pg_catalog.pg_proc p
         JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-        WHERE n.nspname = current_schema() AND p.proname = ${statement.name} AND p.pronargs = 0
+        WHERE n.nspname = current_schema() AND p.proname = ${fn.name} AND p.pronargs = 0
       `
       if (!existing[0]) {
-        await sql.unsafe(statement.statement).simple()
+        await sql.unsafe(fn.sql).simple()
         continue
       }
       const currentFunction = existing[0]
       if (
-        normalizeBody(currentFunction.body) !== normalizeBody(statement.body)
+        normalizeBody(currentFunction.body) !== normalizeBody(fn.body)
         || !currentFunction.normalFunction
         || !currentFunction.plpgsql
         || !currentFunction.returnTrigger
         || currentFunction.securityDefiner
       ) {
-        throw new Error(`Existing lifecycle function "${statement.name}" does not match the canonical model`)
+        throw new Error(`Existing lifecycle function "${fn.name}" does not match the canonical model`)
       }
     }
-    for (const trigger of lifecycle.triggers) {
+    for (const trigger of schema.triggers) {
       const existing = await sql<{
         columns: string[],
         constraint: number,
@@ -1467,7 +1495,7 @@ WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table
   t.tgisinternal
       `
       if (!existing[0]) {
-        await sql.unsafe(trigger.statement).simple()
+        await sql.unsafe(trigger.sql).simple()
         continue
       }
       const current = existing[0]
@@ -1476,7 +1504,7 @@ WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table
         || current.enabled !== 'O'
         || current.initDeferred !== trigger.initDeferred
         || (current.constraint !== 0) !== trigger.constraint
-        || current.functionName !== trigger.function
+        || current.functionName !== trigger.functionName
         || !current.functionSchema
         || !current.noWhen
         || current.type !== trigger.type
@@ -1489,6 +1517,15 @@ WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table
       }
     }
   }
+}
+
+/**
+ * Extract the bare constraint definition from an ALTER TABLE statement.
+ * @param statement - Canonical add-constraint SQL.
+ * @returns The catalog-comparable definition.
+ */
+function constraintDefinition(statement: string): string {
+  return statement.replace(/^alter table\s+\S+\s+add constraint\s+"[^"]+"\s+/iu, '')
 }
 
 /**
@@ -2429,15 +2466,6 @@ function relationshipTable(relationship: RelationshipDefinition): TableDefinitio
 }
 
 /**
- * Build the foreign-key statements for one relationship table.
- * @param relationship - Named relationship definition.
- * @returns Endpoint foreign-key statements in authored order.
- */
-function relationshipConstraints(relationship: RelationshipDefinition): readonly string[] {
-  return relationshipForeignKeyDefinitions(relationship).map(definition => definition.statement)
-}
-
-/**
  * Build foreign-key metadata for one relationship table.
  * @param relationship - Named relationship definition.
  * @returns Endpoint foreign-key definitions in authored order.
@@ -2490,18 +2518,6 @@ function identityCheck(column: string, format: IdentityFormat | undefined): stri
   end`
   if (format === 'Snowflake') return snowflake
   return `(${uuid} or ${snowflake})`
-}
-
-/**
- * Build statements for one physical table.
- * @param table - Physical table metadata.
- * @returns Its table statement followed by index statements.
- */
-function tableStatements(table: TableDefinition): readonly string[] {
-  return [
-    createTable(table),
-    ...(table.indexes ?? []).map(index => createIndex(table, index)),
-  ]
 }
 
 /**
@@ -2844,19 +2860,6 @@ function lifecycleFunction(name: string, body: string): LifecycleFunction {
     statement: `create or replace function ${quoteIdentifier(name)}() ` +
       `returns trigger language plpgsql as $$${body}$$`,
   }
-}
-
-/**
- * Build lifecycle DDL for a fresh schema.
- * @param entities - Validated entities.
- * @returns Function and trigger statements.
- */
-function lifecycleStatements(entities: readonly EntityDefinition[]): readonly string[] {
-  const definitions = lifecycleDefinitions(entities)
-  return [
-    ...definitions.functions.map(definition => definition.statement),
-    ...definitions.triggers.map(definition => definition.statement),
-  ]
 }
 
 /**
