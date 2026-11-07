@@ -14,8 +14,9 @@ import type { APIRoute } from '../types/APIRoute'
 import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
+import { runAsActor } from './ActorContext'
 import type { AuthorizationOptions } from './Authorization'
-import { Authorization, AUTHORIZATION_RUN } from './Authorization'
+import { Authorization, enrollIdentity } from './Authorization'
 import { Builder } from './Builder'
 import type { Database, DatabaseOptions } from './Database'
 import { createDatabase, NullDatabase } from './Database'
@@ -232,7 +233,7 @@ export class Server {
         if (!params) continue
 
         if (this.#authorization) {
-          return await this.#authorization[AUTHORIZATION_RUN](identity, () => handler(params, context))
+          return await runAsActor({ id: identity }, () => handler(params, context))
         }
         return await handler(params, context)
       }
@@ -285,7 +286,7 @@ export class Server {
           request,
         }
         if (this.#authorization) {
-          return this.#authorization[AUTHORIZATION_RUN](identity, () => sseResponse(params, context, handler))
+          return runAsActor({ id: identity }, () => sseResponse(params, context, handler))
         }
         return sseResponse(params, context, handler)
       }
@@ -670,7 +671,7 @@ export class Server {
       identity: async accessToken => {
         const subject = await resolve(accessToken)
         if (subject === null || !this.#authorization) return subject
-        return this.#authorization.login(provider, subject)
+        return enrollIdentity(this.#database, provider, subject)
       },
     })
     this.identity(options.session)

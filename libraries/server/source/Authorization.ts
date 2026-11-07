@@ -1,6 +1,6 @@
 import type { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
-import { currentActor, runAsActor } from './ActorContext'
+import { currentActor, signIdentity } from './ActorContext'
 import type { Database } from './Database'
 import { actorSecret, openAdmin } from './Database'
 import type { EntityDefinition, QueryFieldDefinition } from './EntityDefinitions'
@@ -69,8 +69,6 @@ const SECURITY_SOURCE = JSON.stringify({
 const SECURITY_NAMES = ['User', 'Role', 'Grant', 'ExternalIdentity', 'UserRole'] as const
 /** Definitions produced by {@link Authorization.load}, which already include the system ontology. */
 const LOADED_DEFINITIONS = new WeakSet<EntityDefinitions>()
-/** Internal request-scope binding; not part of the published package surface. */
-export const AUTHORIZATION_RUN = Symbol('basis/authorization-run')
 /** The built-in principal for grants that apply to anonymous and signed-in requests. */
 const PUBLIC_ROLE = 'public'
 /** The built-in role that receives initial security administration. */
@@ -193,16 +191,6 @@ export class Authorization {
   }
 
   /**
-   * Internal: bind verified request identity for the dispatch boundary.
-   * @param actor - Canonical User id or null.
-   * @param callback - Work that may open native transactions.
-   * @returns The callback result.
-   */
-  [AUTHORIZATION_RUN]<T>(actor: string | null, callback: () => T): T {
-    return runAsActor({ id: actor }, callback)
-  }
-
-  /**
    * Resolve a verified canonical User id, failing closed when the User is gone.
    * @param userId - Verified canonical id from the session.
    * @returns The live canonical id, or null.
@@ -228,20 +216,6 @@ export class Authorization {
    * @param profile.email - Email address.
    * @returns The canonical User id, or null when the binding is revoked.
    */
-  async login(
-    provider: string,
-    subject: string,
-    profile: { readonly displayName?: string, readonly email?: string } = {},
-  ): Promise<string | null> {
-    if (!provider || !subject) return null
-    const rows = await this.#database.sql<{ id: string | null }[]>`
-      SELECT basis.login_identity(
-        ${provider}, ${subject}, ${profile.email ?? null}, ${profile.displayName ?? null}
-      ) AS "id"
-    `
-    return rows[0]?.id ?? null
-  }
-
   /**
    * Explicit, operator-controlled bootstrap. Never called by OAuth login.
    * @param options - Optional first administrator identity.
@@ -271,7 +245,7 @@ export class Authorization {
 
       let userId: string | null = null
       if (options.provider && options.subject) {
-        userId = await this.login(options.provider, options.subject, options)
+        userId = await enrollIdentity(this.#database, options.provider, options.subject, options)
         if (userId) await this.#assignRoleAdmin(userId, ADMIN_ROLE, admin.sql)
       }
       return { userId }
@@ -551,6 +525,43 @@ export class Authorization {
     }
   }
 
+}
+
+/**
+ * Enroll a provider assertion that the server has already verified.
+ *
+ * This is intentionally a module capability rather than a public method on
+ * `server.auth`; direct restricted-role SQL cannot produce the signed proof.
+ * @param database - Restricted database capability.
+ * @param provider - Verified provider slug.
+ * @param subject - Verified stable provider subject.
+ * @param profile - Optional email and display name.
+ * @param profile.displayName - Human-readable name.
+ * @param profile.email - Email address.
+ * @returns The canonical User id, or null when the binding is revoked.
+ */
+export async function enrollIdentity(
+  database: Database,
+  provider: string,
+  subject: string,
+  profile: { readonly displayName?: string, readonly email?: string } = {},
+): Promise<string | null> {
+  if (!provider || !subject) return null
+  const secret = actorSecret(database)
+  if (!secret) throw new Error('Authorization actor secret is not configured')
+  const [domain] = await database.sql<{ domain: string }[]>`
+    SELECT current_database()::text AS domain
+  `
+  if (!domain?.domain) throw new Error('PostgreSQL did not expose a database domain')
+  const proof = signIdentity(provider, subject, secret, domain.domain)
+  const rows = await database.sql<{ id: string | null }[]>`
+SELECT basis.login_identity(${provider},
+  ${subject},
+  ${profile.email ?? null},
+  ${profile.displayName ?? null},
+  ${proof} ) AS "id"
+  `
+  return rows[0]?.id ?? null
 }
 
 /**

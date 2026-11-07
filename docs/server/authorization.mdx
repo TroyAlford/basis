@@ -30,7 +30,7 @@ const server = new Server()
 
 ## Identity and bootstrap
 
-OAuth provider subjects are not canonical entity identities. `server.oauth()` maps the verified provider subject through `server.auth.login(provider, subject)` and stores the resulting canonical `User.id` in the existing identity cookie. A first login never receives administration automatically.
+OAuth provider subjects are not canonical entity identities. The `server.oauth()` flow maps a verified provider subject through a module-private enrollment capability, stores the resulting canonical `User.id` in the existing identity cookie, and never exposes a public actor or identity-minting method on `server.auth`. A first login never receives administration automatically.
 
 The administration methods derive the acting actor from the verified request context. They never accept a caller-supplied user id, so a handler cannot switch identity by passing a value from the request.
 
@@ -102,7 +102,7 @@ server.api([HttpVerb.Post], 'articles', async (_params, context) => {
 })
 ```
 
-The actor is not a plain trusted `basis.actor_id` setting. PostgreSQL verifies a server-signed, expiring token whose signature includes the current transaction id, so a token copied into another transaction or pooled session is treated as anonymous. Setting a forged value is also treated as anonymous. Transaction-local state cannot leak to another pooled request, and nested savepoints retain the enclosing actor.
+The actor is not a plain trusted `basis.actor_id` setting. PostgreSQL verifies a server-signed, expiring token whose signature includes the current transaction id, database domain, and signing-key version, so a token copied into another transaction, database, or pooled session is treated as anonymous. Setting a forged value is also treated as anonymous. Transaction-local state cannot leak to another pooled request, and nested savepoints retain the enclosing actor.
 
 ## PostgreSQL privilege boundary
 

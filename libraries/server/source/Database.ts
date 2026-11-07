@@ -316,9 +316,13 @@ class PostgresDatabase implements Database {
         if (!this.#actorSecret) throw new Error('Actor binding is not configured for this database')
         let token = ''
         if (actor.id !== null) {
-          const [transaction] = await tx<{ id: string }[]>`select txid_current()::text as id`
-          if (!transaction?.id) throw new Error('PostgreSQL did not expose a transaction id')
-          token = signActor(actor.id, this.#actorSecret, transaction.id)
+          const [transaction] = await tx<{ domain: string, id: string }[]>`
+            select txid_current()::text as id, current_database()::text as domain
+          `
+          if (!transaction?.id || !transaction.domain) {
+            throw new Error('PostgreSQL did not expose its transaction identity')
+          }
+          token = signActor(actor.id, this.#actorSecret, transaction.id, transaction.domain)
         }
         await tx`select set_config('basis.actor', ${token}, true)`
       }

@@ -675,7 +675,7 @@ export class EntityDefinitions {
     const functions = [
       'basis.actor_id()',
       'basis.actor_active(text)',
-      'basis.login_identity(text, text, text, text)',
+      'basis.login_identity(text, text, text, text, text)',
       'basis.matches(jsonb, jsonb)',
       'basis.authorized(text, text, jsonb)',
       'basis.authorized_row(text, text, jsonb)',
@@ -692,7 +692,7 @@ export class EntityDefinitions {
     statements.push(`REVOKE ALL ON FUNCTION ${functions} FROM PUBLIC`)
     statements.push(
       'GRANT EXECUTE ON FUNCTION basis.actor_id(), basis.actor_active(text), ' +
-      'basis.login_identity(text, text, text, text), ' +
+      'basis.login_identity(text, text, text, text, text), ' +
       'basis.matches(jsonb, jsonb), basis.authorized(text, text, jsonb), ' +
       'basis.authorized_row(text, text, jsonb), basis.authorized_root(text, jsonb), ' +
       'basis.create_role(text, text), basis.assign_role(text, text), ' +
@@ -722,21 +722,22 @@ export class EntityDefinitions {
         token := current_setting('basis.actor', true);
         IF token IS NULL OR token = '' THEN RETURN NULL; END IF;
         parts := string_to_array(token, ':');
-        IF array_length(parts, 1) <> 4 THEN RETURN NULL; END IF;
+        IF array_length(parts, 1) <> 6 THEN RETURN NULL; END IF;
         IF parts[2] <> txid_current()::text THEN RETURN NULL; END IF;
-        expires := parts[3]::numeric;
+        IF parts[3] <> current_database()::text OR parts[4] <> 'v1' THEN RETURN NULL; END IF;
+        expires := parts[5]::numeric;
         IF expires < extract(epoch FROM now()) THEN RETURN NULL; END IF;
         SELECT value INTO secret FROM basis.secret WHERE key = 'actor';
         IF secret IS NULL THEN RETURN NULL; END IF;
         expected := encode(
           hmac(
-            convert_to(parts[1] || ':' || parts[2] || ':' || parts[3], 'UTF8'),
+            convert_to(parts[1] || ':' || parts[2] || ':' || parts[3] || ':' || parts[4] || ':' || parts[5], 'UTF8'),
             convert_to(secret, 'UTF8'),
             'sha256'
           ),
           'hex'
         );
-        IF expected <> parts[4] THEN RETURN NULL; END IF;
+        IF expected <> parts[6] THEN RETURN NULL; END IF;
         actor := convert_from(decode(parts[1], 'hex'), 'UTF8');
         RETURN actor;
       EXCEPTION WHEN others THEN
@@ -822,7 +823,8 @@ export class EntityDefinitions {
         provider_name text,
         provider_subject text,
         email_address text,
-        display_name text
+        display_name text,
+        identity_proof text
       )
       RETURNS text
       LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
@@ -832,10 +834,37 @@ export class EntityDefinitions {
         user_id text;
         identity_id text;
         user_name text;
+        proof_parts text[];
+        proof_secret text;
+        proof_expected text;
+        proof_expires numeric;
       BEGIN
         IF provider_name IS NULL OR provider_name = '' OR provider_subject IS NULL OR provider_subject = '' THEN
           RETURN NULL;
         END IF;
+        IF identity_proof IS NULL OR identity_proof = '' THEN RETURN NULL; END IF;
+        proof_parts := string_to_array(identity_proof, ':');
+        IF array_length(proof_parts, 1) <> 6 THEN RETURN NULL; END IF;
+        IF proof_parts[1] <> encode(convert_to(provider_name, 'UTF8'), 'hex') THEN RETURN NULL; END IF;
+        IF proof_parts[2] <> encode(convert_to(provider_subject, 'UTF8'), 'hex') THEN RETURN NULL; END IF;
+        IF proof_parts[3] <> current_database()::text OR proof_parts[4] <> 'v1' THEN RETURN NULL; END IF;
+        proof_expires := proof_parts[5]::numeric;
+        IF proof_expires < extract(epoch FROM now()) THEN RETURN NULL; END IF;
+        SELECT value INTO proof_secret FROM basis.secret WHERE key = 'actor';
+        IF proof_secret IS NULL THEN RETURN NULL; END IF;
+        proof_expected := encode(
+          hmac(
+            convert_to(
+              proof_parts[1] || ':' || proof_parts[2] || ':' || proof_parts[3] || ':' ||
+              proof_parts[4] || ':' || proof_parts[5],
+              'UTF8'
+            ),
+            convert_to(proof_secret, 'UTF8'),
+            'sha256'
+          ),
+          'hex'
+        );
+        IF proof_expected <> proof_parts[6] THEN RETURN NULL; END IF;
         PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));
         SELECT e."revoked", e."user.id" INTO existing_revoked, existing_user
         FROM "ExternalIdentity" e

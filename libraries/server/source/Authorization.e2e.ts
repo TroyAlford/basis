@@ -5,7 +5,9 @@ import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { removeService } from '../testing/DatabaseFixture'
-import { Authorization, AUTHORIZATION_RUN } from './Authorization'
+import { runAsActor, signActor } from './ActorContext'
+import { Authorization, enrollIdentity } from './Authorization'
+import { actorSecret } from './Database'
 import { Server } from './Server'
 
 const silent = new Logger({ silent: true })
@@ -50,7 +52,9 @@ describe('Authorization RLS', () => {
     try {
       const authorization = server.auth
       if (!authorization) throw new Error('authorization did not initialize')
-      const asActor = <T>(actor: string | null, work: () => T): T => authorization[AUTHORIZATION_RUN](actor, work)
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      expect(Object.getOwnPropertySymbols(Object.getPrototypeOf(authorization))).toEqual([])
+      expect(Object.getOwnPropertySymbols(Object.getPrototypeOf(server.db))).toEqual([])
       const admin = await authorization.bootstrap({
         displayName: 'Admin',
         email: 'admin@example.com',
@@ -70,10 +74,10 @@ describe('Authorization RLS', () => {
       expect(role?.current).toBe('basis_app')
       expect(role?.superuser).toBe(false)
       expect(role?.bypass).toBe(false)
-      const user = await authorization.login('test', 'user', { email: 'user@example.com' })
-      const other = await authorization.login('test', 'other', { email: 'other-employee@example.com' })
-      const sameUser = await authorization.login('test', 'user', { email: 'user@example.com' })
-      const collision = await authorization.login('other', 'user', { email: 'collision@example.com' })
+      const user = await enrollIdentity(server.db, 'test', 'user', { email: 'user@example.com' })
+      const other = await enrollIdentity(server.db, 'test', 'other', { email: 'other-employee@example.com' })
+      const sameUser = await enrollIdentity(server.db, 'test', 'user', { email: 'user@example.com' })
+      const collision = await enrollIdentity(server.db, 'other', 'user', { email: 'collision@example.com' })
       if (!user || !other || !sameUser || !collision) throw new Error('identity mapping failed')
       expect(sameUser).toBe(user)
       expect(collision).not.toBe(user)
@@ -149,6 +153,23 @@ describe('Authorization RLS', () => {
       }))
       expect(replayed[0]?.actor).toBeNull()
 
+      const secret = actorSecret(server.db)
+      if (!secret) throw new Error('actor secret was not configured')
+      const wrongDomain = await asActor(user, () => server.db.tx(async sql => {
+        const [transaction] = await sql<{ domain: string, id: string }[]>`
+          SELECT txid_current()::text AS id, current_database()::text AS domain
+        `
+        if (!transaction?.id) throw new Error('transaction identity was missing')
+        const token = signActor(user, secret, transaction.id, 'different-database')
+        await sql`
+          SELECT set_config('basis.actor', ${token}, TRUE)
+        `
+        return sql<{ actor: string | null }[]>`
+          SELECT basis.actor_id() AS actor
+        `
+      }))
+      expect(wrongDomain[0]?.actor).toBeNull()
+
       const changed = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article"
         SET "title" = 'Leaked'
@@ -182,6 +203,15 @@ describe('Authorization RLS', () => {
       await expect(asActor(admin.userId, () => server.db.tx(async sql => sql`
         SELECT basis.assign_role(${admin.userId}, 'admin')
       `))).rejects.toThrow()
+      const forgedIdentity = await asActor(other, () => server.db.tx(async sql => sql`
+        SELECT basis.login_identity('evil', 'subject', 'evil@example.com', 'Evil', 'forged') AS id
+      `))
+      expect(forgedIdentity[0]?.id).toBeNull()
+      const nullProof = await asActor(other, () => server.db.tx(async sql => sql`
+        SELECT basis.login_identity('evil', 'other', 'evil@example.com', 'Evil', NULL) AS id
+      `))
+      expect(nullProof[0]?.id).toBeNull()
+      expect('login' in authorization).toBe(false)
       await expect(asActor(admin.userId, () => authorization.assignRole(admin.userId, 'admin'))).rejects.toThrow()
 
       const editor = 'editor'
