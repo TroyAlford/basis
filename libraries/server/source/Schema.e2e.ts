@@ -34,8 +34,10 @@ describe('DDL schema planning', () => {
     expect(plan.operations.some(operation => operation.kind === 'constraint')).toBe(true)
     expect(plan.blocked).toBe(false)
     const ids = new Set(plan.operations.map(operation => operation.id))
+    const positions = new Map(plan.operations.map((operation, index) => [operation.id, index]))
     expect(plan.operations.every(operation => (
-      operation.dependsOn.every(dependency => ids.has(dependency))
+      operation.dependsOn.every(dependency => ids.has(dependency)
+        && (positions.get(dependency) ?? Infinity) < (positions.get(operation.id) ?? -1))
     ))).toBe(true)
   })
 

@@ -746,9 +746,16 @@ export class EntityDefinitions {
       if (!match) continue
       const using = / USING \((.*?)\)(?: WITH CHECK|$)/u.exec(statement)?.[1] ?? 'true'
       const check = / WITH CHECK \((.*?)\)$/u.exec(statement)?.[1] ?? 'true'
+      const command = / FOR (SELECT|INSERT|UPDATE|DELETE|ALL)/u.exec(statement)?.[1] ?? 'ALL'
+      const roles = / TO ([^ ]+)/u.exec(statement)?.[1]
+        ?.split(',').map(role => role.trim().replaceAll('"', '')) ?? ['public']
+      const permissive = / AS (PERMISSIVE|RESTRICTIVE)/u.exec(statement)?.[1] ?? 'PERMISSIVE'
       policies.push({
+        command,
         definition: `USING ${using} WITH CHECK ${check}`,
         name: match[1] as string,
+        permissive,
+        roles,
         sql: statement,
         table: match[2] as string,
       })
@@ -756,9 +763,14 @@ export class EntityDefinitions {
     let grants: PhysicalGrant[] = []
     if (includeAuthorization) {
       grants = []
-      for (const sql of authDdl) {
+      const privilegeDdl = [...this.authorizationSchemaDdl(), ...authDdl]
+      for (const sql of privilegeDdl) {
+        if (!/^(?:GRANT|REVOKE)/u.test(sql)) continue
         const match = /^GRANT\s+([A-Z, ]+)\s+ON\s+(?:TABLE\s+)?"([^"]+)"\s+TO\s+"([^"]+)"/u.exec(sql)
-        if (!match) continue
+        if (!match) {
+          grants.push({ name: `privilege:${sql}`, sql })
+          continue
+        }
         const [, privileges, table, grantee] = match
         for (const privilege of (privileges ?? '').split(',').map(value => value.trim()).filter(Boolean)) {
           grants.push({
@@ -1540,7 +1552,9 @@ function authorizationFunctions(sql: string): PhysicalFunction[] {
       lifecycle: false,
       name: `basis.${name}`,
       required: [`basis.${name}`],
+      searchPath: /SET search_path = ([^\n]+)/u.exec(chunk)?.[1]?.trim(),
       securityDefiner: /SECURITY DEFINER/u.test(chunk),
+      signature: new RegExp(`basis\\.${name}\\(([^)]*)\\)`, 'u').exec(chunk)?.[1]?.trim() ?? '',
       sql: chunk,
     })
   }

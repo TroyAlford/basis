@@ -87,8 +87,12 @@ export interface PhysicalFunction {
   readonly name: string,
   /** Required PostgreSQL function names for this compiled object. */
   readonly required: readonly string[],
+  /** Function search_path setting. */
+  readonly searchPath?: string,
   /** Whether the function is security definer. */
   readonly securityDefiner?: boolean,
+  /** Function identity argument signature. */
+  readonly signature?: string,
   /** Complete function DDL. */
   readonly sql: string,
 }
@@ -121,10 +125,16 @@ export interface PhysicalTrigger {
 
 /** One typed row-level policy. */
 export interface PhysicalPolicy {
+  /** SQL command the policy applies to. */
+  readonly command?: string,
   /** Policy definition, when introspected. */
   readonly definition?: string,
   /** Policy name. */
   readonly name: string,
+  /** Whether the policy is permissive or restrictive. */
+  readonly permissive?: string,
+  /** Roles the policy applies to. */
+  readonly roles?: readonly string[],
   /** Complete create-policy SQL. */
   readonly sql: string,
   /** Owning table. */
@@ -347,12 +357,17 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     body: string,
     definition: string,
     name: string,
+    searchPath: string | null,
     securityDefiner: boolean,
+    signature: string,
   }[]>`
     SELECT CASE WHEN n.nspname = 'basis' THEN 'basis.' || p.proname ELSE p.proname END AS name,
       p.prosrc AS body,
       pg_get_functiondef(p.oid) AS definition,
-      p.prosecdef AS "securityDefiner"
+      p.prosecdef AS "securityDefiner",
+      pg_get_function_identity_arguments(p.oid) AS signature,
+      array_to_string(p.proconfig,
+      ',') AS "searchPath"
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname IN (current_schema(), 'basis')
@@ -389,14 +404,20 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     ORDER BY n.nspname, c.relname, t.tgname
   `
   const policyRows = await sql<{
+    command: string,
     definition: string,
     name: string,
+    permissive: string,
+    roles: string[],
     schema: string,
     table: string,
   }[]>`
     SELECT schemaname AS schema,
       tablename AS TABLE,
       policyname AS name,
+      cmd AS command,
+      permissive,
+      roles,
       concat('USING ',
       coalesce(qual,
       'true'),
@@ -484,13 +505,18 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       definition: row.definition,
       name: row.name,
       required: [row.name],
+      searchPath: row.searchPath ?? undefined,
       securityDefiner: row.securityDefiner,
+      signature: row.signature,
       sql: '',
     })),
     grants,
     policies: policyRows.map(row => ({
+      command: row.command,
       definition: row.definition,
       name: row.name,
+      permissive: row.permissive,
+      roles: row.roles,
       sql: '',
       table: row.schema === 'basis' ? `basis.${row.table}` : row.table,
     })),
@@ -510,6 +536,15 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       type: row.type,
     })),
   }
+}
+
+/**
+ * Set required function names from a desired physical schema.
+ * @param schema - Desired schema.
+ * @returns Required names.
+ */
+function desiredFunctionNamesForPlan(schema: PhysicalSchema): Set<string> {
+  return new Set(schema.functions.flatMap(fn => fn.required))
 }
 
 /**
@@ -540,6 +575,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   const previousConstraints = new Set(previous?.constraints.map(constraint => constraint.name) ?? [])
   const previousPolicies = new Set(previous?.policies.map(policy => policy.name) ?? [])
   const previousFunctionMap = new Map(previous?.functions.map(fn => [fn.name, fn]) ?? [])
+  const previousGrantNames = new Set((previous?.grants ?? []).map(grant => grant.name))
   const operations: SchemaOperation[] = []
   const drift: string[] = []
   const ambiguities: string[] = []
@@ -579,6 +615,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   const desiredGrantees = new Set((desired.grants ?? []).map(grant => grant.grantee).filter(Boolean))
   for (const grant of desired.grants ?? []) {
     if (!actualGrants.has(grant.name)) {
+      if (previousGrantNames.has(grant.name)) continue
       operations.push({
         dependsOn: [],
         id: `grant:${grant.name}`,
@@ -609,6 +646,74 @@ export function plan(options: PlanOptions): SchemaPlan {
     for (const previousName of previousOnly) {
       for (const next of desiredOnly) ambiguities.push(`${previousName} -> ${next}`)
     }
+  }
+
+  const actualFunctionMapForBaseline = new Map(options.actual.functions.map(fn => [fn.name, fn]))
+  for (const [name, previousTable] of previousTablesPhysical) {
+    const actualTable = actualTables.get(name)
+    if (!actualTable) continue
+    const actualColumns = new Map(actualTable.columns.map(column => [column.name, column]))
+    for (const previousColumn of previousTable.columns) {
+      const actualColumn = actualColumns.get(previousColumn.name)
+      if (!actualColumn) {
+        drift.push(`missing deployed column: ${name}.${previousColumn.name}`)
+      } else if (!sameType(previousColumn.sqlType, actualColumn.sqlType)
+        || previousColumn.nullable !== actualColumn.nullable) {
+        drift.push(`out-of-band column definition change: ${name}.${previousColumn.name}`)
+      }
+    }
+    if (previousTable.primaryKey.join(',') !== actualTable.primaryKey.join(',')) {
+      drift.push(`out-of-band primary key change: ${name}`)
+    }
+    if (previousTable.rowSecurity !== undefined && previousTable.rowSecurity !== actualTable.rowSecurity) {
+      drift.push(`out-of-band RLS state change: ${name}`)
+    }
+    const actualIndexes = new Map(actualTable.indexes.map(index => [index.name, index]))
+    for (const previousIndex of previousTable.indexes) {
+      const actualIndex = actualIndexes.get(previousIndex.name)
+      if (!actualIndex) {
+        drift.push(`missing deployed index: ${name}.${previousIndex.name}`)
+      } else if (
+        (previousIndex.unique !== undefined && actualIndex.unique !== previousIndex.unique)
+        || (previousIndex.columns !== undefined
+          && (actualIndex.columns ?? []).join(',') !== previousIndex.columns.join(','))
+      ) {
+        drift.push(`out-of-band index definition change: ${name}.${previousIndex.name}`)
+      }
+    }
+  }
+  const actualConstraintsForBaseline = new Map(
+    options.actual.constraints.map(constraint => [constraint.name, constraint]),
+  )
+  for (const previousConstraint of previous?.constraints ?? []) {
+    const actualConstraint = actualConstraintsForBaseline.get(previousConstraint.name)
+    if (!actualConstraint) {
+      drift.push(`missing deployed constraint: ${previousConstraint.name}`)
+    } else if (
+      previousConstraint.definition !== undefined
+      && normalizeDefinition(previousConstraint.definition) !== normalizeDefinition(actualConstraint.definition ?? '')
+    ) {
+      drift.push(`out-of-band constraint definition change: ${previousConstraint.name}`)
+    }
+  }
+  for (const previousFunction of previous?.functions ?? []) {
+    for (const name of previousFunction.required) {
+      const actualFunction = actualFunctionMapForBaseline.get(name)
+      if (!actualFunction) {
+        if (desiredFunctionNamesForPlan(desired).has(name)) {
+          drift.push(`missing deployed function: ${name}`)
+        }
+        continue
+      }
+      if (previousFunction.body !== undefined && actualFunction.body !== undefined
+        && normalizeBody(previousFunction.body) !== normalizeBody(actualFunction.body)) {
+        drift.push(`out-of-band function definition change: ${name}`)
+      }
+    }
+  }
+  const actualGrantNames = new Set((options.actual.grants ?? []).map(grant => grant.name))
+  for (const name of previousGrantNames) {
+    if (!actualGrantNames.has(name)) drift.push(`missing deployed grant: ${name}`)
   }
 
   for (const table of desired.tables) {
@@ -853,14 +958,18 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
     const actualFunction = actualFunctionMap.get(fn.name)
     const changedBody = fn.body !== undefined && actualFunction?.body !== undefined
-      && normalizeDefinition(actualFunction.body) !== normalizeDefinition(fn.body)
+      && normalizeBody(actualFunction.body) !== normalizeBody(fn.body)
     const changedSecurity = fn.securityDefiner !== undefined
       && actualFunction?.securityDefiner !== undefined
       && actualFunction.securityDefiner !== fn.securityDefiner
-    if (actualFunction && (changedBody || changedSecurity)) {
+    const changedSignature = fn.signature !== undefined && actualFunction?.signature !== undefined
+      && normalizeDefinition(fn.signature) !== normalizeDefinition(actualFunction.signature)
+    const changedSearchPath = fn.searchPath !== undefined && actualFunction?.searchPath !== undefined
+      && normalizeSearchPath(fn.searchPath) !== normalizeSearchPath(actualFunction.searchPath)
+    if (actualFunction && (changedBody || changedSecurity || changedSignature || changedSearchPath)) {
       const prior = previousFunctionMap.get(fn.name)
       const priorMatchesActual = prior?.body !== undefined && actualFunction.body !== undefined
-        && normalizeDefinition(prior.body) === normalizeDefinition(actualFunction.body)
+        && normalizeBody(prior.body) === normalizeBody(actualFunction.body)
         && (prior.securityDefiner === undefined || actualFunction.securityDefiner === undefined
           || prior.securityDefiner === actualFunction.securityDefiner)
       if (priorMatchesActual) {
@@ -993,10 +1102,22 @@ export function plan(options: PlanOptions): SchemaPlan {
     if (operation.kind === 'policy') {
       for (const dependency of functionOperations) dependencies.add(dependency.id)
     }
+    if (operation.kind === 'grant') {
+      const grant = desired.grants?.find(candidate => candidate.name === operation.target)
+      if (grant?.table && tableOperations.has(grant.table)) {
+        dependencies.add(`table:${grant.table}`)
+      }
+    }
+    if (operation.kind === 'constraint') {
+      const constraint = desired.constraints.find(candidate => candidate.name === operation.target)
+      if (constraint?.target && tableOperations.has(constraint.target)) {
+        dependencies.add(`table:${constraint.target}`)
+      }
+    }
     if (operation.kind === 'index' || operation.kind === 'constraint'
       || operation.kind === 'trigger' || operation.kind === 'policy'
-      || operation.kind === 'add-column' || operation.kind === 'alter-column'
-      || operation.kind === 'drop-column') {
+      || operation.kind === 'row-security' || operation.kind === 'add-column'
+      || operation.kind === 'alter-column' || operation.kind === 'drop-column') {
       let tableTarget = operation.target.split(':')[0]?.split('.')[0] ?? ''
       if (operation.kind === 'policy') {
         tableTarget = desired.policies.find(policy => policy.name === operation.target)?.table ?? tableTarget
@@ -1019,7 +1140,14 @@ export function plan(options: PlanOptions): SchemaPlan {
     ambiguities,
     blocked: ambiguities.length > 0 || drift.length > 0,
     drift,
-    operations,
+    operations: operations.map(operation => ({
+      ...operation,
+      preconditions: operation.kind === 'alter-column'
+        ? ['explicit cast/backfill resolution required', 'target table exists']
+        : operation.dependsOn.length > 0
+          ? operation.dependsOn.map(dependency => `completed:${dependency}`)
+          : ['schema is writable'],
+    })),
   }
 }
 
@@ -1038,12 +1166,51 @@ export function hash(source: string): string {
 export const DDL = { hash, introspect, plan }
 
 /**
+ * Normalize a function search_path setting.
+ * @param value - Search path setting.
+ * @returns Comparable search path text.
+ */
+function normalizeSearchPath(value: string): string {
+  return normalizeDefinition(value.replace(/^search_path=/iu, ''))
+}
+
+/**
+ * Normalize a function body without altering string literals.
+ * @param value - Function body.
+ * @returns Comparable body text.
+ */
+function normalizeBody(value: string): string {
+  return value.replaceAll('\r\n', '\n').trim()
+}
+
+/**
  * Normalize SQL for defensive catalog comparison.
  * @param value - SQL or catalog expression.
  * @returns Comparable text.
  */
 function normalizeDefinition(value: string): string {
-  return value.toLowerCase().replaceAll('"', '').replace(/\s+/gu, '').replaceAll('initiallyimmediate', '').trim()
+  let normalized = ''
+  let quoted = false
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] as string
+    if (character === "'") {
+      normalized += character
+      if (quoted && value[index + 1] === "'") {
+        normalized += "'"
+        index += 1
+        continue
+      }
+      quoted = !quoted
+      continue
+    }
+    if (quoted) {
+      normalized += character
+      continue
+    }
+    if (character === '"' || /\s/u.test(character)) continue
+    normalized += character.toLowerCase()
+  }
+  return normalized.replaceAll('initiallyimmediate', '')
 }
 
 /**
