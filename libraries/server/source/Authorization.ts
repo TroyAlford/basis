@@ -1,8 +1,8 @@
 import type { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
-import { runAsActor } from './ActorContext'
+import { currentActor, runAsActor } from './ActorContext'
 import type { Database } from './Database'
-import { AUTHORIZATION_ADMIN, AUTHORIZATION_SECRET } from './Database'
+import { actorSecret, openAdmin } from './Database'
 import type { EntityDefinition, QueryFieldDefinition } from './EntityDefinitions'
 import { EntityDefinitions, FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
@@ -69,6 +69,8 @@ const SECURITY_SOURCE = JSON.stringify({
 const SECURITY_NAMES = ['User', 'Role', 'Grant', 'ExternalIdentity', 'UserRole'] as const
 /** Definitions produced by {@link Authorization.load}, which already include the system ontology. */
 const LOADED_DEFINITIONS = new WeakSet<EntityDefinitions>()
+/** Internal request-scope binding; not part of the published package surface. */
+export const AUTHORIZATION_RUN = Symbol('basis/authorization-run')
 /** The built-in principal for grants that apply to anonymous and signed-in requests. */
 const PUBLIC_ROLE = 'public'
 /** The built-in role that receives initial security administration. */
@@ -167,6 +169,8 @@ export class Authorization {
       entities: [...security.entities, ...(application.entities ?? [])],
       relationships: [...security.relationships, ...(application.relationships ?? [])],
     }))
+    const user = definitions.entity('User')
+    if (user) (user as { abstract: boolean }).abstract = false
     LOADED_DEFINITIONS.add(definitions)
     return definitions
   }
@@ -182,19 +186,19 @@ export class Authorization {
    * @param options - Database and optional application definitions.
    */
   constructor(options: AuthorizationOptions) {
-    this.#actorSecret = options.actorSecret ?? options.database[AUTHORIZATION_SECRET]?.()
+    this.#actorSecret = options.actorSecret ?? actorSecret(options.database)
     this.#appRole = options.appRole ?? DEFAULT_APP_ROLE
     this.#database = options.database
     this.definitions = Authorization.combine(options.definitions)
   }
 
   /**
-   * Run work under one request actor.
+   * Internal: bind verified request identity for the dispatch boundary.
    * @param actor - Canonical User id or null.
    * @param callback - Work that may open native transactions.
    * @returns The callback result.
    */
-  run<T>(actor: string | null, callback: () => T): T {
+  [AUTHORIZATION_RUN]<T>(actor: string | null, callback: () => T): T {
     return runAsActor({ id: actor }, callback)
   }
 
@@ -253,13 +257,13 @@ export class Authorization {
     readonly provider?: string,
     readonly subject?: string,
   } = {}): Promise<BootstrapResult> {
-    const admin = await this.#database[AUTHORIZATION_ADMIN]?.()
+    const admin = await openAdmin(this.#database).catch(() => null)
     if (!admin) throw new Error('Authorization requires an administrative database connection')
     try {
-      await admin.sql.unsafe('CREATE EXTENSION IF NOT EXISTS pgcrypto').simple()
       await this.definitions.createTables(admin.sql)
-      await this.#createInternalSchema(admin.sql)
-      await this.#createSecurityIndexes(admin.sql)
+      for (const statement of this.definitions.authorizationSchemaDdl()) {
+        await admin.sql.unsafe(statement).simple()
+      }
       await this.#writeActorSecret(admin.sql)
       await this.#seedRoles(admin.sql)
       await this.#seedAncestors(admin.sql)
@@ -278,25 +282,24 @@ export class Authorization {
 
   /**
    * Inspect whether an actor has an action on one target row.
-   * @param actor - Canonical User id or null.
    * @param action - Closed action.
    * @param target - Entity or relationship name.
    * @param row - Optional row projection.
    * @returns Whether the action is allowed.
    */
   async can(
-    actor: string | null,
     action: Action | `${Action}`,
     target: string,
     row: Record<string, unknown> = {},
   ): Promise<boolean> {
+    this.#requestActor()
     try {
-      return await this.run(actor, () => this.#database.tx(async tx => {
+      return await this.#database.tx(async tx => {
         const rows = await tx<{ allowed: boolean }[]>`
           SELECT basis.authorized(${target}, ${action}, ${row}::jsonb) AS allowed
         `
         return rows[0]?.allowed === true
-      }))
+      })
     } catch {
       return false
     }
@@ -304,137 +307,104 @@ export class Authorization {
 
   /**
    * Create an application role. Requires `manage` on Role.
-   * @param actor - Acting canonical User id.
    * @param key - Stable role key.
    * @param title - Human-readable role title.
    */
-  async createRole(actor: string, key: string, title: string): Promise<void> {
-    await this.#requireManage(actor, 'Role')
-    if (!/^[a-z][a-z0-9_-]*$/.test(key)) throw new Error('Authorization: role key must be a lowercase identifier')
-    if (!title) throw new Error('Authorization: role title is required')
-    const id = randomUUID()
-    await this.run(actor, () => this.#database.tx(async tx => {
-      await tx`INSERT INTO "Entity" ("id", "name", "entity") VALUES (${id}, ${title}, 'Role')`
-      await tx`INSERT INTO "Role" ("id", "key", "title") VALUES (${id}, ${key}, ${title})`
-    }))
+  async createRole(key: string, title: string): Promise<void> {
+    await this.#requireManage('Role')
+    await this.#database.tx(async tx => {
+      await tx`SELECT basis.create_role(${key}, ${title})`
+    })
   }
 
   /**
    * Revoke one provider identity binding. Requires `manage` on ExternalIdentity.
-   * @param actor - Acting canonical User id.
    * @param provider - Provider slug.
    * @param subject - Stable provider subject.
    */
-  async revokeIdentity(actor: string, provider: string, subject: string): Promise<void> {
-    await this.#requireManage(actor, 'ExternalIdentity')
-    await this.run(actor, () => this.#database.tx(async tx => {
-      await tx`
-        UPDATE "ExternalIdentity" SET "revoked" = true
-        WHERE "provider" = ${provider} AND "subject" = ${subject}
-      `
-    }))
+  async revokeIdentity(provider: string, subject: string): Promise<void> {
+    await this.#requireManage('ExternalIdentity')
+    await this.#database.tx(async tx => {
+      await tx`SELECT basis.revoke_identity(${provider}, ${subject})`
+    })
   }
 
   /**
    * Assign a role to a User. Requires `manage` on `UserRole`; self-escalation is rejected.
-   * @param actor - Acting canonical User id.
    * @param userId - User receiving the role.
    * @param role - Role key.
    */
-  async assignRole(actor: string, userId: string, role: string): Promise<void> {
-    if (actor === userId) throw new Error('Authorization: self role assignment is not allowed')
-    await this.#requireManage(actor, 'UserRole')
-    const roleId = await this.#roleId(role)
-    await this.run(actor, () => this.#database.tx(async tx => {
-      await tx`
-        INSERT INTO "UserRole" ("user.id", "role.id")
-        VALUES (${userId}, ${roleId})
-        ON CONFLICT DO NOTHING
-      `
-    }))
+  async assignRole(userId: string, role: string): Promise<void> {
+    const actor = this.#requestActor()
+    if (actor.id === userId) throw new Error('Authorization: self role assignment is not allowed')
+    await this.#requireManage('UserRole')
+    await this.#database.tx(async tx => {
+      await tx`SELECT basis.assign_role(${userId}, ${role})`
+    })
   }
 
   /**
    * Remove a role from a User. Requires `manage` on `UserRole`.
-   * @param actor - Acting canonical User id.
    * @param userId - User losing the role.
    * @param role - Role key.
    */
-  async removeRole(actor: string, userId: string, role: string): Promise<void> {
-    await this.#requireManage(actor, 'UserRole')
-    const roleId = await this.#roleId(role)
-    await this.run(actor, () => this.#database.tx(async tx => {
-      await tx`DELETE FROM "UserRole" WHERE "user.id" = ${userId} AND "role.id" = ${roleId}`
-    }))
+  async removeRole(userId: string, role: string): Promise<void> {
+    await this.#requireManage('UserRole')
+    await this.#database.tx(async tx => {
+      await tx`SELECT basis.remove_role(${userId}, ${role})`
+    })
   }
 
   /**
    * Create or update one authoritative grant. Requires `manage` on Grant.
-   * @param actor - Acting canonical User id.
    * @param input - Grant input.
    */
-  async grant(actor: string, input: GrantInput): Promise<void> {
-    await this.#requireManage(actor, 'Grant')
+  async grant(input: GrantInput): Promise<void> {
+    await this.#requireManage('Grant')
     const action = actionValue(input.action)
     if (action === Action.Manage) {
       throw new Error('Authorization: manage grants require explicit bootstrap')
     }
     const predicate = this.#normalizePredicate(input.target, input.predicate)
-    const roleId = await this.#roleId(input.role)
-    const id = randomUUID()
-    await this.run(actor, () => this.#database.tx(async tx => {
-      await tx`INSERT INTO "Entity" ("id", "name", "entity") VALUES (${id}, 'Grant', 'Grant')`
-      await tx`
-        INSERT INTO "Grant" ("id", "role.id", "action", "target", "predicate")
-        VALUES (${id}, ${roleId}, ${action}, ${input.target}, coalesce(${predicate}::jsonb, 'null'::jsonb))
-      `
-    }))
+    await this.#database.tx(async tx => {
+      await tx`SELECT basis.create_grant(${input.role}, ${action}, ${input.target}, ${predicate}::jsonb)`
+    })
   }
 
   /**
    * Update one grant. Requires `manage` on Grant.
-   * @param actor - Acting canonical User id.
    * @param grantId - Grant id.
    * @param input - New grant input.
    */
-  async updateGrant(actor: string, grantId: string, input: GrantInput): Promise<void> {
-    await this.#requireManage(actor, 'Grant')
+  async updateGrant(grantId: string, input: GrantInput): Promise<void> {
+    await this.#requireManage('Grant')
     const action = actionValue(input.action)
     if (action === Action.Manage) throw new Error('Authorization: manage grants require explicit bootstrap')
     const predicate = this.#normalizePredicate(input.target, input.predicate)
-    const roleId = await this.#roleId(input.role)
-    await this.run(actor, () => this.#database.tx(async tx => {
-      await tx`
-        UPDATE "Grant"
-        SET "role.id" = ${roleId}, "action" = ${action}, "target" = ${input.target},
-          "predicate" = coalesce(${predicate}::jsonb, 'null'::jsonb)
-        WHERE "id" = ${grantId}
-      `
-    }))
+    await this.#database.tx(async tx => {
+      await tx`SELECT basis.update_grant(${grantId}, ${input.role}, ${action}, ${input.target}, ${predicate}::jsonb)`
+    })
   }
 
   /**
    * Revoke one grant. Requires `manage` on Grant.
-   * @param actor - Acting canonical User id.
    * @param grantId - Grant id.
    */
-  async revoke(actor: string, grantId: string): Promise<void> {
-    await this.#requireManage(actor, 'Grant')
-    await this.run(actor, () => this.#database.tx(async tx => {
-      await tx`DELETE FROM "Grant" WHERE "id" = ${grantId}`
-      await tx`DELETE FROM "Entity" WHERE "id" = ${grantId} AND "entity" = 'Grant'`
-    }))
+  async revoke(grantId: string): Promise<void> {
+    await this.#requireManage('Grant')
+    await this.#database.tx(async tx => {
+      await tx`SELECT basis.revoke_grant(${grantId})`
+    })
   }
 
   /**
    * List effective grants for one actor. Requires `manage` on Grant.
-   * @param actor - Acting canonical User id.
    * @param userId - User to inspect, or null for public.
    * @returns Effective grants.
    */
-  async effective(actor: string, userId: string | null): Promise<EffectiveGrant[]> {
-    await this.#requireManage(actor, 'Grant')
-    return this.run(actor, () => this.#database.tx(async tx => {
+  async effective(userId: string | null): Promise<EffectiveGrant[]> {
+    await this.#requireManage('Grant')
+    return this.#database.tx(async tx => {
       const rows = await tx<{
         action: string,
         id: string,
@@ -450,21 +420,19 @@ export class Authorization {
         ORDER BY r."key", g."target", g."action", g."id"
       `
       return rows
-    }))
+    })
   }
 
-  async #requireManage(actor: string, target: string): Promise<void> {
-    if (!await this.can(actor, Action.Manage, target)) {
+  #requestActor(): { readonly id: string | null } {
+    const actor = currentActor()
+    if (!actor) throw new Error('Authorization: no verified request actor is bound')
+    return actor
+  }
+
+  async #requireManage(target: string): Promise<void> {
+    if (!await this.can(Action.Manage, target)) {
       throw new Error(`Authorization denied: manage on ${target} is required`)
     }
-  }
-
-  async #roleId(role: string): Promise<string> {
-    const rows = await this.#database.sql<{ id: string | null }[]>`
-      SELECT basis.role_id(${role}) AS "id"
-    `
-    if (!rows[0]?.id) throw new Error(`Unknown role "${role}"`)
-    return rows[0].id
   }
 
   async #assignRoleAdmin(userId: string, role: string, sql: BunSQL): Promise<void> {
@@ -504,35 +472,8 @@ export class Authorization {
     return filter
   }
 
-  async #createInternalSchema(sql: BunSQL): Promise<void> {
-    await sql.unsafe(`
-      CREATE SCHEMA IF NOT EXISTS basis;
-      CREATE TABLE IF NOT EXISTS basis.secret (
-        key text PRIMARY KEY,
-        value text NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS basis.entity_ancestor (
-        entity text NOT NULL,
-        ancestor text NOT NULL,
-        PRIMARY KEY (entity, ancestor)
-      );
-      REVOKE ALL ON basis.secret FROM PUBLIC;
-    `).simple()
-  }
-
-  async #createSecurityIndexes(sql: BunSQL): Promise<void> {
-    await sql.unsafe(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "Role_key_key" ON "Role" ("key");
-      CREATE UNIQUE INDEX IF NOT EXISTS "ExternalIdentity_provider_subject_key"
-        ON "ExternalIdentity" ("provider", "subject");
-      CREATE INDEX IF NOT EXISTS "Grant_role_idx" ON "Grant" ("role.id");
-      CREATE INDEX IF NOT EXISTS "UserRole_user_idx" ON "UserRole" ("user.id");
-      CREATE INDEX IF NOT EXISTS "UserRole_role_idx" ON "UserRole" ("role.id");
-    `).simple()
-  }
-
   async #writeActorSecret(sql: BunSQL): Promise<void> {
-    const secret = this.#actorSecret ?? this.#database[AUTHORIZATION_SECRET]?.()
+    const secret = this.#actorSecret ?? actorSecret(this.#database)
     if (!secret) throw new Error('Authorization actor secret is not configured')
     await sql`
       INSERT INTO basis.secret ("key", "value")
@@ -575,305 +516,41 @@ export class Authorization {
   }
 
   async #seedAncestors(sql: BunSQL): Promise<void> {
-    const rows: { ancestor: string, entity: string }[] = []
+    const rows: { ancestor: string, depth: number, entity: string }[] = []
     for (const name of ['Entity', ...this.definitions.entities.map(entity => entity.name),
       ...this.definitions.relationships.map(relationship => relationship.name)]) {
       let current = name
+      let depth = 0
       while (current !== 'Entity') {
-        rows.push({ ancestor: current, entity: name })
+        rows.push({ ancestor: current, depth, entity: name })
+        depth += 1
         const definition = this.definitions.entity(current)
         if (!definition || definition.parent === current) break
         current = definition.parent
       }
-      rows.push({ ancestor: 'Entity', entity: name })
+      rows.push({ ancestor: 'Entity', depth, entity: name })
     }
     for (const row of rows) {
       await sql`
-        INSERT INTO basis.entity_ancestor ("entity", "ancestor")
-        VALUES (${row.entity}, ${row.ancestor}) ON CONFLICT DO NOTHING
+        INSERT INTO basis.entity_ancestor ("entity", "ancestor", "depth")
+        VALUES (${row.entity}, ${row.ancestor}, ${row.depth}) ON CONFLICT ("entity", "ancestor") DO
+        UPDATE
+        SET "depth" = EXCLUDED."depth"
       `
     }
   }
 
   async #createRLS(sql: BunSQL): Promise<void> {
-    await sql.unsafe(this.#functionDdl()).simple()
     const superuser = (await sql<{ superuser: boolean }[]>`
       SELECT r.rolsuper AS superuser
       FROM pg_roles r
       WHERE r.rolname = current_user
     `)[0]?.superuser === true
-    const tables = [
-      { entity: 'Entity', root: true, table: 'Entity' },
-      ...this.definitions.entities.map(entity => ({ entity: entity.name, root: false, table: entity.name })),
-      ...this.definitions.relationships.map(relationship => ({
-        entity: relationship.name,
-        root: false,
-        table: relationship.name,
-      })),
-    ]
-    for (const { entity, root, table } of tables) {
-      const quoted = quote(table)
-      const role = quote(this.#appRole)
-      await sql.unsafe(`ALTER TABLE ${quoted} ENABLE ROW LEVEL SECURITY`).simple()
-      if (superuser) await sql.unsafe(`ALTER TABLE ${quoted} FORCE ROW LEVEL SECURITY`).simple()
-      await sql.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${quoted} TO ${role}`).simple()
-      for (const [action, policy] of [
-        ['read', 'SELECT'],
-        ['create', 'INSERT'],
-        ['update', 'UPDATE'],
-        ['delete', 'DELETE'],
-      ] as const) {
-        const name = `basis_${table.replaceAll(/[^A-Za-z0-9]/g, '_')}_${action}`
-        const check = root
-          ? `basis.authorized_root('${action}', to_jsonb(${quoted}))`
-          : `basis.authorized('${entity}', '${action}', to_jsonb(${quoted}))`
-        await sql.unsafe(`DROP POLICY IF EXISTS ${quote(name)} ON ${quoted}`).simple()
-        const using = policy === 'INSERT' ? '' : ` USING (${check})`
-        const withCheck = policy === 'INSERT' || policy === 'UPDATE' ? ` WITH CHECK (${check})` : ''
-        await sql.unsafe(
-          `CREATE POLICY ${quote(name)} ON ${quoted} FOR ${policy} TO ${role}${using}${withCheck}`,
-        ).simple()
-      }
+    for (const statement of this.definitions.authorizationDdl(this.#appRole, superuser)) {
+      await sql.unsafe(statement).simple()
     }
-    await sql.unsafe('REVOKE CREATE ON SCHEMA public FROM PUBLIC').simple()
-    await sql.unsafe(`REVOKE CREATE ON SCHEMA public FROM ${quote(this.#appRole)}`).simple()
-    await sql.unsafe(`GRANT USAGE ON SCHEMA public TO ${quote(this.#appRole)}`).simple()
-    await sql.unsafe(`GRANT USAGE ON SCHEMA basis TO ${quote(this.#appRole)}`).simple()
-    const functions = [
-      'basis.actor_id()',
-      'basis.actor_active(text)',
-      'basis.login_identity(text, text, text, text)',
-      'basis.role_id(text)',
-      'basis.matches(jsonb, jsonb)',
-      'basis.authorized(text, text, jsonb)',
-      'basis.authorized_create(text)',
-      'basis.authorized_root(text, jsonb)',
-    ].join(', ')
-    await sql.unsafe(`REVOKE ALL ON FUNCTION ${functions} FROM PUBLIC`).simple()
-    await sql.unsafe(
-      'GRANT EXECUTE ON FUNCTION basis.actor_id(), basis.actor_active(text), ' +
-      'basis.login_identity(text, text, text, text), basis.role_id(text), ' +
-      'basis.matches(jsonb, jsonb), basis.authorized(text, text, jsonb), ' +
-      `basis.authorized_root(text, jsonb) TO ${quote(this.#appRole)}`,
-    ).simple()
   }
 
-  #functionDdl(): string {
-    return `
-      CREATE OR REPLACE FUNCTION basis.actor_id() RETURNS text
-      LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = basis, public, pg_temp AS $$
-      DECLARE
-        token text;
-        parts text[];
-        secret text;
-        expected text;
-        actor text;
-        expires numeric;
-      BEGIN
-        token := current_setting('basis.actor', true);
-        IF token IS NULL OR token = '' THEN RETURN NULL; END IF;
-        parts := string_to_array(token, ':');
-        IF array_length(parts, 1) <> 3 THEN RETURN NULL; END IF;
-        expires := parts[2]::numeric;
-        IF expires < extract(epoch FROM now()) THEN RETURN NULL; END IF;
-        SELECT value INTO secret FROM basis.secret WHERE key = 'actor';
-        IF secret IS NULL THEN RETURN NULL; END IF;
-        expected := encode(
-          hmac(convert_to(parts[1] || ':' || parts[2], 'UTF8'), convert_to(secret, 'UTF8'), 'sha256'),
-          'hex'
-        );
-        IF expected <> parts[3] THEN RETURN NULL; END IF;
-        actor := convert_from(decode(parts[1], 'hex'), 'UTF8');
-        RETURN actor;
-      EXCEPTION WHEN others THEN
-        RETURN NULL;
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.matches(predicate jsonb, row_value jsonb) RETURNS boolean
-      LANGUAGE plpgsql STABLE AS $$
-      DECLARE
-        op text;
-        field text;
-        value jsonb;
-        actual jsonb;
-        child jsonb;
-        actor text;
-      BEGIN
-        IF predicate IS NULL OR predicate = 'null'::jsonb OR predicate = '{}'::jsonb THEN RETURN true; END IF;
-        op := predicate->>'operator';
-        IF op = '$and' THEN
-          FOR child IN SELECT value FROM jsonb_array_elements(predicate->'filters') LOOP
-            IF NOT basis.matches(child, row_value) THEN RETURN false; END IF;
-          END LOOP;
-          RETURN true;
-        END IF;
-        IF op = '$or' THEN
-          FOR child IN SELECT value FROM jsonb_array_elements(predicate->'filters') LOOP
-            IF basis.matches(child, row_value) THEN RETURN true; END IF;
-          END LOOP;
-          RETURN false;
-        END IF;
-        IF op = '$not' THEN
-          RETURN NOT basis.matches(predicate->'filters'->0, row_value);
-        END IF;
-        field := predicate->>'field';
-        value := predicate->'value';
-        IF field IS NULL THEN RETURN false; END IF;
-        actual := row_value -> field;
-        IF value = '{"$actor":true}'::jsonb THEN
-          actor := basis.actor_id();
-          value := to_jsonb(actor);
-        END IF;
-        IF op = '$eq' THEN RETURN actual IS NOT DISTINCT FROM value; END IF;
-        IF op = '$ne' THEN RETURN actual IS DISTINCT FROM value; END IF;
-        IF op = '$lt' THEN RETURN actual < value; END IF;
-        IF op = '$lte' THEN RETURN actual <= value; END IF;
-        IF op = '$gt' THEN RETURN actual > value; END IF;
-        IF op = '$gte' THEN RETURN actual >= value; END IF;
-        IF op = '$empty' THEN
-          RETURN actual IS NULL OR actual = '""'::jsonb OR actual = '[]'::jsonb OR actual = 'null'::jsonb;
-        END IF;
-        IF op = '$contains' THEN
-          IF jsonb_typeof(actual) = 'array' THEN RETURN actual @> jsonb_build_array(value); END IF;
-          RETURN (actual #>> '{}') LIKE '%' || (value #>> '{}') || '%';
-        END IF;
-        IF op = '$overlaps' THEN
-          RETURN EXISTS (
-            SELECT 1 FROM jsonb_array_elements(actual) item
-            WHERE value ? (item #>> '{}')
-          );
-        END IF;
-        IF op = '$sequenceEqual' THEN RETURN actual = value; END IF;
-        RETURN false;
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.role_id(role_key text)
-      RETURNS text
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-        SELECT "id" FROM "Role" WHERE "key" = role_key
-      $$;
-
-      CREATE OR REPLACE FUNCTION basis.actor_active(candidate text)
-      RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-        SELECT EXISTS (
-          SELECT 1
-          FROM "User" u
-          JOIN "ExternalIdentity" e ON e."user.id" = u."id"
-          WHERE u."id" = candidate AND e."revoked" = false
-        )
-      $$;
-
-      CREATE OR REPLACE FUNCTION basis.login_identity(
-        provider_name text,
-        provider_subject text,
-        email_address text,
-        display_name text
-      )
-      RETURNS text
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE
-        existing_revoked boolean;
-        existing_user text;
-        user_id text;
-        identity_id text;
-        user_name text;
-      BEGIN
-        IF provider_name IS NULL OR provider_name = '' OR provider_subject IS NULL OR provider_subject = '' THEN
-          RETURN NULL;
-        END IF;
-        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));
-        SELECT e."revoked", e."user.id" INTO existing_revoked, existing_user
-        FROM "ExternalIdentity" e
-        JOIN "User" u ON u."id" = e."user.id"
-        WHERE e."provider" = provider_name AND e."subject" = provider_subject
-        FOR UPDATE OF e;
-        IF FOUND THEN
-          IF existing_revoked THEN RETURN NULL; END IF;
-          RETURN existing_user;
-        END IF;
-        user_id := gen_random_uuid()::text;
-        user_name := coalesce(
-          nullif(display_name, ''),
-          nullif(email_address, ''),
-          provider_name || ':' || provider_subject
-        );
-        INSERT INTO "Entity" ("id", "name", "entity") VALUES (user_id, user_name, 'User');
-        INSERT INTO "User" ("id", "email", "displayName")
-          VALUES (user_id, coalesce(email_address, ''), user_name);
-        identity_id := gen_random_uuid()::text;
-        INSERT INTO "Entity" ("id", "name", "entity")
-          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');
-        INSERT INTO "ExternalIdentity" ("id", "provider", "subject", "revoked", "user.id")
-          VALUES (identity_id, provider_name, provider_subject, false, user_id);
-        RETURN user_id;
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.authorized(target_entity text, requested_action text, row_value jsonb)
-      RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-        SELECT EXISTS (
-          SELECT 1
-          FROM "Grant" g
-          JOIN "Role" r ON r."id" = g."role.id"
-          LEFT JOIN "UserRole" ur ON ur."role.id" = r."id"
-          WHERE (r."key" = 'public' OR (basis.actor_id() IS NOT NULL AND ur."user.id" = basis.actor_id()))
-            AND (
-              g."action" = requested_action
-              OR (g."action" = 'manage' AND (
-                requested_action = 'manage'
-                OR target_entity IN ('Role', 'Grant', 'UserRole', 'ExternalIdentity')
-              ))
-            )
-            AND (g."target" = '*' OR g."target" = target_entity OR EXISTS (
-              SELECT 1 FROM basis.entity_ancestor ea
-              WHERE ea.entity = target_entity AND ea.ancestor = g."target"
-            ))
-            AND (g."predicate" IS NULL OR g."predicate" = 'null'::jsonb OR basis.matches(g."predicate", row_value))
-        )
-      $$;
-
-      CREATE OR REPLACE FUNCTION basis.authorized_create(target_entity text)
-      RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-        SELECT EXISTS (
-          SELECT 1
-          FROM "Grant" g
-          JOIN "Role" r ON r."id" = g."role.id"
-          LEFT JOIN "UserRole" ur ON ur."role.id" = r."id"
-          WHERE (r."key" = 'public' OR (basis.actor_id() IS NOT NULL AND ur."user.id" = basis.actor_id()))
-            AND (
-              g."action" = 'create'
-              OR (g."action" = 'manage' AND target_entity IN ('Role', 'Grant', 'UserRole', 'ExternalIdentity'))
-            )
-            AND (g."target" = '*' OR g."target" = target_entity OR g."target" = 'Entity' OR EXISTS (
-              SELECT 1 FROM basis.entity_ancestor ea
-              WHERE ea.entity = target_entity AND ea.ancestor = g."target"
-            ))
-        )
-      $$;
-
-      CREATE OR REPLACE FUNCTION basis.authorized_root(requested_action text, row_value jsonb)
-      RETURNS boolean
-      LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE
-        entity_name text;
-        leaf jsonb;
-      BEGIN
-        entity_name := coalesce(row_value->>'entity', '');
-        IF entity_name = '' THEN RETURN false; END IF;
-        IF requested_action = 'create' THEN
-          RETURN basis.authorized_create(entity_name);
-        END IF;
-        EXECUTE format('SELECT to_jsonb(t) FROM %I t WHERE t.id = $1', entity_name)
-          INTO leaf USING row_value->>'id';
-        IF leaf IS NOT NULL THEN
-          row_value := row_value || leaf;
-        END IF;
-        RETURN basis.authorized(entity_name, requested_action, row_value);
-      END $$;
-    `
-  }
 }
 
 /**
@@ -989,13 +666,4 @@ function actionValue(action: Action | `${Action}`): Action {
     throw new Error(`Authorization: unknown action "${action}"`)
   }
   return action as Action
-}
-
-/**
- * Quote one PostgreSQL identifier.
- * @param identifier - Identifier.
- * @returns The quoted identifier.
- */
-function quote(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`
 }

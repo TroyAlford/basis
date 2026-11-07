@@ -34,11 +34,6 @@ const DOCKER_REQUIRED =
 /** The container mount for the host-owned password file. */
 const PASSWORD_MOUNT = '/run/secrets/basis-postgres-password'
 
-/** Internal accessor for an explicit privileged provisioning connection. */
-export const AUTHORIZATION_ADMIN = Symbol('basis/authorization-admin')
-/** Internal accessor for the actor-token signing secret. */
-export const AUTHORIZATION_SECRET = Symbol('basis/authorization-secret')
-
 /** One narrow privileged provisioning connection. */
 export interface AdminConnection {
   /** Closes the privileged connection. */
@@ -162,12 +157,32 @@ export async function queryEntity<T = Record<string, unknown>>(
   return rows.map(row => prepared.hydrate(row)) as T[]
 }
 
+const ADMIN_CONNECTIONS = new WeakMap<object, () => Promise<AdminConnection>>()
+const ACTOR_SECRETS = new WeakMap<object, string>()
+
+/**
+ * Open the explicit privileged provisioning connection registered for a database.
+ * @param database - The restricted database capability.
+ * @returns A short-lived administrative connection.
+ * @throws {Error} When the database has no trusted provisioner.
+ */
+export async function openAdmin(database: Database): Promise<AdminConnection> {
+  const opener = ADMIN_CONNECTIONS.get(database)
+  if (!opener) throw new Error('No administrative database connection is configured')
+  return opener()
+}
+
+/**
+ * Read the actor-token signing secret registered for a database.
+ * @param database - The restricted database capability.
+ * @returns The secret, or undefined.
+ */
+export function actorSecret(database: Database): string | undefined {
+  return ACTOR_SECRETS.get(database)
+}
+
 /** A server-owned database capability. */
 export interface Database {
-  /** Internal: open a narrow privileged provisioning connection when configured. */
-  [AUTHORIZATION_ADMIN]?(): Promise<AdminConnection>,
-  /** Internal: the actor-token signing secret when configured. */
-  [AUTHORIZATION_SECRET]?(): string | undefined,
   /** Closes the database pool and releases its resources. */
   close(): Promise<void>,
   /** Whether the pool has been closed. */
@@ -202,7 +217,6 @@ function publishedPort(output: string): number | null {
  */
 class PostgresDatabase implements Database {
   #actorSecret: string | undefined
-  #adminUrl: string | URL | undefined
   #closed = false
   #closing: Promise<void> | null = null
   #entities: EntityDefinitions | undefined
@@ -213,37 +227,25 @@ class PostgresDatabase implements Database {
    * @param url - The PostgreSQL connection URL.
    * @param entities - Canonical definitions used for entity queries.
    * @param adminUrl - Optional privileged provisioning URL.
-   * @param actorSecret - Optional actor-token signing secret.
+   * @param signingSecret - Optional actor-token signing secret.
    */
   constructor(
     url: string | URL,
     entities?: EntityDefinitions,
     adminUrl?: string | URL,
-    actorSecret?: string,
+    signingSecret?: string,
   ) {
-    this.#actorSecret = actorSecret
-    this.#adminUrl = adminUrl
+    this.#actorSecret = signingSecret
     this.#entities = entities
     this.#sql = new BunSQL({ ...POOL_DEFAULTS, url })
-  }
-
-  /**
-   * Internal: open a privileged provisioning connection when configured.
-   * @returns A short-lived administrative connection.
-   */
-  async [AUTHORIZATION_ADMIN](): Promise<AdminConnection> {
-    if (!this.#adminUrl) throw new Error('No administrative database URL is configured')
-    const pool = new PostgresDatabase(this.#adminUrl)
-    await pool.connect()
-    return { close: () => pool.close(), sql: pool.sql }
-  }
-
-  /**
-   * Internal: the actor-token signing secret when configured.
-   * @returns The secret, or undefined.
-   */
-  [AUTHORIZATION_SECRET](): string | undefined {
-    return this.#actorSecret
+    if (signingSecret) ACTOR_SECRETS.set(this, signingSecret)
+    if (adminUrl) {
+      ADMIN_CONNECTIONS.set(this, async () => {
+        const pool = new PostgresDatabase(adminUrl)
+        await pool.connect()
+        return { close: () => pool.close(), sql: pool.sql }
+      })
+    }
   }
 
   /**
@@ -312,7 +314,12 @@ class PostgresDatabase implements Database {
       const actor = currentActor()
       if (actor !== undefined) {
         if (!this.#actorSecret) throw new Error('Actor binding is not configured for this database')
-        const token = actor.id === null ? '' : signActor(actor.id, this.#actorSecret)
+        let token = ''
+        if (actor.id !== null) {
+          const [transaction] = await tx<{ id: string }[]>`select txid_current()::text as id`
+          if (!transaction?.id) throw new Error('PostgreSQL did not expose a transaction id')
+          token = signActor(actor.id, this.#actorSecret, transaction.id)
+        }
         await tx`select set_config('basis.actor', ${token}, true)`
       }
       return callback(tx)
@@ -404,7 +411,6 @@ class ManagedDatabase implements Database {
   #closing: Promise<void> | null = null
   #connecting: Promise<void> | null = null
   #actorSecret: string | undefined
-  #adminUrl: string | undefined
   #authorization: boolean
   #containerName: string
   #database: PostgresDatabase | null = null
@@ -443,25 +449,6 @@ class ManagedDatabase implements Database {
   get sql(): BunSQL {
     if (!this.#database) throw new Error('Managed database is not connected')
     return this.#database.sql
-  }
-
-  /**
-   * Internal: open a privileged provisioning connection when configured.
-   * @returns A short-lived administrative connection.
-   */
-  async [AUTHORIZATION_ADMIN](): Promise<AdminConnection> {
-    if (!this.#adminUrl) throw new Error('Managed database is not connected')
-    const pool = new PostgresDatabase(this.#adminUrl)
-    await pool.connect()
-    return { close: () => pool.close(), sql: pool.sql }
-  }
-
-  /**
-   * Internal: the actor-token signing secret when configured.
-   * @returns The secret, or undefined.
-   */
-  [AUTHORIZATION_SECRET](): string | undefined {
-    return this.#actorSecret
   }
 
   /**
@@ -537,7 +524,11 @@ class ManagedDatabase implements Database {
     const port = await this.#publishedPort()
     const ownerUrl = `postgres://${MANAGED_NAME}:${encodeURIComponent(secret.password)}` +
       `@127.0.0.1:${port}/${MANAGED_NAME}`
-    this.#adminUrl = ownerUrl
+    ADMIN_CONNECTIONS.set(this, async () => {
+      const pool = new PostgresDatabase(ownerUrl)
+      await pool.connect()
+      return { close: () => pool.close(), sql: pool.sql }
+    })
     if (!this.#authorization) {
       await this.#connectWhenReady(ownerUrl)
       return
@@ -545,6 +536,7 @@ class ManagedDatabase implements Database {
 
     const appPassword = await this.#appSecret()
     this.#actorSecret = await this.#actorSigningSecret()
+    ACTOR_SECRETS.set(this, this.#actorSecret)
     await this.#provisionApplicationRole(ownerUrl, appPassword)
     const appUrl = `postgres://${APP_ROLE}:${encodeURIComponent(appPassword)}` +
       `@127.0.0.1:${port}/${MANAGED_NAME}`
@@ -788,16 +780,16 @@ class ManagedDatabase implements Database {
   /**
    * Retry the real pool connection until PostgreSQL accepts it.
    * @param url - The managed PostgreSQL connection URL.
-   * @param actorSecret - Optional actor-token signing secret.
+   * @param signingSecret - Optional actor-token signing secret.
    */
-  async #connectWhenReady(url: string, actorSecret?: string): Promise<void> {
+  async #connectWhenReady(url: string, signingSecret?: string): Promise<void> {
     const deadline = Date.now() + READY_TIMEOUT_MS
     let lastError: Error | null = null
 
     while (Date.now() < deadline) {
       if (this.#closed) throw new Error('Database is closed')
 
-      const database = new PostgresDatabase(url, this.#entities, undefined, actorSecret)
+      const database = new PostgresDatabase(url, this.#entities, undefined, signingSecret)
       try {
         await database.connect()
         if (this.#closed) {

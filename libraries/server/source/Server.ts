@@ -15,7 +15,7 @@ import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import type { AuthorizationOptions } from './Authorization'
-import { Authorization } from './Authorization'
+import { Authorization, AUTHORIZATION_RUN } from './Authorization'
 import { Builder } from './Builder'
 import type { Database, DatabaseOptions } from './Database'
 import { createDatabase, NullDatabase } from './Database'
@@ -232,7 +232,7 @@ export class Server {
         if (!params) continue
 
         if (this.#authorization) {
-          return await this.#authorization.run(identity, () => handler(params, context))
+          return await this.#authorization[AUTHORIZATION_RUN](identity, () => handler(params, context))
         }
         return await handler(params, context)
       }
@@ -285,7 +285,7 @@ export class Server {
           request,
         }
         if (this.#authorization) {
-          return this.#authorization.run(identity, () => sseResponse(params, context, handler))
+          return this.#authorization[AUTHORIZATION_RUN](identity, () => sseResponse(params, context, handler))
         }
         return sseResponse(params, context, handler)
       }

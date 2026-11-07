@@ -32,6 +32,8 @@ const server = new Server()
 
 OAuth provider subjects are not canonical entity identities. `server.oauth()` maps the verified provider subject through `server.auth.login(provider, subject)` and stores the resulting canonical `User.id` in the existing identity cookie. A first login never receives administration automatically.
 
+The administration methods derive the acting actor from the verified request context. They never accept a caller-supplied user id, so a handler cannot switch identity by passing a value from the request.
+
 Bootstrap is an explicit operator action:
 
 ```ts
@@ -58,7 +60,7 @@ These operations require `manage` on the corresponding security metadata. `manag
 The closed action vocabulary is `read`, `create`, `update`, `delete`, and `manage`. A grant binds one role, one target entity (or relationship), one action, and an optional validated row predicate.
 
 ```ts
-await server.auth!.grant(operatorId, {
+await server.auth!.grant({
   role: 'public',
   action: 'read',
   target: 'Article',
@@ -100,9 +102,11 @@ server.api([HttpVerb.Post], 'articles', async (_params, context) => {
 })
 ```
 
-The actor is not a plain trusted `basis.actor_id` setting. PostgreSQL verifies a server-signed, expiring token; setting a forged value is treated as anonymous. Transaction-local state cannot leak to another pooled request, and nested savepoints retain the enclosing actor.
+The actor is not a plain trusted `basis.actor_id` setting. PostgreSQL verifies a server-signed, expiring token whose signature includes the current transaction id, so a token copied into another transaction or pooled session is treated as anonymous. Setting a forged value is also treated as anonymous. Transaction-local state cannot leak to another pooled request, and nested savepoints retain the enclosing actor.
 
 ## PostgreSQL privilege boundary
+
+Authorization functions, RLS policies, grants, and the internal security metadata are compiled by `EntityDefinitions.authorizationDdl`/`authorizationSchemaDdl`; bootstrap is the explicit trusted execution path. There is no request-time schema writer.
 
 With authorization enabled, `server.db` always uses the restricted application role (`basis_app` by default). Managed PostgreSQL provisions that role through the owner connection, stores its random password and actor-signing secret under `.basis/database/` with host-only permissions, and closes the privileged provisioning connection afterwards. The owner credential is never exposed through `server.db` or `RouteContext`.
 

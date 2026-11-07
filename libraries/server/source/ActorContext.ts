@@ -31,14 +31,15 @@ export function currentActor(): RequestActor | undefined {
 }
 
 /**
- * Sign one canonical actor id for PostgreSQL verification.
+ * Sign one canonical actor id for the current PostgreSQL transaction.
  * @param actorId - Canonical User id.
  * @param secret - Server-owned signing secret.
- * @returns The transaction-local actor token.
+ * @param transactionId - PostgreSQL transaction id from `txid_current()`.
+ * @returns The transaction-bound actor token.
  */
-export function signActor(actorId: string, secret: string): string {
+export function signActor(actorId: string, secret: string, transactionId: string): string {
   const expiry = Math.floor(Date.now() / 1000) + TOKEN_LIFETIME_SECONDS
-  const payload = `${Buffer.from(actorId, 'utf8').toString('hex')}:${expiry}`
+  const payload = `${Buffer.from(actorId, 'utf8').toString('hex')}:${transactionId}:${expiry}`
   const signature = createHmac('sha256', secret).update(payload).digest('hex')
   return `${payload}:${signature}`
 }

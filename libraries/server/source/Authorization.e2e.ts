@@ -5,19 +5,24 @@ import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { removeService } from '../testing/DatabaseFixture'
-import { Authorization } from './Authorization'
+import { Authorization, AUTHORIZATION_RUN } from './Authorization'
 import { Server } from './Server'
 
 const silent = new Logger({ silent: true })
 
 const application = Authorization.load(JSON.stringify({
-  entities: [{
-    fields: [
-      { field: 'title', type: 'String' },
-      { field: 'owner', target: 'User', type: 'Entity' },
-    ],
-    name: 'Article',
-  }],
+  entities: [
+    {
+      fields: [
+        { field: 'title', type: 'String' },
+        { field: 'owner', target: 'User', type: 'Entity' },
+      ],
+      name: 'Article',
+    },
+    { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
+    { extends: 'Profile', fields: [], name: 'Employee' },
+    { extends: 'User', fields: [], name: 'ApplicationUser' },
+  ],
 }))
 
 /**
@@ -45,6 +50,7 @@ describe('Authorization RLS', () => {
     try {
       const authorization = server.auth
       if (!authorization) throw new Error('authorization did not initialize')
+      const asActor = <T>(actor: string | null, work: () => T): T => authorization[AUTHORIZATION_RUN](actor, work)
       const admin = await authorization.bootstrap({
         displayName: 'Admin',
         email: 'admin@example.com',
@@ -65,18 +71,18 @@ describe('Authorization RLS', () => {
       expect(role?.superuser).toBe(false)
       expect(role?.bypass).toBe(false)
       const user = await authorization.login('test', 'user', { email: 'user@example.com' })
-      const other = await authorization.login('test', 'other', { email: 'other@example.com' })
+      const other = await authorization.login('test', 'other', { email: 'other-employee@example.com' })
       const sameUser = await authorization.login('test', 'user', { email: 'user@example.com' })
       const collision = await authorization.login('other', 'user', { email: 'collision@example.com' })
       if (!user || !other || !sameUser || !collision) throw new Error('identity mapping failed')
       expect(sameUser).toBe(user)
       expect(collision).not.toBe(user)
-      expect(await authorization.can(user, 'manage', 'Grant')).toBe(false)
-      expect(await authorization.can(admin.userId, 'read', 'Article')).toBe(false)
+      expect(await asActor(user, () => authorization.can('manage', 'Grant'))).toBe(false)
+      expect(await asActor(admin.userId, () => authorization.can('read', 'Article'))).toBe(false)
 
-      await authorization.grant(admin.userId, { action: 'create', role: 'admin', target: 'Article' })
+      await asActor(admin.userId, () => authorization.grant({ action: 'create', role: 'admin', target: 'Article' }))
       const article = randomUUID()
-      await authorization.run(admin.userId, () => server.db.tx(async sql => {
+      await asActor(admin.userId, () => server.db.tx(async sql => {
         await sql`
           INSERT INTO "Entity" ("id", "name", "entity")
           VALUES (${article}, 'Article', 'Article')
@@ -87,23 +93,23 @@ describe('Authorization RLS', () => {
         `
       }))
 
-      await authorization.grant(admin.userId, {
+      await asActor(admin.userId, () => authorization.grant({
         action: 'read',
         predicate: { field: 'owner.id', operator: '$eq', value: { $actor: true } },
         role: 'public',
         target: 'Article',
-      })
+      }))
 
-      const own = await authorization.run(user, () => server.db.query('Article', { fields: ['id', 'title'] }))
+      const own = await asActor(user, () => server.db.query('Article', { fields: ['id', 'title'] }))
       expect(own).toEqual([{ id: article, title: 'Private' }])
-      const stranger = await authorization.run(other, () => server.db.query('Article', { fields: ['id', 'title'] }))
+      const stranger = await asActor(other, () => server.db.query('Article', { fields: ['id', 'title'] }))
       expect(stranger).toEqual([])
-      const anonymous = await authorization.run(null, () => server.db.query('Article', {
+      const anonymous = await asActor(null, () => server.db.query('Article', {
         fields: ['id', 'title'],
       }))
       expect(anonymous).toEqual([])
 
-      const direct = await authorization.run(user, () => server.db.tx(async sql => {
+      const direct = await asActor(user, () => server.db.tx(async sql => {
         const rows = await sql<{ id: string }[]>`
           SELECT "id"
           FROM "Article"
@@ -112,7 +118,7 @@ describe('Authorization RLS', () => {
       }))
       expect(direct).toEqual([{ id: article }])
 
-      const forged = await authorization.run(user, () => server.db.tx(async sql => {
+      const forged = await asActor(user, () => server.db.tx(async sql => {
         await sql`
           SELECT set_config('basis.actor', 'deadbeef:9999999999:forged', TRUE)
         `
@@ -123,7 +129,27 @@ describe('Authorization RLS', () => {
       }))
       expect(forged).toEqual([])
 
-      const changed = await authorization.run(other, () => server.db.tx(async sql => sql`
+      let copied = ''
+      await asActor(user, () => server.db.tx(async sql => {
+        const [token] = await sql<{ token: string }[]>`
+          SELECT current_setting('basis.actor', TRUE) AS token
+        `
+        copied = token?.token ?? ''
+        expect((await sql<{ actor: string | null }[]>`
+          SELECT basis.actor_id() AS actor
+        `)[0]?.actor).toBe(user)
+      }))
+      const replayed = await asActor(other, () => server.db.tx(async sql => {
+        await sql`
+          SELECT set_config('basis.actor', ${copied}, TRUE)
+        `
+        return sql<{ actor: string | null }[]>`
+          SELECT basis.actor_id() AS actor
+        `
+      }))
+      expect(replayed[0]?.actor).toBeNull()
+
+      const changed = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article"
         SET "title" = 'Leaked'
         WHERE "id" = ${article}
@@ -131,34 +157,56 @@ describe('Authorization RLS', () => {
       `))
       expect(changed).toHaveLength(0)
 
-      await expect(authorization.run(other, () => server.db.tx(async sql => sql`
+      await expect(asActor(other, () => server.db.tx(async sql => sql`
         ALTER TABLE "Article" DISABLE ROW LEVEL SECURITY
       `))).rejects.toThrow()
-      await expect(authorization.assignRole(admin.userId, admin.userId, 'admin')).rejects.toThrow()
+      await expect(asActor(other, () => server.db.tx(async sql => sql`
+        UPDATE "Grant"
+        SET "action" = 'manage'
+      `))).rejects.toThrow()
+      await expect(asActor(other, () => server.db.tx(async sql => sql`
+        INSERT INTO "UserRole" ("user.id", "role.id")
+        VALUES (${other}, (SELECT "id" FROM "Role" WHERE "key" = 'admin'))
+      `))).rejects.toThrow()
+      await expect(asActor(admin.userId, () => server.db.tx(async sql => sql`
+        UPDATE "Grant"
+        SET "action" = 'manage'
+      `))).rejects.toThrow()
+      await expect(asActor(admin.userId, () => server.db.tx(async sql => sql`
+        INSERT INTO "UserRole" ("user.id", "role.id")
+        VALUES (${other}, (SELECT "id" FROM "Role" WHERE "key" = 'admin'))
+      `))).rejects.toThrow()
+      await expect(asActor(admin.userId, () => server.db.tx(async sql => sql`
+        SELECT basis.create_grant('admin', 'manage', '*', 'null'::jsonb)
+      `))).rejects.toThrow()
+      await expect(asActor(admin.userId, () => server.db.tx(async sql => sql`
+        SELECT basis.assign_role(${admin.userId}, 'admin')
+      `))).rejects.toThrow()
+      await expect(asActor(admin.userId, () => authorization.assignRole(admin.userId, 'admin'))).rejects.toThrow()
 
       const editor = 'editor'
-      await authorization.createRole(admin.userId, editor, 'Editor')
-      await authorization.assignRole(admin.userId, other, editor)
-      await authorization.grant(admin.userId, {
+      await asActor(admin.userId, () => authorization.createRole(editor, 'Editor'))
+      await asActor(admin.userId, () => authorization.assignRole(other, editor))
+      await asActor(admin.userId, () => authorization.grant({
         action: 'read',
         role: editor,
         target: 'Article',
-      })
-      await authorization.grant(admin.userId, {
+      }))
+      await asActor(admin.userId, () => authorization.grant({
         action: 'update',
         role: editor,
         target: 'Article',
-      })
-      expect(await authorization.can(other, 'update', 'Article', { id: article })).toBe(true)
-      const updated = await authorization.run(other, () => server.db.tx(async sql => sql`
+      }))
+      expect(await asActor(other, () => authorization.can('update', 'Article', { id: article }))).toBe(true)
+      const updated = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article"
         SET "title" = 'Updated'
         WHERE "id" = ${article}
         RETURNING "id"
       `))
       expect(updated).toHaveLength(1)
-      await authorization.removeRole(admin.userId, other, editor)
-      const deniedAgain = await authorization.run(other, () => server.db.tx(async sql => sql`
+      await asActor(admin.userId, () => authorization.removeRole(other, editor))
+      const deniedAgain = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article"
         SET "title" = 'Leaked'
         WHERE "id" = ${article}
@@ -167,16 +215,16 @@ describe('Authorization RLS', () => {
       expect(deniedAgain).toHaveLength(0)
 
       const limited = 'limited'
-      await authorization.createRole(admin.userId, limited, 'Limited')
-      await authorization.assignRole(admin.userId, other, limited)
-      await authorization.grant(admin.userId, { action: 'read', role: limited, target: 'Article' })
-      await authorization.grant(admin.userId, {
+      await asActor(admin.userId, () => authorization.createRole(limited, 'Limited'))
+      await asActor(admin.userId, () => authorization.assignRole(other, limited))
+      await asActor(admin.userId, () => authorization.grant({ action: 'read', role: limited, target: 'Article' }))
+      await asActor(admin.userId, () => authorization.grant({
         action: 'update',
         predicate: { field: 'title', operator: '$eq', value: 'Updated' },
         role: limited,
         target: 'Article',
-      })
-      await expect(authorization.run(other, () => server.db.tx(async sql => sql`
+      }))
+      await expect(asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article"
         SET "title" = 'Changed'
         WHERE "id" = ${article}
@@ -193,13 +241,13 @@ describe('Authorization RLS', () => {
       expect(await response?.json()).toEqual([{ id: article, title: 'Updated' }])
 
       const allowedId = randomUUID()
-      await authorization.grant(admin.userId, {
+      await asActor(admin.userId, () => authorization.grant({
         action: 'create',
         predicate: { field: 'id', operator: '$eq', value: allowedId },
         role: 'public',
         target: 'Article',
-      })
-      await authorization.run(user, () => server.db.tx(async sql => {
+      }))
+      await asActor(user, () => server.db.tx(async sql => {
         await sql`
           INSERT INTO "Entity" ("id", "name", "entity")
           VALUES (${allowedId}, 'Allowed', 'Article')
@@ -209,7 +257,7 @@ describe('Authorization RLS', () => {
           VALUES (${allowedId}, 'Allowed', ${user})
         `
       }))
-      await expect(authorization.run(other, () => server.db.tx(async sql => {
+      await expect(asActor(other, () => server.db.tx(async sql => {
         const deniedId = randomUUID()
         await sql`
           INSERT INTO "Entity" ("id", "name", "entity")
@@ -221,15 +269,158 @@ describe('Authorization RLS', () => {
         `
       }))).rejects.toThrow()
 
-      const publicGrant = (await authorization.effective(admin.userId, null))
-        .find(grant => grant.role === 'public' && grant.action === 'read' && grant.target === 'Article')
-      if (!publicGrant) throw new Error('public grant was not created')
-      await authorization.revoke(admin.userId, publicGrant.id)
-      expect(await authorization.run(user, () => server.db.query('Article', {
+      const employeeId = randomUUID()
+      const employeeOtherId = randomUUID()
+      await asActor(admin.userId, () => authorization.grant({
+        action: 'create',
+        role: 'admin',
+        target: 'Employee',
+      }))
+      await asActor(admin.userId, () => server.db.tx(async sql => {
+        const employees = [
+          [employeeId, 'employee@example.com'],
+          [employeeOtherId, 'other-employee@example.com'],
+        ] as const
+        for (const [id, email] of employees) {
+          await sql`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${id}, ${email}, 'Employee')
+          `
+          await sql`
+            INSERT INTO "Profile" ("id", "email")
+            VALUES (${id}, ${email})
+          `
+          await sql`
+            INSERT INTO "Employee" ("id")
+            VALUES (${id})
+          `
+        }
+      }))
+      await asActor(admin.userId, () => authorization.grant({
+        action: 'read',
+        predicate: { field: 'email', operator: '$eq', value: 'employee@example.com' },
+        role: 'public',
+        target: 'Employee',
+      }))
+      const employees = await asActor(other, () => server.db.query('Employee', {
+        fields: ['id', 'email'],
+      }))
+      expect(employees).toEqual([{ email: 'employee@example.com', id: employeeId }])
+
+      const applicationUserId = randomUUID()
+      await asActor(admin.userId, () => authorization.grant({
+        action: 'create',
+        role: 'admin',
+        target: 'ApplicationUser',
+      }))
+      await asActor(admin.userId, () => server.db.tx(async sql => {
+        await sql`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES (${applicationUserId}, 'Application User', 'ApplicationUser')
+        `
+        await sql`
+          INSERT INTO "User" ("id", "email", "displayName")
+          VALUES (${applicationUserId}, 'application@example.com', 'Application User')
+        `
+        await sql`
+          INSERT INTO "ApplicationUser" ("id")
+          VALUES (${applicationUserId})
+        `
+      }))
+      await asActor(admin.userId, () => authorization.grant({
+        action: 'read',
+        predicate: { field: 'email', operator: '$eq', value: 'application@example.com' },
+        role: 'public',
+        target: 'ApplicationUser',
+      }))
+      expect(await asActor(other, () => server.db.query('ApplicationUser', {
+        fields: ['id', 'email'],
+      }))).toEqual([{ email: 'application@example.com', id: applicationUserId }])
+
+      const secretId = randomUUID()
+      const literalId = randomUUID()
+      await asActor(admin.userId, () => server.db.tx(async sql => {
+        await sql`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES (${secretId}, 'secret', 'Article')
+        `
+        await sql`
+          INSERT INTO "Article" ("id", "title", "owner.id")
+          VALUES (${secretId}, 'x-secret', ${admin.userId})
+        `
+        await sql`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES (${literalId}, 'literal', 'Article')
+        `
+        await sql`
+          INSERT INTO "Article" ("id", "title", "owner.id")
+          VALUES (${literalId}, 'X%Literal', ${admin.userId})
+        `
+      }))
+      await asActor(admin.userId, () => authorization.grant({
+        action: 'read',
+        predicate: { field: 'title', operator: '$contains', value: 'x%' },
+        role: 'public',
+        target: 'Article',
+      }))
+      const contains = await asActor(null, () => server.db.query('Article', { fields: ['id', 'title'] }))
+      expect(contains).toEqual([{ id: literalId, title: 'X%Literal' }])
+
+      const parity = await asActor(null, () => server.db.tx(async sql => {
+        const [row] = await sql<{
+          less: boolean,
+          literal: boolean,
+          nullMissing: boolean,
+          wildcard: boolean,
+        }[]>`
+          SELECT basis.matches(jsonb_build_object('field',
+            'title',
+            'operator',
+            '$contains',
+            'value',
+            'x%'),
+            jsonb_build_object('title',
+            'x-secret') ) AS wildcard,
+            basis.matches(jsonb_build_object('field',
+            'title',
+            'operator',
+            '$contains',
+            'value',
+            'x%'),
+            jsonb_build_object('title',
+            'X%Literal') ) AS literal,
+            basis.matches(jsonb_build_object('field',
+            'n',
+            'operator',
+            '$lt',
+            'value',
+            2),
+            jsonb_build_object('n',
+            1) ) AS less,
+            basis.matches(jsonb_build_object('field',
+            'missing',
+            'operator',
+            '$eq',
+            'value',
+            NULL),
+            jsonb_build_object('n',
+            1) ) AS "nullMissing"
+        `
+        return row
+      }))
+      expect(parity).toEqual({ less: true, literal: true, nullMissing: true, wildcard: false })
+
+      const publicGrants = (await asActor(admin.userId, () => authorization.effective(null)))
+        .filter(grant => grant.role === 'public' && grant.action === 'read' && grant.target === 'Article')
+      if (publicGrants.length === 0) throw new Error('public grant was not created')
+      for (const grant of publicGrants) {
+        await asActor(admin.userId, () => authorization.revoke(grant.id))
+      }
+      expect(await asActor(user, () => server.db.query('Article', {
         fields: ['id', 'title'],
       }))).toEqual([])
 
-      await authorization.revokeIdentity(admin.userId, 'test', 'other')
+      await asActor(admin.userId, () => authorization.revokeIdentity('test', 'other'))
       expect(await authorization.resolve(other)).toBeNull()
 
     } finally {
