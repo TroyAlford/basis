@@ -641,6 +641,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   const actualTables = new Map(options.actual.tables.map(table => [table.name, table]))
   const desiredTables = new Map(desired.tables.map(table => [table.name, table]))
   const previousTablesPhysical = new Map(previous?.tables.map(table => [table.name, table]) ?? [])
+  const removedTables = new Set([...previousTablesPhysical.keys()].filter(name => !desiredTables.has(name)))
   const actualFunctions = new Set(options.actual.functions.flatMap(fn => fn.required))
   const actualTriggers = new Set(options.actual.triggers.map(trigger => trigger.name))
   const actualPolicies = new Set(options.actual.policies.map(policy => policy.name))
@@ -696,9 +697,12 @@ export function plan(options: PlanOptions): SchemaPlan {
   const desiredGrantees = new Set((desired.grants ?? [])
     .map(grant => grant.grantee)
     .filter((grantee): grantee is string => Boolean(grantee) && grantee !== 'PUBLIC'))
+  const desiredFunctionNamesForGrants = new Set(desired.functions.flatMap(fn => fn.required))
   for (const grant of desired.grants ?? []) {
+    const missingFunction = grant.object === 'function' && grant.function !== undefined
+      && desiredFunctionNamesForGrants.has(grant.function) && !actualFunctions.has(grant.function)
     const exists = grant.kind === 'revoke'
-      ? Boolean(grant.grantName && actualGrants.has(grant.grantName))
+      ? Boolean((grant.grantName && actualGrants.has(grant.grantName)) || missingFunction)
       : actualGrants.has(grant.name)
     if (!exists && grant.kind !== 'revoke') {
       if (previousGrantNames.has(grant.name)) continue
@@ -723,12 +727,12 @@ export function plan(options: PlanOptions): SchemaPlan {
   }
   for (const grant of actualGrants.values()) {
     if (desiredGrants.has(grant.name) || desiredRevokes.has(grant.name)) continue
+    if (grant.table && removedTables.has(grant.table)) continue
     if (grant.grantee && desiredGrantees.has(grant.grantee)) {
       drift.push(`unexpected grant: ${grant.name}`)
     }
   }
 
-  const removedTables = new Set([...previousTablesPhysical.keys()].filter(name => !desiredTables.has(name)))
   const previousTables = new Set<string>()
   if (options.previous) {
     previousTables.add('Entity')
@@ -813,8 +817,9 @@ export function plan(options: PlanOptions): SchemaPlan {
         && normalizeDefinition(previousFunction.signature) !== normalizeDefinition(actualFunction.signature)) {
         drift.push(`out-of-band function signature change: ${name}`)
       }
-      if (previousFunction.searchPath !== undefined && actualFunction.searchPath !== undefined
-        && normalizeSearchPath(previousFunction.searchPath) !== normalizeSearchPath(actualFunction.searchPath)) {
+      if (previousFunction.searchPath !== undefined
+        && (actualFunction.searchPath === undefined
+          || normalizeSearchPath(previousFunction.searchPath) !== normalizeSearchPath(actualFunction.searchPath))) {
         drift.push(`out-of-band function search path change: ${name}`)
       }
     }
@@ -1103,8 +1108,9 @@ export function plan(options: PlanOptions): SchemaPlan {
       && actualFunction.securityDefiner !== fn.securityDefiner
     const changedSignature = fn.signature !== undefined && actualFunction?.signature !== undefined
       && normalizeDefinition(fn.signature) !== normalizeDefinition(actualFunction.signature)
-    const changedSearchPath = fn.searchPath !== undefined && actualFunction?.searchPath !== undefined
-      && normalizeSearchPath(fn.searchPath) !== normalizeSearchPath(actualFunction.searchPath)
+    const changedSearchPath = fn.searchPath !== undefined
+      && (actualFunction?.searchPath === undefined
+        || normalizeSearchPath(fn.searchPath) !== normalizeSearchPath(actualFunction.searchPath))
     if (actualFunction && (changedBody || changedSecurity || changedSignature || changedSearchPath)) {
       const prior = previousFunctionMap.get(fn.name)
       const priorMatchesActual = prior?.body !== undefined && actualFunction.body !== undefined
@@ -1113,8 +1119,9 @@ export function plan(options: PlanOptions): SchemaPlan {
           || prior.securityDefiner === actualFunction.securityDefiner)
         && (prior.signature === undefined || actualFunction.signature === undefined
           || normalizeDefinition(prior.signature) === normalizeDefinition(actualFunction.signature))
-        && (prior.searchPath === undefined || actualFunction.searchPath === undefined
-          || normalizeSearchPath(prior.searchPath) === normalizeSearchPath(actualFunction.searchPath))
+        && (prior.searchPath === undefined
+          || (actualFunction.searchPath !== undefined
+            && normalizeSearchPath(prior.searchPath) === normalizeSearchPath(actualFunction.searchPath)))
       if (priorMatchesActual) {
         operations.push({
           dependsOn: [],
@@ -1240,7 +1247,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     const dependencies = new Set(operation.dependsOn.filter(dependency => plannedIds.has(dependency)))
     if (
       schemaOperation
-      && (operation.kind === 'policy' || operation.kind === 'function'
+      && (operation.kind === 'policy' || operation.kind === 'function' || operation.kind === 'grant'
         || (operation.kind === 'table' && operation.target.startsWith('basis.')))
     ) {
       dependencies.add(schemaOperation.id)
@@ -1257,6 +1264,10 @@ export function plan(options: PlanOptions): SchemaPlan {
       const grant = desired.grants?.find(candidate => candidate.name === operation.target)
       if (grant?.table && tableOperations.has(grant.table)) {
         dependencies.add(`table:${grant.table}`)
+      }
+      if (grant?.function) {
+        const dependency = functionOperations.find(candidate => candidate.target === grant.function)
+        if (dependency) dependencies.add(dependency.id)
       }
     }
     if (operation.kind === 'constraint') {

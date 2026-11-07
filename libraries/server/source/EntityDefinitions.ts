@@ -815,10 +815,14 @@ export class EntityDefinitions {
           }
           continue
         }
-        const revokeTable = /^REVOKE\s+([A-Z, ]+)\s+ON\s+(?:TABLE\s+)?"([^"]+)"\s+FROM\s+"([^"]+)"/u.exec(sql)
+        // eslint-disable-next-line @stylistic/max-len
+        const revokeTable = /^REVOKE\s+([A-Z, ]+)\s+ON\s+(?:TABLE\s+)?["']?([A-Za-z0-9_.]+)["']?\s+FROM\s+["']?([A-Za-z0-9_]+)["']?/u.exec(sql)
         if (revokeTable) {
           const [, privileges, table, grantee] = revokeTable
-          for (const privilege of (privileges ?? '').split(',').map(value => value.trim()).filter(Boolean)) {
+          const values = (privileges ?? '').trim() === 'ALL'
+            ? ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']
+            : (privileges ?? '').split(',').map(value => value.trim()).filter(Boolean)
+          for (const privilege of values) {
             const grantName = `grant:${grantee}:table:${table}:${privilege}`
             grants.push({
               grantName,
