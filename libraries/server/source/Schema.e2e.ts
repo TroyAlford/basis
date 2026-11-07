@@ -257,6 +257,33 @@ describe('DDL schema planning', () => {
     ))).toBe(true)
   })
 
+  test('plans PUBLIC EXECUTE revocations after newly created security functions', () => {
+    const model = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      grants: [{ action: 'read', role: 'public', target: 'Note' }],
+    })
+    const empty = {
+      constraints: [],
+      extensions: [],
+      functions: [],
+      policies: [],
+      tables: [],
+      triggers: [],
+    }
+    const plan = DDL.plan({ actual: empty, appRole: 'basis_app', desired: model })
+    const revokes = plan.operations.filter(operation => (
+      operation.kind === 'grant' && operation.sql.startsWith('REVOKE ALL ON FUNCTION')
+    ))
+    expect(revokes.some(operation => operation.sql.includes('basis.has_role'))).toBe(true)
+    expect(revokes.some(operation => operation.sql.includes('basis.policy_field'))).toBe(true)
+    for (const revoke of revokes) {
+      const functionTarget = revoke.dependsOn.find(dependency => dependency.startsWith('function:'))
+      expect(functionTarget).toBeTruthy()
+      expect(plan.operations.some(operation => operation.id === functionTarget)).toBe(true)
+    }
+    expect(plan.operations.some(operation => operation.sql.includes('basis.matches'))).toBe(false)
+  })
+
   test('includes authorization objects in the desired physical output', async () => {
     const model = new Graph({
       entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
