@@ -180,6 +180,26 @@ describe('DDL schema planning', () => {
     }, { fresh: true })
   })
 
+  test('plans an intended entity removal without redundant child drops', async () => {
+    const previous = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'title', type: 'String' }], name: 'Note' },
+        { fields: [{ field: 'title', type: 'String' }], name: 'Tag' },
+      ],
+    }))
+    const desired = definitions('Note')
+    await withIsolatedDatabase('schema-plan-remove', async database => {
+      await previous.createTables(database.sql)
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
+      expect(plan.operations.some(operation => operation.id === 'drop-table:Tag' || (
+        operation.kind === 'table' && operation.target === 'Tag' && operation.sql.startsWith('DROP')
+      ))).toBe(true)
+      expect(plan.operations.some(operation => operation.target === 'Tag_leaf_check')).toBe(false)
+      expect(plan.blocked).toBe(false)
+    }, { fresh: true })
+  })
+
   test('reports live catalog drift as a blocker', async () => {
     const model = definitions()
     await withIsolatedDatabase('schema-plan-drift', async database => {

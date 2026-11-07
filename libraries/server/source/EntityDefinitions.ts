@@ -765,22 +765,72 @@ export class EntityDefinitions {
       grants = []
       const privilegeDdl = [...this.authorizationSchemaDdl(), ...authDdl]
       for (const sql of privilegeDdl) {
-        if (!/^(?:GRANT|REVOKE)/u.test(sql)) continue
-        const match = /^GRANT\s+([A-Z, ]+)\s+ON\s+(?:TABLE\s+)?"([^"]+)"\s+TO\s+"([^"]+)"/u.exec(sql)
-        if (!match) {
-          grants.push({ name: `privilege:${sql}`, sql })
-          continue
-        }
-        const [, privileges, table, grantee] = match
-        for (const privilege of (privileges ?? '').split(',').map(value => value.trim()).filter(Boolean)) {
+        const verb = /^(GRANT|REVOKE)/u.exec(sql)?.[1]
+        if (!verb) continue
+        const kind = verb === 'GRANT' ? 'grant' as const : 'revoke' as const
+        const schema = /^GRANT|REVOKE\s+[^]+?\s+ON SCHEMA\s+"?([^"\s]+)"?\s+(?:TO|FROM)\s+"?([^"\s]+)"?/u.exec(sql)
+        if (schema) {
+          const privilege = /^(?:GRANT|REVOKE)\s+([A-Z, ]+?)\s+ON SCHEMA/u.exec(sql)?.[1] ?? ''
+          const grantName = `grant:${schema[2]}:schema:${schema[1]}:${privilege}`
           grants.push({
-            grantee,
-            name: `grant:${grantee}:${table}:${privilege}`,
+            grantName,
+            grantee: schema[2],
+            kind,
+            name: `${kind}:${grantName}`,
+            object: 'schema',
             privilege,
             sql,
-            table,
+            table: schema[1],
           })
+          continue
         }
+        // eslint-disable-next-line @stylistic/max-len
+        const routine = /^(?:GRANT|REVOKE)\s+([A-Z, ]+?)\s+ON FUNCTION\s+([^\s]+(?:\s*,\s*[^\s]+)*)\s+(?:TO|FROM)\s+"?([^"\s]+)"?/u.exec(sql)
+        if (routine) {
+          for (const fn of (routine[2] ?? '').split(',').map(value => value.trim()).filter(Boolean)) {
+            const privilege = routine[1] ?? ''
+            const grantName = `grant:${routine[3]}:function:${fn}:${privilege}`
+            grants.push({
+              function: fn,
+              grantName,
+              grantee: routine[3],
+              kind,
+              name: `${kind}:${grantName}`,
+              object: 'function',
+              privilege,
+              sql,
+            })
+          }
+          continue
+        }
+        const match = /^GRANT\s+([A-Z, ]+)\s+ON\s+(?:TABLE\s+)?"([^"]+)"\s+TO\s+"([^"]+)"/u.exec(sql)
+        if (match) {
+          const [, privileges, table, grantee] = match
+          for (const privilege of (privileges ?? '').split(',').map(value => value.trim()).filter(Boolean)) {
+            const grantName = `grant:${grantee}:table:${table}:${privilege}`
+            grants.push({ grantName, grantee, kind, name: grantName, object: 'table', privilege, sql, table })
+          }
+          continue
+        }
+        const revokeTable = /^REVOKE\s+([A-Z, ]+)\s+ON\s+(?:TABLE\s+)?"([^"]+)"\s+FROM\s+"([^"]+)"/u.exec(sql)
+        if (revokeTable) {
+          const [, privileges, table, grantee] = revokeTable
+          for (const privilege of (privileges ?? '').split(',').map(value => value.trim()).filter(Boolean)) {
+            const grantName = `grant:${grantee}:table:${table}:${privilege}`
+            grants.push({
+              grantName,
+              grantee,
+              kind,
+              name: `revoke:${grantName}`,
+              object: 'table',
+              privilege,
+              sql,
+              table,
+            })
+          }
+          continue
+        }
+        grants.push({ kind, name: `${kind}:${sql}`, sql })
       }
     }
     return {
@@ -1552,7 +1602,7 @@ function authorizationFunctions(sql: string): PhysicalFunction[] {
       lifecycle: false,
       name: `basis.${name}`,
       required: [`basis.${name}`],
-      searchPath: /SET search_path = ([^\n]+)/u.exec(chunk)?.[1]?.trim(),
+      searchPath: /SET search_path = ([^\n]*?) AS \$\$/u.exec(chunk)?.[1]?.trim(),
       securityDefiner: /SECURITY DEFINER/u.test(chunk),
       signature: new RegExp(`basis\\.${name}\\(([^)]*)\\)`, 'u').exec(chunk)?.[1]?.trim() ?? '',
       sql: chunk,

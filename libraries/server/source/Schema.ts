@@ -143,15 +143,23 @@ export interface PhysicalPolicy {
 
 /** One typed physical grant or revoke statement. */
 export interface PhysicalGrant {
+  /** Function name for function grants. */
+  readonly function?: string,
+  /** Grant name used for lookup; revoke entries point at this grant. */
+  readonly grantName?: string,
   /** Grantee role name. */
   readonly grantee?: string,
+  /** Whether this is a grant or a revoke statement. */
+  readonly kind?: 'grant' | 'revoke',
   /** Stable object name. */
   readonly name: string,
+  /** Object family. */
+  readonly object?: 'function' | 'schema' | 'table',
   /** Privilege name. */
   readonly privilege?: string,
   /** Complete grant or revoke SQL. */
   readonly sql: string,
-  /** Optional target table. */
+  /** Optional schema or table target. */
   readonly table?: string,
 }
 
@@ -444,12 +452,62 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     const table = row.schema === 'basis' ? `basis.${row.table}` : row.table
     return {
       grantee: row.grantee,
-      name: `grant:${row.grantee}:${table}:${row.privilege}`,
+      kind: 'grant' as const,
+      name: `grant:${row.grantee}:table:${table}:${row.privilege}`,
+      object: 'table' as const,
       privilege: row.privilege,
       sql: '',
       table,
     }
   })
+
+  const schemaGrantRows = await sql<{
+    grantee: string,
+    privilege: string,
+    schema: string,
+  }[]>`
+    SELECT n.nspname AS schema,
+      CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee,
+      a.privilege_type AS privilege
+    FROM pg_namespace n, aclexplode(n.nspacl) a
+    WHERE n.nspname IN ('public', 'basis', current_schema())
+    ORDER BY n.nspname, grantee, privilege
+  `
+  const functionGrantRows = await sql<{
+    function: string,
+    grantee: string,
+    privilege: string,
+  }[]>`
+    SELECT CASE WHEN n.nspname = 'basis' THEN 'basis.' || p.proname ELSE p.proname END AS function,
+      CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee,
+      a.privilege_type AS privilege
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace, aclexplode(p.proacl) a
+    WHERE n.nspname IN (current_schema(), 'basis')
+    ORDER BY function, grantee, privilege
+  `
+  for (const row of schemaGrantRows) {
+    grants.push({
+      grantee: row.grantee,
+      kind: 'grant',
+      name: `grant:${row.grantee}:schema:${row.schema}:${row.privilege}`,
+      object: 'schema',
+      privilege: row.privilege,
+      sql: '',
+      table: row.schema,
+    })
+  }
+  for (const row of functionGrantRows) {
+    grants.push({
+      function: row.function,
+      grantee: row.grantee,
+      kind: 'grant',
+      name: `grant:${row.grantee}:function:${row.function}:${row.privilege}`,
+      object: 'function',
+      privilege: row.privilege,
+      sql: '',
+    })
+  }
 
   const columnsByTable = new Map<string, PhysicalColumn[]>()
   for (const row of columnRows) {
@@ -575,7 +633,9 @@ export function plan(options: PlanOptions): SchemaPlan {
   const previousConstraints = new Set(previous?.constraints.map(constraint => constraint.name) ?? [])
   const previousPolicies = new Set(previous?.policies.map(policy => policy.name) ?? [])
   const previousFunctionMap = new Map(previous?.functions.map(fn => [fn.name, fn]) ?? [])
-  const previousGrantNames = new Set((previous?.grants ?? []).map(grant => grant.name))
+  const previousGrantNames = new Set((previous?.grants ?? [])
+    .filter(grant => grant.kind !== 'revoke')
+    .map(grant => grant.name))
   const operations: SchemaOperation[] = []
   const drift: string[] = []
   const ambiguities: string[] = []
@@ -612,10 +672,28 @@ export function plan(options: PlanOptions): SchemaPlan {
 
   const actualGrants = new Map((options.actual.grants ?? []).map(grant => [grant.name, grant]))
   const desiredGrants = new Set((desired.grants ?? []).map(grant => grant.name))
-  const desiredGrantees = new Set((desired.grants ?? []).map(grant => grant.grantee).filter(Boolean))
+  const desiredRevokes = new Set((desired.grants ?? [])
+    .filter(grant => grant.kind === 'revoke')
+    .map(grant => grant.grantName)
+    .filter((name): name is string => Boolean(name)))
+  const desiredGrantees = new Set((desired.grants ?? [])
+    .map(grant => grant.grantee)
+    .filter((grantee): grantee is string => Boolean(grantee) && grantee !== 'PUBLIC'))
   for (const grant of desired.grants ?? []) {
-    if (!actualGrants.has(grant.name)) {
+    const exists = grant.kind === 'revoke'
+      ? Boolean(grant.grantName && actualGrants.has(grant.grantName))
+      : actualGrants.has(grant.name)
+    if (!exists && grant.kind !== 'revoke') {
       if (previousGrantNames.has(grant.name)) continue
+      operations.push({
+        dependsOn: [],
+        id: `grant:${grant.name}`,
+        kind: 'grant',
+        risk: 'review',
+        sql: grant.sql,
+        target: grant.name,
+      })
+    } else if (exists && grant.kind === 'revoke') {
       operations.push({
         dependsOn: [],
         id: `grant:${grant.name}`,
@@ -627,12 +705,13 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
   for (const grant of actualGrants.values()) {
-    if (desiredGrants.has(grant.name)) continue
+    if (desiredGrants.has(grant.name) || desiredRevokes.has(grant.name)) continue
     if (grant.grantee && desiredGrantees.has(grant.grantee)) {
       drift.push(`unexpected grant: ${grant.name}`)
     }
   }
 
+  const removedTables = new Set([...previousTablesPhysical.keys()].filter(name => !desiredTables.has(name)))
   const previousTables = new Set<string>()
   if (options.previous) {
     previousTables.add('Entity')
@@ -932,7 +1011,8 @@ export function plan(options: PlanOptions): SchemaPlan {
   }
   const desiredConstraints = new Set(desired.constraints.map(constraint => constraint.name))
   for (const constraint of options.actual.constraints) {
-    if (!desiredConstraints.has(constraint.name)) drift.push(`unexpected constraint: ${constraint.name}`)
+    if (desiredConstraints.has(constraint.name) || removedTables.has(constraint.table)) continue
+    drift.push(`unexpected constraint: ${constraint.name}`)
   }
 
   const actualFunctionMap = new Map(options.actual.functions.map(fn => [fn.name, fn]))
@@ -1035,6 +1115,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   for (const name of actualTriggers) {
     if (desiredTriggerNames.has(name)) continue
     const trigger = actualTriggerMap.get(name)
+    if (trigger && removedTables.has(trigger.table)) continue
     if (previousTriggers.has(name) && trigger) {
       operations.push({
         dependsOn: [],
