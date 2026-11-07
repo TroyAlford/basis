@@ -87,6 +87,8 @@ export interface GraphOptions {
   readonly relationships?: readonly unknown[],
   /** Role declarations and stable identifiers. */
   readonly roles?: RoleSource,
+  /** Application schema used by compiled security functions; defaults to public. */
+  readonly schema?: string,
 }
 
 /** The system security ontology shared by every graph. */
@@ -158,6 +160,7 @@ export class Graph {
   readonly grants: readonly GraphGrant[]
   readonly #rolesById: ReadonlyMap<string, GraphRole>
   readonly #rolesByName: ReadonlyMap<string, GraphRole>
+  readonly #schema: string
 
   /**
    * Build and validate the graph.
@@ -184,6 +187,7 @@ export class Graph {
       relationships: [...(SYSTEM_DOCUMENT.relationships ?? []), ...relationships],
     }))
     this.roles = normalizeRoles(options.roles)
+    this.#schema = options.schema ?? 'public'
     this.#rolesById = new Map(this.roles.map(role => [role.id, role]))
     this.#rolesByName = new Map(this.roles.map(role => [role.name, role]))
     this.grants = (options.grants ?? []).map(grant => this.#normalizeGrant(grant))
@@ -234,7 +238,7 @@ export class Graph {
       lifecycle: false,
       name: 'basis.has_role',
       required: ['basis.has_role'],
-      searchPath: 'public, basis, pg_temp',
+      searchPath: this.#searchPath(),
       securityDefiner: true,
       signature: 'role_id text',
       sql: hasRoleDdl,
@@ -509,7 +513,7 @@ export class Graph {
       if (!expression) continue
       const body = action === Action.Create
         ? expression
-        : `EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf)} AS ${quoteIdentifier(alias)} ` +
+        : `EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf)} ${quoteIdentifier(alias)} ` +
           `WHERE ${quoteIdentifier(alias)}.${quoteIdentifier('id')} = ${row}.${quoteIdentifier('id')} ` +
           `AND ${expression})`
       conditions.push(`(${row}.${quoteIdentifier('entity')} = ${literal(leaf)} AND ${body})`)
@@ -537,7 +541,7 @@ export class Graph {
         continue
       }
       conditions.push(
-        `EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf)} AS ${quoteIdentifier(childAlias)} ` +
+        `EXISTS (SELECT 1 FROM ${quoteIdentifier(leaf)} ${quoteIdentifier(childAlias)} ` +
         `WHERE ${quoteIdentifier(childAlias)}.${quoteIdentifier('id')} = ${alias}.${quoteIdentifier('id')} ` +
         `AND ${predicate})`,
       )
@@ -586,6 +590,10 @@ export class Graph {
       return `${this.#helperName(grant)}(${alias}.${quoteIdentifier('id')})`
     }
     return this.#compileDirectPredicate(grant, alias, table, false)
+  }
+
+  #grantApplies(grant: GraphGrant, leaf: string): boolean {
+    return new Set(['*', 'Entity', ...this.#ancestors(leaf)]).has(grant.target)
   }
 
   #requiresHelper(grant: GraphGrant, table: string): boolean {
@@ -650,6 +658,12 @@ export class Graph {
     return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
   }
 
+  #searchPath(): string {
+    return this.#schema === 'public'
+      ? 'public, basis, pg_temp'
+      : `${this.#schema}, public, basis, pg_temp`
+  }
+
   #identityFunctions(): PhysicalFunction[] {
     const userEntity = this.userLeaf()
     const userFields = this.definitions.entity('User')?.effectiveFields ?? []
@@ -663,7 +677,7 @@ export class Graph {
     const resolveSql = `
       CREATE OR REPLACE FUNCTION basis.resolve_identity(candidate text)
       RETURNS text
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
         SELECT u."id"
         FROM "User" u
         WHERE u."id" = candidate
@@ -679,7 +693,7 @@ export class Graph {
       lifecycle: false,
       name: 'basis.resolve_identity',
       required: ['basis.resolve_identity'],
-      searchPath: 'public, basis, pg_temp',
+      searchPath: this.#searchPath(),
       securityDefiner: true,
       signature: 'candidate text',
       sql: resolveSql,
@@ -692,7 +706,7 @@ export class Graph {
         email_address text
       )
       RETURNS text
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
       DECLARE
         existing_revoked boolean;
         existing_user text;
@@ -735,7 +749,7 @@ export class Graph {
       lifecycle: false,
       name: 'basis.enroll_identity',
       required: ['basis.enroll_identity'],
-      searchPath: 'public, basis, pg_temp',
+      searchPath: this.#searchPath(),
       securityDefiner: true,
       signature: 'provider_name text, provider_subject text, display_name text, email_address text',
       sql: enrollSql,
@@ -769,6 +783,10 @@ export class Graph {
     const seen = new Set<string>()
     for (const grant of this.grants) {
       if (!grant.predicate) continue
+      const needed = [...this.#concreteLeaves(),
+        ...this.definitions.relationships.map(relationship => relationship.name)]
+        .some(leaf => this.#grantApplies(grant, leaf) && this.#requiresHelper(grant, leaf))
+      if (!needed) continue
       const name = this.#helperName(grant)
       if (seen.has(name)) continue
       seen.add(name)
@@ -776,7 +794,7 @@ export class Graph {
       const sql = `
         CREATE OR REPLACE FUNCTION ${name}(root_id text)
         RETURNS boolean
-        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
+        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
           SELECT EXISTS (
             SELECT 1
             FROM ${quoteIdentifier(grant.target)} AS "__row"
@@ -790,7 +808,7 @@ export class Graph {
         lifecycle: false,
         name,
         required: [name],
-        searchPath: 'public, basis, pg_temp',
+        searchPath: this.#searchPath(),
         securityDefiner: true,
         signature: 'root_id text',
         sql,
@@ -1018,7 +1036,7 @@ export class Graph {
     return `
       CREATE OR REPLACE FUNCTION basis.has_role(role_id text)
       RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
         SELECT EXISTS (
           SELECT 1
           FROM "UserRole" ur

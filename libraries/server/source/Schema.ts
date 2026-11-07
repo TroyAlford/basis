@@ -816,6 +816,10 @@ export function plan(options: PlanOptions): SchemaPlan {
       }
     }
   }
+  for (const [id] of actualRoles) {
+    if (previousRoles.has(id) || desiredRoles.has(id)) continue
+    drift.push(`unexpected role: ${id}`)
+  }
   for (const [id] of previousRoles) {
     if (desiredRoles.has(id)) continue
     if (!actualRoles.has(id)) continue
@@ -1235,7 +1239,7 @@ export function plan(options: PlanOptions): SchemaPlan {
         id: `drop-function:${name}`,
         kind: 'function',
         risk: 'review',
-        sql: `DROP FUNCTION ${quote(name)}()`,
+        sql: `DROP FUNCTION ${quote(name)}(${previousFunctionMap.get(name)?.signature ?? ''})`,
         target: name,
       })
     } else {
@@ -1461,7 +1465,7 @@ function sqlLiteral(value: string): string {
 function samePolicy(left: PhysicalPolicy, right: PhysicalPolicy): boolean {
   const definition = left.definition === undefined || right.definition === undefined
     ? left.definition === right.definition
-    : normalizeDefinition(left.definition) === normalizeDefinition(right.definition)
+    : normalizePolicyDefinition(left.definition) === normalizePolicyDefinition(right.definition)
   const command = left.command === undefined || right.command === undefined
     ? left.command === right.command
     : left.command === right.command
@@ -1472,6 +1476,50 @@ function samePolicy(left: PhysicalPolicy, right: PhysicalPolicy): boolean {
     ? left.roles === right.roles
     : [...left.roles].sort().join(',') === [...right.roles].sort().join(',')
   return definition && command && permissive && roles
+}
+
+/**
+ * Normalize a PostgreSQL policy expression for catalog comparison.
+ *
+ * PostgreSQL rewrites equivalent expressions (casts, qualifiers, IS DISTINCT
+ * FROM negation, aliases, and redundant parentheses) when storing a policy.
+ * This comparison form removes those representation differences while
+ * preserving literal contents and predicate values.
+ * @param value - Policy definition text.
+ * @returns Comparable policy definition.
+ */
+function normalizePolicyDefinition(value: string): string {
+  let normalized = ''
+  let quoted = false
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] as string
+    if (character === "'") {
+      normalized += character
+      if (quoted && value[index + 1] === "'") {
+        normalized += "'"
+        index += 1
+        continue
+      }
+      quoted = !quoted
+      continue
+    }
+    if (quoted) {
+      normalized += character
+      continue
+    }
+    if (character === '"' || character === ';') continue
+    normalized += character.toLowerCase()
+  }
+  normalized = normalized.replace(/::[a-z_][a-z0-9_ ]*/gu, '')
+  normalized = normalized.replace(
+    /(^|[\s(,=])(?!basis\.)[a-z_][a-z0-9_]*\./gu,
+    (_match, prefix: string) => prefix,
+  )
+  normalized = normalized.replace(/\s+/gu, '')
+  for (let pass = 0; pass < 4; pass += 1) {
+    normalized = normalized.replace(/not\(([^()]*)isdistinctfrom([^()]*)\)/gu, '$1isnotdistinctfrom$2')
+  }
+  return normalized.replaceAll('(', '').replaceAll(')', '')
 }
 
 /**

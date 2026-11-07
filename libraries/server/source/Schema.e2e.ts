@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { randomUUID } from 'node:crypto'
 import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Graph } from './Graph'
@@ -257,6 +258,107 @@ describe('DDL schema planning', () => {
     ))).toBe(true)
   })
 
+  test('plans real catalog policy and role changes', async () => {
+    await withIsolatedDatabase('schema-plan-catalog-policy', async database => {
+      const appRole = `basis_plan_app_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+      await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
+      const previous = new Graph({
+        entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+        grants: [{ action: 'read', predicate: "title = 'x'", role: 'editor', target: 'Note' }],
+        roles: { editor: { name: 'Editor' } },
+        schema: database.schema,
+      })
+      const desired = new Graph({
+        entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+        grants: [{ action: 'read', predicate: "title = 'y'", role: 'editor', target: 'Note' }],
+        roles: { editor: { name: 'Editor Renamed' } },
+        schema: database.schema,
+      })
+      await previous.definitions.createTables(database.sql)
+      for (const statement of previous.authorizationDdl(appRole, false)) {
+        await database.sql.unsafe(statement).simple()
+      }
+      for (const role of previous.roles) {
+        if (role.id === 'public') continue
+        await database.sql`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES (${role.id}, ${role.name}, 'Role')
+        `
+        await database.sql`
+          INSERT INTO "Role" ("id", "description")
+          VALUES (${role.id}, ${role.description ?? ''})
+        `
+      }
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual,
+        appRole,
+        desired,
+        previous,
+        superuser: false,
+      })
+      expect(plan.drift).toEqual([])
+      expect(plan.blocked).toBe(false)
+      expect(plan.operations.some(operation => operation.id.endsWith(':replace'))).toBe(true)
+      expect(plan.operations.some(operation => operation.kind === 'role')).toBe(true)
+    }, { fresh: true })
+  })
+
+  test('reports unexpected deployed graph roles as drift', () => {
+    const model = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      roles: { editor: { name: 'Editor' } },
+    })
+    const physical = model.physicalSchema('basis_app', false)
+    const unexpected = randomUUID()
+    const plan = DDL.plan({
+      actual: {
+        ...physical,
+        roles: [...(physical.roles ?? []), { id: unexpected, name: 'Unexpected' }],
+      },
+      appRole: 'basis_app',
+      desired: model,
+      previous: model,
+    })
+    expect(plan.drift).toContain(`unexpected role: ${unexpected}`)
+    expect(plan.blocked).toBe(true)
+  })
+
+  test('drops replaced predicate helpers with their canonical signature', () => {
+    const entities = [
+      { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
+      { extends: 'Profile', fields: [], name: 'Employee' },
+    ]
+    const previous = new Graph({
+      entities,
+      grants: [{
+        action: 'read',
+        predicate: "email = 'x'",
+        role: 'public',
+        target: 'Employee',
+      }],
+    })
+    const desired = new Graph({
+      entities,
+      grants: [{
+        action: 'read',
+        predicate: "email = 'y'",
+        role: 'public',
+        target: 'Employee',
+      }],
+    })
+    const plan = DDL.plan({
+      actual: previous.physicalSchema('basis_app', false),
+      appRole: 'basis_app',
+      desired,
+      previous,
+    })
+    const drops = plan.operations.filter(operation => operation.id.startsWith('drop-function:basis.policy_'))
+    expect(drops).toHaveLength(1)
+    expect(drops[0]?.sql).toContain('(root_id text)')
+    expect(drops[0]?.sql.endsWith('()')).toBe(false)
+  })
+
   test('plans graph role metadata changes while preserving role identity', () => {
     const previous = new Graph({
       entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
@@ -305,8 +407,16 @@ describe('DDL schema planning', () => {
 
   test('plans PUBLIC EXECUTE revocations after newly created security functions', () => {
     const model = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-      grants: [{ action: 'read', predicate: "title = 'x'", role: 'public', target: 'Note' }],
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
+        { extends: 'Profile', fields: [], name: 'Employee' },
+      ],
+      grants: [{
+        action: 'read',
+        predicate: "email = 'x'",
+        role: 'public',
+        target: 'Employee',
+      }],
     })
     const empty = {
       constraints: [],

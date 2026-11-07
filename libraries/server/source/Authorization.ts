@@ -76,10 +76,12 @@ export class Authorization {
   async resolve(userId: string | null): Promise<string | null> {
     if (!userId) return null
     try {
-      const rows = await this.#database.sql<{ id: string | null }[]>`
-        SELECT basis.resolve_identity(${userId}) AS "id"
-      `
-      return rows[0]?.id ?? null
+      return await this.#database.tx(async tx => {
+        const rows = await tx<{ id: string | null }[]>`
+          SELECT basis.resolve_identity(${userId}) AS "id"
+        `
+        return rows[0]?.id ?? null
+      })
     } catch {
       return null
     }
@@ -161,15 +163,17 @@ export class Authorization {
     subject: string,
     profile: { readonly displayName?: string, readonly email?: string } = {},
   ): Promise<string | null> {
-    const rows = await this.#database.sql<{ id: string | null }[]>`
-      SELECT basis.enroll_identity(
-        ${provider},
-        ${subject},
-        ${profile.displayName ?? null},
-        ${profile.email ?? null}
-      ) AS "id"
-    `
-    return rows[0]?.id ?? null
+    return this.#database.tx(async tx => {
+      const rows = await tx<{ id: string | null }[]>`
+        SELECT basis.enroll_identity(
+          ${provider},
+          ${subject},
+          ${profile.displayName ?? null},
+          ${profile.email ?? null}
+        ) AS "id"
+      `
+      return rows[0]?.id ?? null
+    })
   }
 
   /**
@@ -355,13 +359,15 @@ export async function enrollIdentity(
   subject: string,
   profile: { readonly displayName?: string, readonly email?: string } = {},
 ): Promise<string | null> {
-  const rows = await database.sql<{ id: string | null }[]>`
+  return database.tx(async sql => {
+    const rows = await sql<{ id: string | null }[]>`
 SELECT basis.enroll_identity(${provider},
   ${subject},
   ${profile.displayName ?? null},
   ${profile.email ?? null} ) AS "id"
-  `
-  return rows[0]?.id ?? null
+    `
+    return rows[0]?.id ?? null
+  })
 }
 
 /**
