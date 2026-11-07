@@ -2,7 +2,7 @@
 
 A Bun application server for Basis React applications. One `Server` supports live development with Bun HMR and a deterministic managed-production runtime.
 
-The authoritative API and lifecycle reference is the documentation site: [Server](../../docs/server/index.mdx) and [Database & Transactions](../../docs/server/database.mdx). This README is a front door.
+The authoritative API and lifecycle reference is the documentation site: [Server](../../docs/server/index.mdx), [Database & Transactions](../../docs/server/database.mdx), and [Authorization & Row-Level Security](../../docs/server/authorization.mdx). This README is a front door.
 
 ## Usage
 
@@ -33,6 +33,8 @@ Development delegates to Bun's dev server for compilation, watching, HMR, and Re
 ## Database
 
 `server.database()` configures the zero-config managed PostgreSQL capability. Pass `{ url }` only for an explicit external server. The server owns the Bun pool; the managed PostgreSQL service and its durable data survive web-server restarts. See the [database guide](../../docs/server/database.mdx).
+
+`server.authorization()` adds the canonical User/Role/Grant model and PostgreSQL RLS. With authorization enabled, `server.db` uses a restricted application role; `adminUrl` is reserved for explicit provisioning and is never exposed to handlers. See the [authorization guide](../../docs/server/authorization.mdx).
 
 ## Other server facilities
 

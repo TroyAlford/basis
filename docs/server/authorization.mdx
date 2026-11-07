@@ -1,0 +1,125 @@
+---
+title: Authorization & Row-Level Security
+---
+
+# Authorization & Row-Level Security
+
+Basis owns one canonical authorization model and enforces it in PostgreSQL. `server.authorization()` composes the Basis security ontology with application entities, puts `server.db` on a restricted application role, and installs PostgreSQL row-level security (RLS). Application code does not evaluate permissions in JavaScript to decide visibility.
+
+```ts
+import { Authorization, EntityDefinitions, Server } from 'basis/server'
+
+const application = Authorization.load(JSON.stringify({
+  entities: [{
+    name: 'Article',
+    fields: [
+      { field: 'title', type: 'String' },
+      { field: 'owner', type: 'Entity', target: 'User' },
+    ],
+  }],
+}))
+
+const server = new Server()
+  .root(import.meta.dir)
+  .authorization({ definitions: application })
+  .database({ entities: application })
+  .start()
+```
+
+`Authorization.load` is the application loader that makes the system `User` entity available to references and MTI. Do not define `User`, `Role`, `Grant`, `ExternalIdentity`, or `UserRole` yourself; those names are reserved.
+
+## Identity and bootstrap
+
+OAuth provider subjects are not canonical entity identities. The `server.oauth()` flow maps a verified provider subject through a module-private enrollment capability, stores the resulting canonical `User.id` in the existing identity cookie, and never exposes a public actor or identity-minting method on `server.auth`. A first login never receives administration automatically.
+
+The administration methods derive the acting actor from the verified request context. They never accept a caller-supplied user id, so a handler cannot switch identity by passing a value from the request.
+
+Bootstrap is an explicit operator action:
+
+```ts
+const result = await server.auth!.bootstrap({
+  provider: 'github',
+  subject: 'operator-subject',
+  email: 'operator@example.com',
+})
+
+if (!result.userId) throw new Error('bootstrap identity was not created')
+```
+
+`bootstrap()` creates/reconciles the schema, the built-in `public` and `admin` principals, and the initial administrative membership. Call it from a trusted startup or deployment step, not from a request handler. Normal administration then goes through the typed operations on `server.auth`:
+
+- `createRole`, `assignRole`, `removeRole`
+- `grant`, `updateGrant`, `revoke`
+- `revokeIdentity`
+- `effective`, `can`
+
+These operations require `manage` on the corresponding security metadata. `manage` does not imply unrestricted data access or PostgreSQL `BYPASSRLS`; application data needs its own explicit grants.
+
+## Actions and grants
+
+The closed action vocabulary is `read`, `create`, `update`, `delete`, and `manage`. A grant binds one role, one target entity (or relationship), one action, and an optional validated row predicate.
+
+```ts
+await server.auth!.grant({
+  role: 'public',
+  action: 'read',
+  target: 'Article',
+  predicate: {
+    operator: '$eq',
+    field: 'owner.id',
+    value: { $actor: true },
+  },
+})
+```
+
+Claims are default-deny. Applicable grants combine as OR. A role with an unconditional grant has that action; a conditional grant permits only rows whose predicate is true. A conditional grant never becomes unconditional unless an explicit unconditional grant also exists. `manage` grants are created only by bootstrap.
+
+Predicates use the same structured `Filter`/`Predicate` vocabulary as entity queries. The typed `{ $actor: true }` operand is the only actor extension; it resolves to the request's canonical `User.id` inside PostgreSQL. Reference fields are addressed by their stored path, for example `owner.id`. Source strings are normalized through the same `QueryNormalizer` owner when supplied.
+
+## Request transactions
+
+The server resolves the verified canonical actor once at API dispatch. `RouteContext.identity` is that canonical id (or `null`), and `RouteContext.db` is the request-scoped database capability.
+
+```ts
+server.api([HttpVerb.Get], 'articles', async (_params, context) => {
+  const articles = await context.db!.query('Article', {
+    fields: ['id', 'title', 'owner.id'],
+  })
+  return Response.json(articles)
+})
+```
+
+`server.db.tx` called inside the request automatically pins one native Bun transaction connection, installs a server-signed transaction-local actor token, and clears it at transaction end. `server.db.query` uses the same context. Outside a request no actor is inherited; an operation that must be anonymous or administrative should be explicit. Direct SQL must run inside `db.tx` to acquire the request actor:
+
+```ts
+server.api([HttpVerb.Post], 'articles', async (_params, context) => {
+  const [row] = await context.db!.tx(tx => tx`
+    INSERT INTO "Article" ("id", "title", "owner.id")
+    VALUES (${crypto.randomUUID()}, 'Draft', ${context.identity})
+    RETURNING "id"
+  `)
+  return Response.json(row)
+})
+```
+
+The actor is not a plain trusted `basis.actor_id` setting. PostgreSQL verifies a server-signed, expiring token whose signature includes the current transaction id, database domain, and signing-key version, so a token copied into another transaction, database, or pooled session is treated as anonymous. Setting a forged value is also treated as anonymous. Transaction-local state cannot leak to another pooled request, and nested savepoints retain the enclosing actor.
+
+## PostgreSQL privilege boundary
+
+Authorization functions, RLS policies, grants, and the internal security metadata are compiled by `EntityDefinitions.authorizationDdl`/`authorizationSchemaDdl`; bootstrap is the explicit trusted execution path. There is no request-time schema writer.
+
+With authorization enabled, `server.db` always uses the restricted application role (`basis_app` by default). Managed PostgreSQL provisions that role through the owner connection, stores its random password and actor-signing secret under `.basis/database/` with host-only permissions, and closes the privileged provisioning connection afterwards. The owner credential is never exposed through `server.db` or `RouteContext`.
+
+External PostgreSQL uses `url` for the restricted pool and `adminUrl` only for trusted provisioning/bootstrap:
+
+```ts
+server
+  .authorization({ appRole: 'basis_app', actorSecret: process.env.BASIS_ACTOR_SECRET })
+  .database({
+    url: process.env.BASIS_APP_URL,
+    adminUrl: process.env.BASIS_ADMIN_URL,
+    actorSecret: process.env.BASIS_ACTOR_SECRET,
+  })
+```
+
+The administrative connection is not available to ordinary handlers. The application role must be `NOSUPERUSER`, `NOBYPASSRLS`, and not the table owner. RLS is installed on the `Entity` root, every MTI table, every named relationship table, and the security metadata. `SELECT`, `INSERT`, `UPDATE`, and `DELETE` each get an appropriate policy; updates check both old and new rows. `Entity` root reads merge the concrete leaf row so conditional predicates see application fields.

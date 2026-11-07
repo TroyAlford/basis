@@ -3,6 +3,7 @@ import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { currentActor, signActor } from './ActorContext'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { compilePolymorphicQuery } from './PolymorphicQuery'
 import type { Filter } from './Predicate'
@@ -19,6 +20,8 @@ const POOL_DEFAULTS = {
 const MANAGED_IMAGE = 'postgres:17-alpine'
 /** The managed database's user and database name. */
 const MANAGED_NAME = 'basis'
+/** The restricted application login role. */
+const APP_ROLE = 'basis_app'
 /** The PostgreSQL port inside the managed container. */
 const MANAGED_PORT = 5432
 /** How long to wait for the managed container to accept connections. */
@@ -31,14 +34,27 @@ const DOCKER_REQUIRED =
 /** The container mount for the host-owned password file. */
 const PASSWORD_MOUNT = '/run/secrets/basis-postgres-password'
 
+/** One narrow privileged provisioning connection. */
+export interface AdminConnection {
+  /** Closes the privileged connection. */
+  close(): Promise<void>,
+  /** The privileged connection's SQL capability. */
+  readonly sql: BunSQL,
+}
+
 /** Options for a server-owned database capability. */
 export interface DatabaseOptions {
+  /** Actor-token signing secret; required with an external administrative URL. */
+  actorSecret?: string,
+  /** Explicit administrative PostgreSQL URL used only for trusted provisioning. */
+  adminUrl?: string | URL,
+  /** Restricted application login role name. Defaults to `basis_app`. */
+  appRole?: string,
+  /** Enable restricted application-role provisioning and RLS-ready operation. */
+  authorization?: boolean,
   /** Canonical entity definitions used to validate and build `db.query`. */
   entities?: EntityDefinitions,
-  /**
-   * External PostgreSQL connection URL. When omitted, the server manages a
-   * local PostgreSQL service with an application-scoped identity.
-   */
+  /** Restricted application PostgreSQL URL. */
   url?: string | URL,
 }
 
@@ -141,6 +157,30 @@ export async function queryEntity<T = Record<string, unknown>>(
   return rows.map(row => prepared.hydrate(row)) as T[]
 }
 
+const ADMIN_CONNECTIONS = new WeakMap<object, () => Promise<AdminConnection>>()
+const ACTOR_SECRETS = new WeakMap<object, string>()
+
+/**
+ * Open the explicit privileged provisioning connection registered for a database.
+ * @param database - The restricted database capability.
+ * @returns A short-lived administrative connection.
+ * @throws {Error} When the database has no trusted provisioner.
+ */
+export async function openAdmin(database: Database): Promise<AdminConnection> {
+  const opener = ADMIN_CONNECTIONS.get(database)
+  if (!opener) throw new Error('No administrative database connection is configured')
+  return opener()
+}
+
+/**
+ * Read the actor-token signing secret registered for a database.
+ * @param database - The restricted database capability.
+ * @returns The secret, or undefined.
+ */
+export function actorSecret(database: Database): string | undefined {
+  return ACTOR_SECRETS.get(database)
+}
+
 /** A server-owned database capability. */
 export interface Database {
   /** Closes the database pool and releases its resources. */
@@ -176,6 +216,7 @@ function publishedPort(output: string): number | null {
  * Instances are owned by the server; callers reach them through `server.db`.
  */
 class PostgresDatabase implements Database {
+  #actorSecret: string | undefined
   #closed = false
   #closing: Promise<void> | null = null
   #entities: EntityDefinitions | undefined
@@ -185,10 +226,26 @@ class PostgresDatabase implements Database {
    * Creates the pool.
    * @param url - The PostgreSQL connection URL.
    * @param entities - Canonical definitions used for entity queries.
+   * @param adminUrl - Optional privileged provisioning URL.
+   * @param signingSecret - Optional actor-token signing secret.
    */
-  constructor(url: string | URL, entities?: EntityDefinitions) {
+  constructor(
+    url: string | URL,
+    entities?: EntityDefinitions,
+    adminUrl?: string | URL,
+    signingSecret?: string,
+  ) {
+    this.#actorSecret = signingSecret
     this.#entities = entities
     this.#sql = new BunSQL({ ...POOL_DEFAULTS, url })
+    if (signingSecret) ACTOR_SECRETS.set(this, signingSecret)
+    if (adminUrl) {
+      ADMIN_CONNECTIONS.set(this, async () => {
+        const pool = new PostgresDatabase(adminUrl)
+        await pool.connect()
+        return { close: () => pool.close(), sql: pool.sql }
+      })
+    }
   }
 
   /**
@@ -239,6 +296,9 @@ class PostgresDatabase implements Database {
   async query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]> {
     if (this.#closed) throw new Error('Database is closed')
     if (!this.#entities) throw new Error('No entity definitions are configured for this database')
+    if (currentActor() !== undefined) {
+      return this.tx(async tx => queryEntity<T>(tx, this.#entities as EntityDefinitions, entity, options))
+    }
     return queryEntity<T>(this.#sql, this.#entities, entity, options)
   }
 
@@ -250,7 +310,24 @@ class PostgresDatabase implements Database {
    */
   tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>> {
     if (this.#closed) return Promise.reject(new Error('Database is closed'))
-    return this.#sql.begin(callback)
+    return this.#sql.begin(async tx => {
+      const actor = currentActor()
+      if (actor !== undefined) {
+        if (!this.#actorSecret) throw new Error('Actor binding is not configured for this database')
+        let token = ''
+        if (actor.id !== null) {
+          const [transaction] = await tx<{ domain: string, id: string }[]>`
+            select txid_current()::text as id, current_database()::text as domain
+          `
+          if (!transaction?.id || !transaction.domain) {
+            throw new Error('PostgreSQL did not expose its transaction identity')
+          }
+          token = signActor(actor.id, this.#actorSecret, transaction.id, transaction.domain)
+        }
+        await tx`select set_config('basis.actor', ${token}, true)`
+      }
+      return callback(tx)
+    })
   }
 }
 
@@ -337,6 +414,8 @@ class ManagedDatabase implements Database {
   #closed = false
   #closing: Promise<void> | null = null
   #connecting: Promise<void> | null = null
+  #actorSecret: string | undefined
+  #authorization: boolean
   #containerName: string
   #database: PostgresDatabase | null = null
   #entities: EntityDefinitions | undefined
@@ -347,8 +426,10 @@ class ManagedDatabase implements Database {
   /**
    * Creates the managed database capability. The service starts on {@link connect}.
    * @param entities - Canonical definitions used for entity queries.
+   * @param authorization - Whether to provision and use a restricted app role.
    */
-  constructor(entities?: EntityDefinitions) {
+  constructor(entities?: EntityDefinitions, authorization = false) {
+    this.#authorization = authorization
     this.#entities = entities
     this.#installation = resolve(process.cwd())
     this.#identity = managedDatabaseIdentity(this.#installation)
@@ -445,9 +526,99 @@ class ManagedDatabase implements Database {
     }
 
     const port = await this.#publishedPort()
-    const url = `postgres://${MANAGED_NAME}:${encodeURIComponent(secret.password)}` +
+    const ownerUrl = `postgres://${MANAGED_NAME}:${encodeURIComponent(secret.password)}` +
       `@127.0.0.1:${port}/${MANAGED_NAME}`
-    await this.#connectWhenReady(url)
+    ADMIN_CONNECTIONS.set(this, async () => {
+      const pool = new PostgresDatabase(ownerUrl)
+      await pool.connect()
+      return { close: () => pool.close(), sql: pool.sql }
+    })
+    if (!this.#authorization) {
+      await this.#connectWhenReady(ownerUrl)
+      return
+    }
+
+    const appPassword = await this.#appSecret()
+    this.#actorSecret = await this.#actorSigningSecret()
+    ACTOR_SECRETS.set(this, this.#actorSecret)
+    await this.#provisionApplicationRole(ownerUrl, appPassword)
+    const appUrl = `postgres://${APP_ROLE}:${encodeURIComponent(appPassword)}` +
+      `@127.0.0.1:${port}/${MANAGED_NAME}`
+    await this.#connectWhenReady(appUrl, this.#actorSecret)
+  }
+
+  /**
+   * Read or create the managed restricted-application password.
+   * @returns The application password.
+   */
+  async #appSecret(): Promise<string> {
+    const directory = join(this.#installation, '.basis', 'database')
+    const file = join(directory, 'app-password')
+    try {
+      const handle = await open(file, 'wx', 0o600)
+      try {
+        await handle.writeFile(randomUUID())
+      } finally {
+        await handle.close()
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+    const password = (await readFile(file, 'utf8')).trim()
+    if (!password) throw new Error('Managed application credentials are empty')
+    await chmod(file, 0o600)
+    return password
+  }
+
+  /**
+   * Read or create the managed actor-token signing secret.
+   * @returns The signing secret.
+   */
+  async #actorSigningSecret(): Promise<string> {
+    const directory = join(this.#installation, '.basis', 'database')
+    const file = join(directory, 'actor-secret')
+    try {
+      const handle = await open(file, 'wx', 0o600)
+      try {
+        await handle.writeFile(randomUUID())
+      } finally {
+        await handle.close()
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+    const secret = (await readFile(file, 'utf8')).trim()
+    if (!secret) throw new Error('Managed actor credentials are empty')
+    await chmod(file, 0o600)
+    return secret
+  }
+
+  /**
+   * Provision the restricted application role using the owner connection.
+   * @param ownerUrl - The owner connection URL.
+   * @param password - The restricted application password.
+   */
+  async #provisionApplicationRole(ownerUrl: string, password: string): Promise<void> {
+    const admin = new PostgresDatabase(ownerUrl)
+    try {
+      await admin.connect()
+      const quoted = password.replaceAll("'", "''")
+      await admin.sql.unsafe(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN
+            CREATE ROLE "${APP_ROLE}" LOGIN PASSWORD '${quoted}'
+              NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+          ELSE
+            ALTER ROLE "${APP_ROLE}" WITH LOGIN PASSWORD '${quoted}'
+              NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+          END IF;
+        END $$;
+      `).simple()
+      await admin.sql.unsafe(`GRANT CONNECT ON DATABASE "${MANAGED_NAME}" TO "${APP_ROLE}"`).simple()
+    } finally {
+      await admin.close()
+    }
   }
 
   /**
@@ -613,15 +784,16 @@ class ManagedDatabase implements Database {
   /**
    * Retry the real pool connection until PostgreSQL accepts it.
    * @param url - The managed PostgreSQL connection URL.
+   * @param signingSecret - Optional actor-token signing secret.
    */
-  async #connectWhenReady(url: string): Promise<void> {
+  async #connectWhenReady(url: string, signingSecret?: string): Promise<void> {
     const deadline = Date.now() + READY_TIMEOUT_MS
     let lastError: Error | null = null
 
     while (Date.now() < deadline) {
       if (this.#closed) throw new Error('Database is closed')
 
-      const database = new PostgresDatabase(url, this.#entities)
+      const database = new PostgresDatabase(url, this.#entities, undefined, signingSecret)
       try {
         await database.connect()
         if (this.#closed) {
@@ -659,6 +831,8 @@ class ManagedDatabase implements Database {
  * @returns The managed or external database capability.
  */
 export function createDatabase(options: DatabaseOptions = {}): Database {
-  if (options.url) return new PostgresDatabase(options.url, options.entities)
-  return new ManagedDatabase(options.entities)
+  if (options.url) {
+    return new PostgresDatabase(options.url, options.entities, options.adminUrl, options.actorSecret)
+  }
+  return new ManagedDatabase(options.entities, options.authorization ?? false)
 }

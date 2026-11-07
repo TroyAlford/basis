@@ -4,6 +4,8 @@ title: Database & Transactions
 
 # Database & Transactions
 
+For canonical User/Role/Grant authorization and PostgreSQL row-level security, use [Authorization & Row-Level Security](./authorization.mdx). `server.database({ url, adminUrl })` separates the restricted application pool from trusted provisioning; `adminUrl` is never exposed through `server.db`.
+
 `server.database()` gives the server one owned PostgreSQL capability, exposed as `server.db`. Managed mode is zero-config: Basis keys the database to the normalized application working directory, lets Docker allocate a loopback port, reconciles an existing app-owned service, and waits for the pool before reporting healthy. The service and its data outlive any one web-server process.
 
 Pass `url` only when using an explicit external PostgreSQL server. Managed state and credentials live inside the installation under `.basis/database/`; Basis writes a local ignore file and static serving never exposes `.basis`.

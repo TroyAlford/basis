@@ -14,6 +14,9 @@ import type { APIRoute } from '../types/APIRoute'
 import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
+import { runAsActor } from './ActorContext'
+import type { AuthorizationOptions } from './Authorization'
+import { Authorization, enrollIdentity } from './Authorization'
 import { Builder } from './Builder'
 import type { Database, DatabaseOptions } from './Database'
 import { createDatabase, NullDatabase } from './Database'
@@ -87,6 +90,8 @@ export class Server {
 
   #apis = new Map<string, APIRoute>()
   #assets: string | null = null
+  #authorization: Authorization | null = null
+  #authorizationOptions: Omit<AuthorizationOptions, 'database'> | null = null
   #builder: Builder | null = null
   #closing: Promise<void> | null = null
   #database: Database = new NullDatabase()
@@ -153,6 +158,14 @@ export class Server {
   }
 
   /**
+   * The canonical authorization capability when configured.
+   * @returns The authorization service, or null.
+   */
+  get auth(): Authorization | null {
+    return this.#authorization
+  }
+
+  /**
    * The server-owned database capability.
    *
    * A server always has a database capability. When {@link database} has not
@@ -199,7 +212,16 @@ export class Server {
    * @returns The API response, or `null` when no template matches.
    */
   async handleAPI(uri: URI, request: Request): Promise<Response | null> {
-    const context: RouteContext = { logger: this.#logger, request }
+    const verified = this.#identity?.get(request) ?? null
+    const identity = this.#authorization
+      ? await this.#authorization.resolve(verified)
+      : verified
+    const context: RouteContext = {
+      db: this.#database,
+      identity,
+      logger: this.#logger,
+      request,
+    }
 
     for (const target of this.#targets(uri)) {
       if (!target) continue
@@ -210,6 +232,9 @@ export class Server {
         const params = parseTemplateURI(target, template)
         if (!params) continue
 
+        if (this.#authorization) {
+          return await runAsActor({ id: identity }, () => handler(params, context))
+        }
         return await handler(params, context)
       }
     }
@@ -250,7 +275,20 @@ export class Server {
             statusText: 'Method Not Allowed',
           })
         }
-        return sseResponse(params, { logger: this.#logger, request }, handler)
+        const verified = this.#identity?.get(request) ?? null
+        const identity = this.#authorization
+          ? await this.#authorization.resolve(verified)
+          : verified
+        const context: RouteContext = {
+          db: this.#database,
+          identity,
+          logger: this.#logger,
+          request,
+        }
+        if (this.#authorization) {
+          return runAsActor({ id: identity }, () => sseResponse(params, context, handler))
+        }
+        return sseResponse(params, context, handler)
       }
     }
 
@@ -356,7 +394,8 @@ export class Server {
    * @returns The UI response.
    */
   async handleUI(request?: Request): Promise<Response> {
-    const identity = request && this.#identity ? this.#identity.get(request) : null
+    const verified = request && this.#identity ? this.#identity.get(request) : null
+    const identity = this.#authorization ? await this.#authorization.resolve(verified) : verified
     const runtime: BasisRuntime = { ...this.runtime, identity }
 
     /*
@@ -454,8 +493,30 @@ export class Server {
       this.#assets ? [this.#assets] : [],
     )
 
+    const databaseOptions = this.#databaseOptions ?? {}
+    if (!this.#authorizationOptions && databaseOptions.authorization) {
+      this.#authorizationOptions = {}
+    }
+    if (this.#authorizationOptions) {
+      const application = this.#authorizationOptions.definitions ?? databaseOptions.entities
+      const definitions = Authorization.combine(application)
+      this.#databaseOptions = {
+        ...databaseOptions,
+        actorSecret: this.#authorizationOptions.actorSecret ?? databaseOptions.actorSecret,
+        appRole: this.#authorizationOptions.appRole ?? databaseOptions.appRole,
+        authorization: true,
+        entities: definitions,
+      }
+    }
     if (this.#databaseOptions) {
       this.#database = createDatabase(this.#databaseOptions)
+      if (this.#authorizationOptions) {
+        this.#authorization = new Authorization({
+          ...this.#authorizationOptions,
+          database: this.#database,
+          definitions: this.#authorizationOptions.definitions ?? databaseOptions.entities,
+        })
+      }
     }
     const databaseReady = this.#database instanceof NullDatabase
       ? Promise.resolve()
@@ -603,11 +664,35 @@ export class Server {
    * @returns The server.
    */
   oauth(options: OAuthOptions): Server {
-    const flow = new OAuth(options)
+    const provider = options.session.provider
+    const resolve = options.identity
+    const flow = new OAuth({
+      ...options,
+      identity: async accessToken => {
+        const subject = await resolve(accessToken)
+        if (subject === null || !this.#authorization) return subject
+        return enrollIdentity(this.#database, provider, subject)
+      },
+    })
     this.identity(options.session)
     this.api([HttpVerb.Get], 'oauth/login', () => flow.login())
     this.api([HttpVerb.Get], 'oauth/callback', (_params, { request }) => flow.callback(request))
     this.api([HttpVerb.Get], 'oauth/logout', (_params, { request }) => flow.logout(request))
+    return this
+  }
+
+  /**
+   * Configures the canonical authorization and PostgreSQL RLS capability.
+   *
+   * Must be called before {@link start}. The system User/Role/Grant ontology is
+   * composed with the application definitions, and the database is placed in
+   * restricted application-role mode. Bootstrap is explicit through
+   * {@link Authorization.bootstrap}; OAuth login never grants administration.
+   * @param options - Application definitions and optional role/secret overrides.
+   * @returns The server.
+   */
+  authorization(options: Omit<AuthorizationOptions, 'database'> = {}): Server {
+    this.#authorizationOptions = options
     return this
   }
 

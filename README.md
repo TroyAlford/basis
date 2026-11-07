@@ -13,6 +13,7 @@ The documentation site is the authoritative reference for every public surface. 
 - [Installation](./docs/installation.mdx) — pinned install, trusted dependencies, first imports, host capabilities.
 - [Server](./docs/server/index.mdx) — lifecycle, API routes, assets, health, SSE, sockets.
 - [Database & Transactions](./docs/server/database.mdx) — managed PostgreSQL, `db.sql`, `db.tx`.
+- [Authorization & Row-Level Security](./docs/server/authorization.mdx) — canonical User/Role/Grant, request actors, restricted-role RLS.
 - [Reference](./docs/reference.mdx) — supported imports and internal-workspace boundaries.
 - [Architecture](./docs/architecture.mdx) — system shape and invariants.
 

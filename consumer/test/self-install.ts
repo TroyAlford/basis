@@ -66,7 +66,7 @@ const main = (): void => {
 
     writeFileSync(join(app, 'fixture.test.ts'), [
       "import { expect, test } from 'bun:test'",
-      "import { EntityDefinitions } from 'basis/server'",
+      "import { Authorization, EntityDefinitions } from 'basis/server'",
       "import { withIsolatedDatabase } from 'basis/testing'",
       '',
       'const entities = EntityDefinitions.load(JSON.stringify({',
@@ -75,6 +75,14 @@ const main = (): void => {
       "    name: 'ConsumerNote',",
       '  }],',
       '}))',
+      '',
+      "test('consumer fixture extends the system User ontology', () => {",
+      '  const definitions = Authorization.load(JSON.stringify({',
+      "    entities: [{ name: 'ApplicationUser', extends: 'User', fields: [] }],",
+      '  }))',
+      "  expect(definitions.entity('ApplicationUser')).toBeTruthy()",
+      "  expect(definitions.entity('User')).toBeTruthy()",
+      '})',
       '',
       "test('consumer fixture uses provided entities', async () => {",
       "  await withIsolatedDatabase('consumer-fixture', async database => {",

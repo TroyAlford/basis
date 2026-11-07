@@ -15,6 +15,7 @@ import LoggingDoc from '../../docs/logging.mdx'
 import OAuthDoc from '../../docs/oauth.mdx'
 import ReferenceDoc from '../../docs/reference.mdx'
 import ReviewDoc from '../../docs/review.mdx'
+import AuthorizationDoc from '../../docs/server/authorization.mdx'
 import DatabaseDoc from '../../docs/server/database.mdx'
 import ServerDoc from '../../docs/server/index.mdx'
 import QueryLanguageDoc from '../../docs/server/query-language.mdx'
@@ -178,6 +179,13 @@ export const routes = [
     parent: 'section:server',
     path: '/server/database',
     title: 'Database & Transactions',
+  }),
+  docs({
+    component: AuthorizationDoc,
+    markdown: true,
+    parent: 'section:server',
+    path: '/server/authorization',
+    title: 'Authorization & Row-Level Security',
   }),
   docs({
     component: QueryLanguageDoc,

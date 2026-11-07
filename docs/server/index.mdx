@@ -78,6 +78,8 @@ Every server serves `/assets/favicon`. Configure a file, `Bun.file`, or an icon 
 
 `server.handle(request)` dispatches one request through the same routes used by a bound server, for hosts that mount Basis inside another fetch handler. SSE responses opt out of the HTTP idle timeout automatically.
 
-## Database
+## Database and authorization
+
+`server.authorization()` composes the system security ontology and installs PostgreSQL row-level security. See [Authorization & Row-Level Security](./authorization.mdx) for bootstrap, grants, request actor binding, and the restricted-role boundary.
 
 `server.database()` configures the zero-config managed PostgreSQL capability. See [Database & Transactions](./database.mdx) for pool lifecycle, `db.sql`, transactions, health, and managed storage, and [Query Language](./query-language.mdx) for the canonical predicate and grammar contract.
