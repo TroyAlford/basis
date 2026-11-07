@@ -2,6 +2,12 @@ export type { APIRoute } from './types/APIRoute'
 export type { HealthOptions, HealthStatus } from './apis/health'
 export { HttpVerb } from '../utilities'
 export { Authorization, Action } from './source/Authorization'
+export { DDL } from './source/Schema'
+export type {
+  PhysicalColumn, PhysicalConstraint, PhysicalFunction, PhysicalGrant, PhysicalIndex,
+  PhysicalKind, PhysicalPolicy, PhysicalSchema, PhysicalTable, PhysicalTrigger,
+  PlanOptions, SchemaOperation, SchemaPlan,
+} from './source/Schema'
 export type { AuthorizationOptions, BootstrapResult, EffectiveGrant, GrantInput } from './source/Authorization'
 export { NullDatabase } from './source/Database'
 export type { Database, DatabaseOptions, QueryOptions } from './source/Database'
