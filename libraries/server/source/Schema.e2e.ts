@@ -258,6 +258,85 @@ describe('DDL schema planning', () => {
     ))).toBe(true)
   })
 
+  test('does not equate policy literals or Boolean precedence', () => {
+    const entities = [{
+      fields: [
+        { field: 'title', type: 'String' },
+        { field: 'active', type: 'Boolean' },
+      ],
+      name: 'Note',
+    }]
+    const literal = new Graph({
+      entities,
+      grants: [{ action: 'read', predicate: "title = 'a b'", role: 'public', target: 'Note' }],
+    })
+    const literalChanged = new Graph({
+      entities,
+      grants: [{ action: 'read', predicate: "title = 'ab'", role: 'public', target: 'Note' }],
+    })
+    const literalPlan = DDL.plan({
+      actual: literal.physicalSchema('basis_app', false),
+      appRole: 'basis_app',
+      desired: literalChanged,
+      previous: literal,
+    })
+    expect(literalPlan.operations.some(operation => (
+      operation.kind === 'policy' && operation.id.endsWith(':replace')
+    ))).toBe(true)
+
+    const left = new Graph({
+      entities,
+      grants: [{
+        action: 'read',
+        predicate: {
+          filters: [
+            { field: 'title', operator: '$eq', value: 'x' },
+            {
+              filters: [
+                { field: 'active', operator: '$eq', value: true },
+                { field: 'title', operator: '$eq', value: 'y' },
+              ],
+              operator: '$or',
+            },
+          ],
+          operator: '$and',
+        },
+        role: 'public',
+        target: 'Note',
+      }],
+    })
+    const right = new Graph({
+      entities,
+      grants: [{
+        action: 'read',
+        predicate: {
+          filters: [
+            {
+              filters: [
+                { field: 'title', operator: '$eq', value: 'x' },
+                { field: 'active', operator: '$eq', value: true },
+              ],
+              operator: '$and',
+            },
+            { field: 'title', operator: '$eq', value: 'y' },
+          ],
+          operator: '$or',
+        },
+        role: 'public',
+        target: 'Note',
+      }],
+    })
+    const precedencePlan = DDL.plan({
+      actual: left.physicalSchema('basis_app', false),
+      appRole: 'basis_app',
+      desired: right,
+      previous: left,
+    })
+    expect(precedencePlan.operations.some(operation => (
+      operation.kind === 'policy' && operation.id.endsWith(':replace')
+    ))).toBe(true)
+  })
+
   test('plans real catalog policy and role changes', async () => {
     await withIsolatedDatabase('schema-plan-catalog-policy', async database => {
       const appRole = `basis_plan_app_${randomUUID().replaceAll('-', '').slice(0, 12)}`
@@ -357,6 +436,82 @@ describe('DDL schema planning', () => {
     expect(drops).toHaveLength(1)
     expect(drops[0]?.sql).toContain('(root_id text)')
     expect(drops[0]?.sql.endsWith('()')).toBe(false)
+    const replacement = plan.operations.findIndex(operation => (
+      operation.kind === 'policy' && operation.id.endsWith(':replace')
+    ))
+    const drop = plan.operations.findIndex(operation => operation.id === drops[0]?.id)
+    expect(replacement).toBeGreaterThan(-1)
+    expect(drop).toBeGreaterThan(replacement)
+  })
+
+  test('executes the ordered policy/helper replacement sequence in PostgreSQL', async () => {
+    await withIsolatedDatabase('schema-plan-catalog-helper', async database => {
+      const appRole = `basis_plan_helper_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+      await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
+      const entities = [
+        { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
+        { extends: 'Profile', fields: [], name: 'Employee' },
+      ]
+      const previous = new Graph({
+        entities,
+        grants: [{
+          action: 'read',
+          predicate: "email = 'x'",
+          role: 'public',
+          target: 'Employee',
+        }],
+        schema: database.schema,
+      })
+      const desired = new Graph({
+        entities,
+        grants: [{
+          action: 'read',
+          predicate: "email = 'y'",
+          role: 'public',
+          target: 'Employee',
+        }],
+        schema: database.schema,
+      })
+      await previous.definitions.createTables(database.sql)
+      for (const statement of previous.authorizationDdl(appRole, false)) {
+        await database.sql.unsafe(statement).simple()
+      }
+      const [role] = await database.sql<{ role: string }[]>`
+        SELECT current_user AS role
+      `
+      if (!role?.role) throw new Error('database role was not available')
+      for (const item of previous.roles) {
+        if (item.id === 'public') continue
+        await database.sql`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES (${item.id}, ${item.name}, 'Role')
+        `
+        await database.sql`
+          INSERT INTO "Role" ("id", "description")
+          VALUES (${item.id}, ${item.description ?? ''})
+        `
+      }
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual,
+        appRole,
+        desired,
+        previous,
+        superuser: false,
+      })
+      const oldHelpers = (previous.physicalSchema(appRole, false).functions ?? [])
+        .filter(fn => fn.name.startsWith('basis.policy_'))
+        .map(fn => fn.name)
+      expect(oldHelpers).toHaveLength(1)
+      const executable = plan.operations.filter(operation => (
+        operation.kind === 'function' || operation.kind === 'policy'
+      ))
+      for (const operation of executable) {
+        await database.sql.unsafe(operation.sql).simple()
+      }
+      const after = await DDL.introspect(database.sql)
+      expect(after.functions.some(fn => oldHelpers.includes(fn.name))).toBe(false)
+    }, { fresh: true })
   })
 
   test('plans graph role metadata changes while preserving role identity', () => {

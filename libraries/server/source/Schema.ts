@@ -1357,7 +1357,16 @@ export function plan(options: PlanOptions): SchemaPlan {
       if (dependency) dependencies.add(dependency.id)
     }
     if (operation.kind === 'policy') {
-      for (const dependency of functionOperations) dependencies.add(dependency.id)
+      for (const dependency of functionOperations) {
+        if (dependency.id.startsWith('function:')) dependencies.add(dependency.id)
+      }
+    }
+    if (operation.id.startsWith('drop-function:')) {
+      for (const replacement of operations) {
+        if (replacement.id.startsWith('policy:') && replacement.id.endsWith(':replace')) {
+          dependencies.add(replacement.id)
+        }
+      }
     }
     if (operation.kind === 'grant') {
       const grant = desired.grants?.find(candidate => candidate.name === operation.target)
@@ -1393,10 +1402,24 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
     operation.dependsOn = [...dependencies]
   }
-  operations.sort((left, right) => (
-    (PHASE[left.kind] ?? 99) - (PHASE[right.kind] ?? 99)
-    || left.id.localeCompare(right.id)
-  ))
+  const ordered: SchemaOperation[] = []
+  const completed = new Set<string>()
+  const pending = [...operations]
+  while (pending.length > 0) {
+    const ready = pending.filter(operation => (
+      operation.dependsOn.every(dependency => completed.has(dependency))
+    ))
+    const candidates = ready.length > 0 ? ready : pending
+    candidates.sort((left, right) => (
+      (PHASE[left.kind] ?? 99) - (PHASE[right.kind] ?? 99)
+      || left.id.localeCompare(right.id)
+    ))
+    const next = candidates[0] as SchemaOperation
+    ordered.push(next)
+    completed.add(next.id)
+    pending.splice(pending.indexOf(next), 1)
+  }
+  operations.splice(0, operations.length, ...ordered)
   return {
     ambiguities,
     blocked: ambiguities.length > 0 || drift.length > 0,
@@ -1489,37 +1512,102 @@ function samePolicy(left: PhysicalPolicy, right: PhysicalPolicy): boolean {
  * @returns Comparable policy definition.
  */
 function normalizePolicyDefinition(value: string): string {
-  let normalized = ''
-  let quoted = false
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index] as string
-    if (character === "'") {
-      normalized += character
-      if (quoted && value[index + 1] === "'") {
-        normalized += "'"
-        index += 1
-        continue
-      }
-      quoted = !quoted
-      continue
-    }
-    if (quoted) {
-      normalized += character
-      continue
-    }
-    if (character === '"' || character === ';') continue
-    normalized += character.toLowerCase()
-  }
+  const literals: string[] = []
+  const protectedValue = value.replace(/'(?:''|[^'])*'/gu, literal => {
+    literals.push(literal)
+    return `\uE000${literals.length - 1}\uE001`
+  })
+  let normalized = protectedValue.toLowerCase().replace(/[";]/gu, '')
   normalized = normalized.replace(/::[a-z_][a-z0-9_ ]*/gu, '')
   normalized = normalized.replace(
     /(^|[\s(,=])(?!basis\.)[a-z_][a-z0-9_]*\./gu,
     (_match, prefix: string) => prefix,
   )
+  normalized = normalized.replace(
+    /not\s*\(\s*([^()]*?)\s+is\s+distinct\s+from\s+([^()]*?)\s*\)/gu,
+    '$1 is not distinct from $2',
+  )
+  normalized = stripPolicyParentheses(normalized)
   normalized = normalized.replace(/\s+/gu, '')
-  for (let pass = 0; pass < 4; pass += 1) {
-    normalized = normalized.replace(/not\(([^()]*)isdistinctfrom([^()]*)\)/gu, '$1isnotdistinctfrom$2')
+  return normalized.replace(/\uE000(\d+)\uE001/gu, (_match, index: string) => literals[Number(index)] ?? '')
+}
+
+/** SQL words that introduce a grouping parenthesis rather than a function call. */
+const POLICY_GROUP_WORDS = new Set([
+  'and', 'by', 'check', 'else', 'from', 'in', 'not', 'on', 'or', 'select',
+  'then', 'using', 'when', 'where',
+])
+
+/**
+ * Remove only redundant grouping parentheses from a policy expression.
+ * @param expression - Policy expression with whitespace retained between tokens.
+ * @returns Expression with redundant groups removed.
+ */
+function stripPolicyParentheses(expression: string): string {
+  let result = ''
+  let index = 0
+  while (index < expression.length) {
+    const character = expression[index] as string
+    if (character !== '(') {
+      result += character
+      index += 1
+      continue
+    }
+    let depth = 0
+    let end = index
+    for (; end < expression.length; end += 1) {
+      if (expression[end] === '(') depth += 1
+      else if (expression[end] === ')') {
+        depth -= 1
+        if (depth === 0) break
+      }
+    }
+    if (end >= expression.length) {
+      result += expression.slice(index)
+      break
+    }
+    const content = expression.slice(index + 1, end)
+    const before = /([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(expression.slice(0, index))?.[1]?.toLowerCase()
+    const after = /^\s*([A-Za-z_][A-Za-z0-9_]*)/u.exec(expression.slice(end + 1))?.[1]?.toLowerCase()
+    const functionCall = before !== undefined && !POLICY_GROUP_WORDS.has(before)
+    const inner = stripPolicyParentheses(content)
+    if (functionCall) {
+      result += `(${inner})`
+    } else {
+      const operator = topLevelPolicyOperator(inner)
+      const keep = operator === 'or'
+        ? before === 'and' || before === 'not' || after === 'and'
+        : operator === 'and' && before === 'not'
+      result += keep ? `(${inner})` : inner
+    }
+    index = end + 1
   }
-  return normalized.replaceAll('(', '').replaceAll(')', '')
+  return result
+}
+
+/**
+ * Read the lowest-precedence top-level boolean operator in one expression.
+ * @param expression - Parenthesis-stripped expression.
+ * @returns `or`, `and`, `not`, or undefined.
+ */
+function topLevelPolicyOperator(expression: string): string | undefined {
+  let depth = 0
+  let or = false
+  let and = false
+  let not = false
+  for (let index = 0; index < expression.length; index += 1) {
+    const character = expression[index]
+    if (character === '(') depth += 1
+    else if (character === ')') depth = Math.max(0, depth - 1)
+    else if (/[A-Za-z_]/u.test(character as string) && depth === 0) {
+      const word = /^([A-Za-z_][A-Za-z0-9_]*)/u.exec(expression.slice(index))?.[1]?.toLowerCase()
+      if (word === 'or') or = true
+      else if (word === 'and') and = true
+      else if (word === 'not') not = true
+      index += (word?.length ?? 1) - 1
+    }
+  }
+  return or ? 'or' : and ? 'and' : not ? 'not' : undefined
 }
 
 /**
