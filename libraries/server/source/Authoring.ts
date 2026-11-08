@@ -195,6 +195,7 @@ export function generateTypes(definitions: EntityDefinitions): string {
     lines.push(`export interface ${entity.name} extends Entity {`)
     lines.push(`  readonly entity: '${entity.name}'`)
     for (const field of entity.effectiveFields) {
+      if (field.name === 'id' || field.name === 'name' || field.name === 'entity') continue
       lines.push(`  readonly ${field.name}: ${fieldType(field)}`)
     }
     lines.push('}')
