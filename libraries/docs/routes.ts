@@ -15,6 +15,7 @@ import LoggingDoc from '../../docs/logging.mdx'
 import OAuthDoc from '../../docs/oauth.mdx'
 import ReferenceDoc from '../../docs/reference.mdx'
 import ReviewDoc from '../../docs/review.mdx'
+import AuthoringDoc from '../../docs/server/authoring.mdx'
 import AuthorizationDoc from '../../docs/server/authorization.mdx'
 import DatabaseDoc from '../../docs/server/database.mdx'
 import ServerDoc from '../../docs/server/index.mdx'
@@ -187,6 +188,13 @@ export const routes = [
     parent: 'section:server',
     path: '/server/authorization',
     title: 'Authorization & Row-Level Security',
+  }),
+  docs({
+    component: AuthoringDoc,
+    markdown: true,
+    parent: 'section:server',
+    path: '/server/authoring',
+    title: 'Typed Authoring & Generated Products',
   }),
   docs({
     component: SchemaDoc,

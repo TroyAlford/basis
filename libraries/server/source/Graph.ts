@@ -1061,12 +1061,56 @@ function applicationDocument(options: GraphOptions): GraphDocument {
   if (input instanceof EntityDefinitions) {
     return {
       entities: input.entities.map(entity => ({
-        fields: entity.fields.filter(field => field.name !== 'id'),
+        fields: [
+          ...(entity.idFormat === undefined ? [] : [{ field: 'id', format: entity.idFormat }]),
+          ...entity.fields.filter(field => field.name !== 'id').map(field => {
+            if (field.type === FieldType.Entity) {
+              return {
+                field: field.name,
+                ...(field.inverse === undefined ? {} : { inverse: field.inverse }),
+                target: field.target,
+                type: FieldType.Entity,
+              }
+            }
+            if (field.type === FieldType.Inverse) {
+              return {
+                cardinality: field.cardinality,
+                field: field.name,
+                inverse: field.inverse,
+                target: field.target,
+                type: FieldType.Inverse,
+              }
+            }
+            if (field.type === FieldType.Array) {
+              return {
+                field: field.name,
+                items: {
+                  ...(field.items.format === undefined ? {} : { format: field.items.format }),
+                  type: field.items.type,
+                },
+                type: FieldType.Array,
+              }
+            }
+            if (field.type === FieldType.JSON) return { field: field.name, type: FieldType.JSON }
+            return {
+              field: field.name,
+              ...(field.format === undefined ? {} : { format: field.format }),
+              type: field.type,
+            }
+          }),
+        ],
         name: entity.name,
         ...(entity.extends === undefined ? {} : { extends: entity.extends }),
-        ...(entity.idFormat === undefined ? {} : { id: { format: entity.idFormat } }),
       })),
-      relationships: input.relationships,
+      relationships: input.relationships.map(relationship => ({
+        between: relationship.between.map(endpoint => ({
+          field: endpoint.field,
+          inverse: endpoint.inverse,
+          target: endpoint.target,
+        })),
+        fields: relationship.fields.map(relationshipFieldSource),
+        name: relationship.name,
+      })),
     }
   }
   if (typeof input === 'string') {
@@ -1085,6 +1129,35 @@ function applicationDocument(options: GraphOptions): GraphDocument {
     }
   }
   return { entities: [], relationships: options.relationships }
+}
+
+/**
+ * Convert one validated relationship field back to authored JSON.
+ * @param field - Validated relationship field.
+ * @returns Canonical relationship field source.
+ */
+function relationshipFieldSource(
+  field: EntityDefinition['fields'][number],
+): Record<string, unknown> {
+  if (field.type === FieldType.Entity || field.type === FieldType.Inverse) {
+    throw new Error(`Relationship field "${field.name}" is not a value field`)
+  }
+  if (field.type === FieldType.Array) {
+    return {
+      field: field.name,
+      items: {
+        ...(field.items.format === undefined ? {} : { format: field.items.format }),
+        type: field.items.type,
+      },
+      type: FieldType.Array,
+    }
+  }
+  if (field.type === FieldType.JSON) return { field: field.name, type: FieldType.JSON }
+  return {
+    field: field.name,
+    ...(field.format === undefined ? {} : { format: field.format }),
+    type: field.type,
+  }
 }
 
 /**
