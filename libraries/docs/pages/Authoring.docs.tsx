@@ -1,36 +1,7 @@
-import { Cardinality, defineEntities, FieldType, generateProducts } from 'basis/server'
 import { Mermaid } from '../../react/components/Mermaid/Mermaid'
 import { Code } from '../components/Code'
 import { DocumentationPage } from '../components/DocumentationPage'
-
-const entities = defineEntities({
-  entities: [
-    {
-      fields: [
-        { field: 'email', type: FieldType.String },
-        {
-          cardinality: Cardinality.Many,
-          field: 'notes',
-          inverse: 'owner',
-          target: 'Note',
-          type: FieldType.Inverse,
-        },
-      ],
-      name: 'User',
-    },
-    {
-      fields: [
-        { field: 'title', type: FieldType.String },
-        { field: 'owner', inverse: 'notes', target: 'User', type: FieldType.Entity },
-        { field: 'tags', items: { type: FieldType.String }, type: FieldType.Array },
-        { field: 'metadata', type: FieldType.JSON },
-      ],
-      name: 'Note',
-    },
-  ],
-})
-
-const products = generateProducts(entities)
+import { authoringLogicalErd, authoringPhysicalErd, authoringSchema, authoringTypes } from '../generated/Authoring.generated.ts'
 
 export class AuthoringDocs extends DocumentationPage<Record<string, never>> {
   content() {
@@ -74,20 +45,20 @@ export class AuthoringDocs extends DocumentationPage<Record<string, never>> {
         <section>
           <h2>Generated TypeScript</h2>
           <p>These examples are rendered from the live <code>generateProducts</code> result for the declaration above; they are not copied snapshots.</p>
-          {Code.format(products.types)}
+          {Code.format(authoringTypes)}
         </section>
         <section>
           <h2>Generated JSON Schema</h2>
           <p>The output schema for <code>Note</code>:</p>
-          {Code.format(JSON.stringify(products.schemas.Note?.output, null, 2))}
+          {Code.format(authoringSchema)}
         </section>
         <section>
           <h2>Logical ERD</h2>
-          <Mermaid>{products.logicalErd}</Mermaid>
+          <Mermaid>{authoringLogicalErd}</Mermaid>
         </section>
         <section>
           <h2>Physical ERD</h2>
-          <Mermaid>{products.physicalErd}</Mermaid>
+          <Mermaid>{authoringPhysicalErd}</Mermaid>
         </section>
         <section>
           <h2>Authoring Conventions</h2>
