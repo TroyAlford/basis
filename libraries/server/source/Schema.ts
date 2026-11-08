@@ -1520,7 +1520,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   operations.splice(0, operations.length, ...ordered)
   return {
     actual: stripMigrationLedger(actualSchema),
-    actualHash: physicalHash(actualSchema),
+    actualHash: physicalHash(actualSchema, true),
     ambiguities,
     blocked: ambiguities.length > 0 || drift.length > 0,
     desired,
@@ -1546,7 +1546,6 @@ function stripMigrationLedger(schema: PhysicalSchema): PhysicalSchema {
   return {
     ...schema,
     grants: (schema.grants ?? []).filter(grant => grant.table !== 'basis.schema_migration'),
-    schemas: (schema.schemas ?? []).filter(name => name !== 'basis'),
     tables: schema.tables.filter(table => table.name !== 'basis.schema_migration'),
   }
 }
@@ -1554,10 +1553,17 @@ function stripMigrationLedger(schema: PhysicalSchema): PhysicalSchema {
 /**
  * Hash one physical snapshot in a key-stable form.
  * @param schema - Physical schema snapshot.
+ * @param ignoreLedgerSchema - Whether ledger-created basis schema/grants are ignored.
  * @returns Stable SHA-256 digest.
  */
-export function physicalHash(schema: PhysicalSchema): string {
-  return hash(JSON.stringify(stableValue(stripMigrationLedger(schema))))
+export function physicalHash(schema: PhysicalSchema, ignoreLedgerSchema = false): string {
+  const stripped = stripMigrationLedger(schema)
+  if (!ignoreLedgerSchema) return hash(JSON.stringify(stableValue(stripped)))
+  return hash(JSON.stringify(stableValue({
+    ...stripped,
+    grants: (stripped.grants ?? []).filter(grant => grant.table !== 'basis'),
+    schemas: (stripped.schemas ?? []).filter(name => name !== 'basis'),
+  })))
 }
 
 /**
@@ -1674,8 +1680,9 @@ export async function applyMigration(
   if (artifact.operations.some(operation => /\bconcurrently\b/iu.test(operation.sql))) {
     return applyNontransactional(sql, artifact)
   }
-  return sql.begin(async tx => {
+  const execute = async (tx: BunSQL): Promise<MigrationApplyResult> => {
     if (artifact.schema) await tx.unsafe(`SET LOCAL search_path TO ${quote(artifact.schema)}`).simple()
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended('basis.schema_migration', 0))`
     await tx`CREATE SCHEMA IF NOT EXISTS basis`
     await tx`
       CREATE TABLE IF NOT EXISTS basis.schema_migration (
@@ -1689,13 +1696,12 @@ export async function applyMigration(
         applied_at timestamptz NOT NULL DEFAULT now()
       )
     `
-    await tx`SELECT pg_advisory_xact_lock(hashtextextended('basis.schema_migration', 0))`
     const duplicate = await tx<{ id: string }[]>`
       SELECT id FROM basis.schema_migration WHERE checksum = ${artifact.checksum} LIMIT 1
     `
     if (duplicate[0]) throw new Error(`Migration ${artifact.version} was already applied`)
     const source = await introspect(tx)
-    if (physicalHash(source) !== artifact.sourceHash) {
+    if (physicalHash(source, true) !== artifact.sourceHash) {
       throw new Error('Migration source catalog has drifted from the reviewed plan')
     }
     for (const operation of artifact.operations) {
@@ -1740,7 +1746,37 @@ export async function applyMigration(
       targetHash: artifact.targetHash,
       version: artifact.version,
     }
-  })
+  }
+  return withMigrationContext(sql, execute)
+}
+
+let migrationSavepoint = 0
+
+/**
+ * Run migration work in the caller transaction when one exists, otherwise start one.
+ * @param sql - Administrative SQL capability.
+ * @param work - Transaction-scoped migration work.
+ * @returns The work result.
+ */
+async function withMigrationContext<T>(
+  sql: BunSQL,
+  work: (tx: BunSQL) => Promise<T>,
+): Promise<T> {
+  const savepoint = `basis_migration_${migrationSavepoint += 1}`
+  try {
+    await sql.unsafe(`SAVEPOINT ${savepoint}`).simple()
+  } catch (error) {
+    if (!/transaction/i.test(error instanceof Error ? error.message : String(error))) throw error
+    return sql.begin(work)
+  }
+  try {
+    const result = await work(sql)
+    await sql.unsafe(`RELEASE SAVEPOINT ${savepoint}`).simple()
+    return result
+  } catch (error) {
+    await sql.unsafe(`ROLLBACK TO SAVEPOINT ${savepoint}`).simple()
+    throw error
+  }
 }
 
 /**
@@ -1751,8 +1787,10 @@ export async function applyMigration(
 function migrationChecksum(artifact: MigrationArtifact): string {
   return hash(JSON.stringify({
     appRole: artifact.appRole,
+    createdAt: artifact.createdAt,
     expected: artifact.expected,
     operations: artifact.operations,
+    planHash: artifact.planHash,
     schema: artifact.schema,
     sourceHash: artifact.sourceHash,
     superuser: artifact.superuser,
@@ -1771,111 +1809,92 @@ async function applyNontransactional(
   sql: BunSQL,
   artifact: MigrationArtifact,
 ): Promise<MigrationApplyResult> {
-  const [previous] = await sql<{ path: string }[]>`
-    SELECT current_setting('search_path') AS path
-  `
-  if (artifact.schema) await sql`
-    SELECT set_config('search_path', ${artifact.schema}, FALSE)
-  `
-  await sql`
-    SELECT pg_advisory_lock(hashtextextended('basis.schema_migration', 0))
-  `
+  const reserved = await sql.reserve()
   try {
-    await sql`
-      CREATE SCHEMA IF NOT EXISTS basis
+    const db = reserved as unknown as BunSQL
+    const [previous] = await db<{ path: string }[]>`
+      SELECT current_setting('search_path') AS path
     `
-    await sql`
-      CREATE TABLE IF NOT EXISTS basis.schema_migration (id text PRIMARY KEY,
-        version text NOT NULL,
-        checksum text NOT NULL UNIQUE,
-        source_hash text NOT NULL,
-        target_hash text NOT NULL,
-        artifact jsonb NOT NULL,
-        status text NOT NULL,
-        applied_at timestamptz NOT NULL DEFAULT now() )
-    `
-    const duplicate = await sql<{ id: string }[]>`
-      SELECT id
-      FROM basis.schema_migration
-      WHERE checksum = ${artifact.checksum}
-      LIMIT 1
-    `
-    if (duplicate[0]) throw new Error(`Migration ${artifact.version} was already applied`)
-    const source = await introspect(sql)
-    if (physicalHash(source) !== artifact.sourceHash) {
-      throw new Error('Migration source catalog has drifted from the reviewed plan')
-    }
-    for (const operation of artifact.operations) await sql.unsafe(operation.sql).simple()
-    const actual = stripMigrationLedger(await introspect(sql))
-    const verification = plan({
-      actual,
-      appRole: artifact.appRole,
-      desired: { physicalSchema: () => artifact.expected },
-      previousPhysical: artifact.expected,
-      superuser: artifact.superuser,
-    })
-    if (verification.drift.length > 0 || verification.operations.length > 0) {
-      throw new Error(
-        `Migration verification failed: ${[
-          ...verification.drift,
-          ...verification.operations.map(operation => operation.id),
-        ].join('; ')}`,
-      )
-    }
-    await sql`
-      INSERT INTO basis.schema_migration (id,
-        version,
-        checksum,
-        source_hash,
-        target_hash,
-        artifact,
-        status)
-VALUES (${artifact.checksum},
-  ${artifact.version},
-  ${artifact.checksum},
-  ${artifact.sourceHash},
-  ${artifact.targetHash},
-  ${JSON.stringify(artifact)}::jsonb,
-  'applied' )
-    `
-    return {
-      applied: true,
-      checksum: artifact.checksum,
-      operationCount: artifact.operations.length,
-      targetHash: artifact.targetHash,
-      version: artifact.version,
-    }
-  } catch (error) {
+    if (artifact.schema) await db`SELECT set_config('search_path', ${artifact.schema}, FALSE)`
+    await db`SELECT pg_advisory_lock(hashtextextended('basis.schema_migration', 0))`
     try {
-      await sql`
-        INSERT INTO basis.schema_migration (id,
-          version,
-          checksum,
-          source_hash,
-          target_hash,
-          artifact,
-          status)
-VALUES (${artifact.checksum},
-  ${artifact.version},
-  ${artifact.checksum},
-  ${artifact.sourceHash},
-  ${artifact.targetHash},
-  ${JSON.stringify(artifact)}::jsonb,
-  'failed' )
+      await db`CREATE SCHEMA IF NOT EXISTS basis`
+      await db`
+        CREATE TABLE IF NOT EXISTS basis.schema_migration (
+          id text PRIMARY KEY,
+          version text NOT NULL,
+          checksum text NOT NULL UNIQUE,
+          source_hash text NOT NULL,
+          target_hash text NOT NULL,
+          artifact jsonb NOT NULL,
+          status text NOT NULL,
+          applied_at timestamptz NOT NULL DEFAULT now()
+        )
       `
-    } catch {
-      // Preserve the original failure; the ledger may not exist yet.
+      const duplicate = await db<{ id: string }[]>`
+        SELECT id FROM basis.schema_migration WHERE checksum = ${artifact.checksum} LIMIT 1
+      `
+      if (duplicate[0]) throw new Error(`Migration ${artifact.version} was already applied`)
+      const source = await introspect(db)
+      if (physicalHash(source, true) !== artifact.sourceHash) {
+        throw new Error('Migration source catalog has drifted from the reviewed plan')
+      }
+      for (const operation of artifact.operations) await db.unsafe(operation.sql).simple()
+      const actual = stripMigrationLedger(await introspect(db))
+      const verification = plan({
+        actual,
+        appRole: artifact.appRole,
+        desired: { physicalSchema: () => artifact.expected },
+        previousPhysical: artifact.expected,
+        superuser: artifact.superuser,
+      })
+      if (verification.drift.length > 0 || verification.operations.length > 0) {
+        throw new Error(
+          `Migration verification failed: ${[
+            ...verification.drift,
+            ...verification.operations.map(operation => operation.id),
+          ].join('; ')}`,
+        )
+      }
+      await db`
+        INSERT INTO basis.schema_migration
+          (id, version, checksum, source_hash, target_hash, artifact, status)
+        VALUES (
+          ${artifact.checksum}, ${artifact.version}, ${artifact.checksum},
+          ${artifact.sourceHash}, ${artifact.targetHash}, ${JSON.stringify(artifact)}::jsonb,
+          'applied'
+        )
+      `
+      return {
+        applied: true,
+        checksum: artifact.checksum,
+        operationCount: artifact.operations.length,
+        targetHash: artifact.targetHash,
+        version: artifact.version,
+      }
+    } catch (error) {
+      try {
+        await db`
+          INSERT INTO basis.schema_migration
+            (id, version, checksum, source_hash, target_hash, artifact, status)
+          VALUES (
+            ${artifact.checksum}, ${artifact.version}, ${artifact.checksum},
+            ${artifact.sourceHash}, ${artifact.targetHash}, ${JSON.stringify(artifact)}::jsonb,
+            'failed'
+          )
+        `
+      } catch {
+        // Preserve the original failure; the ledger may not exist yet.
+      }
+      throw error
+    } finally {
+      await db`SELECT pg_advisory_unlock(hashtextextended('basis.schema_migration', 0))`
+      if (previous?.path !== undefined) {
+        await db`SELECT set_config('search_path', ${previous.path}, FALSE)`
+      }
     }
-    throw error
   } finally {
-    await sql`
-      SELECT pg_advisory_unlock(hashtextextended('basis.schema_migration', 0))
-    `
-    if (previous?.path !== undefined) {
-      await sql`
-        SELECT set_config('search_path', ${previous.path}, FALSE)
-      `
-    }
+    reserved.release()
   }
 }
 
@@ -1892,7 +1911,7 @@ export async function readiness(
   if (migrationChecksum(artifact) !== artifact.checksum) {
     throw new Error('Migration artifact checksum does not match its contents')
   }
-  return sql.begin(async tx => {
+  return withMigrationContext(sql, async tx => {
     if (artifact.schema) await tx.unsafe(`SET LOCAL search_path TO ${quote(artifact.schema)}`).simple()
     const actual = stripMigrationLedger(await introspect(tx))
     const verification = plan({

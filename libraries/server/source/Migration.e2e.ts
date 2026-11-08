@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
+import { randomUUID } from 'node:crypto'
 import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
 import { EntityDefinitions } from './EntityDefinitions'
+import { Graph } from './Graph'
 import { DDL } from './Schema'
 
 /**
@@ -42,6 +44,11 @@ describe('Reviewed schema evolution', () => {
       const readiness = await DDL.readiness(database.sql, artifact)
       expect(readiness.ready).toBe(true)
       expect(readiness.discrepancies).toEqual([])
+      await database.sql.unsafe(
+        'DROP FUNCTION IF EXISTS basis.has_role(text) CASCADE; ' +
+        'DROP FUNCTION IF EXISTS basis.resolve_identity(text) CASCADE; ' +
+        'DROP FUNCTION IF EXISTS basis.enroll_identity(text, text, text, text) CASCADE',
+      ).simple()
 
       await expect(DDL.apply(database.sql, artifact)).rejects.toThrow('already applied')
       const tampered = {
@@ -56,6 +63,8 @@ describe('Reviewed schema evolution', () => {
         }],
       }
       await expect(DDL.apply(database.sql, tampered)).rejects.toThrow('checksum')
+      await expect(DDL.apply(database.sql, { ...artifact, planHash: 'tampered' }))
+        .rejects.toThrow('checksum')
       await database.sql.unsafe('ALTER TABLE "Note" ADD COLUMN "extra" text').simple()
       const drifted = await DDL.readiness(database.sql, artifact)
       expect(drifted.ready).toBe(false)
@@ -131,6 +140,36 @@ describe('Reviewed schema evolution', () => {
     }, { fresh: true })
   }, 120_000)
 
+  test('applies and verifies a Graph security schema', async () => {
+    await withIsolatedDatabase('migration-graph', async database => {
+      const appRole = `basis_graph_app_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+      await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
+      const graph = new Graph({
+        entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+        grants: [{ action: 'read', role: 'public', target: 'Note' }],
+        schema: database.schema,
+      })
+      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
+      const empty = await DDL.introspect(database.sql)
+      const expected = graph.physicalSchema(appRole, false)
+      const plan = DDL.plan({
+        actual: empty,
+        appRole,
+        desired: { physicalSchema: () => expected },
+      })
+      const artifact = DDL.review(plan, {
+        appRole,
+        schema: database.schema,
+        version: '001-graph',
+      })
+      await DDL.apply(database.sql, artifact)
+      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
+      const readiness = await DDL.readiness(database.sql, artifact)
+      expect(readiness.ready).toBe(true)
+      expect(readiness.discrepancies).toEqual([])
+    }, { fresh: true })
+  }, 120_000)
+
   test('applies and verifies an MTI transition', async () => {
     const desired = EntityDefinitions.load(JSON.stringify({
       entities: [
@@ -202,29 +241,21 @@ describe('Reviewed schema evolution', () => {
     await withIsolatedDatabase('migration-interrupted', async database => {
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const empty = await DDL.introspect(database.sql)
-      const artifact = DDL.review(DDL.plan({ actual: empty, desired }), {
+      const plan = DDL.plan({ actual: empty, desired })
+      const failing = plan.operations.find(operation => (
+        operation.kind === 'constraint' || operation.kind === 'trigger'
+      ))
+      if (!failing) throw new Error('migration plan did not contain a later operation')
+      const artifact = DDL.review(plan, {
+        resolutions: [{
+          approved: true,
+          operationId: failing.id,
+          sql: 'SELECT * FROM "does_not_exist"',
+        }],
         schema: database.schema,
         version: '001-note',
       })
-      const broken = {
-        ...artifact,
-        operations: [{
-          dependsOn: [],
-          id: 'broken:missing-table',
-          kind: 'table' as const,
-          risk: 'review' as const,
-          sql: 'CREATE TABLE "Broken" ("id" text)',
-          target: 'Broken',
-        }, {
-          dependsOn: [],
-          id: 'broken:invalid',
-          kind: 'table' as const,
-          risk: 'review' as const,
-          sql: 'SELECT * FROM "does_not_exist"',
-          target: 'invalid',
-        }],
-      }
-      await expect(DDL.apply(database.sql, broken)).rejects.toThrow()
+      await expect(DDL.apply(database.sql, artifact)).rejects.toThrow()
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const [ledger] = await database.sql<{ count: number }[]>`
         SELECT count(*)::int AS count
@@ -232,6 +263,10 @@ describe('Reviewed schema evolution', () => {
         WHERE checksum = ${artifact.checksum}
       `
       expect(ledger?.count).toBe(0)
+      const [table] = await database.sql<{ present: boolean }[]>`
+        SELECT to_regclass(${`"${database.schema}"."Note"`}) IS NOT NULL AS present
+      `
+      expect(table?.present).toBe(false)
     }, { fresh: true })
   }, 120_000)
 
