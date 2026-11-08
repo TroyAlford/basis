@@ -61,6 +61,8 @@ describe('typed authoring and generated products', () => {
     expect(first.schemas.Note?.output).toBeDefined()
     expect(first.schemas.Note?.create).toBeDefined()
     expect(first.logicalErd).toContain('erDiagram')
+    expect(first.logicalErd).toContain('User ||--o{ Note : owner')
+    expect(first.physicalErd).toContain('Entity ||--o{ User : extends')
     expect(first.physicalErd).toContain('Note')
     expect(generateTypes(definitions)).toBe(first.types)
     expect(generateJSONSchemas(definitions)).toEqual(first.schemas)

@@ -108,6 +108,11 @@ The `Note` output JSON Schema is:
 
 ```mermaid
 erDiagram
+  Entity {
+    string id
+    string name
+    string entity
+  }
   User {
     string id
     string name
@@ -122,6 +127,9 @@ erDiagram
     UserRef owner
     readonly string[] tags
   }
+  Entity ||--o{ User : extends
+  Entity ||--o{ Note : extends
+  User ||--o{ Note : owner
 ```
 
 `physicalErd` uses the compiled table and column representation:
@@ -143,6 +151,9 @@ erDiagram
     text owner.id
     text[] tags
   }
+  Entity ||--o{ User : extends
+  Entity ||--o{ Note : extends
+  User ||--o{ Note : owner
 ```
 
 The generated outputs are values returned from the API, not committed source files. Write them to your own `generated/` directory when your application chooses to persist them.

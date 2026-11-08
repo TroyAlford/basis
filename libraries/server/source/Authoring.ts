@@ -1,4 +1,4 @@
-import type { EntityDefinition, IdentityFormat, ScalarFieldDefinition } from './EntityDefinitions'
+import type { EffectiveFieldDefinition, FieldDefinition, IdentityFormat, ScalarFieldDefinition } from './EntityDefinitions'
 import { EntityDefinitions, FieldType } from './EntityDefinitions'
 
 /** Navigation cardinality accepted by typed authoring. */
@@ -257,6 +257,11 @@ export function generateErd(
       lines.push('  }')
     }
   } else {
+    lines.push('  Entity {')
+    lines.push('    string id')
+    lines.push('    string name')
+    lines.push('    string entity')
+    lines.push('  }')
     for (const entity of definitions.entities) {
       lines.push(`  ${entity.name} {`)
       for (const field of entity.effectiveFields) {
@@ -264,14 +269,34 @@ export function generateErd(
       }
       lines.push('  }')
     }
+    for (const relationship of definitions.relationships) {
+      lines.push(`  ${relationship.name} {`)
+      for (const field of relationship.fields) lines.push(`    ${fieldType(field)} ${field.name}`)
+      lines.push('  }')
+    }
   }
+
+  const connect = (left: string, right: string, label: string, cardinality = '||--o{'): void => {
+    lines.push(`  ${left} ${cardinality} ${right} : ${label}`)
+  }
+
   for (const entity of definitions.entities) {
-    if (entity.parent !== 'Entity') lines.push(`  ${entity.parent} ||--o{ ${entity.name} : extends`)
+    connect(entity.parent, entity.name, 'extends')
+    for (const field of entity.fields) {
+      if (field.type !== FieldType.Entity) continue
+      const association = definitions.association(entity.name, field.name)
+      connect(
+        field.target,
+        entity.name,
+        field.name,
+        association?.cardinality === 'One' ? '||--o|' : '||--o{',
+      )
+    }
   }
   for (const relationship of definitions.relationships) {
     const [left, right] = relationship.between
-    lines.push(`  ${left.target} ||--o{ ${relationship.name} : ${left.field}`)
-    lines.push(`  ${right.target} ||--o{ ${relationship.name} : ${right.field}`)
+    connect(left.target, relationship.name, left.field)
+    connect(right.target, relationship.name, right.field)
   }
   return lines.join('\n')
 }
@@ -281,10 +306,11 @@ export function generateErd(
  * @param field - Effective field.
  * @returns TypeScript type expression.
  */
-function fieldType(field: EntityDefinition['effectiveFields'][number]): string {
+function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
   if (field.type === FieldType.Entity) return `${field.target}Ref`
   if (field.type === FieldType.Array) return `readonly ${scalarType(field.items.type)}[]`
   if (field.type === FieldType.JSON) return 'unknown'
+  if (field.type === FieldType.Inverse) return 'unknown'
   return scalarType(field.type)
 }
 
@@ -310,7 +336,7 @@ function scalarType(type: ScalarFieldDefinition['type']): string {
  * @param field - Effective field.
  * @returns JSON Schema fragment.
  */
-function schemaForField(field: EntityDefinition['effectiveFields'][number]): Record<string, unknown> {
+function schemaForField(field: EffectiveFieldDefinition): Record<string, unknown> {
   if (field.type === FieldType.Entity) return { type: 'string' }
   if (field.type === FieldType.Array) return {
     items: schemaForScalar(field.items.type),
