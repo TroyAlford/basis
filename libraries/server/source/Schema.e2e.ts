@@ -337,6 +337,40 @@ describe('DDL schema planning', () => {
     ))).toBe(true)
   })
 
+  test('does not erase a Boolean clause after a JSON cast', () => {
+    const entities = [{
+      fields: [
+        { field: 'details', type: 'JSON' },
+        { field: 'active', type: 'Boolean' },
+      ],
+      name: 'Note',
+    }]
+    const predicate = (operator: '$and' | '$or') => ({
+      filters: [
+        { field: 'details', operator: '$contains', value: { type: 'safe' } },
+        { field: 'active', operator: '$eq', value: true },
+      ],
+      operator,
+    })
+    const left = new Graph({
+      entities,
+      grants: [{ action: 'read', predicate: predicate('$and'), role: 'public', target: 'Note' }],
+    })
+    const right = new Graph({
+      entities,
+      grants: [{ action: 'read', predicate: predicate('$or'), role: 'public', target: 'Note' }],
+    })
+    const plan = DDL.plan({
+      actual: left.physicalSchema('basis_app', false),
+      appRole: 'basis_app',
+      desired: right,
+      previous: left,
+    })
+    expect(plan.operations.some(operation => (
+      operation.kind === 'policy' && operation.id.endsWith(':replace')
+    ))).toBe(true)
+  })
+
   test('plans real catalog policy and role changes', async () => {
     await withIsolatedDatabase('schema-plan-catalog-policy', async database => {
       const appRole = `basis_plan_app_${randomUUID().replaceAll('-', '').slice(0, 12)}`

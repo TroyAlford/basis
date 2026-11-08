@@ -1518,7 +1518,15 @@ function normalizePolicyDefinition(value: string): string {
     return `\uE000${literals.length - 1}\uE001`
   })
   let normalized = protectedValue.toLowerCase().replace(/[";]/gu, '')
-  normalized = normalized.replace(/::[a-z_][a-z0-9_ ]*/gu, '')
+  normalized = normalized.replace(
+    new RegExp(
+      String.raw`::(?:double\s+precision|character\s+varying|timestamp(?:\s+with(?:out)?\s+time\s+zone)?|` +
+      String.raw`time(?:\s+with(?:out)?\s+time\s+zone)?|numeric(?:\([0-9, ]+\))?|` +
+      String.raw`[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?(?:\([0-9, ]+\))?(?:\[\])*)(?![a-z0-9_])`,
+      'giu',
+    ),
+    '',
+  )
   normalized = normalized.replace(
     /(^|[\s(,=])(?!basis\.)[a-z_][a-z0-9_]*\./gu,
     (_match, prefix: string) => prefix,
