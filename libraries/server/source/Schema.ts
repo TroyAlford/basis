@@ -673,8 +673,8 @@ function desiredFunctionNamesForPlan(schema: PhysicalSchema): Set<string> {
  */
 export function plan(options: PlanOptions): SchemaPlan {
   const desired = options.desired.physicalSchema(options.appRole, options.superuser)
-  const previous = options.previousPhysical ??
-    options.previous?.physicalSchema(options.appRole, options.superuser)
+  const compiledPrevious = options.previous?.physicalSchema(options.appRole, options.superuser)
+  const previous = options.previousPhysical ?? compiledPrevious
   const actualTables = new Map(options.actual.tables.map(table => [table.name, table]))
   const desiredTables = new Map(desired.tables.map(table => [table.name, table]))
   const previousTablesPhysical = new Map(previous?.tables.map(table => [table.name, table]) ?? [])
@@ -694,6 +694,14 @@ export function plan(options: PlanOptions): SchemaPlan {
   const operations: SchemaOperation[] = []
   const drift: string[] = []
   const ambiguities: string[] = []
+  if (
+    options.previousPhysical === undefined
+    && compiledPrevious !== undefined
+    && options.actual.policies.length > 0
+    && compiledPrevious.policies.length > 0
+  ) {
+    drift.push('historical compiled physical artifact required for existing deployment planning')
+  }
 
   const desiredExtensions = new Set(desired.extensions)
   for (const extension of desired.extensions) {
@@ -1493,7 +1501,9 @@ function sqlLiteral(value: string): string {
  * @returns Whether the generated metadata is identical.
  */
 function samePolicyIdentity(left: PhysicalPolicy, right: PhysicalPolicy): boolean {
-  return left.definition === right.definition
+  return left.sql === right.sql
+    && left.table === right.table
+    && left.definition === right.definition
     && left.command === right.command
     && left.permissive === right.permissive
     && [...left.roles ?? []].sort().join(',') === [...right.roles ?? []].sort().join(',')

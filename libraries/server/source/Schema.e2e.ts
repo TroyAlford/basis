@@ -364,6 +364,36 @@ describe('DDL schema planning', () => {
       operation.kind === 'policy' && operation.id === `policy:${policy.name}:replace`
     ))).toBe(true)
 
+    const sqlChanged = {
+      ...historical,
+      policies: historical.policies.map(candidate => (
+        candidate.name === policy.name
+          ? { ...candidate, sql: `${candidate.sql} ` }
+          : candidate
+      )),
+    }
+    const sqlPlan = DDL.plan({
+      actual: sqlChanged,
+      appRole: 'basis_app',
+      desired: model,
+      previousPhysical: sqlChanged,
+    })
+    expect(sqlPlan.drift).toEqual([])
+    expect(sqlPlan.operations.some(operation => (
+      operation.kind === 'policy' && operation.id === `policy:${policy.name}:replace`
+    ))).toBe(true)
+
+    const missingArtifact = DDL.plan({
+      actual: historical,
+      appRole: 'basis_app',
+      desired: model,
+      previous: model,
+    })
+    expect(missingArtifact.drift).toContain(
+      'historical compiled physical artifact required for existing deployment planning',
+    )
+    expect(missingArtifact.blocked).toBe(true)
+
     const drifted = {
       ...historical,
       policies: historical.policies.map(candidate => (
@@ -453,6 +483,7 @@ describe('DDL schema planning', () => {
         appRole,
         desired,
         previous,
+        previousPhysical: previous.physicalSchema(appRole, false),
         superuser: false,
       })
       expect(plan.drift).toEqual([])
@@ -510,6 +541,7 @@ describe('DDL schema planning', () => {
       appRole: 'basis_app',
       desired,
       previous,
+      previousPhysical: previous.physicalSchema('basis_app', false),
     })
     const drops = plan.operations.filter(operation => operation.id.startsWith('drop-function:basis.policy_'))
     expect(drops).toHaveLength(1)
@@ -609,6 +641,7 @@ describe('DDL schema planning', () => {
       appRole: 'basis_app',
       desired,
       previous,
+      previousPhysical: previous.physicalSchema('basis_app', false),
     })
     expect(plan.drift).toEqual([])
     expect(plan.blocked).toBe(false)
@@ -631,6 +664,7 @@ describe('DDL schema planning', () => {
       appRole: 'basis_app',
       desired,
       previous,
+      previousPhysical: previous.physicalSchema('basis_app', false),
     })
     expect(plan.drift).toEqual([])
     expect(plan.blocked).toBe(false)
