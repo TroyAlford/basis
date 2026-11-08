@@ -1601,7 +1601,18 @@ export function review(
     resolutions.set(resolution.operationId, resolution)
   }
   const operations: SchemaOperation[] = []
+  const ambiguityTables = new Set(planResult.ambiguities.flatMap(ambiguity => (
+    ambiguity.split(' -> ').map(name => name.trim())
+  )))
   for (const operation of planResult.operations) {
+    if (ambiguityTables.size > 0 && operation.kind !== 'function' && [...ambiguityTables].some(name => (
+      operation.target === name
+      || operation.target.startsWith(`${name}:`)
+      || operation.target.includes(`:${name}:`)
+      || operation.sql.includes('"' + name + '"')
+    ))) {
+      continue
+    }
     const resolution = resolutions.get(operation.id)
     if (resolution && !resolution.approved) {
       throw new Error(`Migration operation ${operation.id} was rejected`)

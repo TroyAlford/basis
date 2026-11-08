@@ -91,6 +91,26 @@ describe('Reviewed schema evolution', () => {
     }, { fresh: true })
   }, 120_000)
 
+  test('applies and verifies an MTI transition', async () => {
+    const desired = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
+        { extends: 'Profile', fields: [], name: 'Employee' },
+      ],
+    }))
+    await withIsolatedDatabase('migration-mti', async database => {
+      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
+      const empty = await DDL.introspect(database.sql)
+      const artifact = DDL.review(DDL.plan({ actual: empty, desired }), {
+        schema: database.schema,
+        version: '001-mti',
+      })
+      await DDL.apply(database.sql, artifact)
+      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
+      expect((await DDL.readiness(database.sql, artifact)).ready).toBe(true)
+    }, { fresh: true })
+  }, 120_000)
+
   test('requires an explicit approved SQL resolution for a data operation', async () => {
     const previous = EntityDefinitions.load(JSON.stringify({
       entities: [{ fields: [{ field: 'amount', type: 'String' }], name: 'Note' }],
