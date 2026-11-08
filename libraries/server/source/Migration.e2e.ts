@@ -285,12 +285,19 @@ describe('Reviewed schema evolution', () => {
       })
       await expect(DDL.apply(database.sql, artifact)).rejects.toThrow()
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
-      const [ledger] = await database.sql<{ count: number }[]>`
-        SELECT count(*)::int AS count
-        FROM basis.schema_migration
-        WHERE checksum = ${artifact.checksum}
+      const [ledgerTable] = await database.sql<{ present: boolean }[]>`
+        SELECT to_regclass('basis.schema_migration') IS NOT NULL AS present
       `
-      expect(ledger?.count).toBe(0)
+      let ledgerCount = 0
+      if (ledgerTable?.present) {
+        const [ledger] = await database.sql<{ count: number }[]>`
+          SELECT count(*)::int AS count
+          FROM basis.schema_migration
+          WHERE checksum = ${artifact.checksum}
+        `
+        ledgerCount = ledger?.count ?? 0
+      }
+      expect(ledgerCount).toBe(0)
       const [table] = await database.sql<{ present: boolean }[]>`
         SELECT to_regclass(${`"${database.schema}"."Note"`}) IS NOT NULL AS present
       `
