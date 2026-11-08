@@ -696,9 +696,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   const ambiguities: string[] = []
   if (
     options.previousPhysical === undefined
-    && compiledPrevious !== undefined
     && options.actual.policies.length > 0
-    && compiledPrevious.policies.length > 0
   ) {
     drift.push('historical compiled physical artifact required for existing deployment planning')
   }

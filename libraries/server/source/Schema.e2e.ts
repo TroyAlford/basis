@@ -337,6 +337,23 @@ describe('DDL schema planning', () => {
     ))).toBe(true)
   })
 
+  test('blocks an existing policy deployment without historical provenance', () => {
+    const model = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      grants: [{ action: 'read', predicate: "title = 'x'", role: 'public', target: 'Note' }],
+    })
+    const actual = model.physicalSchema('basis_app', false)
+    const plan = DDL.plan({
+      actual,
+      appRole: 'basis_app',
+      desired: model,
+    })
+    expect(plan.drift).toContain(
+      'historical compiled physical artifact required for existing deployment planning',
+    )
+    expect(plan.blocked).toBe(true)
+  })
+
   test('plans a generator-output change and blocks unexpected live policy drift', () => {
     const model = new Graph({
       entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
