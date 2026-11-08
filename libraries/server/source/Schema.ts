@@ -264,8 +264,6 @@ export interface MigrationArtifact {
   readonly appRole?: string,
   /** Artifact checksum, also used as the ledger id. */
   readonly checksum: string,
-  /** Creation timestamp for review/audit. */
-  readonly createdAt: string,
   /** Desired physical snapshot used for post-apply verification. */
   readonly expected: PhysicalSchema,
   /** Deterministic operation SQL and dependency graph. */
@@ -1646,7 +1644,6 @@ export function review(
   const artifact = {
     appRole: options.appRole,
     checksum: '',
-    createdAt: new Date().toISOString(),
     expected: planResult.desired,
     operations,
     planHash: hash(JSON.stringify(planResult)),
@@ -1697,7 +1694,9 @@ export async function applyMigration(
       )
     `
     const duplicate = await tx<{ id: string }[]>`
-      SELECT id FROM basis.schema_migration WHERE checksum = ${artifact.checksum} LIMIT 1
+      SELECT id FROM basis.schema_migration
+      WHERE checksum = ${artifact.checksum} OR version = ${artifact.version}
+      LIMIT 1
     `
     if (duplicate[0]) throw new Error(`Migration ${artifact.version} was already applied`)
     const source = await introspect(tx)
@@ -1787,7 +1786,6 @@ async function withMigrationContext<T>(
 function migrationChecksum(artifact: MigrationArtifact): string {
   return hash(JSON.stringify({
     appRole: artifact.appRole,
-    createdAt: artifact.createdAt,
     expected: artifact.expected,
     operations: artifact.operations,
     planHash: artifact.planHash,
@@ -1832,7 +1830,9 @@ async function applyNontransactional(
         )
       `
       const duplicate = await db<{ id: string }[]>`
-        SELECT id FROM basis.schema_migration WHERE checksum = ${artifact.checksum} LIMIT 1
+        SELECT id FROM basis.schema_migration
+      WHERE checksum = ${artifact.checksum} OR version = ${artifact.version}
+      LIMIT 1
       `
       if (duplicate[0]) throw new Error(`Migration ${artifact.version} was already applied`)
       const source = await introspect(db)

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
+import { useDatabaseFixture } from '../testing/DatabaseFixture'
 import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Graph } from './Graph'
@@ -19,6 +20,15 @@ function model(...names: string[]): EntityDefinitions {
   }))
 }
 
+/**
+ * Create a unique version label for one test run.
+ * @param label - Stable version prefix.
+ * @returns The unique version.
+ */
+function migrationVersion(label: string): string {
+  return `${label}-${randomUUID().slice(0, 8)}`
+}
+
 describe('Reviewed schema evolution', () => {
   test('applies a reviewed artifact, records it once, verifies readiness, and rejects drift', async () => {
     const desired = model('Note')
@@ -26,13 +36,16 @@ describe('Reviewed schema evolution', () => {
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired })
-      const artifact = DDL.review(plan, { schema: database.schema, version: '001-note' })
+      const attemptVersion = migrationVersion('001-note')
+      const artifact = DDL.review(plan, { schema: database.schema, version: attemptVersion })
+      const identical = DDL.review(plan, { schema: database.schema, version: attemptVersion })
+      expect(identical.checksum).toBe(artifact.checksum)
       expect(artifact.operations.length).toBeGreaterThan(0)
 
       const applied = await DDL.apply(database.sql, artifact)
       expect(applied.applied).toBe(true)
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
-      expect(applied.version).toBe('001-note')
+      expect(applied.version).toBe(attemptVersion)
 
       const [ledger] = await database.sql<{ count: number }[]>`
         SELECT count(*)::int AS count
@@ -50,6 +63,21 @@ describe('Reviewed schema evolution', () => {
         'DROP FUNCTION IF EXISTS basis.enroll_identity(text, text, text, text) CASCADE',
       ).simple()
 
+      const [afterApply] = await database.sql<{ present: boolean }[]>`
+        SELECT to_regclass(${`"${database.schema}"."Note"`}) IS NOT NULL AS present
+      `
+      expect(afterApply?.present).toBe(true)
+      const noopPlan = DDL.plan({
+        actual: await DDL.introspect(database.sql),
+        desired,
+        previousPhysical: desired.physicalSchema('basis_app', false),
+      })
+      const duplicateVersion = DDL.review(noopPlan, {
+        schema: database.schema,
+        version: attemptVersion,
+      })
+      expect(duplicateVersion.checksum).not.toBe(artifact.checksum)
+      await expect(DDL.apply(database.sql, duplicateVersion)).rejects.toThrow('already applied')
       await expect(DDL.apply(database.sql, artifact)).rejects.toThrow('already applied')
       const tampered = {
         ...artifact,
@@ -84,7 +112,7 @@ describe('Reviewed schema evolution', () => {
       const empty = await DDL.introspect(database.sql)
       const first = DDL.review(DDL.plan({ actual: empty, desired: previous }), {
         schema: database.schema,
-        version: '001-old',
+        version: migrationVersion('001-old'),
       })
       await DDL.apply(database.sql, first)
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
@@ -96,7 +124,7 @@ describe('Reviewed schema evolution', () => {
         previousPhysical: previous.physicalSchema('basis_app', false),
       })
       expect(plan.ambiguities).toContain('OldNote -> NewNote')
-      expect(() => DDL.review(plan, { schema: database.schema, version: '002-new' }))
+      expect(() => DDL.review(plan, { schema: database.schema, version: migrationVersion('002-new') }))
         .toThrow('requires an explicit approved rename SQL resolution')
       const artifact = DDL.review(plan, {
         resolutions: [{
@@ -105,7 +133,7 @@ describe('Reviewed schema evolution', () => {
           sql: 'ALTER TABLE "OldNote" RENAME TO "NewNote"',
         }],
         schema: database.schema,
-        version: '002-new',
+        version: migrationVersion('002-new'),
       })
       expect(artifact.operations.some(operation => operation.id === 'rename:OldNote -> NewNote'))
         .toBe(true)
@@ -120,7 +148,7 @@ describe('Reviewed schema evolution', () => {
       const empty = await DDL.introspect(database.sql)
       const first = DDL.review(DDL.plan({ actual: empty, desired: previous }), {
         schema: database.schema,
-        version: '001-note',
+        version: migrationVersion('001-note'),
       })
       await DDL.apply(database.sql, first)
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
@@ -134,7 +162,7 @@ describe('Reviewed schema evolution', () => {
         previousPhysical,
       })
       expect(plan.blocked).toBe(false)
-      const second = DDL.review(plan, { schema: database.schema, version: '002-tag' })
+      const second = DDL.review(plan, { schema: database.schema, version: migrationVersion('002-tag') })
       await DDL.apply(database.sql, second)
       expect((await DDL.readiness(database.sql, second)).ready).toBe(true)
     }, { fresh: true })
@@ -160,7 +188,7 @@ describe('Reviewed schema evolution', () => {
       const artifact = DDL.review(plan, {
         appRole,
         schema: database.schema,
-        version: '001-graph',
+        version: migrationVersion('001-graph'),
       })
       await DDL.apply(database.sql, artifact)
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
@@ -182,7 +210,7 @@ describe('Reviewed schema evolution', () => {
       const empty = await DDL.introspect(database.sql)
       const artifact = DDL.review(DDL.plan({ actual: empty, desired }), {
         schema: database.schema,
-        version: '001-mti',
+        version: migrationVersion('001-mti'),
       })
       await DDL.apply(database.sql, artifact)
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
@@ -202,7 +230,7 @@ describe('Reviewed schema evolution', () => {
       const empty = await DDL.introspect(database.sql)
       const first = DDL.review(DDL.plan({ actual: empty, desired: previous }), {
         schema: database.schema,
-        version: '001-note',
+        version: migrationVersion('001-note'),
       })
       await DDL.apply(database.sql, first)
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
@@ -217,7 +245,7 @@ describe('Reviewed schema evolution', () => {
       expect(plan.operations.some(operation => (
         operation.kind === 'alter-column' && operation.risk === 'data'
       ))).toBe(true)
-      expect(() => DDL.review(plan, { schema: database.schema, version: '002-number' }))
+      expect(() => DDL.review(plan, { schema: database.schema, version: migrationVersion('002-number') }))
         .toThrow('explicit approved SQL resolution')
 
       const artifact = DDL.review(plan, {
@@ -228,7 +256,7 @@ describe('Reviewed schema evolution', () => {
             'USING "amount"::double precision',
         }],
         schema: database.schema,
-        version: '002-number',
+        version: migrationVersion('002-number'),
       })
       await DDL.apply(database.sql, artifact)
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
@@ -253,7 +281,7 @@ describe('Reviewed schema evolution', () => {
           sql: 'SELECT * FROM "does_not_exist"',
         }],
         schema: database.schema,
-        version: '001-note',
+        version: migrationVersion('001-note'),
       })
       await expect(DDL.apply(database.sql, artifact)).rejects.toThrow()
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
@@ -270,6 +298,70 @@ describe('Reviewed schema evolution', () => {
     }, { fresh: true })
   }, 120_000)
 
+  test('applies a CONCURRENTLY operation through a reserved pooled session', async () => {
+    const fixture = await useDatabaseFixture('migration-concurrent')
+    const schema = `migration_concurrent_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+    const admin = fixture.server.db.sql
+    await admin.unsafe(`CREATE SCHEMA "${schema}"`).simple()
+    try {
+      const reserved = await admin.reserve()
+      await reserved.unsafe(`SET search_path TO "${schema}"`).simple()
+      const actual = await DDL.introspect(reserved)
+      reserved.release()
+      const desired = model('Note')
+      const plan = DDL.plan({ actual, desired })
+      const index = plan.operations.find(operation => operation.kind === 'index')
+      if (!index) throw new Error('migration plan did not contain an index')
+      const artifact = DDL.review(plan, {
+        resolutions: [{
+          approved: true,
+          operationId: index.id,
+          sql: index.sql.replace(/^CREATE INDEX/u, 'CREATE INDEX CONCURRENTLY'),
+        }],
+        schema,
+        version: migrationVersion('001-concurrent'),
+      })
+      const applied = await DDL.apply(admin, artifact)
+      expect(applied.applied).toBe(true)
+      expect((await DDL.readiness(admin, artifact)).ready).toBe(true)
+    } finally {
+      await admin.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).simple()
+    }
+  }, 120_000)
+
+  test('records a failed nontransactional migration without claiming readiness', async () => {
+    const fixture = await useDatabaseFixture('migration-concurrent-failure')
+    const schema = `migration_concurrent_fail_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+    const admin = fixture.server.db.sql
+    await admin.unsafe(`CREATE SCHEMA "${schema}"`).simple()
+    try {
+      const reserved = await admin.reserve()
+      await reserved.unsafe(`SET search_path TO "${schema}"`).simple()
+      const actual = await DDL.introspect(reserved)
+      reserved.release()
+      const plan = DDL.plan({ actual, desired: model('Note') })
+      const index = plan.operations.find(operation => operation.kind === 'index')
+      if (!index) throw new Error('migration plan did not contain an index')
+      const artifact = DDL.review(plan, {
+        resolutions: [{
+          approved: true,
+          operationId: index.id,
+          sql: 'CREATE INDEX CONCURRENTLY "migration_missing_idx" ON "Missing" ("id")',
+        }],
+        schema,
+        version: migrationVersion('001-concurrent-fail'),
+      })
+      await expect(DDL.apply(admin, artifact)).rejects.toThrow()
+      const [ledger] = await admin<{ status: string }[]>`
+        SELECT status FROM basis.schema_migration WHERE checksum = ${artifact.checksum}
+      `
+      expect(ledger?.status).toBe('failed')
+      expect((await DDL.readiness(admin, artifact)).ready).toBe(false)
+    } finally {
+      await admin.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).simple()
+    }
+  }, 120_000)
+
   test('rejects application when the live source drifted from the approved plan', async () => {
     const desired = model('Note')
     await withIsolatedDatabase('migration-drift', async database => {
@@ -277,7 +369,7 @@ describe('Reviewed schema evolution', () => {
       const empty = await DDL.introspect(database.sql)
       const artifact = DDL.review(DDL.plan({ actual: empty, desired }), {
         schema: database.schema,
-        version: '001-note',
+        version: migrationVersion('001-note'),
       })
       await database.sql.unsafe('CREATE TABLE "Unapproved" ("id" text PRIMARY KEY)').simple()
       await expect(DDL.apply(database.sql, artifact)).rejects.toThrow('drifted')
