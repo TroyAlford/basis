@@ -1639,13 +1639,7 @@ export function review(
     targetHash: planResult.desiredHash ?? physicalHash(planResult.desired),
     version: options.version,
   } satisfies MigrationArtifact
-  artifact.checksum = hash(JSON.stringify({
-    expected: artifact.expected,
-    operations,
-    sourceHash: artifact.sourceHash,
-    targetHash: artifact.targetHash,
-    version: artifact.version,
-  }))
+  artifact.checksum = migrationChecksum(artifact)
   return {
     ...artifact,
     checksum: artifact.checksum,
@@ -1663,6 +1657,12 @@ export async function applyMigration(
   sql: BunSQL,
   artifact: MigrationArtifact,
 ): Promise<MigrationApplyResult> {
+  if (migrationChecksum(artifact) !== artifact.checksum) {
+    throw new Error('Migration artifact checksum does not match its contents')
+  }
+  if (artifact.operations.some(operation => /\bconcurrently\b/iu.test(operation.sql))) {
+    return applyNontransactional(sql, artifact)
+  }
   return sql.begin(async tx => {
     if (artifact.schema) await tx.unsafe(`SET LOCAL search_path TO ${quote(artifact.schema)}`).simple()
     await tx`CREATE SCHEMA IF NOT EXISTS basis`
@@ -1733,6 +1733,142 @@ export async function applyMigration(
 }
 
 /**
+ * Calculate the deterministic checksum of a migration artifact.
+ * @param artifact - Reviewed migration artifact.
+ * @returns SHA-256 checksum.
+ */
+function migrationChecksum(artifact: MigrationArtifact): string {
+  return hash(JSON.stringify({
+    appRole: artifact.appRole,
+    expected: artifact.expected,
+    operations: artifact.operations,
+    schema: artifact.schema,
+    sourceHash: artifact.sourceHash,
+    superuser: artifact.superuser,
+    targetHash: artifact.targetHash,
+    version: artifact.version,
+  }))
+}
+
+/**
+ * Apply an artifact containing PostgreSQL operations that cannot run in a transaction.
+ * @param sql - Administrative PostgreSQL capability.
+ * @param artifact - Reviewed immutable migration artifact.
+ * @returns The apply result.
+ */
+async function applyNontransactional(
+  sql: BunSQL,
+  artifact: MigrationArtifact,
+): Promise<MigrationApplyResult> {
+  const [previous] = await sql<{ path: string }[]>`
+    SELECT current_setting('search_path') AS path
+  `
+  if (artifact.schema) await sql`
+    SELECT set_config('search_path', ${artifact.schema}, FALSE)
+  `
+  await sql`
+    SELECT pg_advisory_lock(hashtextextended('basis.schema_migration', 0))
+  `
+  try {
+    await sql`
+      CREATE SCHEMA IF NOT EXISTS basis
+    `
+    await sql`
+      CREATE TABLE IF NOT EXISTS basis.schema_migration (id text PRIMARY KEY,
+        version text NOT NULL,
+        checksum text NOT NULL UNIQUE,
+        source_hash text NOT NULL,
+        target_hash text NOT NULL,
+        artifact jsonb NOT NULL,
+        status text NOT NULL,
+        applied_at timestamptz NOT NULL DEFAULT now() )
+    `
+    const duplicate = await sql<{ id: string }[]>`
+      SELECT id
+      FROM basis.schema_migration
+      WHERE checksum = ${artifact.checksum}
+      LIMIT 1
+    `
+    if (duplicate[0]) throw new Error(`Migration ${artifact.version} was already applied`)
+    const source = await introspect(sql)
+    if (physicalHash(source) !== artifact.sourceHash) {
+      throw new Error('Migration source catalog has drifted from the reviewed plan')
+    }
+    for (const operation of artifact.operations) await sql.unsafe(operation.sql).simple()
+    const actual = stripMigrationLedger(await introspect(sql))
+    const verification = plan({
+      actual,
+      appRole: artifact.appRole,
+      desired: { physicalSchema: () => artifact.expected },
+      previousPhysical: artifact.expected,
+      superuser: artifact.superuser,
+    })
+    if (verification.drift.length > 0 || verification.operations.length > 0) {
+      throw new Error(
+        `Migration verification failed: ${[
+          ...verification.drift,
+          ...verification.operations.map(operation => operation.id),
+        ].join('; ')}`,
+      )
+    }
+    await sql`
+      INSERT INTO basis.schema_migration (id,
+        version,
+        checksum,
+        source_hash,
+        target_hash,
+        artifact,
+        status)
+VALUES (${artifact.checksum},
+  ${artifact.version},
+  ${artifact.checksum},
+  ${artifact.sourceHash},
+  ${artifact.targetHash},
+  ${JSON.stringify(artifact)}::jsonb,
+  'applied' )
+    `
+    return {
+      applied: true,
+      checksum: artifact.checksum,
+      operationCount: artifact.operations.length,
+      targetHash: artifact.targetHash,
+      version: artifact.version,
+    }
+  } catch (error) {
+    try {
+      await sql`
+        INSERT INTO basis.schema_migration (id,
+          version,
+          checksum,
+          source_hash,
+          target_hash,
+          artifact,
+          status)
+VALUES (${artifact.checksum},
+  ${artifact.version},
+  ${artifact.checksum},
+  ${artifact.sourceHash},
+  ${artifact.targetHash},
+  ${JSON.stringify(artifact)}::jsonb,
+  'failed' )
+      `
+    } catch {
+      // Preserve the original failure; the ledger may not exist yet.
+    }
+    throw error
+  } finally {
+    await sql`
+      SELECT pg_advisory_unlock(hashtextextended('basis.schema_migration', 0))
+    `
+    if (previous?.path !== undefined) {
+      await sql`
+        SELECT set_config('search_path', ${previous.path}, FALSE)
+      `
+    }
+  }
+}
+
+/**
  * Check whether the live catalog matches an approved migration expectation.
  * @param sql - Connected PostgreSQL capability.
  * @param artifact - Approved immutable migration artifact.
@@ -1742,6 +1878,9 @@ export async function readiness(
   sql: BunSQL,
   artifact: MigrationArtifact,
 ): Promise<MigrationReadiness> {
+  if (migrationChecksum(artifact) !== artifact.checksum) {
+    throw new Error('Migration artifact checksum does not match its contents')
+  }
   return sql.begin(async tx => {
     if (artifact.schema) await tx.unsafe(`SET LOCAL search_path TO ${quote(artifact.schema)}`).simple()
     const actual = stripMigrationLedger(await introspect(tx))

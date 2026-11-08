@@ -44,6 +44,18 @@ describe('Reviewed schema evolution', () => {
       expect(readiness.discrepancies).toEqual([])
 
       await expect(DDL.apply(database.sql, artifact)).rejects.toThrow('already applied')
+      const tampered = {
+        ...artifact,
+        operations: [...artifact.operations, {
+          dependsOn: [],
+          id: 'tampered',
+          kind: 'table' as const,
+          risk: 'review' as const,
+          sql: 'SELECT 1',
+          target: 'tampered',
+        }],
+      }
+      await expect(DDL.apply(database.sql, tampered)).rejects.toThrow('checksum')
       await database.sql.unsafe('ALTER TABLE "Note" ADD COLUMN "extra" text').simple()
       const drifted = await DDL.readiness(database.sql, artifact)
       expect(drifted.ready).toBe(false)

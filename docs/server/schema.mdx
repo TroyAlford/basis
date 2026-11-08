@@ -69,4 +69,4 @@ const status = await DDL.readiness(adminSql, artifact)
 
 `DDL.apply` rechecks the approved source hash, records the artifact once in `basis.schema_migration`, executes the ordered operations transactionally, verifies the resulting physical state, and rejects duplicate or drifted application. It returns the applied version and target hash. Invalid or interrupted application rolls back before the ledger entry is written.
 
-`DDL.readiness` compares the live catalog with the artifact's expected physical state and never mutates the database. It reports concrete discrepancies and is meant for readiness checks, not automatic startup migration. Nontransactional operations are rejected explicitly rather than being executed outside the reviewed transaction.
+`DDL.readiness` compares the live catalog with the artifact's expected physical state and never mutates the database. It reports concrete discrepancies and is meant for readiness checks, not automatic startup migration. Operations containing `CONCURRENTLY` use the explicit nontransactional path under a session advisory lock; failures are recorded as failed ledger entries and never presented as readiness.
