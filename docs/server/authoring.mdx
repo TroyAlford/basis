@@ -49,7 +49,7 @@ import { generateProducts } from 'basis/server'
 const products = generateProducts(entities)
 ```
 
-- `types` contains entity interfaces, `*Ref` identity references, and projection aliases.
+- `types` contains entity interfaces and `*Ref` identity references. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
 - `schemas` contains `create`, `output`, and `update` JSON Schemas for every entity.
 - `logicalErd` and `physicalErd` contain Mermaid entity-relationship diagrams.
 
