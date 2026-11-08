@@ -423,15 +423,10 @@ class QueryProjection {
     if (field) {
       if (rest.length === 0) {
         if (field.type === FieldType.Entity) {
-          if (depth >= MAX_REFERENCE_DEPTH) {
-            throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
-          }
           const target = this.#entities.entity(field.target)
           const sourceAlias = this.#ownerAlias(context, field.owner, false, scope)
-          const childKey = contextKey === '' ? segment : `${contextKey}.${segment}`
-          const targetOccurrence = this.#filterTarget(field, sourceAlias, childKey, scope)
           return {
-            expression: `${targetOccurrence.rootAlias}.${quote('id')}`,
+            expression: `${sourceAlias}.${quote(field.column)}`,
             field: {
               ...(target?.idFormat ? { format: target.idFormat } : {}),
               name: fullName,
@@ -448,6 +443,19 @@ class QueryProjection {
       }
       if (field.type !== FieldType.Entity) {
         throw new Error(`Filter path "${fullName}" traverses non-reference field "${segment}"`)
+      }
+      if (rest.length === 1 && rest[0] === 'id') {
+        const target = this.#entities.entity(field.target)
+        const sourceAlias = this.#ownerAlias(context, field.owner, false, scope)
+        return {
+          expression: `${sourceAlias}.${quote(field.column)}`,
+          field: {
+            ...(target?.idFormat ? { format: target.idFormat } : {}),
+            name: fullName,
+            type: FieldType.ID,
+          },
+          identity: true,
+        }
       }
       if (depth >= MAX_REFERENCE_DEPTH) {
         throw new Error(`Reference path "${fullName}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)

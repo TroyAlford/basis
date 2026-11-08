@@ -1,0 +1,49 @@
+---
+title: Schema Inspection & Planning
+---
+
+# Schema Inspection & Planning
+
+The canonical `EntityDefinitions` model now owns one typed physical representation. Fresh installs, desired snapshots, and live catalog introspection all use the same table, column, index, constraint, function, trigger, policy, extension, and authorization objects.
+
+## Desired physical schema
+
+```ts
+const model = new Graph({ entities, relationships, roles, grants })
+const desired = model.physicalSchema('basis_app', false)
+```
+
+`PhysicalSchema` contains typed tables and columns, primary keys and defaults, indexes, foreign-key constraints, lifecycle functions and triggers, graph security functions, RLS policies, graph-managed role rows, role/table/schema/function grants, RLS flags, schemas, and extensions. `EntityDefinitions.ddl` and `EntityDefinitions.createTables` emit and reconcile the ontology's tables and lifecycle objects; `Graph.physicalSchema` adds the graph's roles and compiled policies. Both use the same physical representation.
+
+## Read-only introspection
+
+```ts
+const actual = await DDL.introspect(ownerSql) // trusted catalog connection
+```
+
+`DDL.introspect` reads `information_schema`, `pg_catalog`, `pg_indexes`, `pg_proc`, `pg_trigger`, and `pg_policies`. It never creates, alters, or drops an object.
+
+## Planning
+
+```ts
+const plan = DDL.plan({
+  actual,
+  desired: nextGraph,
+  previous: deployedGraph,
+  previousPhysical: deployedPhysical,
+  appRole: 'basis_app',
+  superuser: true,
+})
+```
+
+Supply the historical compiled artifact with `previousPhysical` when planning an existing deployment. An upgrade without that artifact fails closed rather than recompiling previous intent with the current generator. The planner uses that approved artifact instead of recompiling previous intent with the current generator. A change in generated policy SQL is therefore migration-worthy even when the old and new SQL are semantically equivalent. PostgreSQL's catalog deparsing is normalized only at the previous→actual drift boundary.
+
+`DDL.plan` is deterministic and read-only. Each operation carries a stable id, target, intended SQL, dependency edges, preconditions, and risk classification. A populated-table add-column operation is marked `data`; security changes are marked `review`. New tables carry their RLS, grant, index, and constraint dependencies. Intentional previous→desired changes become operations, including policy replacement and graph role metadata updates; unexplained differences from the compiled previous physical state are drift.
+
+The plan reports:
+
+- `drift` when the live catalog contains an unexpected table, column, index, constraint, function, trigger, or policy.
+- `ambiguities` when a previous table disappears and a new desired table appears. The planner never guesses a rename.
+- `blocked` when drift or ambiguity requires an explicit reviewed decision.
+
+Applying a plan is intentionally not part of this API. Increment C owns reviewed execution, the migration ledger, and readiness verification. `DDL.hash(source)` produces the deterministic SHA-256 source hash used by snapshots.

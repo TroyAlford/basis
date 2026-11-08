@@ -15,14 +15,14 @@ import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
 import { runAsActor } from './ActorContext'
-import type { AuthorizationOptions } from './Authorization'
-import { Authorization, enrollIdentity } from './Authorization'
+import { Authorization } from './Authorization'
 import { Builder } from './Builder'
 import type { Database, DatabaseOptions } from './Database'
 import { createDatabase, NullDatabase } from './Database'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
 import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
+import type { Graph } from './Graph'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import type { SocketData } from './Sockets'
@@ -91,7 +91,7 @@ export class Server {
   #apis = new Map<string, APIRoute>()
   #assets: string | null = null
   #authorization: Authorization | null = null
-  #authorizationOptions: Omit<AuthorizationOptions, 'database'> | null = null
+  #graph: Graph | null = null
   #builder: Builder | null = null
   #closing: Promise<void> | null = null
   #database: Database = new NullDatabase()
@@ -493,28 +493,22 @@ export class Server {
       this.#assets ? [this.#assets] : [],
     )
 
-    const databaseOptions = this.#databaseOptions ?? {}
-    if (!this.#authorizationOptions && databaseOptions.authorization) {
-      this.#authorizationOptions = {}
-    }
-    if (this.#authorizationOptions) {
-      const application = this.#authorizationOptions.definitions ?? databaseOptions.entities
-      const definitions = Authorization.combine(application)
-      this.#databaseOptions = {
+    let databaseOptions = this.#databaseOptions ?? {}
+    if (this.#graph) {
+      databaseOptions = {
         ...databaseOptions,
-        actorSecret: this.#authorizationOptions.actorSecret ?? databaseOptions.actorSecret,
-        appRole: this.#authorizationOptions.appRole ?? databaseOptions.appRole,
         authorization: true,
-        entities: definitions,
+        entities: this.#graph.definitions,
       }
+      this.#databaseOptions = databaseOptions
     }
     if (this.#databaseOptions) {
       this.#database = createDatabase(this.#databaseOptions)
-      if (this.#authorizationOptions) {
+      if (this.#graph) {
         this.#authorization = new Authorization({
-          ...this.#authorizationOptions,
+          appRole: databaseOptions.appRole,
           database: this.#database,
-          definitions: this.#authorizationOptions.definitions ?? databaseOptions.entities,
+          graph: this.#graph,
         })
       }
     }
@@ -671,7 +665,7 @@ export class Server {
       identity: async accessToken => {
         const subject = await resolve(accessToken)
         if (subject === null || !this.#authorization) return subject
-        return enrollIdentity(this.#database, provider, subject)
+        return this.#authorization.enrollIdentity(provider, subject)
       },
     })
     this.identity(options.session)
@@ -682,17 +676,17 @@ export class Server {
   }
 
   /**
-   * Configures the canonical authorization and PostgreSQL RLS capability.
+   * Configures the canonical application graph and PostgreSQL RLS capability.
    *
-   * Must be called before {@link start}. The system User/Role/Grant ontology is
-   * composed with the application definitions, and the database is placed in
-   * restricted application-role mode. Bootstrap is explicit through
-   * {@link Authorization.bootstrap}; OAuth login never grants administration.
-   * @param options - Application definitions and optional role/secret overrides.
+   * The graph owns roles and permissions; loading it never mutates PostgreSQL.
+   * The database is placed in restricted application-role mode. Bootstrap is
+   * explicit through {@link Authorization.bootstrap}; OAuth login never grants
+   * administration.
+   * @param graph - The application graph.
    * @returns The server.
    */
-  authorization(options: Omit<AuthorizationOptions, 'database'> = {}): Server {
-    this.#authorizationOptions = options
+  graph(graph: Graph): Server {
+    this.#graph = graph
     return this
   }
 

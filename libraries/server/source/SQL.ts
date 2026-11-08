@@ -299,6 +299,7 @@ function whereClause(
 
   const values: BoundScalar[] = []
   const bind = (value: BoundScalar): string => {
+    if (value === '$me') return 'nullif(current_setting(\'actor.id\', true), \'\')'
     values.push(value)
     return `$${values.length}`
   }
@@ -531,10 +532,7 @@ function queryField(entity: EntityDefinition, name: string): QueryFieldDefinitio
   const field = entity.fields.find(candidate => candidate.name === name)
   if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
   if (field.type === FieldType.Entity) {
-    throw new Error(
-      `Query field "${entity.name}.${name}" is an entity reference; ` +
-      'references cannot be used in predicates or ordering',
-    )
+    return { name: field.column, type: FieldType.ID }
   }
   if (field.type === FieldType.Inverse) {
     throw new Error(

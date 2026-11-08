@@ -1,4 +1,5 @@
 import type { SQL } from 'bun'
+import type { PhysicalConstraint, PhysicalSchema, PhysicalTable } from './Schema'
 
 /** Enable PostgreSQL trigram search for universal names. */
 const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with schema public'
@@ -586,525 +587,97 @@ export class EntityDefinitions {
   }
 
   /**
-   * Compile the authorization metadata schema into canonical DDL.
-   * @returns Ordered internal-schema and index statements.
-   */
-  authorizationSchemaDdl(): readonly string[] {
-    return [
-      'CREATE EXTENSION IF NOT EXISTS pgcrypto',
-      'CREATE SCHEMA IF NOT EXISTS basis',
-      'CREATE TABLE IF NOT EXISTS basis.secret (key text PRIMARY KEY, value text NOT NULL)',
-      'CREATE TABLE IF NOT EXISTS basis.entity_ancestor (' +
-        'entity text NOT NULL, ancestor text NOT NULL, ' +
-        'depth integer NOT NULL DEFAULT 0, PRIMARY KEY (entity, ancestor))',
-      'ALTER TABLE basis.entity_ancestor ADD COLUMN IF NOT EXISTS depth integer NOT NULL DEFAULT 0',
-      'REVOKE ALL ON basis.secret FROM PUBLIC',
-      'CREATE UNIQUE INDEX IF NOT EXISTS "Role_key_key" ON "Role" ("key")',
-      'CREATE UNIQUE INDEX IF NOT EXISTS "ExternalIdentity_provider_subject_key" ' +
-        'ON "ExternalIdentity" ("provider", "subject")',
-      'CREATE INDEX IF NOT EXISTS "Grant_role_idx" ON "Grant" ("role.id")',
-      'CREATE INDEX IF NOT EXISTS "UserRole_user_idx" ON "UserRole" ("user.id")',
-      'CREATE INDEX IF NOT EXISTS "UserRole_role_idx" ON "UserRole" ("role.id")',
-    ]
-  }
-
-  /**
-   * Compile authorization functions, RLS policies, and grants into canonical DDL.
+   * Compile the canonical physical schema shared by planning and introspection.
    *
-   * This is the single physical authorization-schema output. The caller owns
-   * the explicit privileged bootstrap execution; ordinary database operation
-   * never invokes it.
-   * @param appRole - Restricted application login role.
-   * @param superuser - Whether the provisioning connection can force owner RLS.
-   * @returns Ordered authorization DDL statements.
+   * Security roles, grants, functions, and policies are compiled by {@link Graph}.
+   * This method emits only the canonical model's tables and lifecycle objects.
+   * @param appRole - Retained for a stable physical-compiler signature.
+   * @param superuser - Retained for a stable physical-compiler signature.
+   * @param includeAuthorization - Retained for compatibility; graph security DDL is separate.
+   * @returns The typed desired physical schema.
    */
-  authorizationDdl(appRole: string, superuser: boolean): readonly string[] {
-    const role = quoteIdentifier(appRole)
-    const statements: string[] = [this.#authorizationFunctionDdl()]
-    const tables = [
-      { entity: 'Entity', relationship: false, root: true, table: 'Entity' },
+  physicalSchema(appRole = 'basis_app', superuser = false, includeAuthorization = false): PhysicalSchema {
+    void appRole
+    void superuser
+    void includeAuthorization
+    const tables: PhysicalTable[] = this.tables.map(table => ({
+      columns: table.columns.map(column => ({
+        name: column.name,
+        nullable: column.nullable === true,
+        primaryKey: column.primaryKey === true,
+        sqlType: columnType(column),
+      })),
+      forceRowSecurity: false,
+      indexes: (table.indexes ?? []).map(index => ({
+        columns: index.columns,
+        name: index.name,
+        sql: createIndex(table, index),
+        table: table.name,
+        unique: index.unique === true,
+      })),
+      name: table.name,
+      primaryKey: table.primaryKey ?? table.columns.filter(column => column.primaryKey).map(column => column.name),
+      rowSecurity: false,
+      sql: createTable(table),
+    }))
+    const constraints: PhysicalConstraint[] = [
       ...this.entities.map(entity => ({
-        entity: entity.name,
-        relationship: false,
-        root: false,
+        column: 'id',
+        definition: constraintDefinition(addParentConstraint(entity)),
+        name: parentConstraintName(entity),
+        sql: addParentConstraint(entity),
         table: entity.name,
+        target: entity.parent,
+        targetColumn: 'id',
       })),
-      ...this.relationships.map(relationship => ({
-        entity: relationship.name,
-        relationship: true,
-        root: false,
-        table: relationship.name,
-      })),
+      ...this.entities.flatMap(entity => entity.fields
+        .filter(isReferenceField)
+        .map(field => ({
+          column: field.column,
+          definition: constraintDefinition(addConstraint(entity, field)),
+          name: constraintName(entity, field),
+          sql: addConstraint(entity, field),
+          table: entity.name,
+          target: field.target,
+          targetColumn: 'id',
+        }))),
+      ...this.relationships.flatMap(relationship => relationshipForeignKeyDefinitions(relationship)
+        .map(definition => ({
+          column: definition.column,
+          definition: constraintDefinition(definition.statement),
+          name: definition.name,
+          sql: definition.statement,
+          table: relationship.name,
+          target: definition.target,
+          targetColumn: 'id',
+        }))),
     ]
-    for (const { entity, relationship, root, table } of tables) {
-      const quoted = quoteIdentifier(table)
-      statements.push(`ALTER TABLE ${quoted} ENABLE ROW LEVEL SECURITY`)
-      if (superuser) statements.push(`ALTER TABLE ${quoted} FORCE ROW LEVEL SECURITY`)
-      const securityTable = ['Grant', 'Role', 'UserRole', 'ExternalIdentity'].includes(table)
-      statements.push(
-        securityTable
-          ? `GRANT SELECT ON ${quoted} TO ${role}`
-          : `GRANT SELECT, INSERT, UPDATE, DELETE ON ${quoted} TO ${role}`,
-      )
-      for (const [action, policy] of [
-        ['read', 'SELECT'],
-        ['create', 'INSERT'],
-        ['update', 'UPDATE'],
-        ['delete', 'DELETE'],
-      ] as const) {
-        const name = `basis_${table.replaceAll(/[^A-Za-z0-9]/g, '_')}_${action}`
-        const check = root
-          ? `basis.authorized_root('${action}', to_jsonb(${quoted}))`
-          : relationship
-            ? `basis.authorized('${entity}', '${action}', to_jsonb(${quoted}))`
-            : `basis.authorized_row('${entity}', '${action}', to_jsonb(${quoted}))`
-        statements.push(`DROP POLICY IF EXISTS ${quoteIdentifier(name)} ON ${quoted}`)
-        const using = policy === 'INSERT' ? '' : ` USING (${check})`
-        const withCheck = policy === 'INSERT' || policy === 'UPDATE' ? ` WITH CHECK (${check})` : ''
-        statements.push(
-          `CREATE POLICY ${quoteIdentifier(name)} ON ${quoted} FOR ${policy} TO ${role}${using}${withCheck}`,
-        )
-      }
+    const lifecycle = lifecycleDefinitions(this.entities)
+    return {
+      constraints,
+      extensions: ['pg_trgm'],
+      functions: lifecycle.functions.map(fn => ({
+        body: fn.body,
+        lifecycle: true,
+        name: fn.name,
+        required: [fn.name],
+        securityDefiner: false,
+        sql: fn.statement,
+      })),
+      policies: [],
+      tables,
+      triggers: lifecycle.triggers.map(trigger => ({
+        columns: trigger.columns,
+        constraint: trigger.constraint,
+        deferrable: trigger.deferrable,
+        functionName: trigger.function,
+        initDeferred: trigger.initDeferred,
+        name: trigger.name,
+        sql: trigger.statement,
+        table: trigger.table,
+        type: trigger.type,
+      })),
     }
-    statements.push(
-      'REVOKE CREATE ON SCHEMA public FROM PUBLIC',
-      `REVOKE CREATE ON SCHEMA public FROM ${role}`,
-      `GRANT USAGE ON SCHEMA public TO ${role}`,
-      `GRANT USAGE ON SCHEMA basis TO ${role}`,
-    )
-    const functions = [
-      'basis.actor_id()',
-      'basis.actor_active(text)',
-      'basis.login_identity(text, text, text, text, text)',
-      'basis.matches(jsonb, jsonb)',
-      'basis.authorized(text, text, jsonb)',
-      'basis.authorized_row(text, text, jsonb)',
-      'basis.authorized_create(text)',
-      'basis.authorized_root(text, jsonb)',
-      'basis.create_role(text, text)',
-      'basis.assign_role(text, text)',
-      'basis.remove_role(text, text)',
-      'basis.create_grant(text, text, text, jsonb)',
-      'basis.update_grant(text, text, text, text, jsonb)',
-      'basis.revoke_grant(text)',
-      'basis.revoke_identity(text, text)',
-    ].join(', ')
-    statements.push(`REVOKE ALL ON FUNCTION ${functions} FROM PUBLIC`)
-    statements.push(
-      'GRANT EXECUTE ON FUNCTION basis.actor_id(), basis.actor_active(text), ' +
-      'basis.login_identity(text, text, text, text, text), ' +
-      'basis.matches(jsonb, jsonb), basis.authorized(text, text, jsonb), ' +
-      'basis.authorized_row(text, text, jsonb), basis.authorized_root(text, jsonb), ' +
-      'basis.create_role(text, text), basis.assign_role(text, text), ' +
-      'basis.remove_role(text, text), basis.create_grant(text, text, text, jsonb), ' +
-      'basis.update_grant(text, text, text, text, jsonb), basis.revoke_grant(text), ' +
-      `basis.revoke_identity(text, text) TO ${role}`,
-    )
-    return statements
-  }
-
-  /**
-   * Compile the fixed authorization function bodies.
-   * @returns PostgreSQL function DDL.
-   */
-  #authorizationFunctionDdl(): string {
-    return `
-      CREATE OR REPLACE FUNCTION basis.actor_id() RETURNS text
-      LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = basis, public, pg_temp AS $$
-      DECLARE
-        token text;
-        parts text[];
-        secret text;
-        expected text;
-        actor text;
-        expires numeric;
-      BEGIN
-        token := current_setting('basis.actor', true);
-        IF token IS NULL OR token = '' THEN RETURN NULL; END IF;
-        parts := string_to_array(token, ':');
-        IF array_length(parts, 1) <> 7 OR parts[1] <> 'actor' THEN RETURN NULL; END IF;
-        IF parts[3] <> txid_current()::text THEN RETURN NULL; END IF;
-        IF parts[4] <> current_database()::text OR parts[5] <> 'v1' THEN RETURN NULL; END IF;
-        expires := parts[6]::numeric;
-        IF expires < extract(epoch FROM now()) THEN RETURN NULL; END IF;
-        SELECT value INTO secret FROM basis.secret WHERE key = 'actor';
-        IF secret IS NULL THEN RETURN NULL; END IF;
-        expected := encode(
-          hmac(
-            convert_to(
-              parts[1] || ':' || parts[2] || ':' || parts[3] || ':' || parts[4] || ':' || parts[5] || ':' || parts[6],
-              'UTF8'
-            ),
-            convert_to(secret, 'UTF8'),
-            'sha256'
-          ),
-          'hex'
-        );
-        IF expected <> parts[7] THEN RETURN NULL; END IF;
-        actor := convert_from(decode(parts[2], 'hex'), 'UTF8');
-        RETURN actor;
-      EXCEPTION WHEN others THEN
-        RETURN NULL;
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.matches(predicate jsonb, row_value jsonb) RETURNS boolean
-      LANGUAGE plpgsql STABLE AS $$
-      DECLARE
-        op text;
-        field text;
-        value jsonb;
-        actual jsonb;
-        child jsonb;
-        actor text;
-        text_value text;
-      BEGIN
-        IF predicate IS NULL OR predicate = 'null'::jsonb OR predicate = '{}'::jsonb THEN RETURN true; END IF;
-        op := predicate->>'operator';
-        IF op = '$and' THEN
-          FOR child IN SELECT value FROM jsonb_array_elements(predicate->'filters') LOOP
-            IF NOT basis.matches(child, row_value) THEN RETURN false; END IF;
-          END LOOP;
-          RETURN true;
-        END IF;
-        IF op = '$or' THEN
-          FOR child IN SELECT value FROM jsonb_array_elements(predicate->'filters') LOOP
-            IF basis.matches(child, row_value) THEN RETURN true; END IF;
-          END LOOP;
-          RETURN false;
-        END IF;
-        IF op = '$not' THEN
-          RETURN NOT basis.matches(predicate->'filters'->0, row_value);
-        END IF;
-        field := predicate->>'field';
-        value := predicate->'value';
-        IF field IS NULL THEN RETURN false; END IF;
-        actual := row_value -> field;
-        IF value = '{"$actor":true}'::jsonb THEN
-          actor := basis.actor_id();
-          value := to_jsonb(actor);
-        END IF;
-        IF op = '$eq' THEN
-          IF value = 'null'::jsonb THEN RETURN actual IS NULL OR actual = 'null'::jsonb; END IF;
-          RETURN actual IS NOT DISTINCT FROM value;
-        END IF;
-        IF op = '$ne' THEN RETURN actual IS DISTINCT FROM value; END IF;
-        IF op = '$lt' THEN RETURN actual < value; END IF;
-        IF op = '$lte' THEN RETURN actual <= value; END IF;
-        IF op = '$gt' THEN RETURN actual > value; END IF;
-        IF op = '$gte' THEN RETURN actual >= value; END IF;
-        IF op = '$empty' THEN
-          RETURN actual IS NULL OR actual = '""'::jsonb OR actual = '[]'::jsonb OR actual = 'null'::jsonb;
-        END IF;
-        IF op = '$contains' THEN
-          IF actual IS NULL OR value IS NULL THEN RETURN false; END IF;
-          IF jsonb_typeof(actual) IN ('array', 'object') THEN RETURN actual @> value; END IF;
-          text_value := value #>> '{}';
-          RETURN position(lower(text_value) in lower(actual #>> '{}')) > 0;
-        END IF;
-        IF op = '$overlaps' THEN
-          RETURN EXISTS (
-            SELECT 1 FROM jsonb_array_elements(actual) item
-            WHERE value ? (item #>> '{}')
-          );
-        END IF;
-        IF op = '$sequenceEqual' THEN RETURN actual = value; END IF;
-        RETURN false;
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.actor_active(candidate text)
-      RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-        SELECT EXISTS (
-          SELECT 1
-          FROM "User" u
-          JOIN "ExternalIdentity" e ON e."user.id" = u."id"
-          WHERE u."id" = candidate AND e."revoked" = false
-        )
-      $$;
-
-      CREATE OR REPLACE FUNCTION basis.login_identity(
-        provider_name text,
-        provider_subject text,
-        email_address text,
-        display_name text,
-        identity_proof text
-      )
-      RETURNS text
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE
-        existing_revoked boolean;
-        existing_user text;
-        user_id text;
-        identity_id text;
-        user_name text;
-        proof_parts text[];
-        proof_secret text;
-        proof_expected text;
-        proof_expires numeric;
-      BEGIN
-        IF provider_name IS NULL OR provider_name = '' OR provider_subject IS NULL OR provider_subject = '' THEN
-          RETURN NULL;
-        END IF;
-        IF identity_proof IS NULL OR identity_proof = '' THEN RETURN NULL; END IF;
-        proof_parts := string_to_array(identity_proof, ':');
-        IF array_length(proof_parts, 1) <> 7 OR proof_parts[1] <> 'identity-enrollment' THEN RETURN NULL; END IF;
-        IF proof_parts[2] <> encode(convert_to(provider_name, 'UTF8'), 'hex') THEN RETURN NULL; END IF;
-        IF proof_parts[3] <> encode(convert_to(provider_subject, 'UTF8'), 'hex') THEN RETURN NULL; END IF;
-        IF proof_parts[4] <> current_database()::text OR proof_parts[5] <> 'v1' THEN RETURN NULL; END IF;
-        proof_expires := proof_parts[6]::numeric;
-        IF proof_expires < extract(epoch FROM now()) THEN RETURN NULL; END IF;
-        SELECT value INTO proof_secret FROM basis.secret WHERE key = 'actor';
-        IF proof_secret IS NULL THEN RETURN NULL; END IF;
-        proof_expected := encode(
-          hmac(
-            convert_to(
-              proof_parts[1] || ':' || proof_parts[2] || ':' || proof_parts[3] || ':' ||
-              proof_parts[4] || ':' || proof_parts[5] || ':' || proof_parts[6],
-              'UTF8'
-            ),
-            convert_to(proof_secret, 'UTF8'),
-            'sha256'
-          ),
-          'hex'
-        );
-        IF proof_expected <> proof_parts[7] THEN RETURN NULL; END IF;
-        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));
-        SELECT e."revoked", e."user.id" INTO existing_revoked, existing_user
-        FROM "ExternalIdentity" e
-        JOIN "User" u ON u."id" = e."user.id"
-        WHERE e."provider" = provider_name AND e."subject" = provider_subject
-        FOR UPDATE OF e;
-        IF FOUND THEN
-          IF existing_revoked THEN RETURN NULL; END IF;
-          RETURN existing_user;
-        END IF;
-        user_id := gen_random_uuid()::text;
-        user_name := coalesce(
-          nullif(display_name, ''),
-          nullif(email_address, ''),
-          provider_name || ':' || provider_subject
-        );
-        INSERT INTO "Entity" ("id", "name", "entity") VALUES (user_id, user_name, 'User');
-        INSERT INTO "User" ("id", "email", "displayName")
-          VALUES (user_id, coalesce(email_address, ''), user_name);
-        identity_id := gen_random_uuid()::text;
-        INSERT INTO "Entity" ("id", "name", "entity")
-          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');
-        INSERT INTO "ExternalIdentity" ("id", "provider", "subject", "revoked", "user.id")
-          VALUES (identity_id, provider_name, provider_subject, false, user_id);
-        RETURN user_id;
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.authorized(target_entity text, requested_action text, row_value jsonb)
-      RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-        SELECT EXISTS (
-          SELECT 1
-          FROM "Grant" g
-          JOIN "Role" r ON r."id" = g."role.id"
-          LEFT JOIN "UserRole" ur ON ur."role.id" = r."id"
-          WHERE (r."key" = 'public' OR (basis.actor_id() IS NOT NULL AND ur."user.id" = basis.actor_id()))
-            AND (
-              g."action" = requested_action
-              OR (g."action" = 'manage' AND (
-                requested_action = 'manage'
-                OR target_entity IN ('Role', 'Grant', 'UserRole', 'ExternalIdentity')
-              ))
-            )
-            AND (g."target" = '*' OR g."target" = target_entity OR EXISTS (
-              SELECT 1 FROM basis.entity_ancestor ea
-              WHERE ea.entity = target_entity AND ea.ancestor = g."target"
-            ))
-            AND (g."predicate" IS NULL OR g."predicate" = 'null'::jsonb OR basis.matches(g."predicate", row_value))
-        )
-      $$;
-
-      CREATE OR REPLACE FUNCTION basis.authorized_create(target_entity text)
-      RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-        SELECT EXISTS (
-          SELECT 1
-          FROM "Grant" g
-          JOIN "Role" r ON r."id" = g."role.id"
-          LEFT JOIN "UserRole" ur ON ur."role.id" = r."id"
-          WHERE (r."key" = 'public' OR (basis.actor_id() IS NOT NULL AND ur."user.id" = basis.actor_id()))
-            AND (
-              g."action" = 'create'
-              OR (g."action" = 'manage' AND target_entity IN ('Role', 'Grant', 'UserRole', 'ExternalIdentity'))
-            )
-            AND (g."target" = '*' OR g."target" = target_entity OR g."target" = 'Entity' OR EXISTS (
-              SELECT 1 FROM basis.entity_ancestor ea
-              WHERE ea.entity = target_entity AND ea.ancestor = g."target"
-            ))
-        )
-      $$;
-
-      CREATE OR REPLACE FUNCTION basis.create_role(role_key text, role_title text)
-      RETURNS void
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE role_id text;
-      BEGIN
-        IF NOT basis.authorized('Role', 'manage', '{}'::jsonb) THEN
-          RAISE EXCEPTION 'authorization denied: manage on Role is required';
-        END IF;
-        IF role_key !~ '^[a-z][a-z0-9_-]*$' OR role_title IS NULL OR role_title = '' THEN
-          RAISE EXCEPTION 'invalid role';
-        END IF;
-        role_id := gen_random_uuid()::text;
-        INSERT INTO "Entity" ("id", "name", "entity") VALUES (role_id, role_title, 'Role');
-        INSERT INTO "Role" ("id", "key", "title") VALUES (role_id, role_key, role_title);
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.assign_role(user_id text, role_key text)
-      RETURNS void
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE role_id text;
-      BEGIN
-        IF user_id = basis.actor_id() THEN
-          RAISE EXCEPTION 'authorization denied: self role assignment is not allowed';
-        END IF;
-        IF NOT basis.authorized('UserRole', 'manage', '{}'::jsonb) THEN
-          RAISE EXCEPTION 'authorization denied: manage on UserRole is required';
-        END IF;
-        SELECT "id" INTO role_id FROM "Role" WHERE "key" = role_key;
-        IF role_id IS NULL THEN RAISE EXCEPTION 'unknown role %', role_key; END IF;
-        INSERT INTO "UserRole" ("user.id", "role.id") VALUES (user_id, role_id)
-        ON CONFLICT DO NOTHING;
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.remove_role(user_id text, role_key text)
-      RETURNS void
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE role_id text;
-      BEGIN
-        IF NOT basis.authorized('UserRole', 'manage', '{}'::jsonb) THEN
-          RAISE EXCEPTION 'authorization denied: manage on UserRole is required';
-        END IF;
-        SELECT "id" INTO role_id FROM "Role" WHERE "key" = role_key;
-        IF role_id IS NULL THEN RAISE EXCEPTION 'unknown role %', role_key; END IF;
-        DELETE FROM "UserRole" WHERE "user.id" = user_id AND "role.id" = role_id;
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.create_grant(
-        role_key text,
-        grant_action text,
-        target_name text,
-        predicate_value jsonb
-      )
-      RETURNS void
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE role_id text;
-      DECLARE grant_id text;
-      BEGIN
-        IF grant_action = 'manage' THEN
-          RAISE EXCEPTION 'authorization denied: manage grants require explicit bootstrap';
-        END IF;
-        IF NOT basis.authorized('Grant', 'manage', '{}'::jsonb) THEN
-          RAISE EXCEPTION 'authorization denied: manage on Grant is required';
-        END IF;
-        SELECT "id" INTO role_id FROM "Role" WHERE "key" = role_key;
-        IF role_id IS NULL THEN RAISE EXCEPTION 'unknown role %', role_key; END IF;
-        grant_id := gen_random_uuid()::text;
-        INSERT INTO "Entity" ("id", "name", "entity") VALUES (grant_id, 'Grant', 'Grant');
-        INSERT INTO "Grant" ("id", "role.id", "action", "target", "predicate")
-        VALUES (grant_id, role_id, grant_action, target_name, coalesce(predicate_value, 'null'::jsonb));
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.update_grant(
-        grant_id text,
-        role_key text,
-        grant_action text,
-        target_name text,
-        predicate_value jsonb
-      )
-      RETURNS void
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE role_id text;
-      BEGIN
-        IF grant_action = 'manage' THEN
-          RAISE EXCEPTION 'authorization denied: manage grants require explicit bootstrap';
-        END IF;
-        IF NOT basis.authorized('Grant', 'manage', '{}'::jsonb) THEN
-          RAISE EXCEPTION 'authorization denied: manage on Grant is required';
-        END IF;
-        SELECT "id" INTO role_id FROM "Role" WHERE "key" = role_key;
-        IF role_id IS NULL THEN RAISE EXCEPTION 'unknown role %', role_key; END IF;
-        UPDATE "Grant"
-        SET "role.id" = role_id, "action" = grant_action, "target" = target_name,
-          "predicate" = coalesce(predicate_value, 'null'::jsonb)
-        WHERE "id" = grant_id;
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.revoke_grant(grant_id text)
-      RETURNS void
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      BEGIN
-        IF NOT basis.authorized('Grant', 'manage', '{}'::jsonb) THEN
-          RAISE EXCEPTION 'authorization denied: manage on Grant is required';
-        END IF;
-        DELETE FROM "Grant" WHERE "id" = grant_id;
-        DELETE FROM "Entity" WHERE "id" = grant_id AND "entity" = 'Grant';
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.revoke_identity(provider_name text, provider_subject text)
-      RETURNS void
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      BEGIN
-        IF NOT basis.authorized('ExternalIdentity', 'manage', '{}'::jsonb) THEN
-          RAISE EXCEPTION 'authorization denied: manage on ExternalIdentity is required';
-        END IF;
-        UPDATE "ExternalIdentity" SET "revoked" = true
-        WHERE "provider" = provider_name AND "subject" = provider_subject;
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.authorized_row(table_name text, requested_action text, row_value jsonb)
-      RETURNS boolean
-      LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE
-        leaf text;
-        part jsonb;
-        merged jsonb := '{}'::jsonb;
-        chain_table text;
-        row_id text;
-      BEGIN
-        row_id := row_value->>'id';
-        IF table_name = 'Entity' THEN
-          leaf := row_value->>'entity';
-        ELSE
-          SELECT e."entity" INTO leaf FROM "Entity" e WHERE e."id" = row_id;
-        END IF;
-        IF leaf IS NULL OR leaf = '' THEN RETURN false; END IF;
-        FOR chain_table IN
-          SELECT ancestor FROM basis.entity_ancestor
-          WHERE entity = leaf
-          ORDER BY depth DESC
-        LOOP
-          IF chain_table = 'Entity' THEN
-            SELECT to_jsonb(e) INTO part FROM "Entity" e WHERE e."id" = row_id;
-          ELSE
-            EXECUTE format('SELECT to_jsonb(t) FROM %I t WHERE t.id = $1', chain_table)
-              INTO part USING row_id;
-          END IF;
-          IF part IS NOT NULL THEN merged := merged || part; END IF;
-        END LOOP;
-        merged := merged || row_value;
-        RETURN basis.authorized(leaf, requested_action, merged);
-      END $$;
-
-      CREATE OR REPLACE FUNCTION basis.authorized_root(requested_action text, row_value jsonb)
-      RETURNS boolean
-      LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$
-      DECLARE
-        entity_name text;
-        leaf jsonb;
-      BEGIN
-        entity_name := coalesce(row_value->>'entity', '');
-        IF entity_name = '' THEN RETURN false; END IF;
-        IF requested_action = 'create' THEN
-          RETURN basis.authorized_create(entity_name);
-        END IF;
-        RETURN basis.authorized_row('Entity', requested_action, row_value);
-      END $$;`
   }
 
   /**
@@ -1181,15 +754,16 @@ export class EntityDefinitions {
    * @returns The complete ordered DDL sequence.
    */
   get ddl(): readonly string[] {
+    const schema = this.physicalSchema('basis_app', false, false)
     return [
       IDENTITY_EXTENSION_DDL,
-      ...this.tables.flatMap(tableStatements),
-      ...this.entities.map(entity => addParentConstraint(entity)),
-      ...this.entities.flatMap(entity => entity.fields
-        .filter(isReferenceField)
-        .map(field => addConstraint(entity, field))),
-      ...this.relationships.flatMap(relationshipConstraints),
-      ...lifecycleStatements(this.entities),
+      ...schema.tables.flatMap(table => [
+        table.sql,
+        ...table.indexes.map(index => index.sql),
+      ]),
+      ...schema.constraints.map(constraint => constraint.sql),
+      ...schema.functions.map(fn => fn.sql),
+      ...schema.triggers.map(trigger => trigger.sql),
     ]
   }
 
@@ -1205,61 +779,43 @@ export class EntityDefinitions {
    * @throws {Error} When a constraint or lifecycle definition does not match.
    */
   async createTables(sql: SQL): Promise<void> {
+    const schema = this.physicalSchema('basis_app', false, false)
     await sql.unsafe(IDENTITY_EXTENSION_DDL).simple()
-    for (const table of this.tables) {
+    for (const table of schema.tables) {
       const rows = await sql<{ present: boolean }[]>`
 SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_schema() AND tablename
           = ${table.name} ) AS present
       `
       const created = !rows[0]?.present
-      if (created) await sql.unsafe(createTable(table)).simple()
-      for (const index of table.indexes ?? []) {
-        if (await indexExists(sql, table.name, index)) continue
-        await sql.unsafe(createIndex(table, index)).simple()
-        if (!await indexExists(sql, table.name, index)) {
+      if (created) await sql.unsafe(table.sql).simple()
+      for (const index of table.indexes) {
+        const compatible = { ...index, columns: index.columns ?? [] } as unknown as TableIndex
+        if (await indexExists(sql, table.name, compatible)) continue
+        await sql.unsafe(index.sql).simple()
+        if (!await indexExists(sql, table.name, compatible)) {
           throw new Error(`Index "${index.name}" was not created by the canonical schema compiler`)
         }
       }
     }
 
-    for (const entity of this.entities) {
+    for (const constraint of schema.constraints) {
+      if (!constraint.column || !constraint.target) {
+        await sql.unsafe(constraint.sql).simple()
+        continue
+      }
       await reconcileForeignKey(
         sql,
-        entity.name,
-        parentConstraintName(entity),
-        'id',
-        entity.parent,
-        'id',
-        addParentConstraint(entity),
+        constraint.table,
+        constraint.name,
+        constraint.column,
+        constraint.target,
+        constraint.targetColumn ?? 'id',
+        constraint.sql,
       )
-      for (const field of entity.fields.filter(isReferenceField)) {
-        await reconcileForeignKey(
-          sql,
-          entity.name,
-          constraintName(entity, field),
-          field.column,
-          field.target,
-          'id',
-          addConstraint(entity, field),
-        )
-      }
-    }
-    for (const relationship of this.relationships) {
-      for (const constraint of relationshipForeignKeyDefinitions(relationship)) {
-        await reconcileForeignKey(
-          sql,
-          relationship.name,
-          constraint.name,
-          constraint.column,
-          constraint.target,
-          'id',
-          constraint.statement,
-        )
-      }
     }
 
-    const lifecycle = lifecycleDefinitions(this.entities)
-    for (const statement of lifecycle.functions) {
+    for (const fn of schema.functions) {
+      if (!fn.lifecycle || !fn.body) continue
       const existing = await sql<{
         body: string,
         normalFunction: boolean,
@@ -1274,24 +830,24 @@ SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_sch
           p.prosecdef AS "securityDefiner"
         FROM pg_catalog.pg_proc p
         JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-        WHERE n.nspname = current_schema() AND p.proname = ${statement.name} AND p.pronargs = 0
+        WHERE n.nspname = current_schema() AND p.proname = ${fn.name} AND p.pronargs = 0
       `
       if (!existing[0]) {
-        await sql.unsafe(statement.statement).simple()
+        await sql.unsafe(fn.sql).simple()
         continue
       }
       const currentFunction = existing[0]
       if (
-        normalizeBody(currentFunction.body) !== normalizeBody(statement.body)
+        normalizeBody(currentFunction.body) !== normalizeBody(fn.body)
         || !currentFunction.normalFunction
         || !currentFunction.plpgsql
         || !currentFunction.returnTrigger
         || currentFunction.securityDefiner
       ) {
-        throw new Error(`Existing lifecycle function "${statement.name}" does not match the canonical model`)
+        throw new Error(`Existing lifecycle function "${fn.name}" does not match the canonical model`)
       }
     }
-    for (const trigger of lifecycle.triggers) {
+    for (const trigger of schema.triggers) {
       const existing = await sql<{
         columns: string[],
         constraint: number,
@@ -1322,7 +878,7 @@ WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table
   t.tgisinternal
       `
       if (!existing[0]) {
-        await sql.unsafe(trigger.statement).simple()
+        await sql.unsafe(trigger.sql).simple()
         continue
       }
       const current = existing[0]
@@ -1331,7 +887,7 @@ WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table
         || current.enabled !== 'O'
         || current.initDeferred !== trigger.initDeferred
         || (current.constraint !== 0) !== trigger.constraint
-        || current.functionName !== trigger.function
+        || current.functionName !== trigger.functionName
         || !current.functionSchema
         || !current.noWhen
         || current.type !== trigger.type
@@ -1344,6 +900,15 @@ WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table
       }
     }
   }
+}
+
+/**
+ * Extract the bare constraint definition from an ALTER TABLE statement.
+ * @param statement - Canonical add-constraint SQL.
+ * @returns The catalog-comparable definition.
+ */
+function constraintDefinition(statement: string): string {
+  return statement.replace(/^alter table\s+\S+\s+add constraint\s+"[^"]+"\s+/iu, '')
 }
 
 /**
@@ -2284,15 +1849,6 @@ function relationshipTable(relationship: RelationshipDefinition): TableDefinitio
 }
 
 /**
- * Build the foreign-key statements for one relationship table.
- * @param relationship - Named relationship definition.
- * @returns Endpoint foreign-key statements in authored order.
- */
-function relationshipConstraints(relationship: RelationshipDefinition): readonly string[] {
-  return relationshipForeignKeyDefinitions(relationship).map(definition => definition.statement)
-}
-
-/**
  * Build foreign-key metadata for one relationship table.
  * @param relationship - Named relationship definition.
  * @returns Endpoint foreign-key definitions in authored order.
@@ -2345,18 +1901,6 @@ function identityCheck(column: string, format: IdentityFormat | undefined): stri
   end`
   if (format === 'Snowflake') return snowflake
   return `(${uuid} or ${snowflake})`
-}
-
-/**
- * Build statements for one physical table.
- * @param table - Physical table metadata.
- * @returns Its table statement followed by index statements.
- */
-function tableStatements(table: TableDefinition): readonly string[] {
-  return [
-    createTable(table),
-    ...(table.indexes ?? []).map(index => createIndex(table, index)),
-  ]
 }
 
 /**
@@ -2699,19 +2243,6 @@ function lifecycleFunction(name: string, body: string): LifecycleFunction {
     statement: `create or replace function ${quoteIdentifier(name)}() ` +
       `returns trigger language plpgsql as $$${body}$$`,
   }
-}
-
-/**
- * Build lifecycle DDL for a fresh schema.
- * @param entities - Validated entities.
- * @returns Function and trigger statements.
- */
-function lifecycleStatements(entities: readonly EntityDefinition[]): readonly string[] {
-  const definitions = lifecycleDefinitions(entities)
-  return [
-    ...definitions.functions.map(definition => definition.statement),
-    ...definitions.triggers.map(definition => definition.statement),
-  ]
 }
 
 /**

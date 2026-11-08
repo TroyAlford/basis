@@ -3,6 +3,8 @@ import { Operator as QueryOperator } from './Operator'
 
 /** The kind of one query-language token. */
 export enum TokenType {
+  /** The current actor identity shorthand. */
+  Actor = 'actor',
   /** Boolean literal. */
   Boolean = 'boolean',
   /** Object key/value separator. */
@@ -122,6 +124,17 @@ export const QueryLexer = {
       }
 
       if (character === '$') {
+        if (source.startsWith('$me', index) && !IDENTIFIER_PART.test(source[index + 3] ?? '')) {
+          tokens.push({
+            end: index + 3,
+            raw: '$me',
+            start: index,
+            type: TokenType.Actor,
+            value: '$me',
+          })
+          index += 3
+          continue
+        }
         const token = operatorToken(source, index, diagnostics)
         tokens.push(token)
         index = token.end

@@ -1,8 +1,24 @@
 export type { APIRoute } from './types/APIRoute'
 export type { HealthOptions, HealthStatus } from './apis/health'
 export { HttpVerb } from '../utilities'
-export { Authorization, Action } from './source/Authorization'
-export type { AuthorizationOptions, BootstrapResult, EffectiveGrant, GrantInput } from './source/Authorization'
+export { Authorization } from './source/Authorization'
+export { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID } from './source/Graph'
+export { DDL } from './source/Schema'
+export type {
+  PhysicalColumn, PhysicalConstraint, PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalRole,
+  PhysicalKind, PhysicalPolicy, PhysicalSchema, PhysicalTable, PhysicalTrigger,
+  PhysicalModel, PlanOptions, SchemaOperation, SchemaPlan,
+} from './source/Schema'
+export type { AuthorizationOptions, BootstrapResult, EffectiveGrant } from './source/Authorization'
+export type {
+  GrantDefinition,
+  GraphDocument,
+  GraphGrant,
+  GraphOptions,
+  GraphRole,
+  RoleDetails,
+  RoleSource,
+} from './source/Graph'
 export { NullDatabase } from './source/Database'
 export type { Database, DatabaseOptions, QueryOptions } from './source/Database'
 export { SortDirection } from './source/SortDirection'
