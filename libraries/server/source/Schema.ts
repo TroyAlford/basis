@@ -214,14 +214,98 @@ export interface SchemaOperation {
 
 /** One schema planning result. */
 export interface SchemaPlan {
+  /** Live catalog snapshot used to produce this plan. */
+  readonly actual?: PhysicalSchema,
+  /** Deterministic hash of the live catalog snapshot. */
+  readonly actualHash?: string,
   /** Unresolved rename candidates. */
   readonly ambiguities: readonly string[],
   /** Whether destructive or ambiguous drift blocks execution. */
   readonly blocked: boolean,
+  /** Desired compiled physical snapshot. */
+  readonly desired?: PhysicalSchema,
+  /** Deterministic hash of the desired physical snapshot. */
+  readonly desiredHash?: string,
   /** Drift found in the live catalog. */
   readonly drift: readonly string[],
   /** Deterministic operation graph. */
   readonly operations: readonly SchemaOperation[],
+}
+
+/** One explicit approval or replacement for a planned operation. */
+export interface MigrationResolution {
+  /** Whether the operation is approved. */
+  readonly approved: boolean,
+  /** Stable operation or ambiguity id. */
+  readonly operationId: string,
+  /** Optional reviewer rationale. */
+  readonly reason?: string,
+  /** Replacement SQL for a data, destructive, or ambiguous operation. */
+  readonly sql?: string,
+}
+
+/** Options for turning a read-only plan into an immutable migration artifact. */
+export interface MigrationReviewOptions {
+  /** Restricted application role used by security DDL. */
+  readonly appRole?: string,
+  /** Explicit resolutions for data, destructive, or ambiguous operations. */
+  readonly resolutions?: readonly MigrationResolution[],
+  /** Explicit application schema for DDL execution. */
+  readonly schema?: string,
+  /** Whether provisioning can force owner RLS. */
+  readonly superuser?: boolean,
+  /** Immutable human-readable version identifier. */
+  readonly version: string,
+}
+
+/** A reviewed, immutable migration artifact. */
+export interface MigrationArtifact {
+  /** Restricted application role used by security DDL. */
+  readonly appRole?: string,
+  /** Artifact checksum, also used as the ledger id. */
+  readonly checksum: string,
+  /** Creation timestamp for review/audit. */
+  readonly createdAt: string,
+  /** Desired physical snapshot used for post-apply verification. */
+  readonly expected: PhysicalSchema,
+  /** Deterministic operation SQL and dependency graph. */
+  readonly operations: readonly SchemaOperation[],
+  /** Plan hash before resolutions. */
+  readonly planHash: string,
+  /** Explicit application schema for DDL execution. */
+  readonly schema?: string,
+  /** Hash of the live source catalog this artifact applies to. */
+  readonly sourceHash: string,
+  /** Whether provisioning can force owner RLS. */
+  readonly superuser?: boolean,
+  /** Hash of the desired physical state. */
+  readonly targetHash: string,
+  /** Immutable version identifier. */
+  readonly version: string,
+}
+
+/** One successful migration apply result. */
+export interface MigrationApplyResult {
+  /** Whether the artifact was applied by this call. */
+  readonly applied: true,
+  /** Artifact checksum. */
+  readonly checksum: string,
+  /** Number of executed operations. */
+  readonly operationCount: number,
+  /** Verified target hash. */
+  readonly targetHash: string,
+  /** Artifact version. */
+  readonly version: string,
+}
+
+/** One schema readiness result. */
+export interface MigrationReadiness {
+  /** Concrete differences from the approved expectation. */
+  readonly discrepancies: readonly string[],
+  /** Whether the actual catalog matches the approved expectation. */
+  readonly ready: boolean,
+  /** Expected physical hash. */
+  readonly targetHash: string,
 }
 
 /** One canonical model that compiles to a physical schema. */
@@ -672,17 +756,18 @@ function desiredFunctionNamesForPlan(schema: PhysicalSchema): Set<string> {
  * @returns The deterministic plan.
  */
 export function plan(options: PlanOptions): SchemaPlan {
+  const actualSchema = stripMigrationLedger(options.actual)
   const desired = options.desired.physicalSchema(options.appRole, options.superuser)
   const compiledPrevious = options.previous?.physicalSchema(options.appRole, options.superuser)
   const previous = options.previousPhysical ?? compiledPrevious
-  const actualTables = new Map(options.actual.tables.map(table => [table.name, table]))
+  const actualTables = new Map(actualSchema.tables.map(table => [table.name, table]))
   const desiredTables = new Map(desired.tables.map(table => [table.name, table]))
   const previousTablesPhysical = new Map(previous?.tables.map(table => [table.name, table]) ?? [])
   const removedTables = new Set([...previousTablesPhysical.keys()].filter(name => !desiredTables.has(name)))
-  const actualFunctions = new Set(options.actual.functions.flatMap(fn => fn.required))
-  const actualTriggers = new Set(options.actual.triggers.map(trigger => trigger.name))
-  const actualPolicies = new Set(options.actual.policies.map(policy => policy.name))
-  const actualExtensions = new Set(options.actual.extensions)
+  const actualFunctions = new Set(actualSchema.functions.flatMap(fn => fn.required))
+  const actualTriggers = new Set(actualSchema.triggers.map(trigger => trigger.name))
+  const actualPolicies = new Set(actualSchema.policies.map(policy => policy.name))
+  const actualExtensions = new Set(actualSchema.extensions)
   const previousTriggers = new Set(previous?.triggers.map(trigger => trigger.name) ?? [])
   const previousFunctions = new Set(previous?.functions.flatMap(fn => fn.required) ?? [])
   const previousConstraints = new Set(previous?.constraints.map(constraint => constraint.name) ?? [])
@@ -696,7 +781,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   const ambiguities: string[] = []
   if (
     options.previousPhysical === undefined
-    && options.actual.policies.length > 0
+    && actualSchema.policies.length > 0
   ) {
     drift.push('historical compiled physical artifact required for existing deployment planning')
   }
@@ -717,7 +802,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   for (const extension of actualExtensions) {
     if (!desiredExtensions.has(extension)) drift.push(`unexpected extension: ${extension}`)
   }
-  const actualSchemas = new Set(options.actual.schemas ?? [])
+  const actualSchemas = new Set(actualSchema.schemas ?? [])
   for (const schema of desired.schemas ?? []) {
     if (!actualSchemas.has(schema)) {
       operations.push({
@@ -731,7 +816,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
 
-  const actualGrants = new Map((options.actual.grants ?? []).map(grant => [grant.name, grant]))
+  const actualGrants = new Map((actualSchema.grants ?? []).map(grant => [grant.name, grant]))
   const desiredGrants = new Set((desired.grants ?? []).map(grant => grant.name))
   const desiredRevokes = new Set((desired.grants ?? [])
     .filter(grant => grant.kind === 'revoke')
@@ -779,7 +864,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
 
-  const actualRoles = new Map((options.actual.roles ?? []).map(role => [role.id, role]))
+  const actualRoles = new Map((actualSchema.roles ?? []).map(role => [role.id, role]))
   const previousRoles = new Map((previous?.roles ?? []).map(role => [role.id, role]))
   const desiredRoles = new Map((desired.roles ?? []).map(role => [role.id, role]))
   for (const [id, role] of previousRoles) {
@@ -858,7 +943,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
 
-  const actualFunctionMapForBaseline = new Map(options.actual.functions.map(fn => [fn.name, fn]))
+  const actualFunctionMapForBaseline = new Map(actualSchema.functions.map(fn => [fn.name, fn]))
   for (const [name, previousTable] of previousTablesPhysical) {
     const actualTable = actualTables.get(name)
     if (!actualTable) continue
@@ -893,7 +978,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
   const actualConstraintsForBaseline = new Map(
-    options.actual.constraints.map(constraint => [constraint.name, constraint]),
+    actualSchema.constraints.map(constraint => [constraint.name, constraint]),
   )
   for (const previousConstraint of previous?.constraints ?? []) {
     const actualConstraint = actualConstraintsForBaseline.get(previousConstraint.name)
@@ -934,11 +1019,11 @@ export function plan(options: PlanOptions): SchemaPlan {
       }
     }
   }
-  const actualGrantNames = new Set((options.actual.grants ?? []).map(grant => grant.name))
+  const actualGrantNames = new Set((actualSchema.grants ?? []).map(grant => grant.name))
   for (const name of previousGrantNames) {
     if (!actualGrantNames.has(name)) drift.push(`missing deployed grant: ${name}`)
   }
-  const actualTriggerMapForBaseline = new Map(options.actual.triggers.map(trigger => [trigger.name, trigger]))
+  const actualTriggerMapForBaseline = new Map(actualSchema.triggers.map(trigger => [trigger.name, trigger]))
   for (const previousTrigger of previous?.triggers ?? []) {
     const actualTrigger = actualTriggerMapForBaseline.get(previousTrigger.name)
     if (!actualTrigger) {
@@ -952,7 +1037,7 @@ export function plan(options: PlanOptions): SchemaPlan {
       drift.push(`out-of-band trigger definition change: ${previousTrigger.name}`)
     }
   }
-  const actualPolicyMapForBaseline = new Map(options.actual.policies.map(policy => [policy.name, policy]))
+  const actualPolicyMapForBaseline = new Map(actualSchema.policies.map(policy => [policy.name, policy]))
   for (const previousPolicy of previous?.policies ?? []) {
     const actualPolicy = actualPolicyMapForBaseline.get(previousPolicy.name)
     if (!actualPolicy) {
@@ -1135,7 +1220,7 @@ export function plan(options: PlanOptions): SchemaPlan {
       }
     }
   }
-  for (const table of options.actual.tables) {
+  for (const table of actualSchema.tables) {
     if (desiredTables.has(table.name) || ambiguities.some(pair => pair.startsWith(`${table.name} ->`))) continue
     if (previousTables.has(table.name)) {
       operations.push({
@@ -1151,7 +1236,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
 
-  const actualConstraints = new Map(options.actual.constraints.map(constraint => [constraint.name, constraint]))
+  const actualConstraints = new Map(actualSchema.constraints.map(constraint => [constraint.name, constraint]))
   for (const constraint of desired.constraints) {
     const existing = actualConstraints.get(constraint.name)
     if (!existing) {
@@ -1177,12 +1262,12 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
   const desiredConstraints = new Set(desired.constraints.map(constraint => constraint.name))
-  for (const constraint of options.actual.constraints) {
+  for (const constraint of actualSchema.constraints) {
     if (desiredConstraints.has(constraint.name) || removedTables.has(constraint.table)) continue
     drift.push(`unexpected constraint: ${constraint.name}`)
   }
 
-  const actualFunctionMap = new Map(options.actual.functions.map(fn => [fn.name, fn]))
+  const actualFunctionMap = new Map(actualSchema.functions.map(fn => [fn.name, fn]))
   for (const fn of desired.functions) {
     if (!fn.required.every(name => actualFunctions.has(name))) {
       if (fn.required.some(name => previousFunctions.has(name))) {
@@ -1256,7 +1341,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
 
-  const actualTriggerMap = new Map(options.actual.triggers.map(trigger => [trigger.name, trigger]))
+  const actualTriggerMap = new Map(actualSchema.triggers.map(trigger => [trigger.name, trigger]))
   for (const trigger of desired.triggers) {
     const existing = actualTriggerMap.get(trigger.name)
     if (!existing) {
@@ -1303,7 +1388,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
   }
 
-  const actualPolicyMap = new Map(options.actual.policies.map(policy => [policy.name, policy]))
+  const actualPolicyMap = new Map(actualSchema.policies.map(policy => [policy.name, policy]))
   for (const policy of desired.policies) {
     const existing = actualPolicyMap.get(policy.name)
     if (!existing) {
@@ -1434,8 +1519,12 @@ export function plan(options: PlanOptions): SchemaPlan {
   }
   operations.splice(0, operations.length, ...ordered)
   return {
+    actual: stripMigrationLedger(actualSchema),
+    actualHash: physicalHash(actualSchema),
     ambiguities,
     blocked: ambiguities.length > 0 || drift.length > 0,
+    desired,
+    desiredHash: physicalHash(desired),
     drift,
     operations: operations.map(operation => ({
       ...operation,
@@ -1446,6 +1535,233 @@ export function plan(options: PlanOptions): SchemaPlan {
           : ['schema is writable'],
     })),
   }
+}
+
+/**
+ * Remove the migration ledger from a physical snapshot before comparing state.
+ * @param schema - Physical schema snapshot.
+ * @returns Snapshot without the ledger table.
+ */
+function stripMigrationLedger(schema: PhysicalSchema): PhysicalSchema {
+  return {
+    ...schema,
+    grants: (schema.grants ?? []).filter(grant => grant.table !== 'basis.schema_migration'),
+    schemas: (schema.schemas ?? []).filter(name => name !== 'basis'),
+    tables: schema.tables.filter(table => table.name !== 'basis.schema_migration'),
+  }
+}
+
+/**
+ * Hash one physical snapshot in a key-stable form.
+ * @param schema - Physical schema snapshot.
+ * @returns Stable SHA-256 digest.
+ */
+export function physicalHash(schema: PhysicalSchema): string {
+  return hash(JSON.stringify(stableValue(stripMigrationLedger(schema))))
+}
+
+/**
+ * Recursively order object keys for deterministic JSON.
+ * @param value - Arbitrary JSON-compatible value.
+ * @returns Stable value.
+ */
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, stableValue(child)]),
+  )
+}
+
+/**
+ * Turn a read-only plan into an immutable, reviewed migration artifact.
+ * @param planResult - The plan to review.
+ * @param options - Version and explicit resolutions.
+ * @returns The approved artifact.
+ * @throws {Error} When drift is present or required resolutions are missing.
+ */
+export function review(
+  planResult: SchemaPlan,
+  options: MigrationReviewOptions,
+): MigrationArtifact {
+  if (planResult.drift.length > 0) {
+    throw new Error(`Migration plan has blocking drift: ${planResult.drift.join('; ')}`)
+  }
+  if (!planResult.actual || !planResult.desired) {
+    throw new Error('Migration plan does not contain physical source and target snapshots')
+  }
+  if (!options.version.trim()) throw new Error('Migration version is required')
+  const resolutions = new Map<string, MigrationResolution>()
+  for (const resolution of options.resolutions ?? []) {
+    if (resolutions.has(resolution.operationId)) {
+      throw new Error(`Duplicate migration resolution for ${resolution.operationId}`)
+    }
+    resolutions.set(resolution.operationId, resolution)
+  }
+  const operations: SchemaOperation[] = []
+  for (const operation of planResult.operations) {
+    const resolution = resolutions.get(operation.id)
+    if (resolution && !resolution.approved) {
+      throw new Error(`Migration operation ${operation.id} was rejected`)
+    }
+    if (operation.risk === 'data' && (!resolution?.approved || !resolution.sql)) {
+      throw new Error(`Migration operation ${operation.id} requires an explicit approved SQL resolution`)
+    }
+    operations.push(resolution?.sql === undefined ? operation : { ...operation, sql: resolution.sql })
+  }
+  for (const ambiguity of planResult.ambiguities) {
+    const resolution = resolutions.get(`rename:${ambiguity}`)
+    if (!resolution?.approved || !resolution.sql) {
+      throw new Error(`Migration ambiguity "${ambiguity}" requires an explicit approved rename SQL resolution`)
+    }
+    operations.push({
+      dependsOn: [],
+      id: `rename:${ambiguity}`,
+      kind: 'table',
+      preconditions: ['explicit rename resolution approved'],
+      risk: 'review',
+      sql: resolution.sql,
+      target: ambiguity,
+    })
+  }
+  const artifact = {
+    appRole: options.appRole,
+    checksum: '',
+    createdAt: new Date().toISOString(),
+    expected: planResult.desired,
+    operations,
+    planHash: hash(JSON.stringify(planResult)),
+    schema: options.schema,
+    sourceHash: planResult.actualHash ?? physicalHash(planResult.actual),
+    superuser: options.superuser,
+    targetHash: planResult.desiredHash ?? physicalHash(planResult.desired),
+    version: options.version,
+  } satisfies MigrationArtifact
+  artifact.checksum = hash(JSON.stringify({
+    expected: artifact.expected,
+    operations,
+    sourceHash: artifact.sourceHash,
+    targetHash: artifact.targetHash,
+    version: artifact.version,
+  }))
+  return {
+    ...artifact,
+    checksum: artifact.checksum,
+  }
+}
+
+/**
+ * Apply one reviewed migration artifact through the administrative connection.
+ * @param sql - Trusted PostgreSQL capability with DDL privileges.
+ * @param artifact - Reviewed immutable migration artifact.
+ * @returns The apply result.
+ * @throws {Error} On source drift, duplicate application, failed SQL, or verification failure.
+ */
+export async function applyMigration(
+  sql: BunSQL,
+  artifact: MigrationArtifact,
+): Promise<MigrationApplyResult> {
+  return sql.begin(async tx => {
+    if (artifact.schema) await tx.unsafe(`SET LOCAL search_path TO ${quote(artifact.schema)}`).simple()
+    await tx`CREATE SCHEMA IF NOT EXISTS basis`
+    await tx`
+      CREATE TABLE IF NOT EXISTS basis.schema_migration (
+        id text PRIMARY KEY,
+        version text NOT NULL,
+        checksum text NOT NULL UNIQUE,
+        source_hash text NOT NULL,
+        target_hash text NOT NULL,
+        artifact jsonb NOT NULL,
+        status text NOT NULL,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended('basis.schema_migration', 0))`
+    const duplicate = await tx<{ id: string }[]>`
+      SELECT id FROM basis.schema_migration WHERE checksum = ${artifact.checksum} LIMIT 1
+    `
+    if (duplicate[0]) throw new Error(`Migration ${artifact.version} was already applied`)
+    const source = await introspect(tx)
+    if (physicalHash(source) !== artifact.sourceHash) {
+      throw new Error('Migration source catalog has drifted from the reviewed plan')
+    }
+    for (const operation of artifact.operations) {
+      if (/\bconcurrently\b/iu.test(operation.sql)) {
+        throw new Error(`Nontransactional migration operation is not supported: ${operation.id}`)
+      }
+      await tx.unsafe(operation.sql).simple()
+    }
+    const actual = stripMigrationLedger(await introspect(tx))
+    const verification = plan({
+      actual,
+      appRole: artifact.appRole,
+      desired: { physicalSchema: () => artifact.expected },
+      previousPhysical: artifact.expected,
+      superuser: artifact.superuser,
+    })
+    if (verification.drift.length > 0 || verification.operations.length > 0) {
+      throw new Error(
+        `Migration verification failed: ${[
+          ...verification.drift,
+          ...verification.operations.map(operation => operation.id),
+        ].join('; ')}`,
+      )
+    }
+    await tx`
+      INSERT INTO basis.schema_migration
+        (id, version, checksum, source_hash, target_hash, artifact, status)
+      VALUES (
+        ${artifact.checksum},
+        ${artifact.version},
+        ${artifact.checksum},
+        ${artifact.sourceHash},
+        ${artifact.targetHash},
+        ${JSON.stringify(artifact)}::jsonb,
+        'applied'
+      )
+    `
+    return {
+      applied: true,
+      checksum: artifact.checksum,
+      operationCount: artifact.operations.length,
+      targetHash: artifact.targetHash,
+      version: artifact.version,
+    }
+  })
+}
+
+/**
+ * Check whether the live catalog matches an approved migration expectation.
+ * @param sql - Connected PostgreSQL capability.
+ * @param artifact - Approved immutable migration artifact.
+ * @returns Readiness status and concrete discrepancies.
+ */
+export async function readiness(
+  sql: BunSQL,
+  artifact: MigrationArtifact,
+): Promise<MigrationReadiness> {
+  return sql.begin(async tx => {
+    if (artifact.schema) await tx.unsafe(`SET LOCAL search_path TO ${quote(artifact.schema)}`).simple()
+    const actual = stripMigrationLedger(await introspect(tx))
+    const verification = plan({
+      actual,
+      appRole: artifact.appRole,
+      desired: { physicalSchema: () => artifact.expected },
+      previousPhysical: artifact.expected,
+      superuser: artifact.superuser,
+    })
+    const discrepancies = [
+      ...verification.drift,
+      ...verification.operations.map(operation => operation.id),
+    ]
+    return {
+      discrepancies,
+      ready: discrepancies.length === 0,
+      targetHash: artifact.targetHash,
+    }
+  })
 }
 
 /**
@@ -1460,7 +1776,7 @@ export function hash(source: string): string {
 /**
  * The canonical schema-planning capability.
  */
-export const DDL = { hash, introspect, plan }
+export const DDL = { apply: applyMigration, hash, introspect, plan, readiness, review }
 
 /**
  * Normalize a function search_path setting.

@@ -47,3 +47,26 @@ The plan reports:
 - `blocked` when drift or ambiguity requires an explicit reviewed decision.
 
 Applying a plan is intentionally not part of this API. Increment C owns reviewed execution, the migration ledger, and readiness verification. `DDL.hash(source)` produces the deterministic SHA-256 source hash used by snapshots.
+
+## Reviewed migration artifacts
+
+A plan is read-only input to the migration review boundary. `DDL.review` turns it into a deterministic, checksummed artifact. Data-changing operations and unresolved renames require explicit approved SQL; a blocked plan with live drift cannot be reviewed.
+
+```ts
+const artifact = DDL.review(plan, {
+  schema: 'public',
+  version: '2026-11-08-001',
+  resolutions: [{
+    operationId: 'alter-column:Note:amount',
+    approved: true,
+    sql: 'ALTER TABLE "Note" ALTER COLUMN "amount" TYPE double precision USING "amount"::double precision',
+  }],
+})
+
+const result = await DDL.apply(adminSql, artifact)
+const status = await DDL.readiness(adminSql, artifact)
+```
+
+`DDL.apply` rechecks the approved source hash, records the artifact once in `basis.schema_migration`, executes the ordered operations transactionally, verifies the resulting physical state, and rejects duplicate or drifted application. It returns the applied version and target hash. Invalid or interrupted application rolls back before the ledger entry is written.
+
+`DDL.readiness` compares the live catalog with the artifact's expected physical state and never mutates the database. It reports concrete discrepancies and is meant for readiness checks, not automatic startup migration. Nontransactional operations are rejected explicitly rather than being executed outside the reviewed transaction.

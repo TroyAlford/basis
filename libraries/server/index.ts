@@ -3,11 +3,12 @@ export type { HealthOptions, HealthStatus } from './apis/health'
 export { HttpVerb } from '../utilities'
 export { Authorization } from './source/Authorization'
 export { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID } from './source/Graph'
-export { DDL } from './source/Schema'
+export { DDL, physicalHash } from './source/Schema'
 export type {
   PhysicalColumn, PhysicalConstraint, PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalRole,
   PhysicalKind, PhysicalPolicy, PhysicalSchema, PhysicalTable, PhysicalTrigger,
-  PhysicalModel, PlanOptions, SchemaOperation, SchemaPlan,
+  MigrationApplyResult, MigrationArtifact, MigrationReadiness, MigrationResolution,
+  MigrationReviewOptions, PhysicalModel, PlanOptions, SchemaOperation, SchemaPlan,
 } from './source/Schema'
 export type { AuthorizationOptions, BootstrapResult, EffectiveGrant } from './source/Authorization'
 export type {
