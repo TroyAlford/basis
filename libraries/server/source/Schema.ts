@@ -252,6 +252,8 @@ export interface PlanOptions {
   readonly includeAuthorization?: boolean,
   /** Previous deployed model, when available. */
   readonly previous?: PhysicalModel,
+  /** Historical compiled physical artifact supplied by the approved deployment record. */
+  readonly previousPhysical?: PhysicalSchema,
   /** Whether the provisioning connection can force owner RLS. */
   readonly superuser?: boolean,
 }
@@ -671,7 +673,8 @@ function desiredFunctionNamesForPlan(schema: PhysicalSchema): Set<string> {
  */
 export function plan(options: PlanOptions): SchemaPlan {
   const desired = options.desired.physicalSchema(options.appRole, options.superuser)
-  const previous = options.previous?.physicalSchema(options.appRole, options.superuser)
+  const previous = options.previousPhysical ??
+    options.previous?.physicalSchema(options.appRole, options.superuser)
   const actualTables = new Map(options.actual.tables.map(table => [table.name, table]))
   const desiredTables = new Map(desired.tables.map(table => [table.name, table]))
   const previousTablesPhysical = new Map(previous?.tables.map(table => [table.name, table]) ?? [])
@@ -948,7 +951,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     const actualPolicy = actualPolicyMapForBaseline.get(previousPolicy.name)
     if (!actualPolicy) {
       drift.push(`missing deployed policy: ${previousPolicy.name}`)
-    } else if (!samePolicy(previousPolicy, actualPolicy)) {
+    } else if (!sameCatalogPolicy(previousPolicy, actualPolicy)) {
       drift.push(`out-of-band policy definition change: ${previousPolicy.name}`)
     }
   }
@@ -1312,9 +1315,11 @@ export function plan(options: PlanOptions): SchemaPlan {
       })
       continue
     }
-    if (!samePolicy(policy, existing)) {
-      const previousPolicy = previous?.policies.find(candidate => candidate.name === policy.name)
-      if (previousPolicy && samePolicy(previousPolicy, existing)) {
+    const previousPolicy = previous?.policies.find(candidate => candidate.name === policy.name)
+    const generatedChange = previousPolicy !== undefined
+      && !samePolicyIdentity(previousPolicy, policy)
+    if (generatedChange) {
+      if (sameCatalogPolicy(previousPolicy, existing)) {
         operations.push({
           dependsOn: [`table:${policy.table}`],
           id: `policy:${policy.name}:replace`,
@@ -1326,6 +1331,8 @@ export function plan(options: PlanOptions): SchemaPlan {
       } else {
         drift.push(`policy definition changed: ${policy.name}`)
       }
+    } else if (!sameCatalogPolicy(policy, existing)) {
+      drift.push(`policy definition changed: ${policy.name}`)
     }
   }
   const desiredPolicyNames = new Set(desired.policies.map(policy => policy.name))
@@ -1480,12 +1487,25 @@ function sqlLiteral(value: string): string {
 }
 
 /**
- * Compare two typed policy definitions semantically.
- * @param left - Desired or previous policy.
- * @param right - Observed or desired policy.
- * @returns Whether the policy metadata is equivalent.
+ * Compare authoritative generated policy artifacts directly.
+ * @param left - Previous or desired generated policy.
+ * @param right - Other generated policy.
+ * @returns Whether the generated metadata is identical.
  */
-function samePolicy(left: PhysicalPolicy, right: PhysicalPolicy): boolean {
+function samePolicyIdentity(left: PhysicalPolicy, right: PhysicalPolicy): boolean {
+  return left.definition === right.definition
+    && left.command === right.command
+    && left.permissive === right.permissive
+    && [...left.roles ?? []].sort().join(',') === [...right.roles ?? []].sort().join(',')
+}
+
+/**
+ * Compare a compiled policy against PostgreSQL's catalog representation.
+ * @param left - Compiled policy.
+ * @param right - Catalog or compiled policy.
+ * @returns Whether the policy metadata is equivalent at the catalog boundary.
+ */
+function sameCatalogPolicy(left: PhysicalPolicy, right: PhysicalPolicy): boolean {
   const definition = left.definition === undefined || right.definition === undefined
     ? left.definition === right.definition
     : normalizePolicyDefinition(left.definition) === normalizePolicyDefinition(right.definition)

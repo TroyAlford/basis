@@ -337,6 +337,51 @@ describe('DDL schema planning', () => {
     ))).toBe(true)
   })
 
+  test('plans a generator-output change and blocks unexpected live policy drift', () => {
+    const model = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      grants: [{ action: 'read', predicate: "title = 'x'", role: 'public', target: 'Note' }],
+    })
+    const historical = model.physicalSchema('basis_app', false)
+    const policy = historical.policies.find(candidate => candidate.name === 'basis_Note_read')
+    if (!policy) throw new Error('compiled policy was not found')
+    const previousPhysical = {
+      ...historical,
+      policies: historical.policies.map(candidate => (
+        candidate.name === policy.name
+          ? { ...candidate, definition: `${candidate.definition} ` }
+          : candidate
+      )),
+    }
+    const generatedPlan = DDL.plan({
+      actual: previousPhysical,
+      appRole: 'basis_app',
+      desired: model,
+      previousPhysical,
+    })
+    expect(generatedPlan.drift).toEqual([])
+    expect(generatedPlan.operations.some(operation => (
+      operation.kind === 'policy' && operation.id === `policy:${policy.name}:replace`
+    ))).toBe(true)
+
+    const drifted = {
+      ...historical,
+      policies: historical.policies.map(candidate => (
+        candidate.name === policy.name
+          ? { ...candidate, roles: ['public'] }
+          : candidate
+      )),
+    }
+    const driftPlan = DDL.plan({
+      actual: drifted,
+      appRole: 'basis_app',
+      desired: model,
+      previousPhysical: historical,
+    })
+    expect(driftPlan.drift).toContain(`out-of-band policy definition change: ${policy.name}`)
+    expect(driftPlan.blocked).toBe(true)
+  })
+
   test('does not erase a Boolean clause after a JSON cast', () => {
     const entities = [{
       fields: [
