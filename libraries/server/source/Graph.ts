@@ -963,12 +963,13 @@ export class Graph {
       privilege: 'EXECUTE',
       sql: `GRANT EXECUTE ON FUNCTION basis.has_role(text) TO ${role}`,
     })
+    const publicFunctionGrant = functionGrant.replace(`grant:${appRole}:`, 'grant:PUBLIC:')
     grants.push({
       function: 'basis.has_role',
-      grantName: functionGrant,
+      grantName: publicFunctionGrant,
       grantee: 'PUBLIC',
       kind: 'revoke',
-      name: `revoke:${functionGrant}`,
+      name: `revoke:${publicFunctionGrant}`,
       object: 'function',
       privilege: 'EXECUTE',
       sql: 'REVOKE ALL ON FUNCTION basis.has_role(text) FROM PUBLIC',
@@ -985,12 +986,13 @@ export class Graph {
         privilege: 'EXECUTE',
         sql: `GRANT EXECUTE ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) TO ${role}`,
       })
+      const publicHelperGrant = helperGrant.replace(`grant:${appRole}:`, 'grant:PUBLIC:')
       grants.push({
         function: fn.name,
-        grantName: helperGrant,
+        grantName: publicHelperGrant,
         grantee: 'PUBLIC',
         kind: 'revoke',
-        name: `revoke:${helperGrant}`,
+        name: `revoke:${publicHelperGrant}`,
         object: 'function',
         privilege: 'EXECUTE',
         sql: `REVOKE ALL ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) FROM PUBLIC`,
@@ -1008,12 +1010,13 @@ export class Graph {
         privilege: 'EXECUTE',
         sql: `GRANT EXECUTE ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) TO ${role}`,
       })
+      const publicIdentityGrant = identityGrant.replace(`grant:${appRole}:`, 'grant:PUBLIC:')
       grants.push({
         function: fn.name,
-        grantName: identityGrant,
+        grantName: publicIdentityGrant,
         grantee: 'PUBLIC',
         kind: 'revoke',
-        name: `revoke:${identityGrant}`,
+        name: `revoke:${publicIdentityGrant}`,
         object: 'function',
         privilege: 'EXECUTE',
         sql: `REVOKE ALL ON FUNCTION ${fn.name}(${fn.signature ?? 'text'}) FROM PUBLIC`,

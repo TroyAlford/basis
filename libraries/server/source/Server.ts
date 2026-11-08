@@ -18,13 +18,15 @@ import { runAsActor } from './ActorContext'
 import { Authorization } from './Authorization'
 import { Builder } from './Builder'
 import type { Database, DatabaseOptions } from './Database'
-import { createDatabase, NullDatabase } from './Database'
+import { createDatabase, NullDatabase, openAdmin } from './Database'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
 import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
 import type { Graph } from './Graph'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
+import type { MigrationArtifact } from './Schema'
+import { DDL } from './Schema'
 import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
@@ -108,6 +110,7 @@ export class Server {
   #mounts: StaticMount[] = []
   #ready: Promise<void> = Promise.resolve()
   #readyError: Error | null = null
+  #schemaExpectation: MigrationArtifact | null = null
   #root: string = process.cwd()
   #server: BunServer<SocketData> | null = null
   #sockets = new Map<string, SocketHandlers>()
@@ -512,9 +515,7 @@ export class Server {
         })
       }
     }
-    const databaseReady = this.#database instanceof NullDatabase
-      ? Promise.resolve()
-      : this.#database.connect()
+    const databaseReady = this.#databaseReady()
 
     let routes: Bun.Serve.Routes<SocketData, string> | undefined
 
@@ -687,6 +688,20 @@ export class Server {
    */
   graph(graph: Graph): Server {
     this.#graph = graph
+    return this
+  }
+
+  /**
+   * Requires the deployed schema to match an approved migration artifact.
+   *
+   * Readiness runs through the trusted administrative connection at startup and
+   * fails closed without applying any migration. {@link DDL.readiness} performs
+   * the check; this method only wires it into startup/health.
+   * @param artifact - Approved immutable migration artifact.
+   * @returns The server.
+   */
+  migration(artifact: MigrationArtifact): Server {
+    this.#schemaExpectation = artifact
     return this
   }
 
@@ -909,6 +924,31 @@ export class Server {
     this.#ready = this.#trackReady(
       Promise.all([buildReady, databaseReady]).then(() => undefined),
     )
+  }
+
+  /**
+   * Connect the database and validate any configured schema expectation.
+   * @returns A promise that resolves when the database path is ready.
+   */
+  #databaseReady(): Promise<void> {
+    if (this.#database instanceof NullDatabase) {
+      if (this.#schemaExpectation) {
+        return Promise.reject(new Error('Schema readiness requires a database'))
+      }
+      return Promise.resolve()
+    }
+    return this.#database.connect().then(async () => {
+      if (!this.#schemaExpectation) return
+      const admin = await openAdmin(this.#database)
+      try {
+        const result = await DDL.readiness(admin.sql, this.#schemaExpectation)
+        if (!result.ready) {
+          throw new Error(`Schema readiness failed: ${result.discrepancies.join('; ')}`)
+        }
+      } finally {
+        await admin.close()
+      }
+    })
   }
 
   /**
