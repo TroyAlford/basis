@@ -137,14 +137,6 @@ export function defineEntities(document: AuthoredDocument | string): EntityDefin
   )
 }
 
-/** One generated entity product. */
-export interface GeneratedEntity {
-  /** Generated entity interface name. */
-  readonly name: string,
-  /** Generated reference type name. */
-  readonly reference: string,
-}
-
 /** Generated TypeScript source. */
 export interface GeneratedProducts {
   /** Logical Mermaid entity relationship diagram. */
@@ -190,6 +182,8 @@ export function generateTypes(definitions: EntityDefinitions): string {
     '  readonly entity: string',
     '}',
     '',
+    "export type EntityRef = Pick<Entity, 'id' | 'name' | 'entity'>",
+    '',
   ]
   for (const entity of definitions.entities) {
     lines.push(`export interface ${entity.name} extends Entity {`)
@@ -201,7 +195,6 @@ export function generateTypes(definitions: EntityDefinitions): string {
     lines.push('}')
     lines.push('')
     lines.push(`export type ${entity.name}Ref = Pick<${entity.name}, 'id' | 'name' | 'entity'>`)
-    lines.push(`export type ${entity.name}Projection = ${entity.name}`)
     lines.push('')
   }
   return lines.join('\n').trimEnd() + '\n'
@@ -280,23 +273,30 @@ export function generateErd(
     lines.push(`  ${left} ${cardinality} ${right} : ${label}`)
   }
 
-  for (const entity of definitions.entities) {
-    connect(entity.parent, entity.name, 'extends')
-    for (const field of entity.fields) {
-      if (field.type !== FieldType.Entity) continue
-      const association = definitions.association(entity.name, field.name)
-      connect(
-        field.target,
-        entity.name,
-        field.name,
-        association?.cardinality === 'One' ? '||--o|' : '||--o{',
-      )
+  if (physical) {
+    for (const constraint of physical.constraints) {
+      if (!constraint.target || !constraint.column) continue
+      connect(constraint.target, constraint.table, constraint.column)
     }
-  }
-  for (const relationship of definitions.relationships) {
-    const [left, right] = relationship.between
-    connect(left.target, relationship.name, left.field)
-    connect(right.target, relationship.name, right.field)
+  } else {
+    for (const entity of definitions.entities) {
+      connect(entity.parent, entity.name, 'extends')
+      for (const field of entity.fields) {
+        if (field.type !== FieldType.Entity) continue
+        const association = definitions.association(entity.name, field.name)
+        connect(
+          field.target,
+          entity.name,
+          field.name,
+          association?.cardinality === 'One' ? '||--o|' : '||--o{',
+        )
+      }
+    }
+    for (const relationship of definitions.relationships) {
+      const [left, right] = relationship.between
+      connect(left.target, relationship.name, left.field)
+      connect(right.target, relationship.name, right.field)
+    }
   }
   return lines.join('\n')
 }
@@ -307,7 +307,7 @@ export function generateErd(
  * @returns TypeScript type expression.
  */
 function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
-  if (field.type === FieldType.Entity) return `${field.target}Ref`
+  if (field.type === FieldType.Entity) return `${field.target}Ref | null`
   if (field.type === FieldType.Array) return `readonly ${scalarType(field.items.type)}[]`
   if (field.type === FieldType.JSON) return 'unknown'
   if (field.type === FieldType.Inverse) return 'unknown'
@@ -337,7 +337,7 @@ function scalarType(type: ScalarFieldDefinition['type']): string {
  * @returns JSON Schema fragment.
  */
 function schemaForField(field: EffectiveFieldDefinition): Record<string, unknown> {
-  if (field.type === FieldType.Entity) return { type: 'string' }
+  if (field.type === FieldType.Entity) return { type: ['string', 'null'] }
   if (field.type === FieldType.Array) return {
     items: schemaForScalar(field.items.type),
     type: 'array',
@@ -356,7 +356,7 @@ function schemaForScalar(type: ScalarFieldDefinition['type']): Record<string, un
     case FieldType.Boolean: return { type: 'boolean' }
     case FieldType.Number: return { type: 'number' }
     case FieldType.String: return { type: 'string' }
-    case FieldType.Date:
+    case FieldType.Date: return { format: 'date', type: 'string' }
     case FieldType.Timestamp: return { format: 'date-time', type: 'string' }
     case FieldType.ID: return { type: 'string' }
     default: return {}

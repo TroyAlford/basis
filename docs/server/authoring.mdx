@@ -68,23 +68,23 @@ export interface Entity {
   readonly entity: string
 }
 
+export type EntityRef = Pick<Entity, 'id' | 'name' | 'entity'>
+
 export interface User extends Entity {
   readonly entity: 'User'
   readonly email: string
 }
 
 export type UserRef = Pick<User, 'id' | 'name' | 'entity'>
-export type UserProjection = User
 
 export interface Note extends Entity {
   readonly entity: 'Note'
   readonly title: string
-  readonly owner: UserRef
+  readonly owner: UserRef | null
   readonly tags: readonly string[]
 }
 
 export type NoteRef = Pick<Note, 'id' | 'name' | 'entity'>
-export type NoteProjection = Note
 ```
 
 The `Note` output JSON Schema is:
@@ -96,7 +96,7 @@ The `Note` output JSON Schema is:
     "id": { "type": "string" },
     "name": { "type": "string" },
     "title": { "type": "string" },
-    "owner": { "type": "string" },
+    "owner": { "type": ["string", "null"] },
     "tags": { "items": { "type": "string" }, "type": "array" }
   },
   "required": ["id", "entity", "name"],
@@ -124,7 +124,7 @@ erDiagram
     string name
     string entity
     string title
-    UserRef owner
+    UserRef | null owner
     readonly string[] tags
   }
   Entity ||--o{ User : extends
@@ -151,9 +151,9 @@ erDiagram
     text owner.id
     text[] tags
   }
-  Entity ||--o{ User : extends
-  Entity ||--o{ Note : extends
-  User ||--o{ Note : owner
+  Entity ||--o{ User : id
+  Entity ||--o{ Note : id
+  User ||--o{ Note : owner.id
 ```
 
 The generated outputs are values returned from the API, not committed source files. Write them to your own `generated/` directory when your application chooses to persist them.

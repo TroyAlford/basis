@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Cardinality, defineEntities, generateErd, generateJSONSchemas, generateProducts, generateTypes } from './Authoring'
 import { EntityDefinitions, FieldType } from './EntityDefinitions'
 import { Graph } from './Graph'
@@ -24,6 +27,9 @@ const document = {
         { field: 'owner', inverse: 'notes', target: 'User', type: FieldType.Entity as const },
         { field: 'tags', items: { type: FieldType.String as const }, type: FieldType.Array as const },
         { field: 'metadata', type: FieldType.JSON as const },
+        { field: 'dueOn', type: FieldType.Date as const },
+        { field: 'createdAt', type: FieldType.Timestamp as const },
+        { field: 'subject', target: 'Entity', type: FieldType.Entity as const },
       ],
       name: 'Note',
     },
@@ -56,17 +62,54 @@ describe('typed authoring and generated products', () => {
     const second = generateProducts(definitions)
     expect(first).toEqual(second)
     expect(first.types).toContain('export interface Note extends Entity')
+    expect(first.types).toContain('export type EntityRef')
     expect(first.types).toContain('export type NoteRef')
-    expect(first.types).toContain('readonly owner: UserRef')
+    expect(first.types).toContain('readonly owner: UserRef | null')
+    expect(first.types).toContain('readonly subject: EntityRef | null')
+    expect(first.types).not.toContain('Projection')
     expect(first.schemas.Note?.output).toBeDefined()
     expect(first.schemas.Note?.create).toBeDefined()
+    expect((first.schemas.Note?.output as {
+      properties: Record<string, { format?: string, type?: unknown }>,
+    }).properties.owner?.type).toEqual(['string', 'null'])
+    expect((first.schemas.Note?.output as {
+      properties: Record<string, { format?: string }>,
+    }).properties.dueOn?.format).toBe('date')
+    expect((first.schemas.Note?.output as {
+      properties: Record<string, { format?: string }>,
+    }).properties.createdAt?.format).toBe('date-time')
     expect(first.logicalErd).toContain('erDiagram')
     expect(first.logicalErd).toContain('User ||--o{ Note : owner')
-    expect(first.physicalErd).toContain('Entity ||--o{ User : extends')
+    expect(first.physicalErd).toContain('Entity ||--o{ User : id')
     expect(first.physicalErd).toContain('Note')
     expect(generateTypes(definitions)).toBe(first.types)
     expect(generateJSONSchemas(definitions)).toEqual(first.schemas)
     expect(generateErd(definitions, 'logical')).toBe(first.logicalErd)
     expect(generateErd(definitions, 'physical')).toBe(first.physicalErd)
   })
+
+  test('emits TypeScript that compiles', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'basis-authored-types-'))
+    try {
+      const file = join(directory, 'types.ts')
+      await writeFile(file, generateTypes(defineEntities(document)))
+      const result = Bun.spawnSync({
+        cmd: [
+          process.execPath,
+          './node_modules/@typescript/native/bin/tsc',
+          '--ignoreConfig',
+          '--noEmit',
+          '--skipLibCheck',
+          '--strict',
+          file,
+        ],
+        cwd: process.cwd(),
+        stderr: 'pipe',
+        stdout: 'pipe',
+      })
+      expect(result.exitCode).toBe(0)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  }, 30_000)
 })

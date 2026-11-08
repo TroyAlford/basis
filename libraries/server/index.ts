@@ -31,7 +31,6 @@ export type {
   AuthoredRelationship,
   AuthoredRelationshipEndpoint,
   AuthoredScalarField,
-  GeneratedEntity,
   GeneratedProducts,
 } from './source/Authoring'
 export type {
