@@ -1,3 +1,4 @@
+import { renderMermaidSVG } from 'beautiful-mermaid'
 import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -69,9 +70,12 @@ describe('typed authoring and generated products', () => {
     expect(first.types).not.toContain('Projection')
     expect(first.schemas.Note?.output).toBeDefined()
     expect(first.schemas.Note?.create).toBeDefined()
-    expect((first.schemas.Note?.output as {
-      properties: Record<string, { format?: string, type?: unknown }>,
+    expect((first.schemas.Note?.create as {
+      properties: Record<string, { type?: unknown }>,
     }).properties.owner?.type).toEqual(['string', 'null'])
+    expect((first.schemas.Note?.output as {
+      properties: Record<string, { anyOf?: unknown }>,
+    }).properties.owner?.anyOf).toBeDefined()
     expect((first.schemas.Note?.output as {
       properties: Record<string, { format?: string }>,
     }).properties.dueOn?.format).toBe('date')
@@ -80,12 +84,17 @@ describe('typed authoring and generated products', () => {
     }).properties.createdAt?.format).toBe('date-time')
     expect(first.logicalErd).toContain('erDiagram')
     expect(first.logicalErd).toContain('User ||--o{ Note : owner')
+    expect(first.logicalErd).toContain('Ref owner "nullable"')
+    expect(first.logicalErd).toContain('string[] tags')
     expect(first.physicalErd).toContain('Entity ||--o{ User : id')
     expect(first.physicalErd).toContain('Note')
     expect(generateTypes(definitions)).toBe(first.types)
     expect(generateJSONSchemas(definitions)).toEqual(first.schemas)
     expect(generateErd(definitions, 'logical')).toBe(first.logicalErd)
     expect(generateErd(definitions, 'physical')).toBe(first.physicalErd)
+    const svg = renderMermaidSVG(first.logicalErd)
+    expect(svg).toContain('owner')
+    expect(svg).toContain('tags')
   })
 
   test('emits TypeScript that compiles', async () => {

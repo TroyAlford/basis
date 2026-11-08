@@ -214,18 +214,25 @@ export function generateJSONSchemas(
     update: Readonly<Record<string, unknown>>,
   }> = {}
   for (const entity of definitions.entities) {
-    const properties = {
+    const fields = entity.effectiveFields
+      .filter(field => field.name !== 'id' && field.name !== 'name' && field.name !== 'entity')
+    const base = {
       entity: { const: entity.name, type: 'string' },
       id: { type: 'string' },
       name: { type: 'string' },
-      ...Object.fromEntries(entity.effectiveFields
-        .filter(field => field.name !== 'id' && field.name !== 'name' && field.name !== 'entity')
-        .map(field => [field.name, schemaForField(field)])),
+    }
+    const input = {
+      ...base,
+      ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'input')])),
+    }
+    const output = {
+      ...base,
+      ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'output')])),
     }
     schemas[entity.name] = {
-      create: { properties, required: ['entity', 'name'], type: 'object' },
-      output: { properties, required: ['id', 'entity', 'name'], type: 'object' },
-      update: { properties, type: 'object' },
+      create: { properties: input, required: ['entity', 'name'], type: 'object' },
+      output: { properties: output, required: ['id', 'entity', 'name'], type: 'object' },
+      update: { properties: input, type: 'object' },
     }
   }
   return schemas
@@ -258,13 +265,13 @@ export function generateErd(
     for (const entity of definitions.entities) {
       lines.push(`  ${entity.name} {`)
       for (const field of entity.effectiveFields) {
-        lines.push(`    ${fieldType(field)} ${field.name}`)
+        lines.push(`    ${mermaidField(field)}`)
       }
       lines.push('  }')
     }
     for (const relationship of definitions.relationships) {
       lines.push(`  ${relationship.name} {`)
-      for (const field of relationship.fields) lines.push(`    ${fieldType(field)} ${field.name}`)
+      for (const field of relationship.fields) lines.push(`    ${mermaidField(field)}`)
       lines.push('  }')
     }
   }
@@ -334,16 +341,65 @@ function scalarType(type: ScalarFieldDefinition['type']): string {
 /**
  * Render one field's JSON Schema.
  * @param field - Effective field.
+ * @param mode - Input identifier or hydrated output shape.
  * @returns JSON Schema fragment.
  */
-function schemaForField(field: EffectiveFieldDefinition): Record<string, unknown> {
-  if (field.type === FieldType.Entity) return { type: ['string', 'null'] }
+function schemaForField(
+  field: EffectiveFieldDefinition,
+  mode: 'input' | 'output',
+): Record<string, unknown> {
+  if (field.type === FieldType.Entity) {
+    if (mode === 'input') return { type: ['string', 'null'] }
+    return {
+      anyOf: [{
+        properties: {
+          entity: field.target === 'Entity'
+            ? { type: 'string' }
+            : { const: field.target, type: 'string' },
+          id: { type: 'string' },
+          name: { type: 'string' },
+        },
+        required: ['id', 'name', 'entity'],
+        type: 'object',
+      }, { type: 'null' }],
+    }
+  }
   if (field.type === FieldType.Array) return {
     items: schemaForScalar(field.items.type),
     type: 'array',
   }
   if (field.type === FieldType.JSON) return {}
   return schemaForScalar(field.type)
+}
+
+/**
+ * Render one field using Mermaid's whitespace-delimited type/name grammar.
+ * @param field - Effective or relationship field.
+ * @returns Mermaid attribute line body.
+ */
+function mermaidField(field: EffectiveFieldDefinition | FieldDefinition): string {
+  if (field.type === FieldType.Entity) return `Ref ${field.name} "nullable"`
+  if (field.type === FieldType.Array) return `${mermaidScalar(field.items.type)}[] ${field.name}`
+  if (field.type === FieldType.JSON) return `json ${field.name}`
+  if (field.type === FieldType.Inverse) return `unknown ${field.name}`
+  return `${mermaidScalar(field.type)} ${field.name}`
+}
+
+/**
+ * Render one scalar Mermaid attribute type.
+ * @param type - Scalar field type.
+ * @returns Single-token Mermaid type.
+ */
+function mermaidScalar(type: ScalarFieldDefinition['type']): string {
+  switch (type) {
+    case FieldType.Boolean: return 'boolean'
+    case FieldType.Date: return 'date'
+    case FieldType.Number: return 'number'
+    case FieldType.String:
+    case FieldType.ID: return 'string'
+    case FieldType.Timestamp: return 'timestamptz'
+    default: return 'unknown'
+  }
 }
 
 /**

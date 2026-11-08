@@ -96,7 +96,20 @@ The `Note` output JSON Schema is:
     "id": { "type": "string" },
     "name": { "type": "string" },
     "title": { "type": "string" },
-    "owner": { "type": ["string", "null"] },
+    "owner": {
+      "anyOf": [
+        {
+          "properties": {
+            "entity": { "const": "User", "type": "string" },
+            "id": { "type": "string" },
+            "name": { "type": "string" }
+          },
+          "required": ["id", "name", "entity"],
+          "type": "object"
+        },
+        { "type": "null" }
+      ]
+    },
     "tags": { "items": { "type": "string" }, "type": "array" }
   },
   "required": ["id", "entity", "name"],
@@ -124,8 +137,8 @@ erDiagram
     string name
     string entity
     string title
-    UserRef | null owner
-    readonly string[] tags
+    Ref owner "nullable"
+    string[] tags
   }
   Entity ||--o{ User : extends
   Entity ||--o{ Note : extends
