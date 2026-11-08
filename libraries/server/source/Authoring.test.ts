@@ -97,6 +97,31 @@ describe('typed authoring and generated products', () => {
     expect(svg).toContain('tags')
   })
 
+  test('uses concrete descendants for abstract reference output discriminators', () => {
+    const abstract = defineEntities({
+      entities: [
+        { fields: [{ field: 'email', type: FieldType.String }], name: 'User' },
+        { extends: 'User', fields: [], name: 'AdminUser' },
+        {
+          fields: [{ field: 'owner', target: 'User', type: FieldType.Entity }],
+          name: 'Note',
+        },
+      ],
+    })
+    const products = generateProducts(abstract)
+    const note = products.schemas.Note?.output as {
+      properties: Record<string, { anyOf?: { properties?: Record<string, unknown> }[] }>,
+    }
+    const owner = note.properties.owner?.anyOf?.[0]?.properties?.entity as {
+      enum?: string[],
+    } | undefined
+    expect(owner?.enum).toContain('AdminUser')
+    const user = products.schemas.User?.output as {
+      properties: Record<string, { enum?: string[] }>,
+    }
+    expect(user.properties.entity.enum).toContain('AdminUser')
+  })
+
   test('emits TypeScript that compiles', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'basis-authored-types-'))
     try {

@@ -1,4 +1,4 @@
-import type { EffectiveFieldDefinition, FieldDefinition, IdentityFormat, ScalarFieldDefinition } from './EntityDefinitions'
+import type { EffectiveFieldDefinition, EntityDefinition, FieldDefinition, IdentityFormat, ScalarFieldDefinition } from './EntityDefinitions'
 import { EntityDefinitions, FieldType } from './EntityDefinitions'
 
 /** Navigation cardinality accepted by typed authoring. */
@@ -217,17 +217,18 @@ export function generateJSONSchemas(
     const fields = entity.effectiveFields
       .filter(field => field.name !== 'id' && field.name !== 'name' && field.name !== 'entity')
     const base = {
-      entity: { const: entity.name, type: 'string' },
+      entity: discriminatorSchema(entity, definitions, 'input'),
       id: { type: 'string' },
       name: { type: 'string' },
     }
     const input = {
       ...base,
-      ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'input')])),
+      ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'input', definitions)])),
     }
     const output = {
       ...base,
-      ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'output')])),
+      entity: discriminatorSchema(entity, definitions, 'output'),
+      ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'output', definitions)])),
     }
     schemas[entity.name] = {
       create: { properties: input, required: ['entity', 'name'], type: 'object' },
@@ -342,20 +343,20 @@ function scalarType(type: ScalarFieldDefinition['type']): string {
  * Render one field's JSON Schema.
  * @param field - Effective field.
  * @param mode - Input identifier or hydrated output shape.
+ * @param definitions - Canonical definitions for concrete discriminator schemas.
  * @returns JSON Schema fragment.
  */
 function schemaForField(
   field: EffectiveFieldDefinition,
   mode: 'input' | 'output',
+  definitions: EntityDefinitions,
 ): Record<string, unknown> {
   if (field.type === FieldType.Entity) {
     if (mode === 'input') return { type: ['string', 'null'] }
     return {
       anyOf: [{
         properties: {
-          entity: field.target === 'Entity'
-            ? { type: 'string' }
-            : { const: field.target, type: 'string' },
+          entity: discriminatorSchemaForTarget(field.target, definitions, 'output'),
           id: { type: 'string' },
           name: { type: 'string' },
         },
@@ -370,6 +371,73 @@ function schemaForField(
   }
   if (field.type === FieldType.JSON) return {}
   return schemaForScalar(field.type)
+}
+
+/**
+ * Render the output discriminator for one concrete or abstract entity.
+ * @param entity - Entity whose output is being described.
+ * @param definitions - Canonical definitions.
+ * @param mode - Input or hydrated output schema mode.
+ * @returns JSON Schema for the entity discriminator.
+ */
+function discriminatorSchema(
+  entity: EntityDefinition,
+  definitions: EntityDefinitions,
+  mode: 'input' | 'output',
+): Record<string, unknown> {
+  if (mode === 'input' || !entity.abstract) return { const: entity.name, type: 'string' }
+  return discriminatorSchemaForTarget(entity.name, definitions, mode)
+}
+
+/**
+ * Render a concrete-discriminator schema for a reference target.
+ * @param target - Referenced entity name.
+ * @param definitions - Canonical definitions.
+ * @param mode - Input or hydrated output schema mode.
+ * @returns JSON Schema for the target discriminator.
+ */
+function discriminatorSchemaForTarget(
+  target: string,
+  definitions: EntityDefinitions,
+  mode: 'input' | 'output',
+): Record<string, unknown> {
+  if (target === 'Entity') return { type: 'string' }
+  const entity = definitions.entity(target)
+  if (!entity || mode === 'input' || !entity.abstract) {
+    return { const: target, type: 'string' }
+  }
+  const descendants = concreteDescendants(definitions, target)
+  return descendants.length === 0
+    ? { type: 'string' }
+    : { enum: descendants, type: 'string' }
+}
+
+/**
+ * Collect concrete descendants of one entity.
+ * @param definitions - Canonical definitions.
+ * @param parent - Parent entity name.
+ * @returns Concrete descendant names.
+ */
+function concreteDescendants(definitions: EntityDefinitions, parent: string): string[] {
+  return definitions.entities
+    .filter(entity => !entity.abstract && isDescendantOf(definitions, entity.name, parent))
+    .map(entity => entity.name)
+}
+
+/**
+ * Whether an entity descends from another entity.
+ * @param definitions - Canonical definitions.
+ * @param name - Candidate entity.
+ * @param parent - Ancestor entity.
+ * @returns Whether the candidate descends from the ancestor.
+ */
+function isDescendantOf(definitions: EntityDefinitions, name: string, parent: string): boolean {
+  let current = definitions.entity(name)
+  while (current && current.parent !== 'Entity') {
+    if (current.parent === parent) return true
+    current = definitions.entity(current.parent)
+  }
+  return false
 }
 
 /**
