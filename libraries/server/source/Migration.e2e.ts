@@ -63,6 +63,46 @@ describe('Reviewed schema evolution', () => {
     }, { fresh: true })
   }, 120_000)
 
+  test('requires an explicit approved resolution for a rename ambiguity', async () => {
+    const previous = EntityDefinitions.load(JSON.stringify({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'OldNote' }],
+    }))
+    const desired = EntityDefinitions.load(JSON.stringify({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'NewNote' }],
+    }))
+    await withIsolatedDatabase('migration-rename', async database => {
+      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
+      const empty = await DDL.introspect(database.sql)
+      const first = DDL.review(DDL.plan({ actual: empty, desired: previous }), {
+        schema: database.schema,
+        version: '001-old',
+      })
+      await DDL.apply(database.sql, first)
+      await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual,
+        desired,
+        previous,
+        previousPhysical: previous.physicalSchema('basis_app', false),
+      })
+      expect(plan.ambiguities).toContain('OldNote -> NewNote')
+      expect(() => DDL.review(plan, { schema: database.schema, version: '002-new' }))
+        .toThrow('requires an explicit approved rename SQL resolution')
+      const artifact = DDL.review(plan, {
+        resolutions: [{
+          approved: true,
+          operationId: 'rename:OldNote -> NewNote',
+          sql: 'ALTER TABLE "OldNote" RENAME TO "NewNote"',
+        }],
+        schema: database.schema,
+        version: '002-new',
+      })
+      expect(artifact.operations.some(operation => operation.id === 'rename:OldNote -> NewNote'))
+        .toBe(true)
+    }, { fresh: true })
+  }, 120_000)
+
   test('applies an additive transition from a reviewed previous artifact', async () => {
     const previous = model('Note')
     const desired = model('Note', 'Tag')
