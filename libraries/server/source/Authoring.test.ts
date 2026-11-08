@@ -120,6 +120,15 @@ describe('typed authoring and generated products', () => {
       properties: Record<string, { enum?: string[] }>,
     }
     expect(user.properties.entity.enum).toContain('AdminUser')
+    const userCreate = products.schemas.User?.create as {
+      properties: Record<string, { const?: string, enum?: string[] }>,
+    }
+    expect(userCreate.properties.entity.enum).toContain('AdminUser')
+    expect(userCreate.properties.entity.const).toBeUndefined()
+    const userUpdate = products.schemas.User?.update as {
+      properties: Record<string, { const?: string, enum?: string[] }>,
+    }
+    expect(userUpdate.properties.entity.enum).toContain('AdminUser')
   })
 
   test('emits assignable abstract reference types', async () => {

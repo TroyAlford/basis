@@ -220,7 +220,7 @@ export function generateJSONSchemas(
     const fields = entity.effectiveFields
       .filter(field => field.name !== 'id' && field.name !== 'name' && field.name !== 'entity')
     const base = {
-      entity: discriminatorSchema(entity, definitions, 'input'),
+      entity: discriminatorSchema(entity, definitions),
       id: { type: 'string' },
       name: { type: 'string' },
     }
@@ -230,7 +230,7 @@ export function generateJSONSchemas(
     }
     const output = {
       ...base,
-      entity: discriminatorSchema(entity, definitions, 'output'),
+      entity: discriminatorSchema(entity, definitions),
       ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'output', definitions)])),
     }
     schemas[entity.name] = {
@@ -359,7 +359,7 @@ function schemaForField(
     return {
       anyOf: [{
         properties: {
-          entity: discriminatorSchemaForTarget(field.target, definitions, 'output'),
+          entity: discriminatorSchemaForTarget(field.target, definitions),
           id: { type: 'string' },
           name: { type: 'string' },
         },
@@ -380,33 +380,29 @@ function schemaForField(
  * Render the output discriminator for one concrete or abstract entity.
  * @param entity - Entity whose output is being described.
  * @param definitions - Canonical definitions.
- * @param mode - Input or hydrated output schema mode.
  * @returns JSON Schema for the entity discriminator.
  */
 function discriminatorSchema(
   entity: EntityDefinition,
   definitions: EntityDefinitions,
-  mode: 'input' | 'output',
 ): Record<string, unknown> {
-  if (mode === 'input' || !entity.abstract) return { const: entity.name, type: 'string' }
-  return discriminatorSchemaForTarget(entity.name, definitions, mode)
+  if (!entity.abstract) return { const: entity.name, type: 'string' }
+  return discriminatorSchemaForTarget(entity.name, definitions)
 }
 
 /**
  * Render a concrete-discriminator schema for a reference target.
  * @param target - Referenced entity name.
  * @param definitions - Canonical definitions.
- * @param mode - Input or hydrated output schema mode.
  * @returns JSON Schema for the target discriminator.
  */
 function discriminatorSchemaForTarget(
   target: string,
   definitions: EntityDefinitions,
-  mode: 'input' | 'output',
 ): Record<string, unknown> {
   if (target === 'Entity') return { type: 'string' }
   const entity = definitions.entity(target)
-  if (!entity || mode === 'input' || !entity.abstract) {
+  if (!entity || !entity.abstract) {
     return { const: target, type: 'string' }
   }
   const descendants = concreteDescendants(definitions, target)
