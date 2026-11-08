@@ -122,6 +122,44 @@ describe('typed authoring and generated products', () => {
     expect(user.properties.entity.enum).toContain('AdminUser')
   })
 
+  test('emits assignable abstract reference types', async () => {
+    const abstract = defineEntities({
+      entities: [
+        { fields: [{ field: 'email', type: FieldType.String }], name: 'User' },
+        { extends: 'User', fields: [], name: 'AdminUser' },
+        {
+          fields: [{ field: 'owner', target: 'User', type: FieldType.Entity }],
+          name: 'Note',
+        },
+      ],
+    })
+    const directory = await mkdtemp(join(tmpdir(), 'basis-abstract-types-'))
+    try {
+      const file = join(directory, 'types.ts')
+      await writeFile(file, [
+        generateTypes(abstract),
+        "const owner: Note['owner'] = { entity: 'AdminUser', id: '1', name: 'Admin' }",
+      ].join('\n'))
+      const result = Bun.spawnSync({
+        cmd: [
+          process.execPath,
+          './node_modules/@typescript/native/bin/tsc',
+          '--ignoreConfig',
+          '--noEmit',
+          '--skipLibCheck',
+          '--strict',
+          file,
+        ],
+        cwd: process.cwd(),
+        stderr: 'pipe',
+        stdout: 'pipe',
+      })
+      expect(result.exitCode).toBe(0)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  }, 30_000)
+
   test('emits TypeScript that compiles', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'basis-authored-types-'))
     try {

@@ -187,7 +187,10 @@ export function generateTypes(definitions: EntityDefinitions): string {
   ]
   for (const entity of definitions.entities) {
     lines.push(`export interface ${entity.name} extends Entity {`)
-    lines.push(`  readonly entity: '${entity.name}'`)
+    const discriminator = entity.abstract
+      ? concreteDescendants(definitions, entity.name).map(name => `'${name}'`).join(' | ')
+      : `'${entity.name}'`
+    lines.push(`  readonly entity: ${discriminator || 'string'}`)
     for (const field of entity.effectiveFields) {
       if (field.name === 'id' || field.name === 'name' || field.name === 'entity') continue
       lines.push(`  readonly ${field.name}: ${fieldType(field)}`)
