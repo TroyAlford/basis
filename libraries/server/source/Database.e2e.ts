@@ -190,7 +190,7 @@ describe('Server database lifecycle', () => {
         expect(await a.db.sql<{ present: boolean }[]>`
           SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm' ) AS present
         `).toEqual([{ present: false }])
-        await installSchema(a.db.sql, aEntities)
+        await installSchema(a.db.sql, aEntities, { schema: 'public' })
         expect(await a.db.sql<{ present: boolean }[]>`
           SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm' ) AS present
         `).toEqual([{ present: true }])
