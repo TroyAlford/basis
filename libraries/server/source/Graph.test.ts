@@ -22,6 +22,16 @@ const graph = new Graph({
   },
 })
 
+/**
+ * Read the compiled identity-enrollment function.
+ * @param model - Graph to inspect.
+ * @returns Its enrollment SQL.
+ */
+function enrollSql(model: Graph): string {
+  return model.physicalSchema('basis_app', false).functions
+    .find(fn => fn.name === 'basis.enroll_identity')?.sql ?? ''
+}
+
 describe('Graph', () => {
   test('compiles root grants from the canonical identity fields', () => {
     const rootGraph = new Graph({
@@ -90,10 +100,26 @@ describe('Graph', () => {
     expect(overridden.definitions.concreteDescendants('User').map(entity => entity.name))
       .toEqual(['AdminUser'])
     expect(overridden.definitions.isA('AdminUser', 'User')).toBe(true)
-    expect(overridden.userLeaf()).toBe('AdminUser')
-    expect(plain.userLeaf()).toBe('User')
     expect(overridden.definitions.relationship('UserRole')?.between.map(endpoint => endpoint.target))
       .toContain('User')
+    expect(enrollSql(plain)).toContain('INSERT INTO "User"')
+    expect(enrollSql(overridden)).toContain('INSERT INTO "AdminUser"')
+  })
+
+  test('does not choose among multiple concrete User descendants', () => {
+    const ambiguous = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        { extends: 'User', fields: [], name: 'AdminUser' },
+        { extends: 'User', fields: [], name: 'CustomerUser' },
+      ],
+    })
+    const sql = enrollSql(ambiguous)
+    expect(sql).toContain('FROM "ExternalIdentity"')
+    expect(sql).toContain('RAISE EXCEPTION')
+    expect(sql).toContain('multiple concrete User descendants: AdminUser, CustomerUser')
+    expect(sql).not.toContain('INSERT INTO "AdminUser"')
+    expect(sql).not.toContain('INSERT INTO "CustomerUser"')
   })
 
   test('validates the complete cross-fragment graph once', () => {

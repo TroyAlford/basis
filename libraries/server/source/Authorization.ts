@@ -1,10 +1,8 @@
 import type { SQL as BunSQL } from 'bun'
-import { randomUUID } from 'node:crypto'
 import { currentActor } from './ActorContext'
-import type { AdminConnection, Database } from './Database'
+import type { Database } from './Database'
 import { openAdmin } from './Database'
-import type { EntityDefinitions, QueryFieldDefinition } from './EntityDefinitions'
-import { FieldType } from './EntityDefinitions'
+import type { EntityDefinitions } from './EntityDefinitions'
 import type { Graph } from './Graph'
 import { Action, ADMIN_ROLE_ID, PUBLIC_ROLE_ID } from './Graph'
 import type { Filter } from './Predicate'
@@ -122,12 +120,11 @@ export class Authorization {
       await this.#seedRoles(admin.sql)
       let userId: string | null = null
       if (options.provider && options.subject) {
-        userId = await enrollIdentityWithAdmin(
-          admin,
+        userId = await this.#enrollIdentityWithSql(
+          admin.sql,
           options.provider,
           options.subject,
           options,
-          this.graph.userLeaf(),
         )
         if (userId) {
           const role = this.graph.role(options.role ?? ADMIN_ROLE_ID)
@@ -149,8 +146,8 @@ export class Authorization {
    * Map a provider identity to a canonical User, creating it once.
    *
    * The trusted server verifies the provider assertion before calling this
-   * method. Identity creation uses the short-lived administrative connection,
-   * never the restricted request role.
+   * method. OAuth uses the restricted application path; bootstrap invokes the
+   * same security-definer function through its administrative connection.
    * @param provider - Provider slug.
    * @param subject - Stable provider subject.
    * @param profile - Optional email and display name.
@@ -163,17 +160,32 @@ export class Authorization {
     subject: string,
     profile: { readonly displayName?: string, readonly email?: string } = {},
   ): Promise<string | null> {
-    return this.#database.tx(async tx => {
-      const rows = await tx<{ id: string | null }[]>`
-        SELECT basis.enroll_identity(
-          ${provider},
-          ${subject},
-          ${profile.displayName ?? null},
-          ${profile.email ?? null}
-        ) AS "id"
-      `
-      return rows[0]?.id ?? null
-    })
+    return this.#database.tx(tx => this.#enrollIdentityWithSql(tx, provider, subject, profile))
+  }
+
+  /**
+   * Execute the canonical enrollment function on one SQL connection.
+   * @param sql - Transaction, request, or administrative SQL connection.
+   * @param provider - Provider slug.
+   * @param subject - Stable provider subject.
+   * @param profile - Optional email and display name.
+   * @param profile.displayName - Human-readable name.
+   * @param profile.email - Email address.
+   * @returns The canonical User id, or null when revoked.
+   */
+  async #enrollIdentityWithSql(
+    sql: BunSQL,
+    provider: string,
+    subject: string,
+    profile: { readonly displayName?: string, readonly email?: string } = {},
+  ): Promise<string | null> {
+    const rows = await sql<{ id: string | null }[]>`
+SELECT basis.enroll_identity(${provider},
+  ${subject},
+  ${profile.displayName ?? null},
+  ${profile.email ?? null} ) AS "id"
+    `
+    return rows[0]?.id ?? null
   }
 
   /**
@@ -324,119 +336,4 @@ export class Authorization {
       }
     })
   }
-}
-
-/**
- * Enroll a provider assertion that the server has already verified.
- * @param database - Restricted database capability.
- * @param provider - Verified provider slug.
- * @param subject - Verified stable provider subject.
- * @param profile - Optional email and display name.
- * @param profile.displayName - Human-readable name.
- * @param profile.email - Email address.
- * @returns The canonical User id, or null when the binding is revoked.
- */
-export async function enrollIdentity(
-  database: Database,
-  provider: string,
-  subject: string,
-  profile: { readonly displayName?: string, readonly email?: string } = {},
-): Promise<string | null> {
-  return database.tx(async sql => {
-    const rows = await sql<{ id: string | null }[]>`
-SELECT basis.enroll_identity(${provider},
-  ${subject},
-  ${profile.displayName ?? null},
-  ${profile.email ?? null} ) AS "id"
-    `
-    return rows[0]?.id ?? null
-  })
-}
-
-/**
- * Enroll a verified provider subject through the bootstrap connection.
- * @param admin - Short-lived administrative connection.
- * @param provider - Provider slug.
- * @param subject - Stable provider subject.
- * @param profile - Optional identity profile.
- * @param profile.displayName - Human-readable name.
- * @param profile.email - Email address.
- * @param userEntity - Concrete canonical User leaf table.
- * @returns Canonical User id, or null when revoked.
- */
-async function enrollIdentityWithAdmin(
-  admin: AdminConnection,
-  provider: string,
-  subject: string,
-  profile: { readonly displayName?: string, readonly email?: string } = {},
-  userEntity = 'User',
-): Promise<string | null> {
-  if (!provider || !subject) return null
-  const sql = admin.sql
-  return sql.begin(async tx => {
-    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`${provider}:${subject}`}, 0))`
-    const [existing] = await tx<{ id: string, revoked: boolean }[]>`
-      SELECT e."user.id" AS id, e."revoked" AS revoked
-      FROM "ExternalIdentity" e
-      WHERE e."provider" = ${provider} AND e."subject" = ${subject}
-      FOR UPDATE
-    `
-    if (existing) return existing.revoked ? null : existing.id
-    const userId = randomUUID()
-    const name = profile.displayName || profile.email || `${provider}:${subject}`
-    await tx`
-      INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${userId}, ${name}, ${userEntity})
-    `
-    const user = await userFields(tx)
-    const columns = ['"id"', ...user.map(field => `"${field.name.replaceAll('"', '""')}"`)]
-    const values = [userId, ...user.map(field => (field.name === 'email' ? profile.email ?? '' : ''))]
-    const placeholders = values.map((_value, index) => `$${index + 1}`).join(', ')
-    await tx.unsafe(`INSERT INTO "User" (${columns.join(', ')}) VALUES (${placeholders})`, values)
-    if (userEntity !== 'User') {
-      await tx.unsafe(`INSERT INTO ${quoteName(userEntity)} ("id") VALUES ($1)`, [userId])
-    }
-    const identityId = randomUUID()
-    await tx`
-      INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${identityId}, ${`${provider}:${subject}`}, 'ExternalIdentity')
-    `
-    await tx`
-      INSERT INTO "ExternalIdentity" ("id", "provider", "subject", "revoked", "user.id")
-      VALUES (${identityId}, ${provider}, ${subject}, false, ${userId})
-    `
-    return userId
-  })
-}
-
-/**
- * Quote one PostgreSQL identifier.
- * @param name - Identifier text.
- * @returns Quoted identifier.
- */
-function quoteName(name: string): string {
-  return `"${name.replaceAll('"', '""')}"`
-}
-
-/**
- * Discover optional application User fields that can receive provider profile data.
- * @param sql - Transaction client.
- * @returns Fields other than `id`.
- */
-async function userFields(sql: BunSQL): Promise<readonly QueryFieldDefinition[]> {
-  const rows = await sql<{ field: string, type: string }[]>`
-    SELECT column_name AS field, data_type AS type
-    FROM information_schema.columns
-    WHERE table_schema NOT IN ('pg_catalog',
-      'information_schema') AND table_name = 'User' AND column_name <> 'id'
-    ORDER BY ordinal_position
-  `
-  return rows.map(row => ({
-    name: row.field,
-    type: row.type === 'boolean'
-      ? FieldType.Boolean
-      : row.type === 'text'
-        ? FieldType.String
-        : FieldType.JSON,
-  } as QueryFieldDefinition))
 }

@@ -663,9 +663,15 @@ export class Server {
     const flow = new OAuth({
       ...options,
       identity: async accessToken => {
-        const subject = await resolve(accessToken)
-        if (subject === null || !this.#authorization) return subject
-        return this.#authorization.enrollIdentity(provider, subject)
+        const resolved = await resolve(accessToken)
+        if (resolved === null || !this.#authorization) return resolved
+        const subject = typeof resolved === 'string' ? resolved : resolved.subject
+        const profile: { displayName?: string, email?: string } = {}
+        if (typeof resolved !== 'string') {
+          if (resolved.displayName !== undefined) profile.displayName = resolved.displayName
+          if (resolved.email !== undefined) profile.email = resolved.email
+        }
+        return this.#authorization.enrollIdentity(provider, subject, profile)
       },
     })
     this.identity(options.session)

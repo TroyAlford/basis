@@ -60,7 +60,9 @@ await server.auth!.assignRole(userId, 'editor')
 await server.auth!.removeRole(userId, 'editor')
 ```
 
-`bootstrap()` is an explicit trusted operator action. It creates/reconciles the schema, seeds the graph roles, creates the first identity through the administrative connection, and adds the initial administrator membership. Never call it from an ordinary request handler, and never grant administration on first OAuth login automatically.
+`bootstrap()` is an explicit trusted operator action. It creates/reconciles the schema, seeds the graph roles, invokes the same canonical `basis.enroll_identity` function used by OAuth, and adds the initial administrator membership. Never call it from an ordinary request handler, and never grant administration on first OAuth login automatically.
+
+Automatic creation of a new `User` requires exactly one concrete `User` descendant. A graph may declare multiple concrete User subtypes for application-managed accounts; existing provider bindings still resolve, but a new automatic signup raises an explicit ambiguity error instead of choosing by declaration order. Enrollment supplies the canonical root name and the optional `User.email` value only; OAuth receives those profile values from the provider `identity` callback. It does not synthesize application-owned fields. If the selected User or one of its concrete subtypes has a required field that the enrollment call does not provide, PostgreSQL rejects creation and leaves no partial identity behind.
 
 ## Grants and predicates
 
@@ -127,6 +129,6 @@ The administrative connection is not available to ordinary handlers. The applica
 
 `server.auth!.can(action, target, row?)` executes the compiled policy expression and returns whether PostgreSQL permits the action for the current request actor. `server.auth!.effective(userId)` lists graph grants effective for a user, including Public grants. `server.auth!.revokeIdentity(provider, subject)` revokes a provider binding.
 
-Identity resolution and enrollment use narrow system-owned security-definer functions through the restricted application path; they do not require the owner credential at request time. Provider subjects are never treated as canonical entity ids, and revoked bindings fail closed. The administrative connection remains reserved for explicit bootstrap and schema provisioning.
+Identity resolution and enrollment use one narrow system-owned security-definer function. OAuth calls it through the restricted application path; `bootstrap()` invokes the same function through its administrative connection. Request-time enrollment does not require the owner credential. Provider subjects are never treated as canonical entity ids, and revoked bindings fail closed. The administrative connection remains reserved for explicit bootstrap and schema provisioning.
 
 The graph's roles, grants, RLS policies, schemas, indexes, and security functions are part of the typed physical schema compiled by `Graph.physicalSchema` and planned by `DDL.plan`. See [Schema Inspection & Planning](./schema.mdx).
