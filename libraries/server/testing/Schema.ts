@@ -36,22 +36,31 @@ export async function installSchema(
   desired: PhysicalModel,
   options: InstallSchemaOptions = {},
 ): Promise<ReturnType<typeof DDL.review>> {
-  const actual = await DDL.introspect(sql)
-  const plan = DDL.plan({
-    actual,
-    appRole: options.appRole,
-    desired,
-    previous: options.previous,
-    previousPhysical: options.previousPhysical,
-    superuser: options.superuser,
-  })
-  const artifact = DDL.review(plan, {
-    appRole: options.appRole,
-    resolutions: options.resolutions,
-    schema: options.schema,
-    superuser: options.superuser,
-    version: options.version ?? `test-${randomUUID()}`,
-  })
-  if (artifact.operations.length > 0) await DDL.apply(sql, artifact)
-  return artifact
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const actual = await DDL.introspect(sql)
+      const plan = DDL.plan({
+        actual,
+        appRole: options.appRole,
+        desired,
+        previous: options.previous,
+        previousPhysical: options.previousPhysical,
+        superuser: options.superuser,
+      })
+      const artifact = DDL.review(plan, {
+        appRole: options.appRole,
+        resolutions: options.resolutions,
+        schema: options.schema,
+        superuser: options.superuser,
+        version: options.version ?? `test-${randomUUID()}`,
+      })
+      if (artifact.operations.length > 0) await DDL.apply(sql, artifact)
+      return artifact
+    } catch (error) {
+      const starting = typeof error === 'object' && error !== null
+        && (error as { errno?: string }).errno === '57P03'
+      if (!starting || attempt >= 3) throw error
+      await new Promise(resolve => setTimeout(resolve, 1_000))
+    }
+  }
 }
