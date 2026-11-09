@@ -641,14 +641,9 @@ export class Graph {
   }
 
   #identityFunctions(): PhysicalFunction[] {
-    const userEntity = this.userLeaf()
+    const userLeaves = this.definitions.concreteDescendants('User')
     const userFields = this.definitions.entity('User')?.effectiveFields ?? []
     const email = userFields.some(field => field.name === 'email')
-    const userColumns = ['"id"', ...(email ? ['"email"'] : [])].join(', ')
-    const userValues = email ? 'user_id, coalesce(email_address, \'\')' : 'user_id'
-    const leafInsert = userEntity === 'User'
-      ? ''
-      : `INSERT INTO ${quoteIdentifier(userEntity)} ("id") VALUES (user_id);`
     const functions: PhysicalFunction[] = []
     const resolveSql = `
       CREATE OR REPLACE FUNCTION basis.resolve_identity(candidate text)
@@ -674,7 +669,29 @@ export class Graph {
       signature: 'candidate text',
       sql: resolveSql,
     })
-    const enrollSql = `
+    const enrollSql = userLeaves.length === 1
+      ? this.#enrollSql(userLeaves[0].name, email)
+      : this.#ambiguousEnrollSql(userLeaves.map(entity => entity.name))
+    functions.push({
+      body: /\$\$([\s\S]*?)\$\$/u.exec(enrollSql)?.[1]?.trim() ?? '',
+      lifecycle: false,
+      name: 'basis.enroll_identity',
+      required: ['basis.enroll_identity'],
+      searchPath: this.#searchPath(),
+      securityDefiner: true,
+      signature: 'provider_name text, provider_subject text, display_name text, email_address text',
+      sql: enrollSql,
+    })
+    return functions
+  }
+
+  #enrollSql(userEntity: string, email: boolean): string {
+    const userColumns = ['"id"', ...(email ? ['"email"'] : [])].join(', ')
+    const userValues = email ? 'user_id, email_address' : 'user_id'
+    const leafInsert = userEntity === 'User'
+      ? ''
+      : `INSERT INTO ${quoteIdentifier(userEntity)} ("id") VALUES (user_id);`
+    return `
       CREATE OR REPLACE FUNCTION basis.enroll_identity(
         provider_name text,
         provider_subject text,
@@ -720,25 +737,25 @@ export class Graph {
         RETURN user_id;
       END $$;
     `
-    functions.push({
-      body: /\$\$([\s\S]*?)\$\$/u.exec(enrollSql)?.[1]?.trim() ?? '',
-      lifecycle: false,
-      name: 'basis.enroll_identity',
-      required: ['basis.enroll_identity'],
-      searchPath: this.#searchPath(),
-      securityDefiner: true,
-      signature: 'provider_name text, provider_subject text, display_name text, email_address text',
-      sql: enrollSql,
-    })
-    return functions
   }
 
-  /**
-   * Resolve the concrete canonical User leaf table.
-   * @returns The User table or its first concrete descendant.
-   */
-  userLeaf(): string {
-    return this.definitions.concreteDescendants('User')[0]?.name ?? 'User'
+  #ambiguousEnrollSql(userLeaves: readonly string[]): string {
+    const detail = userLeaves.length === 0
+      ? 'no concrete User descendants'
+      : `multiple concrete User descendants: ${userLeaves.join(', ')}`
+    return `
+      CREATE OR REPLACE FUNCTION basis.enroll_identity(
+        provider_name text,
+        provider_subject text,
+        display_name text,
+        email_address text
+      )
+      RETURNS text
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
+      BEGIN
+        RAISE EXCEPTION ${literal(`Basis identity enrollment is ambiguous: ${detail}`)};
+      END $$;
+    `
   }
 
   #policyFunctions(): PhysicalFunction[] {

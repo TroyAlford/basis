@@ -66,13 +66,14 @@ const graph = new Graph({
 /**
  * Start one isolated authorization server.
  * @param install - Temporary installation root.
+ * @param applicationGraph - Graph to install for the server.
  * @returns The started server.
  */
-async function start(install: string): Promise<Server> {
+async function start(install: string, applicationGraph: Graph = graph): Promise<Server> {
   const previous = process.cwd()
   process.chdir(install)
   const server = new Server()
-    .graph(graph)
+    .graph(applicationGraph)
     .database()
     .root(install)
   server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
@@ -116,6 +117,13 @@ describe('Authorization RLS', () => {
       if (!user || !other || !same || !collision) throw new Error('identity mapping failed')
       expect(same).toBe(user)
       expect(collision).not.toBe(user)
+      expect(await authorization.enrollIdentity('test', 'admin', { email: 'admin@example.com' }))
+        .toBe(admin.userId)
+      const concurrent = await Promise.all(Array.from({ length: 8 }, () => (
+        authorization.enrollIdentity('test', 'concurrent', { email: 'concurrent@example.com' })
+      )))
+      expect(new Set(concurrent).size).toBe(1)
+      expect(concurrent[0]).not.toBeNull()
 
       expect(await asActor(admin.userId, () => authorization.can('manage', 'UserRole'))).toBe(true)
       expect(await asActor(user, () => authorization.can('manage', 'UserRole'))).toBe(false)
@@ -345,9 +353,56 @@ describe('Authorization RLS', () => {
 
       await asActor(admin.userId, () => authorization.revokeIdentity('test', 'other'))
       expect(await authorization.resolve(other)).toBeNull()
+      expect(await authorization.enrollIdentity('test', 'other', { email: 'other@example.com' }))
+        .toBeNull()
     } finally {
       await server.shutdown()
       removeService(install)
+    }
+  }, 120_000)
+
+  test('declines ambiguous targets and missing required User fields', async () => {
+    const ambiguousInstall = tempDirectory('basis-authorization-ambiguous-')
+    const ambiguousGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        { extends: 'User', fields: [], name: 'AdminUser' },
+        { extends: 'User', fields: [], name: 'CustomerUser' },
+      ],
+    })
+    const ambiguousServer = await start(ambiguousInstall, ambiguousGraph)
+    try {
+      const authorization = ambiguousServer.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      await authorization.bootstrap()
+      await expect(authorization.enrollIdentity('test', 'ambiguous', { email: 'ambiguous@example.com' }))
+        .rejects.toThrow('multiple concrete User descendants: AdminUser, CustomerUser')
+    } finally {
+      await ambiguousServer.shutdown()
+      removeService(ambiguousInstall)
+    }
+
+    const requiredInstall = tempDirectory('basis-authorization-required-')
+    const requiredGraph = new Graph({
+      entities: [{
+        fields: [
+          { field: 'email', type: 'String' },
+          { field: 'department', type: 'String' },
+        ],
+        name: 'User',
+      }],
+    })
+    const requiredServer = await start(requiredInstall, requiredGraph)
+    try {
+      const authorization = requiredServer.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      await authorization.bootstrap()
+      await expect(authorization.enrollIdentity('test', 'missing-department', {
+        email: 'missing@example.com',
+      })).rejects.toThrow('department')
+    } finally {
+      await requiredServer.shutdown()
+      removeService(requiredInstall)
     }
   }, 120_000)
 })
