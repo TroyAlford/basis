@@ -38,13 +38,27 @@ runs:
     - name: Install ASDF plugins & tools
       shell: bash
       run: |
+        install_tool() {
+          local tool="$1"
+          local version="$2"
+          local attempt
+          for attempt in 1 2 3; do
+            if asdf install "$tool" "$version"; then
+              return 0
+            fi
+            echo "::warning::asdf install ${tool} ${version} failed (attempt ${attempt}); retrying" >&2
+            sleep "$((attempt * 5))"
+          done
+          return 1
+        }
+
         # Install plugins and tools from .tool-versions
         if [ -f .tool-versions ]; then
           while read -r tool version; do
             if ! asdf plugin list | grep -q "^$tool$"; then
               asdf plugin add "$tool"
             fi
-            asdf install "$tool" "$version"
+            install_tool "$tool" "$version"
           done < .tool-versions
         fi
 
@@ -55,11 +69,11 @@ runs:
               asdf plugin add "$plugin"
             fi
             if [ "$version" = "latest" ]; then
-              asdf install "$plugin" latest
+              install_tool "$plugin" latest
               latest_version=$(asdf list "$plugin" | grep -v "No versions installed" | tail -n 1 | tr -d ' *')
               asdf global "$plugin" "$latest_version"
             else
-              asdf install "$plugin" "$version"
+              install_tool "$plugin" "$version"
               asdf global "$plugin" "$version"
             fi
           done
