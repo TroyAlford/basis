@@ -62,7 +62,7 @@ await server.auth!.removeRole(userId, 'editor')
 
 `bootstrap()` is an explicit trusted operator action. It creates/reconciles the schema, seeds the graph roles, invokes the same canonical `basis.enroll_identity` function used by OAuth, and adds the initial administrator membership. Never call it from an ordinary request handler, and never grant administration on first OAuth login automatically.
 
-Automatic enrollment requires exactly one concrete `User` descendant. A graph may declare multiple concrete User subtypes for application-managed accounts, but automatic enrollment then raises an explicit ambiguity error instead of choosing by declaration order. Enrollment supplies the canonical root name and the optional `User.email` value only; it does not synthesize application-owned fields. If the selected User or one of its concrete subtypes has a required field that the enrollment call does not provide, PostgreSQL rejects creation and leaves no partial identity behind.
+Automatic creation of a new `User` requires exactly one concrete `User` descendant. A graph may declare multiple concrete User subtypes for application-managed accounts; existing provider bindings still resolve, but a new automatic signup raises an explicit ambiguity error instead of choosing by declaration order. Enrollment supplies the canonical root name and the optional `User.email` value only; OAuth receives those profile values from the provider `identity` callback. It does not synthesize application-owned fields. If the selected User or one of its concrete subtypes has a required field that the enrollment call does not provide, PostgreSQL rejects creation and leaves no partial identity behind.
 
 ## Grants and predicates
 

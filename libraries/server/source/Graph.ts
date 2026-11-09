@@ -669,9 +669,12 @@ export class Graph {
       signature: 'candidate text',
       sql: resolveSql,
     })
-    const enrollSql = userLeaves.length === 1
-      ? this.#enrollSql(userLeaves[0].name, email)
-      : this.#ambiguousEnrollSql(userLeaves.map(entity => entity.name))
+    const userEntity = userLeaves.length === 1 ? userLeaves[0].name : null
+    const enrollSql = this.#enrollSql(
+      userEntity,
+      email,
+      userLeaves.map(entity => entity.name),
+    )
     functions.push({
       body: /\$\$([\s\S]*?)\$\$/u.exec(enrollSql)?.[1]?.trim() ?? '',
       lifecycle: false,
@@ -685,12 +688,29 @@ export class Graph {
     return functions
   }
 
-  #enrollSql(userEntity: string, email: boolean): string {
-    const userColumns = ['"id"', ...(email ? ['"email"'] : [])].join(', ')
-    const userValues = email ? 'user_id, email_address' : 'user_id'
-    const leafInsert = userEntity === 'User'
-      ? ''
-      : `INSERT INTO ${quoteIdentifier(userEntity)} ("id") VALUES (user_id);`
+  #enrollSql(
+    userEntity: string | null,
+    email: boolean,
+    userLeaves: readonly string[],
+  ): string {
+    const ancestry = userEntity === null ? [] : this.definitions.ancestry(userEntity)
+    const userInserts = ancestry
+      .filter(name => name !== 'Entity')
+      .reverse()
+      .map(name => {
+        if (name === 'User' && email) {
+          return 'INSERT INTO "User" ("id", "email") VALUES (user_id, email_address);'
+        }
+        return `INSERT INTO ${quoteIdentifier(name)} ("id") VALUES (user_id);`
+      })
+      .join('\n        ')
+    const detail = userLeaves.length === 0
+      ? 'no concrete User descendants'
+      : `multiple concrete User descendants: ${userLeaves.join(', ')}`
+    const creation = userEntity === null
+      ? `RAISE EXCEPTION ${literal(`Basis identity enrollment is ambiguous: ${detail}`)};`
+      : `INSERT INTO "Entity" ("id", "name", "entity") VALUES (user_id, user_name, ${literal(userEntity)});
+        ${userInserts}`
     return `
       CREATE OR REPLACE FUNCTION basis.enroll_identity(
         provider_name text,
@@ -726,34 +746,13 @@ export class Graph {
           nullif(email_address, ''),
           provider_name || ':' || provider_subject
         );
-        INSERT INTO "Entity" ("id", "name", "entity") VALUES (user_id, user_name, ${literal(userEntity)});
-        INSERT INTO "User" (${userColumns}) VALUES (${userValues});
-        ${leafInsert}
+        ${creation}
         identity_id := gen_random_uuid()::text;
         INSERT INTO "Entity" ("id", "name", "entity")
           VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');
         INSERT INTO "ExternalIdentity" ("id", "provider", "subject", "revoked", "user.id")
           VALUES (identity_id, provider_name, provider_subject, false, user_id);
         RETURN user_id;
-      END $$;
-    `
-  }
-
-  #ambiguousEnrollSql(userLeaves: readonly string[]): string {
-    const detail = userLeaves.length === 0
-      ? 'no concrete User descendants'
-      : `multiple concrete User descendants: ${userLeaves.join(', ')}`
-    return `
-      CREATE OR REPLACE FUNCTION basis.enroll_identity(
-        provider_name text,
-        provider_subject text,
-        display_name text,
-        email_address text
-      )
-      RETURNS text
-      LANGUAGE plpgsql SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
-      BEGIN
-        RAISE EXCEPTION ${literal(`Basis identity enrollment is ambiguous: ${detail}`)};
       END $$;
     `
   }

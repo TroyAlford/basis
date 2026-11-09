@@ -1,11 +1,12 @@
 import { Logger } from 'basis/logger'
-import type { Identity } from 'basis/oauth'
+import { Identity } from 'basis/oauth'
 import { HttpVerb } from 'basis/server'
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { removeService } from '../testing/DatabaseFixture'
 import { runAsActor } from './ActorContext'
+import { openAdmin } from './Database'
 import { ADMIN_ROLE_ID } from './Graph'
 import { Graph } from './Graph'
 import { Server } from './Server'
@@ -62,6 +63,20 @@ const graph = new Graph({
     limited: { name: 'Limited' },
   },
 })
+
+/**
+ * Capture response cookies while a server response is built.
+ * @returns The captured cookies and a restore function.
+ */
+function captureSetCookie(): { readonly cookies: string[], restore: () => void } {
+  const cookies: string[] = []
+  const append = Headers.prototype.append
+  Headers.prototype.append = function (this: Headers, name: string, value: string): void {
+    if (name.toLowerCase() === 'set-cookie') cookies.push(value)
+    append.call(this, name, value)
+  }
+  return { cookies, restore: (): void => { Headers.prototype.append = append } }
+}
 
 /**
  * Start one isolated authorization server.
@@ -375,6 +390,43 @@ describe('Authorization RLS', () => {
       const authorization = ambiguousServer.auth
       if (!authorization) throw new Error('authorization did not initialize')
       await authorization.bootstrap()
+      const existingUserId = randomUUID()
+      const admin = await openAdmin(ambiguousServer.db)
+      try {
+        await admin.sql.begin(async tx => {
+          await tx`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${existingUserId}, 'existing@example.com', 'AdminUser')
+          `
+          await tx`
+            INSERT INTO "User" ("id", "email")
+            VALUES (${existingUserId}, 'existing@example.com')
+          `
+          await tx`
+            INSERT INTO "AdminUser" ("id") VALUES (${existingUserId})
+          `
+          const identityId = randomUUID()
+          await tx`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${identityId}, 'test:existing', 'ExternalIdentity')
+          `
+          await tx`
+            INSERT INTO "ExternalIdentity" ("id", "provider", "subject", "revoked", "user.id")
+            VALUES (${identityId}, 'test', 'existing', false, ${existingUserId})
+          `
+        })
+        expect(await authorization.enrollIdentity('test', 'existing', { email: 'existing@example.com' }))
+          .toBe(existingUserId)
+        await admin.sql`
+          UPDATE "ExternalIdentity"
+          SET "revoked" = true
+          WHERE "provider" = 'test' AND "subject" = 'existing'
+        `
+        expect(await authorization.enrollIdentity('test', 'existing', { email: 'existing@example.com' }))
+          .toBeNull()
+      } finally {
+        await admin.close()
+      }
       await expect(authorization.enrollIdentity('test', 'ambiguous', { email: 'ambiguous@example.com' }))
         .rejects.toThrow('multiple concrete User descendants: AdminUser, CustomerUser')
     } finally {
@@ -403,6 +455,125 @@ describe('Authorization RLS', () => {
     } finally {
       await requiredServer.shutdown()
       removeService(requiredInstall)
+    }
+  }, 120_000)
+
+  test('enrolls a complete MTI chain and rolls back incomplete creation', async () => {
+    const tieredInstall = tempDirectory('basis-authorization-tiered-')
+    const tieredGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        { extends: 'User', fields: [], name: 'Member' },
+        { extends: 'Member', fields: [], name: 'PremiumMember' },
+      ],
+    })
+    const tieredServer = await start(tieredInstall, tieredGraph)
+    try {
+      const authorization = tieredServer.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const adminResult = await authorization.bootstrap({
+        email: 'tiered@example.com',
+        provider: 'test',
+        subject: 'tiered',
+      })
+      if (!adminResult.userId) throw new Error('tiered bootstrap did not create a user')
+      const admin = await openAdmin(tieredServer.db)
+      try {
+        const rows = await admin.sql<{ email: string, id: string }[]>`
+          SELECT p."id", u."email"
+          FROM "PremiumMember" p
+          JOIN "Member" m ON m."id" = p."id"
+          JOIN "User" u ON u."id" = m."id"
+        `
+        expect(rows).toEqual([{ email: 'tiered@example.com', id: adminResult.userId }])
+      } finally {
+        await admin.close()
+      }
+    } finally {
+      await tieredServer.shutdown()
+      removeService(tieredInstall)
+    }
+
+    const requiredChainInstall = tempDirectory('basis-authorization-required-chain-')
+    const requiredChainGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        { extends: 'User', fields: [{ field: 'department', type: 'String' }], name: 'Member' },
+        { extends: 'Member', fields: [], name: 'PremiumMember' },
+      ],
+    })
+    const requiredChainServer = await start(requiredChainInstall, requiredChainGraph)
+    try {
+      const authorization = requiredChainServer.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      await authorization.bootstrap()
+      await expect(authorization.enrollIdentity('test', 'incomplete', {
+        email: 'incomplete@example.com',
+      })).rejects.toThrow('department')
+      const admin = await openAdmin(requiredChainServer.db)
+      try {
+        const [users] = await admin.sql<{ count: number }[]>`SELECT count(*)::int AS count FROM "User"`
+        const [members] = await admin.sql<{ count: number }[]>`SELECT count(*)::int AS count FROM "Member"`
+        const [premium] = await admin.sql<{ count: number }[]>`SELECT count(*)::int AS count FROM "PremiumMember"`
+        const [identities] = await admin.sql<{ count: number }[]>`
+          SELECT count(*)::int AS count FROM "ExternalIdentity" WHERE "subject" = 'incomplete'
+        `
+        expect(users?.count).toBe(0)
+        expect(members?.count).toBe(0)
+        expect(premium?.count).toBe(0)
+        expect(identities?.count).toBe(0)
+      } finally {
+        await admin.close()
+      }
+    } finally {
+      await requiredChainServer.shutdown()
+      removeService(requiredChainInstall)
+    }
+  }, 120_000)
+
+  test('passes the verified OAuth profile through the Server owner', async () => {
+    const install = tempDirectory('basis-authorization-oauth-profile-')
+    const oauthGraph = new Graph({
+      entities: [{ fields: [{ field: 'email', type: 'String' }], name: 'User' }],
+    })
+    const server = await start(install, oauthGraph)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      await authorization.bootstrap()
+      const session = new Identity({ provider: 'test', public: 'client-id', secret: 'client-secret' })
+      server.oauth({
+        authorize: state => `/api/oauth/callback?state=${state}`,
+        exchange: async () => 'access-token',
+        identity: async () => ({
+          displayName: 'OAuth User',
+          email: 'oauth@example.com',
+          subject: 'oauth-subject',
+        }),
+        session,
+      })
+
+      const capture = captureSetCookie()
+      let stateCookie = ''
+      try {
+        const login = await server.handle(new Request('http://localhost/api/oauth/login'))
+        expect(login?.status).toBe(302)
+        stateCookie = capture.cookies.find(cookie => cookie.startsWith('basis_oauth_state=')) ?? ''
+      } finally {
+        capture.restore()
+      }
+      const state = stateCookie.split(';')[0]?.split('=')[1] ?? ''
+      const callbackRequest = new Request(
+        `http://localhost/api/oauth/callback?code=code&state=${state}`,
+      )
+      callbackRequest.headers.set('cookie', stateCookie.split(';')[0] ?? '')
+      const callback = await server.handle(callbackRequest)
+      expect(callback?.status).toBe(302)
+      expect(await authorization.enrollIdentity('test', 'oauth-subject', { email: 'oauth@example.com' }))
+        .not.toBeNull()
+    } finally {
+      await server.shutdown()
+      removeService(install)
     }
   }, 120_000)
 })

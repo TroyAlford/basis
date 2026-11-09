@@ -48,8 +48,14 @@ const github = {
       headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json' },
     })
     if (!response.ok) return null
-    const body = await response.json() as { id?: number }
-    return body.id === undefined ? null : String(body.id)
+    const body = await response.json() as { email?: string, id?: number, name?: string }
+    return body.id === undefined
+      ? null
+      : {
+        displayName: body.name,
+        email: body.email,
+        subject: String(body.id),
+      }
   },
 }
 
@@ -60,5 +66,7 @@ server.oauth({
   identity: token => github.userId(token),
 })
 ```
+
+`identity` may return a bare provider subject or an `OAuthIdentity` object with `subject`, `displayName`, and `email`. The profile is passed to canonical identity enrollment; omitted values remain absent, so required application fields fail closed instead of receiving synthesized values.
 
 `OAuthOptions` also supports `logger`, `returnTo`, and `stateMaxAgeSeconds`. Provider-specific endpoints, scopes, and error handling stay in the callback helpers; the flow itself remains provider-agnostic. Configuring OAuth or `server.identity(identity)` embeds the verified user id in the SPA runtime context.

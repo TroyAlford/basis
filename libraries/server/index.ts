@@ -69,7 +69,7 @@ export type {
   ScalarFieldType,
 } from './source/EntityDefinitions'
 export { OAuth } from './source/OAuth'
-export type { OAuthOptions } from './source/OAuth'
+export type { OAuthIdentity, OAuthOptions } from './source/OAuth'
 export type { FavIconInput, IconOptions, IconRegistry } from './source/FavIcon'
 export type { RouteContext } from './types/RouteContext'
 export { sseResponse } from './source/Sse'

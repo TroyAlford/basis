@@ -23,6 +23,16 @@ const STATE_COOKIE = 'basis_oauth_state'
 /** How long an authorization round trip has to finish. */
 const STATE_MAX_AGE_SECONDS = 600
 
+/** Optional verified profile returned alongside a provider subject. */
+export interface OAuthIdentity {
+  /** Human-readable display name. */
+  readonly displayName?: string,
+  /** Verified email address. */
+  readonly email?: string,
+  /** Stable provider subject. */
+  readonly subject: string,
+}
+
 /** Options accepted by {@link OAuth}. */
 export interface OAuthOptions {
   /**
@@ -37,10 +47,10 @@ export interface OAuthOptions {
    */
   exchange: (code: string, credentials: IdentityCredentials) => Promise<string | null>,
   /**
-   * Resolve the signed-in user id from an access token, or `null` on failure.
-   * Called on callback.
+   * Resolve the provider subject and optional profile from an access token, or
+   * `null` on failure. Called on callback.
    */
-  identity: (accessToken: string) => Promise<string | null>,
+  identity: (accessToken: string) => Promise<string | OAuthIdentity | null>,
   /** Optional logger for flow failures. */
   logger?: ILogger,
   /** Where to send the browser after a successful callback. Defaults to `/`. */
@@ -106,12 +116,13 @@ export class OAuth {
     }
     if (accessToken === null) return this.#failure('exchange_failed', 401)
 
-    let userId: string | null
+    let identity: string | OAuthIdentity | null
     try {
-      userId = await this.#options.identity(accessToken)
+      identity = await this.#options.identity(accessToken)
     } catch (error) {
       return this.#failure('identity_failed', 401, error)
     }
+    const userId = typeof identity === 'string' ? identity : identity?.subject ?? null
     if (userId === null) return this.#failure('identity_failed', 401)
 
     const headers = new Headers({ Location: this.#options.returnTo ?? '/' })

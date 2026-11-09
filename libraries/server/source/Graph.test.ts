@@ -115,6 +115,7 @@ describe('Graph', () => {
       ],
     })
     const sql = enrollSql(ambiguous)
+    expect(sql).toContain('FROM "ExternalIdentity"')
     expect(sql).toContain('RAISE EXCEPTION')
     expect(sql).toContain('multiple concrete User descendants: AdminUser, CustomerUser')
     expect(sql).not.toContain('INSERT INTO "AdminUser"')
