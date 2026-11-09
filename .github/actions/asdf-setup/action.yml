@@ -14,9 +14,10 @@ runs:
     - uses: actions/checkout@v4
     - uses: asdf-vm/actions/setup@v4
       with:
-        # Pin a published ASDF binary instead of a mutable release alias so
-        # setup does not depend on the availability of the latest asset.
-        asdf_version: 0.18.0
+        # Install ASDF from its published tag rather than its release binary.
+        # The binary asset is not required for the runner and avoids coupling
+        # setup to the release download endpoint.
+        asdf_branch: v0.20.2
 
     - name: Cache ASDF plugins
       uses: actions/cache@v4
