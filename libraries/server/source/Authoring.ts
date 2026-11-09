@@ -1,141 +1,5 @@
-import type { EffectiveFieldDefinition, EntityDefinition, FieldDefinition, IdentityFormat, ScalarFieldDefinition } from './EntityDefinitions'
-import { EntityDefinitions, FieldType } from './EntityDefinitions'
-
-/** Navigation cardinality accepted by typed authoring. */
-export enum Cardinality {
-  /** A collection navigation. */
-  Many = 'Many',
-  /** A singular navigation. */
-  One = 'One',
-}
-
-/** One authored scalar field. */
-export interface AuthoredScalarField {
-  /** Field name, in camelCase. */
-  readonly field: string,
-  /** Scalar field type. */
-  readonly type: FieldType.Boolean | FieldType.Date | FieldType.Number
-    | FieldType.String | FieldType.Timestamp,
-}
-
-/** One authored `id` refinement. */
-export interface AuthoredIdentityField {
-  /** Universal identity field. */
-  readonly field: 'id',
-  /** Optional canonical identity format. */
-  readonly format?: IdentityFormat,
-}
-
-/** One authored native array field. */
-export interface AuthoredArrayField {
-  /** Field name, in camelCase. */
-  readonly field: string,
-  /** Scalar array element descriptor. */
-  readonly items: {
-    /** Optional identity format for ID elements. */
-    readonly format?: IdentityFormat,
-    /** Scalar element type. */
-    readonly type: ScalarFieldDefinition['type'],
-  },
-  /** Array field type. */
-  readonly type: FieldType.Array,
-}
-
-/** One authored opaque JSON field. */
-export interface AuthoredJSONField {
-  /** Field name, in camelCase. */
-  readonly field: string,
-  /** JSON field type. */
-  readonly type: FieldType.JSON,
-}
-
-/** One authored entity reference. */
-export interface AuthoredReferenceField {
-  /** Field name, in camelCase. */
-  readonly field: string,
-  /** Optional inverse navigation name. */
-  readonly inverse?: string,
-  /** Referenced entity name. */
-  readonly target: string,
-  /** Entity reference field type. */
-  readonly type: FieldType.Entity,
-}
-
-/** One authored reciprocal inverse navigation. */
-export interface AuthoredInverseField {
-  /** Inverse cardinality. */
-  readonly cardinality: Cardinality,
-  /** Field name, in camelCase. */
-  readonly field: string,
-  /** Forward reference field name. */
-  readonly inverse: string,
-  /** Entity exposing the forward reference. */
-  readonly target: string,
-  /** Inverse navigation field type. */
-  readonly type: FieldType.Inverse,
-}
-
-/** Any authored entity field. */
-export type AuthoredField =
-  | AuthoredArrayField
-  | AuthoredIdentityField
-  | AuthoredInverseField
-  | AuthoredJSONField
-  | AuthoredReferenceField
-  | AuthoredScalarField
-
-/** One authored entity. */
-export interface AuthoredEntity {
-  /** Parent entity, when using MTI. */
-  readonly extends?: string,
-  /** Declared local fields. */
-  readonly fields: readonly AuthoredField[],
-  /** Exact entity name. */
-  readonly name: string,
-}
-
-/** One authored relationship endpoint. */
-export interface AuthoredRelationshipEndpoint {
-  /** Endpoint field name, in camelCase. */
-  readonly field: string,
-  /** Inverse navigation name on the target. */
-  readonly inverse: string,
-  /** Referenced entity name. */
-  readonly target: string,
-}
-
-/** One authored named relationship. */
-export interface AuthoredRelationship {
-  /** The two relationship endpoints. */
-  readonly between: readonly [AuthoredRelationshipEndpoint, AuthoredRelationshipEndpoint],
-  /** Relationship-owned fields. */
-  readonly fields: readonly (AuthoredArrayField | AuthoredJSONField | AuthoredScalarField)[],
-  /** Relationship name. */
-  readonly name: string,
-}
-
-/** JSON-compatible typed authoring document. */
-export interface AuthoredDocument {
-  /** Entity declarations. */
-  readonly entities: readonly AuthoredEntity[],
-  /** Named relationship declarations. */
-  readonly relationships?: readonly AuthoredRelationship[],
-}
-
-/**
- * Validate a typed JSON-compatible authoring document.
- *
- * The typed form is serialized and passed through the exact canonical
- * `EntityDefinitions.load` validator; it is not a second model registry.
- * @param document - Typed authoring document or canonical JSON text.
- * @returns Validated canonical definitions.
- * @throws {Error} When the document is invalid.
- */
-export function defineEntities(document: AuthoredDocument | string): EntityDefinitions {
-  return EntityDefinitions.load(
-    typeof document === 'string' ? document : JSON.stringify(document),
-  )
-}
+import type { EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import { FieldType } from './EntityDefinitions'
 
 /** Generated TypeScript source. */
 export interface GeneratedProducts {
@@ -188,7 +52,7 @@ export function generateTypes(definitions: EntityDefinitions): string {
   for (const entity of definitions.entities) {
     lines.push(`export interface ${entity.name} extends Entity {`)
     const discriminator = entity.abstract
-      ? concreteDescendants(definitions, entity.name).map(name => `'${name}'`).join(' | ')
+      ? definitions.concreteDescendants(entity.name).map(descendant => `'${descendant.name}'`).join(' | ')
       : `'${entity.name}'`
     lines.push(`  readonly entity: ${discriminator || 'string'}`)
     for (const field of entity.effectiveFields) {
@@ -405,38 +269,10 @@ function discriminatorSchemaForTarget(
   if (!entity || !entity.abstract) {
     return { const: target, type: 'string' }
   }
-  const descendants = concreteDescendants(definitions, target)
+  const descendants = definitions.concreteDescendants(target).map(descendant => descendant.name)
   return descendants.length === 0
     ? { type: 'string' }
     : { enum: descendants, type: 'string' }
-}
-
-/**
- * Collect concrete descendants of one entity.
- * @param definitions - Canonical definitions.
- * @param parent - Parent entity name.
- * @returns Concrete descendant names.
- */
-function concreteDescendants(definitions: EntityDefinitions, parent: string): string[] {
-  return definitions.entities
-    .filter(entity => !entity.abstract && isDescendantOf(definitions, entity.name, parent))
-    .map(entity => entity.name)
-}
-
-/**
- * Whether an entity descends from another entity.
- * @param definitions - Canonical definitions.
- * @param name - Candidate entity.
- * @param parent - Ancestor entity.
- * @returns Whether the candidate descends from the ancestor.
- */
-function isDescendantOf(definitions: EntityDefinitions, name: string, parent: string): boolean {
-  let current = definitions.entity(name)
-  while (current && current.parent !== 'Entity') {
-    if (current.parent === parent) return true
-    current = definitions.entity(current.parent)
-  }
-  return false
 }
 
 /**

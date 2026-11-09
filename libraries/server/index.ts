@@ -3,13 +3,12 @@ export type { HealthOptions, HealthStatus } from './apis/health'
 export { HttpVerb } from '../utilities'
 export { Authorization } from './source/Authorization'
 export {
-  Cardinality,
-  defineEntities,
   generateErd,
   generateJSONSchemas,
   generateProducts,
   generateTypes,
 } from './source/Authoring'
+export { Cardinality } from './source/GraphAuthoring'
 export { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID } from './source/Graph'
 export { DDL, physicalHash } from './source/Schema'
 export type {
@@ -19,6 +18,7 @@ export type {
   MigrationReviewOptions, PhysicalModel, PlanOptions, SchemaOperation, SchemaPlan,
 } from './source/Schema'
 export type { AuthorizationOptions, BootstrapResult, EffectiveGrant } from './source/Authorization'
+export type { GeneratedProducts } from './source/Authoring'
 export type {
   AuthoredArrayField,
   AuthoredDocument,
@@ -31,11 +31,9 @@ export type {
   AuthoredRelationship,
   AuthoredRelationshipEndpoint,
   AuthoredScalarField,
-  GeneratedProducts,
-} from './source/Authoring'
+} from './source/GraphAuthoring'
 export type {
   GrantDefinition,
-  GraphDocument,
   GraphGrant,
   GraphOptions,
   GraphRole,

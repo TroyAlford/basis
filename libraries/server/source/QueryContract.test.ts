@@ -284,6 +284,10 @@ describe('Query contract', () => {
       where: "permissions = 'admin'",
     }))
 
+    const abstract = compileEntityQuery(definitions, 'User', { fields: ['id'] })
+    expect(abstract.sql).toContain('"entity" IN (\'SystemUser\')')
+    expect(abstract.sql).not.toContain('"entity" IN (\'User\'')
+
     const identity = '00000000-0000-4000-8000-000000000001'
     expect(compileEntityQuery(definitions, 'Pet', {
       fields: ['id'],

@@ -3,9 +3,10 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Cardinality, defineEntities, generateErd, generateJSONSchemas, generateProducts, generateTypes } from './Authoring'
+import { generateErd, generateJSONSchemas, generateProducts, generateTypes } from './Authoring'
 import { EntityDefinitions, FieldType } from './EntityDefinitions'
 import { Graph } from './Graph'
+import { Cardinality } from './GraphAuthoring'
 
 const document = {
   entities: [
@@ -47,18 +48,18 @@ const document = {
 
 describe('typed authoring and generated products', () => {
   test('uses the canonical validator and produces the same physical model as JSON', () => {
-    const typed = defineEntities(document)
+    const typed = EntityDefinitions.fromDocument(document)
     const json = EntityDefinitions.load(JSON.stringify(document))
     expect(typed.physicalSchema('basis_app', false, false))
       .toEqual(json.physicalSchema('basis_app', false, false))
     expect(generateProducts(typed)).toEqual(generateProducts(json))
     expect(typed.entities.map(entity => entity.name)).toEqual(['User', 'Note'])
-    const graph = new Graph({ entities: typed })
+    const graph = new Graph({ entities: document })
     expect(graph.definitions.entity('Note')?.effectiveFields.some(field => field.name === 'owner')).toBe(true)
   })
 
   test('generates deterministic types, schemas, and both ERDs', () => {
-    const definitions = defineEntities(document)
+    const definitions = EntityDefinitions.fromDocument(document)
     const first = generateProducts(definitions)
     const second = generateProducts(definitions)
     expect(first).toEqual(second)
@@ -98,7 +99,7 @@ describe('typed authoring and generated products', () => {
   })
 
   test('uses concrete descendants for abstract reference output discriminators', () => {
-    const abstract = defineEntities({
+    const abstract = EntityDefinitions.fromDocument({
       entities: [
         { fields: [{ field: 'email', type: FieldType.String }], name: 'User' },
         { extends: 'User', fields: [], name: 'AdminUser' },
@@ -132,7 +133,7 @@ describe('typed authoring and generated products', () => {
   })
 
   test('emits assignable abstract reference types', async () => {
-    const abstract = defineEntities({
+    const abstract = EntityDefinitions.fromDocument({
       entities: [
         { fields: [{ field: 'email', type: FieldType.String }], name: 'User' },
         { extends: 'User', fields: [], name: 'AdminUser' },
@@ -173,7 +174,7 @@ describe('typed authoring and generated products', () => {
     const directory = await mkdtemp(join(tmpdir(), 'basis-authored-types-'))
     try {
       const file = join(directory, 'types.ts')
-      await writeFile(file, generateTypes(defineEntities(document)))
+      await writeFile(file, generateTypes(EntityDefinitions.fromDocument(document)))
       const result = Bun.spawnSync({
         cmd: [
           process.execPath,

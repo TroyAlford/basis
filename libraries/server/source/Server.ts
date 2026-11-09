@@ -503,10 +503,9 @@ export class Server {
         authorization: true,
         entities: this.#graph.definitions,
       }
-      this.#databaseOptions = databaseOptions
     }
-    if (this.#databaseOptions) {
-      this.#database = createDatabase(this.#databaseOptions)
+    if (this.#databaseOptions || this.#graph) {
+      this.#database = createDatabase(databaseOptions)
       if (this.#graph) {
         this.#authorization = new Authorization({
           appRole: databaseOptions.appRole,
@@ -687,6 +686,9 @@ export class Server {
    * @returns The server.
    */
   graph(graph: Graph): Server {
+    if (this.#databaseOptions?.entities) {
+      throw new Error('Server: provide application entities through Graph, not database({ entities })')
+    }
     this.#graph = graph
     return this
   }
@@ -717,6 +719,9 @@ export class Server {
    * @returns The server.
    */
   database(options: DatabaseOptions = {}): Server {
+    if (this.#graph && options.entities) {
+      throw new Error('Server: provide application entities through Graph, not database({ entities })')
+    }
     this.#databaseOptions = options
     return this
   }

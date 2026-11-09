@@ -4,12 +4,12 @@ title: Typed Authoring & Generated Products
 
 # Typed Authoring & Generated Products
 
-Canonical definitions can be authored as typed TypeScript without changing validation. `defineEntities` serializes the typed document and runs it through the same `EntityDefinitions.load` validator used for `entities.json`.
+`graph.ts` is the application's single authored source of truth. Importing it constructs the canonical in-memory `Graph`, which validates the complete ontology once and is the model used by query, authorization, DDL, type, schema, and ERD consumers.
 
 ```ts
-import { Cardinality, FieldType, defineEntities } from 'basis/server'
+import { Cardinality, FieldType, Graph } from 'basis/server'
 
-export default defineEntities({
+export default new Graph({
   entities: [
     {
       fields: [
@@ -37,16 +37,19 @@ export default defineEntities({
 })
 ```
 
-The typed declaration accepts the same entity, relationship, array, JSON, reference, inverse, MTI, and identity-format shapes as canonical JSON. There is no decorator syntax, second registry, or alternative validator. The resulting `EntityDefinitions` can be passed directly to `Graph`, `DDL`, or a server database configuration.
+The typed declaration accepts the same entity, relationship, array, JSON, reference, inverse, MTI, and identity-format shapes as canonical JSON. There is no decorator syntax, second registry, or alternative validator. JSON remains an alternate input syntax for tools that load a parsed document; it feeds the same `Graph` construction path. A `Graph` is passed directly to `Server.graph(graph)`.
+
+The constructed `graph.definitions` is the canonical model. Its narrow ontology queries are intentionally public: `ancestry(name)` returns the entity through its ancestors to `Entity`, `isA(name, ancestor)` includes identity, and `concreteDescendants(name)` returns concrete leaves in declaration order. A concrete entity is its own concrete descendant; abstract names are never returned as leaves; `Entity` covers every concrete leaf. Consumers use these queries instead of walking parent links themselves.
 
 ## Generated products
 
-`generateProducts(definitions)` derives deterministic products from that one validated model:
+`generateProducts(graph.definitions)` derives deterministic products from that one validated model:
 
 ```ts
+import graph from './graph'
 import { generateProducts } from 'basis/server'
 
-const products = generateProducts(entities)
+const products = generateProducts(graph.definitions)
 ```
 
 - `types` contains entity interfaces and `*Ref` identity references. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
@@ -57,7 +60,7 @@ const products = generateProducts(entities)
 
 ## Example generated output
 
-For the typed `User`/`Note` declaration above, `generateProducts(entities).types` produces:
+For the typed `User`/`Note` declaration above, `generateProducts(graph.definitions).types` includes these application interfaces (the system security entities are emitted too):
 
 ```ts
 /** Generated from the canonical Basis entity definitions. Do not edit by hand. */

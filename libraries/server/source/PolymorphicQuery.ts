@@ -1593,14 +1593,9 @@ export function compilePolymorphicQuery(
   }
   const hydrate = projection.build(options.fields, predicate.values.length + 1)
 
-  const leaves: string[] = []
-  if (definition.abstract) {
-    for (const entity of entities.entities) {
-      if (!entity.abstract && descendsFrom(entities, entity, definition.name)) {
-        leaves.push(quoteLiteral(entity.name))
-      }
-    }
-  }
+  const leaves = definition.abstract
+    ? entities.concreteDescendants(definition.name).map(entity => quoteLiteral(entity.name))
+    : []
   const leafFilter = leaves.length === 0
     ? 'FALSE'
     : `${projection.root.rootAlias}."entity" IN (${leaves.join(', ')})`
@@ -1701,9 +1696,7 @@ function descendantFields(
 ): ReadonlyMap<string, DescendantField> {
   if (!definition.abstract) return new Map()
   const baseNames = new Set(definition.effectiveFields.map(field => field.name))
-  const leaves = entities.entities.filter(entity => (
-    !entity.abstract && descendsFrom(entities, entity, definition.name)
-  ))
+  const leaves = entities.concreteDescendants(definition.name)
   return collectDescendantFields(leaves, baseNames)
 }
 
@@ -1717,7 +1710,7 @@ function universalDescendantFields(
   entities: EntityDefinitions,
   root: EntityDefinition,
 ): ReadonlyMap<string, DescendantField> {
-  const leaves = entities.entities.filter(entity => !entity.abstract)
+  const leaves = entities.concreteDescendants('Entity')
   return collectDescendantFields(leaves, new Set(root.effectiveFields.map(field => field.name)))
 }
 
@@ -1785,27 +1778,6 @@ function fieldContract(field: FieldDefinition): string {
   if (field.type === FieldType.Entity) return `Entity:${field.target}`
   if (field.type === FieldType.Inverse) return `Inverse:${field.target}:${field.inverse}:${field.cardinality}`
   return `${field.type}:${field.format ?? ''}`
-}
-
-/**
- * Whether an entity descends from an ancestor.
- * @param entities - Canonical definitions.
- * @param entity - Candidate entity.
- * @param ancestor - Ancestor name.
- * @returns `true` when the entity is the ancestor or a descendant.
- */
-function descendsFrom(
-  entities: EntityDefinitions,
-  entity: EntityDefinition,
-  ancestor: string,
-): boolean {
-  let current: string | undefined = entity.name
-  while (current !== undefined) {
-    if (current === ancestor) return true
-    current = entities.entity(current)?.parent
-    if (current === 'Entity') return false
-  }
-  return false
 }
 
 /**

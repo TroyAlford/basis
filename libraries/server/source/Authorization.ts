@@ -127,7 +127,7 @@ export class Authorization {
           options.provider,
           options.subject,
           options,
-          this.#userEntity(),
+          this.graph.userLeaf(),
         )
         if (userId) {
           const role = this.graph.role(options.role ?? ADMIN_ROLE_ID)
@@ -281,23 +281,6 @@ export class Authorization {
     } finally {
       await admin.close()
     }
-  }
-
-  #userEntity(): string {
-    const user = this.graph.definitions.entity('User')
-    if (!user) return 'User'
-    if (!user.abstract) return 'User'
-    const leaf = this.graph.definitions.entities.find(entity => {
-      let current = entity
-      while (current.parent !== 'Entity') {
-        const parent = this.graph.definitions.entity(current.parent)
-        if (!parent) return false
-        if (parent.name === 'User') return !entity.abstract
-        current = parent
-      }
-      return false
-    })
-    return leaf?.name ?? 'User'
   }
 
   #requestActor(): { readonly id: string | null } {
