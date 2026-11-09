@@ -9,6 +9,7 @@ import { accountDefinition, containers, noteDefinition, numberRowDefinition, rem
 import type { DurableDatabase, IsolatedDatabase } from '../testing/DatabaseIsolation'
 import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIsolation'
 import { withSeedDatabase } from '../testing/DatabaseSeed'
+import { installSchema } from '../testing/Schema'
 import { compileEntityQuery, queryEntity } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Operator } from './Operator'
@@ -189,7 +190,7 @@ describe('Server database lifecycle', () => {
         expect(await a.db.sql<{ present: boolean }[]>`
           SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm' ) AS present
         `).toEqual([{ present: false }])
-        await aEntities.createTables(a.db.sql)
+        await installSchema(a.db.sql, aEntities)
         expect(await a.db.sql<{ present: boolean }[]>`
           SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm' ) AS present
         `).toEqual([{ present: true }])
@@ -352,7 +353,7 @@ describe('Server database lifecycle', () => {
       entities: [noteDefinition, accountDefinition],
     }))
     await database.use(entities)
-    await entities.createTables(database.sql)
+    await installSchema(database.sql, entities)
 
     const noteColumns = await database.sql<{
       columnName: string,
@@ -417,7 +418,7 @@ WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = current_schema() 
       INSERT INTO "Account" ("id", "label")
       VALUES (${accountId}, ${'Troy'})
     `
-    await entities.createTables(database.sql)
+    await installSchema(database.sql, entities)
     expect(await database.sql<{ count: number }[]>`
       SELECT count(*)::int AS count
       FROM "Note"
@@ -475,7 +476,7 @@ WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = current_schema() 
         },
       ],
     }))
-    await database.tx(async sql => entities.createTables(sql))
+    await database.tx(async sql => installSchema(sql, entities))
     const userId = randomUUID()
     const novelId = '123'
     await database.tx(async sql => {
@@ -570,7 +571,7 @@ WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = current_schema() 
         },
       ],
     }))
-    await database.tx(async sql => entities.createTables(sql))
+    await database.tx(async sql => installSchema(sql, entities))
     const systemUserId = randomUUID()
     const clientOwnerId = randomUUID()
     const clientManagerId = randomUUID()
@@ -1038,7 +1039,7 @@ VALUES (${'1001'},
     })
   }, 300_000)
 
-  durableTest('rolls back partial fresh-schema initialization inside db.tx', async database => {
+  durableTest('blocks partial fresh-schema initialization inside db.tx', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
         { fields: [], name: 'Good' },
@@ -1048,8 +1049,8 @@ VALUES (${'1001'},
     await database.tx(async sql => sql`
       CREATE TABLE "Broken" ("marker" text)
     `)
-    const failure = await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error)
-    expect(failure).toMatchObject({ errno: '42703' })
+    const failure = await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error)
+    expect(failure).toMatchObject({ message: expect.stringContaining('Migration plan has blocking drift') })
     expect(await database.tx(async sql => sql<{ entity: boolean, good: boolean }[]>`
 SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
   to_regclass('"Good"') IS NOT NULL AS good
@@ -1059,7 +1060,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
   isolatedTest('creates and indexes the universal identity root', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
     await database.use(entities)
-    await entities.createTables(database.sql)
+    await installSchema(database.sql, entities)
 
     expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
       SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
@@ -1509,7 +1510,7 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     }])
   }, 120_000)
 
-  isolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
+  freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
         {
@@ -1543,8 +1544,8 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
       ],
     }))
     await database.use(entities)
-    await entities.createTables(database.sql)
-    await entities.createTables(database.sql)
+    await installSchema(database.sql, entities)
+    await installSchema(database.sql, entities)
 
     expect(await database.sql<{ indexName: string, isUnique: boolean }[]>`
       SELECT indexname AS "indexName", indisunique AS "isUnique"
@@ -1564,8 +1565,8 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     await database.sql`
       CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" ("id")
     `
-    await expect(entities.createTables(database.sql))
-      .rejects.toThrow('does not match the canonical model')
+    await expect(installSchema(database.sql, entities))
+      .rejects.toThrow('index definition changed: Pet.Pet_guardian_fk_idx')
     await database.sql`
       DROP INDEX "Pet_guardian_fk_idx"
     `
@@ -1573,28 +1574,28 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
       CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" ("guardian.id")
       WHERE FALSE
     `
-    await expect(entities.createTables(database.sql))
-      .rejects.toThrow('does not match the canonical model')
+    await expect(installSchema(database.sql, entities))
+      .rejects.toThrow('Migration plan has blocking drift')
     await database.sql`
       DROP INDEX "Pet_guardian_fk_idx"
     `
     await database.sql`
       CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" ("guardian.id", lower("id"))
     `
-    await expect(entities.createTables(database.sql))
-      .rejects.toThrow('does not match the canonical model')
+    await expect(installSchema(database.sql, entities))
+      .rejects.toThrow('Migration plan has blocking drift')
     await database.sql`
       DROP INDEX "Pet_guardian_fk_idx"
     `
     await database.sql`
       CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" ("guardian.id") NULLS NOT DISTINCT
     `
-    await expect(entities.createTables(database.sql))
-      .rejects.toThrow('does not match the canonical model')
+    await expect(installSchema(database.sql, entities))
+      .rejects.toThrow('Migration plan has blocking drift')
     await database.sql`
       DROP INDEX "Pet_guardian_fk_idx"
     `
-    await entities.createTables(database.sql)
+    await installSchema(database.sql, entities)
 
     const personOne = '00000000-0000-4000-8000-000000000001'
     const personTwo = '00000000-0000-4000-8000-000000000002'
@@ -2270,7 +2271,7 @@ VALUES (${dogOne},
     })).toThrow('safe integer range')
   }, 120_000)
 
-  isolatedTest('rejects index name collisions on fresh tables', async database => {
+  freshIsolatedTest('rejects index name collisions on fresh tables', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
         {
@@ -2298,11 +2299,11 @@ VALUES (${dogOne},
     await database.sql`
       CREATE UNIQUE INDEX "Pet_owner_fk_idx" ON "Other" ("id")
     `
-    await expect(entities.createTables(database.sql))
-      .rejects.toThrow('does not match the canonical model')
+    await expect(installSchema(database.sql, entities))
+      .rejects.toThrow('Migration plan has blocking drift')
   }, 120_000)
 
-  isolatedTest('rejects nonindex relation names reserved for canonical indexes', async database => {
+  freshIsolatedTest('rejects nonindex relation names reserved for canonical indexes', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [
         {
@@ -2327,8 +2328,8 @@ VALUES (${dogOne},
     await database.sql`
       CREATE TABLE "Pet_owner_fk_idx" ("id" text PRIMARY KEY)
     `
-    await expect(entities.createTables(database.sql))
-      .rejects.toThrow('was not created by the canonical schema compiler')
+    await expect(installSchema(database.sql, entities))
+      .rejects.toThrow('unexpected table: Pet_owner_fk_idx')
   }, 120_000)
 
   isolatedTest('projects inverse navigations for inherited and multiple roots', async database => {
@@ -2450,7 +2451,7 @@ VALUES (${dogOne},
         },
       ],
     }))
-    await database.tx(async sql => entities.createTables(sql))
+    await database.tx(async sql => installSchema(sql, entities))
 
     const incompleteId = randomUUID()
     expect(await database.tx(async sql => sql`
@@ -2594,7 +2595,7 @@ VALUES (${dogOne},
       WHERE tgname = 'Entity_leaf_check' AND tgrelid = '"Entity"'::regclass
     `)
     const before = await triggerOid()
-    await database.tx(async sql => entities.createTables(sql))
+    await database.tx(async sql => installSchema(sql, entities))
     expect(await triggerOid()).toEqual(before)
 
     await database.tx(async sql => {
@@ -2620,11 +2621,8 @@ VALUES (${dogOne},
     await database.tx(async sql => sql`
       ALTER TABLE "Entity" disable trigger "Entity_leaf_check"
     `)
-    expect(await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error))
-      .toHaveProperty(
-        'message',
-        'Existing lifecycle trigger "Entity_leaf_check" on "Entity" does not match the canonical model',
-      )
+    expect(await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error))
+      .toHaveProperty('message', expect.stringContaining('trigger definition changed: Entity_leaf_check'))
     await database.tx(async sql => sql`
       ALTER TABLE "Entity" enable trigger "Entity_leaf_check"
     `)
@@ -2636,11 +2634,8 @@ VALUES (${dogOne},
       CREATE trigger "Entity_leaf_immutable" before
       UPDATE of "name" ON "Entity" FOR each row execute function "Entity_leaf_immutable"()
     `)
-    expect(await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error))
-      .toHaveProperty(
-        'message',
-        'Existing lifecycle trigger "Entity_leaf_immutable" on "Entity" does not match the canonical model',
-      )
+    expect(await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error))
+      .toHaveProperty('message', expect.stringContaining('trigger definition changed: Entity_leaf_immutable'))
 
     await database.tx(async sql => {
       await sql.unsafe(
@@ -2648,11 +2643,8 @@ VALUES (${dogOne},
         'language plpgsql as $$begin return new; end$$',
       ).simple()
     })
-    expect(await database.tx(async sql => entities.createTables(sql)).catch((error: unknown) => error))
-      .toHaveProperty(
-        'message',
-        'Existing lifecycle function "Entity_leaf_immutable" does not match the canonical model',
-      )
+    expect(await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error))
+      .toHaveProperty('message', expect.stringContaining('function definition changed: Entity_leaf_immutable'))
   }, 120_000)
 
   isolatedTest('filters numeric values with each comparison operator', async database => {
@@ -2800,7 +2792,7 @@ VALUES (${dogOne},
       ],
     }))
 
-    await database.tx(async sql => entities.createTables(sql))
+    await database.tx(async sql => installSchema(sql, entities))
 
     const constraints = await database.tx(async sql => sql<{
       deferrable: boolean,
@@ -2880,7 +2872,7 @@ VALUES (${invalidUserId},
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
 
-    await database.tx(async sql => entities.createTables(sql))
+    await database.tx(async sql => installSchema(sql, entities))
     expect(await database.tx(async sql => sql<{ count: number }[]>`
       SELECT count(*)::int AS count
       FROM pg_constraint
@@ -2894,8 +2886,8 @@ VALUES (${invalidUserId},
       ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("car.id") REFERENCES
         "CycleCar" ("id")
     `)
-    await expect(database.tx(async sql => entities.createTables(sql)))
-      .rejects.toThrow('does not match the canonical model')
+    await expect(database.tx(async sql => installSchema(sql, entities)))
+      .rejects.toThrow('constraint definition changed: CycleUser_car_fkey')
 
     await database.tx(async sql => sql`
       ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
@@ -2904,8 +2896,8 @@ VALUES (${invalidUserId},
       ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("car.id") REFERENCES
         "CycleCar" ("id") ON DELETE cascade DEFERRABLE INITIALLY immediate
     `)
-    await expect(database.tx(async sql => entities.createTables(sql)))
-      .rejects.toThrow('does not match the canonical model')
+    await expect(database.tx(async sql => installSchema(sql, entities)))
+      .rejects.toThrow('constraint definition changed: CycleUser_car_fkey')
 
     await database.tx(async sql => sql`
       ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
@@ -2914,13 +2906,13 @@ VALUES (${invalidUserId},
       ALTER TABLE "CycleUser" ADD CONSTRAINT "CycleUser_car_fkey" FOREIGN KEY ("car.id") REFERENCES
         "CycleCar" ("id") DEFERRABLE INITIALLY immediate NOT valid
     `)
-    await expect(database.tx(async sql => entities.createTables(sql)))
-      .rejects.toThrow('does not match the canonical model')
+    await expect(database.tx(async sql => installSchema(sql, entities)))
+      .rejects.toThrow('constraint definition changed: CycleUser_car_fkey')
 
     await database.tx(async sql => sql`
       ALTER TABLE "CycleUser" DROP CONSTRAINT "CycleUser_car_fkey"
     `)
-    await database.tx(async sql => entities.createTables(sql))
+    await database.tx(async sql => installSchema(sql, entities))
     expect(await database.tx(async sql => sql<{ count: number }[]>`
       SELECT count(*)::int AS count
       FROM pg_constraint
@@ -2939,7 +2931,7 @@ VALUES (${invalidUserId},
       }],
     }))
 
-    await database.tx(async sql => entities.createTables(sql))
+    await database.tx(async sql => installSchema(sql, entities))
 
     const nodeId = randomUUID()
     await database.tx(async sql => {

@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { registerRunCleanup } from '../../testing/lifecycle'
 import { EntityDefinitions } from '../source/EntityDefinitions'
 import { Server } from '../source/Server'
+import { installSchema } from './Schema'
 
 /** Activity-log environment variable used by the lifecycle proof. */
 const ACTIVITY_LOG = 'BASIS_DATABASE_ACTIVITY_LOG'
@@ -334,7 +335,10 @@ function fixtureInstall(): string {
  * @returns A stable schema identifier.
  */
 function fixtureSchemaName(entities: EntityDefinitions): string {
-  const hash = createHash('sha256').update(entities.ddl.join('\n')).digest('hex').slice(0, 16)
+  const hash = createHash('sha256')
+    .update(`${entities.ddl.join('\n')}\nreviewed-install-v1`)
+    .digest('hex')
+    .slice(0, 16)
   return `basis_fixture_${hash}`
 }
 
@@ -361,7 +365,7 @@ async function ensureSchema(
 
     await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
     await sql.unsafe(`set local search_path to ${quoteIdentifier(schema)}`).simple()
-    await entities.createTables(sql)
+    await installSchema(sql, entities, { version: `fixture:${schema}` })
   })
   return schema
 }

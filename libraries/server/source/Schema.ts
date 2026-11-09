@@ -490,7 +490,9 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       ',') AS "searchPath"
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname IN (current_schema(), 'basis')
+    WHERE n.nspname IN (current_schema(),
+'basis') AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid
+  = p.oid AND d.deptype = 'e' )
     ORDER BY n.nspname, p.proname
   `
   const triggerRows = await sql<{
@@ -792,7 +794,7 @@ export function plan(options: PlanOptions): SchemaPlan {
         id: `extension:${extension}`,
         kind: 'extension',
         risk: 'safe',
-        sql: `CREATE EXTENSION IF NOT EXISTS ${quote(extension)}`,
+        sql: `CREATE EXTENSION IF NOT EXISTS ${quote(extension)} WITH SCHEMA public`,
         target: extension,
       })
     }
@@ -1208,6 +1210,7 @@ export function plan(options: PlanOptions): SchemaPlan {
         existing.valid === false
         || (index.unique !== undefined && existing.unique !== index.unique)
         || (index.columns !== undefined && (existing.columns ?? []).join(',') !== index.columns.join(','))
+        || (existing.definition !== undefined && !sameIndexDefinition(index.sql, existing.definition))
       ) {
         drift.push(`index definition changed: ${table.name}.${index.name}`)
       }
@@ -1498,23 +1501,7 @@ export function plan(options: PlanOptions): SchemaPlan {
     }
     operation.dependsOn = [...dependencies]
   }
-  const ordered: SchemaOperation[] = []
-  const completed = new Set<string>()
-  const pending = [...operations]
-  while (pending.length > 0) {
-    const ready = pending.filter(operation => (
-      operation.dependsOn.every(dependency => completed.has(dependency))
-    ))
-    const candidates = ready.length > 0 ? ready : pending
-    candidates.sort((left, right) => (
-      (PHASE[left.kind] ?? 99) - (PHASE[right.kind] ?? 99)
-      || left.id.localeCompare(right.id)
-    ))
-    const next = candidates[0] as SchemaOperation
-    ordered.push(next)
-    completed.add(next.id)
-    pending.splice(pending.indexOf(next), 1)
-  }
+  const ordered = orderMigrationOperations(operations)
   operations.splice(0, operations.length, ...ordered)
   return {
     actual: stripMigrationLedger(actualSchema),
@@ -1533,6 +1520,41 @@ export function plan(options: PlanOptions): SchemaPlan {
           : ['schema is writable'],
     })),
   }
+}
+
+/**
+ * Order migration operations by phase and stable id.
+ * @param operations - Operations with dependency edges.
+ * @returns Operations in executable order.
+ * @throws {Error} When dependencies cannot be resolved.
+ */
+export function orderMigrationOperations(
+  operations: readonly SchemaOperation[],
+): SchemaOperation[] {
+  const ordered: SchemaOperation[] = []
+  const completed = new Set<string>()
+  const pending = [...operations]
+  while (pending.length > 0) {
+    const ready = pending.filter(operation => (
+      operation.dependsOn.every(dependency => completed.has(dependency))
+    ))
+    if (ready.length === 0) {
+      throw new Error(
+        `Migration plan has unresolved operation dependencies: ${pending.map(operation => (
+          `${operation.id} -> [${operation.dependsOn.filter(dependency => !completed.has(dependency)).join(', ')}]`
+        )).join('; ')}`,
+      )
+    }
+    ready.sort((left, right) => (
+      (PHASE[left.kind] ?? 99) - (PHASE[right.kind] ?? 99)
+      || left.id.localeCompare(right.id)
+    ))
+    const next = ready[0] as SchemaOperation
+    ordered.push(next)
+    completed.add(next.id)
+    pending.splice(pending.indexOf(next), 1)
+  }
+  return ordered
 }
 
 /**
@@ -1998,6 +2020,29 @@ function samePolicyIdentity(left: PhysicalPolicy, right: PhysicalPolicy): boolea
  * @param right - Catalog or compiled policy.
  * @returns Whether the policy metadata is equivalent at the catalog boundary.
  */
+/**
+ * Compare a compiled index statement with PostgreSQL's catalog definition.
+ * @param compiled - Canonical create-index SQL.
+ * @param catalog - Catalog definition from `pg_get_indexdef`.
+ * @returns Whether both describe the same index.
+ */
+function sameIndexDefinition(compiled: string, catalog: string): boolean {
+  const desired = compiled.toLowerCase()
+  const actual = catalog.toLowerCase()
+  if (actual.includes(' where ') !== desired.includes(' where ')) return false
+  if (actual.includes(' nulls not distinct') !== desired.includes(' nulls not distinct')) return false
+  const expression = (value: string): boolean => /\b[a-z_][a-z0-9_]*\s*\(/u.test(
+    value.replace(/\busing\s+[a-z]+\b/gu, ''),
+  )
+  return expression(actual) === expression(desired)
+}
+
+/**
+ * Compare a compiled policy against PostgreSQL's catalog representation.
+ * @param left - Compiled policy.
+ * @param right - Catalog or compiled policy.
+ * @returns Whether the policy metadata is equivalent at the catalog boundary.
+ */
 function sameCatalogPolicy(left: PhysicalPolicy, right: PhysicalPolicy): boolean {
   const definition = left.definition === undefined || right.definition === undefined
     ? left.definition === right.definition
@@ -2040,14 +2085,15 @@ function normalizePolicyDefinition(value: string): string {
     ),
     '',
   )
-  normalized = normalized.replace(
-    /(^|[\s(,=])(?!basis\.)[a-z_][a-z0-9_]*\./gu,
-    (_match, prefix: string) => prefix,
-  )
-  normalized = normalized.replace(
-    /not\s*\(\s*([^()]*?)\s+is\s+distinct\s+from\s+([^()]*?)\s*\)/gu,
-    '$1 is not distinct from $2',
-  )
+  let previous: string
+  do {
+    previous = normalized
+    normalized = normalized.replace(
+      /(^|[\s(,=])(?!basis\.)[a-z_][a-z0-9_]*\./gu,
+      (_match, prefix: string) => prefix,
+    )
+  } while (normalized !== previous)
+  normalized = normalizeNotDistinct(normalized)
   normalized = stripPolicyParentheses(normalized)
   normalized = normalized.replace(/\s+/gu, '')
   return normalized.replace(/\uE000(\d+)\uE001/gu, (_match, index: string) => literals[Number(index)] ?? '')
@@ -2062,6 +2108,44 @@ const POLICY_GROUP_WORDS = new Set([
 /**
  * Remove only redundant grouping parentheses from a policy expression.
  * @param expression - Policy expression with whitespace retained between tokens.
+ * @returns Expression with redundant groups removed.
+ */
+/**
+ * Rewrite PostgreSQL's `NOT (x IS DISTINCT FROM y)` form.
+ * @param value - Normalized policy definition.
+ * @returns The equivalent definition without the leading `NOT`.
+ */
+function normalizeNotDistinct(value: string): string {
+  let result = value
+  let cursor = 0
+  while (true) {
+    const start = result.indexOf('not (', cursor)
+    if (start === -1) return result
+    let depth = 1
+    let index = start + 5
+    while (index < result.length && depth > 0) {
+      if (result[index] === '(') depth += 1
+      else if (result[index] === ')') depth -= 1
+      index += 1
+    }
+    if (depth !== 0) return result
+    const close = index - 1
+    const inner = result.slice(start + 5, close)
+    const marker = ' is distinct from '
+    const separator = inner.indexOf(marker)
+    if (separator === -1) {
+      cursor = close + 1
+      continue
+    }
+    const rewritten = `${inner.slice(0, separator)} is not distinct from ${inner.slice(separator + marker.length)}`
+    result = result.slice(0, start) + rewritten + result.slice(close + 1)
+    cursor = start + rewritten.length
+  }
+}
+
+/**
+ * Remove redundant grouping parentheses from a normalized policy expression.
+ * @param expression - Policy expression.
  * @returns Expression with redundant groups removed.
  */
 function stripPolicyParentheses(expression: string): string {

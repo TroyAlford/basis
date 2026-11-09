@@ -5,6 +5,7 @@ import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { removeService } from '../testing/DatabaseFixture'
+import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
 import { ADMIN_ROLE_ID } from './Graph'
@@ -94,6 +95,17 @@ async function start(install: string, applicationGraph: Graph = graph): Promise<
   server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
   process.chdir(previous)
   await server.ready()
+  const admin = await openAdmin(server.db)
+  try {
+    await installSchema(admin.sql, applicationGraph, {
+      appRole: 'basis_app',
+      schema: 'public',
+      superuser: true,
+      version: `authorization-${randomUUID()}`,
+    })
+  } finally {
+    await admin.close()
+  }
   return server
 }
 
