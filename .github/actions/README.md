@@ -4,7 +4,7 @@ This directory contains a collection of reusable GitHub Actions designed to auto
 
 These actions are provided to create reusable pieces of a standard GitHub repository setup. They assume the following:
 
-- **ASDF for Tooling Management**: You are using ASDF to manage core tooling versions such as npm, yarn, bun, python, etc. This allows for consistent environment setups across different development and CI environments.
+- **Explicit toolchain setup**: Callers install their own toolchain before using these actions. Basis workflows use `oven-sh/setup-bun@v2` with the Bun version pinned in `.tool-versions` and install dependencies with `bun install --frozen-lockfile`.
 
 - **Conventional Commits with Squash-and-Merge Strategy**: You are using the Conventional Commits specification, with a squash-and-merge strategy for pull requests. This means each merged PR results in a single squashed commit, with the PR title forming part of the commit message. This approach helps maintain a clean and understandable commit history. If you're not familiar with setting up this strategy in GitHub, you may want to configure your repository settings to enforce squash merging and ensure PR titles are formatted according to Conventional Commits.
 
@@ -18,31 +18,27 @@ uses: TroyAlford/basis/.github/actions/<name>@<ref>
 
 Actions that need a toolchain (for example `bun`) say so in their own README and leave setup to the calling workflow.
 
-1. **ASDF Setup & Install**
-   - Description: Sets up the ASDF version manager and installs necessary plugins and tools specified in the `.tool-versions` file. It also determines the package manager used in the project and caches dependencies.
-   - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/asdf-setup)
-
-2. **Check Convco PR Title**
+1. **Check Convco PR Title**
    - Description: Checks if the PR title follows the Conventional Commits specification.
    - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/enforce-convco)
 
-3. **Determine Version**
+2. **Determine Version**
    - Description: Computes the next semantic version from conventional commits since the last tag. Needs `bun` + `git` on PATH and full history.
    - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/determine-version)
 
-4. **Create Convco Release**
+3. **Create Convco Release**
    - Description: Creates a GitHub release at the given version with generated notes. Needs `gh` (preinstalled on hosted runners).
    - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/create-release)
 
-5. **Knip Dead-Code Check**
+4. **Knip Dead-Code Check**
    - Description: Runs the Basis-owned knip dead-code analysis, using the shared version pin and default config instead of each repository declaring its own.
    - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/knip)
 
-6. **Required Gate**
+5. **Required Gate**
    - Description: Reduces a workflow's `needs` results into one reliable required status, failing closed on skipped, cancelled, missing, neutral or stale work while reusing a prior success only for the exact head SHA.
    - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/required-gate)
 
-7. **Change Impact**
+6. **Change Impact**
    - Description: Computes a fail-safe, exact-merge-base suite decision from the base policy, changed paths, and a resolved import graph, so a workflow can skip unaffected suites before allocating their runners.
    - [More Details](https://github.com/TroyAlford/basis/tree/main/.github/actions/change-impact)
 

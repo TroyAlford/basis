@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -152,6 +152,23 @@ describe('Basis Code CI', () => {
     expect(code.jobs?.['type-check']?.steps?.some(step => step.run === 'bun run lint:ts')).toBe(true)
     expect(code.jobs?.['consumer-install']?.steps?.some(step => step.run === 'bun run test:consumer')).toBe(true)
     expect(code.jobs?.knip?.steps?.some(step => step.uses?.includes('/knip'))).toBe(true)
+  })
+
+  test('sets up the pinned Bun toolchain and frozen dependencies', () => {
+    const jobs = ['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install']
+    for (const id of jobs) {
+      const steps = code.jobs?.[id]?.steps ?? []
+      const setup = steps.find(step => step.uses === 'oven-sh/setup-bun@v2')
+      expect(setup?.with?.['bun-version-file']).toBe('.tool-versions')
+      expect(steps.some(step => step.run === 'bun install --frozen-lockfile')).toBe(true)
+    }
+
+    const databaseImage = loadWorkflow('.github/workflows/database-image.yml')
+    const databaseSteps = databaseImage.jobs?.publish?.steps ?? []
+    expect(databaseSteps.find(step => step.uses === 'oven-sh/setup-bun@v2')?.with?.['bun-version-file'])
+      .toBe('.tool-versions')
+    expect(databaseSteps.some(step => step.run === 'bun install --frozen-lockfile')).toBe(true)
+    expect(existsSync(join(root, '.github/actions/asdf-setup'))).toBe(false)
   })
 
   test('preflights trusted change impact before conditional test lanes', () => {
