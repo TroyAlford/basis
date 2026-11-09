@@ -13,6 +13,10 @@ runs:
   steps:
     - uses: actions/checkout@v4
     - uses: asdf-vm/actions/setup@v4
+      with:
+        # Pin a published ASDF binary instead of a mutable release alias so
+        # setup does not depend on the availability of the latest asset.
+        asdf_version: v0.18.0
 
     - name: Cache ASDF plugins
       uses: actions/cache@v4
