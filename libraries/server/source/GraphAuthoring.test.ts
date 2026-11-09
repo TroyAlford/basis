@@ -37,6 +37,7 @@ describe('Graph authoring types', () => {
     expect(() => new Graph({ entities: '{"entities":[{"fields":[],"name":"Role"}]}' })).toThrow('reserved by Basis authorization') // eslint-disable-line @stylistic/max-len
     expect(() => new Graph({ entities: '{"entities":[{"fields":[{"field":"owner","target":"Missing","type":"Entity"}],"name":"Note"}]}' })) // eslint-disable-line @stylistic/max-len
       .toThrow('unknown target entity "Missing"')
+    expect(() => new Graph({ entities: 'null' })).toThrow('entities must be an authored document or entity array')
   })
 
   test('rejects a pre-validated EntityDefinitions model', () => {

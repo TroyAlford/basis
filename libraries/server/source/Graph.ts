@@ -1001,22 +1001,37 @@ function normalizeGraphInput(options: GraphOptions): AuthoredDocument {
     throw new Error('Graph: pass authored entities instead of EntityDefinitions')
   }
   if (typeof input === 'string') {
-    const parsed = JSON.parse(input) as AuthoredDocument | readonly AuthoredEntity[]
+    const parsed: unknown = JSON.parse(input)
     if (isAuthoredEntityArray(parsed)) {
       return { entities: parsed, relationships: options.relationships }
     }
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Graph: entities must be an authored document or entity array')
+    }
+    const document = parsed as AuthoredDocument
+    if (document.entities !== undefined && !Array.isArray(document.entities)) {
+      throw new Error('Graph: entities must be an authored document or entity array')
+    }
     return {
-      ...parsed,
-      ...(options.relationships === undefined ? {} : { relationships: options.relationships }),
+      entities: document.entities ?? [],
+      ...(options.relationships === undefined
+        ? (document.relationships === undefined ? {} : { relationships: document.relationships })
+        : { relationships: options.relationships }),
     }
   }
   if (isAuthoredEntityArray(input)) {
     return { entities: input, relationships: options.relationships }
   }
   if (input && typeof input === 'object') {
+    const document = input as AuthoredDocument
+    if (document.entities !== undefined && !Array.isArray(document.entities)) {
+      throw new Error('Graph: entities must be an authored document or entity array')
+    }
     return {
-      ...(input as AuthoredDocument),
-      ...(options.relationships === undefined ? {} : { relationships: options.relationships }),
+      entities: document.entities ?? [],
+      ...(options.relationships === undefined
+        ? (document.relationships === undefined ? {} : { relationships: document.relationships })
+        : { relationships: options.relationships }),
     }
   }
   return { entities: [], relationships: options.relationships }
