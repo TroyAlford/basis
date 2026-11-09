@@ -1593,14 +1593,9 @@ export function compilePolymorphicQuery(
   }
   const hydrate = projection.build(options.fields, predicate.values.length + 1)
 
-  const leaves: string[] = []
-  if (definition.abstract) {
-    for (const entity of entities.entities) {
-      if (!entity.abstract && entities.isA(entity.name, definition.name)) {
-        leaves.push(quoteLiteral(entity.name))
-      }
-    }
-  }
+  const leaves = definition.abstract
+    ? entities.concreteDescendants(definition.name).map(entity => quoteLiteral(entity.name))
+    : []
   const leafFilter = leaves.length === 0
     ? 'FALSE'
     : `${projection.root.rootAlias}."entity" IN (${leaves.join(', ')})`

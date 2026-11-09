@@ -156,6 +156,7 @@ export class Graph {
       ...entities,
     ]
     this.definitions = EntityDefinitions.fromDocument({
+      ...application,
       entities: allEntities,
       relationships: [...(SYSTEM_DOCUMENT.relationships ?? []), ...relationships],
     })
@@ -995,7 +996,35 @@ export class Graph {
  * @param options - Graph options.
  * @returns The application authored document.
  */
-function normalizeGraphInput(options: GraphOptions): AuthoredDocument {
+/** Authored document with any unknown keys retained for canonical validation. */
+type GraphAuthoringDocument = AuthoredDocument & Readonly<Record<string, unknown>>
+
+/**
+ * Normalize one parsed or typed authored document while preserving every key.
+ * @param document - Authored document candidate.
+ * @param relationships - Optional explicit relationship override.
+ * @returns The authored document with normalized entities and relationships.
+ */
+function normalizeDocument(
+  document: GraphAuthoringDocument,
+  relationships: GraphOptions['relationships'],
+): GraphAuthoringDocument {
+  if (document.entities !== undefined && !Array.isArray(document.entities)) {
+    throw new Error('Graph: entities must be an authored document or entity array')
+  }
+  return {
+    ...document,
+    entities: document.entities ?? [],
+    ...(relationships === undefined ? {} : { relationships }),
+  }
+}
+
+/**
+ * Normalize graph authoring input into one authored document.
+ * @param options - Graph options.
+ * @returns The application authored document.
+ */
+function normalizeGraphInput(options: GraphOptions): GraphAuthoringDocument {
   const input = options.entities
   if (input instanceof EntityDefinitions) {
     throw new Error('Graph: pass authored entities instead of EntityDefinitions')
@@ -1008,31 +1037,13 @@ function normalizeGraphInput(options: GraphOptions): AuthoredDocument {
     if (!parsed || typeof parsed !== 'object') {
       throw new Error('Graph: entities must be an authored document or entity array')
     }
-    const document = parsed as AuthoredDocument
-    if (document.entities !== undefined && !Array.isArray(document.entities)) {
-      throw new Error('Graph: entities must be an authored document or entity array')
-    }
-    return {
-      entities: document.entities ?? [],
-      ...(options.relationships === undefined
-        ? (document.relationships === undefined ? {} : { relationships: document.relationships })
-        : { relationships: options.relationships }),
-    }
+    return normalizeDocument(parsed as GraphAuthoringDocument, options.relationships)
   }
   if (isAuthoredEntityArray(input)) {
     return { entities: input, relationships: options.relationships }
   }
   if (input && typeof input === 'object') {
-    const document = input as AuthoredDocument
-    if (document.entities !== undefined && !Array.isArray(document.entities)) {
-      throw new Error('Graph: entities must be an authored document or entity array')
-    }
-    return {
-      entities: document.entities ?? [],
-      ...(options.relationships === undefined
-        ? (document.relationships === undefined ? {} : { relationships: document.relationships })
-        : { relationships: options.relationships }),
-    }
+    return normalizeDocument(input as GraphAuthoringDocument, options.relationships)
   }
   return { entities: [], relationships: options.relationships }
 }

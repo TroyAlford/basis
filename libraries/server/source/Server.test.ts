@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { ILogger } from '../../utilities'
 import { Logger } from '../../utilities'
 import { Builder } from './Builder'
+import { Graph } from './Graph'
 import { Server } from './Server'
 
 /*
@@ -534,6 +535,24 @@ function restoreEnv(previous: Readonly<Record<string, string | undefined>>): voi
     else process.env[key] = value
   }
 }
+
+describe('Server graph configuration', () => {
+  test('does not treat Graph-derived database options as caller configuration', async () => {
+    const graph = new Graph({ entities: [{ fields: [], name: 'Note' }] })
+    const { logger } = createRecordingLogger()
+    const server = new Server()
+      .graph(graph)
+      .database({ url: 'postgresql://127.0.0.1:1/basis' })
+      .start({ development: false, hostname: '127.0.0.1', logger, port: 0, version: 'test-version' })
+
+    try {
+      expect(() => server.graph(graph)).not.toThrow()
+      expect(() => server.database({ url: 'postgresql://127.0.0.1:1/basis' })).not.toThrow()
+    } finally {
+      await server.shutdown()
+    }
+  })
+})
 
 describe('Server logging', () => {
   test('constructs a standard Basis Logger and exposes it', () => {

@@ -503,10 +503,9 @@ export class Server {
         authorization: true,
         entities: this.#graph.definitions,
       }
-      this.#databaseOptions = databaseOptions
     }
-    if (this.#databaseOptions) {
-      this.#database = createDatabase(this.#databaseOptions)
+    if (this.#databaseOptions || this.#graph) {
+      this.#database = createDatabase(databaseOptions)
       if (this.#graph) {
         this.#authorization = new Authorization({
           appRole: databaseOptions.appRole,

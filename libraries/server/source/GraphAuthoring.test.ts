@@ -38,6 +38,11 @@ describe('Graph authoring types', () => {
     expect(() => new Graph({ entities: '{"entities":[{"fields":[{"field":"owner","target":"Missing","type":"Entity"}],"name":"Note"}]}' })) // eslint-disable-line @stylistic/max-len
       .toThrow('unknown target entity "Missing"')
     expect(() => new Graph({ entities: 'null' })).toThrow('entities must be an authored document or entity array')
+    expect(() => new Graph({ entities: '{"entites":[{"name":"Note","fields":[]}]}' }))
+      .toThrow('unknown top-level property "entites"')
+    expect(() => new Graph({
+      entities: { entites: [], entities: [{ fields: [], name: 'Note' }] } as never,
+    })).toThrow('unknown top-level property "entites"')
   })
 
   test('rejects a pre-validated EntityDefinitions model', () => {
