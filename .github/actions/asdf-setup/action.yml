@@ -17,7 +17,7 @@ runs:
         # Install ASDF from its published tag rather than its release binary.
         # The binary asset is not required for the runner and avoids coupling
         # setup to the release download endpoint.
-        asdf_branch: v0.20.2
+        asdf_branch: v0.18.0
 
     - name: Cache ASDF plugins
       uses: actions/cache@v4
