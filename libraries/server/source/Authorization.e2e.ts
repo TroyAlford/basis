@@ -73,7 +73,7 @@ async function start(install: string): Promise<Server> {
   process.chdir(install)
   const server = new Server()
     .graph(graph)
-    .database({ entities: graph.definitions })
+    .database()
     .root(install)
   server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
   process.chdir(previous)

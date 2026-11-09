@@ -23,6 +23,111 @@ const graph = new Graph({
 })
 
 describe('Graph', () => {
+  test('compiles root grants from the canonical identity fields', () => {
+    const rootGraph = new Graph({
+      entities: [{ fields: [], name: 'Note' }],
+      grants: [{ action: 'read', predicate: 'id = $me', role: 'public', target: 'Entity' }],
+    })
+    const read = rootGraph.physicalSchema('basis_app', true).policies.find(policy => (
+      policy.table === 'Entity' && policy.command === 'SELECT'
+    ))
+    expect(read?.sql).toContain('basis.policy_')
+    expect(read?.sql).toContain('"Entity"."entity"')
+    expect(() => new Graph({
+      entities: [{ fields: [{ field: 'name', type: 'String' }], name: 'Note' }],
+    })).toThrow('reserved for the universal identity root')
+  })
+
+  test('constructs typed and JSON authoring equivalently', () => {
+    const document = {
+      entities: [
+        {
+          fields: [
+            { field: 'email', type: 'String' },
+            {
+              cardinality: 'Many',
+              field: 'notes',
+              inverse: 'owner',
+              target: 'Note',
+              type: 'Inverse',
+            },
+          ],
+          name: 'User',
+        },
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            { field: 'owner', inverse: 'notes', target: 'User', type: 'Entity' },
+          ],
+          name: 'Note',
+        },
+      ],
+    } as const
+    const typed = new Graph({ entities: document })
+    const json = new Graph({ entities: JSON.stringify(document) })
+    expect(typed.definitions.physicalSchema('basis_app', false, false))
+      .toEqual(json.definitions.physicalSchema('basis_app', false, false))
+    expect(typed.roles).toEqual(json.roles)
+    expect(typed.grants).toEqual(json.grants)
+  })
+
+  test('composes system ontology and application User overrides', () => {
+    const plain = new Graph({ entities: [{ fields: [], name: 'Note' }] })
+    expect(plain.definitions.entities.filter(entity => entity.name === 'User')).toHaveLength(1)
+    expect(plain.definitions.entity('User')).toBeDefined()
+    expect(plain.definitions.entity('Role')).toBeDefined()
+    expect(plain.definitions.entity('ExternalIdentity')).toBeDefined()
+    expect(plain.definitions.relationship('UserRole')).toBeDefined()
+
+    const overridden = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        { extends: 'User', fields: [], name: 'AdminUser' },
+      ],
+    })
+    expect(overridden.definitions.entities.filter(entity => entity.name === 'User')).toHaveLength(1)
+    expect(overridden.definitions.entity('User')?.abstract).toBe(true)
+    expect(overridden.definitions.concreteDescendants('User').map(entity => entity.name))
+      .toEqual(['AdminUser'])
+    expect(overridden.definitions.isA('AdminUser', 'User')).toBe(true)
+    expect(overridden.userLeaf()).toBe('AdminUser')
+    expect(plain.userLeaf()).toBe('User')
+    expect(overridden.definitions.relationship('UserRole')?.between.map(endpoint => endpoint.target))
+      .toContain('User')
+  })
+
+  test('validates the complete cross-fragment graph once', () => {
+    const user = {
+      fields: [{
+        cardinality: 'Many',
+        field: 'notes',
+        inverse: 'owner',
+        target: 'Note',
+        type: 'Inverse',
+      }],
+      name: 'User',
+    } as const
+    const note = {
+      fields: [{ field: 'owner', inverse: 'notes', target: 'User', type: 'Entity' }],
+      name: 'Note',
+    } as const
+    const composed = new Graph({ entities: [user, note] })
+    expect(composed.definitions.entity('User')?.inverseFields[0]?.name).toBe('notes')
+    expect(composed.definitions.entity('Note')?.fields[1]?.name).toBe('owner')
+    expect(() => new Graph({ entities: [user] })).toThrow('unknown target entity "Note"')
+    expect(() => new Graph({ entities: [note] })).toThrow('no reciprocal Inverse field')
+    expect(() => new Graph({ entities: [user, user, note] })).toThrow('duplicate entity "User"')
+  })
+
+  test('rejects duplicate system names', () => {
+    expect(() => new Graph({ entities: [{ fields: [], name: 'Role' }] }))
+      .toThrow('reserved by Basis authorization')
+    expect(() => new Graph({ entities: [{ fields: [], name: 'ExternalIdentity' }] }))
+      .toThrow('reserved by Basis authorization')
+    expect(() => new Graph({ entities: [{ fields: [], name: 'UserRole' }] }))
+      .toThrow('reserved by Basis authorization')
+  })
+
   test('normalizes roles and $me into canonical graph data', () => {
     expect(graph.role('public')?.id).toBe(PUBLIC_ROLE_ID)
     expect(graph.role('admin')?.id).toBe(ADMIN_ROLE_ID)

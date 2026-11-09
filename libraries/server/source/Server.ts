@@ -687,6 +687,9 @@ export class Server {
    * @returns The server.
    */
   graph(graph: Graph): Server {
+    if (this.#databaseOptions?.entities) {
+      throw new Error('Server: provide application entities through Graph, not database({ entities })')
+    }
     this.#graph = graph
     return this
   }
@@ -717,6 +720,9 @@ export class Server {
    * @returns The server.
    */
   database(options: DatabaseOptions = {}): Server {
+    if (this.#graph && options.entities) {
+      throw new Error('Server: provide application entities through Graph, not database({ entities })')
+    }
     this.#databaseOptions = options
     return this
   }

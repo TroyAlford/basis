@@ -1018,6 +1018,42 @@ describe('EntityDefinitions', () => {
     expect(sql).not.toMatch(new RegExp(`\\b(?:${keywords.join('|')})\\b`))
   })
 
+  test('validates parsed and JSON documents through one entry point', () => {
+    const document = {
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        { fields: [], name: 'Note' },
+      ],
+    }
+    const parsed = EntityDefinitions.fromDocument(document)
+    const loaded = EntityDefinitions.load(JSON.stringify(document))
+    expect(parsed.ddl).toEqual(loaded.ddl)
+    expect(parsed.entities.map(entity => entity.name)).toEqual(loaded.entities.map(entity => entity.name))
+  })
+
+  test('exposes canonical ancestry and concrete descendant queries', () => {
+    const definitions = load({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        { extends: 'User', fields: [], name: 'AdminUser' },
+        { extends: 'User', fields: [], name: 'CustomerUser' },
+        { fields: [], name: 'Note' },
+      ],
+    })
+    expect(definitions.ancestry('AdminUser')).toEqual(['AdminUser', 'User', 'Entity'])
+    expect(definitions.isA('AdminUser', 'User')).toBe(true)
+    expect(definitions.isA('AdminUser', 'Entity')).toBe(true)
+    expect(definitions.isA('User', 'AdminUser')).toBe(false)
+    expect(definitions.concreteDescendants('User').map(entity => entity.name))
+      .toEqual(['AdminUser', 'CustomerUser'])
+    expect(definitions.concreteDescendants('Note').map(entity => entity.name)).toEqual(['Note'])
+    expect(definitions.concreteDescendants('Entity').map(entity => entity.name))
+      .toEqual(['AdminUser', 'CustomerUser', 'Note'])
+    expect(() => definitions.ancestry('Missing')).toThrow('Unknown entity')
+    expect(definitions.isA('Missing', 'Entity')).toBe(false)
+    expect(() => definitions.concreteDescendants('Missing')).toThrow('Unknown entity')
+  })
+
   test('rejects malformed entity documents and references', () => {
     expect(() => EntityDefinitions.load('{')).toThrow('Invalid entity JSON')
     expect(() => load({})).toThrow('entities must be a non-empty array')

@@ -503,6 +503,27 @@ export class EntityDefinitions {
   readonly #rootCollections: readonly DerivedCollectionDefinition[]
   /** Derived singular navigations exposed by the universal identity root. */
   readonly #rootSingularNavigations: readonly DerivedSingularDefinition[]
+  /** Canonical ancestry by entity name. */
+  readonly #ancestryByName: ReadonlyMap<string, readonly string[]>
+  /** Concrete descendants by ancestor name. */
+  readonly #descendantNames: ReadonlyMap<string, readonly string[]>
+
+  /**
+   * Validate one JSON-compatible authored document.
+   * @param value - Parsed authored document.
+   * @returns The validated entity definitions.
+   * @throws {Error} When the document is invalid.
+   */
+  static fromDocument(value: unknown): EntityDefinitions {
+    const document = parseEntityDocument(value)
+    return new EntityDefinitions(
+      document.associations,
+      document.entities,
+      document.relationships,
+      document.rootCollections,
+      document.rootSingularNavigations,
+    )
+  }
 
   /**
    * Parse and validate canonical entity JSON.
@@ -517,51 +538,7 @@ export class EntityDefinitions {
     } catch (error) {
       throw new Error('Invalid entity JSON', { cause: error })
     }
-    const document = parseEntityDocument(value)
-    return new EntityDefinitions(
-      document.associations,
-      document.entities,
-      document.relationships,
-      document.rootCollections,
-      document.rootSingularNavigations,
-    )
-  }
-
-  /**
-   * Compose validated definition sets into one canonical ontology.
-   *
-   * Entity and relationship names are shared into one namespace; a duplicate
-   * is an authoring conflict rather than a silent override.
-   * @param definitions - Validated definition sets in composition order.
-   * @returns The combined definitions.
-   * @throws {Error} When two sets define the same entity or relationship name.
-   */
-  static combine(...definitions: readonly EntityDefinitions[]): EntityDefinitions {
-    const names = new Set<string>()
-    const entities: EntityDefinition[] = []
-    const relationships: RelationshipDefinition[] = []
-    for (const definition of definitions) {
-      for (const entity of definition.entities) {
-        if (entity.name === 'User' && names.has('User')) {
-          throw new Error('Entity name "User" is reserved by Basis authorization')
-        }
-        if (names.has(entity.name)) throw new Error(`Duplicate entity "${entity.name}"`)
-        names.add(entity.name)
-        entities.push(entity)
-      }
-      for (const relationship of definition.relationships) {
-        if (names.has(relationship.name)) throw new Error(`Duplicate relationship "${relationship.name}"`)
-        names.add(relationship.name)
-        relationships.push(relationship)
-      }
-    }
-    return new EntityDefinitions(
-      definitions.flatMap(definition => [...definition.associations]),
-      entities,
-      relationships,
-      definitions.flatMap(definition => [...definition.#rootCollections]),
-      definitions.flatMap(definition => [...definition.#rootSingularNavigations]),
-    )
+    return EntityDefinitions.fromDocument(value)
   }
 
   /**
@@ -584,6 +561,64 @@ export class EntityDefinitions {
     this.relationships = relationships
     this.#rootCollections = rootCollections
     this.#rootSingularNavigations = rootSingularNavigations
+    const ancestry = new Map<string, readonly string[]>()
+    const descendants = new Map<string, string[]>([['Entity', []]])
+    const byName = new Map(entities.map(entity => [entity.name, entity]))
+    for (const entity of entities) {
+      const chain: string[] = []
+      let current: EntityDefinition | undefined = entity
+      while (current && current.name !== 'Entity') {
+        chain.push(current.name)
+        current = byName.get(current.parent)
+      }
+      chain.push('Entity')
+      ancestry.set(entity.name, chain)
+      if (!entity.abstract) {
+        for (const ancestor of chain) {
+          const values = descendants.get(ancestor) ?? []
+          values.push(entity.name)
+          descendants.set(ancestor, values)
+        }
+      }
+    }
+    this.#ancestryByName = ancestry
+    this.#descendantNames = descendants
+  }
+
+  /**
+   * Return one entity's ancestry, including itself and the universal root.
+   * @param name - Entity name.
+   * @returns Ancestry from the entity toward `Entity`.
+   * @throws {Error} When the entity is unknown.
+   */
+  ancestry(name: string): readonly string[] {
+    if (name === 'Entity') return ['Entity']
+    const value = this.#ancestryByName.get(name)
+    if (!value) throw new Error(`Unknown entity "${name}"`)
+    return value
+  }
+
+  /**
+   * Whether one entity is compatible with an ancestor.
+   * @param name - Entity name.
+   * @param ancestor - Ancestor name.
+   * @returns `true` when the entity is the ancestor or descends from it.
+   */
+  isA(name: string, ancestor: string): boolean {
+    if (name === 'Entity') return ancestor === 'Entity'
+    return this.#ancestryByName.get(name)?.includes(ancestor) === true
+  }
+
+  /**
+   * Return concrete types compatible with one ancestor.
+   * @param name - Entity or `Entity` name.
+   * @returns Concrete descendants in declaration order.
+   * @throws {Error} When the entity is unknown.
+   */
+  concreteDescendants(name: string): readonly EntityDefinition[] {
+    const values = this.#descendantNames.get(name)
+    if (!values) throw new Error(`Unknown entity "${name}"`)
+    return values.map(value => this.entity(value) as EntityDefinition)
   }
 
   /**

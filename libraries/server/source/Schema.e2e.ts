@@ -265,7 +265,7 @@ describe('DDL schema planning', () => {
         { field: 'active', type: 'Boolean' },
       ],
       name: 'Note',
-    }]
+    }] as const
     const literal = new Graph({
       entities,
       grants: [{ action: 'read', predicate: "title = 'a b'", role: 'public', target: 'Note' }],
@@ -436,7 +436,7 @@ describe('DDL schema planning', () => {
         { field: 'active', type: 'Boolean' },
       ],
       name: 'Note',
-    }]
+    }] as const
     const predicate = (operator: '$and' | '$or') => ({
       filters: [
         { field: 'details', operator: '$contains', value: { type: 'safe' } },
@@ -534,7 +534,7 @@ describe('DDL schema planning', () => {
     const entities = [
       { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
       { extends: 'Profile', fields: [], name: 'Employee' },
-    ]
+    ] as const
     const previous = new Graph({
       entities,
       grants: [{
@@ -579,7 +579,7 @@ describe('DDL schema planning', () => {
       const entities = [
         { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
         { extends: 'Profile', fields: [], name: 'Employee' },
-      ]
+      ] as const
       const previous = new Graph({
         entities,
         grants: [{

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { EntityDefinition, QueryFieldDefinition } from './EntityDefinitions'
-import { EntityDefinitions, FieldType, isCanonicalUUID } from './EntityDefinitions'
+import { EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
+import type { AuthoredDocument, AuthoredEntity, AuthoredRelationship } from './GraphAuthoring'
 import { Operator } from './Operator'
 import type { Filter } from './Predicate'
 import { Predicate } from './Predicate'
@@ -69,30 +70,22 @@ export interface GraphGrant {
   readonly target: string,
 }
 
-/** Canonical entity/relationship input accepted by a graph. */
-export interface GraphDocument {
-  /** Canonical entity declarations. */
-  readonly entities?: readonly unknown[],
-  /** Canonical named relationship declarations. */
-  readonly relationships?: readonly unknown[],
-}
-
-/** Options for the application-facing canonical graph. */
+/** Canonical graph authoring options. */
 export interface GraphOptions {
-  /** Canonical application ontology as JSON text, a document, or an entity array. */
-  readonly entities?: EntityDefinitions | GraphDocument | string | readonly unknown[],
+  /** Application ontology as JSON text, a document, or an entity array. */
+  readonly entities?: AuthoredDocument | readonly AuthoredEntity[] | string,
   /** Graph-defined permission declarations. */
   readonly grants?: readonly GrantDefinition[],
-  /** Role declarations when `entities` is an entity array. */
-  readonly relationships?: readonly unknown[],
-  /** Role declarations and stable identifiers. */
+  /** Application relationships when `entities` is an entity array. */
+  readonly relationships?: readonly AuthoredRelationship[],
+  /** Role authoring forms and stable identifiers. */
   readonly roles?: RoleSource,
   /** Application schema used by compiled security functions; defaults to public. */
   readonly schema?: string,
 }
 
 /** The system security ontology shared by every graph. */
-const SYSTEM_DOCUMENT: GraphDocument = {
+const SYSTEM_DOCUMENT: AuthoredDocument = {
   entities: [
     { fields: [], name: 'User' },
     { fields: [{ field: 'description', type: 'String' }], name: 'Role' },
@@ -124,26 +117,6 @@ const MANAGED_ENTITIES = new Set(['Role', 'UserRole', 'ExternalIdentity'])
 const ADMIN_ROLE: GraphRole = { id: ADMIN_ROLE_ID, name: 'Administrator' }
 /** The built-in public principal. */
 const PUBLIC_ROLE: GraphRole = { id: PUBLIC_ROLE_ID, name: 'Public' }
-/** The root entity shape used by policy predicates targeting `Entity`. */
-const ENTITY_ROOT = {
-  abstract: false,
-  collections: [],
-  effectiveFields: [
-    { name: 'id', owner: 'Entity', type: FieldType.ID },
-    { name: 'name', owner: 'Entity', type: FieldType.String },
-    { name: 'entity', owner: 'Entity', type: FieldType.String },
-  ],
-  fields: [
-    { name: 'id', type: FieldType.ID },
-    { name: 'name', type: FieldType.String },
-    { name: 'entity', type: FieldType.String },
-  ],
-  inverseFields: [],
-  name: 'Entity',
-  parent: 'Entity',
-  singularNavigations: [],
-} satisfies EntityDefinition
-
 /**
  * The one application-facing canonical graph.
  *
@@ -167,8 +140,8 @@ export class Graph {
    * @param options - Application ontology, roles, and grants.
    */
   constructor(options: GraphOptions = {}) {
-    const application = applicationDocument(options)
-    const entities = application.entities ?? []
+    const application = normalizeGraphInput(options)
+    const entities = application.entities
     const relationships = application.relationships ?? []
     for (const entity of entities) {
       const name = entityName(entity)
@@ -182,10 +155,10 @@ export class Graph {
       ...security.filter(entity => hasUser === false || entityName(entity) !== 'User'),
       ...entities,
     ]
-    this.definitions = EntityDefinitions.load(JSON.stringify({
+    this.definitions = EntityDefinitions.fromDocument({
       entities: allEntities,
       relationships: [...(SYSTEM_DOCUMENT.relationships ?? []), ...relationships],
-    }))
+    })
     this.roles = normalizeRoles(options.roles)
     this.#schema = options.schema ?? 'public'
     this.#rolesById = new Map(this.roles.map(role => [role.id, role]))
@@ -325,7 +298,9 @@ export class Graph {
     const entity = this.#policyEntity(target)
     if (!entity) return null
     const relationship = this.definitions.relationship(target)
-    const leaves = relationship ? [target] : this.#leaves(target)
+    const leaves = relationship
+      ? [target]
+      : this.definitions.concreteDescendants(target).map(descendant => descendant.name)
     const conditions: string[] = []
     for (const leaf of leaves) {
       const table = quoteIdentifier(leaf)
@@ -353,7 +328,7 @@ export class Graph {
   createExpression(target: string, row: Record<string, unknown> = {}): string | null {
     const entity = this.#policyEntity(target)
     if (!entity) return null
-    const targets = new Set(['*', ...this.#ancestors(target)])
+    const targets = new Set(['*', ...this.#ancestry(target)])
     const conditions: string[] = []
     for (const grant of this.grants) {
       if (!targets.has(grant.target)) continue
@@ -370,7 +345,7 @@ export class Graph {
   }
 
   #compilePredicateForRow(grant: GraphGrant, row: Record<string, unknown>): string {
-    const entity = grant.target === 'Entity' ? ENTITY_ROOT : this.#policyEntity(grant.target)
+    const entity = grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target)
     if (!entity) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
     const valueFor = (name: string): unknown => {
       if (Object.hasOwn(row, name)) return row[name]
@@ -447,8 +422,8 @@ export class Graph {
     if (target === '*') throw new Error('Graph: a wildcard grant cannot carry a predicate')
     if (target === 'Entity') {
       const filter = typeof input === 'string'
-        ? QueryNormalizer.normalize(ENTITY_ROOT, input, name => policyField(ENTITY_ROOT, name))
-        : Predicate.normalize(ENTITY_ROOT, input, name => policyField(ENTITY_ROOT, name))
+        ? QueryNormalizer.normalize(identityDefinition(), input, name => policyField(identityDefinition(), name))
+        : Predicate.normalize(identityDefinition(), input, name => policyField(identityDefinition(), name))
       if (filter) assertPolicySafe(filter)
       return filter
     }
@@ -502,7 +477,7 @@ export class Graph {
   }
 
   #entityRootExpression(action: Action): string | null {
-    const leaves = this.#concreteLeaves()
+    const leaves = this.definitions.concreteDescendants('Entity').map(entity => entity.name)
     const conditions: string[] = []
     for (const leaf of leaves) {
       const row = quoteIdentifier('Entity')
@@ -522,11 +497,11 @@ export class Graph {
   }
 
   #entityTableExpression(table: string, action: Action): string | null {
-    const leaves = this.#leaves(table)
+    const leaves = this.definitions.concreteDescendants(table).map(entity => entity.name)
     const alias = quoteIdentifier(table)
     const conditions: string[] = []
     for (const leaf of leaves) {
-      if (leaf === table && this.#isConcrete(table)) {
+      if (leaf === table && this.definitions.entity(table)?.abstract === false) {
         const expression = this.#leafExpression(leaf, action, alias, false)
         if (expression) conditions.push(expression)
         continue
@@ -568,7 +543,7 @@ export class Graph {
     roleOnly: boolean,
     table: string,
   ): string | null {
-    const targets = new Set(['*', 'Entity', ...this.#ancestors(leaf)])
+    const targets = new Set(['*', 'Entity', ...this.#ancestry(leaf)])
     const conditions: string[] = []
     for (const grant of this.grants) {
       if (!targets.has(grant.target)) continue
@@ -593,12 +568,12 @@ export class Graph {
   }
 
   #grantApplies(grant: GraphGrant, leaf: string): boolean {
-    return new Set(['*', 'Entity', ...this.#ancestors(leaf)]).has(grant.target)
+    return new Set(['*', 'Entity', ...this.#ancestry(leaf)]).has(grant.target)
   }
 
   #requiresHelper(grant: GraphGrant, table: string): boolean {
     if (grant.target !== table || !grant.predicate) return grant.target !== table
-    const entity = grant.target === 'Entity' ? ENTITY_ROOT : this.#policyEntity(grant.target)
+    const entity = grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target)
     if (!entity) return true
     return filterFieldNames(grant.predicate).some(name => {
       const field = entity.effectiveFields.find(candidate => candidate.name === name.split('.', 1)[0])
@@ -620,7 +595,7 @@ export class Graph {
     table: string,
     allowSubqueries: boolean,
   ): string {
-    const entity = grant.target === 'Entity' ? ENTITY_ROOT : this.#policyEntity(grant.target)
+    const entity = grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target)
     if (!entity) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
     const ownerOf = (name: string): string => {
       const root = name.split('.', 1)[0] ?? name
@@ -762,20 +737,7 @@ export class Graph {
    * @returns The User table or its first concrete descendant.
    */
   userLeaf(): string {
-    const user = this.definitions.entity('User')
-    if (!user) return 'User'
-    if (!user.abstract) return 'User'
-    const leaf = this.definitions.entities.find(entity => {
-      let current = entity
-      while (current.parent !== 'Entity') {
-        const parent = this.definitions.entity(current.parent)
-        if (!parent) return false
-        if (parent.name === 'User') return !entity.abstract
-        current = parent
-      }
-      return false
-    })
-    return leaf?.name ?? 'User'
+    return this.definitions.concreteDescendants('User')[0]?.name ?? 'User'
   }
 
   #policyFunctions(): PhysicalFunction[] {
@@ -783,7 +745,7 @@ export class Graph {
     const seen = new Set<string>()
     for (const grant of this.grants) {
       if (!grant.predicate) continue
-      const needed = [...this.#concreteLeaves(),
+      const needed = [...this.definitions.concreteDescendants('Entity').map(entity => entity.name),
         ...this.definitions.relationships.map(relationship => relationship.name)]
         .some(leaf => this.#grantApplies(grant, leaf) && this.#requiresHelper(grant, leaf))
       if (!needed) continue
@@ -825,37 +787,14 @@ export class Graph {
     return conditions.length === 0 ? null : `(${conditions.join(' OR ')})`
   }
 
-  #ancestors(name: string): string[] {
-    const result: string[] = []
-    let current = name
-    while (current && current !== 'Entity') {
-      result.push(current)
-      const entity = this.definitions.entity(current)
-      if (!entity) break
-      const parent = entity.parent
-      if (parent === current) break
-      current = parent
-    }
-    result.push('Entity')
-    return result
-  }
-
-  #leaves(name: string): string[] {
-    const entity = this.definitions.entity(name)
-    if (!entity) return []
-    return this.#concreteLeaves().filter(leaf => this.#ancestors(leaf).includes(name))
-  }
-
-  #concreteLeaves(): string[] {
-    return this.definitions.entities.filter(entity => !entity.abstract).map(entity => entity.name)
-  }
-
-  #isConcrete(name: string): boolean {
-    return this.definitions.entity(name)?.abstract === false
+  #ancestry(name: string): readonly string[] {
+    if (this.definitions.entity(name)) return this.definitions.ancestry(name)
+    if (this.definitions.relationship(name)) return [name, 'Entity']
+    return []
   }
 
   #policyEntity(name: string): EntityDefinition | undefined {
-    if (name === 'Entity') return ENTITY_ROOT
+    if (name === 'Entity') return identityDefinition()
     const entity = this.definitions.entity(name)
     if (entity) {
       return {
@@ -1052,79 +991,31 @@ export class Graph {
 }
 
 /**
- * Normalize application document input.
+ * Normalize graph authoring input into one authored document.
  * @param options - Graph options.
- * @returns A document containing application entities and relationships.
+ * @returns The application authored document.
  */
-function applicationDocument(options: GraphOptions): GraphDocument {
+function normalizeGraphInput(options: GraphOptions): AuthoredDocument {
   const input = options.entities
   if (input instanceof EntityDefinitions) {
-    return {
-      entities: input.entities.map(entity => ({
-        fields: [
-          ...(entity.idFormat === undefined ? [] : [{ field: 'id', format: entity.idFormat }]),
-          ...entity.fields.filter(field => field.name !== 'id').map(field => {
-            if (field.type === FieldType.Entity) {
-              return {
-                field: field.name,
-                ...(field.inverse === undefined ? {} : { inverse: field.inverse }),
-                target: field.target,
-                type: FieldType.Entity,
-              }
-            }
-            if (field.type === FieldType.Inverse) {
-              return {
-                cardinality: field.cardinality,
-                field: field.name,
-                inverse: field.inverse,
-                target: field.target,
-                type: FieldType.Inverse,
-              }
-            }
-            if (field.type === FieldType.Array) {
-              return {
-                field: field.name,
-                items: {
-                  ...(field.items.format === undefined ? {} : { format: field.items.format }),
-                  type: field.items.type,
-                },
-                type: FieldType.Array,
-              }
-            }
-            if (field.type === FieldType.JSON) return { field: field.name, type: FieldType.JSON }
-            return {
-              field: field.name,
-              ...(field.format === undefined ? {} : { format: field.format }),
-              type: field.type,
-            }
-          }),
-        ],
-        name: entity.name,
-        ...(entity.extends === undefined ? {} : { extends: entity.extends }),
-      })),
-      relationships: input.relationships.map(relationship => ({
-        between: relationship.between.map(endpoint => ({
-          field: endpoint.field,
-          inverse: endpoint.inverse,
-          target: endpoint.target,
-        })),
-        fields: relationship.fields.map(relationshipFieldSource),
-        name: relationship.name,
-      })),
-    }
+    throw new Error('Graph: pass authored entities instead of EntityDefinitions')
   }
   if (typeof input === 'string') {
-    const parsed = JSON.parse(input) as GraphDocument | readonly unknown[]
-    return Array.isArray(parsed)
-      ? { entities: parsed, relationships: options.relationships }
-      : parsed as GraphDocument
+    const parsed = JSON.parse(input) as AuthoredDocument | readonly AuthoredEntity[]
+    if (isAuthoredEntityArray(parsed)) {
+      return { entities: parsed, relationships: options.relationships }
+    }
+    return {
+      ...parsed,
+      ...(options.relationships === undefined ? {} : { relationships: options.relationships }),
+    }
   }
-  if (Array.isArray(input)) {
+  if (isAuthoredEntityArray(input)) {
     return { entities: input, relationships: options.relationships }
   }
   if (input && typeof input === 'object') {
     return {
-      ...(input as GraphDocument),
+      ...(input as AuthoredDocument),
       ...(options.relationships === undefined ? {} : { relationships: options.relationships }),
     }
   }
@@ -1132,32 +1023,12 @@ function applicationDocument(options: GraphOptions): GraphDocument {
 }
 
 /**
- * Convert one validated relationship field back to authored JSON.
- * @param field - Validated relationship field.
- * @returns Canonical relationship field source.
+ * Whether a value is an authored entity array.
+ * @param value - Candidate value.
+ * @returns Whether the value is an array of entity declarations.
  */
-function relationshipFieldSource(
-  field: EntityDefinition['fields'][number],
-): Record<string, unknown> {
-  if (field.type === FieldType.Entity || field.type === FieldType.Inverse) {
-    throw new Error(`Relationship field "${field.name}" is not a value field`)
-  }
-  if (field.type === FieldType.Array) {
-    return {
-      field: field.name,
-      items: {
-        ...(field.items.format === undefined ? {} : { format: field.items.format }),
-        type: field.items.type,
-      },
-      type: FieldType.Array,
-    }
-  }
-  if (field.type === FieldType.JSON) return { field: field.name, type: FieldType.JSON }
-  return {
-    field: field.name,
-    ...(field.format === undefined ? {} : { format: field.format }),
-    type: field.type,
-  }
+function isAuthoredEntityArray(value: unknown): value is readonly AuthoredEntity[] {
+  return Array.isArray(value)
 }
 
 /**
