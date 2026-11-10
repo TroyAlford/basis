@@ -84,6 +84,12 @@
         "@types/less": "^3.0.8",
       },
     },
+    "libraries/codegen": {
+      "name": "@basis/codegen",
+      "dependencies": {
+        "@basis/server": "workspace:*",
+      },
+    },
     "libraries/configuration": {
       "name": "@basis/configuration",
       "dependencies": {
@@ -101,6 +107,7 @@
         "@basis/utilities": "workspace:*",
         "react": "^19",
         "react-dom": "^19",
+        "shiki": "3.0.0",
       },
       "devDependencies": {
         "@faker-js/faker": "^10.4.0",
@@ -220,6 +227,15 @@
         "chalk": "^6.0.0",
       },
     },
+    "libraries/visualization": {
+      "name": "@basis/visualization",
+      "dependencies": {
+        "@basis/server": "workspace:*",
+      },
+      "devDependencies": {
+        "beautiful-mermaid": "^1.1.3",
+      },
+    },
     "libraries/workspaces": {
       "name": "@basis/workspaces",
       "bin": {
@@ -308,6 +324,8 @@
 
     "@basis/bun-plugins": ["@basis/bun-plugins@workspace:libraries/bun-plugins"],
 
+    "@basis/codegen": ["@basis/codegen@workspace:libraries/codegen"],
+
     "@basis/configuration": ["@basis/configuration@workspace:libraries/configuration"],
 
     "@basis/docs": ["@basis/docs@workspace:libraries/docs"],
@@ -329,6 +347,8 @@
     "@basis/testing": ["@basis/testing@workspace:libraries/testing"],
 
     "@basis/utilities": ["@basis/utilities@workspace:libraries/utilities"],
+
+    "@basis/visualization": ["@basis/visualization@workspace:libraries/visualization"],
 
     "@basis/workspaces": ["@basis/workspaces@workspace:libraries/workspaces"],
 

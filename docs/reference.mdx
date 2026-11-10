@@ -12,6 +12,7 @@ The root `package.json` exposes these supported imports:
 
 ```text
 basis/cli
+basis/codegen
 basis/configuration
 basis/eslint
 basis/logger
@@ -28,9 +29,10 @@ basis/testing/bun
 basis/tsconfig/base.json
 basis/tsconfig/bun.json
 basis/tsconfig/react.json
+basis/visualization
 ```
 
-Each documented surface has a page in the navigation: [CLI](./cli.mdx), [Configuration](./configuration.mdx), [ESLint](./eslint.mdx), [Logging](./logging.mdx), [OAuth](./oauth.mdx), [Server](./server/index.mdx), [Database & Transactions](./server/database.mdx), [Authorization & Row-Level Security](./server/authorization.mdx), [Typed Authoring & Generated Products](./server/authoring.mdx), [Schema Inspection & Planning](./server/schema.mdx), [Query Language](./server/query-language.mdx), [Build Plugins & Serve](./build-plugins.mdx), [Testing & Visual Snapshots](./testing.md), [Code Review](./review.mdx), and [TypeScript](./typescript.mdx). The server database page also documents `EntityDefinitions`, `EntityDefinition`, `FieldDefinition`, and the `FieldType` enum. React components, editors, icons, mixins, router, and theme are documented under React.
+Each documented surface has a page in the navigation: [CLI](./cli.mdx), [Configuration](./configuration.mdx), [ESLint](./eslint.mdx), [Logging](./logging.mdx), [OAuth](./oauth.mdx), [Server](./server/index.mdx), [Database & Transactions](./server/database.mdx), [Authorization & Row-Level Security](./server/authorization.mdx), [Typed Authoring & Generated Products](./server/authoring.mdx), [Schema Inspection & Planning](./server/schema.mdx), [Query Language](./server/query-language.mdx), [Build Plugins & Serve](./build-plugins.mdx), [Testing & Visual Snapshots](./testing.md), [Code Review](./review.mdx), and [TypeScript](./typescript.mdx). The server database page also documents `EntityDefinitions`, `EntityDefinition`, `FieldDefinition`, and the `FieldType` enum. Build-time TypeScript/JSON Schema generation is exposed at `basis/codegen`; ERD source generation is exposed at `basis/visualization`. React components, editors, icons, mixins, router, and theme are documented under React.
 
 ## Internal workspaces
 

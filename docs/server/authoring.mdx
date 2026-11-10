@@ -43,24 +43,27 @@ The constructed `graph.definitions` is the canonical model. Its narrow ontology 
 
 ## Generated products
 
-`generateProducts(graph.definitions)` derives deterministic products from that one validated model:
+Build-time code generation lives outside the server runtime. Import the generators from their consumer packages and pass `graph.definitions`:
 
 ```ts
 import graph from './graph'
-import { generateProducts } from 'basis/server'
+import { generateJSONSchemas, generateTypes } from 'basis/codegen'
+import { generateErd } from 'basis/visualization'
 
-const products = generateProducts(graph.definitions)
+const types = generateTypes(graph.definitions)
+const schemas = generateJSONSchemas(graph.definitions)
+const logicalErd = generateErd(graph.definitions, 'logical')
+const physicalErd = generateErd(graph.definitions, 'physical')
 ```
 
-- `types` contains entity interfaces and `*Ref` identity references. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
-- `schemas` contains `create`, `output`, and `update` JSON Schemas for every entity.
-- `logicalErd` and `physicalErd` contain Mermaid entity-relationship diagrams.
+- `basis/codegen` emits entity interfaces, `*Ref` identity references, and `create`, `output`, and `update` JSON Schemas. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
+- `basis/visualization` emits logical and physical Mermaid ERD source. Render it with the existing `Mermaid` component from `basis/react`; visualization never becomes a server runtime dependency.
 
-`generateTypes`, `generateJSONSchemas`, and `generateErd` expose the same products individually. Generation is deterministic for a fixed canonical model and must not be maintained as a second schema definition.
+Generation is deterministic for a fixed canonical model and must not be maintained as a second schema definition.
 
 ## Example generated output
 
-For the typed `User`/`Note` declaration above, `generateProducts(graph.definitions).types` includes these application interfaces (the system security entities are emitted too):
+For the typed `User`/`Note` declaration above, `generateTypes(graph.definitions)` includes these application interfaces (the system security entities are emitted too):
 
 ```ts
 /** Generated from the canonical Basis entity definitions. Do not edit by hand. */
