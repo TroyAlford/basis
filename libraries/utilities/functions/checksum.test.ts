@@ -14,7 +14,8 @@ describe('checksum', () => {
   })
 
   test('can preserve insertion-order serialization for legacy byte layouts', () => {
-    expect(checksum({ a: 1, b: 2 }, { stable: false }))
-      .not.toBe(checksum({ a: 1, b: 2 }, { stable: false }))
+    const first = Object.fromEntries([['a', 1], ['b', 2]])
+    const second = Object.fromEntries([['b', 2], ['a', 1]])
+    expect(checksum(first, { stable: false })).not.toBe(checksum(second, { stable: false }))
   })
 })
