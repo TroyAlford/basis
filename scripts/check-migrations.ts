@@ -59,12 +59,22 @@ async function materialize(ref: string, source: string, target: string): Promise
 }
 
 /**
- * Resolve the base argument from CLI arguments.
+ * Resolve one named CLI option.
+ * @param name - Option name.
+ * @param fallback - Value used when omitted.
+ * @returns Selected value.
+ */
+function option(name: string, fallback: string): string {
+  const index = process.argv.indexOf(name)
+  return index >= 0 ? (process.argv[index + 1] ?? fallback) : fallback
+}
+
+/**
+ * Resolve the base Git revision.
  * @returns Base Git revision.
  */
 function baseRef(): string {
-  const index = process.argv.indexOf('--base')
-  return index >= 0 ? (process.argv[index + 1] ?? 'origin/main') : 'origin/main'
+  return option('--base', 'origin/main')
 }
 
 /**
@@ -90,28 +100,30 @@ async function loadGraph(file: string): Promise<Graph> {
  */
 async function main(): Promise<number> {
   const base = baseRef()
+  const graphPath = option('--graph', GRAPH)
+  const migrationsPath = option('--migrations', MIGRATIONS)
   const root = process.cwd()
   const sandbox = await mkdtemp(join(root, '.basis', 'migration-gate-'))
   const install = join(sandbox, 'postgres')
   const baseMigrations = join(sandbox, 'base-migrations')
   let baseGraph: Graph | null = null
   try {
-    const baseGraphSource = gitFile(base, GRAPH)
+    const baseGraphSource = gitFile(base, graphPath)
     if (baseGraphSource !== null) {
       const file = join(sandbox, 'base-graph.ts')
       await writeFile(file, baseGraphSource)
       baseGraph = await loadGraph(file)
-      await materialize(base, MIGRATIONS, baseMigrations)
+      await materialize(base, migrationsPath, baseMigrations)
     }
-    const headGraphSource = await readFile(join(root, GRAPH), 'utf8')
+    const headGraphSource = await readFile(join(root, graphPath), 'utf8')
     const headGraphFile = join(sandbox, 'head-graph.ts')
     await writeFile(headGraphFile, headGraphSource)
     const headGraph = await loadGraph(headGraphFile)
-    const headRelease = await loadRelease(join(root, MIGRATIONS), headGraph)
+    const headRelease = await loadRelease(join(root, migrationsPath), headGraph)
     const head = new DatabaseRelease({
       graph: headGraph,
       installation: install,
-      migrations: join(root, MIGRATIONS),
+      migrations: join(root, migrationsPath),
     })
     if (baseGraph) {
       await new DatabaseRelease({
