@@ -5,7 +5,9 @@
     ".": "./index.ts"
   },
   "dependencies": {
-    "@basis/server": "workspace:*",
+    "@basis/server": "workspace:*"
+  },
+  "devDependencies": {
     "beautiful-mermaid": "^1.1.3"
   }
 }

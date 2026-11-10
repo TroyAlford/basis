@@ -231,6 +231,8 @@
       "name": "@basis/visualization",
       "dependencies": {
         "@basis/server": "workspace:*",
+      },
+      "devDependencies": {
         "beautiful-mermaid": "^1.1.3",
       },
     },
