@@ -1,3 +1,4 @@
+import { Logger } from 'basis/logger'
 import { tempDirectory } from 'basis/testing'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdir, unlink, writeFile } from 'node:fs/promises'
@@ -9,6 +10,7 @@ import { Graph } from './Graph'
 import { DatabaseRelease, loadRelease } from './Release'
 import type { MigrationArtifact } from './Schema'
 import { DDL } from './Schema'
+import { Server } from './Server'
 
 /**
  * Build a migration artifact from one live model to another.
@@ -109,6 +111,8 @@ async function sourceReady(
 }
 
 const installs: string[] = []
+const silent = new Logger({ silent: true })
+const application = join(import.meta.dir, '..', '..', '..', 'testing', 'server', 'Application.tsx')
 
 afterEach(() => {
   for (const install of installs.splice(0)) removeService(install)
@@ -172,6 +176,22 @@ describe('versioned database releases', () => {
     expect(result.applied).toEqual([artifactB.version])
     expect(result.backup?.artifactVersion).toBe(artifactA.version)
     expect(await sourceReady(install, graphB, artifactB)).toBe(true)
+
+    const previousCwd = process.cwd()
+    process.chdir(install)
+    const server = new Server()
+      .graph(graphB)
+      .database()
+      .migration(artifactB)
+      .root(install)
+      .main(application)
+      .start({ development: false, hostname: '127.0.0.1', logger: silent, port: 0 })
+    process.chdir(previousCwd)
+    try {
+      await expect(server.ready()).resolves.toBeUndefined()
+    } finally {
+      await server.shutdown()
+    }
 
     const noop = await release.apply()
     expect(noop.changed).toBe(false)
