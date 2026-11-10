@@ -117,6 +117,46 @@ export class ReleaseError extends Error {
     this.failure = failure
     this.code = failure.code
   }
+
+  /**
+   * Recovery point captured before the failed attempt.
+   * @returns Recorded recovery point, if any.
+   */
+  get backup(): PostgresBackup | undefined {
+    return this.failure.backup
+  }
+
+  /**
+   * Cutover phase that failed.
+   * @returns Failed release phase.
+   */
+  get phase(): string {
+    return this.failure.phase
+  }
+
+  /**
+   * Whether a later retry may reasonably succeed.
+   * @returns Whether the failure is retryable.
+   */
+  get retryable(): boolean {
+    return this.failure.retryable
+  }
+
+  /**
+   * Approved target physical hash.
+   * @returns Approved target physical hash.
+   */
+  get targetHash(): string {
+    return this.failure.targetHash
+  }
+
+  /**
+   * Application release version.
+   * @returns Application release version.
+   */
+  get version(): string {
+    return this.failure.version
+  }
 }
 
 /** Options for one host-run database release. */
@@ -253,7 +293,6 @@ export class DatabaseRelease {
     let plan: ReleasePlan | null = null
     let backup: PostgresBackup | undefined
     try {
-      unlock = await this.#lock()
       const finalTargetHash = release.migrations.at(-1)?.targetHash ?? ''
       const recordedFailure = await this.failure()
       if (
@@ -264,6 +303,8 @@ export class DatabaseRelease {
       ) {
         throw new ReleaseError(recordedFailure)
       }
+      phase = 'lock'
+      unlock = await this.#lock()
       const connection = await this.#service.ensure(false)
       sourceSql = new BunSQL(connection.ownerUrl)
       await sourceSql.connect()
@@ -405,7 +446,7 @@ export class DatabaseRelease {
         failure,
         backup,
       )
-      await this.#writeFailure(record).catch(() => undefined)
+      if (phase !== 'lock') await this.#writeFailure(record).catch(() => undefined)
       throw new ReleaseError(record, error)
     } finally {
       await sourceSql?.close().catch(() => undefined)
@@ -479,19 +520,21 @@ export class DatabaseRelease {
   ): ReleaseFailure {
     const classification = phase === 'load'
       ? ['RELEASE_INVALID', false] as const
-      : phase === 'plan'
-        ? ['RELEASE_PLAN_FAILED', false] as const
-        : phase === 'backup'
-          ? ['RELEASE_BACKUP_FAILED', true] as const
-          : phase === 'staging'
-            ? ['RELEASE_TRANSIENT', true] as const
-            : phase === 'migration'
-              ? ['MIGRATION_FAILED', false] as const
-              : phase === 'verification'
-                ? ['RELEASE_VERIFICATION_FAILED', false] as const
-                : phase === 'cutover'
-                  ? ['RELEASE_CUTOVER_FAILED', true] as const
-                  : ['RELEASE_STATE_INVALID', false] as const
+      : phase === 'lock'
+        ? ['RELEASE_LOCKED', true] as const
+        : phase === 'plan'
+          ? ['RELEASE_PLAN_FAILED', false] as const
+          : phase === 'backup'
+            ? ['RELEASE_BACKUP_FAILED', true] as const
+            : phase === 'staging'
+              ? ['RELEASE_TRANSIENT', true] as const
+              : phase === 'migration'
+                ? ['MIGRATION_FAILED', false] as const
+                : phase === 'verification'
+                  ? ['RELEASE_VERIFICATION_FAILED', false] as const
+                  : phase === 'cutover'
+                    ? ['RELEASE_CUTOVER_FAILED', true] as const
+                    : ['RELEASE_STATE_INVALID', false] as const
     return {
       ...(backup === undefined ? {} : { backup }),
       code: classification[0],

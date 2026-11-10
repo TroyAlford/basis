@@ -327,7 +327,8 @@ describe('versioned database releases', () => {
     expect(firstFailure).toBeInstanceOf(ReleaseError)
     expect(firstFailure).toMatchObject({
       code: 'MIGRATION_FAILED',
-      failure: { retryable: false, version: '3.0.0' },
+      retryable: false,
+      version: '3.0.0',
     })
     expect(await failing.failure()).toMatchObject({
       code: 'MIGRATION_FAILED',
@@ -337,7 +338,12 @@ describe('versioned database releases', () => {
     const backupsAfterFailure = (await readdir(join(install, '.basis', 'backups')))
       .filter(name => name.endsWith('.dump'))
       .length
-    const repeatedFailure = (await failing.apply().catch((error: unknown) => error)) as ReleaseError
+    const repeated = new DatabaseRelease({
+      graph: graphC,
+      installation: install,
+      migrations: releaseC,
+    })
+    const repeatedFailure = (await repeated.apply().catch((error: unknown) => error)) as ReleaseError
     expect(repeatedFailure).toBeInstanceOf(ReleaseError)
     expect(repeatedFailure.code).toBe('MIGRATION_FAILED')
     expect((await readdir(join(install, '.basis', 'backups')))
