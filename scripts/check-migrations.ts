@@ -67,7 +67,8 @@ async function materialize(ref: string, source: string, target: string): Promise
  */
 function option(name: string, environment: string, fallback: string): string {
   const index = process.argv.indexOf(name)
-  return index >= 0 ? (process.argv[index + 1] ?? fallback) : process.env[environment] ?? fallback
+  if (index >= 0) return process.argv[index + 1] || fallback
+  return process.env[environment] || fallback
 }
 
 /**
