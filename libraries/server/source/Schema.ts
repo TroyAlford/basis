@@ -30,6 +30,8 @@ export interface PhysicalIndex {
   readonly method?: string,
   /** Index name. */
   readonly name: string,
+  /** Whether each key column uses PostgreSQL's default operator class. */
+  readonly operatorClassDefaults?: readonly boolean[],
   /** Operator classes for key columns, when known. */
   readonly operatorClasses?: readonly string[],
   /** Complete create-index SQL when compiled from a desired model. */
@@ -418,6 +420,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     definition: string,
     index: string,
     method: string,
+    operatorClassDefaults: boolean[] | null,
     operatorClasses: string[] | null,
     schema: string,
     table: string,
@@ -434,6 +437,9 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
 (SELECT array_agg(opc.opcname ORDER BY u.ordinality) FROM unnest(i.indclass) WITH ORDINALITY
   u(opcoid,
       ordinality) JOIN pg_opclass opc ON opc.oid = u.opcoid) AS "operatorClasses",
+(SELECT array_agg(opc.opcdefault ORDER BY u.ordinality) FROM unnest(i.indclass) WITH ORDINALITY
+  u(opcoid,
+      ordinality) JOIN pg_opclass opc ON opc.oid = u.opcoid) AS "operatorClassDefaults",
 (SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(i.indkey) WITH ORDINALITY u(attnum,
       ordinality) JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = u.attnum) AS columns
     FROM pg_index i
@@ -673,6 +679,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       definition: row.definition,
       method: row.method,
       name: row.index,
+      operatorClassDefaults: row.operatorClassDefaults ?? [],
       operatorClasses: row.operatorClasses ?? [],
       sql: row.definition,
       table: name,
@@ -1224,8 +1231,7 @@ export function plan(options: PlanOptions): SchemaPlan {
         || (index.unique !== undefined && existing.unique !== index.unique)
         || (index.columns !== undefined && (existing.columns ?? []).join(',') !== index.columns.join(','))
         || (existing.method !== undefined && (index.method ?? 'btree') !== existing.method)
-        || (index.operatorClasses !== undefined && index.operatorClasses.length > 0
-          && !sameOperatorClasses(index.operatorClasses, existing.operatorClasses ?? []))
+        || !sameIndexOperatorClasses(index, existing)
         || (existing.definition !== undefined && !sameIndexDefinition(index.sql, existing.definition))
       ) {
         drift.push(`index definition changed: ${table.name}.${index.name}`)
@@ -2045,6 +2051,22 @@ function sameIndexDefinition(compiled: string, catalog: string): boolean {
     value.replace(/\busing\s+[a-z]+\b/gu, ''),
   )
   return expression(actual) === expression(desired)
+}
+
+/**
+ * Compare canonical and catalog operator classes.
+ * @param expected - Canonical index.
+ * @param actual - Catalog index.
+ * @returns Whether both indexes use equivalent operator classes.
+ */
+function sameIndexOperatorClasses(expected: PhysicalIndex, actual: PhysicalIndex): boolean {
+  const classes = expected.operatorClasses ?? []
+  if (classes.length === 0) {
+    if (actual.operatorClassDefaults === undefined) return true
+    return actual.operatorClassDefaults.length > 0
+      && actual.operatorClassDefaults.every(Boolean)
+  }
+  return sameOperatorClasses(classes, actual.operatorClasses ?? [])
 }
 
 /**

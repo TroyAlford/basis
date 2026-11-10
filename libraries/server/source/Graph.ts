@@ -820,6 +820,7 @@ export class Graph {
       indexes.push({
         columns: ['provider', 'subject'],
         name: 'ExternalIdentity_provider_subject_key',
+        operatorClasses: [],
         sql: 'CREATE UNIQUE INDEX IF NOT EXISTS "ExternalIdentity_provider_subject_key" ' +
           'ON "ExternalIdentity" ("provider", "subject")',
         table: 'ExternalIdentity',
@@ -831,12 +832,14 @@ export class Graph {
         {
           columns: ['user.id'],
           name: 'UserRole_user_idx',
+          operatorClasses: [],
           sql: 'CREATE INDEX IF NOT EXISTS "UserRole_user_idx" ON "UserRole" ("user.id")',
           table: 'UserRole',
         },
         {
           columns: ['role.id'],
           name: 'UserRole_role_idx',
+          operatorClasses: [],
           sql: 'CREATE INDEX IF NOT EXISTS "UserRole_role_idx" ON "UserRole" ("role.id")',
           table: 'UserRole',
         },

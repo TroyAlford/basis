@@ -723,6 +723,22 @@ describe('DDL schema planning', () => {
     }, { fresh: true })
   })
 
+  test('detects a nondefault operator class on a canonical default B-tree', async () => {
+    const model = definitions()
+    await withIsolatedDatabase('schema-index-opclass', async database => {
+      await installSchema(database.sql, model)
+      await database.sql`
+        DROP INDEX "Entity_name_id_idx"
+      `
+      await database.sql`
+        CREATE INDEX "Entity_name_id_idx" ON "Entity" USING btree ("name" text_pattern_ops, "id")
+      `
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({ actual, desired: model })
+      expect(plan.drift).toContain('index definition changed: Entity.Entity_name_id_idx')
+    }, { fresh: true })
+  })
+
   test('detects a same-name index with the wrong access method', async () => {
     const model = definitions()
     await withIsolatedDatabase('schema-index-method', async database => {
