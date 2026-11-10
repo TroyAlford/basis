@@ -8,9 +8,11 @@ export { DDL, physicalHash } from './source/Schema'
 export { ManagedPostgresOperations } from './source/PostgresOperations'
 export type {
   PostgresBackup,
+  PostgresCleanupWarning,
   PostgresOperationsOptions,
   PostgresRestoreOptions,
   PostgresRestoreResult,
+  PostgresRollbackResult,
   PostgresUpgradeResult,
 } from './source/PostgresOperations'
 export type {

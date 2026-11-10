@@ -58,6 +58,14 @@ export interface PostgresRestoreResult {
   readonly verified: true,
 }
 
+/** One post-commit cleanup warning. */
+export interface PostgresCleanupWarning {
+  /** Cleanup failure message. */
+  readonly message: string,
+  /** Resource left behind for later cleanup. */
+  readonly resource: string,
+}
+
 /** Upgrade result. */
 export interface PostgresUpgradeResult {
   /** Recovery point taken before cutover. */
@@ -66,6 +74,14 @@ export interface PostgresUpgradeResult {
   readonly image: string,
   /** Previous source image. */
   readonly previousImage: string,
+  /** Non-fatal post-commit cleanup obligations. */
+  readonly warnings: readonly PostgresCleanupWarning[],
+}
+
+/** Rollback result. */
+export interface PostgresRollbackResult {
+  /** Non-fatal post-commit cleanup obligations. */
+  readonly warnings: readonly PostgresCleanupWarning[],
 }
 
 /** One immutable backup manifest. */
@@ -232,8 +248,8 @@ export class ManagedPostgresOperations {
     const recovery = await this.backup()
     const manifest = await this.#readBackup(recovery.path)
     const target = await this.#prepareRestore(manifest, targetImage, recovery.path)
-    await this.#cutover(target, targetImage, manifest, previousImage)
-    return { backup: recovery, image: targetImage, previousImage }
+    const warnings = await this.#cutover(target, targetImage, manifest, previousImage)
+    return { backup: recovery, image: targetImage, previousImage, warnings }
   }
 
   /**
@@ -241,13 +257,14 @@ export class ManagedPostgresOperations {
    * The caller must stop application pools before invoking this method.
    * @param backup - Backup archive path.
    * @param image - Image for the restored source container; defaults to current.
+   * @returns Cleanup warnings for any post-commit resources left behind.
    */
-  async rollback(backup: string, image?: string): Promise<void> {
+  async rollback(backup: string, image?: string): Promise<PostgresRollbackResult> {
     const manifest = await this.#readBackup(backup)
     const previousImage = await this.#service.containerImage()
     const targetImage = image ?? manifest.image
     const target = await this.#prepareRestore(manifest, targetImage, backup)
-    await this.#cutover(target, targetImage, manifest, previousImage)
+    return { warnings: await this.#cutover(target, targetImage, manifest, previousImage) }
   }
 
   /**
@@ -304,13 +321,14 @@ export class ManagedPostgresOperations {
    * @param image - Target image.
    * @param manifest - Recovery point manifest.
    * @param previousImage - Previous source image.
+   * @returns Cleanup warnings for any post-commit resources left behind.
    */
   async #cutover(
     restore: DisposableRestore,
     image: string,
     manifest: BackupManifest,
     previousImage: string,
-  ): Promise<void> {
+  ): Promise<readonly PostgresCleanupWarning[]> {
     const state = await this.#service.containerState()
     if (state === 'running') await this.#service.stopContainer()
     const recoveryVolume = `${this.#service.volumeName}-recovery-${randomUUID()}`
@@ -338,8 +356,7 @@ export class ManagedPostgresOperations {
       await this.#service.waitReady()
       await this.#verifyService(manifest)
       sourceCommitted = true
-      await this.#service.removeVolume(restore.volume)
-      await this.#service.removeVolume(recoveryVolume)
+      return await this.#cleanupCommitted(restore.volume, recoveryVolume)
     } catch (error) {
       if (sourceCommitted) throw error
       if (!sourceDetached) {
@@ -370,6 +387,30 @@ export class ManagedPostgresOperations {
       }
       throw error
     }
+  }
+
+  /**
+   * Clean up post-commit volumes without turning a successful cutover into failure.
+   * @param candidateVolume - Disposable candidate volume.
+   * @param recoveryVolume - Preserved source volume copy.
+   * @returns Non-fatal cleanup warnings for resources that remain.
+   */
+  async #cleanupCommitted(
+    candidateVolume: string,
+    recoveryVolume: string,
+  ): Promise<readonly PostgresCleanupWarning[]> {
+    const warnings: PostgresCleanupWarning[] = []
+    for (const resource of [candidateVolume, recoveryVolume]) {
+      try {
+        await this.#service.removeVolume(resource)
+      } catch (error) {
+        warnings.push({
+          message: error instanceof Error ? error.message : String(error),
+          resource,
+        })
+      }
+    }
+    return warnings
   }
 
   /**

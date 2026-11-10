@@ -40,6 +40,8 @@ class FailingService extends ManagedPostgresService {
   failRemoveContainer = false
   failRemoveVolume = false
   failStart = false
+  failCandidateCleanup = false
+  failRecoveryCleanup = false
 
   override async createContainer(
     name: string,
@@ -66,6 +68,14 @@ class FailingService extends ManagedPostgresService {
     if (this.failRemoveVolume && name === this.volumeName) {
       this.failRemoveVolume = false
       throw new Error('injected volume removal failure')
+    }
+    if (this.failCandidateCleanup && name.startsWith('basis-restore-volume-')) {
+      this.failCandidateCleanup = false
+      throw new Error('injected candidate cleanup failure')
+    }
+    if (this.failRecoveryCleanup && name.includes('-recovery-')) {
+      this.failRecoveryCleanup = false
+      throw new Error('injected recovery cleanup failure')
     }
     return super.removeVolume(name)
   }
@@ -329,6 +339,48 @@ describe('Managed PostgreSQL operations', () => {
         } catch (error) {
           throw new Error(`failure case "${name}" did not recover`, { cause: error })
         }
+      }
+
+      const candidateCleanupService = new FailingService(installRoot)
+      candidateCleanupService.failCandidateCleanup = true
+      const candidateCleanup = await new ManagedPostgresOperations({
+        artifact,
+        installation: installRoot,
+      }, candidateCleanupService).upgrade('postgres:17-alpine')
+      expect(candidateCleanup.warnings).toHaveLength(1)
+      expect(candidateCleanup.warnings[0]?.resource).toStartWith('basis-restore-volume-')
+      const candidateLeftover = candidateCleanup.warnings[0]?.resource ?? ''
+      expect(run('docker', [
+        'volume', 'ls', '-q', '--filter', `name=^${candidateLeftover}$`,
+      ], { logger: silent }).lines).toEqual([candidateLeftover])
+      const candidateCleanupServer = await start(installRoot, artifact, 'postgres:17-alpine')
+      try {
+        await expectOwnArticle(candidateCleanupServer, user, { id: own, title: 'Own article' })
+      } finally {
+        await candidateCleanupServer.shutdown()
+      }
+      await new ManagedPostgresOperations({
+        artifact,
+        installation: installRoot,
+      }).rollback(backup.path, 'postgres:16.4-alpine')
+
+      const recoveryCleanupService = new FailingService(installRoot)
+      recoveryCleanupService.failRecoveryCleanup = true
+      const recoveryCleanup = await new ManagedPostgresOperations({
+        artifact,
+        installation: installRoot,
+      }, recoveryCleanupService).upgrade('postgres:17-alpine')
+      expect(recoveryCleanup.warnings).toHaveLength(1)
+      expect(recoveryCleanup.warnings[0]?.resource).toContain('-recovery-')
+      const recoveryLeftover = recoveryCleanup.warnings[0]?.resource ?? ''
+      expect(run('docker', [
+        'volume', 'ls', '-q', '--filter', `name=^${recoveryLeftover}$`,
+      ], { logger: silent }).lines).toEqual([recoveryLeftover])
+      const recoveryCleanupServer = await start(installRoot, artifact, 'postgres:17-alpine')
+      try {
+        await expectOwnArticle(recoveryCleanupServer, user, { id: own, title: 'Own article' })
+      } finally {
+        await recoveryCleanupServer.shutdown()
       }
     } finally {
       await source.shutdown()
