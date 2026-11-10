@@ -241,37 +241,6 @@ export class Graph {
   }
 
   /**
-   * Compile the graph's bootstrap DDL. This never executes it.
-   * @param appRole - Restricted application login role.
-   * @param superuser - Whether provisioning can force owner RLS.
-   * @returns Ordered security DDL.
-   */
-  authorizationDdl(appRole = DEFAULT_APP_ROLE, superuser = false): readonly string[] {
-    const role = quoteIdentifier(appRole)
-    const schema = this.physicalSchema(appRole, superuser)
-    const statements: string[] = ['CREATE SCHEMA IF NOT EXISTS basis']
-    for (const index of this.#indexes()) statements.push(index.sql)
-    for (const fn of schema.functions) {
-      if (!fn.lifecycle) statements.push(fn.sql)
-    }
-    for (const table of schema.tables) {
-      const quoted = quoteIdentifier(table.name)
-      statements.push(`ALTER TABLE ${quoted} ENABLE ROW LEVEL SECURITY`)
-      if (superuser) statements.push(`ALTER TABLE ${quoted} FORCE ROW LEVEL SECURITY`)
-    }
-    statements.push('REVOKE CREATE ON SCHEMA public FROM PUBLIC')
-    statements.push(`REVOKE CREATE ON SCHEMA public FROM ${role}`)
-    statements.push(`GRANT USAGE ON SCHEMA public TO ${role}`)
-    statements.push(`GRANT USAGE ON SCHEMA basis TO ${role}`)
-    for (const grant of schema.grants ?? []) statements.push(grant.sql)
-    for (const policy of schema.policies) {
-      statements.push(`DROP POLICY IF EXISTS ${quoteIdentifier(policy.name)} ON ${quoteIdentifier(policy.table)}`)
-      statements.push(policy.sql)
-    }
-    return [...new Set(statements)]
-  }
-
-  /**
    * Compile one authorization expression for an action and target.
    *
    * The expression is PostgreSQL SQL, not a JavaScript access decision. It is
@@ -851,6 +820,7 @@ export class Graph {
       indexes.push({
         columns: ['provider', 'subject'],
         name: 'ExternalIdentity_provider_subject_key',
+        operatorClasses: [],
         sql: 'CREATE UNIQUE INDEX IF NOT EXISTS "ExternalIdentity_provider_subject_key" ' +
           'ON "ExternalIdentity" ("provider", "subject")',
         table: 'ExternalIdentity',
@@ -862,12 +832,14 @@ export class Graph {
         {
           columns: ['user.id'],
           name: 'UserRole_user_idx',
+          operatorClasses: [],
           sql: 'CREATE INDEX IF NOT EXISTS "UserRole_user_idx" ON "UserRole" ("user.id")',
           table: 'UserRole',
         },
         {
           columns: ['role.id'],
           name: 'UserRole_role_idx',
+          operatorClasses: [],
           sql: 'CREATE INDEX IF NOT EXISTS "UserRole_role_idx" ON "UserRole" ("role.id")',
           table: 'UserRole',
         },
@@ -986,6 +958,16 @@ export class Graph {
       object: 'schema',
       privilege: 'CREATE',
       sql: `REVOKE CREATE ON SCHEMA public FROM ${role}`,
+      table: 'public',
+    })
+    grants.push({
+      grantName: 'grant:PUBLIC:schema:public:CREATE',
+      grantee: 'PUBLIC',
+      kind: 'revoke',
+      name: 'revoke:grant:PUBLIC:schema:public:CREATE',
+      object: 'schema',
+      privilege: 'CREATE',
+      sql: 'REVOKE CREATE ON SCHEMA public FROM PUBLIC',
       table: 'public',
     })
     return grants

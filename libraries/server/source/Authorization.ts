@@ -2,20 +2,14 @@ import type { SQL as BunSQL } from 'bun'
 import { currentActor } from './ActorContext'
 import type { Database } from './Database'
 import { openAdmin } from './Database'
-import type { EntityDefinitions } from './EntityDefinitions'
 import type { Graph } from './Graph'
 import { Action, ADMIN_ROLE_ID, PUBLIC_ROLE_ID } from './Graph'
 import type { Filter } from './Predicate'
 
 export { Action } from './Graph'
 
-/** The restricted application login role used by managed PostgreSQL. */
-const DEFAULT_APP_ROLE = 'basis_app'
-
 /** Options used to construct the authorization capability. */
 export interface AuthorizationOptions {
-  /** The restricted application login role; defaults to `basis_app`. */
-  readonly appRole?: string,
   /** The server-owned database capability. */
   readonly database: Database,
   /** The canonical application graph. */
@@ -50,20 +44,15 @@ export interface BootstrapResult {
 export class Authorization {
   /** The canonical graph that owns roles and permissions. */
   readonly graph: Graph
-  /** The combined application and security ontology. */
-  readonly definitions: EntityDefinitions
-  readonly #appRole: string
   readonly #database: Database
 
   /**
    * Build the capability.
-   * @param options - Database, graph, and restricted application role.
+   * @param options - Database and canonical graph.
    */
   constructor(options: AuthorizationOptions) {
-    this.#appRole = options.appRole ?? DEFAULT_APP_ROLE
     this.#database = options.database
     this.graph = options.graph
-    this.definitions = options.graph.definitions
   }
 
   /**
@@ -105,35 +94,23 @@ export class Authorization {
     if (currentActor() !== undefined) {
       throw new Error('Authorization: bootstrap is only available outside request dispatch')
     }
+    if (!options.provider || !options.subject) return { userId: null }
     const admin = await openAdmin(this.#database).catch(() => null)
     if (!admin) throw new Error('Authorization requires an administrative database connection')
     try {
-      await this.definitions.createTables(admin.sql)
-      const superuser = (await admin.sql<{ superuser: boolean }[]>`
-        SELECT r.rolsuper AS superuser
-        FROM pg_roles r
-        WHERE r.rolname = current_user
-      `)[0]?.superuser === true
-      for (const statement of this.graph.authorizationDdl(this.#appRole, superuser)) {
-        await admin.sql.unsafe(statement).simple()
-      }
-      await this.#seedRoles(admin.sql)
-      let userId: string | null = null
-      if (options.provider && options.subject) {
-        userId = await this.#enrollIdentityWithSql(
-          admin.sql,
-          options.provider,
-          options.subject,
-          options,
-        )
-        if (userId) {
-          const role = this.graph.role(options.role ?? ADMIN_ROLE_ID)
-          if (role) {
-            await admin.sql`
-              INSERT INTO "UserRole" ("user.id", "role.id")
-              VALUES (${userId}, ${role.id}) ON CONFLICT DO NOTHING
-            `
-          }
+      const userId = await this.#enrollIdentityWithSql(
+        admin.sql,
+        options.provider,
+        options.subject,
+        options,
+      )
+      if (userId) {
+        const role = this.graph.role(options.role ?? ADMIN_ROLE_ID)
+        if (role) {
+          await admin.sql`
+            INSERT INTO "UserRole" ("user.id", "role.id")
+            VALUES (${userId}, ${role.id}) ON CONFLICT DO NOTHING
+          `
         }
       }
       return { userId }
@@ -305,35 +282,5 @@ SELECT basis.enroll_identity(${provider},
     if (!await this.can(Action.Manage, target)) {
       throw new Error(`Authorization denied: manage on ${target} is required`)
     }
-  }
-
-  async #seedRoles(sql: BunSQL): Promise<void> {
-    await sql.begin(async tx => {
-      for (const role of this.graph.roles) {
-        if (role.id === PUBLIC_ROLE_ID) continue
-        const existing = await tx<{ id: string }[]>`
-          SELECT "id" FROM "Role" WHERE "id" = ${role.id}
-        `
-        if (existing[0]) {
-          await tx`
-            UPDATE "Role" SET "description" = ${role.description ?? ''}
-            WHERE "id" = ${role.id}
-          `
-          await tx`
-            UPDATE "Entity" SET "name" = ${role.name}, "entity" = 'Role'
-            WHERE "id" = ${role.id}
-          `
-          continue
-        }
-        await tx`
-          INSERT INTO "Entity" ("id", "name", "entity")
-          VALUES (${role.id}, ${role.name}, 'Role')
-        `
-        await tx`
-          INSERT INTO "Role" ("id", "description")
-          VALUES (${role.id}, ${role.description ?? ''})
-        `
-      }
-    })
   }
 }

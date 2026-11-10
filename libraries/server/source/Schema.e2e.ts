@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { installSchema } from '../testing/Schema'
 import { EntityDefinitions } from './EntityDefinitions'
 import { Graph } from './Graph'
 import { DDL } from './Schema'
@@ -45,7 +46,7 @@ describe('DDL schema planning', () => {
   test('reports no operations for an unchanged live model', async () => {
     const model = definitions()
     await withIsolatedDatabase('schema-plan-unchanged', async database => {
-      await model.createTables(database.sql)
+      await installSchema(database.sql, model)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired: model, includeAuthorization: false })
       expect(plan.drift).toEqual([])
@@ -62,7 +63,7 @@ describe('DDL schema planning', () => {
       ],
     }))
     await withIsolatedDatabase('schema-plan-additive', async database => {
-      await previous.createTables(database.sql)
+      await installSchema(database.sql, previous)
       const before = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual: before, desired, includeAuthorization: false, previous })
       expect(plan.operations.some(operation => operation.target === 'Tag')).toBe(true)
@@ -75,7 +76,7 @@ describe('DDL schema planning', () => {
     const previous = definitions('OldNote')
     const desired = definitions('NewNote')
     await withIsolatedDatabase('schema-plan-ambiguous', async database => {
-      await previous.createTables(database.sql)
+      await installSchema(database.sql, previous)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
       expect(plan.ambiguities).toContain('OldNote -> NewNote')
@@ -99,7 +100,7 @@ describe('DDL schema planning', () => {
       }],
     }))
     await withIsolatedDatabase('schema-plan-relationship', async database => {
-      await previous.createTables(database.sql)
+      await installSchema(database.sql, previous)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
       expect(plan.operations.some(operation => operation.target === 'Membership')).toBe(true)
@@ -118,7 +119,7 @@ describe('DDL schema planning', () => {
       ],
     }))
     await withIsolatedDatabase('schema-plan-mti', async database => {
-      await previous.createTables(database.sql)
+      await installSchema(database.sql, previous)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
       expect(plan.operations.some(operation => operation.target === 'Employee')).toBe(true)
@@ -135,7 +136,7 @@ describe('DDL schema planning', () => {
       entities: [{ fields: [{ field: 'amount', type: 'Number' }], name: 'Note' }],
     }))
     await withIsolatedDatabase('schema-plan-column-change', async database => {
-      await previous.createTables(database.sql)
+      await installSchema(database.sql, previous)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
       expect(plan.operations.some(operation => operation.kind === 'alter-column')).toBe(true)
@@ -159,7 +160,7 @@ describe('DDL schema planning', () => {
       ],
     })
     await withIsolatedDatabase('schema-plan-new-auth-table', async database => {
-      await previous.definitions.createTables(database.sql)
+      await installSchema(database.sql, previous.definitions)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, appRole: 'basis_app', desired, previous, superuser: true })
       expect(plan.operations.some(operation => (
@@ -174,7 +175,7 @@ describe('DDL schema planning', () => {
   test('treats a missing previously deployed table as drift, not an addition', async () => {
     const model = definitions()
     await withIsolatedDatabase('schema-plan-missing-deployed', async database => {
-      await model.createTables(database.sql)
+      await installSchema(database.sql, model)
       await database.sql`
         DROP TABLE "Note"
       `
@@ -195,7 +196,7 @@ describe('DDL schema planning', () => {
     }))
     const desired = definitions('Note')
     await withIsolatedDatabase('schema-plan-remove', async database => {
-      await previous.createTables(database.sql)
+      await installSchema(database.sql, previous)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({ actual, desired, includeAuthorization: false, previous })
       expect(plan.operations.some(operation => operation.id === 'drop-table:Tag' || (
@@ -209,7 +210,7 @@ describe('DDL schema planning', () => {
   test('reports live catalog drift as a blocker', async () => {
     const model = definitions()
     await withIsolatedDatabase('schema-plan-drift', async database => {
-      await model.createTables(database.sql)
+      await installSchema(database.sql, model)
       await database.sql`
         CREATE TABLE "Unexpected" ("id" text PRIMARY KEY)
       `
@@ -226,7 +227,7 @@ describe('DDL schema planning', () => {
       grants: [{ action: 'read', role: 'public', target: 'Note' }],
     })
     await withIsolatedDatabase('schema-plan-rls', async database => {
-      await model.definitions.createTables(database.sql)
+      await installSchema(database.sql, model.definitions)
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({
         actual,
@@ -479,21 +480,11 @@ describe('DDL schema planning', () => {
         roles: { editor: { name: 'Editor Renamed' } },
         schema: database.schema,
       })
-      await previous.definitions.createTables(database.sql)
-      for (const statement of previous.authorizationDdl(appRole, false)) {
-        await database.sql.unsafe(statement).simple()
-      }
-      for (const role of previous.roles) {
-        if (role.id === 'public') continue
-        await database.sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
-          VALUES (${role.id}, ${role.name}, 'Role')
-        `
-        await database.sql`
-          INSERT INTO "Role" ("id", "description")
-          VALUES (${role.id}, ${role.description ?? ''})
-        `
-      }
+      await installSchema(database.sql, previous, {
+        appRole,
+        schema: database.schema,
+        superuser: false,
+      })
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({
         actual,
@@ -600,25 +591,11 @@ describe('DDL schema planning', () => {
         }],
         schema: database.schema,
       })
-      await previous.definitions.createTables(database.sql)
-      for (const statement of previous.authorizationDdl(appRole, false)) {
-        await database.sql.unsafe(statement).simple()
-      }
-      const [role] = await database.sql<{ role: string }[]>`
-        SELECT current_user AS role
-      `
-      if (!role?.role) throw new Error('database role was not available')
-      for (const item of previous.roles) {
-        if (item.id === 'public') continue
-        await database.sql`
-          INSERT INTO "Entity" ("id", "name", "entity")
-          VALUES (${item.id}, ${item.name}, 'Role')
-        `
-        await database.sql`
-          INSERT INTO "Role" ("id", "description")
-          VALUES (${item.id}, ${item.description ?? ''})
-        `
-      }
+      await installSchema(database.sql, previous, {
+        appRole,
+        schema: database.schema,
+        superuser: false,
+      })
       const actual = await DDL.introspect(database.sql)
       const plan = DDL.plan({
         actual,
@@ -723,6 +700,59 @@ describe('DDL schema planning', () => {
       expect(plan.operations.some(operation => operation.id === functionTarget)).toBe(true)
     }
     expect(plan.operations.some(operation => operation.sql.includes('basis.matches'))).toBe(false)
+  })
+
+  test('revokes public schema CREATE through the reviewed graph plan', async () => {
+    const appRole = `basis_public_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+    await withIsolatedDatabase('schema-public-create', async database => {
+      await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
+      await database.sql.unsafe('GRANT CREATE ON SCHEMA public TO PUBLIC').simple()
+      const model = new Graph({
+        entities: [{ fields: [], name: 'Note' }],
+        schema: database.schema,
+      })
+      await installSchema(database.sql, model, {
+        appRole,
+        schema: database.schema,
+        superuser: true,
+      })
+      const [privilege] = await database.sql<{ create: boolean }[]>`
+        SELECT has_schema_privilege(${appRole}, 'public', 'CREATE') AS "create"
+      `
+      expect(privilege?.create).toBe(false)
+    }, { fresh: true })
+  })
+
+  test('detects a nondefault operator class on a canonical default B-tree', async () => {
+    const model = definitions()
+    await withIsolatedDatabase('schema-index-opclass', async database => {
+      await installSchema(database.sql, model)
+      await database.sql`
+        DROP INDEX "Entity_name_id_idx"
+      `
+      await database.sql`
+        CREATE INDEX "Entity_name_id_idx" ON "Entity" USING btree ("name" text_pattern_ops, "id")
+      `
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({ actual, desired: model })
+      expect(plan.drift).toContain('index definition changed: Entity.Entity_name_id_idx')
+    }, { fresh: true })
+  })
+
+  test('detects a same-name index with the wrong access method', async () => {
+    const model = definitions()
+    await withIsolatedDatabase('schema-index-method', async database => {
+      await installSchema(database.sql, model)
+      await database.sql`
+        DROP INDEX "Entity_name_trgm_idx"
+      `
+      await database.sql`
+        CREATE INDEX "Entity_name_trgm_idx" ON "Entity" USING btree ("name")
+      `
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({ actual, desired: model })
+      expect(plan.drift).toContain('index definition changed: Entity.Entity_name_trgm_idx')
+    }, { fresh: true })
   })
 
   test('includes authorization objects in the desired physical output', async () => {

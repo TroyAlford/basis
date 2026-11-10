@@ -508,7 +508,6 @@ export class Server {
       this.#database = createDatabase(databaseOptions)
       if (this.#graph) {
         this.#authorization = new Authorization({
-          appRole: databaseOptions.appRole,
           database: this.#database,
           graph: this.#graph,
         })

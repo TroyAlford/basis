@@ -1,4 +1,3 @@
-import type { SQL } from 'bun'
 import type { PhysicalConstraint, PhysicalSchema, PhysicalTable } from './Schema'
 
 /** Enable PostgreSQL trigram search for universal names. */
@@ -645,7 +644,9 @@ export class EntityDefinitions {
       forceRowSecurity: false,
       indexes: (table.indexes ?? []).map(index => ({
         columns: index.columns,
+        method: index.method ?? 'btree',
         name: index.name,
+        operatorClasses: index.opclass === undefined ? [] : [index.opclass],
         sql: createIndex(table, index),
         table: table.name,
         unique: index.unique === true,
@@ -783,9 +784,10 @@ export class EntityDefinitions {
   /**
    * Deterministic PostgreSQL DDL for the identity root and declared entities.
    *
-   * Every table, column and index is created first, in declaration order;
-   * foreign-key constraints and lifecycle checks follow. This is a
-   * fresh-schema compiler, not a migration planner.
+   * Every table, column and index is listed first, in declaration order;
+   * foreign-key constraints and lifecycle checks follow. This is a read-only
+   * projection for inspection and consumers; installation and upgrades use
+   * the reviewed `DDL.plan -> review -> apply` path.
    * @returns The complete ordered DDL sequence.
    */
   get ddl(): readonly string[] {
@@ -802,139 +804,6 @@ export class EntityDefinitions {
     ]
   }
 
-  /**
-   * Create a fresh schema and reconcile existing integrity definitions.
-   *
-   * The caller owns transaction scope; use `db.tx` for an atomic initialization.
-   * Existing tables are not migrated. Existing lifecycle functions and
-   * triggers are inspected; matching definitions are left untouched and
-   * mismatches fail visibly rather than being silently replaced.
-   * @param sql - The connected Bun SQL client.
-   * @returns A promise that resolves after initialization and reconciliation.
-   * @throws {Error} When a constraint or lifecycle definition does not match.
-   */
-  async createTables(sql: SQL): Promise<void> {
-    const schema = this.physicalSchema('basis_app', false, false)
-    await sql.unsafe(IDENTITY_EXTENSION_DDL).simple()
-    for (const table of schema.tables) {
-      const rows = await sql<{ present: boolean }[]>`
-SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = current_schema() AND tablename
-          = ${table.name} ) AS present
-      `
-      const created = !rows[0]?.present
-      if (created) await sql.unsafe(table.sql).simple()
-      for (const index of table.indexes) {
-        const compatible = { ...index, columns: index.columns ?? [] } as unknown as TableIndex
-        if (await indexExists(sql, table.name, compatible)) continue
-        await sql.unsafe(index.sql).simple()
-        if (!await indexExists(sql, table.name, compatible)) {
-          throw new Error(`Index "${index.name}" was not created by the canonical schema compiler`)
-        }
-      }
-    }
-
-    for (const constraint of schema.constraints) {
-      if (!constraint.column || !constraint.target) {
-        await sql.unsafe(constraint.sql).simple()
-        continue
-      }
-      await reconcileForeignKey(
-        sql,
-        constraint.table,
-        constraint.name,
-        constraint.column,
-        constraint.target,
-        constraint.targetColumn ?? 'id',
-        constraint.sql,
-      )
-    }
-
-    for (const fn of schema.functions) {
-      if (!fn.lifecycle || !fn.body) continue
-      const existing = await sql<{
-        body: string,
-        normalFunction: boolean,
-        plpgsql: boolean,
-        returnTrigger: boolean,
-        securityDefiner: boolean,
-      }[]>`
-        SELECT p.prosrc AS body,
-          p.prokind = 'f' AS "normalFunction",
-          p.prolang = (SELECT oid FROM pg_catalog.pg_language WHERE lanname = 'plpgsql') AS plpgsql,
-          p.prorettype = 'trigger'::regtype AS "returnTrigger",
-          p.prosecdef AS "securityDefiner"
-        FROM pg_catalog.pg_proc p
-        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-        WHERE n.nspname = current_schema() AND p.proname = ${fn.name} AND p.pronargs = 0
-      `
-      if (!existing[0]) {
-        await sql.unsafe(fn.sql).simple()
-        continue
-      }
-      const currentFunction = existing[0]
-      if (
-        normalizeBody(currentFunction.body) !== normalizeBody(fn.body)
-        || !currentFunction.normalFunction
-        || !currentFunction.plpgsql
-        || !currentFunction.returnTrigger
-        || currentFunction.securityDefiner
-      ) {
-        throw new Error(`Existing lifecycle function "${fn.name}" does not match the canonical model`)
-      }
-    }
-    for (const trigger of schema.triggers) {
-      const existing = await sql<{
-        columns: string[],
-        constraint: number,
-        deferrable: boolean,
-        enabled: string,
-        functionName: string,
-        functionSchema: boolean,
-        initDeferred: boolean,
-        noWhen: boolean,
-        type: number,
-      }[]>`
-SELECT coalesce((SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(t.tgattr::smallint[])
-  WITH ordinality u(attnum,
-ordinality) JOIN pg_catalog.pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = u.attnum ),
-          '{}'::text[]) AS columns,
-          t.tgconstraint AS CONSTRAINT,
-          t.tgdeferrable AS DEFERRABLE,
-          t.tgenabled AS enabled,
-          p.proname AS "functionName",
-          n.nspname = current_schema() AS "functionSchema",
-          t.tginitdeferred AS "initDeferred",
-          t.tgqual IS NULL AS "noWhen",
-          t.tgtype AS type
-        FROM pg_catalog.pg_trigger t
-        JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
-        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table)}::regclass AND NOT
-  t.tgisinternal
-      `
-      if (!existing[0]) {
-        await sql.unsafe(trigger.sql).simple()
-        continue
-      }
-      const current = existing[0]
-      if (
-        current.deferrable !== trigger.deferrable
-        || current.enabled !== 'O'
-        || current.initDeferred !== trigger.initDeferred
-        || (current.constraint !== 0) !== trigger.constraint
-        || current.functionName !== trigger.functionName
-        || !current.functionSchema
-        || !current.noWhen
-        || current.type !== trigger.type
-        || current.columns.join(',') !== (trigger.columns ?? []).join(',')
-      ) {
-        throw new Error(
-          `Existing lifecycle trigger "${trigger.name}" on "${trigger.table}" ` +
-          'does not match the canonical model',
-        )
-      }
-    }
-  }
 }
 
 /**
@@ -944,15 +813,6 @@ WHERE t.tgname = ${trigger.name} AND t.tgrelid = ${quoteIdentifier(trigger.table
  */
 function constraintDefinition(statement: string): string {
   return statement.replace(/^alter table\s+\S+\s+add constraint\s+"[^"]+"\s+/iu, '')
-}
-
-/**
- * Normalize a PL/pgSQL body for catalog comparison.
- * @param body - Function body.
- * @returns The comparison text.
- */
-function normalizeBody(body: string): string {
-  return body.replaceAll('\r\n', '\n').trim()
 }
 
 /** Parsed canonical document, including derived navigations. */
@@ -1999,77 +1859,6 @@ function addConstraint(entity: EntityDefinition, field: EntityReferenceFieldDefi
 }
 
 /**
- * Reconcile one canonical foreign key.
- * @param sql - SQL client.
- * @param entityName - Owning table.
- * @param name - Constraint name.
- * @param localColumn - Local column.
- * @param targetName - Target table.
- * @param targetColumn - Target column.
- * @param statement - Statement for a missing constraint.
- * @returns A promise that resolves after reconciliation.
- */
-async function reconcileForeignKey(
-  sql: SQL,
-  entityName: string,
-  name: string,
-  localColumn: string,
-  targetName: string,
-  targetColumn: string,
-  statement: string,
-): Promise<void> {
-  const rows = await sql<{
-    deferrable: boolean,
-    deferred: boolean,
-    deleteAction: string,
-    localColumn: string,
-    matchType: string,
-    targetColumn: string,
-    targetMatches: boolean,
-    updateAction: string,
-    validated: boolean,
-  }[]>`
-    SELECT con.condeferrable AS DEFERRABLE,
-      con.condeferred AS deferred,
-      con.confdeltype AS "deleteAction",
-      con.confmatchtype AS "matchType",
-      con.confrelid = ${quoteIdentifier(targetName)}::regclass AS "targetMatches",
-      con.confupdtype AS "updateAction",
-      con.convalidated AS validated,
-      local.attname AS "localColumn",
-      foreign_field.attname AS "targetColumn"
-    FROM pg_catalog.pg_constraint con
-JOIN pg_catalog.pg_attribute local ON local.attrelid = con.conrelid AND local.attnum = con.conkey[1]
-    JOIN pg_catalog.pg_attribute foreign_field ON foreign_field.attrelid = con.confrelid AND
-      foreign_field.attnum = con.confkey[1]
-WHERE con.conname = ${name} AND con.conrelid = ${quoteIdentifier(entityName)}::regclass AND
-  con.contype = 'f' AND
-      cardinality(con.conkey) = 1 AND cardinality(con.confkey) = 1
-  `
-  const existing = rows[0]
-  if (existing) {
-    if (
-      !existing.deferrable
-      || existing.deferred
-      || existing.deleteAction !== 'a'
-      || existing.localColumn !== localColumn
-      || existing.matchType !== 's'
-      || existing.targetColumn !== targetColumn
-      || !existing.targetMatches
-      || existing.updateAction !== 'a'
-      || !existing.validated
-    ) {
-      throw new Error(
-        `Existing foreign key constraint "${name}" on "${entityName}" ` +
-        'does not match the canonical model',
-      )
-    }
-    return
-  }
-  await sql.unsafe(statement).simple()
-}
-
-/**
  * Build deterministic parent constraint name.
  * @param entity - Owning entity.
  * @returns Constraint name.
@@ -2086,64 +1875,6 @@ function parentConstraintName(entity: EntityDefinition): string {
  */
 function constraintName(entity: EntityDefinition, field: EntityReferenceFieldDefinition): string {
   return `${entity.name}_${field.name}_fkey`
-}
-
-/**
- * Whether an index exists and matches its canonical table, columns and uniqueness.
- * @param sql - SQL client.
- * @param tableName - Expected owning table.
- * @param index - Canonical index metadata.
- * @returns `true` when present and matching.
- */
-async function indexExists(sql: SQL, tableName: string, index: TableIndex): Promise<boolean> {
-  const rows = await sql<{
-    attributeCount: number,
-    columns: string[] | null,
-    keyCount: number,
-    noExpressions: boolean,
-    noPredicate: boolean,
-    nullsNotDistinct: boolean,
-    ready: boolean,
-    tableName: string,
-    unique: boolean,
-    valid: boolean,
-  }[]>`
-    SELECT t.relname AS "tableName",
-      i.indisunique AS UNIQUE,
-      i.indisvalid AS valid,
-      i.indisready AS ready,
-      i.indpred IS NULL AS "noPredicate",
-      i.indexprs IS NULL AS "noExpressions",
-      i.indnullsnotdistinct AS "nullsNotDistinct",
-      i.indnkeyatts AS "keyCount",
-      i.indnatts AS "attributeCount",
-(SELECT array_agg(a.attname ORDER BY KEY.ordinality) FROM unnest(i.indkey) WITH ORDINALITY AS
-  KEY(attnum,
-ordinality) JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = KEY.attnum ) AS
-  columns
-    FROM pg_catalog.pg_index i
-    JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
-    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
-    WHERE n.nspname = current_schema() AND c.relname = ${index.name}
-  `
-  const existing = rows[0]
-  if (!existing) return false
-  if (
-    existing.tableName !== tableName
-    || existing.unique !== (index.unique === true)
-    || !existing.valid
-    || !existing.ready
-    || !existing.noPredicate
-    || !existing.noExpressions
-    || existing.nullsNotDistinct
-    || existing.keyCount !== index.columns.length
-    || existing.attributeCount !== index.columns.length
-    || (existing.columns ?? []).join('\u0000') !== index.columns.join('\u0000')
-  ) {
-    throw new Error(`Existing index "${index.name}" does not match the canonical model`)
-  }
-  return true
 }
 
 /**
