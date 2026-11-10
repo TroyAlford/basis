@@ -702,6 +702,43 @@ describe('DDL schema planning', () => {
     expect(plan.operations.some(operation => operation.sql.includes('basis.matches'))).toBe(false)
   })
 
+  test('revokes public schema CREATE through the reviewed graph plan', async () => {
+    const appRole = `basis_public_${randomUUID().replaceAll('-', '').slice(0, 12)}`
+    await withIsolatedDatabase('schema-public-create', async database => {
+      await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
+      await database.sql.unsafe('GRANT CREATE ON SCHEMA public TO PUBLIC').simple()
+      const model = new Graph({
+        entities: [{ fields: [], name: 'Note' }],
+        schema: database.schema,
+      })
+      await installSchema(database.sql, model, {
+        appRole,
+        schema: database.schema,
+        superuser: true,
+      })
+      const [privilege] = await database.sql<{ create: boolean }[]>`
+        SELECT has_schema_privilege(${appRole}, 'public', 'CREATE') AS "create"
+      `
+      expect(privilege?.create).toBe(false)
+    }, { fresh: true })
+  })
+
+  test('detects a same-name index with the wrong access method', async () => {
+    const model = definitions()
+    await withIsolatedDatabase('schema-index-method', async database => {
+      await installSchema(database.sql, model)
+      await database.sql`
+        DROP INDEX "Entity_name_trgm_idx"
+      `
+      await database.sql`
+        CREATE INDEX "Entity_name_trgm_idx" ON "Entity" USING btree ("name")
+      `
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({ actual, desired: model })
+      expect(plan.drift).toContain('index definition changed: Entity.Entity_name_trgm_idx')
+    }, { fresh: true })
+  })
+
   test('includes authorization objects in the desired physical output', async () => {
     const model = new Graph({
       entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],

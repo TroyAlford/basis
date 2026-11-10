@@ -957,6 +957,16 @@ export class Graph {
       sql: `REVOKE CREATE ON SCHEMA public FROM ${role}`,
       table: 'public',
     })
+    grants.push({
+      grantName: 'grant:PUBLIC:schema:public:CREATE',
+      grantee: 'PUBLIC',
+      kind: 'revoke',
+      name: 'revoke:grant:PUBLIC:schema:public:CREATE',
+      object: 'schema',
+      privilege: 'CREATE',
+      sql: 'REVOKE CREATE ON SCHEMA public FROM PUBLIC',
+      table: 'public',
+    })
     return grants
   }
 

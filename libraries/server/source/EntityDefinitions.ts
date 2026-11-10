@@ -644,7 +644,9 @@ export class EntityDefinitions {
       forceRowSecurity: false,
       indexes: (table.indexes ?? []).map(index => ({
         columns: index.columns,
+        method: index.method ?? 'btree',
         name: index.name,
+        operatorClasses: index.opclass === undefined ? [] : [index.opclass],
         sql: createIndex(table, index),
         table: table.name,
         unique: index.unique === true,

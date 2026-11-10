@@ -26,8 +26,12 @@ export interface PhysicalIndex {
   readonly columns?: readonly string[],
   /** Complete catalog definition, when introspected. */
   readonly definition?: string,
+  /** Index access method (`btree`, `gin`, ...). */
+  readonly method?: string,
   /** Index name. */
   readonly name: string,
+  /** Operator classes for key columns, when known. */
+  readonly operatorClasses?: readonly string[],
   /** Complete create-index SQL when compiled from a desired model. */
   readonly sql: string,
   /** Owning table name. */
@@ -413,6 +417,8 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     columns: string[] | null,
     definition: string,
     index: string,
+    method: string,
+    operatorClasses: string[] | null,
     schema: string,
     table: string,
     unique: boolean,
@@ -421,15 +427,20 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     SELECT n.nspname AS schema,
       t.relname AS TABLE,
       c.relname AS INDEX,
+      am.amname AS method,
       i.indisunique AS UNIQUE,
       i.indisvalid AS valid,
       pg_get_indexdef(i.indexrelid) AS definition,
+(SELECT array_agg(opc.opcname ORDER BY u.ordinality) FROM unnest(i.indclass) WITH ORDINALITY
+  u(opcoid,
+      ordinality) JOIN pg_opclass opc ON opc.oid = u.opcoid) AS "operatorClasses",
 (SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(i.indkey) WITH ORDINALITY u(attnum,
       ordinality) JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = u.attnum) AS columns
     FROM pg_index i
     JOIN pg_class c ON c.oid = i.indexrelid
     JOIN pg_class t ON t.oid = i.indrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_am am ON am.oid = c.relam
     WHERE n.nspname IN (current_schema(), 'basis') AND NOT i.indisprimary
     ORDER BY n.nspname, t.relname, c.relname
   `
@@ -660,7 +671,9 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     indexes.push({
       columns: row.columns ?? [],
       definition: row.definition,
+      method: row.method,
       name: row.index,
+      operatorClasses: row.operatorClasses ?? [],
       sql: row.definition,
       table: name,
       unique: row.unique,
@@ -1210,6 +1223,9 @@ export function plan(options: PlanOptions): SchemaPlan {
         existing.valid === false
         || (index.unique !== undefined && existing.unique !== index.unique)
         || (index.columns !== undefined && (existing.columns ?? []).join(',') !== index.columns.join(','))
+        || (existing.method !== undefined && (index.method ?? 'btree') !== existing.method)
+        || (index.operatorClasses !== undefined && index.operatorClasses.length > 0
+          && !sameOperatorClasses(index.operatorClasses, existing.operatorClasses ?? []))
         || (existing.definition !== undefined && !sameIndexDefinition(index.sql, existing.definition))
       ) {
         drift.push(`index definition changed: ${table.name}.${index.name}`)
@@ -2015,12 +2031,6 @@ function samePolicyIdentity(left: PhysicalPolicy, right: PhysicalPolicy): boolea
 }
 
 /**
- * Compare a compiled policy against PostgreSQL's catalog representation.
- * @param left - Compiled policy.
- * @param right - Catalog or compiled policy.
- * @returns Whether the policy metadata is equivalent at the catalog boundary.
- */
-/**
  * Compare a compiled index statement with PostgreSQL's catalog definition.
  * @param compiled - Canonical create-index SQL.
  * @param catalog - Catalog definition from `pg_get_indexdef`.
@@ -2035,6 +2045,17 @@ function sameIndexDefinition(compiled: string, catalog: string): boolean {
     value.replace(/\busing\s+[a-z]+\b/gu, ''),
   )
   return expression(actual) === expression(desired)
+}
+
+/**
+ * Compare canonical and catalog operator-class names.
+ * @param expected - Canonical operator classes.
+ * @param actual - Catalog operator classes.
+ * @returns Whether the operators are equivalent.
+ */
+function sameOperatorClasses(expected: readonly string[], actual: readonly string[]): boolean {
+  const normalize = (value: string): string => value.replace(/^public\./u, '').toLowerCase()
+  return expected.map(normalize).join(',') === actual.map(normalize).join(',')
 }
 
 /**
