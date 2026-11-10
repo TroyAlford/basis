@@ -192,7 +192,7 @@ export class Graph {
     superuser = false,
     includeAuthorization = true,
   ): PhysicalSchema {
-    const base = this.definitions.physicalSchema(appRole, superuser, false)
+    const base = this.definitions.physicalSchema()
     if (!includeAuthorization) return base
     const tables: PhysicalTable[] = base.tables.map(table => ({
       ...table,

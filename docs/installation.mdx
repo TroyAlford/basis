@@ -35,7 +35,7 @@ Non-npm host capabilities are static metadata, not runtime API. Declare only wha
 { "basis": { "hostDependencies": ["docker"] } }
 ```
 
-The install hook resolves each declared capability on `PATH` and fails loudly when it is missing or broken. Docker is required when using the managed database; it is not required for an external PostgreSQL URL.
+The install hook resolves each declared capability on `PATH` and fails loudly when it is missing or broken. Docker is required when using the managed database.
 
 Basis-owned patches live in the package and are declared in its `patchedDependencies` map. The trusted `postinstall` hook applies them to exact `name@version` installs with `git apply`; consumers never copy patch files, add their own `patchedDependencies` entries, or provision a host browser.
 

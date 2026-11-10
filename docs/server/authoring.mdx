@@ -50,10 +50,10 @@ import graph from './graph'
 import { generateJSONSchemas, generateTypes } from 'basis/codegen'
 import { generateErd } from 'basis/visualization'
 
-const types = generateTypes(graph.definitions)
-const schemas = generateJSONSchemas(graph.definitions)
-const logicalErd = generateErd(graph.definitions, 'logical')
-const physicalErd = generateErd(graph.definitions, 'physical')
+const types = generateTypes(graph)
+const schemas = generateJSONSchemas(graph)
+const logicalErd = generateErd(graph, 'logical')
+const physicalErd = generateErd(graph, 'physical')
 ```
 
 - `basis/codegen` emits entity interfaces, `*Ref` identity references, and `create`, `output`, and `update` JSON Schemas. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
@@ -63,7 +63,7 @@ Generation is deterministic for a fixed canonical model and must not be maintain
 
 ## Example generated output
 
-For the typed `User`/`Note` declaration above, `generateTypes(graph.definitions)` includes these application interfaces (the system security entities are emitted too):
+For the typed `User`/`Note` declaration above, `generateTypes(graph)` includes these application interfaces (the system security entities are emitted too):
 
 ```ts
 /** Generated from the canonical Basis entity definitions. Do not edit by hand. */

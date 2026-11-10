@@ -4,15 +4,17 @@ title: Database & Transactions
 
 # Database & Transactions
 
-For canonical User/Role/Grant authorization and PostgreSQL row-level security, use [Authorization & Row-Level Security](./authorization.mdx). `server.database({ url, adminUrl })` separates the restricted application pool from trusted provisioning; `adminUrl` is never exposed through `server.db`.
+For canonical User/Role/Grant authorization and PostgreSQL row-level security, use [Authorization & Row-Level Security](./authorization.mdx). Basis owns the managed PostgreSQL service and keeps the restricted application pool separate from the trusted administrative owner.
 
-`server.database()` gives the server one owned PostgreSQL capability, exposed as `server.db`. Managed mode is zero-config: Basis keys the database to the normalized application working directory, lets Docker allocate a loopback port, reconciles an existing app-owned service, and waits for the pool before reporting healthy. The service and its data outlive any one web-server process.
+`server.database()` gives the server one owned PostgreSQL capability, exposed as `server.db`. Basis keys the database to the normalized application working directory, lets Docker allocate a loopback port, reconciles an existing app-owned service, and waits for the pool before reporting healthy. The service and its data outlive any one web-server process. Externally managed PostgreSQL is not a supported application configuration.
 
-Pass `url` only when using an explicit external PostgreSQL server. Managed state and credentials live inside the installation under `.basis/database/`; backups are written beneath `.basis/backups/`. Basis writes a local ignore file and static serving never exposes `.basis`. Managed PostgreSQL uses `postgres:17-alpine` by default; `database({ image })` selects another pinned image for an upgrade proof or test.
+Managed state and credentials live inside the installation under `.basis/database/`; backups are written beneath `.basis/backups/`. Basis writes a local ignore file and static serving never exposes `.basis`. Managed PostgreSQL uses `postgres:17-alpine` by default; `database({ image })` selects another pinned image for an upgrade proof or test.
 
 ## Canonical graph
 
-The application root's `graph.ts` is the canonical authored model: `export default new Graph({ entities, relationships, roles, grants })`. Importing it constructs and validates the complete in-memory graph once. `EntityDefinitions.load(source)` and `EntityDefinitions.fromDocument(value)` remain available for standalone JSON snapshots and tools; JSON is an alternate input syntax, not a second model authority. Neither loader creates tables, initializes a schema, or runs migrations.
+The application root's `graph.ts` is the canonical authored model: `export default new Graph({ entities, relationships, roles, grants })`. Importing it constructs and validates the complete in-memory graph once. JSON remains an alternate input syntax accepted by `Graph`; it is not a second model authority. Constructing the Graph never creates tables, initializes a schema, or runs migrations.
+
+A Graph-backed production server requires an approved migration artifact through `server.migration(artifact)`. Startup performs only `DDL.readiness`; it never installs or migrates automatically. Development servers without an artifact remain available for explicit local provisioning and tests.
 
 The document root accepts `entities` and an optional `relationships` array. This is the complete relationship vocabulary:
 
@@ -89,11 +91,11 @@ The document root accepts `entities` and an optional `relationships` array. This
 ```
 
 ```ts
-import { EntityDefinitions, FieldType } from 'basis/server'
+import { FieldType, Graph } from 'basis/server'
 
-const entities = EntityDefinitions.load(await Bun.file('./entities.json').text())
-const campaign = entities.entity('Campaign')
-const membership = entities.relationship('Membership')
+const graph = new Graph({ entities: await Bun.file('./entities.json').text() })
+const campaign = graph.definitions.entity('Campaign')
+const membership = graph.definitions.relationship('Membership')
 ```
 
 Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular forward references use `Entity`; reciprocal navigation fields use `Inverse`; scalar arrays use `Array` with scalar `items`; and opaque structured values use `JSON`. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, authored `abstract` boolean, `column`, `Collection`, `ValueCollection`, `Structured`, `Junction`, or mapping descriptor.

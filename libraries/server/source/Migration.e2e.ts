@@ -70,7 +70,7 @@ describe('Reviewed schema evolution', () => {
       const noopPlan = DDL.plan({
         actual: await DDL.introspect(database.sql),
         desired,
-        previousPhysical: desired.physicalSchema('basis_app', false),
+        previousPhysical: desired.physicalSchema(),
       })
       const duplicateVersion = DDL.review(noopPlan, {
         schema: database.schema,
@@ -121,7 +121,7 @@ describe('Reviewed schema evolution', () => {
         actual,
         desired,
         previous,
-        previousPhysical: previous.physicalSchema('basis_app', false),
+        previousPhysical: previous.physicalSchema(),
       })
       expect(plan.ambiguities).toContain('OldNote -> NewNote')
       expect(() => DDL.review(plan, { schema: database.schema, version: migrationVersion('002-new') }))
@@ -154,7 +154,7 @@ describe('Reviewed schema evolution', () => {
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
 
       const actual = await DDL.introspect(database.sql)
-      const previousPhysical = previous.physicalSchema('basis_app', false)
+      const previousPhysical = previous.physicalSchema()
       const plan = DDL.plan({
         actual,
         desired,
@@ -240,7 +240,7 @@ describe('Reviewed schema evolution', () => {
         actual,
         desired,
         previous,
-        previousPhysical: previous.physicalSchema('basis_app', false),
+        previousPhysical: previous.physicalSchema(),
       })
       expect(plan.operations.some(operation => (
         operation.kind === 'alter-column' && operation.risk === 'data'

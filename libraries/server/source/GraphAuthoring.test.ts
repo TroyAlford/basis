@@ -53,7 +53,7 @@ describe('Graph authoring types', () => {
 
   test('rejects a second database model when a Graph is installed', () => {
     const graph = new Graph({ entities: [{ fields: [], name: 'Note' }] })
-    expect(() => new Server().graph(graph).database({ entities: graph.definitions }))
-      .toThrow('provide application entities through Graph')
+    expect(() => new Server().graph(graph).database({ entities: graph.definitions } as never))
+      .toThrow('unsupported database option')
   })
 })

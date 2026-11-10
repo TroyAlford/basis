@@ -537,20 +537,16 @@ function restoreEnv(previous: Readonly<Record<string, string | undefined>>): voi
 }
 
 describe('Server graph configuration', () => {
-  test('does not treat Graph-derived database options as caller configuration', async () => {
+  test('accepts Graph-derived database configuration without a second model', () => {
     const graph = new Graph({ entities: [{ fields: [], name: 'Note' }] })
-    const { logger } = createRecordingLogger()
     const server = new Server()
       .graph(graph)
-      .database({ url: 'postgresql://127.0.0.1:1/basis' })
-      .start({ development: false, hostname: '127.0.0.1', logger, port: 0, version: 'test-version' })
+      .database({ image: 'postgres:17-alpine' })
 
-    try {
-      expect(() => server.graph(graph)).not.toThrow()
-      expect(() => server.database({ url: 'postgresql://127.0.0.1:1/basis' })).not.toThrow()
-    } finally {
-      await server.shutdown()
-    }
+    expect(() => server.graph(graph)).not.toThrow()
+    expect(() => server.database({ image: 'postgres:17-alpine' })).not.toThrow()
+    expect(() => server.database({ url: 'postgresql://127.0.0.1:1/basis' } as never))
+      .toThrow('unsupported database option')
   })
 })
 

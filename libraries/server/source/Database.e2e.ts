@@ -75,17 +75,6 @@ function start(server: Server): Server {
   return server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
 }
 
-/**
- * Read the current health payload.
- * @param server - The started server.
- * @returns The health status and optional error.
- */
-async function health(server: Server): Promise<{ error?: string, status?: string }> {
-  const response = await server.handle(new Request('http://localhost/api/health'))
-  if (!response) throw new Error('health route did not respond')
-  return await response.json() as { error?: string, status?: string }
-}
-
 /** Inspected credential material and its access controls. */
 interface CredentialInspection {
   /** Password directory mode. */
@@ -172,7 +161,7 @@ describe('Server database lifecycle', () => {
       // Same SERVICE_NAME, distinct checkout cwd: each installation remains independent.
       const aEntities = EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
       const a = startWithInstall(
-        new Server().root(assetsA1).database({ entities: aEntities }),
+        new Server().root(assetsA1).database(),
         installA,
         service,
       )
@@ -3292,20 +3281,11 @@ VALUES (${invalidUserId},
     `).toEqual([{ count: 0 }])
   }, 30_000)
 
-  test('reports unhealthy when an external PostgreSQL connection fails', async () => {
-    const server = start(new Server().database({
+  test('rejects external PostgreSQL configuration', () => {
+    expect(() => new Server().database({
       url: 'postgres://basis:basis@127.0.0.1:1/basis',
-    }))
-
-    try {
-      await expect(server.ready()).rejects.toThrow()
-      const result = await health(server)
-      expect(result.status).toBe('error')
-      expect(result.error).toBeDefined()
-    } finally {
-      await server.shutdown()
-    }
-  }, 30_000)
+    } as never)).toThrow('unsupported database option')
+  })
 
   test('uses a null capability when no database is configured', async () => {
     const server = start(new Server())

@@ -1,4 +1,4 @@
-import { Cardinality, EntityDefinitions, FieldType } from 'basis/server'
+import { Cardinality, FieldType, Graph } from 'basis/server'
 import { renderMermaidSVG } from 'beautiful-mermaid'
 import { describe, expect, test } from 'bun:test'
 import { generateErd } from './Erd'
@@ -43,10 +43,10 @@ const document = {
 
 describe('ERD generation', () => {
   test('generates deterministic logical and physical diagrams', () => {
-    const definitions = EntityDefinitions.fromDocument(document)
-    const logical = generateErd(definitions, 'logical')
-    const physical = generateErd(definitions, 'physical')
-    expect(generateErd(definitions, 'logical')).toBe(logical)
+    const graph = new Graph({ entities: document })
+    const logical = generateErd(graph, 'logical')
+    const physical = generateErd(graph, 'physical')
+    expect(generateErd(graph, 'logical')).toBe(logical)
     expect(logical).toContain('erDiagram')
     expect(logical).toContain('User ||--o{ Note : owner')
     expect(logical).toContain('Ref owner "nullable"')

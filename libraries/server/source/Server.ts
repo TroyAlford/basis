@@ -17,7 +17,7 @@ import type { SseHandler } from '../types/SseChannel'
 import { runAsActor } from './ActorContext'
 import { Authorization } from './Authorization'
 import { Builder } from './Builder'
-import type { Database, DatabaseOptions } from './Database'
+import type { Database, DatabaseOptions, ManagedDatabaseOptions } from './Database'
 import { createDatabase, NullDatabase, openAdmin } from './Database'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
@@ -496,7 +496,7 @@ export class Server {
       this.#assets ? [this.#assets] : [],
     )
 
-    let databaseOptions = this.#databaseOptions ?? {}
+    let databaseOptions: ManagedDatabaseOptions = this.#databaseOptions ?? {}
     if (this.#graph) {
       databaseOptions = {
         ...databaseOptions,
@@ -691,9 +691,6 @@ export class Server {
    * @returns The server.
    */
   graph(graph: Graph): Server {
-    if (this.#databaseOptions?.entities) {
-      throw new Error('Server: provide application entities through Graph, not database({ entities })')
-    }
     this.#graph = graph
     return this
   }
@@ -715,17 +712,21 @@ export class Server {
   /**
    * Configures the server-owned PostgreSQL capability.
    *
-   * With no `url`, the server reconciles its application-scoped managed
-   * PostgreSQL service on `start`, discovers its Docker-allocated loopback
-   * port, and connects the pool before reporting healthy. Passing a `url` uses
-   * an explicit external PostgreSQL server instead. The server owns the pool
-   * lifecycle in both cases; the managed database service outlives it.
-   * @param options - An optional external PostgreSQL URL.
+   * The server reconciles its application-scoped managed PostgreSQL service on
+   * `start`, discovers its Docker-allocated loopback port, and connects the
+   * pool before reporting healthy. The server owns the pool lifecycle; the
+   * managed database service outlives it.
+   * @param options - Optional image selection for the managed service.
    * @returns The server.
    */
   database(options: DatabaseOptions = {}): Server {
-    if (this.#graph && options.entities) {
-      throw new Error('Server: provide application entities through Graph, not database({ entities })')
+    const unsupported = ['adminUrl', 'appRole', 'authorization', 'entities', 'url']
+      .filter(key => key in options)
+    if (unsupported.length > 0) {
+      throw new Error(
+        `Server: unsupported database option(s): ${unsupported.join(', ')}. ` +
+        'Basis owns its managed PostgreSQL instance; provide the application model through Graph.',
+      )
     }
     this.#databaseOptions = options
     return this
@@ -948,7 +949,15 @@ export class Server {
       return Promise.resolve()
     }
     return this.#database.connect().then(async () => {
-      if (!this.#schemaExpectation) return
+      if (!this.#schemaExpectation) {
+        if (this.#graph && !this.#development) {
+          throw new Error(
+            'Graph-backed production requires an approved migration artifact; ' +
+            'install or migrate explicitly with DDL.plan -> DDL.review -> DDL.apply',
+          )
+        }
+        return
+      }
       const admin = await openAdmin(this.#database)
       try {
         const result = await DDL.readiness(admin.sql, this.#schemaExpectation)

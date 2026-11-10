@@ -58,7 +58,7 @@ new Server()
   .start()
 ```
 
-`server.database()` is zero-config and creates the managed PostgreSQL capability; pass `{ url }` only for an explicit external server. `server.db.sql` is Bun's pooled tagged-template API, and `server.db.tx(async sql => ...)` owns a transaction boundary. See [Server](../docs/server/index.mdx), [Database & Transactions](../docs/server/database.mdx), and [Authorization & Row-Level Security](../docs/server/authorization.mdx).
+`server.database()` is zero-config and creates the Basis-managed PostgreSQL capability. `server.db.sql` is Bun's pooled tagged-template API, and `server.db.tx(async sql => ...)` owns a transaction boundary. See [Server](../docs/server/index.mdx), [Database & Transactions](../docs/server/database.mdx), and [Authorization & Row-Level Security](../docs/server/authorization.mdx).
 
 ## Testing
 

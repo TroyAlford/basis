@@ -626,15 +626,9 @@ export class EntityDefinitions {
    *
    * Security roles, grants, functions, and policies are compiled by {@link Graph}.
    * This method emits only the canonical model's tables and lifecycle objects.
-   * @param appRole - Retained for a stable physical-compiler signature.
-   * @param superuser - Retained for a stable physical-compiler signature.
-   * @param includeAuthorization - Retained for compatibility; graph security DDL is separate.
    * @returns The typed desired physical schema.
    */
-  physicalSchema(appRole = 'basis_app', superuser = false, includeAuthorization = false): PhysicalSchema {
-    void appRole
-    void superuser
-    void includeAuthorization
+  physicalSchema(): PhysicalSchema {
     const tables: PhysicalTable[] = this.tables.map(table => ({
       columns: table.columns.map(column => ({
         name: column.name,
@@ -792,7 +786,7 @@ export class EntityDefinitions {
    * @returns The complete ordered DDL sequence.
    */
   get ddl(): readonly string[] {
-    const schema = this.physicalSchema('basis_app', false, false)
+    const schema = this.physicalSchema()
     return [
       IDENTITY_EXTENSION_DDL,
       ...schema.tables.flatMap(table => [
