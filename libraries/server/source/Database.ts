@@ -22,6 +22,8 @@ const MANAGED_IMAGE = 'postgres:17-alpine'
 const MANAGED_NAME = 'basis'
 /** The restricted application login role. */
 const APP_ROLE = 'basis_app'
+/** The read-only backup login role. */
+const BACKUP_ROLE = 'basis_backup'
 /** The PostgreSQL port inside the managed container. */
 const MANAGED_PORT = 5432
 /** How long to wait for the managed container to accept connections. */
@@ -52,6 +54,8 @@ export interface DatabaseOptions {
   authorization?: boolean,
   /** Canonical entity definitions used to validate and build `db.query`. */
   entities?: EntityDefinitions,
+  /** Managed PostgreSQL image; defaults to `postgres:17-alpine`. */
+  image?: string,
   /** Restricted application PostgreSQL URL. */
   url?: string | URL,
 }
@@ -386,6 +390,7 @@ class ManagedDatabase implements Database {
   #database: PostgresDatabase | null = null
   #entities: EntityDefinitions | undefined
   #identity: string
+  #image: string
   #installation: string
   #volume: string
 
@@ -393,10 +398,12 @@ class ManagedDatabase implements Database {
    * Creates the managed database capability. The service starts on {@link connect}.
    * @param entities - Canonical definitions used for entity queries.
    * @param authorization - Whether to provision and use a restricted app role.
+   * @param image - Managed PostgreSQL image.
    */
-  constructor(entities?: EntityDefinitions, authorization = false) {
+  constructor(entities?: EntityDefinitions, authorization = false, image = MANAGED_IMAGE) {
     this.#authorization = authorization
     this.#entities = entities
+    this.#image = image
     this.#installation = resolve(process.cwd())
     this.#identity = managedDatabaseIdentity(this.#installation)
     this.#containerName = `basis-postgres-${this.#identity}`
@@ -499,6 +506,8 @@ class ManagedDatabase implements Database {
       await pool.connect()
       return { close: () => pool.close(), sql: pool.sql }
     })
+    const backupPassword = await this.#roleSecret('backup-password')
+    await this.#provisionBackupRole(ownerUrl, backupPassword)
     if (!this.#authorization) {
       await this.#connectWhenReady(ownerUrl)
       return
@@ -516,8 +525,17 @@ class ManagedDatabase implements Database {
    * @returns The application password.
    */
   async #appSecret(): Promise<string> {
+    return this.#roleSecret('app-password')
+  }
+
+  /**
+   * Read or create one managed role password.
+   * @param name - Password filename inside the managed database state directory.
+   * @returns The role password.
+   */
+  async #roleSecret(name: string): Promise<string> {
     const directory = join(this.#installation, '.basis', 'database')
-    const file = join(directory, 'app-password')
+    const file = join(directory, name)
     try {
       const handle = await open(file, 'wx', 0o600)
       try {
@@ -529,7 +547,7 @@ class ManagedDatabase implements Database {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }
     const password = (await readFile(file, 'utf8')).trim()
-    if (!password) throw new Error('Managed application credentials are empty')
+    if (!password) throw new Error(`Managed ${name} credentials are empty`)
     await chmod(file, 0o600)
     return password
   }
@@ -557,6 +575,35 @@ class ManagedDatabase implements Database {
         END $$;
       `).simple()
       await admin.sql.unsafe(`GRANT CONNECT ON DATABASE "${MANAGED_NAME}" TO "${APP_ROLE}"`).simple()
+    } finally {
+      await admin.close()
+    }
+  }
+
+  /**
+   * Provision the read-only backup role using the owner connection.
+   * @param ownerUrl - The owner connection URL.
+   * @param password - The backup role password.
+   */
+  async #provisionBackupRole(ownerUrl: string, password: string): Promise<void> {
+    const admin = new PostgresDatabase(ownerUrl)
+    try {
+      await admin.connect()
+      const quoted = password.replaceAll("'", "''")
+      await admin.sql.unsafe(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${BACKUP_ROLE}') THEN
+            CREATE ROLE "${BACKUP_ROLE}" LOGIN PASSWORD '${quoted}'
+              NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS;
+          ELSE
+            ALTER ROLE "${BACKUP_ROLE}" WITH LOGIN PASSWORD '${quoted}'
+              NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS;
+          END IF;
+        END $$;
+      `).simple()
+      await admin.sql.unsafe(`GRANT CONNECT ON DATABASE "${MANAGED_NAME}" TO "${BACKUP_ROLE}"`).simple()
+      await admin.sql.unsafe(`GRANT pg_read_all_data TO "${BACKUP_ROLE}"`).simple()
     } finally {
       await admin.close()
     }
@@ -689,7 +736,7 @@ class ManagedDatabase implements Database {
       -v ${`${this.#volume}:/var/lib/postgresql/data`}
       -v ${`${passwordFile}:${PASSWORD_MOUNT}:ro`}
       -p ${`127.0.0.1::${MANAGED_PORT}`}
-      ${MANAGED_IMAGE}
+      ${this.#image}
     `
     if (run.exitCode === 0) return
 
@@ -774,5 +821,5 @@ export function createDatabase(options: DatabaseOptions = {}): Database {
   if (options.url) {
     return new PostgresDatabase(options.url, options.entities, options.adminUrl)
   }
-  return new ManagedDatabase(options.entities, options.authorization ?? false)
+  return new ManagedDatabase(options.entities, options.authorization ?? false, options.image)
 }

@@ -8,7 +8,7 @@ For canonical User/Role/Grant authorization and PostgreSQL row-level security, u
 
 `server.database()` gives the server one owned PostgreSQL capability, exposed as `server.db`. Managed mode is zero-config: Basis keys the database to the normalized application working directory, lets Docker allocate a loopback port, reconciles an existing app-owned service, and waits for the pool before reporting healthy. The service and its data outlive any one web-server process.
 
-Pass `url` only when using an explicit external PostgreSQL server. Managed state and credentials live inside the installation under `.basis/database/`; Basis writes a local ignore file and static serving never exposes `.basis`.
+Pass `url` only when using an explicit external PostgreSQL server. Managed state and credentials live inside the installation under `.basis/database/`; backups are written beneath `.basis/backups/`. Basis writes a local ignore file and static serving never exposes `.basis`. Managed PostgreSQL uses `postgres:17-alpine` by default; `database({ image })` selects another pinned image for an upgrade proof or test.
 
 ## Canonical graph
 
@@ -476,3 +476,37 @@ await server.db.tx(async sql => {
 The server owns each process's pool and closes it on shutdown. In managed mode Docker owns the container and durable data volume; stopping or redeploying the web server does not stop PostgreSQL. Different installation directories are isolated, and a second process for the same installation attaches to the same service.
 
 Docker is required for managed mode. An unavailable Docker daemon or failed connection makes startup report `503 error` on `/api/health`.
+
+## Managed backup, restore, and major upgrades
+
+Managed PostgreSQL exposes host-run operations through `ManagedPostgresOperations`. Operations never create a scheduler, daemon, or second migration authority. They use the managed service's owner, restricted application, and read-only backup credentials; passwords remain under `.basis/database/` with owner-only permissions.
+
+```ts
+import { ManagedPostgresOperations } from 'basis/server'
+
+const operations = new ManagedPostgresOperations({
+  installation: process.cwd(),
+})
+const backup = await operations.backup()
+
+await operations.restore(backup.path, {
+  image: 'postgres:17-alpine',
+  verify: async sql => {
+    const rows = await sql`SELECT count(*) FROM "Note"`
+    if (rows[0]?.count === undefined) throw new Error('application data is missing')
+  },
+})
+```
+
+`backup()` runs `pg_dump` through the dedicated `basis_backup` role and writes a custom-format archive plus a checksum manifest under `.basis/backups/`. `restore()` creates disposable storage and a disposable container, restores the archive, runs the supplied application readback, and removes the temporary resources. It never mutates the live service.
+
+A major-version upgrade is explicit and operator-driven:
+
+```ts
+await server.shutdown()
+const result = await operations.upgrade('postgres:17-alpine', { verify })
+```
+
+The caller must stop application pools before `upgrade()`. Basis first takes a verified recovery point, proves the restore under the target image in disposable storage, then replaces the managed volume/container and re-provisions the runtime and backup roles. If cutover fails, it restores the recovery point and the previous image before reporting the failure. `rollback(backup.path, previousImage, verify)` is available for an explicit operator rollback.
+
+Use ordinary host facilities for scheduling and retention, such as a cron entry or systemd timer that runs a short operator script and prunes old files under `.basis/backups/`. Do not add a Basis-managed scheduler or process manager.
