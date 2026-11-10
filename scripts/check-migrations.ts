@@ -59,14 +59,15 @@ async function materialize(ref: string, source: string, target: string): Promise
 }
 
 /**
- * Resolve one named CLI option.
+ * Resolve one named CLI option, environment fallback, or default.
  * @param name - Option name.
- * @param fallback - Value used when omitted.
+ * @param environment - Environment variable name.
+ * @param fallback - Value used when both are omitted.
  * @returns Selected value.
  */
-function option(name: string, fallback: string): string {
+function option(name: string, environment: string, fallback: string): string {
   const index = process.argv.indexOf(name)
-  return index >= 0 ? (process.argv[index + 1] ?? fallback) : fallback
+  return index >= 0 ? (process.argv[index + 1] ?? fallback) : process.env[environment] ?? fallback
 }
 
 /**
@@ -74,7 +75,7 @@ function option(name: string, fallback: string): string {
  * @returns Base Git revision.
  */
 function baseRef(): string {
-  return option('--base', 'origin/main')
+  return option('--base', 'BASIS_MIGRATION_BASE', 'origin/main')
 }
 
 /**
@@ -100,9 +101,10 @@ async function loadGraph(file: string): Promise<Graph> {
  */
 async function main(): Promise<number> {
   const base = baseRef()
-  const graphPath = option('--graph', GRAPH)
-  const migrationsPath = option('--migrations', MIGRATIONS)
+  const graphPath = option('--graph', 'BASIS_MIGRATION_GRAPH', GRAPH)
+  const migrationsPath = option('--migrations', 'BASIS_MIGRATION_DIR', MIGRATIONS)
   const root = process.cwd()
+  await mkdir(join(root, '.basis'), { mode: 0o700, recursive: true })
   const sandbox = await mkdtemp(join(root, '.basis', 'migration-gate-'))
   const install = join(sandbox, 'postgres')
   const baseMigrations = join(sandbox, 'base-migrations')

@@ -1,13 +1,13 @@
 import { Logger } from 'basis/logger'
 import { tempDirectory } from 'basis/testing'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { removeService } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { createDatabase, openAdmin } from './Database'
 import { Graph } from './Graph'
-import { DatabaseRelease, loadRelease } from './Release'
+import { DatabaseRelease, loadRelease, ReleaseError } from './Release'
 import type { MigrationArtifact } from './Schema'
 import { DDL } from './Schema'
 import { Server } from './Server'
@@ -114,8 +114,11 @@ const installs: string[] = []
 const silent = new Logger({ silent: true })
 const application = join(import.meta.dir, '..', '..', '..', 'testing', 'server', 'Application.tsx')
 
-afterEach(() => {
-  for (const install of installs.splice(0)) removeService(install)
+afterEach(async () => {
+  for (const install of installs.splice(0)) {
+    removeService(install)
+    await rm(install, { force: true, recursive: true })
+  }
 })
 
 describe('versioned database releases', () => {
@@ -193,10 +196,16 @@ describe('versioned database releases', () => {
       await server.shutdown()
     }
 
+    const backupsBefore = (await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length
     const noop = await release.apply()
     expect(noop.changed).toBe(false)
     expect(noop.applied).toEqual([])
-    expect(noop.backup?.artifactVersion).toBe(artifactB.version)
+    expect(noop.backup).toBeUndefined()
+    expect((await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length).toBe(backupsBefore)
 
     const missing = join(install, 'migrations-missing')
     await writeRelease(missing, '2.0.0', [artifactA])
@@ -309,11 +318,31 @@ describe('versioned database releases', () => {
     }
     const releaseC = join(install, 'migrations-c')
     await writeRelease(releaseC, '3.0.0', [artifactA, artifactB, artifactC])
-    await expect(new DatabaseRelease({
+    const failing = new DatabaseRelease({
       graph: graphC,
       installation: install,
       migrations: releaseC,
-    }).apply()).rejects.toThrow()
+    })
+    const firstFailure = (await failing.apply().catch((error: unknown) => error)) as ReleaseError
+    expect(firstFailure).toBeInstanceOf(ReleaseError)
+    expect(firstFailure).toMatchObject({
+      code: 'MIGRATION_FAILED',
+      failure: { retryable: false, version: '3.0.0' },
+    })
+    expect(await failing.failure()).toMatchObject({
+      code: 'MIGRATION_FAILED',
+      retryable: false,
+      version: '3.0.0',
+    })
+    const backupsAfterFailure = (await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length
+    const repeatedFailure = (await failing.apply().catch((error: unknown) => error)) as ReleaseError
+    expect(repeatedFailure).toBeInstanceOf(ReleaseError)
+    expect(repeatedFailure.code).toBe('MIGRATION_FAILED')
+    expect((await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length).toBe(backupsAfterFailure)
     expect(await sourceReady(install, graphB, artifactB)).toBe(true)
   }, 240_000)
 })

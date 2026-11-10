@@ -6,11 +6,13 @@ export { Cardinality } from './source/GraphAuthoring'
 export { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID } from './source/Graph'
 export { DDL, physicalHash } from './source/Schema'
 export { ManagedPostgresOperations } from './source/PostgresOperations'
-export { DatabaseRelease, loadRelease } from './source/Release'
+export { DatabaseRelease, loadRelease, ReleaseError } from './source/Release'
 export type {
   DatabaseReleaseOptions,
   LoadedRelease,
   MigrationManifest,
+  ReleaseErrorCode,
+  ReleaseFailure,
   ReleasePlan,
   ReleaseResult,
 } from './source/Release'
