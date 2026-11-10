@@ -59,16 +59,14 @@ async function materialize(ref: string, source: string, target: string): Promise
 }
 
 /**
- * Resolve one named CLI option, environment fallback, or default.
+ * Resolve one named CLI option.
  * @param name - Option name.
- * @param environment - Environment variable name.
- * @param fallback - Value used when both are omitted.
+ * @param fallback - Value used when omitted.
  * @returns Selected value.
  */
-function option(name: string, environment: string, fallback: string): string {
+function option(name: string, fallback: string): string {
   const index = process.argv.indexOf(name)
-  if (index >= 0) return process.argv[index + 1] || fallback
-  return process.env[environment] || fallback
+  return process.argv[index + 1] || fallback
 }
 
 /**
@@ -76,7 +74,7 @@ function option(name: string, environment: string, fallback: string): string {
  * @returns Base Git revision.
  */
 function baseRef(): string {
-  return option('--base', 'BASIS_MIGRATION_BASE', 'origin/main')
+  return option('--base', 'origin/main')
 }
 
 /**
@@ -102,8 +100,8 @@ async function loadGraph(file: string): Promise<Graph> {
  */
 async function main(): Promise<number> {
   const base = baseRef()
-  const graphPath = option('--graph', 'BASIS_MIGRATION_GRAPH', GRAPH)
-  const migrationsPath = option('--migrations', 'BASIS_MIGRATION_DIR', MIGRATIONS)
+  const graphPath = GRAPH
+  const migrationsPath = MIGRATIONS
   const root = process.cwd()
   await mkdir(join(root, '.basis'), { mode: 0o700, recursive: true })
   const sandbox = await mkdtemp(join(root, '.basis', 'migration-gate-'))

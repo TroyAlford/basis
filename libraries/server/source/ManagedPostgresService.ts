@@ -1,8 +1,9 @@
 import { runAsync } from 'basis/configuration'
 import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, open, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { basisPath, databaseDirectory, ensureDatabaseDirectories, writeJson } from './Storage'
 
 /**
  * Resolve the stable per-installation managed database identity.
@@ -221,12 +222,8 @@ export class ManagedPostgresService {
     create: boolean,
     name = 'password',
   ): Promise<{ file: string, password: string }> {
-    const stateRoot = join(this.installation, '.basis')
-    const directory = join(stateRoot, 'database')
-    await mkdir(stateRoot, { mode: 0o700, recursive: true })
-    await chmod(stateRoot, 0o700)
-    await mkdir(directory, { mode: 0o700, recursive: true })
-    await chmod(directory, 0o700)
+    await ensureDatabaseDirectories(this.installation)
+    const directory = databaseDirectory(this.installation)
     await this.#protectState(directory)
     const file = join(directory, name)
     if (create || name !== 'password') {
@@ -376,11 +373,7 @@ export class ManagedPostgresService {
    * @param journal - Journal contents.
    */
   async #writeCutover(journal: CutoverJournal): Promise<void> {
-    const file = this.#cutoverPath()
-    const temporary = `${file}.${randomUUID()}`
-    await mkdir(join(this.installation, '.basis', 'database'), { mode: 0o700, recursive: true })
-    await writeFile(temporary, `${JSON.stringify(journal, null, 2)}\n`, { mode: 0o600 })
-    await rename(temporary, file)
+    await writeJson(this.#cutoverPath(), journal)
   }
 
   /**
@@ -388,7 +381,7 @@ export class ManagedPostgresService {
    * @returns Absolute path.
    */
   #cutoverPath(): string {
-    return join(this.installation, '.basis', 'database', 'cutover.json')
+    return basisPath(this.installation, 'database', 'cutover.json')
   }
 
   /**

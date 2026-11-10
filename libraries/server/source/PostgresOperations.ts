@@ -1,12 +1,13 @@
 import { runAsync } from 'basis/configuration'
 import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { canonicalDataDigest } from './CanonicalData'
 import { MANAGED_APP_ROLE, ManagedPostgresService } from './ManagedPostgresService'
 import type { MigrationArtifact } from './Schema'
 import { DDL } from './Schema'
+import { backupsDirectory, ensureDirectory, writeJson } from './Storage'
 
 /** Managed PostgreSQL database name. */
 const DATABASE = 'basis'
@@ -117,9 +118,6 @@ export interface PostgresCandidate {
   readonly volume: string,
 }
 
-/** One disposable restore container. */
-type DisposableRestore = PostgresCandidate
-
 /**
  * Host-run PostgreSQL operations for one managed installation.
  *
@@ -145,7 +143,7 @@ export class ManagedPostgresOperations {
     this.#artifact = options.artifact
     this.#service = service ?? new ManagedPostgresService(this.#installation)
     this.#backupDirectory = resolve(
-      options.backupDirectory ?? join(this.#installation, '.basis', 'backups'),
+      options.backupDirectory ?? backupsDirectory(this.#installation),
     )
   }
 
@@ -165,8 +163,7 @@ export class ManagedPostgresOperations {
     const stem = `${createdAt.replaceAll(':', '-')}-${randomUUID().slice(0, 8)}`
     const path = join(this.#backupDirectory, `${stem}.dump`)
     const manifest = `${path}.json`
-    await mkdir(this.#backupDirectory, { mode: 0o700, recursive: true })
-    await chmod(this.#backupDirectory, 0o700)
+    await ensureDirectory(this.#backupDirectory)
     await this.#protectDirectory(this.#backupDirectory)
     const sql = new BunSQL(connection.ownerUrl)
     const remote = `/tmp/basis-backup-${randomUUID()}.dump`
@@ -202,7 +199,7 @@ export class ManagedPostgresOperations {
         image,
         version: MANIFEST_VERSION,
       }
-      await writeFile(manifest, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 })
+      await writeJson(manifest, record)
       return {
         artifactVersion: this.#artifact.version,
         checksum,
@@ -323,7 +320,7 @@ export class ManagedPostgresOperations {
     manifest: BackupManifest,
     image: string,
     backupPath: string,
-  ): Promise<DisposableRestore> {
+  ): Promise<PostgresCandidate> {
     const secret = await this.#service.secret(false)
     const restore = {
       container: `basis-restore-${randomUUID()}`,
@@ -370,7 +367,7 @@ export class ManagedPostgresOperations {
    * @returns Cleanup warnings for any post-commit resources left behind.
    */
   async #cutover(
-    restore: DisposableRestore,
+    restore: PostgresCandidate,
     image: string,
     recovery: PostgresVerification | null,
     target: PostgresVerification,
@@ -505,7 +502,7 @@ export class ManagedPostgresOperations {
     recoveryVolume: string,
     previousImage: string,
     manifest: PostgresVerification,
-    candidate: DisposableRestore,
+    candidate: PostgresCandidate,
   ): Promise<void> {
     const hasVolume = await this.#service.volumeExists()
     if (hasVolume) {
@@ -650,7 +647,7 @@ export class ManagedPostgresOperations {
    * Remove one disposable container and volume.
    * @param restore - Disposable restore handle.
    */
-  async #dispose(restore: Pick<DisposableRestore, 'container' | 'volume'>): Promise<void> {
+  async #dispose(restore: Pick<PostgresCandidate, 'container' | 'volume'>): Promise<void> {
     await this.#service.removeContainer(restore.container)
     await this.#service.removeVolume(restore.volume)
   }

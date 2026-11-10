@@ -1,6 +1,6 @@
 import { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
-import { access, mkdir, open, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises'
+import { access, open, readFile, rm, unlink } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { canonicalDataDigest } from './CanonicalData'
 import type { Graph } from './Graph'
@@ -9,6 +9,7 @@ import type { PostgresBackup, PostgresCleanupWarning, PostgresVerification } fro
 import { ManagedPostgresOperations } from './PostgresOperations'
 import type { MigrationArtifact } from './Schema'
 import { DDL, physicalHash, verifyMigrationArtifact } from './Schema'
+import { backupsDirectory, basisPath, databaseDirectory, ensureDatabaseDirectories, writeJson } from './Storage'
 
 /** The checked-in release manifest filename. */
 const MANIFEST = 'manifest.json'
@@ -461,7 +462,7 @@ export class DatabaseRelease {
     this.#migrations = resolve(options.migrations)
     this.#service = new ManagedPostgresService(this.#installation)
     this.#backupDirectory = resolve(
-      options.backupDirectory ?? join(this.#installation, '.basis', 'backups'),
+      options.backupDirectory ?? backupsDirectory(this.#installation),
     )
   }
 
@@ -751,11 +752,7 @@ export class DatabaseRelease {
    * @param failure - Failure record.
    */
   async #writeFailure(failure: ReleaseFailure): Promise<void> {
-    const file = this.#failurePath()
-    const temporary = `${file}.${randomUUID()}`
-    await mkdir(join(this.#installation, '.basis', 'database'), { mode: 0o700, recursive: true })
-    await writeFile(temporary, `${JSON.stringify(failure, null, 2)}\n`, { mode: 0o600 })
-    await rename(temporary, file)
+    await writeJson(this.#failurePath(), failure)
   }
 
   /**
@@ -763,7 +760,7 @@ export class DatabaseRelease {
    * @returns Absolute path.
    */
   #failurePath(): string {
-    return join(this.#installation, '.basis', 'database', 'release-failure.json')
+    return basisPath(this.#installation, 'database', 'release-failure.json')
   }
 
   /**
@@ -849,8 +846,8 @@ export class DatabaseRelease {
    * @returns The unlock callback.
    */
   async #lock(): Promise<() => Promise<void>> {
-    const directory = join(this.#installation, '.basis', 'database')
-    await mkdir(directory, { mode: 0o700, recursive: true })
+    await ensureDatabaseDirectories(this.#installation)
+    const directory = databaseDirectory(this.#installation)
     const file = join(directory, LOCK)
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {

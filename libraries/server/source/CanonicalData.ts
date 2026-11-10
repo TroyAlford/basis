@@ -7,24 +7,20 @@ import { DDL } from './Schema'
  * @returns SHA-256 digest.
  */
 export async function canonicalDataDigest(sql: BunSQL): Promise<string> {
-  const users = await sql<{ data: unknown }[]>`
-    SELECT to_jsonb(t) AS data
+  const users = await sql<Record<string, unknown>[]>`
+    SELECT *
     FROM "User" t
     ORDER BY t."id"
   `
-  const roles = await sql<{ data: unknown }[]>`
-    SELECT to_jsonb(t) AS data
+  const roles = await sql<Record<string, unknown>[]>`
+    SELECT *
     FROM "Role" t
     ORDER BY t."id"
   `
-  const userRoles = await sql<{ data: unknown }[]>`
-    SELECT to_jsonb(t) AS data
+  const userRoles = await sql<Record<string, unknown>[]>`
+    SELECT *
     FROM "UserRole" t
     ORDER BY t."user.id", t."role.id"
   `
-  return DDL.hash(JSON.stringify({
-    roles: roles.map(row => row.data),
-    userRoles: userRoles.map(row => row.data),
-    users: users.map(row => row.data),
-  }))
+  return DDL.hash(JSON.stringify({ roles, userRoles, users }))
 }

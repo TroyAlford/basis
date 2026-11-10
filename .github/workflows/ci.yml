@@ -73,11 +73,7 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Verify versioned database migrations
-        env:
-          BASE_REF: origin/${{ github.event.pull_request.base.ref }}
-          BASIS_MIGRATION_GRAPH: ${{ vars.BASIS_MIGRATION_GRAPH }}
-          BASIS_MIGRATION_DIR: ${{ vars.BASIS_MIGRATION_DIR }}
-        run: bun run test:migrations -- --base "$BASE_REF"
+        run: bun run test:migrations -- --base origin/${{ github.event.pull_request.base.ref }}
       - name: Analyze change impact
         id: impact
         if: steps.policy.outputs.present == 'true'
