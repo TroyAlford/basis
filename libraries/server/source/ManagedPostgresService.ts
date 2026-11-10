@@ -125,6 +125,7 @@ export class ManagedPostgresService {
     if (!hasVolume) await this.createVolume(this.volumeName)
     if (state === 'missing') {
       await this.createContainer(this.containerName, this.volumeName, this.image, secret.file)
+      await this.waitReady()
     } else if (state === 'stopped') {
       await this.startContainer(this.containerName)
     }
@@ -566,12 +567,16 @@ export class ManagedPostgresService {
    */
   async waitReady(name = this.containerName): Promise<void> {
     const deadline = Date.now() + READY_TIMEOUT_MS
+    const args = [
+      'exec', name, 'pg_isready', '-h', '127.0.0.1',
+      '-U', MANAGED_DATABASE, '-d', MANAGED_DATABASE,
+    ]
     while (Date.now() < deadline) {
-      const result = await runAsync`docker exec ${name} pg_isready -U ${MANAGED_DATABASE} -d ${MANAGED_DATABASE}`
+      const result = await runAsync('docker', args)
       if (result.exitCode === 0) {
-        // The postgres image briefly starts a temporary server during initdb.
+        // The image's temporary initdb server has no TCP listener; confirm the final server stayed up.
         await Bun.sleep(1_000)
-        const confirmed = await runAsync`docker exec ${name} pg_isready -U ${MANAGED_DATABASE} -d ${MANAGED_DATABASE}`
+        const confirmed = await runAsync('docker', args)
         if (confirmed.exitCode === 0) return
       }
       await Bun.sleep(READY_POLL_MS)
