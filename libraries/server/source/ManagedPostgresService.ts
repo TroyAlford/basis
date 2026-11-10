@@ -3,7 +3,7 @@ import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, open, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { directories } from '@basis/utilities'
+import { directories } from '../../utilities'
 
 /**
  * Resolve the stable per-installation managed database identity.

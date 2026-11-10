@@ -1,5 +1,5 @@
 import type { SQL as BunSQL } from 'bun'
-import { checksum } from '@basis/utilities'
+import { checksum } from '../../utilities'
 
 /**
  * Read the deterministic digest of canonical User/Role/UserRole data.

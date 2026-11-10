@@ -1,5 +1,5 @@
 import type { SQL as BunSQL } from 'bun'
-import { checksum } from '@basis/utilities'
+import { checksum } from '../../utilities'
 
 /** The category of one physical schema object. */
 export type PhysicalKind =
