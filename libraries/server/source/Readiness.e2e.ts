@@ -88,6 +88,29 @@ describe('Graph-backed production readiness', () => {
         await ready.shutdown()
       }
 
+      const divergentGraph = new Graph({
+        entities: [{
+          fields: [
+            { field: 'title', type: 'String' },
+            { field: 'extra', type: 'String' },
+          ],
+          name: 'Note',
+        }],
+      })
+      const divergent = await start(install, divergentGraph, artifact)
+      try {
+        await expect(divergent.ready()).rejects.toThrow('does not match the configured Graph')
+      } finally {
+        await divergent.shutdown()
+      }
+
+      const stillReady = await start(install, graph, artifact)
+      try {
+        await expect(stillReady.ready()).resolves.toBeUndefined()
+      } finally {
+        await stillReady.shutdown()
+      }
+
       const driftedDatabase = (() => {
         process.chdir(install)
         return createDatabase({ authorization: true, entities: graph.definitions })

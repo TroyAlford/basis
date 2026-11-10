@@ -26,7 +26,7 @@ import type { Graph } from './Graph'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import type { MigrationArtifact } from './Schema'
-import { DDL } from './Schema'
+import { DDL, physicalHash } from './Schema'
 import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
@@ -958,9 +958,19 @@ export class Server {
         }
         return
       }
+      const artifact = this.#schemaExpectation
+      if (this.#graph) {
+        const expected = this.#graph.physicalSchema(artifact.appRole, artifact.superuser)
+        if (physicalHash(expected) !== artifact.targetHash) {
+          throw new Error(
+            'Approved migration artifact does not match the configured Graph; ' +
+            'review and apply a migration for the current Graph',
+          )
+        }
+      }
       const admin = await openAdmin(this.#database)
       try {
-        const result = await DDL.readiness(admin.sql, this.#schemaExpectation)
+        const result = await DDL.readiness(admin.sql, artifact)
         if (!result.ready) {
           throw new Error(`Schema readiness failed: ${result.discrepancies.join('; ')}`)
         }

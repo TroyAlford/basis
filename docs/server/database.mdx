@@ -14,7 +14,7 @@ Managed state and credentials live inside the installation under `.basis/databas
 
 The application root's `graph.ts` is the canonical authored model: `export default new Graph({ entities, relationships, roles, grants })`. Importing it constructs and validates the complete in-memory graph once. JSON remains an alternate input syntax accepted by `Graph`; it is not a second model authority. Constructing the Graph never creates tables, initializes a schema, or runs migrations.
 
-A Graph-backed production server requires an approved migration artifact through `server.migration(artifact)`. Startup performs only `DDL.readiness`; it never installs or migrates automatically. Development servers without an artifact remain available for explicit local provisioning and tests.
+A Graph-backed production server requires an approved migration artifact through `server.migration(artifact)`, and that artifact must describe the exact configured Graph. Startup performs only `DDL.readiness`; it never installs or migrates automatically. Development servers without an artifact remain available for explicit local provisioning and tests.
 
 The document root accepts `entities` and an optional `relationships` array. This is the complete relationship vocabulary:
 
