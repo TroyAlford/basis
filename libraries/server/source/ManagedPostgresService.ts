@@ -3,7 +3,7 @@ import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, open, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { basisPath, databaseDirectory, ensureDatabaseDirectories, writeJson } from './Storage'
+import { directories } from '@basis/utilities'
 
 /**
  * Resolve the stable per-installation managed database identity.
@@ -100,12 +100,11 @@ export class ManagedPostgresService {
   readonly image: string
 
   /**
-   * Build the service for one installation.
-   * @param installation - Application installation root.
+   * Build the service for the current application working directory.
    * @param options - Image override.
    */
-  constructor(installation: string, options: ManagedPostgresServiceOptions = {}) {
-    this.installation = resolve(installation)
+  constructor(options: ManagedPostgresServiceOptions = {}) {
+    this.installation = resolve(process.cwd())
     this.identity = managedDatabaseIdentity(this.installation)
     this.containerName = `basis-postgres-${this.identity}`
     this.volumeName = this.containerName
@@ -222,10 +221,8 @@ export class ManagedPostgresService {
     create: boolean,
     name = 'password',
   ): Promise<{ file: string, password: string }> {
-    await ensureDatabaseDirectories(this.installation)
-    const directory = databaseDirectory(this.installation)
-    await this.#protectState(directory)
-    const file = join(directory, name)
+    const directory = directories('database')
+    const file = await directory.file(name)
     if (create || name !== 'password') {
       try {
         const handle = await open(file, 'wx', 0o600)
@@ -373,7 +370,7 @@ export class ManagedPostgresService {
    * @param journal - Journal contents.
    */
   async #writeCutover(journal: CutoverJournal): Promise<void> {
-    await writeJson(this.#cutoverPath(), journal)
+    await directories('database').json('cutover.json', journal)
   }
 
   /**
@@ -381,25 +378,7 @@ export class ManagedPostgresService {
    * @returns Absolute path.
    */
   #cutoverPath(): string {
-    return basisPath(this.installation, 'database', 'cutover.json')
-  }
-
-  /**
-   * Ensure Git never stages the installation's database state.
-   * @param directory - The installation-local `.basis/database` directory.
-   */
-  async #protectState(directory: string): Promise<void> {
-    const ignore = join(directory, '.gitignore')
-    try {
-      const handle = await open(ignore, 'wx', 0o644)
-      try {
-        await handle.writeFile('*\n')
-      } finally {
-        await handle.close()
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
+    return join(directories('database').path, 'cutover.json')
   }
 
   /**

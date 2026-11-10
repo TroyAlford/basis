@@ -1,13 +1,12 @@
 import { runAsync } from 'basis/configuration'
 import { SQL as BunSQL } from 'bun'
-import { createHash, randomUUID } from 'node:crypto'
-import { chmod, readFile, rm, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { chmod, readFile, rm } from 'node:fs/promises'
+import { checksum, directories } from '@basis/utilities'
 import { canonicalDataDigest } from './CanonicalData'
 import { MANAGED_APP_ROLE, ManagedPostgresService } from './ManagedPostgresService'
 import type { MigrationArtifact } from './Schema'
 import { DDL } from './Schema'
-import { backupsDirectory, ensureDirectory, writeJson } from './Storage'
 
 /** Managed PostgreSQL database name. */
 const DATABASE = 'basis'
@@ -18,10 +17,6 @@ const MANIFEST_VERSION = 1
 export interface PostgresOperationsOptions {
   /** Approved physical/migration artifact corresponding to the backed-up version. */
   readonly artifact: MigrationArtifact,
-  /** Optional backup directory; defaults to `.basis/backups` below installation. */
-  readonly backupDirectory?: string,
-  /** Installation root; defaults to the current working directory. */
-  readonly installation?: string,
 }
 
 /** One completed database backup. */
@@ -129,22 +124,16 @@ export interface PostgresCandidate {
  */
 export class ManagedPostgresOperations {
   readonly #artifact: MigrationArtifact
-  readonly #backupDirectory: string
-  readonly #installation: string
   readonly #service: ManagedPostgresService
 
   /**
-   * Build operations for one managed installation.
-   * @param options - Installation, backup directory, and approved artifact.
+   * Build operations for the current application working directory.
+   * @param options - Approved artifact.
    * @param service - Package-local service seam used by focused tests.
    */
   constructor(options: PostgresOperationsOptions, service?: ManagedPostgresService) {
-    this.#installation = resolve(options.installation ?? process.cwd())
     this.#artifact = options.artifact
-    this.#service = service ?? new ManagedPostgresService(this.#installation)
-    this.#backupDirectory = resolve(
-      options.backupDirectory ?? backupsDirectory(this.#installation),
-    )
+    this.#service = service ?? new ManagedPostgresService()
   }
 
   /**
@@ -161,10 +150,9 @@ export class ManagedPostgresOperations {
     const connection = await this.#service.ensure(false)
     const createdAt = new Date().toISOString()
     const stem = `${createdAt.replaceAll(':', '-')}-${randomUUID().slice(0, 8)}`
-    const path = join(this.#backupDirectory, `${stem}.dump`)
+    const directory = directories('backups')
+    const path = await directory.file(`${stem}.dump`)
     const manifest = `${path}.json`
-    await ensureDirectory(this.#backupDirectory)
-    await this.#protectDirectory(this.#backupDirectory)
     const sql = new BunSQL(connection.ownerUrl)
     const remote = `/tmp/basis-backup-${randomUUID()}.dump`
     try {
@@ -190,19 +178,19 @@ export class ManagedPostgresOperations {
         throw new Error('Canonical User/Role data changed during backup; retry while the application is quiescent')
       }
       const image = await this.#service.containerImage()
-      const checksum = createHash('sha256').update(await readFile(path)).digest('hex')
+      const digest = checksum(await readFile(path))
       const record: BackupManifest = {
         artifact: this.#artifact,
-        checksum,
+        checksum: digest,
         createdAt,
         dataDigest: after,
         image,
         version: MANIFEST_VERSION,
       }
-      await writeJson(manifest, record)
+      await directory.json(`${stem}.dump.json`, record)
       return {
         artifactVersion: this.#artifact.version,
-        checksum,
+        checksum: digest,
         createdAt,
         dataDigest: after,
         image,
@@ -625,8 +613,8 @@ export class ManagedPostgresOperations {
     if (typeof manifest.artifact !== 'object' || manifest.artifact === null) {
       throw new Error('Backup manifest is missing its approved artifact')
     }
-    const checksum = createHash('sha256').update(await readFile(path)).digest('hex')
-    if (checksum !== manifest.checksum) throw new Error('Backup archive checksum does not match its manifest')
+    const digest = checksum(await readFile(path))
+    if (digest !== manifest.checksum) throw new Error('Backup archive checksum does not match its manifest')
     return manifest as BackupManifest
   }
 
@@ -652,11 +640,4 @@ export class ManagedPostgresOperations {
     await this.#service.removeVolume(restore.volume)
   }
 
-  /**
-   * Write a local ignore file for backup artifacts.
-   * @param directory - Backup directory.
-   */
-  async #protectDirectory(directory: string): Promise<void> {
-    await writeFile(join(directory, '.gitignore'), '*\n', { mode: 0o644 })
-  }
 }

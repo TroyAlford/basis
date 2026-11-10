@@ -2,14 +2,14 @@ import { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
 import { access, open, readFile, rm, unlink } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
+import { checksum, directories } from '@basis/utilities'
 import { canonicalDataDigest } from './CanonicalData'
 import type { Graph } from './Graph'
 import { MANAGED_APP_ROLE, ManagedPostgresService } from './ManagedPostgresService'
 import type { PostgresBackup, PostgresCleanupWarning, PostgresVerification } from './PostgresOperations'
 import { ManagedPostgresOperations } from './PostgresOperations'
 import type { MigrationArtifact } from './Schema'
-import { DDL, physicalHash, verifyMigrationArtifact } from './Schema'
-import { backupsDirectory, basisPath, databaseDirectory, ensureDatabaseDirectories, writeJson } from './Storage'
+import { DDL, MigrationError, physicalHash, verifyMigrationArtifact } from './Schema'
 
 /** The checked-in release manifest filename. */
 const MANIFEST = 'manifest.json'
@@ -84,6 +84,8 @@ export type ReleaseErrorCode =
 export interface ReleaseFailure {
   /** Recovery point captured before the failed attempt, when available. */
   readonly backup?: PostgresBackup,
+  /** Stable identity of the exact candidate release. */
+  readonly candidateId: string,
   /** Stable machine code. */
   readonly code: ReleaseErrorCode,
   /** Human-readable diagnostic. */
@@ -119,6 +121,11 @@ type FailureDisposition = 'deterministic' | 'transient' | 'unknown'
 /** Host/network codes that are safe to retry. */
 const TRANSIENT_CODES = new Set([
   'EAGAIN',
+  'ERR_POSTGRES_BROKEN_PIPE',
+  'ERR_POSTGRES_CONNECTION_CLOSED',
+  'ERR_POSTGRES_CONNECTION_REFUSED',
+  'ERR_POSTGRES_CONNECTION_TIMEOUT',
+  'ERR_POSTGRES_SOCKET',
   'ECONNABORTED',
   'ECONNREFUSED',
   'ECONNRESET',
@@ -139,38 +146,6 @@ const TRANSIENT_SQL_CLASSES = new Set(['08', '40', '53', '54', '57', '58'])
 /** PostgreSQL SQLSTATE classes that indicate reviewed SQL/schema incompatibility. */
 const DETERMINISTIC_SQL_CLASSES = new Set(['0A', '23', '28', '2B', '3D', '3F', '42'])
 
-/** Transient host/PostgreSQL messages that should remain retryable. */
-const TRANSIENT_MESSAGES = [
-  /broken pipe/u,
-  /connection (?:closed|refused|reset|terminated)/u,
-  /could not connect/u,
-  /database system is starting up/u,
-  /network/u,
-  /not connected/u,
-  /server closed the connection/u,
-  /socket/u,
-  /terminating connection/u,
-  /timeout|timed out/u,
-] as const
-
-/** Deterministic messages emitted by the release/DDL contract itself. */
-const DETERMINISTIC_MESSAGES = [
-  /Candidate canonical User\/Role data does not match/u,
-  /Candidate is not ready/u,
-  /Candidate ledger does not match/u,
-  /Candidate migration .* is not ready/u,
-  /Candidate migration ledger does not contain/u,
-  /Live database has an unmanaged schema/u,
-  /Live database has drifted from migration/u,
-  /Live migration ledger is incomplete/u,
-  /Migration .* was already applied/u,
-  /Migration artifact checksum does not match/u,
-  /Migration source catalog has drifted/u,
-  /Migration verification failed/u,
-  /Nontransactional migration operation is not supported/u,
-  /Release migrations do not reach/u,
-] as const
-
 /**
  * Build the complete cause chain for an error-like value.
  * @param error - Original failure.
@@ -190,20 +165,6 @@ function errorChain(error: unknown): readonly unknown[] {
     if (Array.isArray(record.errors)) queue.push(...record.errors)
   }
   return chain
-}
-
-/**
- * Read one error message.
- * @param value - Error-like value.
- * @returns Diagnostic text.
- */
-function errorMessage(value: unknown): string {
-  if (value instanceof Error) return value.message
-  if (typeof value === 'object' && value !== null && 'message' in value) {
-    const message = (value as { message?: unknown }).message
-    if (typeof message === 'string') return message
-  }
-  return String(value)
 }
 
 /**
@@ -240,17 +201,10 @@ function isTransient(value: unknown): boolean {
   const code = errorCode(value)
   if (code !== undefined) {
     if (TRANSIENT_CODES.has(code)) return true
-    if (
-      /^ERR_POSTGRES_/u.test(code)
-      && /BROKEN|CLOSED|CONNECTION|NETWORK|REFUSED|RESET|SOCKET|TERMINAT|TIMEOUT/iu.test(code)
-    ) {
-      return true
-    }
     const state = sqlState(value)
     if (state !== undefined && TRANSIENT_SQL_CLASSES.has(state.slice(0, 2))) return true
   }
-  const message = errorMessage(value)
-  return TRANSIENT_MESSAGES.some(pattern => pattern.test(message))
+  return false
 }
 
 /**
@@ -259,11 +213,9 @@ function isTransient(value: unknown): boolean {
  * @returns Whether the same candidate should not be retried without a change.
  */
 function isDeterministic(value: unknown): boolean {
-  if (value instanceof ReleaseDeterministicError) return true
+  if (value instanceof ReleaseDeterministicError || value instanceof MigrationError) return true
   const state = sqlState(value)
-  if (state !== undefined && DETERMINISTIC_SQL_CLASSES.has(state.slice(0, 2))) return true
-  const message = errorMessage(value)
-  return DETERMINISTIC_MESSAGES.some(pattern => pattern.test(message))
+  return state !== undefined && DETERMINISTIC_SQL_CLASSES.has(state.slice(0, 2))
 }
 
 /**
@@ -371,18 +323,34 @@ export class ReleaseError extends Error {
   get version(): string {
     return this.failure.version
   }
+
+  /**
+   * Exact candidate identity for the failed release.
+   * @returns Manifest/artifact identity.
+   */
+  get candidateId(): string {
+    return this.failure.candidateId
+  }
 }
 
 /** Options for one host-run database release. */
 export interface DatabaseReleaseOptions {
-  /** Optional backup directory; defaults to `.basis/backups` below installation. */
-  readonly backupDirectory?: string,
   /** Current application Graph. */
   readonly graph: Graph,
-  /** Installation root; defaults to the current working directory. */
-  readonly installation?: string,
   /** Reviewed migrations directory containing `manifest.json`. */
   readonly migrations: string,
+}
+
+/**
+ * Build the stable identity of one exact reviewed candidate.
+ * @param release - Loaded release.
+ * @returns Manifest and ordered artifact identity.
+ */
+function candidateIdentity(release: LoadedRelease): string {
+  return checksum({
+    migrations: release.migrations.map(artifact => artifact.checksum),
+    version: release.manifest.version,
+  })
 }
 
 /**
@@ -446,24 +414,18 @@ export async function loadRelease(directory: string, graph: Graph): Promise<Load
  * contract, and only then promotes the candidate through the managed service.
  */
 export class DatabaseRelease {
-  readonly #backupDirectory: string
   readonly #graph: Graph
-  readonly #installation: string
   readonly #migrations: string
   readonly #service: ManagedPostgresService
 
   /**
-   * Build a release coordinator.
-   * @param options - Graph, migration directory, and installation options.
+   * Build a release coordinator for the current application working directory.
+   * @param options - Graph and migration directory.
    */
   constructor(options: DatabaseReleaseOptions) {
-    this.#installation = resolve(options.installation ?? process.cwd())
     this.#graph = options.graph
     this.#migrations = resolve(options.migrations)
-    this.#service = new ManagedPostgresService(this.#installation)
-    this.#backupDirectory = resolve(
-      options.backupDirectory ?? backupsDirectory(this.#installation),
-    )
+    this.#service = new ManagedPostgresService()
   }
 
   /**
@@ -494,9 +456,10 @@ export class DatabaseRelease {
     try {
       release = await loadRelease(this.#migrations, this.#graph)
     } catch (error) {
-      const failure = this.#createFailure('unknown', '', 'load', error)
+      const failure = this.#createFailure('unknown', '', 'load', error, undefined, 'unknown')
       throw new ReleaseError(failure, error)
     }
+    const candidateId = candidateIdentity(release)
     let unlock: (() => Promise<void>) | null = null
     let sourceSql: BunSQL | null = null
     let candidateSql: BunSQL | null = null
@@ -507,12 +470,10 @@ export class DatabaseRelease {
     let plan: ReleasePlan | null = null
     let backup: PostgresBackup | undefined
     try {
-      const finalTargetHash = release.migrations.at(-1)?.targetHash ?? ''
       const recordedFailure = await this.failure()
       if (
         recordedFailure
-        && recordedFailure.version === release.manifest.version
-        && recordedFailure.targetHash === finalTargetHash
+        && recordedFailure.candidateId === candidateId
         && !recordedFailure.retryable
       ) {
         throw new ReleaseError(recordedFailure)
@@ -532,9 +493,7 @@ export class DatabaseRelease {
       const previousFailure = await this.failure()
       let reusableBackup: PostgresBackup | undefined
       if (
-        previousFailure
-        && previousFailure.version === release.manifest.version
-        && previousFailure.targetHash === plan.targetHash
+        previousFailure?.candidateId === candidateId
       ) {
         if (!previousFailure.retryable) throw new ReleaseError(previousFailure)
         if (previousFailure.backup && await this.#backupExists(previousFailure.backup)) {
@@ -543,13 +502,8 @@ export class DatabaseRelease {
       }
       phase = 'backup'
       const previous = plan.applied.at(-1)
-      const backupOptions = {
-        artifact: previous,
-        backupDirectory: this.#backupDirectory,
-        installation: this.#installation,
-      }
       backup = reusableBackup ?? (previous
-        ? await new ManagedPostgresOperations(backupOptions, this.#service).backup()
+        ? await new ManagedPostgresOperations({ artifact: previous }, this.#service).backup()
         : undefined)
 
       phase = 'staging'
@@ -621,8 +575,6 @@ export class DatabaseRelease {
       phase = 'cutover'
       const warnings = await new ManagedPostgresOperations({
         artifact: target,
-        backupDirectory: this.#backupDirectory,
-        installation: this.#installation,
       }, this.#service).promoteCandidate(
         candidate,
         image,
@@ -661,6 +613,7 @@ export class DatabaseRelease {
         phase,
         failure,
         backup,
+        candidateId,
       )
       if (phase !== 'lock') await this.#writeFailure(record).catch(() => undefined)
       throw new ReleaseError(record, error)
@@ -676,18 +629,12 @@ export class DatabaseRelease {
    * @returns The failure record, or null when absent.
    */
   async failure(): Promise<ReleaseFailure | null> {
-    let raw: string
-    try {
-      raw = await readFile(this.#failurePath(), 'utf8')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw error
-    }
     let value: unknown
     try {
-      value = JSON.parse(raw)
+      value = await directories('database').json('release-failure.json')
     } catch (error) {
       throw new ReleaseError({
+        candidateId: 'unknown',
         code: 'RELEASE_STATE_INVALID',
         message: 'Database release failure record is malformed',
         occurredAt: new Date().toISOString(),
@@ -697,8 +644,10 @@ export class DatabaseRelease {
         version: 'unknown',
       }, error)
     }
-    if (typeof value !== 'object' || value === null) {
+    if (value === null) return null
+    if (typeof value !== 'object') {
       throw new ReleaseError({
+        candidateId: 'unknown',
         code: 'RELEASE_STATE_INVALID',
         message: 'Database release failure record is malformed',
         occurredAt: new Date().toISOString(),
@@ -715,7 +664,7 @@ export class DatabaseRelease {
    * Clear the durable failure record after a controller acknowledges it.
    */
   async clearFailure(): Promise<void> {
-    await rm(this.#failurePath(), { force: true })
+    await rm(await directories('database').file('release-failure.json'), { force: true })
   }
 
   /**
@@ -725,6 +674,7 @@ export class DatabaseRelease {
    * @param phase - Release phase.
    * @param error - Original failure.
    * @param backup - Recovery point captured before failure.
+   * @param candidateId - Stable candidate identity.
    * @returns Durable failure record.
    */
   #createFailure(
@@ -733,10 +683,12 @@ export class DatabaseRelease {
     phase: string,
     error: unknown,
     backup?: PostgresBackup,
+    candidateId = 'unknown',
   ): ReleaseFailure {
     const classification = classifyFailure(phase, error)
     return {
       ...(backup === undefined ? {} : { backup }),
+      candidateId,
       code: classification.code,
       message: error instanceof Error ? error.message : String(error),
       occurredAt: new Date().toISOString(),
@@ -752,15 +704,7 @@ export class DatabaseRelease {
    * @param failure - Failure record.
    */
   async #writeFailure(failure: ReleaseFailure): Promise<void> {
-    await writeJson(this.#failurePath(), failure)
-  }
-
-  /**
-   * Resolve the durable failure record path.
-   * @returns Absolute path.
-   */
-  #failurePath(): string {
-    return basisPath(this.#installation, 'database', 'release-failure.json')
+    await directories('database').json('release-failure.json', failure)
   }
 
   /**
@@ -846,9 +790,7 @@ export class DatabaseRelease {
    * @returns The unlock callback.
    */
   async #lock(): Promise<() => Promise<void>> {
-    await ensureDatabaseDirectories(this.#installation)
-    const directory = databaseDirectory(this.#installation)
-    const file = join(directory, LOCK)
+    const file = await directories('database').file(LOCK)
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const handle = await open(file, 'wx', 0o600)

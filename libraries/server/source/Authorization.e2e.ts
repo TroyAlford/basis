@@ -93,8 +93,11 @@ async function start(install: string, applicationGraph: Graph = graph): Promise<
     .database()
     .root(install)
   server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
-  process.chdir(previous)
-  await server.ready()
+  try {
+    await server.ready()
+  } finally {
+    process.chdir(previous)
+  }
   const admin = await openAdmin(server.db)
   try {
     await installSchema(admin.sql, applicationGraph, {

@@ -109,8 +109,11 @@ async function start(
     .root(install)
   if (artifact) server.migration(artifact)
   server.start({ development: artifact === undefined, hostname: '127.0.0.1', logger: silent, port: 0 })
-  process.chdir(previous)
-  await server.ready()
+  try {
+    await server.ready()
+  } finally {
+    process.chdir(previous)
+  }
   return server
 }
 
@@ -195,7 +198,7 @@ async function expectFailureRecovery(
   expected: { readonly id: string, readonly title: string },
   preserveVolumes = false,
 ): Promise<void> {
-  const operations = new ManagedPostgresOperations({ artifact, installation: installRoot }, service)
+  const operations = new ManagedPostgresOperations({ artifact }, service)
   await expect(operations.upgrade('postgres:17-alpine'))
     .rejects.toThrow(/injected (cutover|container removal|volume removal|source restart) failure/)
   if (preserveVolumes) {
@@ -216,6 +219,8 @@ async function expectFailureRecovery(
 describe('Managed PostgreSQL operations', () => {
   test('recovers real Graph authorization data and preserves a restartable source', async () => {
     const installRoot = tempDirectory('basis-postgres-operations-')
+    const previous = process.cwd()
+    process.chdir(installRoot)
     const source = await start(installRoot, undefined, 'postgres:16.4-alpine')
     try {
       const artifact = await installArtifact(source)
@@ -248,10 +253,7 @@ describe('Managed PostgreSQL operations', () => {
         await adminConnection.close()
       }
 
-      const operations = new ManagedPostgresOperations({
-        artifact,
-        installation: installRoot,
-      })
+      const operations = new ManagedPostgresOperations({ artifact })
       const backup = await operations.backup()
       expect(backup.artifactVersion).toBe(artifact.version)
       expect(backup.dataDigest).toMatch(/^[0-9a-f]{64}$/)
@@ -325,7 +327,7 @@ describe('Managed PostgreSQL operations', () => {
         }, true],
       ]
       for (const [name, configure, preserveVolumes] of failureCases) {
-        const service = new FailingService(installRoot)
+        const service = new FailingService()
         configure(service)
         try {
           await expectFailureRecovery(
@@ -341,11 +343,10 @@ describe('Managed PostgreSQL operations', () => {
         }
       }
 
-      const candidateCleanupService = new FailingService(installRoot)
+      const candidateCleanupService = new FailingService()
       candidateCleanupService.failCandidateCleanup = true
       const candidateCleanup = await new ManagedPostgresOperations({
         artifact,
-        installation: installRoot,
       }, candidateCleanupService).upgrade('postgres:17-alpine')
       expect(candidateCleanup.warnings).toHaveLength(1)
       expect(candidateCleanup.warnings[0]?.resource).toStartWith('basis-restore-volume-')
@@ -359,16 +360,12 @@ describe('Managed PostgreSQL operations', () => {
       } finally {
         await candidateCleanupServer.shutdown()
       }
-      await new ManagedPostgresOperations({
-        artifact,
-        installation: installRoot,
-      }).rollback(backup.path, 'postgres:16.4-alpine')
+      await new ManagedPostgresOperations({ artifact }).rollback(backup.path, 'postgres:16.4-alpine')
 
-      const recoveryCleanupService = new FailingService(installRoot)
+      const recoveryCleanupService = new FailingService()
       recoveryCleanupService.failRecoveryCleanup = true
       const recoveryCleanup = await new ManagedPostgresOperations({
         artifact,
-        installation: installRoot,
       }, recoveryCleanupService).upgrade('postgres:17-alpine')
       expect(recoveryCleanup.warnings).toHaveLength(1)
       expect(recoveryCleanup.warnings[0]?.resource).toContain('-recovery-')
@@ -383,6 +380,7 @@ describe('Managed PostgreSQL operations', () => {
         await recoveryCleanupServer.shutdown()
       }
     } finally {
+      process.chdir(previous)
       await source.shutdown()
       removeService(installRoot)
     }

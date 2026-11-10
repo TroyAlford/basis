@@ -33,6 +33,17 @@ function enrollSql(model: Graph): string {
 }
 
 describe('Graph', () => {
+  test('round-trips authored options through a JSON snapshot', () => {
+    const original = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'SnapshotNote' }],
+      grants: [{ action: 'read', role: 'public', target: 'SnapshotNote' }],
+      roles: { reader: { name: 'Reader' } },
+    })
+    const restored = new Graph(JSON.parse(JSON.stringify(original)))
+    expect(restored.physicalSchema('basis_app', true))
+      .toEqual(original.physicalSchema('basis_app', true))
+  })
+
   test('compiles root grants from the canonical identity fields', () => {
     const rootGraph = new Graph({
       entities: [{ fields: [], name: 'Note' }],

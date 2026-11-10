@@ -9,7 +9,7 @@ import { createDatabase, openAdmin } from './Database'
 import { Graph } from './Graph'
 import { DatabaseRelease, loadRelease, ReleaseError } from './Release'
 import type { MigrationArtifact } from './Schema'
-import { DDL } from './Schema'
+import { artifactChecksum, DDL } from './Schema'
 import { Server } from './Server'
 
 /**
@@ -17,9 +17,15 @@ import { Server } from './Server'
  * @param current - Current Graph.
  * @param next - Proposed Graph.
  * @param install - Installation root.
+ * @param version - Reviewed migration version.
  * @returns The reviewed artifact.
  */
-async function nextArtifact(current: Graph, next: Graph, install: string): Promise<MigrationArtifact> {
+async function nextArtifact(
+  current: Graph,
+  next: Graph,
+  install: string,
+  version = 'next-reviewed',
+): Promise<MigrationArtifact> {
   const previous = process.cwd()
   process.chdir(install)
   const database = createDatabase({ authorization: true, entities: current.definitions })
@@ -49,7 +55,7 @@ async function nextArtifact(current: Graph, next: Graph, install: string): Promi
           })),
         schema: 'public',
         superuser: true,
-        version: `next-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        version,
       })
     } finally {
       await admin.close()
@@ -87,30 +93,18 @@ async function writeRelease(
  * @returns Artifact with a valid checksum and one transient operation.
  */
 function transientArtifact(artifact: MigrationArtifact): MigrationArtifact {
-  const operation = artifact.operations[0] ?? {
-    dependsOn: [],
-    id: 'transient-failure',
-    kind: 'function' as const,
-    risk: 'safe' as const,
-    sql: 'SELECT 1',
-    target: 'transient-failure',
-  }
+  const operation = artifact.operations[0]
+  if (!operation) throw new Error('Transient fault fixture requires at least one migration operation')
   const operations = [
-    { ...operation, sql: 'SELECT pg_terminate_backend(pg_backend_pid())' },
-    ...artifact.operations.slice(1),
+    {
+      ...operation,
+      id: 'transient-failure',
+      sql: 'SELECT pg_terminate_backend(pg_backend_pid()) ' +
+        'FROM (SELECT nextval(\'public.basis_fault_once\') AS n) s WHERE s.n = 1',
+    },
+    ...artifact.operations,
   ]
-  const checksum = DDL.hash(JSON.stringify({
-    appRole: artifact.appRole,
-    expected: artifact.expected,
-    operations,
-    planHash: artifact.planHash,
-    schema: artifact.schema,
-    sourceHash: artifact.sourceHash,
-    superuser: artifact.superuser,
-    targetHash: artifact.targetHash,
-    version: artifact.version,
-  }))
-  return { ...artifact, checksum, operations }
+  return { ...artifact, checksum: artifactChecksum({ ...artifact, operations }), operations }
 }
 
 /**
@@ -142,11 +136,36 @@ async function sourceReady(
   }
 }
 
+/**
+ * Advance the one-shot transient-failure sequence in the source database.
+ * @param install - Installation root.
+ * @param graph - Current source Graph.
+ */
+async function advanceTransientFault(install: string, graph: Graph): Promise<void> {
+  const previous = process.cwd()
+  process.chdir(install)
+  const database = createDatabase({ authorization: true, entities: graph.definitions })
+  try {
+    await database.connect()
+    const admin = await openAdmin(database)
+    try {
+      await admin.sql`SELECT nextval('public.basis_fault_once')`
+    } finally {
+      await admin.close()
+    }
+  } finally {
+    process.chdir(previous)
+    await database.close()
+  }
+}
+
 const installs: string[] = []
+const originalCwd = process.cwd()
 const silent = new Logger({ silent: true })
 const application = join(import.meta.dir, '..', '..', '..', 'testing', 'server', 'Application.tsx')
 
 afterEach(async () => {
+  process.chdir(originalCwd)
   for (const install of installs.splice(0)) {
     removeService(install)
     await rm(install, { force: true, recursive: true })
@@ -196,9 +215,9 @@ describe('versioned database releases', () => {
     const releaseDirectory = join(install, 'migrations')
     await writeRelease(releaseDirectory, '2.0.0', [artifactA, artifactB])
 
+    process.chdir(install)
     const release = new DatabaseRelease({
       graph: graphB,
-      installation: install,
       migrations: releaseDirectory,
     })
     const plan = await release.plan()
@@ -310,7 +329,8 @@ describe('versioned database releases', () => {
     const artifactB = await nextArtifact(graphA, graphB, install)
     const releaseB = join(install, 'migrations-b')
     await writeRelease(releaseB, '2.0.0', [artifactA, artifactB])
-    expect((await new DatabaseRelease({ graph: graphB, installation: install, migrations: releaseB }).apply()).changed)
+    process.chdir(install)
+    expect((await new DatabaseRelease({ graph: graphB, migrations: releaseB }).apply()).changed)
       .toBe(true)
 
     process.chdir(install)
@@ -350,9 +370,9 @@ describe('versioned database releases', () => {
     }
     const releaseC = join(install, 'migrations-c')
     await writeRelease(releaseC, '3.0.0', [artifactA, artifactB, artifactC])
+    process.chdir(install)
     const failing = new DatabaseRelease({
       graph: graphC,
-      installation: install,
       migrations: releaseC,
     })
     const firstFailure = (await failing.apply().catch((error: unknown) => error)) as ReleaseError
@@ -372,7 +392,6 @@ describe('versioned database releases', () => {
       .length
     const repeated = new DatabaseRelease({
       graph: graphC,
-      installation: install,
       migrations: releaseC,
     })
     const repeatedFailure = (await repeated.apply().catch((error: unknown) => error)) as ReleaseError
@@ -382,6 +401,16 @@ describe('versioned database releases', () => {
       .filter(name => name.endsWith('.dump'))
       .length).toBe(backupsAfterFailure)
     expect(await sourceReady(install, graphB, artifactB)).toBe(true)
+
+    const corrected = await nextArtifact(graphB, graphC, install, '0003-corrected')
+    await writeRelease(releaseC, '3.0.0', [artifactA, artifactB, corrected])
+    const correctedResult = await new DatabaseRelease({
+      graph: graphC,
+      migrations: releaseC,
+    }).apply()
+    expect(correctedResult.changed).toBe(true)
+    expect(correctedResult.applied).toEqual([corrected.version])
+    expect(await sourceReady(install, graphC, corrected)).toBe(true)
   }, 240_000)
 
   test('retries a transient candidate failure without quarantining the release', async () => {
@@ -413,6 +442,7 @@ describe('versioned database releases', () => {
           superuser: true,
           version: '0001-initial',
         })
+        await admin.sql`CREATE SEQUENCE public.basis_fault_once START 1`
       } finally {
         await admin.close()
       }
@@ -423,9 +453,9 @@ describe('versioned database releases', () => {
     const artifactB = await nextArtifact(graphA, graphB, install)
     const releaseDirectory = join(install, 'migrations-transient')
     await writeRelease(releaseDirectory, '4.0.0', [artifactA, transientArtifact(artifactB)])
+    process.chdir(install)
     const release = new DatabaseRelease({
       graph: graphB,
-      installation: install,
       migrations: releaseDirectory,
     })
     const failure = (await release.apply().catch((error: unknown) => error)) as ReleaseError
@@ -445,10 +475,9 @@ describe('versioned database releases', () => {
     const backupsAfterFailure = (await readdir(join(install, '.basis', 'backups')))
       .filter(name => name.endsWith('.dump'))
       .length
-    await writeRelease(releaseDirectory, '4.0.0', [artifactA, artifactB])
+    await advanceTransientFault(install, graphB)
     const retry = new DatabaseRelease({
       graph: graphB,
-      installation: install,
       migrations: releaseDirectory,
     })
     const result = await retry.apply()

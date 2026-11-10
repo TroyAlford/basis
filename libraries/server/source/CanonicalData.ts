@@ -1,5 +1,5 @@
 import type { SQL as BunSQL } from 'bun'
-import { DDL } from './Schema'
+import { checksum } from '@basis/utilities'
 
 /**
  * Read the deterministic digest of canonical User/Role/UserRole data.
@@ -22,5 +22,5 @@ export async function canonicalDataDigest(sql: BunSQL): Promise<string> {
     FROM "UserRole" t
     ORDER BY t."user.id", t."role.id"
   `
-  return DDL.hash(JSON.stringify({ roles, userRoles, users }))
+  return checksum({ roles, userRoles, users })
 }

@@ -1,14 +1,13 @@
-import { DatabaseRelease, loadRelease } from 'basis/server'
-import { Graph } from 'basis/server'
+import { DatabaseRelease, Graph, loadRelease } from 'basis/server'
+import { directories } from 'basis/utilities'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { removeService } from '../libraries/server/testing/DatabaseFixture'
 
-/** Fixture graph used by the repository migration gate. */
-const GRAPH = 'testing/release/graph.ts'
-/** Fixture migrations used by the repository migration gate. */
-const MIGRATIONS = 'testing/release/migrations'
+/** Generated Graph snapshot used by the repository migration gate. */
+const GRAPH = 'graph.json'
+/** Application migration convention. */
+const MIGRATIONS = 'migrations'
 
 /**
  * Read one file from a Git revision.
@@ -78,20 +77,12 @@ function baseRef(): string {
 }
 
 /**
- * Load a Graph module from a file.
- * @param file - Absolute module path.
- * @returns The default Graph export.
+ * Load a Graph snapshot.
+ * @param source - JSON snapshot.
+ * @returns Validated Graph.
  */
-async function loadGraph(file: string): Promise<Graph> {
-  const module = await import(`${pathToFileURL(file).href}?gate=${Date.now()}`) as {
-    default?: unknown,
-    graph?: unknown,
-  }
-  const value = module.graph ?? module.default
-  if (!(value instanceof Graph)) {
-    throw new Error(`${file} must export a Graph as \`graph\``)
-  }
-  return value
+function loadSnapshot(source: string): Graph {
+  return new Graph(JSON.parse(source) as ConstructorParameters<typeof Graph>[0])
 }
 
 /**
@@ -100,49 +91,47 @@ async function loadGraph(file: string): Promise<Graph> {
  */
 async function main(): Promise<number> {
   const base = baseRef()
-  const graphPath = GRAPH
-  const migrationsPath = MIGRATIONS
   const root = process.cwd()
-  await mkdir(join(root, '.basis'), { mode: 0o700, recursive: true })
-  const sandbox = await mkdtemp(join(root, '.basis', 'migration-gate-'))
+  const gate = directories('migration-gate')
+  await gate.ensure()
+  const sandbox = await mkdtemp(join(gate.path, 'run-'))
   const install = join(sandbox, 'postgres')
+  await mkdir(install, { recursive: true })
   const baseMigrations = join(sandbox, 'base-migrations')
   let baseGraph: Graph | null = null
   try {
-    const baseGraphSource = gitFile(base, graphPath)
+    const baseGraphSource = gitFile(base, GRAPH)
+    const baseManifest = gitFile(base, join(MIGRATIONS, 'manifest.json'))
     if (baseGraphSource !== null) {
-      const file = join(sandbox, 'base-graph.ts')
-      await writeFile(file, baseGraphSource)
-      baseGraph = await loadGraph(file)
-      await materialize(base, migrationsPath, baseMigrations)
+      baseGraph = loadSnapshot(baseGraphSource)
+      await materialize(base, MIGRATIONS, baseMigrations)
+    } else if (baseManifest !== null) {
+      throw new Error('Base revision has migrations but no graph.json snapshot')
     }
-    const headGraphSource = await readFile(join(root, graphPath), 'utf8')
-    const headGraphFile = join(sandbox, 'head-graph.ts')
-    await writeFile(headGraphFile, headGraphSource)
-    const headGraph = await loadGraph(headGraphFile)
-    const headRelease = await loadRelease(join(root, migrationsPath), headGraph)
-    const head = new DatabaseRelease({
-      graph: headGraph,
-      installation: install,
-      migrations: join(root, migrationsPath),
-    })
+    const headGraph = loadSnapshot(await readFile(join(root, GRAPH), 'utf8'))
+    const headRelease = await loadRelease(join(root, MIGRATIONS), headGraph)
+    process.chdir(install)
     if (baseGraph) {
       await new DatabaseRelease({
         graph: baseGraph,
-        installation: install,
         migrations: baseMigrations,
       }).apply()
     }
+    const head = new DatabaseRelease({
+      graph: headGraph,
+      migrations: join(root, MIGRATIONS),
+    })
     const result = await head.apply()
     const plan = await head.plan()
     if (!plan.upToDate) throw new Error('Head migrations did not reach the proposed Graph')
     process.stdout.write(
-      `[basis] migrations: base=${baseGraph ? 'loaded' : 'none'} ` +
+      `[basis] migrations: base=${baseGraph ? 'snapshot' : 'bootstrap'} ` +
       `version=${headRelease.manifest.version} applied=${result.applied.length} ` +
       `backup=${result.backup ? 'yes' : 'no'}\n`,
     )
     return 0
   } finally {
+    process.chdir(root)
     removeService(install)
     await rm(sandbox, { force: true, recursive: true })
   }

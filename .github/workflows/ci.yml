@@ -72,6 +72,8 @@ jobs:
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: Verify generated Graph snapshot
+        run: bun run graph:check
       - name: Verify versioned database migrations
         run: bun run test:migrations -- --base origin/${{ github.event.pull_request.base.ref }}
       - name: Analyze change impact

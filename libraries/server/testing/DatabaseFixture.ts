@@ -206,10 +206,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
   const existing = containers(install).length > 0
   const schemas = new Map<string, Promise<string>>()
   scope.pending = { install, service }
-  const server = startForInstall(
-    new Server().root(install).database(),
-    install,
-  )
+  const server = await startForInstall(install)
   const schemaFor = (entities: EntityDefinitions): Promise<string> => {
     const schema = fixtureSchemaName(entities)
     let pending = schemas.get(schema)
@@ -296,15 +293,19 @@ function removeManagedService(
 
 /**
  * Start a server with a specific installation as the managed database identity.
- * @param server - The configured server.
  * @param install - The installation working directory.
  * @returns The started server.
  */
-function startForInstall(server: Server, install: string): Server {
+async function startForInstall(install: string): Promise<Server> {
   const previous = process.cwd()
   process.chdir(install)
   try {
-    return server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
+    const server = new Server()
+      .root(install)
+      .database()
+      .start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
+    await server.ready()
+    return server
   } finally {
     process.chdir(previous)
   }

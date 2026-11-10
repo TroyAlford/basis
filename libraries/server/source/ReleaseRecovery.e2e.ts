@@ -12,6 +12,8 @@ import type { MigrationArtifact } from './Schema'
 import { DDL } from './Schema'
 
 describe('interrupted database cutover recovery', () => {
+  const originalCwd = process.cwd()
+
   test('recovers the original database after process death beyond source detachment', async () => {
     const install = tempDirectory('basis-cutover-recovery-')
     let child: ReturnType<typeof Bun.spawn> | null = null
@@ -61,8 +63,7 @@ describe('interrupted database cutover recovery', () => {
         }
         const operations = new ManagedPostgresOperations({
           artifact,
-          installation: process.env.BASIS_INSTALL,
-        }, new KillingService(process.env.BASIS_INSTALL))
+        }, new KillingService())
         await operations.upgrade('postgres:17-alpine')
       `
       child = Bun.spawn([process.execPath, '-e', code], {
@@ -70,14 +71,14 @@ describe('interrupted database cutover recovery', () => {
         env: {
           ...process.env,
           BASIS_ARTIFACT: artifactPath,
-          BASIS_INSTALL: install,
         },
         stderr: 'pipe',
         stdout: 'pipe',
       })
       const exit = await child.exited
       if (exit === 0) throw new Error('cutover child unexpectedly completed')
-      const service = new ManagedPostgresService(install)
+      process.chdir(install)
+      const service = new ManagedPostgresService()
       const connection = await service.ensure(false)
       const sql = new BunSQL(connection.ownerUrl)
       try {
@@ -89,6 +90,7 @@ describe('interrupted database cutover recovery', () => {
       await expect(stat(join(install, '.basis', 'database', 'cutover.json')))
         .rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
+      process.chdir(originalCwd)
       if (child && child.exitCode === null) {
         child.kill()
         await child.exited.catch(() => undefined)
