@@ -1,0 +1,10 @@
+{
+  "name": "@basis/codegen",
+  "description": "Build-time TypeScript and JSON Schema generation from canonical Basis models.",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@basis/server": "workspace:*"
+  }
+}

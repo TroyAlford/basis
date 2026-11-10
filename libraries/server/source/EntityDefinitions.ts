@@ -1,3 +1,4 @@
+import { postgresScalarType } from './PostgresTypes'
 import type { PhysicalConstraint, PhysicalSchema, PhysicalTable } from './Schema'
 
 /** Enable PostgreSQL trigram search for universal names. */
@@ -2019,27 +2020,10 @@ function lifecycleFunction(name: string, body: string): LifecycleFunction {
 function columnType(column: TableColumn): string {
   if (column.type === FieldType.Array) {
     if (!column.arrayType) throw new Error(`Array column "${column.name}" has no element type`)
-    return `${scalarColumnType(column.arrayType)}[]`
+    return `${postgresScalarType(column.arrayType)}[]`
   }
   if (column.type === FieldType.JSON) return 'jsonb'
-  return scalarColumnType(column.type)
-}
-
-/**
- * Resolve the physical PostgreSQL type for a scalar field.
- * @param type - Scalar field type.
- * @returns Column type declaration.
- */
-function scalarColumnType(type: ScalarFieldType): string {
-  switch (type) {
-    case FieldType.Boolean: return 'boolean'
-    case FieldType.Date: return 'date'
-    case FieldType.ID: return 'text'
-    case FieldType.Number: return 'double precision'
-    case FieldType.String: return 'text'
-    case FieldType.Timestamp: return 'timestamptz'
-    default: throw new Error(`Unsupported field type: ${String(type)}`)
-  }
+  return postgresScalarType(column.type)
 }
 
 /**

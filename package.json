@@ -25,7 +25,9 @@
     "./testing/bun": "./consumer/testing-bun.ts",
     "./tsconfig/base.json": "./consumer/tsconfig/base.json",
     "./tsconfig/bun.json": "./consumer/tsconfig/bun.json",
-    "./tsconfig/react.json": "./consumer/tsconfig/react.json"
+    "./tsconfig/react.json": "./consumer/tsconfig/react.json",
+    "./codegen": "./consumer/codegen.ts",
+    "./visualization": "./consumer/visualization.ts"
   },
   "engines": {
     "bun": ">=1.4.0"

@@ -1,0 +1,11 @@
+{
+  "name": "@basis/visualization",
+  "description": "Mermaid ERD source generation from canonical Basis models.",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@basis/server": "workspace:*",
+    "beautiful-mermaid": "^1.1.3"
+  }
+}

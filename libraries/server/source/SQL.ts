@@ -1,6 +1,7 @@
 import type { ArrayFieldDefinition, EntityDefinition, EntityDefinitions, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
+import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './Predicate'
 import { arrayItemField, Predicate } from './Predicate'
 import { SortDirection } from './SortDirection'
@@ -549,7 +550,7 @@ function queryField(entity: EntityDefinition, name: string): QueryFieldDefinitio
  * @returns Its declared PostgreSQL array type.
  */
 function arraySQLType(field: ArrayFieldDefinition): string {
-  return `${scalarSQLType(field.items.type)}[]`
+  return `${postgresScalarType(field.items.type)}[]`
 }
 
 /**
@@ -566,25 +567,8 @@ function arrayExpression(
 ): string {
   const values = operand as readonly BoundScalar[]
   if (values.length === 0) return `ARRAY[]::${arraySQLType(field)}`
-  const elementType = scalarSQLType(field.items.type)
+  const elementType = postgresScalarType(field.items.type)
   return `ARRAY[${values.map(value => `${bind(value)}::${elementType}`).join(', ')}]`
-}
-
-/**
- * Resolve the PostgreSQL scalar type for one array element.
- * @param type - Scalar element type.
- * @returns PostgreSQL scalar type.
- */
-function scalarSQLType(type: FieldType): string {
-  switch (type) {
-    case FieldType.Boolean: return 'boolean'
-    case FieldType.Date: return 'date'
-    case FieldType.ID: return 'text'
-    case FieldType.Number: return 'double precision'
-    case FieldType.String: return 'text'
-    case FieldType.Timestamp: return 'timestamptz'
-    default: throw new Error(`Unsupported array element type: ${String(type)}`)
-  }
 }
 
 /**
