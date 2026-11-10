@@ -1,6 +1,6 @@
 import { DatabaseRelease, loadRelease } from 'basis/server'
 import { Graph } from 'basis/server'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { removeService } from '../libraries/server/testing/DatabaseFixture'
@@ -103,7 +103,10 @@ async function main(): Promise<number> {
       baseGraph = await loadGraph(file)
       await materialize(base, MIGRATIONS, baseMigrations)
     }
-    const headGraph = await loadGraph(join(root, GRAPH))
+    const headGraphSource = await readFile(join(root, GRAPH), 'utf8')
+    const headGraphFile = join(sandbox, 'head-graph.ts')
+    await writeFile(headGraphFile, headGraphSource)
+    const headGraph = await loadGraph(headGraphFile)
     const headRelease = await loadRelease(join(root, MIGRATIONS), headGraph)
     const head = new DatabaseRelease({
       graph: headGraph,
