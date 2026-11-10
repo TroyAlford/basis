@@ -82,6 +82,38 @@ async function writeRelease(
 }
 
 /**
+ * Replace the first operation with a real, transient PostgreSQL connection termination.
+ * @param artifact - Reviewed target artifact.
+ * @returns Artifact with a valid checksum and one transient operation.
+ */
+function transientArtifact(artifact: MigrationArtifact): MigrationArtifact {
+  const operation = artifact.operations[0] ?? {
+    dependsOn: [],
+    id: 'transient-failure',
+    kind: 'function' as const,
+    risk: 'safe' as const,
+    sql: 'SELECT 1',
+    target: 'transient-failure',
+  }
+  const operations = [
+    { ...operation, sql: 'SELECT pg_terminate_backend(pg_backend_pid())' },
+    ...artifact.operations.slice(1),
+  ]
+  const checksum = DDL.hash(JSON.stringify({
+    appRole: artifact.appRole,
+    expected: artifact.expected,
+    operations,
+    planHash: artifact.planHash,
+    schema: artifact.schema,
+    sourceHash: artifact.sourceHash,
+    superuser: artifact.superuser,
+    targetHash: artifact.targetHash,
+    version: artifact.version,
+  }))
+  return { ...artifact, checksum, operations }
+}
+
+/**
  * Read readiness for a Graph on the managed source.
  * @param install - Installation root.
  * @param graph - Graph to check.
@@ -346,6 +378,83 @@ describe('versioned database releases', () => {
     const repeatedFailure = (await repeated.apply().catch((error: unknown) => error)) as ReleaseError
     expect(repeatedFailure).toBeInstanceOf(ReleaseError)
     expect(repeatedFailure.code).toBe('MIGRATION_FAILED')
+    expect((await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length).toBe(backupsAfterFailure)
+    expect(await sourceReady(install, graphB, artifactB)).toBe(true)
+  }, 240_000)
+
+  test('retries a transient candidate failure without quarantining the release', async () => {
+    const install = tempDirectory('basis-release-transient-')
+    installs.push(install)
+    const previous = process.cwd()
+    const graphA = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+    })
+    const graphB = new Graph({
+      entities: [{
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'extra', type: 'String' },
+        ],
+        name: 'Note',
+      }],
+    })
+    process.chdir(install)
+    const database = createDatabase({ authorization: true, entities: graphA.definitions })
+    let artifactA: MigrationArtifact
+    try {
+      await database.connect()
+      const admin = await openAdmin(database)
+      try {
+        artifactA = await installSchema(admin.sql, graphA, {
+          appRole: 'basis_app',
+          schema: 'public',
+          superuser: true,
+          version: '0001-initial',
+        })
+      } finally {
+        await admin.close()
+      }
+    } finally {
+      process.chdir(previous)
+      await database.close()
+    }
+    const artifactB = await nextArtifact(graphA, graphB, install)
+    const releaseDirectory = join(install, 'migrations-transient')
+    await writeRelease(releaseDirectory, '4.0.0', [artifactA, transientArtifact(artifactB)])
+    const release = new DatabaseRelease({
+      graph: graphB,
+      installation: install,
+      migrations: releaseDirectory,
+    })
+    const failure = (await release.apply().catch((error: unknown) => error)) as ReleaseError
+    expect(failure).toBeInstanceOf(ReleaseError)
+    expect(failure).toMatchObject({
+      code: 'RELEASE_TRANSIENT',
+      phase: 'migration',
+      retryable: true,
+      version: '4.0.0',
+    })
+    expect(await release.failure()).toMatchObject({
+      code: 'RELEASE_TRANSIENT',
+      phase: 'migration',
+      retryable: true,
+      version: '4.0.0',
+    })
+    const backupsAfterFailure = (await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length
+    await writeRelease(releaseDirectory, '4.0.0', [artifactA, artifactB])
+    const retry = new DatabaseRelease({
+      graph: graphB,
+      installation: install,
+      migrations: releaseDirectory,
+    })
+    const result = await retry.apply()
+    expect(result.changed).toBe(true)
+    expect(result.applied).toEqual([artifactB.version])
+    expect(await retry.failure()).toBeNull()
     expect((await readdir(join(install, '.basis', 'backups')))
       .filter(name => name.endsWith('.dump'))
       .length).toBe(backupsAfterFailure)

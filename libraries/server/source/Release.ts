@@ -99,6 +99,219 @@ export interface ReleaseFailure {
   readonly version: string,
 }
 
+/** Internal failure that is confidently deterministic for the candidate. */
+class ReleaseDeterministicError extends Error {
+  /**
+   * Build a deterministic release failure.
+   * @param message - Diagnostic.
+   * @param cause - Original failure.
+   */
+  constructor(message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause })
+    this.name = 'ReleaseDeterministicError'
+  }
+}
+
+/** Confident cause classification used before persisting quarantine evidence. */
+type FailureDisposition = 'deterministic' | 'transient' | 'unknown'
+
+/** Host/network codes that are safe to retry. */
+const TRANSIENT_CODES = new Set([
+  'EAGAIN',
+  'ECONNABORTED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'EMFILE',
+  'ENETUNREACH',
+  'ENFILE',
+  'ENOMEM',
+  'ENOTFOUND',
+  'EPIPE',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+])
+
+/** PostgreSQL SQLSTATE classes that indicate transient service conditions. */
+const TRANSIENT_SQL_CLASSES = new Set(['08', '40', '53', '54', '57', '58'])
+
+/** PostgreSQL SQLSTATE classes that indicate reviewed SQL/schema incompatibility. */
+const DETERMINISTIC_SQL_CLASSES = new Set(['0A', '23', '28', '2B', '3D', '3F', '42'])
+
+/** Transient host/PostgreSQL messages that should remain retryable. */
+const TRANSIENT_MESSAGES = [
+  /broken pipe/u,
+  /connection (?:closed|refused|reset|terminated)/u,
+  /could not connect/u,
+  /database system is starting up/u,
+  /network/u,
+  /not connected/u,
+  /server closed the connection/u,
+  /socket/u,
+  /terminating connection/u,
+  /timeout|timed out/u,
+] as const
+
+/** Deterministic messages emitted by the release/DDL contract itself. */
+const DETERMINISTIC_MESSAGES = [
+  /Candidate canonical User\/Role data does not match/u,
+  /Candidate is not ready/u,
+  /Candidate ledger does not match/u,
+  /Candidate migration .* is not ready/u,
+  /Candidate migration ledger does not contain/u,
+  /Live database has an unmanaged schema/u,
+  /Live database has drifted from migration/u,
+  /Live migration ledger is incomplete/u,
+  /Migration .* was already applied/u,
+  /Migration artifact checksum does not match/u,
+  /Migration source catalog has drifted/u,
+  /Migration verification failed/u,
+  /Nontransactional migration operation is not supported/u,
+  /Release migrations do not reach/u,
+] as const
+
+/**
+ * Build the complete cause chain for an error-like value.
+ * @param error - Original failure.
+ * @returns Error chain, outermost first.
+ */
+function errorChain(error: unknown): readonly unknown[] {
+  const chain: unknown[] = []
+  const queue: unknown[] = [error]
+  const seen = new Set<unknown>()
+  while (queue.length > 0) {
+    const value = queue.shift()
+    if (value === null || typeof value !== 'object' || seen.has(value)) continue
+    seen.add(value)
+    chain.push(value)
+    const record = value as { cause?: unknown, errors?: unknown }
+    if (record.cause !== undefined) queue.push(record.cause)
+    if (Array.isArray(record.errors)) queue.push(...record.errors)
+  }
+  return chain
+}
+
+/**
+ * Read one error message.
+ * @param value - Error-like value.
+ * @returns Diagnostic text.
+ */
+function errorMessage(value: unknown): string {
+  if (value instanceof Error) return value.message
+  if (typeof value === 'object' && value !== null && 'message' in value) {
+    const message = (value as { message?: unknown }).message
+    if (typeof message === 'string') return message
+  }
+  return String(value)
+}
+
+/**
+ * Read the first meaningful host/PostgreSQL code.
+ * @param value - Error-like value.
+ * @returns Code when present.
+ */
+function errorCode(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const record = value as { code?: unknown, errno?: unknown, sqlState?: unknown }
+  for (const candidate of [record.sqlState, record.errno, record.code]) {
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate
+    if (typeof candidate === 'number') return String(candidate)
+  }
+  return undefined
+}
+
+/**
+ * Read a PostgreSQL SQLSTATE from an error-like value.
+ * @param value - Error-like value.
+ * @returns Five-character SQLSTATE when present.
+ */
+function sqlState(value: unknown): string | undefined {
+  const code = errorCode(value)
+  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) ? code : undefined
+}
+
+/**
+ * Whether a cause is confidently transient.
+ * @param value - Error-like value.
+ * @returns Whether retrying can reasonably succeed.
+ */
+function isTransient(value: unknown): boolean {
+  const code = errorCode(value)
+  if (code !== undefined) {
+    if (TRANSIENT_CODES.has(code)) return true
+    if (
+      /^ERR_POSTGRES_/u.test(code)
+      && /BROKEN|CLOSED|CONNECTION|NETWORK|REFUSED|RESET|SOCKET|TERMINAT|TIMEOUT/iu.test(code)
+    ) {
+      return true
+    }
+    const state = sqlState(value)
+    if (state !== undefined && TRANSIENT_SQL_CLASSES.has(state.slice(0, 2))) return true
+  }
+  const message = errorMessage(value)
+  return TRANSIENT_MESSAGES.some(pattern => pattern.test(message))
+}
+
+/**
+ * Whether a cause is confidently deterministic for this candidate.
+ * @param value - Error-like value.
+ * @returns Whether the same candidate should not be retried without a change.
+ */
+function isDeterministic(value: unknown): boolean {
+  if (value instanceof ReleaseDeterministicError) return true
+  const state = sqlState(value)
+  if (state !== undefined && DETERMINISTIC_SQL_CLASSES.has(state.slice(0, 2))) return true
+  const message = errorMessage(value)
+  return DETERMINISTIC_MESSAGES.some(pattern => pattern.test(message))
+}
+
+/**
+ * Classify a release cause without treating unknown failures as terminal.
+ * @param error - Original failure.
+ * @returns Cause disposition.
+ */
+function failureDisposition(error: unknown): FailureDisposition {
+  const chain = errorChain(error)
+  if (chain.some(value => value instanceof ReleaseDeterministicError)) return 'deterministic'
+  if (chain.some(isTransient)) return 'transient'
+  if (chain.some(isDeterministic)) return 'deterministic'
+  return 'unknown'
+}
+
+/**
+ * Pick a stable code and retry disposition for one failed phase.
+ * @param phase - Release phase.
+ * @param error - Original failure.
+ * @returns Code and retryability.
+ */
+function classifyFailure(phase: string, error: unknown): {
+  readonly code: ReleaseErrorCode,
+  readonly retryable: boolean,
+} {
+  if (phase === 'load') return { code: 'RELEASE_INVALID', retryable: false }
+  if (phase === 'lock') return { code: 'RELEASE_LOCKED', retryable: true }
+  if (phase === 'backup') return { code: 'RELEASE_BACKUP_FAILED', retryable: true }
+  if (phase === 'staging') return { code: 'RELEASE_TRANSIENT', retryable: true }
+  if (phase === 'cutover') return { code: 'RELEASE_CUTOVER_FAILED', retryable: true }
+  const deterministic = failureDisposition(error) === 'deterministic'
+  if (phase === 'plan') {
+    return deterministic
+      ? { code: 'RELEASE_PLAN_FAILED', retryable: false }
+      : { code: 'RELEASE_TRANSIENT', retryable: true }
+  }
+  if (phase === 'migration') {
+    return deterministic
+      ? { code: 'MIGRATION_FAILED', retryable: false }
+      : { code: 'RELEASE_TRANSIENT', retryable: true }
+  }
+  if (phase === 'verification') {
+    return deterministic
+      ? { code: 'RELEASE_VERIFICATION_FAILED', retryable: false }
+      : { code: 'RELEASE_TRANSIENT', retryable: true }
+  }
+  return { code: 'RELEASE_STATE_INVALID', retryable: false }
+}
+
 /** One coded release failure with durable classification. */
 export class ReleaseError extends Error {
   /** Durable failure record. */
@@ -367,29 +580,31 @@ export class DatabaseRelease {
       phase = 'migration'
       const candidatePlan = await this.#plan(candidateSql, release)
       if (candidatePlan.applied.length !== plan.applied.length) {
-        throw new Error('Candidate ledger does not match the live release baseline')
+        throw new ReleaseDeterministicError('Candidate ledger does not match the live release baseline')
       }
       for (const artifact of candidatePlan.pending) {
         await DDL.apply(candidateSql, artifact)
         const readiness = await DDL.readiness(candidateSql, artifact)
         if (!readiness.ready) {
-          throw new Error(`Candidate migration ${artifact.version} is not ready: ${readiness.discrepancies.join('; ')}`)
+          throw new ReleaseDeterministicError(
+            `Candidate migration ${artifact.version} is not ready: ${readiness.discrepancies.join('; ')}`,
+          )
         }
       }
       phase = 'verification'
       const readiness = await DDL.readiness(candidateSql, target)
       if (!readiness.ready) {
-        throw new Error(`Candidate is not ready: ${readiness.discrepancies.join('; ')}`)
+        throw new ReleaseDeterministicError(`Candidate is not ready: ${readiness.discrepancies.join('; ')}`)
       }
       const ledger = await this.#ledger(candidateSql)
       const expected = release.migrations.map(artifact => artifact.checksum)
       if (ledger.length !== expected.length || ledger.some((row, index) => row.checksum !== expected[index])) {
-        throw new Error('Candidate migration ledger does not contain the complete release history')
+        throw new ReleaseDeterministicError('Candidate migration ledger does not contain the complete release history')
       }
       if (backup) {
         const digest = await canonicalDataDigest(candidateSql)
         if (digest !== backup.dataDigest) {
-          throw new Error('Candidate canonical User/Role data does not match the release backup')
+          throw new ReleaseDeterministicError('Candidate canonical User/Role data does not match the release backup')
         }
       }
       await candidateSql.close()
@@ -518,30 +733,14 @@ export class DatabaseRelease {
     error: unknown,
     backup?: PostgresBackup,
   ): ReleaseFailure {
-    const classification = phase === 'load'
-      ? ['RELEASE_INVALID', false] as const
-      : phase === 'lock'
-        ? ['RELEASE_LOCKED', true] as const
-        : phase === 'plan'
-          ? ['RELEASE_PLAN_FAILED', false] as const
-          : phase === 'backup'
-            ? ['RELEASE_BACKUP_FAILED', true] as const
-            : phase === 'staging'
-              ? ['RELEASE_TRANSIENT', true] as const
-              : phase === 'migration'
-                ? ['MIGRATION_FAILED', false] as const
-                : phase === 'verification'
-                  ? ['RELEASE_VERIFICATION_FAILED', false] as const
-                  : phase === 'cutover'
-                    ? ['RELEASE_CUTOVER_FAILED', true] as const
-                    : ['RELEASE_STATE_INVALID', false] as const
+    const classification = classifyFailure(phase, error)
     return {
       ...(backup === undefined ? {} : { backup }),
-      code: classification[0],
+      code: classification.code,
       message: error instanceof Error ? error.message : String(error),
       occurredAt: new Date().toISOString(),
       phase,
-      retryable: classification[1],
+      retryable: classification.retryable,
       targetHash,
       version,
     }
@@ -594,7 +793,9 @@ export class DatabaseRelease {
     for (const row of ledger) {
       const artifact = release.migrations[applied]
       if (!artifact || row.checksum !== artifact.checksum || row.status !== 'applied') {
-        throw new Error('Live migration ledger is incomplete, out of order, or contains a failed migration')
+        throw new ReleaseDeterministicError(
+          'Live migration ledger is incomplete, out of order, or contains a failed migration',
+        )
       }
       applied += 1
     }
@@ -603,7 +804,7 @@ export class DatabaseRelease {
       const last = appliedArtifacts.at(-1) as MigrationArtifact
       const readiness = await DDL.readiness(sql, last)
       if (!readiness.ready) {
-        throw new Error(
+        throw new ReleaseDeterministicError(
           `Live database has drifted from migration ${last.version}: ` +
           readiness.discrepancies.join('; '),
         )
@@ -611,7 +812,9 @@ export class DatabaseRelease {
     } else {
       const actual = await DDL.introspect(sql)
       if (actual.tables.some(table => table.name !== 'basis.schema_migration')) {
-        throw new Error('Live database has an unmanaged schema; install through a reviewed migration first')
+        throw new ReleaseDeterministicError(
+          'Live database has an unmanaged schema; install through a reviewed migration first',
+        )
       }
     }
     const target = release.migrations.at(-1) as MigrationArtifact
