@@ -32,9 +32,9 @@ Development delegates to Bun's dev server for compilation, watching, HMR, and Re
 
 ## Database
 
-`server.database()` configures the zero-config managed PostgreSQL capability. Pass `{ url }` only for an explicit external server. The server owns the Bun pool; the managed PostgreSQL service and its durable data survive web-server restarts. See the [database guide](../../docs/server/database.mdx).
+`server.database()` configures the zero-config Basis-managed PostgreSQL capability. The server owns the Bun pool; the managed PostgreSQL service and its durable data survive web-server restarts. See the [database guide](../../docs/server/database.mdx).
 
-`server.graph(graph)` adds the canonical graph roles and compiled PostgreSQL RLS. With authorization enabled, `server.db` uses a restricted application role; `adminUrl` is reserved for explicit provisioning and is never exposed to handlers. See the [authorization guide](../../docs/server/authorization.mdx).
+`server.graph(graph)` adds the canonical graph roles and compiled PostgreSQL RLS. With authorization enabled, `server.db` uses a restricted application role; the administrative owner connection is reserved for explicit provisioning and is never exposed to handlers. See the [authorization guide](../../docs/server/authorization.mdx).
 
 ## Other server facilities
 

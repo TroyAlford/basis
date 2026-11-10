@@ -1,4 +1,4 @@
-import type { EffectiveFieldDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from 'basis/server'
+import type { EffectiveFieldDefinition, FieldDefinition, Graph, ScalarFieldDefinition } from 'basis/server'
 import { FieldType } from 'basis/server'
 
 /** Supported ERD projections. */
@@ -6,15 +6,16 @@ export type ErdMode = 'logical' | 'physical'
 
 /**
  * Generate a deterministic Mermaid ERD from the canonical model.
- * @param definitions - Validated canonical definitions.
+ * @param graph - Canonical application Graph.
  * @param mode - Logical entities or physical tables.
  * @returns Mermaid source.
  */
 export function generateErd(
-  definitions: EntityDefinitions,
+  graph: Graph,
   mode: ErdMode = 'logical',
 ): string {
-  const physical = mode === 'physical' ? definitions.physicalSchema('basis_app', false, false) : null
+  const definitions = graph.definitions
+  const physical = mode === 'physical' ? graph.physicalSchema() : null
   const lines = ['erDiagram']
   if (physical) {
     for (const table of physical.tables) {

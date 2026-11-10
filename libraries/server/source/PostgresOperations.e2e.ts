@@ -108,7 +108,7 @@ async function start(
     .database({ image })
     .root(install)
   if (artifact) server.migration(artifact)
-  server.start({ development: false, hostname: '127.0.0.1', logger: silent, port: 0 })
+  server.start({ development: artifact === undefined, hostname: '127.0.0.1', logger: silent, port: 0 })
   process.chdir(previous)
   await server.ready()
   return server

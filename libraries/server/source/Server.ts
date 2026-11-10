@@ -17,7 +17,7 @@ import type { SseHandler } from '../types/SseChannel'
 import { runAsActor } from './ActorContext'
 import { Authorization } from './Authorization'
 import { Builder } from './Builder'
-import type { Database, DatabaseOptions } from './Database'
+import type { Database, DatabaseOptions, ManagedDatabaseOptions } from './Database'
 import { createDatabase, NullDatabase, openAdmin } from './Database'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
@@ -26,7 +26,7 @@ import type { Graph } from './Graph'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
 import type { MigrationArtifact } from './Schema'
-import { DDL } from './Schema'
+import { DDL, physicalHash } from './Schema'
 import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
@@ -496,7 +496,7 @@ export class Server {
       this.#assets ? [this.#assets] : [],
     )
 
-    let databaseOptions = this.#databaseOptions ?? {}
+    let databaseOptions: ManagedDatabaseOptions = this.#databaseOptions ?? {}
     if (this.#graph) {
       databaseOptions = {
         ...databaseOptions,
@@ -691,9 +691,6 @@ export class Server {
    * @returns The server.
    */
   graph(graph: Graph): Server {
-    if (this.#databaseOptions?.entities) {
-      throw new Error('Server: provide application entities through Graph, not database({ entities })')
-    }
     this.#graph = graph
     return this
   }
@@ -715,17 +712,21 @@ export class Server {
   /**
    * Configures the server-owned PostgreSQL capability.
    *
-   * With no `url`, the server reconciles its application-scoped managed
-   * PostgreSQL service on `start`, discovers its Docker-allocated loopback
-   * port, and connects the pool before reporting healthy. Passing a `url` uses
-   * an explicit external PostgreSQL server instead. The server owns the pool
-   * lifecycle in both cases; the managed database service outlives it.
-   * @param options - An optional external PostgreSQL URL.
+   * The server reconciles its application-scoped managed PostgreSQL service on
+   * `start`, discovers its Docker-allocated loopback port, and connects the
+   * pool before reporting healthy. The server owns the pool lifecycle; the
+   * managed database service outlives it.
+   * @param options - Optional image selection for the managed service.
    * @returns The server.
    */
   database(options: DatabaseOptions = {}): Server {
-    if (this.#graph && options.entities) {
-      throw new Error('Server: provide application entities through Graph, not database({ entities })')
+    const unsupported = ['adminUrl', 'appRole', 'authorization', 'entities', 'url']
+      .filter(key => key in options)
+    if (unsupported.length > 0) {
+      throw new Error(
+        `Server: unsupported database option(s): ${unsupported.join(', ')}. ` +
+        'Basis owns its managed PostgreSQL instance; provide the application model through Graph.',
+      )
     }
     this.#databaseOptions = options
     return this
@@ -948,10 +949,28 @@ export class Server {
       return Promise.resolve()
     }
     return this.#database.connect().then(async () => {
-      if (!this.#schemaExpectation) return
+      if (!this.#schemaExpectation) {
+        if (this.#graph && !this.#development) {
+          throw new Error(
+            'Graph-backed production requires an approved migration artifact; ' +
+            'install or migrate explicitly with DDL.plan -> DDL.review -> DDL.apply',
+          )
+        }
+        return
+      }
+      const artifact = this.#schemaExpectation
+      if (this.#graph) {
+        const expected = this.#graph.physicalSchema(artifact.appRole, artifact.superuser)
+        if (physicalHash(expected) !== artifact.targetHash) {
+          throw new Error(
+            'Approved migration artifact does not match the configured Graph; ' +
+            'review and apply a migration for the current Graph',
+          )
+        }
+      }
       const admin = await openAdmin(this.#database)
       try {
-        const result = await DDL.readiness(admin.sql, this.#schemaExpectation)
+        const result = await DDL.readiness(admin.sql, artifact)
         if (!result.ready) {
           throw new Error(`Schema readiness failed: ${result.discrepancies.join('; ')}`)
         }

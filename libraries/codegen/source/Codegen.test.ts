@@ -1,4 +1,4 @@
-import { Cardinality, EntityDefinitions, FieldType } from 'basis/server'
+import { Cardinality, FieldType, Graph } from 'basis/server'
 import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -45,9 +45,9 @@ const document = {
 
 describe('codegen', () => {
   test('generates deterministic types and schemas', () => {
-    const definitions = EntityDefinitions.fromDocument(document)
-    const types = generateTypes(definitions)
-    const schemas = generateJSONSchemas(definitions)
+    const graph = new Graph({ entities: document })
+    const types = generateTypes(graph)
+    const schemas = generateJSONSchemas(graph)
     expect(types).toContain('export interface Note extends Entity')
     expect(types).toContain('export type EntityRef')
     expect(types).toContain('export type NoteRef')
@@ -70,7 +70,7 @@ describe('codegen', () => {
   })
 
   test('uses concrete descendants for abstract reference output discriminators', () => {
-    const abstract = EntityDefinitions.fromDocument({
+    const abstract = new Graph({
       entities: [
         { fields: [{ field: 'email', type: FieldType.String }], name: 'User' },
         { extends: 'User', fields: [], name: 'AdminUser' },
@@ -104,7 +104,7 @@ describe('codegen', () => {
   })
 
   test('emits assignable abstract reference types', async () => {
-    const abstract = EntityDefinitions.fromDocument({
+    const abstract = new Graph({
       entities: [
         { fields: [{ field: 'email', type: FieldType.String }], name: 'User' },
         { extends: 'User', fields: [], name: 'AdminUser' },
@@ -145,7 +145,7 @@ describe('codegen', () => {
     const directory = await mkdtemp(join(tmpdir(), 'basis-authored-types-'))
     try {
       const file = join(directory, 'types.ts')
-      await writeFile(file, generateTypes(EntityDefinitions.fromDocument(document)))
+      await writeFile(file, generateTypes(new Graph({ entities: document })))
       const result = Bun.spawnSync({
         cmd: [
           process.execPath,

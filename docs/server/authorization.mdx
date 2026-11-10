@@ -112,18 +112,7 @@ Every ordinary application transaction runs through the native Bun `db.tx` path.
 
 With a graph configured, `server.db`, `RouteContext.db`, and request-scoped queries always use the restricted application role (`basis_app` by default). Managed PostgreSQL provisions that role through the owner connection, stores its random password under `.basis/database/`, and closes the privileged provisioning connection afterwards. The owner credential is never exposed through `server.db` or `RouteContext`.
 
-External PostgreSQL uses `url` for the restricted pool and `adminUrl` only for trusted provisioning/bootstrap:
-
-```ts
-server
-  .graph(graph)
-  .database({
-    url: process.env.BASIS_APP_URL,
-    adminUrl: process.env.BASIS_ADMIN_URL,
-  })
-```
-
-The administrative connection is not available to ordinary handlers. The application role must be `NOSUPERUSER`, `NOBYPASSRLS`, and not the table owner. Bootstrap and schema DDL remain trusted administrative operations. RLS is enabled on the root, MTI/relationships, and security metadata; `FORCE ROW LEVEL SECURITY` is applied when provisioning runs with owner privilege.
+The administrative connection is an internal provisioning capability and is not available to ordinary handlers. The application role must be `NOSUPERUSER`, `NOBYPASSRLS`, and not the table owner. Bootstrap and schema DDL remain trusted administrative operations. RLS is enabled on the root, MTI/relationships, and security metadata; `FORCE ROW LEVEL SECURITY` is applied when provisioning runs with owner privilege.
 
 ## Inspection and administration
 

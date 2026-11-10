@@ -103,21 +103,21 @@ Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run t
 `basis/testing` exports `withIsolatedDatabase` and `withDurableDatabase` with the same fixture implementation Basis uses. Pass the consumer's entity definitions explicitly to prepare and query that model in a transaction-isolated schema:
 
 ```ts
-import { EntityDefinitions } from 'basis/server'
+import { Graph } from 'basis/server'
 import { withIsolatedDatabase } from 'basis/testing'
 
-const entities = EntityDefinitions.load(JSON.stringify({
+const graph = new Graph({
   entities: [{
     fields: [{ field: 'id', format: 'UUID' }, { field: 'label', type: 'String' }],
     name: 'ConsumerNote',
   }],
-}))
+})
 
 await withIsolatedDatabase('consumer', async database => {
   await database.sql`INSERT INTO "Entity" ("id", "name", "entity") VALUES (... )`
   await database.sql`INSERT INTO "ConsumerNote" ("id", "label") VALUES (... )`
   const rows = await database.query('ConsumerNote', { fields: ['id', 'label'] })
-}, { entities })
+}, { entities: graph.definitions })
 ```
 
 `test:consumer` proves this import and a real PostgreSQL transaction from a fresh Git-dependency install.

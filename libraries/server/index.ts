@@ -46,7 +46,7 @@ export type {
 export { NullDatabase } from './source/Database'
 export type { Database, DatabaseOptions, QueryOptions } from './source/Database'
 export { SortDirection } from './source/SortDirection'
-export { FieldType, EntityDefinitions } from './source/EntityDefinitions'
+export { FieldType } from './source/EntityDefinitions'
 export { Operator } from './source/Operator'
 export type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
 export type { ArrayScope, CollectionScope, CountScope, QueryScope } from './source/SQL'
@@ -57,6 +57,7 @@ export type {
   DerivedSingularDefinition,
   EffectiveFieldDefinition,
   EntityDefinition,
+  EntityDefinitions,
   EntityReferenceFieldDefinition,
   FieldDefinition,
   InverseCardinality,

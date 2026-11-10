@@ -1,4 +1,4 @@
-import type { EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarFieldDefinition } from 'basis/server'
+import type { EffectiveFieldDefinition, EntityDefinition, FieldDefinition, Graph, ScalarFieldDefinition } from 'basis/server'
 import { FieldType } from 'basis/server'
 
 /** Generated JSON Schema by entity and operation. */
@@ -13,10 +13,11 @@ export type GeneratedSchemas = Readonly<Record<string, {
 
 /**
  * Generate TypeScript entity and reference types.
- * @param definitions - Validated canonical definitions.
+ * @param graph - Canonical application Graph.
  * @returns Deterministic TypeScript source.
  */
-export function generateTypes(definitions: EntityDefinitions): string {
+export function generateTypes(graph: Graph): string {
+  const definitions = graph.definitions
   const root = `/** Generated from the canonical Basis entity definitions. Do not edit by hand. */
 
 export interface Entity {
@@ -45,10 +46,11 @@ export type ${entity.name}Ref = Pick<${entity.name}, 'id' | 'name' | 'entity'>`
 
 /**
  * Generate deterministic JSON Schemas for every entity.
- * @param definitions - Validated canonical definitions.
+ * @param graph - Canonical application Graph.
  * @returns JSON Schema by entity and operation.
  */
-export function generateJSONSchemas(definitions: EntityDefinitions): GeneratedSchemas {
+export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
+  const definitions = graph.definitions
   const schemas: Record<string, {
     create: Readonly<Record<string, unknown>>,
     output: Readonly<Record<string, unknown>>,
@@ -120,7 +122,7 @@ function scalarType(type: ScalarFieldDefinition['type']): string {
 function schemaForField(
   field: EffectiveFieldDefinition,
   mode: 'input' | 'output',
-  definitions: EntityDefinitions,
+  definitions: Graph['definitions'],
 ): Record<string, unknown> {
   if (field.type === FieldType.Entity) {
     if (mode === 'input') return { type: ['string', 'null'] }
@@ -152,7 +154,7 @@ function schemaForField(
  */
 function discriminatorSchema(
   entity: EntityDefinition,
-  definitions: EntityDefinitions,
+  definitions: Graph['definitions'],
 ): Record<string, unknown> {
   if (!entity.abstract) return { const: entity.name, type: 'string' }
   return discriminatorSchemaForTarget(entity.name, definitions)
@@ -166,7 +168,7 @@ function discriminatorSchema(
  */
 function discriminatorSchemaForTarget(
   target: string,
-  definitions: EntityDefinitions,
+  definitions: Graph['definitions'],
 ): Record<string, unknown> {
   if (target === 'Entity') return { type: 'string' }
   const entity = definitions.entity(target)

@@ -9,7 +9,7 @@ import type { Filter } from './Predicate'
 export { managedDatabaseIdentity } from './ManagedPostgresService'
 import type { OrderBy } from './SQL'
 
-/** The pool defaults used by every managed or external connection. */
+/** The pool defaults used by the managed PostgreSQL connection. */
 const POOL_DEFAULTS = {
   connectionTimeout: 10,
   idleTimeout: 30,
@@ -31,18 +31,16 @@ export interface AdminConnection {
 
 /** Options for a server-owned database capability. */
 export interface DatabaseOptions {
-  /** Explicit administrative PostgreSQL URL used only for trusted provisioning. */
-  adminUrl?: string | URL,
-  /** Restricted application login role name. Defaults to `basis_app`. */
-  appRole?: string,
-  /** Enable restricted application-role provisioning and RLS-ready operation. */
-  authorization?: boolean,
-  /** Canonical entity definitions used to validate and build `db.query`. */
-  entities?: EntityDefinitions,
   /** Managed PostgreSQL image; defaults to `postgres:17-alpine`. */
   image?: string,
-  /** Restricted application PostgreSQL URL. */
-  url?: string | URL,
+}
+
+/** Internal options used only when the server wires a canonical Graph into the managed database. */
+export interface ManagedDatabaseOptions extends DatabaseOptions {
+  /** Enable restricted application-role provisioning and RLS-ready operation. */
+  authorization?: boolean,
+  /** Canonical entity definitions owned by the application Graph. */
+  entities?: EntityDefinitions,
 }
 
 /** Options for a root entity query. */
@@ -189,22 +187,10 @@ class PostgresDatabase implements Database {
    * Creates the pool.
    * @param url - The PostgreSQL connection URL.
    * @param entities - Canonical definitions used for entity queries.
-   * @param adminUrl - Optional privileged provisioning URL.
    */
-  constructor(
-    url: string | URL,
-    entities?: EntityDefinitions,
-    adminUrl?: string | URL,
-  ) {
+  constructor(url: string | URL, entities?: EntityDefinitions) {
     this.#entities = entities
     this.#sql = new BunSQL({ ...POOL_DEFAULTS, url })
-    if (adminUrl) {
-      ADMIN_CONNECTIONS.set(this, async () => {
-        const pool = new PostgresDatabase(adminUrl)
-        await pool.connect()
-        return { close: () => pool.close(), sql: pool.sql }
-      })
-    }
   }
 
   /**
@@ -487,13 +473,10 @@ class ManagedDatabase implements Database {
 }
 
 /**
- * Create the database capability for a server.
- * @param options - An optional external PostgreSQL URL.
- * @returns The managed or external database capability.
+ * Create the one managed database capability for a server.
+ * @param options - Internal Graph-derived configuration and optional image.
+ * @returns The managed database capability.
  */
-export function createDatabase(options: DatabaseOptions = {}): Database {
-  if (options.url) {
-    return new PostgresDatabase(options.url, options.entities, options.adminUrl)
-  }
+export function createDatabase(options: ManagedDatabaseOptions = {}): Database {
   return new ManagedDatabase(options.entities, options.authorization ?? false, options.image)
 }

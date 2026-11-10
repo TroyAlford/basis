@@ -207,7 +207,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
   const schemas = new Map<string, Promise<string>>()
   scope.pending = { install, service }
   const server = startForInstall(
-    new Server().root(install).database({ entities: sharedEntities }),
+    new Server().root(install).database(),
     install,
   )
   const schemaFor = (entities: EntityDefinitions): Promise<string> => {

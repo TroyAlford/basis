@@ -75,8 +75,8 @@ describe('Graph', () => {
     } as const
     const typed = new Graph({ entities: document })
     const json = new Graph({ entities: JSON.stringify(document) })
-    expect(typed.definitions.physicalSchema('basis_app', false, false))
-      .toEqual(json.definitions.physicalSchema('basis_app', false, false))
+    expect(typed.definitions.physicalSchema())
+      .toEqual(json.definitions.physicalSchema())
     expect(typed.roles).toEqual(json.roles)
     expect(typed.grants).toEqual(json.grants)
   })
