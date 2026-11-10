@@ -64,7 +64,7 @@ const main = (): void => {
 
     run(['bun', basisBin, 'typecheck'], app, env)
 
-    copyFileSync(join(import.meta.dir, 'fixtures', 'consumer-fixture.test.ts'), join(app, 'fixture.test.ts'))
+    copyFileSync(join(import.meta.dir, 'fixtures', 'consumer-fixture.ts'), join(app, 'fixture.test.ts'))
     run(['bun', 'test', 'fixture.test.ts', '--timeout', '120000'], app)
 
     // True clean reinstall: drop node_modules and the lockfile, install again.
