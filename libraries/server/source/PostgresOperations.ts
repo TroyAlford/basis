@@ -385,10 +385,16 @@ export class ManagedPostgresOperations {
       await this.#service.createVolume(recoveryVolume)
       await this.#service.copyVolume(this.#service.volumeName, recoveryVolume, previousImage)
       await this.#verifyRecovery(recoveryVolume, previousImage, recovery)
+      await this.#service.beginCutover({
+        candidateVolume: restore.volume,
+        recoveryVolume,
+        sourceImage: previousImage,
+      })
       await this.#service.removeContainer()
       await this.#service.removeVolume()
       await this.#assertDetached()
       sourceDetached = true
+      await this.#service.markCutover('detached')
       await this.#service.createVolume()
       await this.#service.stopContainer(restore.container)
       await this.#service.removeContainer(restore.container)
@@ -402,6 +408,8 @@ export class ManagedPostgresOperations {
       )
       await this.#service.waitReady()
       await this.#verifyService(target)
+      await this.#service.markCutover('committed')
+      await this.#service.clearCutover()
       sourceCommitted = true
       return await this.#cleanupCommitted(restore.volume, recoveryVolume)
     } catch (error) {
@@ -409,6 +417,7 @@ export class ManagedPostgresOperations {
       if (!sourceDetached) {
         try {
           await this.#recoverBeforeDetach(recoveryVolume, previousImage, recovery, restore)
+          await this.#service.clearCutover()
         } catch (recoveryError) {
           throw new Error(
             'PostgreSQL cutover failed before detaching the source ' +
@@ -422,6 +431,7 @@ export class ManagedPostgresOperations {
       }
       try {
         await this.#restoreRecovery(recoveryVolume, previousImage, recovery)
+        await this.#service.clearCutover()
         await this.#service.removeVolume(restore.volume)
         await this.#service.removeVolume(recoveryVolume)
       } catch (rollbackError) {

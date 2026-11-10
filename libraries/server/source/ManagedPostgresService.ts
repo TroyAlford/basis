@@ -1,7 +1,7 @@
 import { runAsync } from 'basis/configuration'
 import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, open, readFile } from 'node:fs/promises'
+import { chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 /**
@@ -53,6 +53,23 @@ export interface ManagedPostgresServiceOptions {
   readonly image?: string,
 }
 
+/** Durable phase of an interrupted cutover. */
+export type CutoverPhase = 'committed' | 'detached' | 'prepared'
+
+/** Minimum durable state needed to recover an interrupted cutover. */
+export interface CutoverJournal {
+  /** Candidate volume retained for diagnosis. */
+  readonly candidateVolume: string,
+  /** Durable cutover phase. */
+  readonly phase: CutoverPhase,
+  /** Proven source recovery volume. */
+  readonly recoveryVolume: string,
+  /** Source image needed to restart the recovery volume. */
+  readonly sourceImage: string,
+  /** Journal schema version. */
+  readonly version: 1,
+}
+
 /**
  * Extract the published localhost port from `docker port` output.
  * @param output - Output such as `127.0.0.1:49152`.
@@ -101,6 +118,7 @@ export class ManagedPostgresService {
    */
   async ensure(authorization = false): Promise<ManagedServiceConnection> {
     if (!Bun.which('docker')) throw new Error(DOCKER_REQUIRED)
+    await this.#reconcileCutover()
     const state = await this.containerState()
     const hasVolume = await this.volumeExists()
     const secret = await this.secret(state === 'missing' && !hasVolume)
@@ -238,6 +256,138 @@ export class ManagedPostgresService {
     if (!password) throw new Error(`Managed ${name} credentials are empty`)
     await chmod(file, 0o600)
     return { file, password }
+  }
+
+  /**
+   * Persist the prepared cutover identity before any source detachment.
+   * @param journal - Cutover state.
+   */
+  async beginCutover(journal: Omit<CutoverJournal, 'phase' | 'version'>): Promise<void> {
+    await this.#writeCutover({ ...journal, phase: 'prepared', version: 1 })
+  }
+
+  /**
+   * Advance the durable cutover phase.
+   * @param phase - New phase.
+   */
+  async markCutover(phase: CutoverPhase): Promise<void> {
+    const journal = await this.#readCutover()
+    if (!journal) throw new Error('Database cutover journal is missing')
+    await this.#writeCutover({ ...journal, phase })
+  }
+
+  /**
+   * Remove the cutover journal after a committed or recovered outcome.
+   */
+  async clearCutover(): Promise<void> {
+    await rm(this.#cutoverPath(), { force: true })
+  }
+
+  /**
+   * Recover a cutover interrupted by process death before normal provisioning.
+   * @throws {Error} When the recovery volume or journal is missing or malformed.
+   */
+  async #reconcileCutover(): Promise<void> {
+    const journal = await this.#readCutover()
+    if (!journal) return
+    if (journal.phase === 'committed') {
+      if (!await this.volumeExists()) {
+        throw new Error(
+          'Database cutover was committed but the stable volume is missing; refusing to provision an empty replacement',
+        )
+      }
+      await this.clearCutover()
+      return
+    }
+    const hasSource = await this.volumeExists()
+    if (journal.phase === 'prepared' && hasSource) {
+      const state = await this.containerState()
+      if (state === 'missing') {
+        const secret = await this.secret(false)
+        await this.createContainer(
+          this.containerName,
+          this.volumeName,
+          journal.sourceImage,
+          secret.file,
+        )
+        await this.waitReady()
+      }
+      await this.clearCutover()
+      return
+    }
+    if (!await this.volumeExists(journal.recoveryVolume)) {
+      throw new Error(
+        `Interrupted database cutover recovery volume "${journal.recoveryVolume}" is missing; ` +
+        'refusing to provision an empty replacement',
+      )
+    }
+    await this.removeContainer()
+    await this.removeVolume()
+    await this.createVolume()
+    await this.copyVolume(journal.recoveryVolume, this.volumeName, journal.sourceImage)
+    const secret = await this.secret(false)
+    await this.createContainer(
+      this.containerName,
+      this.volumeName,
+      journal.sourceImage,
+      secret.file,
+    )
+    await this.waitReady()
+    await this.clearCutover()
+  }
+
+  /**
+   * Read the durable cutover journal.
+   * @returns The journal, or null when absent.
+   */
+  async #readCutover(): Promise<CutoverJournal | null> {
+    let raw: string
+    try {
+      raw = await readFile(this.#cutoverPath(), 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+    let value: unknown
+    try {
+      value = JSON.parse(raw)
+    } catch (error) {
+      throw new Error('Database cutover journal is malformed; refusing to provision', { cause: error })
+    }
+    if (typeof value !== 'object' || value === null) {
+      throw new Error('Database cutover journal is malformed; refusing to provision')
+    }
+    const journal = value as Partial<CutoverJournal>
+    if (
+      journal.version !== 1
+      || !['committed', 'detached', 'prepared'].includes(journal.phase ?? '')
+      || typeof journal.candidateVolume !== 'string'
+      || typeof journal.recoveryVolume !== 'string'
+      || typeof journal.sourceImage !== 'string'
+    ) {
+      throw new Error('Database cutover journal is incomplete; refusing to provision')
+    }
+    return journal as CutoverJournal
+  }
+
+  /**
+   * Atomically persist the durable cutover journal.
+   * @param journal - Journal contents.
+   */
+  async #writeCutover(journal: CutoverJournal): Promise<void> {
+    const file = this.#cutoverPath()
+    const temporary = `${file}.${randomUUID()}`
+    await mkdir(join(this.installation, '.basis', 'database'), { mode: 0o700, recursive: true })
+    await writeFile(temporary, `${JSON.stringify(journal, null, 2)}\n`, { mode: 0o600 })
+    await rename(temporary, file)
+  }
+
+  /**
+   * Resolve the durable cutover journal path.
+   * @returns Absolute path.
+   */
+  #cutoverPath(): string {
+    return join(this.installation, '.basis', 'database', 'cutover.json')
   }
 
   /**

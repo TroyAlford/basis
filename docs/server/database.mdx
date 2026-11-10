@@ -529,6 +529,6 @@ const result = await new DatabaseRelease({
 }).apply()
 ```
 
-The coordinator takes a per-release backup, clones the old volume to disposable candidate storage, applies only unapplied artifacts to that candidate, records every ledger entry there, checks the complete Graph/ledger/canonical User/Role contract, and only then promotes the candidate through the existing managed-service cutover. A failure before acceptance removes the candidate and restarts the old database unchanged. A host lock rejects concurrent or stale-process releases. `plan()` returns applied and pending migrations for CI or operator inspection.
+The coordinator takes a per-release backup, clones the old volume to disposable candidate storage, applies only unapplied artifacts to that candidate, records every ledger entry there, checks the complete Graph/ledger/canonical User/Role contract, and only then promotes the candidate through the existing managed-service cutover. A durable cutover journal records the source image and recovery volume before detachment; service startup reconciles an interrupted cutover before provisioning anything new. A failure before acceptance removes the candidate and restarts the old database unchanged. A host lock rejects concurrent or stale-process releases. `plan()` returns applied and pending migrations for CI or operator inspection.
 
 Post-commit cleanup obligations are returned as structured `warnings`; they do not turn a committed release into a false failure. The release coordinator does not schedule itself; host facilities invoke it.

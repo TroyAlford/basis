@@ -133,6 +133,7 @@
     "test:e2e:all": "bun run test:e2e && bun run test:e2e:visual && bun run test:e2e:fixtures",
     "test:all": "bun run test:unit && bun run test:component && bun run test:contract && bun run test:server && bun run test:lifecycle && bun run test:screenshots && bun run test:e2e:all",
     "test:consumer": "bun ./consumer/test/self-install.ts && bun ./consumer/test/cache-isolation.ts && bun ./consumer/test/react-runtime.ts",
+    "test:migrations": "bun ./scripts/check-migrations.ts",
     "test:develop": "bun test --watch",
     "up": "bunx npm-check-updates -p bun --enginesNode --upgrade --root --workspaces",
     "update:linter": "bun --filter=@basis/eslint-plugin run build",
