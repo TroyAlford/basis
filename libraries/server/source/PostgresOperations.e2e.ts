@@ -1,117 +1,262 @@
 import { Logger } from 'basis/logger'
 import { tempDirectory } from 'basis/testing'
-import type { SQL as BunSQL } from 'bun'
 import { describe, expect, test } from 'bun:test'
-import { stat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { copyFile, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { removeService } from '../testing/DatabaseFixture'
+import { installSchema } from '../testing/Schema'
+import { runAsActor } from './ActorContext'
+import { openAdmin } from './Database'
+import { Graph } from './Graph'
+import { ManagedPostgresService } from './ManagedPostgresService'
 import { ManagedPostgresOperations } from './PostgresOperations'
+import type { MigrationArtifact } from './Schema'
 import { Server } from './Server'
 
 const silent = new Logger({ silent: true })
 
+const graph = new Graph({
+  entities: [
+    { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+    {
+      fields: [
+        { field: 'title', type: 'String' },
+        { field: 'owner', target: 'User', type: 'Entity' },
+      ],
+      name: 'Article',
+    },
+  ],
+  grants: [
+    { action: 'manage', role: 'admin', target: '*' },
+    { action: 'read', predicate: 'owner = $me', role: 'public', target: 'Article' },
+  ],
+})
+
+/** One service that can fail the first source-container recreation. */
+class FailingService extends ManagedPostgresService {
+  failNextSource = false
+
+  override async createContainer(
+    name: string,
+    volume: string,
+    image: string,
+    passwordFile: string,
+  ): Promise<void> {
+    if (this.failNextSource && name === this.containerName) {
+      this.failNextSource = false
+      throw new Error('injected cutover failure')
+    }
+    return super.createContainer(name, volume, image, passwordFile)
+  }
+}
+
+/**
+ * Start one managed server in an installation directory.
+ * @param install - Installation root.
+ * @param artifact - Optional approved schema artifact.
+ * @param image - PostgreSQL image.
+ * @returns The started server.
+ */
+async function start(
+  install: string,
+  artifact: MigrationArtifact | undefined,
+  image: string,
+): Promise<Server> {
+  const previous = process.cwd()
+  process.chdir(install)
+  const server = new Server()
+    .graph(graph)
+    .database({ image })
+    .root(install)
+  if (artifact) server.migration(artifact)
+  server.start({ development: false, hostname: '127.0.0.1', logger: silent, port: 0 })
+  process.chdir(previous)
+  await server.ready()
+  return server
+}
+
+/**
+ * Install the canonical Graph schema and return its approved artifact.
+ * @param server - Connected server.
+ * @returns The reviewed artifact.
+ */
+async function installArtifact(server: Server): Promise<MigrationArtifact> {
+  const admin = await openAdmin(server.db)
+  try {
+    return await installSchema(admin.sql, graph, {
+      appRole: 'basis_app',
+      schema: 'public',
+      superuser: true,
+      version: `operations-${randomUUID()}`,
+    })
+  } finally {
+    await admin.close()
+  }
+}
+
+/**
+ * Insert one article through the administrative owner.
+ * @param server - Connected server.
+ * @param id - Article id.
+ * @param title - Article title.
+ * @param owner - Owning canonical User id.
+ */
+async function insertArticle(server: Server, id: string, title: string, owner: string): Promise<void> {
+  const admin = await openAdmin(server.db)
+  try {
+    await admin.sql.begin(async tx => {
+      await tx`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${id}, ${title}, 'Article')
+      `
+      await tx`
+        INSERT INTO "Article" ("id", "title", "owner.id")
+        VALUES (${id}, ${title}, ${owner})
+      `
+    })
+  } finally {
+    await admin.close()
+  }
+}
+
+/**
+ * Assert the application role sees only the actor's own article.
+ * @param server - Connected server.
+ * @param actor - Canonical User id.
+ * @param expected - Expected article projection.
+ * @param expected.id - Expected article id.
+ * @param expected.title - Expected article title.
+ */
+async function expectOwnArticle(
+  server: Server,
+  actor: string,
+  expected: { readonly id: string, readonly title: string },
+): Promise<void> {
+  expect(await runAsActor({ id: actor }, () => server.db.query('Article', {
+    fields: ['id', 'title'],
+  }))).toEqual([expected])
+}
+
 describe('Managed PostgreSQL operations', () => {
-  test('backs up, verifies an isolated restore, and upgrades a major version', async () => {
-    const install = tempDirectory('basis-postgres-operations-')
-    const previous = process.cwd()
-    process.chdir(install)
-    const source = new Server()
-      .root(install)
-      .database({ image: 'postgres:16.4-alpine' })
-      .start({ development: false, hostname: '127.0.0.1', logger: silent, port: 0 })
-    process.chdir(previous)
+  test('recovers real Graph authorization data and preserves a restartable source', async () => {
+    const installRoot = tempDirectory('basis-postgres-operations-')
+    const source = await start(installRoot, undefined, 'postgres:16.4-alpine')
     try {
-      await source.ready()
-      await source.db.sql`
-        CREATE TABLE ops_probe (id text PRIMARY KEY, value text NOT NULL)
-      `
-      await source.db.sql`
-        INSERT INTO ops_probe (id, value)
-        VALUES ('one', 'preserved')
-      `
+      const artifact = await installArtifact(source)
+      const authorization = source.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const admin = await authorization.bootstrap({
+        displayName: 'Admin',
+        email: 'admin@example.com',
+        provider: 'test',
+        subject: 'admin',
+      })
+      const user = await authorization.enrollIdentity('test', 'user', { email: 'user@example.com' })
+      const other = await authorization.enrollIdentity('test', 'other', { email: 'other@example.com' })
+      if (!admin.userId || !user || !other) throw new Error('canonical identity setup failed')
+      const own = randomUUID()
+      const foreign = randomUUID()
+      await insertArticle(source, own, 'Own article', user)
+      await insertArticle(source, foreign, 'Foreign article', other)
+      await expectOwnArticle(source, user, { id: own, title: 'Own article' })
 
-      expect(await source.db.sql<{
-        rolbypassrls: boolean,
-        rolcreatedb: boolean,
-        rolcreaterole: boolean,
-        rolinherit: boolean,
-        rolsuper: boolean,
-      }[]>`
-        SELECT rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolbypassrls
-        FROM pg_roles
-        WHERE rolname = 'basis_backup'
-      `).toEqual([{
-        rolbypassrls: false,
-        rolcreatedb: false,
-        rolcreaterole: false,
-        rolinherit: true,
-        rolsuper: false,
-      }])
+      const adminConnection = await openAdmin(source.db)
+      try {
+        const [backupRole] = await adminConnection.sql<{ count: number }[]>`
+          SELECT count(*)::int AS count
+          FROM pg_roles
+          WHERE rolname = 'basis_backup'
+        `
+        expect(backupRole?.count).toBe(0)
+      } finally {
+        await adminConnection.close()
+      }
 
-      const operations = new ManagedPostgresOperations({ installation: install })
+      const operations = new ManagedPostgresOperations({
+        artifact,
+        installation: installRoot,
+      })
       const backup = await operations.backup()
-      expect(backup.checksum).toMatch(/^[0-9a-f]{64}$/)
-      expect(backup.image).toBe('postgres:16.4-alpine')
+      expect(backup.artifactVersion).toBe(artifact.version)
+      expect(backup.dataDigest).toMatch(/^[0-9a-f]{64}$/)
       expect((await stat(backup.path)).mode & 0o777).toBe(0o600)
       expect((await stat(backup.manifest)).mode & 0o777).toBe(0o600)
-      for (const name of ['password', 'backup-password']) {
-        expect((await stat(join(install, '.basis', 'database', name))).mode & 0o777).toBe(0o600)
+      for (const name of ['password', 'app-password']) {
+        expect((await stat(join(installRoot, '.basis', 'database', name))).mode & 0o777).toBe(0o600)
       }
+      await expect(stat(join(installRoot, '.basis', 'database', 'backup-password')))
+        .rejects.toMatchObject({ code: 'ENOENT' })
 
-      const verify = async (sql: BunSQL): Promise<void> => {
-        const rows = await sql<{ id: string, value: string }[]>`
-          SELECT id, value
-          FROM ops_probe
-        `
-        expect(rows).toEqual([{ id: 'one', value: 'preserved' }])
-      }
-      await expect(operations.restore(backup.path, {
-        image: 'postgres:17-alpine',
-        verify,
-      })).resolves.toEqual({ image: 'postgres:17-alpine', verified: true })
+      expect(await operations.restore(backup.path, { image: 'postgres:17-alpine' }))
+        .toEqual({
+          artifactVersion: artifact.version,
+          dataDigest: backup.dataDigest,
+          image: 'postgres:17-alpine',
+          verified: true,
+        })
+
+      const damaged = `${backup.path}.damaged`
+      const damagedManifest = `${damaged}.json`
+      await copyFile(backup.path, damaged)
+      await copyFile(backup.manifest, damagedManifest)
+      const bytes = await readFile(damaged)
+      bytes[0] = bytes[0] === 0 ? 1 : 0
+      await writeFile(damaged, bytes)
+      await expect(operations.restore(damaged, { image: 'postgres:17-alpine' }))
+        .rejects.toThrow('checksum')
+      await rm(damaged, { force: true })
+      await rm(damagedManifest, { force: true })
+
+      const altered = `${backup.path}.altered`
+      const alteredManifest = `${altered}.json`
+      await copyFile(backup.path, altered)
+      const manifest = JSON.parse(await readFile(backup.manifest, 'utf8')) as Record<string, unknown>
+      manifest.dataDigest = '0'.repeat(64)
+      await writeFile(alteredManifest, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 })
+      await expect(operations.restore(altered, { image: 'postgres:17-alpine' }))
+        .rejects.toThrow('canonical User/Role data')
+      await rm(altered, { force: true })
+      await rm(alteredManifest, { force: true })
 
       await source.shutdown()
-      const upgradedResult = await operations.upgrade('postgres:17-alpine', { verify })
-      expect(upgradedResult).toMatchObject({
+      const upgraded = await operations.upgrade('postgres:17-alpine')
+      expect(upgraded).toMatchObject({
         image: 'postgres:17-alpine',
         previousImage: 'postgres:16.4-alpine',
       })
-
-      process.chdir(install)
-      const upgraded = new Server()
-        .root(install)
-        .database({ image: 'postgres:17-alpine' })
-        .start({ development: false, hostname: '127.0.0.1', logger: silent, port: 0 })
-      process.chdir(previous)
+      const upgradedServer = await start(installRoot, artifact, 'postgres:17-alpine')
       try {
-        await upgraded.ready()
-        expect(await upgraded.db.sql<{ id: string, value: string }[]>`
-          SELECT id, value
-          FROM ops_probe
-        `).toEqual([{ id: 'one', value: 'preserved' }])
+        await expectOwnArticle(upgradedServer, user, { id: own, title: 'Own article' })
       } finally {
-        await upgraded.shutdown()
+        await upgradedServer.shutdown()
       }
 
-      await operations.rollback(backup.path, 'postgres:16.4-alpine', verify)
-      process.chdir(install)
-      const rolledBack = new Server()
-        .root(install)
-        .database({ image: 'postgres:16.4-alpine' })
-        .start({ development: false, hostname: '127.0.0.1', logger: silent, port: 0 })
-      process.chdir(previous)
+      await operations.rollback(backup.path, 'postgres:16.4-alpine')
+      const rolledBack = await start(installRoot, artifact, 'postgres:16.4-alpine')
       try {
-        await rolledBack.ready()
-        expect(await rolledBack.db.sql<{ id: string, value: string }[]>`
-          SELECT id, value
-          FROM ops_probe
-        `).toEqual([{ id: 'one', value: 'preserved' }])
+        await expectOwnArticle(rolledBack, user, { id: own, title: 'Own article' })
       } finally {
         await rolledBack.shutdown()
       }
+
+      const failingService = new FailingService(installRoot)
+      failingService.failNextSource = true
+      const failingOperations = new ManagedPostgresOperations({
+        artifact,
+        installation: installRoot,
+      }, failingService)
+      await expect(failingOperations.upgrade('postgres:17-alpine'))
+        .rejects.toThrow('injected cutover failure')
+      const recovered = await start(installRoot, artifact, 'postgres:16.4-alpine')
+      try {
+        await expectOwnArticle(recovered, user, { id: own, title: 'Own article' })
+      } finally {
+        await recovered.shutdown()
+      }
     } finally {
       await source.shutdown()
-      removeService(install)
+      removeService(installRoot)
     }
-  }, 180_000)
+  }, 300_000)
 })
