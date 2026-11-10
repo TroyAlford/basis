@@ -66,7 +66,7 @@ const main = (): void => {
 
     writeFileSync(join(app, 'fixture.test.ts'), [
       "import { expect, test } from 'bun:test'",
-      "import { Graph } from 'basis/server'",
+      "import { DatabaseRelease, Graph } from 'basis/server'",
       "import * as serverSurface from 'basis/server'",
       "import { generateJSONSchemas, generateTypes } from 'basis/codegen'",
       "import { generateErd } from 'basis/visualization'",
@@ -87,6 +87,7 @@ const main = (): void => {
       "  expect(application.definitions.entity('ApplicationUser')).toBeTruthy()",
       "  expect(application.definitions.entity('User')).toBeTruthy()",
       "  expect('EntityDefinitions' in serverSurface).toBe(false)",
+      "  expect(typeof DatabaseRelease).toBe('function')",
       '})',
       '',
       "test('consumer codegen and visualization surfaces resolve', () => {",

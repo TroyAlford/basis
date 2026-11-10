@@ -513,3 +513,22 @@ const result = await operations.upgrade('postgres:17-alpine')
 The caller must stop application pools before `upgrade()`. Basis first takes a verified recovery point, proves the restore under the target image in disposable storage, copies the current durable volume to an independently restartable recovery volume, and only then detaches the source and stages the verified target. Cutover verifies the restored schema and canonical data again before accepting the target. If cutover fails, Basis restores the recovery volume and the previous image before reporting the failure; unrecoverable failures preserve the recovery and candidate volumes for diagnosis. After a committed cutover, a cleanup failure is returned as `warnings` with the leftover resource names instead of being reported as a failed upgrade; the new database remains active and verified. `rollback(backup.path, previousImage)` is available for an explicit operator rollback through the same safe cutover path and returns the same cleanup warnings.
 
 Use ordinary host facilities for scheduling and retention, such as a cron entry or systemd timer that runs a short operator script and prunes old files under `.basis/backups/`. Do not add a Basis-managed scheduler or process manager.
+
+## Versioned releases
+
+A checked-in `migrations/` directory contains a `manifest.json` with the application release `version` and an ordered list of reviewed `MigrationArtifact` JSON files. Each file's version identity is its filename without `.json`; its checksum and complete expected physical/security schema are validated when loaded. The final artifact must reach the exact configured Graph.
+
+`DatabaseRelease` is the host-run release coordinator. The caller first takes the application offline, then calls `apply()`:
+
+```ts
+import { DatabaseRelease } from 'basis/server'
+
+const result = await new DatabaseRelease({
+  graph,
+  migrations: './migrations',
+}).apply()
+```
+
+The coordinator takes a per-release backup, clones the old volume to disposable candidate storage, applies only unapplied artifacts to that candidate, records every ledger entry there, checks the complete Graph/ledger/canonical User/Role contract, and only then promotes the candidate through the existing managed-service cutover. A failure before acceptance removes the candidate and restarts the old database unchanged. A host lock rejects concurrent or stale-process releases. `plan()` returns applied and pending migrations for CI or operator inspection.
+
+Post-commit cleanup obligations are returned as structured `warnings`; they do not turn a committed release into a false failure. The release coordinator does not schedule itself; host facilities invoke it.

@@ -3,6 +3,7 @@ import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { canonicalDataDigest } from './CanonicalData'
 import { MANAGED_APP_ROLE, ManagedPostgresService } from './ManagedPostgresService'
 import type { MigrationArtifact } from './Schema'
 import { DDL } from './Schema'
@@ -100,13 +101,24 @@ interface BackupManifest {
   readonly version: 1,
 }
 
-/** One disposable restore container. */
-interface DisposableRestore {
-  /** Container name. */
+/** One verification contract for a database state. */
+export interface PostgresVerification {
+  /** Approved artifact for the state. */
+  readonly artifact: MigrationArtifact,
+  /** Canonical User/Role data digest for the state, when available. */
+  readonly dataDigest?: string,
+}
+
+/** One candidate volume and container. */
+export interface PostgresCandidate {
+  /** Candidate container name. */
   readonly container: string,
-  /** Volume name. */
+  /** Candidate volume name. */
   readonly volume: string,
 }
+
+/** One disposable restore container. */
+type DisposableRestore = PostgresCandidate
 
 /**
  * Host-run PostgreSQL operations for one managed installation.
@@ -164,7 +176,7 @@ export class ManagedPostgresOperations {
       if (!readiness.ready) {
         throw new Error(`Backup source schema is not ready: ${readiness.discrepancies.join('; ')}`)
       }
-      const before = await this.#canonicalDigest(sql)
+      const before = await canonicalDataDigest(sql)
       await this.#docker([
         'docker', 'exec', this.#service.containerName, 'pg_dump', '-U', DATABASE, '-d', DATABASE,
         '--format=custom', '--file', remote,
@@ -176,7 +188,7 @@ export class ManagedPostgresOperations {
       await this.#docker([
         'docker', 'exec', this.#service.containerName, 'rm', '-f', remote,
       ], 'backup cleanup failed')
-      const after = await this.#canonicalDigest(sql)
+      const after = await canonicalDataDigest(sql)
       if (before !== after) {
         throw new Error('Canonical User/Role data changed during backup; retry while the application is quiescent')
       }
@@ -248,7 +260,13 @@ export class ManagedPostgresOperations {
     const recovery = await this.backup()
     const manifest = await this.#readBackup(recovery.path)
     const target = await this.#prepareRestore(manifest, targetImage, recovery.path)
-    const warnings = await this.#cutover(target, targetImage, manifest, previousImage)
+    const warnings = await this.#cutover(
+      target,
+      targetImage,
+      manifest,
+      manifest,
+      previousImage,
+    )
     return { backup: recovery, image: targetImage, previousImage, warnings }
   }
 
@@ -264,7 +282,34 @@ export class ManagedPostgresOperations {
     const previousImage = await this.#service.containerImage()
     const targetImage = image ?? manifest.image
     const target = await this.#prepareRestore(manifest, targetImage, backup)
-    return { warnings: await this.#cutover(target, targetImage, manifest, previousImage) }
+    return {
+      warnings: await this.#cutover(
+        target,
+        targetImage,
+        manifest,
+        manifest,
+        previousImage,
+      ),
+    }
+  }
+
+  /**
+   * Promote an independently verified candidate volume into the managed source.
+   * The previous source is preserved and verified before detachment.
+   * @param candidate - Verified candidate container and volume.
+   * @param image - Candidate PostgreSQL image.
+   * @param recovery - Verification contract for the previous source.
+   * @param target - Verification contract for the candidate.
+   * @returns Cleanup warnings for post-commit resources left behind.
+   */
+  async promoteCandidate(
+    candidate: PostgresCandidate,
+    image: string,
+    recovery: PostgresVerification | null,
+    target: PostgresVerification,
+  ): Promise<readonly PostgresCleanupWarning[]> {
+    const previousImage = await this.#service.containerImage()
+    return this.#cutover(candidate, image, recovery, target, previousImage)
   }
 
   /**
@@ -319,14 +364,16 @@ export class ManagedPostgresOperations {
    * Replace the source with a verified target while retaining the old volume.
    * @param restore - Verified disposable restore.
    * @param image - Target image.
-   * @param manifest - Recovery point manifest.
+   * @param recovery - Verification contract for the previous source.
+   * @param target - Verification contract for the replacement.
    * @param previousImage - Previous source image.
    * @returns Cleanup warnings for any post-commit resources left behind.
    */
   async #cutover(
     restore: DisposableRestore,
     image: string,
-    manifest: BackupManifest,
+    recovery: PostgresVerification | null,
+    target: PostgresVerification,
     previousImage: string,
   ): Promise<readonly PostgresCleanupWarning[]> {
     const state = await this.#service.containerState()
@@ -337,7 +384,7 @@ export class ManagedPostgresOperations {
     try {
       await this.#service.createVolume(recoveryVolume)
       await this.#service.copyVolume(this.#service.volumeName, recoveryVolume, previousImage)
-      await this.#verifyRecovery(recoveryVolume, previousImage, manifest)
+      await this.#verifyRecovery(recoveryVolume, previousImage, recovery)
       await this.#service.removeContainer()
       await this.#service.removeVolume()
       await this.#assertDetached()
@@ -354,14 +401,14 @@ export class ManagedPostgresOperations {
         secret.file,
       )
       await this.#service.waitReady()
-      await this.#verifyService(manifest)
+      await this.#verifyService(target)
       sourceCommitted = true
       return await this.#cleanupCommitted(restore.volume, recoveryVolume)
     } catch (error) {
       if (sourceCommitted) throw error
       if (!sourceDetached) {
         try {
-          await this.#recoverBeforeDetach(recoveryVolume, previousImage, manifest, restore)
+          await this.#recoverBeforeDetach(recoveryVolume, previousImage, recovery, restore)
         } catch (recoveryError) {
           throw new Error(
             'PostgreSQL cutover failed before detaching the source ' +
@@ -374,7 +421,7 @@ export class ManagedPostgresOperations {
         throw error
       }
       try {
-        await this.#restoreRecovery(recoveryVolume, previousImage, manifest)
+        await this.#restoreRecovery(recoveryVolume, previousImage, recovery)
         await this.#service.removeVolume(restore.volume)
         await this.#service.removeVolume(recoveryVolume)
       } catch (rollbackError) {
@@ -422,8 +469,9 @@ export class ManagedPostgresOperations {
   async #verifyRecovery(
     recoveryVolume: string,
     previousImage: string,
-    manifest: BackupManifest,
+    manifest: PostgresVerification | null,
   ): Promise<void> {
+    if (manifest === null) return
     const container = `basis-recovery-${randomUUID()}`
     const secret = await this.#service.secret(false)
     try {
@@ -446,7 +494,7 @@ export class ManagedPostgresOperations {
   async #recoverBeforeDetach(
     recoveryVolume: string,
     previousImage: string,
-    manifest: BackupManifest,
+    manifest: PostgresVerification,
     candidate: DisposableRestore,
   ): Promise<void> {
     const hasVolume = await this.#service.volumeExists()
@@ -466,7 +514,7 @@ export class ManagedPostgresOperations {
       } else {
         await this.#service.waitReady()
       }
-      await this.#verifyService(manifest)
+      if (manifest !== null) await this.#verifyService(manifest)
     } else {
       await this.#restoreRecovery(recoveryVolume, previousImage, manifest)
     }
@@ -496,7 +544,7 @@ export class ManagedPostgresOperations {
   async #restoreRecovery(
     recoveryVolume: string,
     previousImage: string,
-    manifest: BackupManifest,
+    manifest: PostgresVerification | null,
   ): Promise<void> {
     await this.#service.removeContainer()
     await this.#service.removeVolume()
@@ -510,14 +558,14 @@ export class ManagedPostgresOperations {
       secret.file,
     )
     await this.#service.waitReady()
-    await this.#verifyService(manifest)
+    if (manifest !== null) await this.#verifyService(manifest)
   }
 
   /**
    * Verify the live stable service against the approved backup version.
    * @param manifest - Recovery point manifest.
    */
-  async #verifyService(manifest: BackupManifest): Promise<void> {
+  async #verifyService(manifest: PostgresVerification): Promise<void> {
     const ownerUrl = await this.#service.ownerUrl()
     await this.#service.provisionApplicationRole(
       ownerUrl,
@@ -531,7 +579,7 @@ export class ManagedPostgresOperations {
    * @param ownerUrl - Administrative owner URL.
    * @param manifest - Recovery point manifest.
    */
-  async #verify(ownerUrl: string, manifest: BackupManifest): Promise<void> {
+  async #verify(ownerUrl: string, manifest: PostgresVerification): Promise<void> {
     const sql = new BunSQL(ownerUrl)
     try {
       await sql.connect()
@@ -539,41 +587,15 @@ export class ManagedPostgresOperations {
       if (!readiness.ready) {
         throw new Error(`Restored schema is not ready: ${readiness.discrepancies.join('; ')}`)
       }
-      const digest = await this.#canonicalDigest(sql)
-      if (digest !== manifest.dataDigest) {
-        throw new Error('Restored canonical User/Role data does not match the backup manifest')
+      if (manifest.dataDigest !== undefined) {
+        const digest = await canonicalDataDigest(sql)
+        if (digest !== manifest.dataDigest) {
+          throw new Error('Restored canonical User/Role data does not match the backup manifest')
+        }
       }
     } finally {
       await sql.close()
     }
-  }
-
-  /**
-   * Read the deterministic digest of canonical User/Role/UserRole data.
-   * @param sql - Administrative connection.
-   * @returns SHA-256 digest.
-   */
-  async #canonicalDigest(sql: BunSQL): Promise<string> {
-    const users = await sql<{ data: unknown }[]>`
-      SELECT to_jsonb(t) AS data
-      FROM "User" t
-      ORDER BY t."id"
-    `
-    const roles = await sql<{ data: unknown }[]>`
-      SELECT to_jsonb(t) AS data
-      FROM "Role" t
-      ORDER BY t."id"
-    `
-    const userRoles = await sql<{ data: unknown }[]>`
-      SELECT to_jsonb(t) AS data
-      FROM "UserRole" t
-      ORDER BY t."user.id", t."role.id"
-    `
-    return DDL.hash(JSON.stringify({
-      roles: roles.map(row => row.data),
-      userRoles: userRoles.map(row => row.data),
-      users: users.map(row => row.data),
-    }))
   }
 
   /**

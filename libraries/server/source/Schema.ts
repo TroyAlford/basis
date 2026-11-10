@@ -1705,6 +1705,17 @@ export function review(
 }
 
 /**
+ * Validate the immutable checksum of a reviewed migration artifact.
+ * @param artifact - Artifact to validate.
+ * @throws {Error} When the checksum does not match the artifact contents.
+ */
+export function verifyMigrationArtifact(artifact: MigrationArtifact): void {
+  if (migrationChecksum(artifact) !== artifact.checksum) {
+    throw new Error('Migration artifact checksum does not match its contents')
+  }
+}
+
+/**
  * Apply one reviewed migration artifact through the administrative connection.
  * @param sql - Trusted PostgreSQL capability with DDL privileges.
  * @param artifact - Reviewed immutable migration artifact.
