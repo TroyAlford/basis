@@ -370,19 +370,29 @@ export class ManagedPostgresService {
   }
 
   /**
-   * Remove one container, ignoring absence.
+   * Remove one container, treating only verified absence as success.
    * @param name - Container name.
+   * @throws {Error} When Docker fails and the container still exists.
    */
   async removeContainer(name = this.containerName): Promise<void> {
-    await runAsync`docker rm -f ${name}`
+    if (await this.containerState(name) === 'missing') return
+    const result = await runAsync`docker rm -f ${name}`
+    if (await this.containerState(name) === 'missing') return
+    const detail = result.stderr.trim() || `docker rm exited with ${result.exitCode}`
+    throw new Error(`PostgreSQL container removal failed: ${detail}`)
   }
 
   /**
-   * Remove one volume, ignoring absence.
+   * Remove one volume, treating only verified absence as success.
    * @param name - Volume name.
+   * @throws {Error} When Docker fails and the volume still exists.
    */
   async removeVolume(name = this.volumeName): Promise<void> {
-    await runAsync`docker volume rm -f ${name}`
+    if (!await this.volumeExists(name)) return
+    const result = await runAsync`docker volume rm -f ${name}`
+    if (!await this.volumeExists(name)) return
+    const detail = result.stderr.trim() || `docker volume rm exited with ${result.exitCode}`
+    throw new Error(`PostgreSQL volume removal failed: ${detail}`)
   }
 
   /**

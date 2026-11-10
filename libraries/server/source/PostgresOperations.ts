@@ -315,13 +315,15 @@ export class ManagedPostgresOperations {
     if (state === 'running') await this.#service.stopContainer()
     const recoveryVolume = `${this.#service.volumeName}-recovery-${randomUUID()}`
     let sourceDetached = false
+    let sourceCommitted = false
     try {
       await this.#service.createVolume(recoveryVolume)
       await this.#service.copyVolume(this.#service.volumeName, recoveryVolume, previousImage)
       await this.#verifyRecovery(recoveryVolume, previousImage, manifest)
       await this.#service.removeContainer()
-      sourceDetached = true
       await this.#service.removeVolume()
+      await this.#assertDetached()
+      sourceDetached = true
       await this.#service.createVolume()
       await this.#service.stopContainer(restore.container)
       await this.#service.removeContainer(restore.container)
@@ -335,13 +337,23 @@ export class ManagedPostgresOperations {
       )
       await this.#service.waitReady()
       await this.#verifyService(manifest)
+      sourceCommitted = true
       await this.#service.removeVolume(restore.volume)
       await this.#service.removeVolume(recoveryVolume)
     } catch (error) {
+      if (sourceCommitted) throw error
       if (!sourceDetached) {
-        await this.#service.startContainer().catch(() => undefined)
-        await this.#dispose(restore).catch(() => undefined)
-        await this.#service.removeVolume(recoveryVolume)
+        try {
+          await this.#recoverBeforeDetach(recoveryVolume, previousImage, manifest, restore)
+        } catch (recoveryError) {
+          throw new Error(
+            'PostgreSQL cutover failed before detaching the source ' +
+            `(${error instanceof Error ? error.message : String(error)}) and recovery failed ` +
+            `(${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}); ` +
+            `recovery volume "${recoveryVolume}" and candidate volume "${restore.volume}" were preserved`,
+            { cause: recoveryError },
+          )
+        }
         throw error
       }
       try {
@@ -384,6 +396,57 @@ export class ManagedPostgresOperations {
   }
 
   /**
+   * Recover a source that was not yet detached, without discarding its volume.
+   * @param recoveryVolume - Proven recovery copy.
+   * @param previousImage - Previous source image.
+   * @param manifest - Recovery point manifest.
+   * @param candidate - Candidate restore to clean up after source recovery.
+   */
+  async #recoverBeforeDetach(
+    recoveryVolume: string,
+    previousImage: string,
+    manifest: BackupManifest,
+    candidate: DisposableRestore,
+  ): Promise<void> {
+    const hasVolume = await this.#service.volumeExists()
+    if (hasVolume) {
+      const state = await this.#service.containerState()
+      if (state === 'missing') {
+        const secret = await this.#service.secret(false)
+        await this.#service.createContainer(
+          this.#service.containerName,
+          this.#service.volumeName,
+          previousImage,
+          secret.file,
+        )
+        await this.#service.waitReady()
+      } else if (state === 'stopped') {
+        await this.#service.startContainer()
+      } else {
+        await this.#service.waitReady()
+      }
+      await this.#verifyService(manifest)
+    } else {
+      await this.#restoreRecovery(recoveryVolume, previousImage, manifest)
+    }
+    await this.#dispose(candidate)
+    await this.#service.removeVolume(recoveryVolume)
+  }
+
+  /**
+   * Confirm both the stable container and volume are physically absent.
+   * @throws {Error} When either resource still exists.
+   */
+  async #assertDetached(): Promise<void> {
+    if (await this.#service.containerState() !== 'missing') {
+      throw new Error('PostgreSQL source container is still present after removal')
+    }
+    if (await this.#service.volumeExists()) {
+      throw new Error('PostgreSQL source volume is still present after removal')
+    }
+  }
+
+  /**
    * Restore the preserved source volume and recreate the previous service.
    * @param recoveryVolume - Preserved source volume.
    * @param previousImage - Previous source image.
@@ -394,8 +457,8 @@ export class ManagedPostgresOperations {
     previousImage: string,
     manifest: BackupManifest,
   ): Promise<void> {
-    await this.#service.removeContainer().catch(() => undefined)
-    await this.#service.removeVolume().catch(() => undefined)
+    await this.#service.removeContainer()
+    await this.#service.removeVolume()
     await this.#service.createVolume()
     await this.#service.copyVolume(recoveryVolume, this.#service.volumeName, previousImage)
     const secret = await this.#service.secret(false)

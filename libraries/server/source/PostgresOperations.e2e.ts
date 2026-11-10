@@ -1,3 +1,4 @@
+import { run } from 'basis/configuration'
 import { Logger } from 'basis/logger'
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
@@ -36,6 +37,9 @@ const graph = new Graph({
 /** One service that can fail the first source-container recreation. */
 class FailingService extends ManagedPostgresService {
   failNextSource = false
+  failRemoveContainer = false
+  failRemoveVolume = false
+  failStart = false
 
   override async createContainer(
     name: string,
@@ -48,6 +52,30 @@ class FailingService extends ManagedPostgresService {
       throw new Error('injected cutover failure')
     }
     return super.createContainer(name, volume, image, passwordFile)
+  }
+
+  override async removeContainer(name = this.containerName): Promise<void> {
+    if (this.failRemoveContainer && name === this.containerName) {
+      this.failRemoveContainer = false
+      throw new Error('injected container removal failure')
+    }
+    return super.removeContainer(name)
+  }
+
+  override async removeVolume(name = this.volumeName): Promise<void> {
+    if (this.failRemoveVolume && name === this.volumeName) {
+      this.failRemoveVolume = false
+      throw new Error('injected volume removal failure')
+    }
+    return super.removeVolume(name)
+  }
+
+  override async startContainer(name = this.containerName): Promise<void> {
+    if (this.failStart && name === this.containerName) {
+      this.failStart = false
+      throw new Error('injected source restart failure')
+    }
+    return super.startContainer(name)
   }
 }
 
@@ -136,6 +164,43 @@ async function expectOwnArticle(
   expect(await runAsActor({ id: actor }, () => server.db.query('Article', {
     fields: ['id', 'title'],
   }))).toEqual([expected])
+}
+
+/**
+ * Prove an injected cutover failure leaves the previous source recoverable.
+ * @param installRoot - Installation root.
+ * @param artifact - Approved schema artifact.
+ * @param service - Service with one injected failure.
+ * @param actor - Canonical User id used for RLS readback.
+ * @param expected - Expected article projection.
+ * @param expected.id - Expected article id.
+ * @param expected.title - Expected article title.
+ * @param preserveVolumes - Whether recovery must preserve additional volumes.
+ */
+async function expectFailureRecovery(
+  installRoot: string,
+  artifact: MigrationArtifact,
+  service: FailingService,
+  actor: string,
+  expected: { readonly id: string, readonly title: string },
+  preserveVolumes = false,
+): Promise<void> {
+  const operations = new ManagedPostgresOperations({ artifact, installation: installRoot }, service)
+  await expect(operations.upgrade('postgres:17-alpine'))
+    .rejects.toThrow(/injected (cutover|container removal|volume removal|source restart) failure/)
+  if (preserveVolumes) {
+    const volumes = run('docker', [
+      'volume', 'ls', '-q', '--filter', `label=basis.install=${installRoot}`,
+    ], { logger: silent }).lines
+    expect(volumes.some(name => name.includes('-recovery-'))).toBe(true)
+    expect(volumes.some(name => name.startsWith('basis-restore-volume-'))).toBe(true)
+  }
+  const recovered = await start(installRoot, artifact, 'postgres:16.4-alpine')
+  try {
+    await expectOwnArticle(recovered, actor, expected)
+  } finally {
+    await recovered.shutdown()
+  }
 }
 
 describe('Managed PostgreSQL operations', () => {
@@ -240,19 +305,30 @@ describe('Managed PostgreSQL operations', () => {
         await rolledBack.shutdown()
       }
 
-      const failingService = new FailingService(installRoot)
-      failingService.failNextSource = true
-      const failingOperations = new ManagedPostgresOperations({
-        artifact,
-        installation: installRoot,
-      }, failingService)
-      await expect(failingOperations.upgrade('postgres:17-alpine'))
-        .rejects.toThrow('injected cutover failure')
-      const recovered = await start(installRoot, artifact, 'postgres:16.4-alpine')
-      try {
-        await expectOwnArticle(recovered, user, { id: own, title: 'Own article' })
-      } finally {
-        await recovered.shutdown()
+      const failureCases: readonly [string, (service: FailingService) => void, boolean][] = [
+        ['cutover', service => { service.failNextSource = true }, false],
+        ['container-removal', service => { service.failRemoveContainer = true }, false],
+        ['volume-removal', service => { service.failRemoveVolume = true }, false],
+        ['restart', service => {
+          service.failRemoveContainer = true
+          service.failStart = true
+        }, true],
+      ]
+      for (const [name, configure, preserveVolumes] of failureCases) {
+        const service = new FailingService(installRoot)
+        configure(service)
+        try {
+          await expectFailureRecovery(
+            installRoot,
+            artifact,
+            service,
+            user,
+            { id: own, title: 'Own article' },
+            preserveVolumes,
+          )
+        } catch (error) {
+          throw new Error(`failure case "${name}" did not recover`, { cause: error })
+        }
       }
     } finally {
       await source.shutdown()
