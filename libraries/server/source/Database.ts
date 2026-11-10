@@ -1,12 +1,12 @@
 import { runAsync } from 'basis/configuration'
 import { SQL as BunSQL } from 'bun'
-import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, open, readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { currentActor } from './ActorContext'
 import type { EntityDefinitions } from './EntityDefinitions'
+import { ManagedPostgresService } from './ManagedPostgresService'
 import { compilePolymorphicQuery } from './PolymorphicQuery'
 import type { Filter } from './Predicate'
+export { managedDatabaseIdentity } from './ManagedPostgresService'
 import type { OrderBy } from './SQL'
 
 /** The pool defaults used by every managed or external connection. */
@@ -16,23 +16,10 @@ const POOL_DEFAULTS = {
   max: 10,
 }
 
-/** The PostgreSQL image used by the managed local database. */
-const MANAGED_IMAGE = 'postgres:17-alpine'
-/** The managed database's user and database name. */
-const MANAGED_NAME = 'basis'
-/** The restricted application login role. */
-const APP_ROLE = 'basis_app'
-/** The PostgreSQL port inside the managed container. */
-const MANAGED_PORT = 5432
 /** How long to wait for the managed container to accept connections. */
 const READY_TIMEOUT_MS = 60_000
 /** How often to poll the managed container's readiness. */
 const READY_POLL_MS = 200
-/** Error shown when a managed database is configured without Docker. */
-const DOCKER_REQUIRED =
-  'A managed database requires Docker. Install Docker and make sure the daemon is running.'
-/** The container mount for the host-owned password file. */
-const PASSWORD_MOUNT = '/run/secrets/basis-postgres-password'
 
 /** One narrow privileged provisioning connection. */
 export interface AdminConnection {
@@ -52,6 +39,8 @@ export interface DatabaseOptions {
   authorization?: boolean,
   /** Canonical entity definitions used to validate and build `db.query`. */
   entities?: EntityDefinitions,
+  /** Managed PostgreSQL image; defaults to `postgres:17-alpine`. */
+  image?: string,
   /** Restricted application PostgreSQL URL. */
   url?: string | URL,
 }
@@ -183,19 +172,6 @@ export interface Database {
   readonly sql: BunSQL,
   /** Runs a callback inside a pooled Bun transaction. */
   tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>>,
-}
-
-/** A managed container's observed state. */
-type ContainerState = 'missing' | 'running' | 'stopped'
-
-/**
- * Extract the published localhost port from `docker port` output.
- * @param output - Output such as `127.0.0.1:49152`.
- * @returns The port, or null when no port was published.
- */
-function publishedPort(output: string): number | null {
-  const match = /:(\d+)\s*$/m.exec(output.trim())
-  return match ? Number(match[1]) : null
 }
 
 /**
@@ -359,18 +335,6 @@ export class NullDatabase implements Database {
 }
 
 /**
- * Resolve the stable per-installation managed database identity.
- *
- * The normalized application working/checkout directory is the only identity
- * input; service names and asset roots do not move the database.
- * @param installation - The application working/checkout directory.
- * @returns The hashed managed database identity.
- */
-export function managedDatabaseIdentity(installation: string): string {
-  return createHash('sha1').update(resolve(installation)).digest('hex').slice(0, 16)
-}
-
-/**
  * A managed local PostgreSQL service and its pool.
  *
  * Its container, data volume, and host-only password file persist
@@ -382,25 +346,20 @@ class ManagedDatabase implements Database {
   #closing: Promise<void> | null = null
   #connecting: Promise<void> | null = null
   #authorization: boolean
-  #containerName: string
   #database: PostgresDatabase | null = null
   #entities: EntityDefinitions | undefined
-  #identity: string
-  #installation: string
-  #volume: string
+  #service: ManagedPostgresService
 
   /**
    * Creates the managed database capability. The service starts on {@link connect}.
    * @param entities - Canonical definitions used for entity queries.
    * @param authorization - Whether to provision and use a restricted app role.
+   * @param image - Managed PostgreSQL image.
    */
-  constructor(entities?: EntityDefinitions, authorization = false) {
+  constructor(entities?: EntityDefinitions, authorization = false, image?: string) {
     this.#authorization = authorization
     this.#entities = entities
-    this.#installation = resolve(process.cwd())
-    this.#identity = managedDatabaseIdentity(this.#installation)
-    this.#containerName = `basis-postgres-${this.#identity}`
-    this.#volume = this.#containerName
+    this.#service = new ManagedPostgresService(resolve(process.cwd()), { image })
   }
 
   /**
@@ -422,7 +381,7 @@ class ManagedDatabase implements Database {
   }
 
   /**
-   * Projects effective scalar and singular reference paths from one entity.
+   * Project effective scalar and singular reference paths from one entity.
    * @param entity - Exact canonical entity name.
    * @param options - Scalar fields and singular reference paths to project.
    * @returns The selected rows.
@@ -475,251 +434,13 @@ class ManagedDatabase implements Database {
 
   /** Reconciles the service, discovers its port, and connects the pool. */
   async #start(): Promise<void> {
-    if (!Bun.which('docker')) throw new Error(DOCKER_REQUIRED)
-    const state = await this.#containerState()
-    const hasVolume = await this.#volumeExists()
-    const secret = await this.#secret(state === 'missing' && !hasVolume)
-    if (!hasVolume) await this.#createVolume()
-
-    if (state === 'missing') {
-      await this.#createContainer(secret.file)
-    } else if (state === 'stopped') {
-      const started = await runAsync`docker start ${this.#containerName}`
-      if (started.exitCode !== 0) {
-        const detail = started.stderr.trim() || `docker start exited with ${started.exitCode}`
-        throw new Error(`PostgreSQL service failed to start: ${detail}`)
-      }
-    }
-
-    const port = await this.#publishedPort()
-    const ownerUrl = `postgres://${MANAGED_NAME}:${encodeURIComponent(secret.password)}` +
-      `@127.0.0.1:${port}/${MANAGED_NAME}`
+    const { appUrl, ownerUrl } = await this.#service.ensure(this.#authorization)
     ADMIN_CONNECTIONS.set(this, async () => {
       const pool = new PostgresDatabase(ownerUrl)
       await pool.connect()
       return { close: () => pool.close(), sql: pool.sql }
     })
-    if (!this.#authorization) {
-      await this.#connectWhenReady(ownerUrl)
-      return
-    }
-
-    const appPassword = await this.#appSecret()
-    await this.#provisionApplicationRole(ownerUrl, appPassword)
-    const appUrl = `postgres://${APP_ROLE}:${encodeURIComponent(appPassword)}` +
-      `@127.0.0.1:${port}/${MANAGED_NAME}`
-    await this.#connectWhenReady(appUrl)
-  }
-
-  /**
-   * Read or create the managed restricted-application password.
-   * @returns The application password.
-   */
-  async #appSecret(): Promise<string> {
-    const directory = join(this.#installation, '.basis', 'database')
-    const file = join(directory, 'app-password')
-    try {
-      const handle = await open(file, 'wx', 0o600)
-      try {
-        await handle.writeFile(randomUUID())
-      } finally {
-        await handle.close()
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
-    const password = (await readFile(file, 'utf8')).trim()
-    if (!password) throw new Error('Managed application credentials are empty')
-    await chmod(file, 0o600)
-    return password
-  }
-
-  /**
-   * Provision the restricted application role using the owner connection.
-   * @param ownerUrl - The owner connection URL.
-   * @param password - The restricted application password.
-   */
-  async #provisionApplicationRole(ownerUrl: string, password: string): Promise<void> {
-    const admin = new PostgresDatabase(ownerUrl)
-    try {
-      await admin.connect()
-      const quoted = password.replaceAll("'", "''")
-      await admin.sql.unsafe(`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN
-            CREATE ROLE "${APP_ROLE}" LOGIN PASSWORD '${quoted}'
-              NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
-          ELSE
-            ALTER ROLE "${APP_ROLE}" WITH LOGIN PASSWORD '${quoted}'
-              NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
-          END IF;
-        END $$;
-      `).simple()
-      await admin.sql.unsafe(`GRANT CONNECT ON DATABASE "${MANAGED_NAME}" TO "${APP_ROLE}"`).simple()
-    } finally {
-      await admin.close()
-    }
-  }
-
-  /**
-   * Ensure Git never stages the installation's database state.
-   * @param directory - The installation-local `.basis/database` directory.
-   */
-  async #protectState(directory: string): Promise<void> {
-    const ignore = join(directory, '.gitignore')
-    try {
-      const handle = await open(ignore, 'wx', 0o644)
-      try {
-        await handle.writeFile('*\n')
-      } finally {
-        await handle.close()
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
-  }
-
-  /**
-   * Resolve the persistent password file, creating it only for a new service.
-   * @param create - Whether a missing file may be initialized.
-   * @returns The password and its host file path.
-   */
-  async #secret(create: boolean): Promise<{ file: string, password: string }> {
-    const stateRoot = join(this.#installation, '.basis')
-    const directory = join(stateRoot, 'database')
-    await mkdir(stateRoot, { mode: 0o700, recursive: true })
-    await chmod(stateRoot, 0o700)
-    await mkdir(directory, { mode: 0o700, recursive: true })
-    await chmod(directory, 0o700)
-    await this.#protectState(directory)
-    const file = join(directory, 'password')
-
-    if (create) {
-      try {
-        const handle = await open(file, 'wx', 0o600)
-        try {
-          await handle.writeFile(randomUUID())
-        } finally {
-          await handle.close()
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      }
-    }
-
-    let password: string
-    try {
-      password = (await readFile(file, 'utf8')).trim()
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new Error(
-          `Managed database credentials are missing for "${this.#identity}"; ` +
-          'restore the password file or deprovision the database explicitly.',
-          { cause: error },
-        )
-      }
-      throw error
-    }
-    if (!password) throw new Error('Managed database credentials are empty')
-    await chmod(file, 0o600)
-    return { file, password }
-  }
-
-  /**
-   * Observe the stable container without mutating it.
-   * @returns Its running state, or `missing`.
-   */
-  async #containerState(): Promise<ContainerState> {
-    const result = await runAsync`
-      docker ps -a
-      --filter ${`name=^/${this.#containerName}$`}
-      --format {{.State}}
-    `
-    if (result.exitCode !== 0) {
-      const detail = result.stderr.trim() || `docker ps exited with ${result.exitCode}`
-      throw new Error(`PostgreSQL service discovery failed: ${detail}`)
-    }
-    if (result.lines.length === 0) return 'missing'
-    return result.lines[0] === 'running' ? 'running' : 'stopped'
-  }
-
-  /**
-   * Whether the durable data volume exists.
-   * @returns `true` when Docker knows the volume.
-   */
-  async #volumeExists(): Promise<boolean> {
-    const result = await runAsync`
-      docker volume ls -q --filter ${`name=^${this.#volume}$`}
-    `
-    if (result.exitCode !== 0) {
-      const detail = result.stderr.trim() || `docker volume ls exited with ${result.exitCode}`
-      throw new Error(`PostgreSQL volume discovery failed: ${detail}`)
-    }
-    return result.lines.length > 0
-  }
-
-  /** Create the durable data volume with application ownership labels. */
-  async #createVolume(): Promise<void> {
-    const created = await runAsync`
-      docker volume create
-      --label ${`basis.database=${this.#identity}`}
-      --label ${`basis.install=${this.#installation}`}
-      ${this.#volume}
-    `
-    if (created.exitCode !== 0) {
-      const detail = created.stderr.trim() || `docker volume create exited with ${created.exitCode}`
-      throw new Error(`PostgreSQL data volume failed to start: ${detail}`)
-    }
-  }
-
-  /**
-   * Create the managed service without replacing a healthy existing one.
-   * @param passwordFile - Host path mounted as the PostgreSQL password file.
-   */
-  async #createContainer(passwordFile: string): Promise<void> {
-    const run = await runAsync`
-      docker run -d --pull missing
-      --name ${this.#containerName}
-      --label ${`basis.database=${this.#identity}`}
-      --label ${`basis.install=${this.#installation}`}
-      -e ${`POSTGRES_USER=${MANAGED_NAME}`}
-      -e ${`POSTGRES_PASSWORD_FILE=${PASSWORD_MOUNT}`}
-      -e ${`POSTGRES_DB=${MANAGED_NAME}`}
-      -v ${`${this.#volume}:/var/lib/postgresql/data`}
-      -v ${`${passwordFile}:${PASSWORD_MOUNT}:ro`}
-      -p ${`127.0.0.1::${MANAGED_PORT}`}
-      ${MANAGED_IMAGE}
-    `
-    if (run.exitCode === 0) return
-
-    // Another process may have created the same app-owned service concurrently.
-    const state = await this.#containerState()
-    if (state === 'missing') {
-      const detail = run.stderr.trim() || `docker run exited with ${run.exitCode}`
-      throw new Error(`PostgreSQL service failed to start: ${detail}`)
-    }
-    if (state === 'stopped') {
-      const started = await runAsync`docker start ${this.#containerName}`
-      if (started.exitCode !== 0) {
-        const detail = started.stderr.trim() || `docker start exited with ${started.exitCode}`
-        throw new Error(`PostgreSQL service failed to start: ${detail}`)
-      }
-    }
-  }
-
-  /**
-   * Discover the container's Docker-allocated loopback port.
-   * @returns The published host port.
-   */
-  async #publishedPort(): Promise<number> {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const result = await runAsync`docker port ${this.#containerName} ${`${MANAGED_PORT}/tcp`}`
-      const port = publishedPort(result.stdout)
-      if (port !== null) return port
-      await Bun.sleep(READY_POLL_MS)
-    }
-    throw new Error('PostgreSQL service did not publish a loopback port')
+    await this.#connectWhenReady(this.#authorization ? appUrl as string : ownerUrl)
   }
 
   /**
@@ -750,7 +471,7 @@ class ManagedDatabase implements Database {
       await Bun.sleep(READY_POLL_MS)
     }
 
-    const logs = await runAsync`docker logs ${this.#containerName}`
+    const logs = await runAsync`docker logs ${this.#service.containerName}`
     throw new Error(
       `PostgreSQL did not accept connections within ${READY_TIMEOUT_MS}ms ` +
       `(${lastError?.message ?? 'no connection'}):\n${logs.stdout}${logs.stderr}`,
@@ -774,5 +495,5 @@ export function createDatabase(options: DatabaseOptions = {}): Database {
   if (options.url) {
     return new PostgresDatabase(options.url, options.entities, options.adminUrl)
   }
-  return new ManagedDatabase(options.entities, options.authorization ?? false)
+  return new ManagedDatabase(options.entities, options.authorization ?? false, options.image)
 }

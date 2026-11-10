@@ -5,6 +5,16 @@ export { Authorization } from './source/Authorization'
 export { Cardinality } from './source/GraphAuthoring'
 export { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID } from './source/Graph'
 export { DDL, physicalHash } from './source/Schema'
+export { ManagedPostgresOperations } from './source/PostgresOperations'
+export type {
+  PostgresBackup,
+  PostgresCleanupWarning,
+  PostgresOperationsOptions,
+  PostgresRestoreOptions,
+  PostgresRestoreResult,
+  PostgresRollbackResult,
+  PostgresUpgradeResult,
+} from './source/PostgresOperations'
 export type {
   PhysicalColumn, PhysicalConstraint, PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalRole,
   PhysicalKind, PhysicalPolicy, PhysicalSchema, PhysicalTable, PhysicalTrigger,

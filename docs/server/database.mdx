@@ -8,7 +8,7 @@ For canonical User/Role/Grant authorization and PostgreSQL row-level security, u
 
 `server.database()` gives the server one owned PostgreSQL capability, exposed as `server.db`. Managed mode is zero-config: Basis keys the database to the normalized application working directory, lets Docker allocate a loopback port, reconciles an existing app-owned service, and waits for the pool before reporting healthy. The service and its data outlive any one web-server process.
 
-Pass `url` only when using an explicit external PostgreSQL server. Managed state and credentials live inside the installation under `.basis/database/`; Basis writes a local ignore file and static serving never exposes `.basis`.
+Pass `url` only when using an explicit external PostgreSQL server. Managed state and credentials live inside the installation under `.basis/database/`; backups are written beneath `.basis/backups/`. Basis writes a local ignore file and static serving never exposes `.basis`. Managed PostgreSQL uses `postgres:17-alpine` by default; `database({ image })` selects another pinned image for an upgrade proof or test.
 
 ## Canonical graph
 
@@ -476,3 +476,38 @@ await server.db.tx(async sql => {
 The server owns each process's pool and closes it on shutdown. In managed mode Docker owns the container and durable data volume; stopping or redeploying the web server does not stop PostgreSQL. Different installation directories are isolated, and a second process for the same installation attaches to the same service.
 
 Docker is required for managed mode. An unavailable Docker daemon or failed connection makes startup report `503 error` on `/api/health`.
+
+## Managed backup, restore, and major upgrades
+
+Managed PostgreSQL exposes host-run operations through `ManagedPostgresOperations`. Operations never create a scheduler, daemon, or second migration authority. They use the existing administrative owner for `pg_dump`, `pg_restore`, and recovery work, while application traffic remains on the restricted `basis_app` role. Owner and application passwords remain under `.basis/database/` with owner-only permissions.
+
+Pass the same approved migration artifact that the deployment supplies to `server.migration()`. The artifact records the schema version, expected physical structure, RLS policies, grants, and ownership that the backup must preserve.
+
+```ts
+import { ManagedPostgresOperations } from 'basis/server'
+
+const operations = new ManagedPostgresOperations({
+  artifact,
+  installation: process.cwd(),
+})
+const backup = await operations.backup()
+
+await operations.restore(backup.path, {
+  image: 'postgres:17-alpine',
+})
+```
+
+`backup()` runs `pg_dump` through the administrative owner and writes a custom-format archive plus a checksum manifest under `.basis/backups/`. The manifest records the approved artifact, archive checksum, source image, version, and a canonical User/Role/UserRole data digest. A backup fails unless the approved artifact is currently ready and canonical data remains stable for the whole dump.
+
+`restore()` creates disposable storage and a disposable container, creates the existing application role before restoring role-dependent grants and policies, restores the archive, then verifies both `DDL.readiness(artifact)` and the canonical User/Role data digest. It returns `verified: true` only after both checks pass and removes the temporary resources. It never mutates the live service. A damaged archive or a data mismatch fails the restore.
+
+A major-version upgrade is explicit and operator-driven:
+
+```ts
+await server.shutdown()
+const result = await operations.upgrade('postgres:17-alpine')
+```
+
+The caller must stop application pools before `upgrade()`. Basis first takes a verified recovery point, proves the restore under the target image in disposable storage, copies the current durable volume to an independently restartable recovery volume, and only then detaches the source and stages the verified target. Cutover verifies the restored schema and canonical data again before accepting the target. If cutover fails, Basis restores the recovery volume and the previous image before reporting the failure; unrecoverable failures preserve the recovery and candidate volumes for diagnosis. After a committed cutover, a cleanup failure is returned as `warnings` with the leftover resource names instead of being reported as a failed upgrade; the new database remains active and verified. `rollback(backup.path, previousImage)` is available for an explicit operator rollback through the same safe cutover path and returns the same cleanup warnings.
+
+Use ordinary host facilities for scheduling and retention, such as a cron entry or systemd timer that runs a short operator script and prunes old files under `.basis/backups/`. Do not add a Basis-managed scheduler or process manager.
