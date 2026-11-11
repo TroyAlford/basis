@@ -14,7 +14,7 @@ ${START_MARKER}
 [serve.static]
 plugins = [${JSON.stringify(SERVE_STATIC_PLUGIN)}]
 ${END_MARKER}
-`.trim() + '\n'
+`.trimStart()
 
 /** The result of ensuring the development-server plugin is configured. */
 export interface ServeStaticConfig {

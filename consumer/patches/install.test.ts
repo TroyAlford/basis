@@ -15,7 +15,7 @@ diff --git a/index.js b/index.js
 @@ -1 +1 @@
 -module.exports = 1
 +module.exports = ${value}
-`.trim() + '\n'
+`.trimStart()
 
 const makeTempDir = (): string => tempDirectory('basis-patches')
 

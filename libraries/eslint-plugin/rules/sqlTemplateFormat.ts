@@ -61,7 +61,13 @@ function wrapLine(line: string): readonly string[] {
   if (line.length <= 100) return [line]
   const parts = splitOutside(line, ',').map(part => part.trim()).filter(part => part !== '')
   if (parts.length > 1) {
-    return parts.map((part, index) => `${index === 0 ? '' : '  '}${part}${index < parts.length - 1 ? ',' : ''}`)
+    return parts.flatMap((part, index) => {
+      const suffix = index < parts.length - 1 ? ',' : ''
+      const nested = part.length > 100 ? wrapLine(part) : [part]
+      return nested.map((nestedLine, lineIndex) => (
+        `${index === 0 && lineIndex === 0 ? '' : '  '}${nestedLine}${lineIndex === nested.length - 1 ? suffix : ''}`
+      ))
+    })
   }
   const words = splitOutside(line, ' ')
   const lines: string[] = []
@@ -208,38 +214,6 @@ function addClauseBreaks(sql: string): string {
 }
 
 /**
- * Find the end of one TypeScript interpolation starting at a `{`.
- * @param value - Line containing the interpolation.
- * @param start - Index of the opening brace.
- * @returns Index after the closing brace, or -1 when unclosed.
- */
-function interpolationEnd(value: string, start: number): number {
-  let depth = 0
-  let quote: "'" | '"' | '`' | null = null
-  for (let index = start; index < value.length; index += 1) {
-    const character = value[index] as string
-    if (quote) {
-      if (character === '\\') {
-        index += 1
-        continue
-      }
-      if (character === quote) quote = null
-      continue
-    }
-    if (character === "'" || character === '"' || character === '`') {
-      quote = character
-      continue
-    }
-    if (character === '{') depth += 1
-    if (character === '}') {
-      depth -= 1
-      if (depth === 0) return index + 1
-    }
-  }
-  return -1
-}
-
-/**
  * Split SQL text on a delimiter outside quoted strings, identifiers,
  * dollar-quoted bodies and comments.
  * @param value - SQL text.
@@ -295,14 +269,6 @@ function splitOutside(value: string, delimiter: string): string[] {
       continue
     }
     if (character === '$') {
-      if (value[index + 1] === '{') {
-        const end = interpolationEnd(value, index + 1)
-        if (end !== -1) {
-          current += value.slice(index, end)
-          index = end - 1
-          continue
-        }
-      }
       const tag = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/u.exec(value.slice(index))?.[0]
       if (tag) {
         dollar = tag
@@ -350,7 +316,11 @@ export const sqlTemplateFormat: Rule.RuleModule = {
         node.quasi.quasis.forEach((quasi, index) => {
           raw += quasi.value.raw
           if (index < node.quasi.expressions.length) {
-            const placeholder = `\u0001${index}\u0001`
+            const expression = context.sourceCode.getText(
+              node.quasi.expressions[index] as ESTree.Expression,
+            )
+            const width = Math.max(...expression.split('\n').map(line => line.length)) + 3
+            const placeholder = `\u0001${index}\u0001${'\u0002'.repeat(Math.max(0, width - 3))}`
             placeholders.push(placeholder)
             raw += placeholder
           }
@@ -373,10 +343,6 @@ export const sqlTemplateFormat: Rule.RuleModule = {
           )
           body = body.replace(placeholder, `\${${expression}}`)
         })
-        body = body
-          .split('\n')
-          .flatMap(line => (line.length <= 100 ? [line] : wrapLine(line)))
-          .join('\n')
         const replacement = `\`${body}\``
         if (replacement === context.sourceCode.getText(node.quasi)) return
         context.report({

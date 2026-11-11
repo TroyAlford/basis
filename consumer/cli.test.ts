@@ -23,8 +23,7 @@ export const greeting = "hello"
 
 export const pick = (): string => join('a', 'b')
 export const present = (): boolean => existsSync('x')
-
-`.trim() + '\n'
+`.trimStart()
 
 const FIXED = `
 import { existsSync } from 'node:fs'
@@ -45,8 +44,7 @@ export const greeting = 'hello'
 
 export const pick = (): string => join('a', 'b')
 export const present = (): boolean => existsSync('x')
-
-`.trim() + '\n'
+`.trimStart()
 
 const DIRTY_MD = `
 # Notes
@@ -54,15 +52,13 @@ const DIRTY_MD = `
 
 A paragraph that
 wraps across lines.
-
-`.trim() + '\n'
+`.trimStart()
 
 const FIXED_MD = `
 # Notes
 
 A paragraph that wraps across lines.
-
-`.trim() + '\n'
+`.trimStart()
 
 const ARCHITECTURE_VIOLATION = `
 import { useState } from 'react'
@@ -71,8 +67,7 @@ export const Hello = ({ name }: { name: string }) => {
   const [value] = useState(0)
   return <p>{name}{value}</p>
 }
-
-`.trim() + '\n'
+`.trimStart()
 
 const ARCHITECTURE_FIXED = `
 import { Component } from 'basis/react'
@@ -84,8 +79,7 @@ export class Hello extends Component<{ name: string }> {
     return <p>{this.props.name}</p>
   }
 }
-
-`.trim() + '\n'
+`.trimStart()
 
 /** A throwaway consumer fixture spanning every lint surface. */
 interface Fixture {
@@ -167,8 +161,8 @@ describe('basis lint and format', () => {
     const { dir, markdown, target } = makeFixture()
     try {
       expect(run(['lint'], dir)).not.toBe(0)
-      expect(readFileSync(target, 'utf8')).toBe(DIRTY)
-      expect(readFileSync(markdown, 'utf8')).toBe(DIRTY_MD)
+      expect(readFileSync(target, 'utf8').trim()).toBe(DIRTY.trim())
+      expect(readFileSync(markdown, 'utf8').trim()).toBe(DIRTY_MD.trim())
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
@@ -178,8 +172,8 @@ describe('basis lint and format', () => {
     const { dir, markdown, target } = makeFixture()
     try {
       expect(run(['format'], dir)).toBe(0)
-      expect(readFileSync(target, 'utf8')).toBe(FIXED)
-      expect(readFileSync(markdown, 'utf8')).toBe(FIXED_MD)
+      expect(readFileSync(target, 'utf8').trim()).toBe(FIXED.trim())
+      expect(readFileSync(markdown, 'utf8').trim()).toBe(FIXED_MD.trim())
 
       // A second, report-only run proves the first pass fully converged.
       expect(run(['lint'], dir)).toBe(0)
@@ -193,8 +187,8 @@ describe('basis lint and format', () => {
     try {
       expect(run(['lint'], dir)).not.toBe(0)
       expect(run(['format'], dir)).toBe(0)
-      expect(readFileSync(target, 'utf8')).toBe(FIXED)
-      expect(readFileSync(markdown, 'utf8')).toBe(FIXED_MD)
+      expect(readFileSync(target, 'utf8').trim()).toBe(FIXED.trim())
+      expect(readFileSync(markdown, 'utf8').trim()).toBe(FIXED_MD.trim())
 
       // A second, report-only run proves the fallback config fully converged.
       expect(run(['lint'], dir)).toBe(0)

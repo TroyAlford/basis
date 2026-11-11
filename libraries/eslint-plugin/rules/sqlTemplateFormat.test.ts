@@ -71,6 +71,26 @@ const query = sql\`(
     expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
   })
 
+  test('preserves regex literals in interpolations while wrapping SQL', () => {
+    const expression = 'fn(/},/.test(value), otherArgument)'
+    const tail = '${tag.anotherExtremelyLongFieldNameForTesting}, ${tag.thirdLongFieldNameForTesting}'
+    const code = `const query = sql\`select \${${expression}}, ${tail}\``
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain(`\${${expression}}`)
+    expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
+  })
+
+  test('preserves multiline interpolations while wrapping SQL', () => {
+    const expression = 'fn(\n  value,\n  other,\n)'
+    const tail = '${tag.anotherExtremelyLongFieldNameForTesting}, ${tag.thirdLongFieldNameForTesting}'
+    const code = `const query = sql\`select \${${expression}}, ${tail}\``
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain(`\${${expression}}`)
+    expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
+  })
+
   test('accepts canonical multiline SQL', () => {
     const code = 'sql`\n  SELECT 1\n`'
     expect(lint(code).fixed).toBe(false)

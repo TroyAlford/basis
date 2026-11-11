@@ -386,8 +386,8 @@ describe('Server database lifecycle', () => {
     const primaryKeys = await database.sql<{ tableName: string }[]>`
       SELECT tc.table_name AS "tableName"
       FROM information_schema.table_constraints tc
-WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = current_schema() AND tc.table_name IN
-  (${'Note'},
+      WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = current_schema() AND tc.table_name IN
+          (${'Note'},
         ${'Account'})
       ORDER BY tc.table_name
     `
@@ -591,12 +591,12 @@ WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = current_schema() 
       `
       await sql`
         INSERT INTO "User" ("id", "email")
-VALUES (${systemUserId},
-  ${'system@example.test'}),
-  (${clientOwnerId},
-  ${'owner@example.test'}),
-  (${clientManagerId},
-  ${'manager@example.test'})
+        VALUES (${systemUserId},
+          ${'system@example.test'}),
+          (${clientOwnerId},
+          ${'owner@example.test'}),
+          (${clientManagerId},
+          ${'manager@example.test'})
       `
       await sql`
         INSERT INTO "SystemUser" ("id", "permissions", "status", "manager.id")
@@ -604,31 +604,31 @@ VALUES (${systemUserId},
       `
       await sql`
         INSERT INTO "Client" ("id", "company", "status")
-VALUES (${clientOwnerId},
-  ${'Acme'},
-  ${'inactive'}),
-  (${clientManagerId},
-  ${'Manager Co'},
-  ${'active'})
+        VALUES (${clientOwnerId},
+          ${'Acme'},
+          ${'inactive'}),
+          (${clientManagerId},
+          ${'Manager Co'},
+          ${'active'})
       `
       await sql`
         INSERT INTO "Article" ("id", "title", "owner.id", "favorite.id")
-VALUES (${'1001'},
-  ${'One'},
-  ${systemUserId},
-  ${systemUserId}),
-  (${'1002'},
-  ${'Two'},
-  ${clientOwnerId},
-  ${clientOwnerId}),
-  (${'1003'},
-  ${'Three'},
-  ${null},
-  ${'1001'}),
-  (${'1004'},
-  ${'Four'},
-  ${null},
-  ${null})
+        VALUES (${'1001'},
+          ${'One'},
+          ${systemUserId},
+          ${systemUserId}),
+          (${'1002'},
+          ${'Two'},
+          ${clientOwnerId},
+          ${clientOwnerId}),
+          (${'1003'},
+          ${'Three'},
+          ${null},
+          ${'1001'}),
+          (${'1004'},
+          ${'Four'},
+          ${null},
+          ${null})
       `
     })
 
@@ -1041,8 +1041,7 @@ VALUES (${'1001'},
     const failure = await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error)
     expect(failure).toMatchObject({ message: expect.stringContaining('Migration plan has blocking drift') })
     expect(await database.tx(async sql => sql<{ entity: boolean, good: boolean }[]>`
-SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
-  to_regclass('"Good"') IS NOT NULL AS good
+      SELECT to_regclass('"Entity"') IS NOT NULL AS entity, to_regclass('"Good"') IS NOT NULL AS good
     `)).toEqual([{ entity: false, good: false }])
   }, 120_000)
 
@@ -1619,15 +1618,15 @@ SELECT to_regclass('"Entity"') IS NOT NULL AS entity,
     `
     await database.sql`
       INSERT INTO "Pet" ("id", "owner.id", "guardian.id")
-VALUES (${petOne},
-  ${personOne},
-  ${personOne}),
-  (${petTwo},
-  ${personOne},
-  ${null}),
-  (${petThree},
-  ${personTwo},
-  ${personTwo})
+      VALUES (${petOne},
+        ${personOne},
+        ${personOne}),
+        (${petTwo},
+        ${personOne},
+        ${null}),
+        (${petThree},
+        ${personTwo},
+        ${personTwo})
     `
     expect(await database.captureError(async db => {
       await db.sql`
@@ -1991,18 +1990,18 @@ VALUES (${petOne},
     `
     await database.sql`
       INSERT INTO "Person" ("id", "title", "manager.id")
-VALUES (${ada},
-  'Ada',
-  ${null}),
-  (${grace},
-  'Grace',
-  ${ada}),
-  (${linus},
-  'Linus',
-  ${null}),
-  (${dana},
-  'Dana',
-  ${null})
+      VALUES (${ada},
+        'Ada',
+        ${null}),
+        (${grace},
+        'Grace',
+        ${ada}),
+        (${linus},
+        'Linus',
+        ${null}),
+        (${dana},
+        'Dana',
+        ${null})
     `
     await database.sql`
       INSERT INTO "Base" ("id", "owner.id", "label")
@@ -2024,15 +2023,7 @@ VALUES (${ada},
     `
     await database.sql`
       INSERT INTO "Dog" ("id", "trait", "mentor.id")
-VALUES (${dogOne},
-  'good',
-  ${grace}),
-  (${dogTwo},
-  'good',
-  ${ada}),
-  (${dogThree},
-  'good',
-  ${null})
+      VALUES (${dogOne}, 'good', ${grace}), (${dogTwo}, 'good', ${ada}), (${dogThree}, 'good', ${null})
     `
     await database.sql`
       INSERT INTO "Cat" ("id", "lives")
@@ -2843,12 +2834,12 @@ VALUES (${dogOne},
       `
       await sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-VALUES (${invalidUserId},
-  ${'Invalid user'},
-  ${'CycleUser'}),
-  (${invalidCarId},
-  ${'Invalid car'},
-  ${'CycleCar'})
+        VALUES (${invalidUserId},
+          ${'Invalid user'},
+          ${'CycleUser'}),
+          (${invalidCarId},
+          ${'Invalid car'},
+          ${'CycleCar'})
       `
       await sql`
         INSERT INTO "CycleUser" ("id", "car.id")

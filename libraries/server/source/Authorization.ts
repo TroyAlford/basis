@@ -157,10 +157,10 @@ export class Authorization {
     profile: { readonly displayName?: string, readonly email?: string } = {},
   ): Promise<string | null> {
     const rows = await sql<{ id: string | null }[]>`
-SELECT basis.enroll_identity(${provider},
-  ${subject},
-  ${profile.displayName ?? null},
-  ${profile.email ?? null} ) AS "id"
+      SELECT basis.enroll_identity(${provider},
+        ${subject},
+        ${profile.displayName ?? null},
+        ${profile.email ?? null} ) AS "id"
     `
     return rows[0]?.id ?? null
   }
