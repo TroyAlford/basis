@@ -52,11 +52,13 @@ describe('checkDocs', () => {
 
   test('rejects semantically invalid entity JSON examples', () => {
     const root = fixture({
-      'docs/index.md': `# Home
+      'docs/index.md': `
+# Home
 
 \`\`\`json
 {"entities":[{"name":"User","fields":[{"field":"email","type":"String","format":"UUID"}]}]}
-\`\`\``,
+\`\`\`
+      `.trim(),
     })
     expect(checkDocs(root).issues.some(issue => issue.message.startsWith('entity JSON:'))).toBe(true)
   })
@@ -67,11 +69,13 @@ describe('checkDocs', () => {
       '{"entities":[{"name":"User","fields":[]}],"extra":"keep"}',
     ]) {
       const root = fixture({
-        'docs/index.md': `# Home
+        'docs/index.md': `
+# Home
 
 \`\`\`json
 ${source}
-\`\`\``,
+\`\`\`
+        `.trim(),
       })
       expect(checkDocs(root).issues.some(issue => issue.message.startsWith('entity JSON:'))).toBe(true)
     }
@@ -91,12 +95,14 @@ ${source}
 
   test('reports unresolved internal links and ignores external ones', () => {
     const root = fixture({
-      'docs/index.md': `# Home
+      'docs/index.md': `
+# Home
 
 [missing](./nope.md)
 [external](https://example.com)
 [anchor](#section)
-[deep](./nested/)`,
+[deep](./nested/)
+      `.trim(),
       'docs/nested/index.md': '# Nested\n',
     })
     const messages = checkDocs(root).issues.map(issue => issue.message)

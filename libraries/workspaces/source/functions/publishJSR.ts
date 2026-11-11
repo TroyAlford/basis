@@ -180,8 +180,10 @@ export async function publishJSR(options: Options) {
       if (!Object.keys(imports).length) delete config.imports
 
       // Write jsr.jsonc with comment header
-      await Bun.write(resolve(packagePath, 'jsr.jsonc'), `// This file is auto-generated. Do not edit directly.
-${JSON.stringify(config, null, 2)}`)
+      await Bun.write(resolve(packagePath, 'jsr.jsonc'), `
+// This file is auto-generated. Do not edit directly.
+${JSON.stringify(config, null, 2)}
+      `.trim())
 
       const flags = [
         '--allow-dirty',

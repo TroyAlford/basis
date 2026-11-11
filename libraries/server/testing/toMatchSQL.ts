@@ -43,10 +43,12 @@ export function toMatchSQL(
     && normalizedActual.every((statement, index) => statement === normalizedExpected[index])
 
   return {
-    message: () => `Expected SQL:
+    message: () => `
+Expected SQL:
 ${format(normalizedExpected)}
 Received SQL:
-${format(normalizedActual)}`,
+${format(normalizedActual)}
+    `.trim(),
     pass,
   }
 }

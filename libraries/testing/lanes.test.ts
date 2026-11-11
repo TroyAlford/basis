@@ -52,7 +52,8 @@ const E2E: Lane = {
  * @returns Fixture source.
  */
 function preamble(lane: Lane): string {
-  return `import { afterAll, expect } from 'bun:test'
+  return `
+import { afterAll, expect } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Locator } from 'playwright'
@@ -67,7 +68,8 @@ const TARGET = {
   evaluate: async () => undefined,
   screenshot: async () => BYTES,
 } as unknown as Locator
-const baseline = (stem: string): string => join(snapshotDirectory(HERE), \`\${stem}.png\`)`
+const baseline = (stem: string): string => join(snapshotDirectory(HERE), \`\${stem}.png\`)
+  `.trim()
 }
 
 /**
@@ -76,7 +78,8 @@ const baseline = (stem: string): string => join(snapshotDirectory(HERE), \`\${st
  * @returns The fixture source.
  */
 function attributionFixture(lane: Lane): string {
-  return `${preamble(lane)}
+  return `
+${preamble(lane)}
 
 test('captures a locator natively', async () => {
   expect(callerFile()).toBe(HERE)
@@ -92,7 +95,8 @@ test('captures an element natively', async () => {
 
 afterAll(() => {
   expect(fullyRunFiles()).toContain(HERE)
-})`
+})
+  `.trim()
 }
 
 /**
@@ -101,11 +105,13 @@ afterAll(() => {
  * @returns The fixture source.
  */
 function pruneFixture(lane: Lane): string {
-  return `${preamble(lane)}
+  return `
+${preamble(lane)}
 
 test('keeps the capture', async () => {
   await matchScreenshot(TARGET)
-})`
+})
+  `.trim()
 }
 
 /**
@@ -114,7 +120,8 @@ test('keeps the capture', async () => {
  * @returns The fixture source.
  */
 function selectionFixture(lane: Lane): string {
-  return `${preamble(lane)}
+  return `
+${preamble(lane)}
 
 test('kept capture', async () => {
   await matchScreenshot(TARGET)
@@ -122,7 +129,8 @@ test('kept capture', async () => {
 
 test('filtered capture', async () => {
   await matchScreenshot(TARGET)
-})`
+})
+  `.trim()
 }
 
 /**
@@ -131,7 +139,8 @@ test('filtered capture', async () => {
  * @returns The fixture source.
  */
 function skipFixture(lane: Lane): string {
-  return `${preamble(lane)}
+  return `
+${preamble(lane)}
 
 test('kept capture', async () => {
   await matchScreenshot(TARGET)
@@ -139,7 +148,8 @@ test('kept capture', async () => {
 
 test.skip('skipped capture', async () => {
   await matchScreenshot(TARGET)
-})`
+})
+  `.trim()
 }
 
 /**
@@ -148,7 +158,8 @@ test.skip('skipped capture', async () => {
  * @returns The fixture source.
  */
 function captureFailureFixture(lane: Lane): string {
-  return `${preamble(lane)}
+  return `
+${preamble(lane)}
 
 test('failed capture', async () => {
   const failing = {
@@ -156,7 +167,8 @@ test('failed capture', async () => {
     screenshot: async () => { throw new Error('capture failed') },
   } as unknown as Locator
   await matchScreenshot(failing)
-})`
+})
+  `.trim()
 }
 
 /**

@@ -6,7 +6,8 @@ import { join } from 'node:path'
 const CLI = join(import.meta.dir, 'cli.ts')
 const ESLINT_PLUGIN = join(import.meta.dir, '..', 'libraries', 'eslint-plugin', 'index.ts')
 
-const DIRTY = `import { join } from 'node:path'
+const DIRTY = `
+import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 
 // first
@@ -22,9 +23,11 @@ export const greeting = "hello"
 
 export const pick = (): string => join('a', 'b')
 export const present = (): boolean => existsSync('x')
-`
 
-const FIXED = `import { existsSync } from 'node:fs'
+`.trim() + '\n'
+
+const FIXED = `
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 /*
@@ -42,29 +45,37 @@ export const greeting = 'hello'
 
 export const pick = (): string => join('a', 'b')
 export const present = (): boolean => existsSync('x')
-`
 
-const DIRTY_MD = `# Notes
+`.trim() + '\n'
+
+const DIRTY_MD = `
+# Notes
 
 
 A paragraph that
 wraps across lines.
-`
 
-const FIXED_MD = `# Notes
+`.trim() + '\n'
+
+const FIXED_MD = `
+# Notes
 
 A paragraph that wraps across lines.
-`
 
-const ARCHITECTURE_VIOLATION = `import { useState } from 'react'
+`.trim() + '\n'
+
+const ARCHITECTURE_VIOLATION = `
+import { useState } from 'react'
 
 export const Hello = ({ name }: { name: string }) => {
   const [value] = useState(0)
   return <p>{name}{value}</p>
 }
-`
 
-const ARCHITECTURE_FIXED = `import { Component } from 'basis/react'
+`.trim() + '\n'
+
+const ARCHITECTURE_FIXED = `
+import { Component } from 'basis/react'
 
 export class Hello extends Component<{ name: string }> {
   static displayName = 'Hello'
@@ -73,7 +84,8 @@ export class Hello extends Component<{ name: string }> {
     return <p>{this.props.name}</p>
   }
 }
-`
+
+`.trim() + '\n'
 
 /** A throwaway consumer fixture spanning every lint surface. */
 interface Fixture {
@@ -235,11 +247,13 @@ describe('basis compliance', () => {
 
   test('stays authoritative when the repository config disables the rule', () => {
     const dir = makeComponentFixture({
-      config: `import { createConfig } from '${join(import.meta.dir, 'eslint.ts')}'
+      config: `
+import { createConfig } from '${join(import.meta.dir, 'eslint.ts')}'
 export default createConfig({
   overrides: [{ files: ['**/*.tsx'], rules: { '@basis/component-architecture': 'off' } }],
 })
-`,
+
+      `.trim(),
     })
     try {
       writeFileSync(join(dir, 'Hello.tsx'), ARCHITECTURE_VIOLATION)

@@ -18,7 +18,8 @@ const preload = join(repoRoot, 'libraries', 'testing', 'bun.ts')
 const application = join(repoRoot, 'libraries', 'testing', 'application.ts')
 
 /** The fixture server: appends `boot`/`stop` (with pid) to `$ACTIVITY_LOG`. */
-const APP_SOURCE = `import { appendFileSync } from 'node:fs'
+const APP_SOURCE = `
+import { appendFileSync } from 'node:fs'
 
 const log = process.env.ACTIVITY_LOG
 const record = (event: string): void => {
@@ -39,7 +40,8 @@ const stop = (): void => {
 }
 
 process.on('SIGTERM', stop)
-process.on('SIGINT', stop)`
+process.on('SIGINT', stop)
+`.trim()
 
 /** A fixture server that holds the lease open while its initial build completes. */
 const SLOW_APP_SOURCE = APP_SOURCE.replace("record('boot')", "record('boot')\nawait Bun.sleep(500)")
@@ -49,10 +51,12 @@ const SLOW_APP_SOURCE = APP_SOURCE.replace("record('boot')", "record('boot')\naw
  * @param body - The test declarations to include.
  * @returns The test module source.
  */
-const suite = (body: string): string => `import { expect, test } from 'bun:test'
+const suite = (body: string): string => `
+import { expect, test } from 'bun:test'
 import { stopApplications, useApplication } from '${application}'
 
-${body}`
+${body}
+`.trim()
 
 /**
  * A minimal test file that boots the same app.
@@ -73,9 +77,11 @@ function eagerPreload(entry: string, timeoutMs?: number): string {
   const options = timeoutMs === undefined
     ? `{ entry: '${entry}' }`
     : `{ entry: '${entry}', timeoutMs: ${timeoutMs} }`
-  return `import { useApplication } from '${application}'
+  return `
+import { useApplication } from '${application}'
 await useApplication(${options})
-`
+
+  `.trim()
 }
 
 /** One fixture directory and its activity log. */

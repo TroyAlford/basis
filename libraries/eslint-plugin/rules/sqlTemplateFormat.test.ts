@@ -58,11 +58,13 @@ describe('sqlTemplateFormat', () => {
 
   test('preserves expression commas when formatting a multiline template', () => {
     const expression = "sql.array(tag.aliases, 'TEXT')"
-    const code = `const query = sql\`(
+    const code = `
+const query = sql\`(
   \${tag.id}::text,
   \${${expression}}::text[],
   \${tag.classifierEligible}::boolean
-)\``
+)\`
+    `.trim()
     const output = lint(code)
     expect(output.fixed).toBe(true)
     expect(output.output).toContain("${sql.array(tag.aliases, 'TEXT')}")

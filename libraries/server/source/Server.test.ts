@@ -302,7 +302,8 @@ describe('Server development HMR', () => {
       const shell = await Bun.fetch(base).then(response => response.text())
       expect(shell).not.toContain('Build Failed')
 
-      const script = `const fs = require('node:fs')
+      const script = `
+const fs = require('node:fs')
 const ws = new WebSocket('ws://127.0.0.1:${server.port}/_bun/hmr')
 ws.binaryType = 'arraybuffer'
 ws.onopen = () => {
@@ -314,7 +315,8 @@ ws.onmessage = event => {
   setTimeout(() => process.exit(0), 50)
 }
 ws.onerror = () => { console.log('ERROR'); process.exit(1) }
-setTimeout(() => process.exit(0), 8000)`
+setTimeout(() => process.exit(0), 8000)
+      `.trim()
 
       const proc = Bun.spawn([process.execPath, '-e', script], { stderr: 'pipe', stdout: 'pipe' })
       const stdout = await new Response(proc.stdout).text()
@@ -622,10 +624,12 @@ describe('Server WebSocket routes', () => {
      * Connect from a native child process: the happy-dom test preload replaces
      * `WebSocket` with a browser stand-in that does not perform a real upgrade.
      */
-    const script = `const ws = new WebSocket('ws://127.0.0.1:${server.port}/echo')
+    const script = `
+const ws = new WebSocket('ws://127.0.0.1:${server.port}/echo')
 ws.onopen = () => { console.log('connected'); ws.close(); process.exit(0) }
 ws.onerror = () => { console.log('failed'); process.exit(1) }
-setTimeout(() => { console.log('timeout'); process.exit(2) }, 5000)`
+setTimeout(() => { console.log('timeout'); process.exit(2) }, 5000)
+    `.trim()
 
     const proc = Bun.spawn([process.execPath, '-e', script], { stderr: 'pipe', stdout: 'pipe' })
     const stdout = await new Response(proc.stdout).text()

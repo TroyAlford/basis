@@ -251,10 +251,12 @@ export function commitScreenshot(
    * a mismatched run must not leave artifacts in the working tree.
    */
   return {
-    message: () => `matchScreenshot: "${key}" differs from ${baseline}
+    message: () => `
+matchScreenshot: "${key}" differs from ${baseline}
 ${`${comparison.diffPixels}/${comparison.total} pixels ` +
         `(${(comparison.ratio * 100).toFixed(2)}%) differ`}
-the diff is kept in memory and not written to disk`,
+the diff is kept in memory and not written to disk
+    `.trim(),
     pass: false,
   }
 }

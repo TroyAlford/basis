@@ -8,12 +8,14 @@ const UNPATCHED = 'module.exports = 1\n'
 const PATCHED = 'module.exports = 42\n'
 const REPATCHED = 'module.exports = 43\n'
 
-const makePatch = (value: number): string => `${`diff --git a/index.js b/index.js
+const makePatch = (value: number): string => `
+diff --git a/index.js b/index.js
 --- a/index.js
 +++ b/index.js
 @@ -1 +1 @@
 -module.exports = 1
-+module.exports = ${value}`}\n`
++module.exports = ${value}
+`.trim() + '\n'
 
 const makeTempDir = (): string => tempDirectory('basis-patches')
 

@@ -51,8 +51,10 @@ describe('no-mixed-type-imports', () => {
   })
 
   test('leaves type and non-type imports on separate lines', () => {
-    const code = `import { a } from 'module'
-import type { b } from 'module'`
+    const code = `
+import { a } from 'module'
+import type { b } from 'module'
+    `.trim()
     const output = lint(code)
     expect(output.fixed).toBe(false)
     expect(output.output).toBe(code)

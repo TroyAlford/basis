@@ -45,7 +45,8 @@ afterAll(() => {
  * @returns The test module source.
  */
 function componentSuite(label: string, count: number): string {
-  return `import { Button } from ${JSON.stringify(react)}
+  return `
+import { Button } from ${JSON.stringify(react)}
 import { matchScreenshot, test } from ${JSON.stringify(testing)}
 
 test(${JSON.stringify(`${label} captures`)}, async () => {
@@ -58,7 +59,8 @@ test(${JSON.stringify(`${label} repeats`)}, async () => {
   for (let index = 0; index < ${REPEATS}; index += 1) {
     await matchScreenshot(<Button>Same</Button>, \`repeat-\${index}\`)
   }
-}, 60_000)`
+}, 60_000)
+  `.trim()
 }
 
 /**
@@ -67,7 +69,8 @@ test(${JSON.stringify(`${label} repeats`)}, async () => {
  * @returns The test module source.
  */
 function applicationSuite(): string {
-  return `import { matchScreenshot, test, useApplication } from ${JSON.stringify(testing)}
+  return `
+import { matchScreenshot, test, useApplication } from ${JSON.stringify(testing)}
 
 const app = await useApplication({
   cwd: ${JSON.stringify(repoRoot)},
@@ -82,7 +85,8 @@ test('captures application visits', async () => {
       await matchScreenshot(page.locator('[data-testid="swatch"]'), path.replace(/[^a-z0-9]+/gi, '-'))
     })
   }
-}, 120_000)`
+}, 120_000)
+  `.trim()
 }
 
 /**
