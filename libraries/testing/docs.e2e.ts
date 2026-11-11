@@ -148,6 +148,27 @@ describe('testing/docs', () => {
     expect(pageErrors).toEqual([])
   }, 60_000)
 
+  test('keeps the docs title fixed above a scrolling navigation and shows its icon', async () => {
+    await app.visit('/components/button', { ...NETWORK }, async page => {
+      const header = page.locator('nav.links > h1')
+      await header.waitFor()
+
+      expect(await header.locator('svg.basis-icon.component').count()).toBe(1)
+      expect(await header.textContent()).toContain('Basis Docs')
+
+      const before = await header.boundingBox()
+      const entries = page.locator('nav.links > .entries')
+      const beforeScroll = await entries.evaluate(el => el.scrollTop)
+      await entries.evaluate(el => { el.scrollTop = el.scrollHeight })
+      await page.waitForTimeout(100)
+      const afterScroll = await entries.evaluate(el => el.scrollTop)
+      const after = await header.boundingBox()
+
+      expect(afterScroll).toBeGreaterThan(beforeScroll)
+      expect(after?.y).toBe(before?.y)
+    })
+  }, 60_000)
+
   test('captures table pinned columns and header actions at a narrow width', async () => {
     await app.visit('/components/table', { ...NETWORK }, async page => {
       const narrow = page.locator('[data-table-header-example]')
