@@ -25,7 +25,7 @@ titleCase('model-first database') // 'Model First Database'
 
 ## Async and identity
 
-`AbortablePromise` provides cancellation-aware waiting. `hash` and `randomHash` create deterministic or random identifiers. `checksum` provides SHA-256 integrity for structured values and raw bytes; structured values use stable key ordering unless `{ stable: false }` preserves a legacy byte layout. `noop` is the shared no-op.
+`AbortablePromise` provides cancellation-aware waiting. `hash` and `randomHash` create deterministic or random identifiers. `checksum` provides SHA-256 integrity for structured values, raw bytes, and Bun files; structured values use stable key ordering unless `{ stable: false }` preserves a legacy byte layout. `checksum(Bun.file(path))` delegates to the platform's native `sha256sum`/`shasum` command and resolves without loading the file into application memory. `noop` is the shared no-op.
 
 ## State directories
 

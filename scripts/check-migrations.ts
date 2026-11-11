@@ -3,43 +3,12 @@ import { directories } from 'basis/utilities'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { removeService } from '../libraries/server/testing/DatabaseFixture'
+import { gitFile, gitFiles, resolveRevision } from './migration-git'
 
 /** Generated Graph snapshot used by the repository migration gate. */
 const GRAPH = 'graph.json'
 /** Application migration convention. */
 const MIGRATIONS = 'migrations'
-
-/**
- * Read one file from a Git revision.
- * @param ref - Git revision.
- * @param path - Repository-relative path.
- * @returns File content, or null when absent.
- */
-function gitFile(ref: string, path: string): string | null {
-  const result = Bun.spawnSync(['git', 'show', `${ref}:${path}`], {
-    cwd: process.cwd(),
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
-  if (result.exitCode !== 0) return null
-  return result.stdout.toString()
-}
-
-/**
- * List files beneath one repository path at a Git revision.
- * @param ref - Git revision.
- * @param path - Repository-relative directory.
- * @returns Repository-relative paths.
- */
-function gitFiles(ref: string, path: string): string[] {
-  const result = Bun.spawnSync(['git', 'ls-tree', '-r', '--name-only', ref, '--', path], {
-    cwd: process.cwd(),
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
-  if (result.exitCode !== 0) return []
-  return result.stdout.toString().split('\n').filter(Boolean)
-}
 
 /**
  * Materialize a directory from one Git revision.
@@ -90,7 +59,7 @@ function loadSnapshot(source: string): Graph {
  * @returns Process exit code.
  */
 async function main(): Promise<number> {
-  const base = baseRef()
+  const base = resolveRevision(baseRef())
   const root = process.cwd()
   const gate = directories('migration-gate')
   await gate.ensure()

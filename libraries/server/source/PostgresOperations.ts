@@ -181,7 +181,7 @@ export class ManagedPostgresOperations {
         throw new Error('Canonical User/Role data changed during backup; retry while the application is quiescent')
       }
       const image = await this.#service.containerImage()
-      const digest = checksum(await readFile(path))
+      const digest = await checksum(Bun.file(path))
       const record: BackupManifest = {
         artifact: this.#artifact,
         checksum: digest,
@@ -616,7 +616,7 @@ export class ManagedPostgresOperations {
     if (typeof manifest.artifact !== 'object' || manifest.artifact === null) {
       throw new Error('Backup manifest is missing its approved artifact')
     }
-    const digest = checksum(await readFile(path))
+    const digest = await checksum(Bun.file(path))
     if (digest !== manifest.checksum) throw new Error('Backup archive checksum does not match its manifest')
     return manifest as BackupManifest
   }
