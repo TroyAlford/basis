@@ -47,6 +47,33 @@ describe('sqlTemplateFormat', () => {
     expect(output.output).toBe(code)
   })
 
+  test('does not reformat interpolated expressions while wrapping SQL', () => {
+    const expression = "sql.array(tag.aliasesForThisParticularlyLongFieldName, 'TEXT')"
+    const code = [
+      'const query = sql`select',
+      `\${${expression}},`,
+      '${tag.anotherExtremelyLongFieldNameForTesting},',
+      '${tag.thirdLongFieldNameForTesting}`',
+    ].join(' ')
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain(`\${${expression}}`)
+  })
+
+  test('preserves expression commas when formatting a multiline template', () => {
+    const code = [
+      'const query = sql`(',
+      '  ${tag.id}::text,',
+      "  ${sql.array(tag.aliases, 'TEXT')}::text[],",
+      '  ${tag.classifierEligible}::boolean',
+      ')`',
+    ].join('\n')
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain("${sql.array(tag.aliases, 'TEXT')}")
+    expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
+  })
+
   test('accepts canonical multiline SQL', () => {
     const code = 'sql`\n  SELECT 1\n`'
     expect(lint(code).fixed).toBe(false)

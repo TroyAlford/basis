@@ -208,6 +208,38 @@ function addClauseBreaks(sql: string): string {
 }
 
 /**
+ * Find the end of one TypeScript interpolation starting at a `{`.
+ * @param value - Line containing the interpolation.
+ * @param start - Index of the opening brace.
+ * @returns Index after the closing brace, or -1 when unclosed.
+ */
+function interpolationEnd(value: string, start: number): number {
+  let depth = 0
+  let quote: "'" | '"' | '`' | null = null
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index] as string
+    if (quote) {
+      if (character === '\\') {
+        index += 1
+        continue
+      }
+      if (character === quote) quote = null
+      continue
+    }
+    if (character === "'" || character === '"' || character === '`') {
+      quote = character
+      continue
+    }
+    if (character === '{') depth += 1
+    if (character === '}') {
+      depth -= 1
+      if (depth === 0) return index + 1
+    }
+  }
+  return -1
+}
+
+/**
  * Split SQL text on a delimiter outside quoted strings, identifiers,
  * dollar-quoted bodies and comments.
  * @param value - SQL text.
@@ -263,6 +295,14 @@ function splitOutside(value: string, delimiter: string): string[] {
       continue
     }
     if (character === '$') {
+      if (value[index + 1] === '{') {
+        const end = interpolationEnd(value, index + 1)
+        if (end !== -1) {
+          current += value.slice(index, end)
+          index = end - 1
+          continue
+        }
+      }
       const tag = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/u.exec(value.slice(index))?.[0]
       if (tag) {
         dollar = tag
