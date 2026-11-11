@@ -311,17 +311,16 @@ export const sqlTemplateFormat: Rule.RuleModule = {
     return {
       TaggedTemplateExpression(node: ESTree.TaggedTemplateExpression): void {
         if (!isSqlTag(node.tag)) return
-        const placeholders: string[] = []
+        const placeholders: { interpolation: string, placeholder: string }[] = []
         let raw = ''
         node.quasi.quasis.forEach((quasi, index) => {
           raw += quasi.value.raw
           if (index < node.quasi.expressions.length) {
-            const expression = context.sourceCode.getText(
-              node.quasi.expressions[index] as ESTree.Expression,
-            )
-            const width = Math.max(...expression.split('\n').map(line => line.length)) + 3
+            const next = node.quasi.quasis[index + 1] as ESTree.TemplateElement
+            const interpolation = `\${${context.sourceCode.text.slice(quasi.range[1], next.range[0])}}`
+            const width = Math.max(...interpolation.split('\n').map(line => line.length))
             const placeholder = `\u0001${index}\u0001${'\u0002'.repeat(Math.max(0, width - 3))}`
-            placeholders.push(placeholder)
+            placeholders.push({ interpolation, placeholder })
             raw += placeholder
           }
         })
@@ -337,11 +336,8 @@ export const sqlTemplateFormat: Rule.RuleModule = {
           /^(?:and|or)\b/iu.test(line) ? `${indent}  ${line}` : `${indent}${line}`
         ))
         let body = `\n${lines.join('\n')}\n${baseIndent}`
-        placeholders.forEach((placeholder, index) => {
-          const expression = context.sourceCode.getText(
-            node.quasi.expressions[index] as ESTree.Expression,
-          )
-          body = body.replace(placeholder, `\${${expression}}`)
+        placeholders.forEach(({ interpolation, placeholder }) => {
+          body = body.replace(placeholder, interpolation)
         })
         const replacement = `\`${body}\``
         if (replacement === context.sourceCode.getText(node.quasi)) return

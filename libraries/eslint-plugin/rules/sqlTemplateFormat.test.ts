@@ -81,6 +81,19 @@ const query = sql\`(
     expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
   })
 
+  test('preserves interpolation trivia and nested source byte-for-byte', () => {
+    const tail = '${tag.anotherExtremelyLongFieldNameForTesting}, ${tag.thirdLongFieldNameForTesting}'
+    const nested = '${fn(`nested ${value}`, /},/.test(value))}'
+    const code = `const query = sql\`select \${/* keep */ value}, \${  spaced  }, ${nested}, ${tail}\``
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain('${/* keep */ value}')
+    expect(output.output).toContain('${  spaced  }')
+    expect(output.output).toContain(nested)
+    expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
+    expect(lint(output.output).fixed).toBe(false)
+  })
+
   test('preserves multiline interpolations while wrapping SQL', () => {
     const expression = 'fn(\n  value,\n  other,\n)'
     const tail = '${tag.anotherExtremelyLongFieldNameForTesting}, ${tag.thirdLongFieldNameForTesting}'
