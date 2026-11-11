@@ -24,10 +24,11 @@ export const noMixedTypeImports: Rule.RuleModule = {
         if (!imports.type.size || !imports.value.size) return
 
         context.report({
-          fix: fixer => fixer.replaceTextRange(decl.range, [
-            `import type { ${[...imports.type].join(', ')} } from '${decl.source.value}'${semi}`,
-            `import { ${[...imports.value].join(', ')} } from '${decl.source.value}'${semi}`,
-          ].join('\n')),
+          fix: fixer => {
+            const typeLine = `import type { ${[...imports.type].join(', ')} } from '${decl.source.value}'${semi}`
+            const valueLine = `import { ${[...imports.value].join(', ')} } from '${decl.source.value}'${semi}`
+            return fixer.replaceTextRange(decl.range, `${typeLine}\n${valueLine}`)
+          },
           messageId: 'noMixedTypeImports',
           node,
         })

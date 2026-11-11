@@ -400,27 +400,27 @@ export function themeStyles(props: Props = {}): string {
   if (name) {
     const theme = merge<Props>(DEFAULT_THEME, props)
     const color = theme.color ?? DEFAULT_THEME.color
-    return [
-      `:root [data-theme="${props.name}"] {`,
-      `  color-scheme: ${colorSchemeFor(color.background ?? DEFAULT_THEME.color.background)};`,
-      `  ${themeVariables(theme).join('\n  ')}`,
-      '}',
-    ].join('\n')
+    return `
+:root [data-theme="${props.name}"] {
+  color-scheme: ${colorSchemeFor(color.background ?? DEFAULT_THEME.color.background)};
+  ${themeVariables(theme).join('\n  ')}
+}
+    `.trim()
   }
 
   const light = merge<Props>(DEFAULT_THEME, props)
   const dark = { ...DARK_THEME.color, ...explicitColorOverrides(props) }
 
-  return [
-    ':root {',
-    `  color-scheme: ${colorSchemeFor(light.color?.background ?? DEFAULT_THEME.color.background)};`,
-    `  ${themeVariables(light).join('\n  ')}`,
-    '}',
-    '@media (prefers-color-scheme: dark) {',
-    '  :root {',
-    '    color-scheme: dark;',
-    `    ${colorVariables(dark).join('\n    ')}`,
-    '  }',
-    '}',
-  ].join('\n')
+  return `
+:root {
+  color-scheme: ${colorSchemeFor(light.color?.background ?? DEFAULT_THEME.color.background)};
+  ${themeVariables(light).join('\n  ')}
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    ${colorVariables(dark).join('\n    ')}
+  }
+}
+  `.trim()
 }

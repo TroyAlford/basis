@@ -47,6 +47,63 @@ describe('sqlTemplateFormat', () => {
     expect(output.output).toBe(code)
   })
 
+  test('does not reformat interpolated expressions while wrapping SQL', () => {
+    const expression = "sql.array(tag.aliasesForThisParticularlyLongFieldName, 'TEXT')"
+    const tail = '${tag.anotherExtremelyLongFieldNameForTesting}, ${tag.thirdLongFieldNameForTesting}'
+    const code = `const query = sql\`select \${${expression}}, ${tail}\``
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain(`\${${expression}}`)
+  })
+
+  test('preserves expression commas when formatting a multiline template', () => {
+    const expression = "sql.array(tag.aliases, 'TEXT')"
+    const code = `
+const query = sql\`(
+  \${tag.id}::text,
+  \${${expression}}::text[],
+  \${tag.classifierEligible}::boolean
+)\`
+    `.trim()
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain("${sql.array(tag.aliases, 'TEXT')}")
+    expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
+  })
+
+  test('preserves regex literals in interpolations while wrapping SQL', () => {
+    const expression = 'fn(/},/.test(value), otherArgument)'
+    const tail = '${tag.anotherExtremelyLongFieldNameForTesting}, ${tag.thirdLongFieldNameForTesting}'
+    const code = `const query = sql\`select \${${expression}}, ${tail}\``
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain(`\${${expression}}`)
+    expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
+  })
+
+  test('preserves interpolation trivia and nested source byte-for-byte', () => {
+    const tail = '${tag.anotherExtremelyLongFieldNameForTesting}, ${tag.thirdLongFieldNameForTesting}'
+    const nested = '${fn(`nested ${value}`, /},/.test(value))}'
+    const code = `const query = sql\`select \${/* keep */ value}, \${  spaced  }, ${nested}, ${tail}\``
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain('${/* keep */ value}')
+    expect(output.output).toContain('${  spaced  }')
+    expect(output.output).toContain(nested)
+    expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
+    expect(lint(output.output).fixed).toBe(false)
+  })
+
+  test('preserves multiline interpolations while wrapping SQL', () => {
+    const expression = 'fn(\n  value,\n  other,\n)'
+    const tail = '${tag.anotherExtremelyLongFieldNameForTesting}, ${tag.thirdLongFieldNameForTesting}'
+    const code = `const query = sql\`select \${${expression}}, ${tail}\``
+    const output = lint(code)
+    expect(output.fixed).toBe(true)
+    expect(output.output).toContain(`\${${expression}}`)
+    expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
+  })
+
   test('accepts canonical multiline SQL', () => {
     const code = 'sql`\n  SELECT 1\n`'
     expect(lint(code).fixed).toBe(false)

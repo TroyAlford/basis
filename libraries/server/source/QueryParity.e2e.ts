@@ -163,42 +163,42 @@ async function seed(database: IsolatedDatabase): Promise<void> {
   `
   await database.sql`
     INSERT INTO "Pet" ("id", "age", "vaccinated", "owner.id")
-VALUES (${petOne},
-  3,
-  TRUE,
-  ${ada}),
-  (${petTwo},
-  8,
-  TRUE,
-  ${ada}),
-  (${petThree},
-  12,
-  FALSE,
-  ${grace})
+    VALUES (${petOne},
+      3,
+      TRUE,
+      ${ada}),
+      (${petTwo},
+      8,
+      TRUE,
+      ${ada}),
+      (${petThree},
+      12,
+      FALSE,
+      ${grace})
   `
   await database.sql`
     INSERT INTO "Campaign" ("id", "title")
-VALUES (${campaignOne},
-  'Campaign One'),
-  (${campaignTwo},
-  'Campaign Two'),
-  (${campaignThree},
-  'Campaign Three')
+    VALUES (${campaignOne},
+      'Campaign One'),
+      (${campaignTwo},
+      'Campaign Two'),
+      (${campaignThree},
+      'Campaign Three')
   `
   await database.sql`
     INSERT INTO "Membership" ("person.id", "campaign.id", "role")
-VALUES (${ada},
-  ${campaignOne},
-  'GM'),
-  (${grace},
-  ${campaignOne},
-  'Player'),
-  (${linus},
-  ${campaignOne},
-  'Player'),
-  (${grace},
-  ${campaignTwo},
-  'GM')
+    VALUES (${ada},
+      ${campaignOne},
+      'GM'),
+      (${grace},
+      ${campaignOne},
+      'Player'),
+      (${linus},
+      ${campaignOne},
+      'Player'),
+      (${grace},
+      ${campaignTwo},
+      'GM')
   `
 }
 

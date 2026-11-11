@@ -61,7 +61,13 @@ function wrapLine(line: string): readonly string[] {
   if (line.length <= 100) return [line]
   const parts = splitOutside(line, ',').map(part => part.trim()).filter(part => part !== '')
   if (parts.length > 1) {
-    return parts.map((part, index) => `${index === 0 ? '' : '  '}${part}${index < parts.length - 1 ? ',' : ''}`)
+    return parts.flatMap((part, index) => {
+      const suffix = index < parts.length - 1 ? ',' : ''
+      const nested = part.length > 100 ? wrapLine(part) : [part]
+      return nested.map((nestedLine, lineIndex) => (
+        `${index === 0 && lineIndex === 0 ? '' : '  '}${nestedLine}${lineIndex === nested.length - 1 ? suffix : ''}`
+      ))
+    })
   }
   const words = splitOutside(line, ' ')
   const lines: string[] = []
@@ -305,13 +311,16 @@ export const sqlTemplateFormat: Rule.RuleModule = {
     return {
       TaggedTemplateExpression(node: ESTree.TaggedTemplateExpression): void {
         if (!isSqlTag(node.tag)) return
-        const placeholders: string[] = []
+        const placeholders: { interpolation: string, placeholder: string }[] = []
         let raw = ''
         node.quasi.quasis.forEach((quasi, index) => {
           raw += quasi.value.raw
           if (index < node.quasi.expressions.length) {
-            const placeholder = `\u0001${index}\u0001`
-            placeholders.push(placeholder)
+            const next = node.quasi.quasis[index + 1] as ESTree.TemplateElement
+            const interpolation = `\${${context.sourceCode.text.slice(quasi.range[1], next.range[0])}}`
+            const width = Math.max(...interpolation.split('\n').map(line => line.length))
+            const placeholder = `\u0001${index}\u0001${'\u0002'.repeat(Math.max(0, width - 3))}`
+            placeholders.push({ interpolation, placeholder })
             raw += placeholder
           }
         })
@@ -327,16 +336,9 @@ export const sqlTemplateFormat: Rule.RuleModule = {
           /^(?:and|or)\b/iu.test(line) ? `${indent}  ${line}` : `${indent}${line}`
         ))
         let body = `\n${lines.join('\n')}\n${baseIndent}`
-        placeholders.forEach((placeholder, index) => {
-          const expression = context.sourceCode.getText(
-            node.quasi.expressions[index] as ESTree.Expression,
-          )
-          body = body.replace(placeholder, `\${${expression}}`)
+        placeholders.forEach(({ interpolation, placeholder }) => {
+          body = body.replace(placeholder, interpolation)
         })
-        body = body
-          .split('\n')
-          .flatMap(line => (line.length <= 100 ? [line] : wrapLine(line)))
-          .join('\n')
         const replacement = `\`${body}\``
         if (replacement === context.sourceCode.getText(node.quasi)) return
         context.report({

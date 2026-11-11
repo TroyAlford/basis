@@ -460,13 +460,13 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       i.indisunique AS UNIQUE,
       i.indisvalid AS valid,
       pg_get_indexdef(i.indexrelid) AS definition,
-(SELECT array_agg(opc.opcname ORDER BY u.ordinality) FROM unnest(i.indclass) WITH ORDINALITY
-  u(opcoid,
+      (SELECT array_agg(opc.opcname ORDER BY u.ordinality) FROM unnest(i.indclass) WITH ORDINALITY
+        u(opcoid,
       ordinality) JOIN pg_opclass opc ON opc.oid = u.opcoid) AS "operatorClasses",
-(SELECT array_agg(opc.opcdefault ORDER BY u.ordinality) FROM unnest(i.indclass) WITH ORDINALITY
-  u(opcoid,
+      (SELECT array_agg(opc.opcdefault ORDER BY u.ordinality) FROM unnest(i.indclass) WITH ORDINALITY
+        u(opcoid,
       ordinality) JOIN pg_opclass opc ON opc.oid = u.opcoid) AS "operatorClassDefaults",
-(SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(i.indkey) WITH ORDINALITY u(attnum,
+      (SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(i.indkey) WITH ORDINALITY u(attnum,
       ordinality) JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = u.attnum) AS columns
     FROM pg_index i
     JOIN pg_class c ON c.oid = i.indexrelid
@@ -534,8 +534,8 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname IN (current_schema(),
-'basis') AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid
-  = p.oid AND d.deptype = 'e' )
+      'basis') AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid
+        = p.oid AND d.deptype = 'e' )
     ORDER BY n.nspname, p.proname
   `
   const triggerRows = await sql<{
@@ -558,8 +558,8 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       t.tginitdeferred AS "initDeferred",
       t.tgconstraint AS CONSTRAINT,
       p.proname AS "functionName",
-(SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(t.tgattr::smallint[]) WITH ORDINALITY
-  u(attnum,
+      (SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(t.tgattr::smallint[]) WITH ORDINALITY
+        u(attnum,
       ordinality) JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = u.attnum) AS columns
     FROM pg_trigger t
     JOIN pg_class c ON c.oid = t.tgrelid

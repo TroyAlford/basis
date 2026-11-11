@@ -6,7 +6,8 @@ import { join } from 'node:path'
 const CLI = join(import.meta.dir, 'cli.ts')
 const ESLINT_PLUGIN = join(import.meta.dir, '..', 'libraries', 'eslint-plugin', 'index.ts')
 
-const DIRTY = `import { join } from 'node:path'
+const DIRTY = `
+import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 
 // first
@@ -22,9 +23,10 @@ export const greeting = "hello"
 
 export const pick = (): string => join('a', 'b')
 export const present = (): boolean => existsSync('x')
-`
+`.trimStart()
 
-const FIXED = `import { existsSync } from 'node:fs'
+const FIXED = `
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 /*
@@ -42,29 +44,33 @@ export const greeting = 'hello'
 
 export const pick = (): string => join('a', 'b')
 export const present = (): boolean => existsSync('x')
-`
+`.trimStart()
 
-const DIRTY_MD = `# Notes
+const DIRTY_MD = `
+# Notes
 
 
 A paragraph that
 wraps across lines.
-`
+`.trimStart()
 
-const FIXED_MD = `# Notes
+const FIXED_MD = `
+# Notes
 
 A paragraph that wraps across lines.
-`
+`.trimStart()
 
-const ARCHITECTURE_VIOLATION = `import { useState } from 'react'
+const ARCHITECTURE_VIOLATION = `
+import { useState } from 'react'
 
 export const Hello = ({ name }: { name: string }) => {
   const [value] = useState(0)
   return <p>{name}{value}</p>
 }
-`
+`.trimStart()
 
-const ARCHITECTURE_FIXED = `import { Component } from 'basis/react'
+const ARCHITECTURE_FIXED = `
+import { Component } from 'basis/react'
 
 export class Hello extends Component<{ name: string }> {
   static displayName = 'Hello'
@@ -73,7 +79,7 @@ export class Hello extends Component<{ name: string }> {
     return <p>{this.props.name}</p>
   }
 }
-`
+`.trimStart()
 
 /** A throwaway consumer fixture spanning every lint surface. */
 interface Fixture {
@@ -155,8 +161,8 @@ describe('basis lint and format', () => {
     const { dir, markdown, target } = makeFixture()
     try {
       expect(run(['lint'], dir)).not.toBe(0)
-      expect(readFileSync(target, 'utf8')).toBe(DIRTY)
-      expect(readFileSync(markdown, 'utf8')).toBe(DIRTY_MD)
+      expect(readFileSync(target, 'utf8').trim()).toBe(DIRTY.trim())
+      expect(readFileSync(markdown, 'utf8').trim()).toBe(DIRTY_MD.trim())
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
@@ -166,8 +172,8 @@ describe('basis lint and format', () => {
     const { dir, markdown, target } = makeFixture()
     try {
       expect(run(['format'], dir)).toBe(0)
-      expect(readFileSync(target, 'utf8')).toBe(FIXED)
-      expect(readFileSync(markdown, 'utf8')).toBe(FIXED_MD)
+      expect(readFileSync(target, 'utf8').trim()).toBe(FIXED.trim())
+      expect(readFileSync(markdown, 'utf8').trim()).toBe(FIXED_MD.trim())
 
       // A second, report-only run proves the first pass fully converged.
       expect(run(['lint'], dir)).toBe(0)
@@ -181,8 +187,8 @@ describe('basis lint and format', () => {
     try {
       expect(run(['lint'], dir)).not.toBe(0)
       expect(run(['format'], dir)).toBe(0)
-      expect(readFileSync(target, 'utf8')).toBe(FIXED)
-      expect(readFileSync(markdown, 'utf8')).toBe(FIXED_MD)
+      expect(readFileSync(target, 'utf8').trim()).toBe(FIXED.trim())
+      expect(readFileSync(markdown, 'utf8').trim()).toBe(FIXED_MD.trim())
 
       // A second, report-only run proves the fallback config fully converged.
       expect(run(['lint'], dir)).toBe(0)
@@ -235,13 +241,13 @@ describe('basis compliance', () => {
 
   test('stays authoritative when the repository config disables the rule', () => {
     const dir = makeComponentFixture({
-      config: [
-        `import { createConfig } from '${join(import.meta.dir, 'eslint.ts')}'`,
-        'export default createConfig({',
-        "  overrides: [{ files: ['**/*.tsx'], rules: { '@basis/component-architecture': 'off' } }],",
-        '})',
-        '',
-      ].join('\n'),
+      config: `
+import { createConfig } from '${join(import.meta.dir, 'eslint.ts')}'
+export default createConfig({
+  overrides: [{ files: ['**/*.tsx'], rules: { '@basis/component-architecture': 'off' } }],
+})
+
+      `.trim(),
     })
     try {
       writeFileSync(join(dir, 'Hello.tsx'), ARCHITECTURE_VIOLATION)

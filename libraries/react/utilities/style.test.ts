@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { css, style } from './style'
+import { css, style, styles } from './style'
 
 describe('style utility', () => {
   beforeEach(() => {
@@ -235,5 +235,13 @@ describe('style utility', () => {
       expect(buttonStyle.textContent).toBe(buttonStyles)
       expect(inputStyle.textContent).toBe(inputStyles)
     })
+  })
+})
+
+describe('styles', () => {
+  test('preserves separators for empty registered styles', () => {
+    style('basis-empty-style-first', '')
+    style('basis-empty-style-second', '.basis-empty-style-second{}')
+    expect(styles().endsWith('\n.basis-empty-style-second{}')).toBe(true)
   })
 })

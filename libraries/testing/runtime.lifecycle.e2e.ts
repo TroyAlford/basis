@@ -45,22 +45,22 @@ afterAll(() => {
  * @returns The test module source.
  */
 function componentSuite(label: string, count: number): string {
-  return [
-    `import { Button } from ${JSON.stringify(react)}`,
-    `import { matchScreenshot, test } from ${JSON.stringify(testing)}`,
-    '',
-    `test(${JSON.stringify(`${label} captures`)}, async () => {`,
-    `  for (let index = 0; index < ${count}; index += 1) {`,
-    '    await matchScreenshot(<Button>Button {index}</Button>, `base-${index}`)',
-    '  }',
-    '}, 60_000)',
-    '',
-    `test(${JSON.stringify(`${label} repeats`)}, async () => {`,
-    `  for (let index = 0; index < ${REPEATS}; index += 1) {`,
-    '    await matchScreenshot(<Button>Same</Button>, `repeat-${index}`)',
-    '  }',
-    '}, 60_000)',
-  ].join('\n')
+  return `
+import { Button } from ${JSON.stringify(react)}
+import { matchScreenshot, test } from ${JSON.stringify(testing)}
+
+test(${JSON.stringify(`${label} captures`)}, async () => {
+  for (let index = 0; index < ${count}; index += 1) {
+    await matchScreenshot(<Button>Button {index}</Button>, \`base-\${index}\`)
+  }
+}, 60_000)
+
+test(${JSON.stringify(`${label} repeats`)}, async () => {
+  for (let index = 0; index < ${REPEATS}; index += 1) {
+    await matchScreenshot(<Button>Same</Button>, \`repeat-\${index}\`)
+  }
+}, 60_000)
+  `.trim()
 }
 
 /**
@@ -69,24 +69,24 @@ function componentSuite(label: string, count: number): string {
  * @returns The test module source.
  */
 function applicationSuite(): string {
-  return [
-    `import { matchScreenshot, test, useApplication } from ${JSON.stringify(testing)}`,
-    '',
-    'const app = await useApplication({',
-    `  cwd: ${JSON.stringify(repoRoot)},`,
-    `  entry: ${JSON.stringify(applicationEntry)},`,
-    '  timeoutMs: 120_000,',
-    '})',
-    '',
-    "test('captures application visits', async () => {",
-    `  for (const path of ${JSON.stringify(VISITS)}) {`,
-    '    await app.visit(path, async page => {',
-    "      await page.waitForSelector('[data-testid=\"swatch\"]')",
-    "      await matchScreenshot(page.locator('[data-testid=\"swatch\"]'), path.replace(/[^a-z0-9]+/gi, '-'))",
-    '    })',
-    '  }',
-    '}, 120_000)',
-  ].join('\n')
+  return `
+import { matchScreenshot, test, useApplication } from ${JSON.stringify(testing)}
+
+const app = await useApplication({
+  cwd: ${JSON.stringify(repoRoot)},
+  entry: ${JSON.stringify(applicationEntry)},
+  timeoutMs: 120_000,
+})
+
+test('captures application visits', async () => {
+  for (const path of ${JSON.stringify(VISITS)}) {
+    await app.visit(path, async page => {
+      await page.waitForSelector('[data-testid="swatch"]')
+      await matchScreenshot(page.locator('[data-testid="swatch"]'), path.replace(/[^a-z0-9]+/gi, '-'))
+    })
+  }
+}, 120_000)
+  `.trim()
 }
 
 /**

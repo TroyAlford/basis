@@ -19,49 +19,51 @@ function fixture(): string {
   const directory = tempDirectory('basis-application-hmr-')
   created.push(directory)
   symlinkSync(join(repoRoot, 'node_modules'), join(directory, 'node_modules'), 'dir')
-  writeFileSync(join(directory, 'serve.ts'), [
-    "import { appendFileSync } from 'node:fs'",
-    `import { Server } from ${JSON.stringify(join(repoRoot, 'libraries', 'server', 'source', 'Server.ts'))}`,
-    '',
-    "import { join } from 'node:path'",
-    "appendFileSync(process.env.BASIS_APP_ACTIVITY ?? join(import.meta.dir, 'activity.log'), `${process.pid}\n`)",
-    "new Server().root(import.meta.dir).main('./main.tsx').title('HMR').start()",
-  ].join('\n'))
-  writeFileSync(join(directory, 'main.tsx'), [
-    "import * as React from 'react'",
-    "import { createRoot } from 'react-dom/client'",
-    "import { Application } from './Application'",
-    '',
-    "createRoot(document.getElementById('root')).render(<Application />)",
-  ].join('\n'))
-  writeFileSync(join(directory, 'Application.tsx'), [
-    `import { Component } from ${JSON.stringify(join(repoRoot, 'libraries', 'react', 'index.ts'))}`,
-    "import * as React from 'react'",
-    '',
-    'export class Application extends Component {',
-    '  static displayName = "Application"',
-    '  content() {',
-    '    return <h1>Application</h1>',
-    '  }',
-    '}',
-  ].join('\n'))
+  writeFileSync(join(directory, 'serve.ts'), `
+import { appendFileSync } from 'node:fs'
+import { Server } from ${JSON.stringify(join(repoRoot, 'libraries', 'server', 'source', 'Server.ts'))}
+
+import { join } from 'node:path'
+appendFileSync(process.env.BASIS_APP_ACTIVITY ?? join(import.meta.dir, 'activity.log'), \`\${process.pid}
+\`)
+new Server().root(import.meta.dir).main('./main.tsx').title('HMR').start()
+  `.trim())
+  writeFileSync(join(directory, 'main.tsx'), `
+import * as React from 'react'
+import { createRoot } from 'react-dom/client'
+import { Application } from './Application'
+
+createRoot(document.getElementById('root')).render(<Application />)
+  `.trim())
+  const componentModule = JSON.stringify(join(repoRoot, 'libraries', 'react', 'index.ts'))
+  writeFileSync(join(directory, 'Application.tsx'), `
+import { Component } from ${componentModule}
+import * as React from 'react'
+
+export class Application extends Component {
+  static displayName = "Application"
+  content() {
+    return <h1>Application</h1>
+  }
+}
+  `.trim())
   const preload = JSON.stringify(join(repoRoot, 'libraries', 'testing', 'bun.ts'))
   writeFileSync(join(directory, 'bunfig.toml'), `[test]\npreload = [${preload}]\n`)
-  writeFileSync(join(directory, 'verify.e2e.ts'), [
-    "import { expect, test } from 'bun:test'",
-    `import { useApplication } from ${JSON.stringify(join(import.meta.dir, 'application.ts'))}`,
-    '',
-    "test('serves the current source', async () => {",
-    '  const app = await useApplication({',
-    "    cwd: import.meta.dir, entry: './serve.ts',",
-    '    persistent: true, timeoutMs: 120_000,',
-    '  })',
-    "  await app.visit('/', async page => {",
-    "    await page.waitForSelector('h1')",
-    "    expect(await page.textContent('h1')).toBe(process.env.EXPECTED)",
-    '  })',
-    '}, 120_000)',
-  ].join('\n'))
+  writeFileSync(join(directory, 'verify.e2e.ts'), `
+import { expect, test } from 'bun:test'
+import { useApplication } from ${JSON.stringify(join(import.meta.dir, 'application.ts'))}
+
+test('serves the current source', async () => {
+  const app = await useApplication({
+    cwd: import.meta.dir, entry: './serve.ts',
+    persistent: true, timeoutMs: 120_000,
+  })
+  await app.visit('/', async page => {
+    await page.waitForSelector('h1')
+    expect(await page.textContent('h1')).toBe(process.env.EXPECTED)
+  })
+}, 120_000)
+  `.trim())
   return directory
 }
 

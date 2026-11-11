@@ -58,16 +58,16 @@ function fixture(files: Record<string, string>): Fixture {
  * @returns The test module source.
  */
 function suite(label: string, body = ''): string {
-  return [
-    "import { expect, test } from 'bun:test'",
-    `import { useDatabaseFixture } from ${JSON.stringify(fixtureModule)}`,
-    '',
-    `test(${JSON.stringify(label)}, async () => {`,
-    `  const { server } = await useDatabaseFixture(${JSON.stringify(label)})`,
-    '  expect(server.db.closed).toBe(false)',
-    body,
-    '}, 120_000)',
-  ].join('\n')
+  return `
+import { expect, test } from 'bun:test'
+import { useDatabaseFixture } from ${JSON.stringify(fixtureModule)}
+
+test(${JSON.stringify(label)}, async () => {
+  const { server } = await useDatabaseFixture(${JSON.stringify(label)})
+  expect(server.db.closed).toBe(false)
+${body}
+}, 120_000)
+  `.trim()
 }
 
 /** Observed fixture lifecycle events. */
@@ -305,15 +305,15 @@ describe('database fixture lifecycle', () => {
 
   test('reaps a child that never starts the fixture', async () => {
     const target = fixture({
-      'a.test.ts': [
-        "import { test } from 'bun:test'",
-        "import { writeFileSync } from 'node:fs'",
-        '',
-        "test('stall', async () => {",
-        "  writeFileSync('child.pid', String(process.pid))",
-        '  await Bun.sleep(10_000)',
-        '}, 20_000)',
-      ].join('\n'),
+      'a.test.ts': `
+import { test } from 'bun:test'
+import { writeFileSync } from 'node:fs'
+
+test('stall', async () => {
+  writeFileSync('child.pid', String(process.pid))
+  await Bun.sleep(10_000)
+}, 20_000)
+      `.trim(),
     })
     const pidFile = join(target.dir, 'child.pid')
 

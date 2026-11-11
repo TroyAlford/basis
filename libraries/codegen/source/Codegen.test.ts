@@ -117,10 +117,10 @@ describe('codegen', () => {
     const directory = await mkdtemp(join(tmpdir(), 'basis-abstract-types-'))
     try {
       const file = join(directory, 'types.ts')
-      await writeFile(file, [
-        generateTypes(abstract),
-        "const owner: Note['owner'] = { entity: 'AdminUser', id: '1', name: 'Admin' }",
-      ].join('\n'))
+      await writeFile(file, `
+${generateTypes(abstract)}
+const owner: Note['owner'] = { entity: 'AdminUser', id: '1', name: 'Admin' }
+      `.trim())
       const result = Bun.spawnSync({
         cmd: [
           process.execPath,
