@@ -33,7 +33,7 @@ function fakeRunner(handler: (args: readonly string[]) => Partial<CommandResult>
   const calls: { readonly args: readonly string[], readonly options?: RunOptions }[] = []
   const runner = (_command: string, args: readonly string[], options?: RunOptions): CommandResult => {
     calls.push({ args: [...args], ...(options === undefined ? {} : { options }) })
-    return { exitCode: 0, stderr: '', stdout: '', ...handler(args) }
+    return { exitCode: 0, lines: [], stderr: '', stdout: '', ...handler(args) }
   }
   return { calls, runner }
 }
@@ -78,7 +78,7 @@ describe('createSecretReader', () => {
     const commands: string[] = []
     const runner = (command: string): CommandResult => {
       commands.push(command)
-      return { exitCode: 0, stderr: '', stdout: 'x' }
+      return { exitCode: 0, lines: ['x'], stderr: '', stdout: 'x' }
     }
 
     createSecretReader({ runner, token: TOKEN }).secret('op://V/i/f')

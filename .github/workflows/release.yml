@@ -54,7 +54,7 @@ jobs:
 
       # The release job only needs `bun` (no dependencies), so install it
       # directly. This keeps the reusable workflow portable to consumers that
-      # do not use ASDF.
+      # use their own toolchain setup.
       - name: Resolve pinned Bun version
         id: bun
         shell: bash
@@ -90,7 +90,9 @@ jobs:
   #   steps:
   #     - uses: actions/checkout@v4
   #       with: { fetch-depth: 0 }
-  #     - uses: ./.github/actions/asdf-setup
+  #     - uses: oven-sh/setup-bun@v2
+  #       with:
+  #         bun-version-file: .tool-versions
 
   #     - name: Identify Changed Workspaces
   #       id: changes

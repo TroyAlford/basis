@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { assert, assertDoctorOk, assertEslintSurface, assertMarkdownSurface, assertNodeFree, assertPatchesActive, assertStylelintSurface, initApp, makeTempDir, makeToolPath, run, runAllowFailure } from './harness'
 
@@ -63,6 +63,9 @@ const main = (): void => {
     run(['bun', basisBin, 'lint'], app, env)
 
     run(['bun', basisBin, 'typecheck'], app, env)
+
+    copyFileSync(join(import.meta.dir, 'fixtures', 'consumer-fixture.ts'), join(app, 'fixture.test.ts'))
+    run(['bun', 'test', 'fixture.test.ts', '--timeout', '120000'], app)
 
     // True clean reinstall: drop node_modules and the lockfile, install again.
     rmSync(join(app, 'node_modules'), { force: true, recursive: true })

@@ -2,7 +2,7 @@
 
 A Bun application server for Basis React applications. One `Server` supports live development with Bun HMR and a deterministic managed-production runtime.
 
-The authoritative API and lifecycle reference is the documentation site: [Server](../../docs/server/index.mdx). This README is a front door.
+The authoritative API and lifecycle reference is the documentation site: [Server](../../docs/server/index.mdx), [Database & Transactions](../../docs/server/database.mdx), and [Authorization & Row-Level Security](../../docs/server/authorization.mdx). This README is a front door.
 
 ## Usage
 
@@ -28,7 +28,13 @@ new Server()
 
 Development delegates to Bun's dev server for compilation, watching, HMR, and React Fast Refresh. Production builds once, bundles the dependency graph, serves the SPA and assets, and shuts down gracefully on `SIGINT`/`SIGTERM`.
 
-`/api/health` reports readiness: `503 starting` until the initial build is ready, `503 error` on failure, and `200` only when ready. `server.ready()` exposes the same promise.
+`/api/health` reports readiness: `503 starting` until the initial build and any configured database pool are ready, `503 error` on failure, and `200` only when ready. `server.ready()` exposes the same promise.
+
+## Database
+
+`server.database()` configures the zero-config Basis-managed PostgreSQL capability. The server owns the Bun pool; the managed PostgreSQL service and its durable data survive web-server restarts. See the [database guide](../../docs/server/database.mdx).
+
+`server.graph(graph)` adds the canonical graph roles and compiled PostgreSQL RLS. With authorization enabled, `server.db` uses a restricted application role; the administrative owner connection is reserved for explicit provisioning and is never exposed to handlers. See the [authorization guide](../../docs/server/authorization.mdx).
 
 ## Other server facilities
 

@@ -20,13 +20,13 @@ const server = new Server()
   })
 ```
 
-`root` resolves relative entrypoints and assets, `main` registers the browser entrypoint, and `assets` serves a static directory. `start` binds the HTTP server; `stop` keeps its synchronous contract, while `shutdown()` waits for the build watcher and owned capabilities.
+`root` resolves relative entrypoints and assets, `main` registers the browser entrypoint, and `assets` serves a static directory. `start` binds the HTTP server; `stop` keeps its synchronous contract, while `shutdown()` waits for the build watcher and owned capabilities such as the database pool.
 
 ## Lifecycle
 
 Development delegates to Bun's dev server, which owns the module graph, file watching, HMR, and React Fast Refresh. Production builds once, bundles the dependency graph, serves the bundle and assets, and handles `SIGINT`/`SIGTERM` through graceful shutdown.
 
-`/api/health` is the readiness API. It stays `503 starting` until the initial build is ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
+`/api/health` is the readiness API. It stays `503 starting` until the initial build and any configured database pool are ready, reports `503 error` on failure, and returns `200` only when the application is ready. `server.ready()` exposes the same promise.
 
 ## API routes
 
@@ -77,3 +77,11 @@ Every server serves `/assets/favicon`. Configure a file, `Bun.file`, or an icon 
 ## Embedding
 
 `server.handle(request)` dispatches one request through the same routes used by a bound server, for hosts that mount Basis inside another fetch handler. SSE responses opt out of the HTTP idle timeout automatically.
+
+## Database and authorization
+
+`server.graph(graph)` composes the canonical graph and installs compiled PostgreSQL row-level security. See [Authorization & Row-Level Security](./authorization.mdx) for bootstrap, grants, request actor binding, and the restricted-role boundary.
+
+`Graph.physicalSchema` plus `DDL.introspect`/`DDL.plan` provide the canonical read-only schema inspection and planning surface. See [Schema Inspection & Planning](./schema.mdx).
+
+`server.database()` configures the zero-config managed PostgreSQL capability. See [Database & Transactions](./database.mdx) for pool lifecycle, `db.sql`, transactions, health, and managed storage, and [Query Language](./query-language.mdx) for the canonical predicate and grammar contract.

@@ -2,6 +2,7 @@ import { afterAll } from 'bun:test'
 import { stopApplications } from './application'
 import { closeRuntime } from './browser'
 import { pruneSnapshots } from './cleanup'
+import { cleanupRun } from './lifecycle'
 import { cleanupTempDirectories, isolateTempDirectories } from './temp'
 
 import './happydom'
@@ -15,6 +16,7 @@ import '../react/testing/bun/register'
 isolateTempDirectories()
 
 afterAll(() => { pruneSnapshots() })
+afterAll(cleanupRun)
 afterAll(stopApplications)
 afterAll(closeRuntime)
 afterAll(cleanupTempDirectories)
@@ -25,7 +27,7 @@ afterAll(cleanupTempDirectories)
  * @param code - The exit code to report after teardown.
  */
 const onSignal = (code: number): void => {
-  void Promise.allSettled([stopApplications(), closeRuntime()])
+  void Promise.allSettled([cleanupRun(), stopApplications(), closeRuntime()])
     .finally(() => {
       cleanupTempDirectories()
       process.exit(code)

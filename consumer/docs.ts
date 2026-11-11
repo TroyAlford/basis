@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { formatEntityDocument } from '../libraries/eslint-plugin/rules/entityDefinitionFormat'
+import { EntityDefinitions } from '../libraries/server/source/EntityDefinitions'
 import type { DocsIssue } from '../libraries/server/source/globDocs'
 import { globDocs } from '../libraries/server/source/globDocs'
 
@@ -66,6 +68,7 @@ export function checkDocs(root: string, source = 'docs'): DocsReport {
     issues.push(
       ...document.frontMatterIssues.map(issue => ({ ...issue, file: relative(issue.file) })),
       ...document.fenceIssues.map(issue => ({ ...issue, file: relative(issue.file) })),
+      ...entityJsonIssues(document.body, relative(document.relativeFile)),
     )
     for (const link of document.links) {
       if (EXTERNAL_LINK.test(link)) continue
@@ -79,6 +82,60 @@ export function checkDocs(root: string, source = 'docs'): DocsReport {
   }
 
   return { issues, pages }
+}
+
+/**
+ * Validate and format-check entity JSON examples in fenced documentation blocks.
+ * @param body - Document body without front-matter.
+ * @param file - Repository-relative file path.
+ * @returns Entity-document formatting issues.
+ */
+function entityJsonIssues(body: string, file: string): DocsIssue[] {
+  const lines = body.split(/\r?\n/u)
+  const issues: DocsIssue[] = []
+  let fence: string | null = null
+  let start = 0
+  let content: string[] = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] as string
+    const match = /^\s*```([A-Za-z0-9_-]*)\s*$/u.exec(line)
+    if (!fence && match) {
+      fence = (match[1] ?? '').toLowerCase()
+      start = index + 1
+      content = []
+      continue
+    }
+    if (fence && /^\s*```\s*$/u.test(line)) {
+      if (fence === 'json') {
+        const source = content.join('\n')
+        try {
+          const value = JSON.parse(source) as unknown
+          if (typeof value === 'object' && value !== null && 'entities' in value) {
+            const result = formatEntityDocument(value)
+            if (result.issues.length > 0) {
+              issues.push({ file, line: start, message: `entity JSON: ${result.issues.join('; ')}` })
+              continue
+            }
+            try {
+              EntityDefinitions.load(source)
+            } catch (error) {
+              issues.push({ file, line: start, message: `entity JSON: ${(error as Error).message}` })
+              continue
+            }
+            if (result.formatted.trim() !== source.trim()) {
+              issues.push({ file, line: start, message: 'entity JSON example is not in canonical format' })
+            }
+          }
+        } catch {
+          // Non-JSON examples are validated by their own tooling.
+        }
+      }
+      fence = null
+      continue
+    }
+    if (fence) content.push(line)
+  }
+  return issues
 }
 
 /**

@@ -4,7 +4,7 @@ title: Architecture
 
 # Architecture
 
-Basis is a Bun-first monorepo distributed as a pinned Git dependency. It is one deliberately integrated implementation: the React UI, application server, configuration, logging, OAuth, testing, review policy, and repository tooling share conventions, ownership, and a coordinated release.
+Basis is a Bun-first monorepo distributed as a pinned Git dependency. It is one deliberately integrated implementation: the React UI, application server, database capability, configuration, logging, OAuth, testing, review policy, and repository tooling share conventions, ownership, and a coordinated release.
 
 The root `package.json` is the public facade. Consumers import supported surfaces (`basis/react`, `basis/server`, `basis/configuration`, `basis/logger`, `basis/oauth`, `basis/review`, `basis/testing`, `basis/cli`, and related tooling) and resolve the pinned source without reaching into workspace paths.
 
@@ -14,7 +14,7 @@ The root `package.json` is the public facade. Consumers import supported surface
 flowchart TD
     Facade["basis/* public facade"]
     UI["React UI<br/>components, editors, router, theme"]
-    Server["Basis Server<br/>HTTP, health, SSE, sockets"]
+    Server["Basis Server<br/>HTTP, health, SSE, sockets, database"]
     Core["Configuration, logging, OAuth"]
     Testing["Testing and visual snapshots"]
     Review["Review policy and tooling"]

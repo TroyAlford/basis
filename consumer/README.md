@@ -46,7 +46,7 @@ bunx basis check
 
 `basis typecheck` runs Bun's built-in TypeScript checker and requires Bun 1.4.3 or newer; an older runtime fails with an upgrade instruction. Installing Basis does not enforce that version by itself. `basis check` runs `basis lint` before it typechecks.
 
-## Server
+## Server and database
 
 ```ts
 import { Server } from 'basis/server'
@@ -54,10 +54,11 @@ import { Server } from 'basis/server'
 new Server()
   .root(import.meta.dir)
   .main('./Application.tsx')
+  .database()
   .start()
 ```
 
-See [Server](../docs/server/index.mdx) for lifecycle, API routes, assets, SSE, sockets, and embedding.
+`server.database()` is zero-config and creates the Basis-managed PostgreSQL capability. `server.db.sql` is Bun's pooled tagged-template API, and `server.db.tx(async sql => ...)` owns a transaction boundary. See [Server](../docs/server/index.mdx), [Database & Transactions](../docs/server/database.mdx), and [Authorization & Row-Level Security](../docs/server/authorization.mdx).
 
 ## Testing
 

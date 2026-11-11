@@ -12,6 +12,7 @@ The root `package.json` exposes these supported imports:
 
 ```text
 basis/cli
+basis/codegen
 basis/configuration
 basis/eslint
 basis/logger
@@ -25,16 +26,18 @@ basis/server
 basis/stylelint
 basis/testing
 basis/testing/bun
+basis/utilities
 basis/tsconfig/base.json
 basis/tsconfig/bun.json
 basis/tsconfig/react.json
+basis/visualization
 ```
 
-Each documented surface has a page in the navigation: [CLI](./cli.mdx), [Configuration](./configuration.mdx), [ESLint](./eslint.mdx), [Logging](./logging.mdx), [OAuth](./oauth.mdx), [Server](./server/index.mdx), [Build Plugins & Serve](./build-plugins.mdx), [Testing & Visual Snapshots](./testing.md), [Code Review](./review.mdx), and [TypeScript](./typescript.mdx). React components, editors, icons, mixins, router, and theme are documented under React.
+Each documented surface has a page in the navigation: [CLI](./cli.mdx), [Configuration](./configuration.mdx), [ESLint](./eslint.mdx), [Logging](./logging.mdx), [OAuth](./oauth.mdx), [Server](./server/index.mdx), [Database & Transactions](./server/database.mdx), [Authorization & Row-Level Security](./server/authorization.mdx), [Typed Authoring & Generated Products](./server/authoring.mdx), [Schema Inspection & Planning](./server/schema.mdx), [Query Language](./server/query-language.mdx), [Build Plugins & Serve](./build-plugins.mdx), [Testing & Visual Snapshots](./testing.md), [Code Review](./review.mdx), and [TypeScript](./typescript.mdx). The server database page also documents the canonical `Graph`, `EntityDefinition`, `FieldDefinition`, and `FieldType` types. Build-time TypeScript/JSON Schema generation is exposed at `basis/codegen`; ERD source generation is exposed at `basis/visualization`. React components, editors, icons, mixins, router, and theme are documented under React.
 
 ## Internal workspaces
 
-`@basis/utilities`, `@basis/workspaces`, `@basis/bun-plugins`, `@basis/eslint-plugin`, and the implementation workspaces behind the facades are internal. An internal workspace path is not a consumer import just because it exists in the repository. Internal code imports public surfaces by their consumer names where possible and internal workspaces package-relatively; consumers resolve the published facade through `exports` alone.
+`@basis/workspaces`, `@basis/bun-plugins`, `@basis/eslint-plugin`, and the implementation workspaces behind the facades are internal. An internal workspace path is not a consumer import just because it exists in the repository. Internal code imports public surfaces by their consumer names where possible and internal workspaces package-relatively; consumers resolve the published facade through `exports` alone.
 
 ## Import rules
 

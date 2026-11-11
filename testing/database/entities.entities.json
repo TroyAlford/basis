@@ -1,0 +1,50 @@
+{
+  "entities": [
+    {
+      "name": "User",
+      "fields": [
+        {
+          "field": "id",
+          "format": "UUID"
+        },
+        {
+          "field": "email",
+          "type": "String"
+        },
+        {
+          "field": "managedUsers",
+          "type": "Inverse",
+          "target": "SystemUser",
+          "inverse": "manager",
+          "cardinality": "Many"
+        }
+      ]
+    },
+    {
+      "name": "SystemUser",
+      "extends": "User",
+      "fields": [
+        {
+          "field": "permissions",
+          "type": "String"
+        },
+        {
+          "field": "manager",
+          "type": "Entity",
+          "target": "User",
+          "inverse": "managedUsers"
+        }
+      ]
+    },
+    {
+      "name": "Client",
+      "extends": "User",
+      "fields": [
+        {
+          "field": "company",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}

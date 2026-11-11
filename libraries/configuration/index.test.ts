@@ -49,6 +49,7 @@ describe('basis/configuration public surface', () => {
     expect(Object.keys(configuration).sort()).toEqual([
       'Environment',
       'run',
+      'runAsync',
       'secret',
     ])
   })

@@ -1,0 +1,535 @@
+---
+title: Database & Transactions
+---
+
+# Database & Transactions
+
+For canonical User/Role/Grant authorization and PostgreSQL row-level security, use [Authorization & Row-Level Security](./authorization.mdx). Basis owns the managed PostgreSQL service and keeps the restricted application pool separate from the trusted administrative owner.
+
+`server.database()` gives the server one owned PostgreSQL capability, exposed as `server.db`. Basis keys the database to the normalized application working directory, lets Docker allocate a loopback port, reconciles an existing app-owned service, and waits for the pool before reporting healthy. The service and its data outlive any one web-server process. Externally managed PostgreSQL is not a supported application configuration.
+
+Managed state and credentials live inside the installation under `.basis/database/`; backups are written beneath `.basis/backups/`. Basis writes a local ignore file and static serving never exposes `.basis`. Managed PostgreSQL uses `postgres:17-alpine` by default; `database({ image })` selects another pinned image for an upgrade proof or test.
+
+## Canonical graph
+
+The application root's `graph.ts` is the canonical authored model: `export default new Graph({ entities, relationships, roles, grants })`. Importing it constructs and validates the complete in-memory graph once. JSON remains an alternate input syntax accepted by `Graph`; it is not a second model authority. Constructing the Graph never creates tables, initializes a schema, or runs migrations.
+
+A Graph-backed production server requires an approved migration artifact through `server.migration(artifact)`, and that artifact must describe the exact configured Graph. Startup performs only `DDL.readiness`; it never installs or migrates automatically. Development servers without an artifact remain available for explicit local provisioning and tests.
+
+The document root accepts `entities` and an optional `relationships` array. This is the complete relationship vocabulary:
+
+```json
+{
+  "entities": [
+    {
+      "name": "User",
+      "fields": [
+        {
+          "field": "articles",
+          "type": "Inverse",
+          "target": "Article",
+          "inverse": "author",
+          "cardinality": "Many"
+        }
+      ]
+    },
+    {
+      "name": "Campaign",
+      "fields": []
+    },
+    {
+      "name": "Article",
+      "fields": [
+        {
+          "field": "author",
+          "type": "Entity",
+          "target": "User",
+          "inverse": "articles"
+        },
+        {
+          "field": "tags",
+          "type": "Array",
+          "items": {
+            "type": "String"
+          }
+        },
+        {
+          "field": "payload",
+          "type": "JSON"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "name": "Membership",
+      "between": [
+        {
+          "field": "user",
+          "target": "User",
+          "inverse": "campaigns"
+        },
+        {
+          "field": "campaign",
+          "target": "Campaign",
+          "inverse": "members"
+        }
+      ],
+      "fields": [
+        {
+          "field": "role",
+          "type": "String"
+        },
+        {
+          "field": "favorites",
+          "type": "String"
+        }
+      ]
+    }
+  ]
+}
+```
+
+```ts
+import { FieldType, Graph } from 'basis/server'
+
+const graph = new Graph({ entities: await Bun.file('./entities.json').text() })
+const campaign = graph.definitions.entity('Campaign')
+const membership = graph.definitions.relationship('Membership')
+```
+
+Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular forward references use `Entity`; reciprocal navigation fields use `Inverse`; scalar arrays use `Array` with scalar `items`; and opaque structured values use `JSON`. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, authored `abstract` boolean, `column`, `Collection`, `ValueCollection`, `Structured`, `Junction`, or mapping descriptor.
+
+The implicit system root owns `id: ID`, `name: String`, and the concrete-leaf `entity` discriminator. The universal lightweight object shape is `{ id, name, entity }`. `id` is always the primary key; every ordinary entity table receives generated `id text primary key` storage and a parent foreign-key column. Root field names are reserved from ordinary declarations.
+
+Identity and ordinary fields are inherited. The only inherited refinement is an `id` entry containing `format` and no `type`:
+
+- `format: UUID` narrows the shared identity to canonical lowercase UUID text.
+- `format: Snowflake` narrows it to canonical signed-64-bit decimal text.
+- Without a refinement, ID accepts either format.
+- A descendant inherits an ancestor format; a conflicting redeclaration is rejected.
+
+The example derives `User.articles` from `Article.author.inverse`, and derives `User.campaigns` and `Campaign.members` from the single `Membership` relationship. Navigations are not authored entity fields. Like effective fields, derived navigations are inherited across MTI: a `SystemUser extends User` query exposes the ancestor’s `articles` and `campaigns`, and a descendant field or navigation that shadows an inherited navigation is rejected.
+
+## References, arrays, JSON, and relationships
+
+A singular forward reference is a field with `type: "Entity"`, an explicit `target`, and an optional `inverse`. It does not author a column. The physical foreign-key column is always the quoted dotted field path `field + '.id'`:
+
+- `Article.author` is addressed as `"Article"."author.id"` in direct SQL and stores text that targets the referenced entity's shared `id`.
+- Logical `author` is selectable as a singular projection; `author.name` traverses to the referenced target.
+- Reference columns are nullable; omit the value for a missing optional reference.
+- `inverse` must be paired with an authored `Inverse` field on the target. A forward reference without `inverse` remains an independent relationship with no inferred reverse navigation.
+
+A reciprocal navigation is a navigation-only field with `type: "Inverse"`, a `target`, the forward field name in `inverse`, and `cardinality: "One" | "Many"`. It creates no PostgreSQL column and is never a predicate or ordering scalar. `One` means zero or one, so it is nullable and physically enforced with a unique index on the forward FK; `Many` uses the normal reverse-lookup index.
+
+```json
+{
+  "entities": [
+    {
+      "name": "Pet",
+      "fields": [
+        {
+          "field": "owner",
+          "type": "Entity",
+          "target": "Person",
+          "inverse": "pets"
+        }
+      ]
+    },
+    {
+      "name": "Person",
+      "fields": [
+        {
+          "field": "pets",
+          "type": "Inverse",
+          "target": "Pet",
+          "inverse": "owner",
+          "cardinality": "Many"
+        }
+      ]
+    }
+  ]
+}
+```
+
+For a one-to-one association, change the reciprocal declaration to `{ "field": "pet", "type": "Inverse", "target": "Pet", "inverse": "owner", "cardinality": "One" }`. The forward field remains the only stored FK and gains a unique index. Model loading requires both sides to name each other and rejects orphan/wrongly directed declarations.
+
+Scalar arrays use `type: "Array"` with a scalar `items` descriptor. They map to native PostgreSQL arrays, preserve element order, and permit duplicates:
+
+```json
+{
+  "field": "tags",
+  "type": "Array",
+  "items": { "type": "String" }
+}
+```
+
+Opaque structured values use `type: "JSON"` and map to a non-null PostgreSQL `jsonb` column. The value shape is intentionally opaque; object and array structure is whatever JSON is written. JSON values are returned whole and can participate in opaque structural `$contains` predicates; they cannot be ordered or traversed as a graph.
+
+A named relationship is a first-class many-to-many declaration in the top-level `relationships` array. There is no `type` discriminator. Every relationship has exactly `name`, `between`, and `fields`:
+
+- `name` is PascalCase and distinct from all entity and relationship names.
+- `between` has exactly two `{ field, target, inverse }` endpoints in authored order. Both inverses are mandatory, and both endpoint fields and inverses must differ.
+- `fields` is required, may be empty, and may contain only scalar, `Array`, or `JSON` fields. It cannot contain `Entity`, `Collection`, `Structured`, or `ValueCollection` fields.
+- Relationship fields are properties of the relationship itself, not target entity fields.
+
+The physical table is named by the relationship. Each endpoint column is the endpoint field's dotted path (`"user.id"`, `"campaign.id"`), is `text not null`, and participates in the composite primary key in authored order. Deferrable foreign keys target the respective entity or supported ancestor `id`, and both endpoint columns receive indexes. Relationship fields are regular non-null columns. There is no surrogate `id`, `name`, `entity`, or root `Entity` row for a relationship.
+
+Duplicate pairs fail with SQLSTATE `23505`; a missing endpoint target fails with `23503`. Relationship tables are unordered sets of pairs and do not have fake `ordered`, `unique`, or `storage` flags. The entity tables, `TableDefinition`, phased foreign-key reconciliation, and query compiler all use the same canonical metadata.
+
+Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `author` is selectable as a singular projection, but it is not filterable or sortable; its physical `author.id` column is never a logical field. Direct `db.sql` remains physical SQL and may address those quoted dotted names normally.
+
+## Universal identity root
+
+Every initialized schema includes a system `"Entity"` table. Its `id` is exact `text`; the root format check accepts either a canonical lowercase UUID or a canonical signed 64-bit decimal string. `name` and the concrete-leaf `entity` discriminator are non-null text columns. `Entity` is reserved and cannot be declared as an application entity.
+
+The root has a B-tree index on `(name, id)` for stable sorted/paged access and a `pg_trgm` `gin` index on `name` for indexed `ILIKE '%term%'` lookup. Initialization enables `pg_trgm` and creates both indexes. Its leaf check accepts only derived concrete entity names. Polymorphic scalar and singular-reference queries execute through the same `db.query` path.
+
+## Reviewed physical installation
+
+A fresh database and every upgrade use one reviewed schema path. The trusted owner connection introspects the live catalog, plans the canonical graph, reviews the immutable artifact, and applies it:
+
+```ts
+import graph from './graph'
+import { DDL } from 'basis/server'
+
+const plan = DDL.plan({
+  actual: await DDL.introspect(adminSql),
+  desired: graph,
+  appRole: 'basis_app',
+})
+const artifact = DDL.review(plan, {
+  schema: 'public',
+  version: 'initial-install-001',
+})
+const result = await DDL.apply(adminSql, artifact)
+```
+
+`adminSql` is the trusted owner or migration connection, never the restricted request pool. `DDL.apply` records the reviewed artifact in `basis.schema_migration`, verifies the resulting catalog, and rejects duplicate or drifted application. There is no separate fresh-install compiler or startup migration path. See [Schema Inspection & Planning](./schema.mdx) for planning, review, readiness, and non-transactional operations.
+
+The compiled plan enables `pg_trgm`, creates the universal `"Entity"` identity root, creates one ordinary PostgreSQL table per entity, and creates one table per named relationship. Local scalar fields use their logical field name; a singular reference field uses its derived dotted `field + '.id'` column; a scalar array uses its logical field name with the matching native PostgreSQL array type. Every ordinary entity table gets generated `id text primary key` storage. `String` maps to `text`; `Number` to `double precision`; `Date` to `date`; `Timestamp` to `timestamptz`; `Boolean` to `boolean`; `JSON` maps to `jsonb`; array types append `[]`. A `Many` reciprocal navigation adds the normal forward-FK index; a `One` reciprocal navigation adds a unique index on the same stored FK column. Relationship tables have no surrogate root identity; their two endpoint columns form the composite primary key. Format checks apply to the effective ordinary `id` format.
+
+Each entity table has a real primary key and an MTI parent foreign key to the system `Entity` root or its parent table. Shared fields are stored only in the table that owns them. The root alone stores `name` and the concrete-leaf `entity` discriminator. Multi-tier chains therefore use ordinary PostgreSQL PK/FK joins, not `INHERITS`.
+
+The canonical statements remain available through `entities.ddl`: entity and relationship table statements run in declaration order, followed by MTI parent constraints, reference constraints, relationship endpoint constraints, and commit-time lifecycle checks. Constraints are `deferrable initially immediate`, so normal operations validate immediately while a transaction can explicitly defer validation for mutually dependent inserts:
+
+```ts
+await server.db.tx(async sql => {
+  await sql`SET CONSTRAINTS ALL DEFERRED`
+  await sql`
+    INSERT INTO "Entity" ("id", "name", "entity")
+    VALUES (${userId}, 'Ada', 'User'), (${campaignId}, 'Example Campaign', 'Campaign')
+  `
+  await sql`INSERT INTO "User" ("id") VALUES (${userId})`
+  await sql`INSERT INTO "Campaign" ("id") VALUES (${campaignId})`
+  await sql`
+    INSERT INTO "Membership" ("user.id", "campaign.id", "role", "favorites")
+    VALUES (${userId}, ${campaignId}, 'GM', 'dice')
+  `
+})
+```
+
+Commit-time constraint triggers reject an incomplete root/leaf chain, a leaf discriminator that does not match, or an incompatible second leaf. The leaf discriminator and leaf identity are immutable after creation. Temporary create/delete and sibling-leaf events are evaluated against surviving final state.
+
+Instance writes use parameterized `db.sql` inside `db.tx`; Basis does not expose an ORM, repository methods, or automatic CRUD routes in this stage. ORM-style writes such as `new Article(...).save()` remain intentionally deferred, not removed: a future write API will use the same canonical metadata. No automatic CRUD routes are generated.
+
+## `db.query`
+
+Attach the canonical graph to the database capability, then project effective scalar fields and singular reference paths from one entity. See [Query Language](./query-language.mdx) for the complete predicate contract, reference/collection/Array/JSON and scoped-member grammar, the stage-20 source/structured parity gate, diagnostics, and explicit exclusions. Querying an abstract entity reads its shared ancestor table and returns one row per concrete descendant, including the actual leaf `entity` discriminator and shared `id`/`name`. Inherited fields and reference targets are joined in the same SQL statement, never by a per-row follow-up query:
+
+```ts
+import graph from './graph'
+import { Operator, Server, SortDirection } from 'basis/server'
+
+const server = new Server()
+  .graph(graph)
+  .database()
+  .start()
+
+const notes = await server.db.query<{ id: string, title: string }>('Note', {
+  fields: ['id', 'title'],
+  where: { title: 'Hello' },
+  orderBy: { field: 'createdAt', direction: SortDirection.Descending },
+  limit: 20,
+  offset: 0,
+})
+```
+
+For an abstract entity, the effective field set includes `id`, `name`, `entity`, and inherited/local fields. A single query returns every concrete descendant:
+
+```ts
+const pets = await server.db.query<{
+  entity: string,
+  id: string,
+  name: string,
+  nickname: string,
+}>('Pet', {
+  fields: ['id', 'name', 'entity', 'nickname'],
+  where: { field: 'name', operator: Operator.Comparison.Contains, value: 'Ada' },
+  orderBy: 'name',
+  limit: 20,
+})
+```
+
+A field that exists only on some concrete descendants is still selectable on an abstract query. Its value is present for leaves that declare it and `null` for siblings that do not:
+
+```ts
+const pets = await server.db.query<{
+  breed: string | null,
+  entity: string,
+  id: string,
+}>('Pet', {
+  fields: ['id', 'entity', 'breed'],
+})
+```
+
+Same-named descendant-only fields are accepted only when their type, format, and reference-target contracts are compatible. The value is selected conditionally from the owning table for each concrete leaf; incompatible declarations fail before SQL runs.
+
+Singular references return the target's lightweight identity `{ id, name, entity }` or `null` when the reference is unset. A reference declared only on some descendant leaves is present for those leaves and `null` for siblings. Selecting a dotted path expands the reference and includes that identity automatically. Fields from an abstract target resolve against its actual concrete leaf. A reference targeting the universal `Entity` root derives leaf-owned fields and references from the actual target leaf; leaves without that field yield `null`:
+
+```ts
+const visits = await server.db.query<{
+  id: string,
+  pet: { breed: string | null, entity: string, id: string, name: string } | null,
+}>('Visit', {
+  fields: ['id', 'pet.breed'],
+  orderBy: 'id',
+})
+```
+
+`fields: ['pet.vet.name']` follows each declared singular reference while the model permits it. Paths are validated segment by segment: unknown fields, traversal through a scalar, reciprocal backtracking, paths deeper than eight reference hops, and projections exceeding the finite path or work budget fail before SQL runs. Singular reference paths and collection comparisons are supported in `where`; reference fields cannot be used in `orderBy`. Relation cycles are allowed in the canonical model and physical foreign keys; a query rejects only guaranteed immediate backtracking through a declared reciprocal pair. The compiler caps requested paths and both authored path work and actual expanded projection/join work, rejecting an over-budget projection before SQL execution.
+
+Derived collection navigations project a bounded envelope. The default preview is three lightweight `{ id, name, entity }` items; `total` is the exact collection count and `remaining` is the count after the requested page. `collections` overrides the preview limit and offset per selected collection. The navigation name is the authored `Inverse` field name, or the declared endpoint inverse for a named relationship:
+
+```ts
+const campaigns = await server.db.query<{
+  campaigns: {
+    items: { entity: string, id: string, name: string }[],
+    remaining: number,
+    total: number,
+  },
+  id: string,
+}>('User', {
+  collections: { campaigns: { limit: 5, offset: 0 } },
+  fields: ['id', 'campaigns'],
+})
+```
+
+Both directions of a named relationship use the same physical relationship row and the same compiler path. Select `relationshipFields` to include direct scalar properties of the relationship itself beneath an object named by lowercasing the first character of the relationship name:
+
+```ts
+const campaigns = await server.db.query<{
+  id: string,
+  members: {
+    items: {
+      entity: string,
+      id: string,
+      membership: { role: string },
+      name: string,
+    }[],
+    remaining: number,
+    total: number,
+  },
+}>('Campaign', {
+  collections: {
+    members: { limit: 3, offset: 0, relationshipFields: ['role'] },
+  },
+  fields: ['id', 'members'],
+})
+```
+
+`relationshipFields` accepts only direct scalar property names of the named relationship; target entity fields, nested graph paths, arrays, JSON, and unknown names are rejected. A collection predicate may filter a direct scalar relationship property with the same lowercase prefix, for example `members $contains (membership.role = 'GM')`. The same physical `Membership` row produces `User.campaigns` in the other direction. Inverse-only navigations such as `User.articles` reject `relationshipFields` because there is no intervening relationship. The envelope is computed in the same SQL statement for both inverse and relationship-backed collections; there is no per-parent lookup. Collections follow stable target identity order.
+
+A terminal nested collection is allowed beneath a singular forward reference, using the natural dotted collection key:
+
+```ts
+const pets = await server.db.query<{
+  id: string,
+  owner: {
+    entity: string,
+    id: string,
+    name: string,
+    pets: { items: { entity: string, id: string, name: string }[], remaining: number, total: number },
+  },
+}>('Pet', {
+  collections: { 'owner.pets': { limit: 2, offset: 0 } },
+  fields: ['id', 'owner.pets'],
+})
+```
+
+`Pet.owner.pets` is legal and bounded. `Pet.owner.pets.owner` is rejected as reciprocal backtracking because the collection item’s `owner` returns to the already traversed Person. A singular reciprocal navigation follows the same rule: `Pet.owner.pet` and `Person.pet.owner` are rejected for a `One` pair, while `Person.manager.manager` remains legal because repeating a forward-only reference is not reciprocal backtracking. Arbitrary recursion through collection elements remains deferred.
+
+Collection navigations participate in `where` through `$contains` (`~=`), `$all`, and `$empty`; member predicates may use `@` or `@.path`, while equivalent relative paths remain supported. `collection.$count` is available in predicates, projections, and supported ordering paths. Negate `$contains` for "no related item matches"; empty collections satisfy `$all` and `$empty`, and fail `$contains`. Bracketed `$contains [P, Q]` requires independent matches, while `$contains (P $and Q)` requires one member to satisfy both. Inner filters resolve against each collection item, including singular-reference paths and named-relationship properties.
+
+`$contains` is a case-insensitive literal substring match on `String` fields. It escapes `%`, `_`, and the escape character before binding, so user input is never interpreted as a wildcard. Abstract display-name searches use the root `pg_trgm` GIN index.
+
+```ts
+const filtered = await server.db.query<{ id: string, title: string }>('Note', {
+  fields: ['id', 'title'],
+  where: {
+    operator: Operator.Logical.And,
+    filters: [
+      { operator: Operator.Comparison.GreaterThanOrEqual, field: 'score', value: 5 },
+      { operator: Operator.Comparison.LessThan, field: 'score', value: 10 },
+      { operator: Operator.Comparison.Equal, field: 'active', value: true },
+    ],
+  },
+  orderBy: { field: 'score', direction: SortDirection.Descending },
+})
+```
+
+```ts
+const matching = await server.db.query<{ id: string, title: string }>('Note', {
+  fields: ['id', 'title'],
+  where: 'score >= 5 $and score < 10 $and title !$empty',
+})
+```
+
+`fields` is required and must be a non-empty list of effective scalar, scalar-array, JSON, derived collection-navigation, dotted singular-reference, or collection-count (`collection.$count`) paths for the named entity. Abstract queries include inherited and descendant-only scalar fields and return the concrete leaf `entity`; concrete queries use the same effective-field contract. A reference field selected without a dotted suffix still returns its default identity object. `where` accepts a single-field equality shorthand (`{ title: 'Hello' }`), an explicit canonical filter tree using the exported `Operator` enums, or a string query expression. An empty or whitespace-only string expression adds no predicate, matching an empty structured object. Shorthand is only equality for one field and normalizes to `Operator.Comparison.Equal`; multiple structured fields must be expressed explicitly with `And` and `filters`. An operator-looking object inside a field value is equality with that whole object, not operator syntax.
+
+Structured and string filters normalize to the same canonical predicate tree and SQL path. Comparisons use `$eq`, `$contains` (`~=`), `$overlaps`, `$sequenceEqual`, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$between`, and `$empty`; string expressions also accept `=`, `==` (native-array set equality), `===` (native-array sequence equality), `>`, `>=`, `<`, `<=`, `!=`, `<>`, and `~=`. `$empty` means SQL null or the empty string on `String` fields, zero rows on relationship collections, and NULL or zero elements on native arrays. `$between` takes exactly two inclusive bounds and uses `values: [lower, upper]` in structured form or `[lower, upper]` after the operator in string form (`score $between [5, 10]`); a `null` bound is open, while `[null, null]` is invalid. `$empty` has no value; it uses NULL/`''` semantics on `String` fields, zero-row semantics on relationship collections, and NULL/zero-element semantics on native arrays. JSON has no empty operator. `$ne` lowers to `Not(Equal)`, `$between` lowers to `And` of its bounds, and String `$empty` lowers to `Or(Equal(null), Equal(''))`. Not is two-valued at the query layer, so a null range comparison negates to true. Logical filters use `$and` or `$or` with a non-empty `filters` array and unary `$not` with exactly one child; string expressions support `$and`, `$or`, `$not`/`!`, and grouping parentheses. `$blank`, `$notblank`, `$nor`, and `$xor` are not part of the vocabulary.
+
+Predicate evaluation is two-valued, including on SQL `NULL`. Equality to a non-null value and range comparisons are false on `NULL`, and `Not` complements that result. Therefore `$ne 5` matches rows whose field is `NULL` as well as rows that are not `5`; `$eq null` matches only `NULL`, and `$ne null` matches only non-`NULL`. String `$empty` matches exactly `NULL` or `''`, not whitespace-only strings; not-empty is `Not(Empty(field))` and does match whitespace-only strings. Relationship `$empty` has the zero-related-row semantics described above.
+
+Unquoted literals are typed from the target field, and quoted values remain strings. ID operands accept canonical UUID or Snowflake text; exact bigint Snowflake inputs normalize to canonical text. Every value is passed as a SQL parameter. Range operators are limited to ordered scalar fields (`String`, `Number`, `Date`, `Timestamp`, and `ID`), not `Boolean`. ID ordering and ranges compare canonical text. Unknown fields, operators, malformed nodes, incompatible literal types, or incompatible field/operator combinations fail before SQL runs.
+
+UUID and Snowflake values remain canonical text in `db.query` results; there is no implicit bigint conversion for identity values. Ordering and comparisons operate on the physical text identity.
+
+`orderBy` is optional and accepts a field name, an `{ field, direction }` object, or an array of those for multi-level ordering; direction uses `SortDirection` and defaults to ascending. Abstract descendant queries append the stable shared `id` tie-break and default to `name, id` ordering. `limit` defaults to 25 and `offset` defaults to 0; both are non-negative integers. Pass `limit: null` explicitly for unlimited rows — `undefined` keeps the default 25. Without `orderBy`, concrete-query row order is unspecified; abstract descendant queries default to `name, id` for stable paging. Invalid limits/offsets fail before SQL runs; validated identifiers are quoted. Identity values are returned as canonical text from `db.query`; raw `db.sql` keeps Bun's native PostgreSQL decoding for non-identity SQL. This step supports scalar, native scalar-array, and JSON projections, including inherited and descendant-only fields for abstract descendants, plus singular reference projections, dotted paths, and bounded inverse and named-relationship collection envelopes. Collection predicates, collection counts, native Array comparisons, scoped `@` member predicates, and opaque JSON `$contains` are implemented (array operands are capped at 128 elements; unsafe or non-round-trippable JSON numeric literals are rejected); arbitrary nested collection projections beyond a terminal collection beneath a singular reference, JSON path traversal/equality, nested `@` correlation, outer-context captures, JSON shape validation, and direct composite-key relationship queries remain deferred. Explicit path depth and work are bounded before SQL execution; the compiler also charges expansion work as it creates projection nodes, joins, leaf-owner aliases, identity projections, and collection subqueries. Only guaranteed reciprocal backtracking is rejected; cyclic entity definitions and physical foreign keys remain valid.
+
+## `db.sql`
+
+`server.db.sql` is the pooled Bun SQL tagged-template API. Interpolations are parameters and results and errors are Bun's own.
+
+```ts
+const owner = 'Troy'
+const notes = await server.db.sql<{ id: string, title: string }[]>`
+  SELECT id, title FROM notes WHERE owner = ${owner}
+`
+```
+
+## `db.tx`
+
+`server.db.tx(callback)` establishes one transaction boundary. The callback receives Bun's native transaction-scoped SQL client, conventionally named `sql`. Everything run through that client is one atomic operation:
+
+```ts
+const noteId = await server.db.tx(async sql => {
+  const [note] = await sql`INSERT INTO notes (title) VALUES (${title}) RETURNING id`
+  await sql`INSERT INTO audit (action, note_id) VALUES ('created', ${note.id})`
+  return note.id
+})
+```
+
+Bun commits when the callback completes successfully, and `db.tx()` resolves with the callback's return value after commit. Returning early commits. Throw to abort:
+
+```ts
+try {
+  await server.db.tx(async sql => {
+    await sql`insert into notes (title) values (${title})`
+    throw new Error('do not keep this note')
+  })
+} catch {
+  // The transaction rolled back.
+}
+```
+
+A thrown error or failed query that escapes the callback rolls back and rejects. Await every query inside the callback; the transaction-scoped client must not be used after it completes. Queries through `server.db.sql` do not automatically join the transaction; use the callback's `sql`.
+
+### Savepoints
+
+`sql.savepoint(callback)` provides partial rollback inside the outer transaction. Catching the savepoint failure leaves the outer transaction usable:
+
+```ts
+await server.db.tx(async sql => {
+  await sql`insert into notes (title) values (${title})`
+  try {
+    await sql.savepoint(async savepoint => {
+      await savepoint`insert into audit (action) values ('discarded')`
+      throw new Error('discard only this savepoint')
+    })
+  } catch {
+    // Only the savepoint rolled back.
+  }
+  await sql`insert into audit (action) values ('committed')`
+})
+```
+
+### Query cancellation
+
+`query.cancel()` cancels one executing query. A cancellation that reaches the PostgreSQL server aborts the current transaction; catching the error alone does not make that transaction usable. Recover with a rollback or a savepoint, or let the error escape `db.tx()` so the transaction rolls back.
+
+```ts
+await server.db.tx(async sql => {
+  try {
+    await sql.savepoint(async savepoint => {
+      const query = savepoint`select pg_sleep(30)`.execute()
+      setTimeout(() => query.cancel(), 100)
+      await query
+    })
+  } catch {
+    // The savepoint rolled back; the outer transaction continues.
+  }
+  await sql`insert into audit (action) values ('continued')`
+})
+```
+
+## Lifecycle and ownership
+
+The server owns each process's pool and closes it on shutdown. In managed mode Docker owns the container and durable data volume; stopping or redeploying the web server does not stop PostgreSQL. Different installation directories are isolated, and a second process for the same installation attaches to the same service.
+
+Docker is required for managed mode. An unavailable Docker daemon or failed connection makes startup report `503 error` on `/api/health`.
+
+## Managed backup, restore, and major upgrades
+
+Managed PostgreSQL exposes host-run operations through `ManagedPostgresOperations`. Operations never create a scheduler, daemon, or second migration authority. They use the existing administrative owner for `pg_dump`, `pg_restore`, and recovery work, while application traffic remains on the restricted `basis_app` role. Owner and application passwords remain under `.basis/database/` with owner-only permissions.
+
+Pass the same approved migration artifact that the deployment supplies to `server.migration()`. The artifact records the schema version, expected physical structure, RLS policies, grants, and ownership that the backup must preserve.
+
+```ts
+import { ManagedPostgresOperations } from 'basis/server'
+
+const operations = new ManagedPostgresOperations({ artifact })
+const backup = await operations.backup()
+
+await operations.restore(backup.path, {
+  image: 'postgres:17-alpine',
+})
+```
+
+`backup()` runs `pg_dump` through the administrative owner and writes a custom-format archive plus a checksum manifest under `.basis/backups/`. The manifest records the approved artifact, archive checksum, source image, version, and a canonical User/Role/UserRole data digest. A backup fails unless the approved artifact is currently ready and canonical data remains stable for the whole dump.
+
+`restore()` creates disposable storage and a disposable container, creates the existing application role before restoring role-dependent grants and policies, restores the archive, then verifies both `DDL.readiness(artifact)` and the canonical User/Role data digest. It returns `verified: true` only after both checks pass and removes the temporary resources. It never mutates the live service. A damaged archive or a data mismatch fails the restore.
+
+A major-version upgrade is explicit and operator-driven:
+
+```ts
+await server.shutdown()
+const result = await operations.upgrade('postgres:17-alpine')
+```
+
+The caller must stop application pools before `upgrade()`. Basis first takes a verified recovery point, proves the restore under the target image in disposable storage, copies the current durable volume to an independently restartable recovery volume, and only then detaches the source and stages the verified target. Cutover verifies the restored schema and canonical data again before accepting the target. If cutover fails, Basis restores the recovery volume and the previous image before reporting the failure; unrecoverable failures preserve the recovery and candidate volumes for diagnosis. After a committed cutover, a cleanup failure is returned as `warnings` with the leftover resource names instead of being reported as a failed upgrade; the new database remains active and verified. `rollback(backup.path, previousImage)` is available for an explicit operator rollback through the same safe cutover path and returns the same cleanup warnings.
+
+Use ordinary host facilities for scheduling and retention, such as a cron entry or systemd timer that runs a short operator script and prunes old files under `.basis/backups/`. Do not add a Basis-managed scheduler or process manager.
+
+## Versioned releases
+
+A checked-in `migrations/` directory contains a `manifest.json` with the application release `version` and an ordered list of reviewed `MigrationArtifact` JSON files. Each file's version identity is its filename without `.json`; its checksum and complete expected physical/security schema are validated when loaded. The final artifact must reach the exact configured Graph.
+
+The application root's `graph.ts` is the authored Graph. A deterministic generated `graph.json` is committed beside it for CI; regenerate it with `bun run graph:generate` and verify freshness with `bun run graph:check`. State and backups resolve under the process working directory's `.basis/` directory; do not pass a separate installation root.
+
+`DatabaseRelease` is the host-run release coordinator. The caller first takes the application offline, then calls `apply()`:
+
+```ts
+import { DatabaseRelease } from 'basis/server'
+
+const result = await new DatabaseRelease({
+  graph,
+  migrations: './migrations',
+}).apply()
+```
+
+The coordinator takes a per-release backup, clones the old volume to disposable candidate storage, applies only unapplied artifacts to that candidate, records every ledger entry there, checks the complete Graph/ledger/canonical User/Role contract, and only then promotes the candidate through the existing managed-service cutover. A durable cutover journal records the source image and recovery volume before detachment; service startup reconciles an interrupted cutover before provisioning anything new. A failure before acceptance removes the candidate and restarts the old database unchanged. A host lock rejects concurrent or stale-process releases. `plan()` returns applied and pending migrations for CI or operator inspection.
+
+A same-version invocation returns `changed: false` without creating another backup. Failed releases throw a `ReleaseError` with a stable `code`, `retryable` classification, release version, target hash, phase, and durable evidence; `failure()` exposes the persisted record and `clearFailure()` lets an external controller acknowledge it. Reviewed SQL, schema, and ledger mismatches are classified as deterministic and non-retryable; PostgreSQL transport, timeout, and service failures remain retryable, and an unclassified cause is not permanently quarantined by default. A recorded recovery point is reused for retries of the same transition. Post-commit cleanup obligations are returned as structured `warnings`; they do not turn a committed release into a false failure. The release coordinator does not schedule itself; host facilities invoke it.
+
+The repository CI gate runs `basis` migrations through `bun run test:migrations`. It verifies the generated `graph.json` snapshot, reconstructs the base revision's snapshot and migrations, applies them to disposable PostgreSQL, and verifies the proposed Graph. A missing migration, stale snapshot, or malformed artifact fails the gate.

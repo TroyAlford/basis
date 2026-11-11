@@ -1,0 +1,123 @@
+---
+title: Authorization & Row-Level Security
+---
+
+# Authorization & Row-Level Security
+
+Basis owns one canonical application graph. The graph declares the ontology, the stable roles that exist, and the role/action/row permissions that PostgreSQL enforces. Loading a graph never mutates the database. `server.graph(graph)` puts `server.db` on the restricted application role, and PostgreSQL compiles the graph's permissions into real row-level-security policies.
+
+```ts
+import { Graph, Server } from 'basis/server'
+
+const graph = new Graph({
+  entities: [{
+    name: 'Article',
+    fields: [
+      { field: 'title', type: 'String' },
+      { field: 'owner', type: 'Entity', target: 'User' },
+    ],
+  }],
+  roles: {
+    editor: { name: 'Editor' },
+  },
+  grants: [
+    { role: 'public', action: 'read', target: 'Article', predicate: 'owner = $me' },
+    { role: 'editor', action: 'read', target: 'Article' },
+    { role: 'editor', action: 'update', target: 'Article' },
+    { role: 'admin', action: 'manage', target: '*' },
+  ],
+})
+
+const server = new Server()
+  .root(import.meta.dir)
+  .graph(graph)
+  .database()
+  .start()
+```
+
+The application root conventionally exports `graph.ts` as `export default new Graph({...})`. Keep the application graph in one module and pass it to the server. `Graph` composes the application ontology with the system `User`, `Role`, `ExternalIdentity`, and `UserRole` definitions. Application `User` inherits `Entity`'s `id`, `name`, and `entity`; do not redeclare those fields. `Role` is an identified entity with a stable UUID `id`, an inherited mutable `name`, and an optional `description`.
+
+## Roles and membership
+
+The graph defines which roles exist. Public is the built-in principal that applies to anonymous and signed-in requests. Administrator is the built-in administration role. Additional roles use stable UUID keys or ordinary role declarations:
+
+```ts
+const roles = new Map([
+  ['00000000-0000-4000-8000-000000000010', { name: 'Reviewer' }],
+])
+```
+
+`UserRole` memberships are live records managed through `server.auth`; they are not graph declarations or seed memberships:
+
+```ts
+await server.auth!.bootstrap({
+  provider: 'github',
+  subject: 'operator-subject',
+  email: 'operator@example.com',
+})
+
+await server.auth!.assignRole(userId, 'editor')
+await server.auth!.removeRole(userId, 'editor')
+```
+
+Install the graph schema first through reviewed `DDL.plan → review → apply`; `bootstrap()` does not create or reconcile schema objects. It invokes the same canonical `basis.enroll_identity` function used by OAuth and adds the initial administrator membership. It is an explicit trusted operator action: never call it from an ordinary request handler, and never grant administration on first OAuth login automatically.
+
+Automatic creation of a new `User` requires exactly one concrete `User` descendant. A graph may declare multiple concrete User subtypes for application-managed accounts; existing provider bindings still resolve, but a new automatic signup raises an explicit ambiguity error instead of choosing by declaration order. Enrollment supplies the canonical root name and the optional `User.email` value only; OAuth receives those profile values from the provider `identity` callback. It does not synthesize application-owned fields. If the selected User or one of its concrete subtypes has a required field that the enrollment call does not provide, PostgreSQL rejects creation and leaves no partial identity behind.
+
+## Grants and predicates
+
+The closed action vocabulary is `read`, `create`, `update`, `delete`, and `manage`. A grant binds one graph role, one target entity or relationship, one action, and an optional validated row predicate.
+
+- Applicable grants combine as OR.
+- No applicable grant means denied.
+- A conditional grant never becomes unconditional without an explicit unconditional grant.
+- `manage` authors controlled security administration; it does not grant blanket data writes or PostgreSQL `BYPASSRLS`.
+- Predicates use the same `Filter`/`Predicate`/`QueryNormalizer` vocabulary as entity queries.
+- Graph changes require a new graph and schema plan. There is no runtime grant registry duplicating the graph.
+
+Graph predicates are normalized when the graph loads and compiled into PostgreSQL `CREATE POLICY ... USING (...)` and `WITH CHECK (...)` expressions. PostgreSQL validates and evaluates them as SQL; Basis does not interpret business predicates at request time. RLS covers the universal `Entity` root, every MTI ancestor and concrete table, and every named relationship table. Reads deny by returning no rows. Creates use `WITH CHECK`; updates check old and new rows; deletes check the old row. Default deny applies to tables without applicable grants.
+
+Inherited MTI predicate fields use a narrow, row-scoped Boolean policy helper generated from the compiled predicate. The helper answers only whether the compiled predicate matches one row identity; it does not return field values or accept arbitrary expression text.
+
+## `$me` is search shorthand
+
+`$me` is available in ordinary entity searches, separate from RLS:
+
+```ts
+const mine = await context.db!.query('Article', {
+  fields: ['id', 'title'],
+  where: 'owner = $me',
+})
+```
+
+Both `owner == $me` and `{ field: 'owner', operator: '$eq', value: '$me' }` compare the stored `owner.id` with the current transaction's `actor.id`. Literal ids, `null`, and `!=` remain ordinary identity comparisons. A filter can voluntarily restrict a user even when RLS allows every row; filters never grant access. Direct SQL remains subject to RLS independently of any application search.
+
+## Request transactions
+
+The server resolves the verified canonical actor once at API dispatch. `RouteContext.identity` is that canonical id (or `null`), and `RouteContext.db` is the request-scoped database capability.
+
+```ts
+server.api([HttpVerb.Get], 'articles', async (_params, context) => {
+  return Response.json(await context.db!.query('Article', {
+    fields: ['id', 'title'],
+  }))
+})
+```
+
+Every ordinary application transaction runs through the native Bun `db.tx` path. Before caller SQL, `db.tx` sets the transaction-local `actor.id` setting with `set_config('actor.id', ..., true)`, including an explicit empty value for anonymous or non-request work. `db.query` uses the same transaction path. Nested savepoints, rollback, concurrent requests, and pooled connection reuse cannot carry the setting beyond the transaction.
+
+`actor.id` is a context setting, not a cryptographically unforgeable principal. The accepted trust boundary is the application transaction/SQL-emission layer: it must use parameterized SQL and must not expose arbitrary untrusted SQL execution. RLS protects ordinary application queries and mistakes in filtering; it does not claim to defend against malicious application-role SQL deliberately overwriting `actor.id`.
+
+## PostgreSQL privilege boundary
+
+With a graph configured, `server.db`, `RouteContext.db`, and request-scoped queries always use the restricted application role (`basis_app` by default). Managed PostgreSQL provisions that role through the owner connection, stores its random password under `.basis/database/`, and closes the privileged provisioning connection afterwards. The owner credential is never exposed through `server.db` or `RouteContext`.
+
+The administrative connection is an internal provisioning capability and is not available to ordinary handlers. The application role must be `NOSUPERUSER`, `NOBYPASSRLS`, and not the table owner. Bootstrap and schema DDL remain trusted administrative operations. RLS is enabled on the root, MTI/relationships, and security metadata; `FORCE ROW LEVEL SECURITY` is applied when provisioning runs with owner privilege.
+
+## Inspection and administration
+
+`server.auth!.can(action, target, row?)` executes the compiled policy expression and returns whether PostgreSQL permits the action for the current request actor. `server.auth!.effective(userId)` lists graph grants effective for a user, including Public grants. `server.auth!.revokeIdentity(provider, subject)` revokes a provider binding.
+
+Identity resolution and enrollment use one narrow system-owned security-definer function. OAuth calls it through the restricted application path; `bootstrap()` invokes the same function through its administrative connection. Request-time enrollment does not require the owner credential. Provider subjects are never treated as canonical entity ids, and revoked bindings fail closed. The administrative connection remains reserved for explicit bootstrap and schema provisioning.
+
+The graph's roles, grants, RLS policies, schemas, indexes, and security functions are part of the typed physical schema compiled by `Graph.physicalSchema` and planned by `DDL.plan`. See [Schema Inspection & Planning](./schema.mdx).

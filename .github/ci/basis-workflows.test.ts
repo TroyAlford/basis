@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -65,6 +66,35 @@ function runGate(script: string, needs: Record<string, { result: string }>): {
 }
 
 /**
+ * Run the actual lane-decision shell step against a synthetic decision file.
+ * @param decision - Decision JSON written to `impact-decision.json`.
+ * @returns The process exit code and output.
+ */
+function runLaneStep(decision: unknown): { code: number, output: string } {
+  const step = code.jobs?.['run-tests']?.steps?.find(entry => entry.name === 'Derive test-lane decisions')
+  if (!step?.run) throw new Error('lane decision step is missing')
+  const directory = mkdtempSync(join(tmpdir(), 'basis-impact-lanes-'))
+  const outputFile = join(directory, 'github-output')
+  try {
+    writeFileSync(join(directory, 'impact-decision.json'), JSON.stringify(decision))
+    writeFileSync(outputFile, '')
+    const process = Bun.spawnSync(['bash', '-c', step.run], {
+      cwd: directory,
+      env: { ...Bun.env, GITHUB_OUTPUT: outputFile, POLICY_PRESENT: 'true' },
+      stderr: 'pipe',
+      stdout: 'pipe',
+    })
+    return {
+      code: process.exitCode ?? -1,
+      output: `${new TextDecoder().decode(process.stdout)}${new TextDecoder().decode(process.stderr)}` +
+        readFileSync(outputFile, 'utf8'),
+    }
+  } finally {
+    rmSync(directory, { force: true, recursive: true })
+  }
+}
+
+/**
  * The gate step for a required job.
  * @param workflow - The parsed workflow.
  * @returns The gate script.
@@ -78,9 +108,9 @@ const code = loadWorkflow('.github/workflows/ci.yml')
 const metadata = loadWorkflow('.github/workflows/pr-metadata.yml')
 
 describe('Basis Code CI', () => {
-  test('runs only the code events and never metadata edits', () => {
+  test('runs only the code events on main and epic branches', () => {
     expect(code.name).toBe('Code CI')
-    expect(code.on?.pull_request?.branches).toEqual(['main'])
+    expect(code.on?.pull_request?.branches).toEqual(['main', 'epic/*'])
     expect(code.on?.pull_request?.types).toEqual([
       'opened',
       'synchronize',
@@ -107,12 +137,84 @@ describe('Basis Code CI', () => {
     expect(eslint.some(step => step.run?.includes('bun ./node_modules/eslint/bin/eslint.js'))).toBe(true)
     expect(eslint.some(step => step.run?.includes('stylelint'))).toBe(true)
     expect(eslint.some(step => step.run === 'bun run lint:md')).toBe(true)
-    expect(eslint.some(step => step.run === 'bun test consumer/cli.test.ts')).toBe(true)
+    expect(eslint.some(step => step.run === 'bun test consumer/cli.test.ts')).toBe(false)
 
-    expect(code.jobs?.['run-tests']?.steps?.some(step => step.run === 'bun run test')).toBe(true)
+    const runTests = code.jobs?.['run-tests']?.steps ?? []
+    for (const command of [
+      'bun run test:unit',
+      'bun run test:component',
+      'bun run test:contract',
+      'bun run test:server',
+      'bun run test:lifecycle',
+    ]) {
+      expect(runTests.some(step => step.run === command)).toBe(true)
+    }
     expect(code.jobs?.['type-check']?.steps?.some(step => step.run === 'bun run lint:ts')).toBe(true)
     expect(code.jobs?.['consumer-install']?.steps?.some(step => step.run === 'bun run test:consumer')).toBe(true)
     expect(code.jobs?.knip?.steps?.some(step => step.uses?.includes('/knip'))).toBe(true)
+  })
+
+  test('sets up the pinned Bun toolchain and frozen dependencies', () => {
+    const jobs = ['eslint', 'run-tests', 'type-check', 'knip', 'consumer-install']
+    for (const id of jobs) {
+      const steps = code.jobs?.[id]?.steps ?? []
+      const setup = steps.find(step => step.uses === 'oven-sh/setup-bun@v2')
+      expect(setup?.with?.['bun-version-file']).toBe('.tool-versions')
+      expect(steps.some(step => step.run === 'bun install --frozen-lockfile')).toBe(true)
+    }
+
+    const databaseImage = loadWorkflow('.github/workflows/database-image.yml')
+    const databaseSteps = databaseImage.jobs?.publish?.steps ?? []
+    expect(databaseSteps.find(step => step.uses === 'oven-sh/setup-bun@v2')?.with?.['bun-version-file'])
+      .toBe('.tool-versions')
+    expect(databaseSteps.some(step => step.run === 'bun install --frozen-lockfile')).toBe(true)
+    expect(existsSync(join(root, '.github/actions/asdf-setup'))).toBe(false)
+  })
+
+  test('preflights trusted change impact before conditional test lanes', () => {
+    const runTests = code.jobs?.['run-tests']?.steps ?? []
+    const checkout = runTests.find(step => step.uses?.startsWith('actions/checkout'))
+    expect(checkout?.with?.ref).toBe('${{ github.event.pull_request.base.sha }}')
+    expect(checkout?.with?.['fetch-depth']).toBe(0)
+
+    const fetch = runTests.find(step => step.name === 'Fetch pull-request head and base')
+    expect(fetch?.env?.BASE_REF).toBe('${{ github.event.pull_request.base.ref }}')
+    expect(fetch?.env?.HEAD_SHA).toBe('${{ github.event.pull_request.head.sha }}')
+    expect(fetch?.run).toContain('refs/pull/${PR_NUMBER}/head')
+    expect(fetch?.run).toContain('git checkout --detach refs/remotes/origin/pr-head')
+
+    const impact = runTests.find(step => step.name === 'Analyze change impact')
+    expect(impact?.uses).toBe('TroyAlford/basis/.github/actions/change-impact@v7.11.0')
+    expect(impact?.with?.['config-path']).toBe('.github/ci-impact.json')
+    expect(impact?.with?.['head-sha']).toBe('${{ github.event.pull_request.head.sha }}')
+
+    const lanes = runTests.find(step => step.name === 'Derive test-lane decisions')
+    expect(lanes?.run).toContain('impact-decision.json')
+    expect(lanes?.run).toContain('$lane-needed=true')
+
+    const laneNames = [
+      'unit', 'component', 'contract', 'server', 'lifecycle', 'docs',
+      'screenshots', 'e2e', 'visual', 'database-fixtures', 'fixture-lifecycle', 'hmr',
+    ]
+    for (const lane of laneNames) {
+      expect(runTests.some(step => step.if === `steps.lanes.outputs.${lane}-needed == 'true'`)).toBe(true)
+    }
+  })
+
+  test('preserves false lane decisions and rejects malformed decisions', () => {
+    const laneNames = [
+      'unit', 'component', 'contract', 'server', 'lifecycle', 'docs',
+      'screenshots', 'e2e', 'visual', 'database-fixtures', 'fixture-lifecycle', 'hmr',
+    ]
+    const suites = Object.fromEntries(laneNames.map(lane => [lane, { needed: lane !== 'unit' }]))
+    const valid = runLaneStep({ suites })
+    expect(valid.code).toBe(0)
+    expect(valid.output).toContain('unit-needed=false')
+    expect(valid.output).toContain('e2e-needed=true')
+
+    const malformed = runLaneStep({ suites: { ...suites, unit: { needed: 'yes' } } })
+    expect(malformed.code).not.toBe(0)
+    expect(malformed.output).toContain('is not a boolean')
   })
 
   test('uses a per-PR concurrency group that ignores the event action', () => {

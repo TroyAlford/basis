@@ -2,6 +2,7 @@
 import eslint from '@eslint/js'
 import type { ESLint } from 'eslint'
 import pluginJSDoc from 'eslint-plugin-jsdoc'
+import * as jsoncParser from 'jsonc-eslint-parser'
 import type { ConfigWithExtends } from 'typescript-eslint'
 import pluginTypescript from 'typescript-eslint'
 import { IGNORE_PATTERNS } from './ignores'
@@ -39,6 +40,14 @@ const plugin = (options: PluginOptions): ConfigWithExtends => {
   return config
 }
 
+/** Disable every plugin rule for JSON documents except the entity rule. */
+const JSON_RULES = Object.fromEntries(
+  Object.entries(plugins).flatMap(([namespace, value]) => (
+    Object.keys((value as { rules?: Record<string, unknown> }).rules ?? {})
+      .map(rule => [`${namespace}/${rule}`, 'off'])
+  )),
+)
+
 export default pluginTypescript.config(
   { ignores: IGNORE_PATTERNS },
   eslint.configs.recommended,
@@ -58,6 +67,8 @@ export default pluginTypescript.config(
       '@basis/sort-interface': 'error',
       '@basis/sort-keys': 'error',
       '@basis/sort-string-enum': 'error',
+      '@basis/sql-template-format': 'error',
+      '@basis/transaction-sql-name': 'error',
       '@import-newlines/enforce': ['error', { items: Infinity, semi: false }],
       '@stylistic/array-bracket-newline': ['error', 'consistent'],
       '@stylistic/array-bracket-spacing': ['error', 'never'],
@@ -288,4 +299,13 @@ export default pluginTypescript.config(
       '@stylistic/max-len': 'off',
     },
   }),
+  {
+    files: ['**/*.entities.json'],
+    languageOptions: { parser: jsoncParser },
+    plugins,
+    rules: {
+      ...JSON_RULES,
+      '@basis/entity-definition-format': 'error',
+    },
+  },
 ) as ESLint.ConfigData

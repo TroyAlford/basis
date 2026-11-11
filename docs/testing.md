@@ -19,15 +19,25 @@ A test file's suffix selects its lane. Bun's default discovery runs only `.test`
 ```json
 {
   "scripts": {
-    "test": "bun test",
+    "test": "bun run test:unit",
+    "test:unit": "bun test ./source/unit/**/*.test.ts",
+    "test:coverage": "bun run test:unit --coverage",
+    "test:component": "bun test ./source/components/**/*.test.tsx",
+    "test:contract": "bun test ./source/contract/*.test.ts",
+    "test:server": "bun test ./source/server/*.test.ts",
+    "test:lifecycle": "bun test ./source/lifecycle/*.test.ts",
     "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
     "test:e2e": "bun test ./source/e2e/*.e2e.ts",
-    "test:all": "bun run test && bun run test:screenshots && bun run test:e2e"
+    "test:e2e:visual": "bun test ./source/e2e/visual/*.e2e.ts",
+    "test:e2e:database-fixtures": "bun test ./source/e2e/fixtures/database/*.e2e.ts",
+    "test:e2e:fixtures": "bun run test:e2e:database-fixtures && bun test ./source/e2e/fixtures/*.e2e.ts",
+    "test:e2e:all": "bun run test:e2e && bun run test:e2e:visual && bun run test:e2e:fixtures",
+    "test:all": "bun run test:unit && bun run test:component && bun run test:contract && bun run test:server && bun run test:lifecycle && bun run test:screenshots && bun run test:e2e:all"
   }
 }
 ```
 
-Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots` and `test:e2e` as separate steps in the impact-selected Visual job. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots`, `test:e2e`, `test:e2e:visual`, and `test:e2e:fixtures` as separate steps in the impact-selected Visual job. `test:unit` is the ordinary warm lane; component, contract, server, lifecycle, browser-visual, and database fixture/seed tests have their own commands. Coverage is opt-in with `test:coverage`. The database fixture lane owns independent-install, restart, and prebuilt 500k-row seed proofs so ordinary behavior E2E never pays their container setup cost. `test:all` is deliberate full acceptance, not the ordinary edit loop.
 
 Basis recognizes all three lanes when it attributes a caller, registers a test, and scopes orphan pruning. That recognition never makes a heavy lane a default test: Bun still discovers only `.test` and `.spec`.
 
@@ -35,18 +45,18 @@ Visual snapshots assert appearance; mounted component tests assert behavior; end
 
 A test-lane run is fast and deterministic because the expensive part — the browser — is paid for once and reused:
 
-- exactly **one Docker container** runs Chromium for the whole run;
+- one version-and-runtime-named Docker container serves Chromium for the run and is reused by later runs;
 - exactly **one browser connection** serves every capture;
 - component/JSX snapshots and `app.visit` snapshots share that one browser;
 - the runtime starts on the first capture, never per file, test, assertion, visit, or component;
-- the testing preload tears it down **once**, when the run ends.
+- the testing preload closes the browser and contexts once when the run ends; the container is removed only in explicit ephemeral mode.
 
 ## Lifecycle
 
 ```mermaid
 flowchart TD
     Run["One test-lane run"] --> First["First capture"]
-    First --> Runtime["Run-scoped runtime"]
+    First --> Runtime["Process runtime + persistent Docker"]
     Runtime --> Container["One Docker container<br/>pinned Playwright image"]
     Container --> Server["playwright run-server<br/>published localhost port"]
     Server --> Browser["One browser<br/>chromium.connect(ws)"]
@@ -54,7 +64,7 @@ flowchart TD
     Browser --> Visit["Application captures<br/>app.visit opens a fresh context per visit"]
     Component --> Compare["Compare with the committed PNG<br/>or write it when missing or updating"]
     Visit --> Compare
-    Compare --> Teardown["Preload afterAll<br/>close the browser and remove the container once"]
+    Compare --> Teardown["Preload afterAll<br/>close browser; remove container only when ephemeral"]
 ```
 
 The runtime is memoised on `globalThis`, so every test file in the process resolves the same instance. There is no per-file, per-test, or per-capture browser startup; a run that never captures a screenshot never starts Docker at all.
@@ -67,7 +77,7 @@ Components whose meaningful state only exists after mount — the resolved `Awai
 
 ## Application captures
 
-`useApplication({ entry })` boots the real server once per run on a free loopback port and waits for readiness. `app.visit(path, options?, fn)` opens a fresh browser context on the shared browser, applies the deterministic network policy, navigates, and runs the callback. Contexts are cheap: they keep server and browser state from leaking between visits without paying for a new browser.
+`useApplication({ entry })` attaches to one detached development server per application identity, starts it on a free loopback port when necessary, waits for readiness, and reuses it across runs with HMR enabled. `app.visit(path, options?, fn)` opens a fresh browser context on the shared browser, applies the deterministic network policy, navigates, and runs the callback. Contexts are cheap: they keep server and browser state from leaking between visits without paying for a new browser. Set `BASIS_APPLICATION_FIXTURE_EPHEMERAL=1` for a run-scoped server that the preload stops; `BASIS_APPLICATION_FIXTURE_ROOT` overrides the persistent fixture directory.
 
 ```tsx
 // Deck.e2e.ts
@@ -82,17 +92,63 @@ test('renders the application', async () => {
 })
 ```
 
-Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Component appearance belongs in `*.screenshot.tsx` and runs with `bun run test:screenshots`; neither is part of the default `bun test` lane.
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Docs highlighting is locally pinned through `shiki` and Mermaid uses the local SSR-capable renderer, so visual journeys do not fetch a CDN. The behavior lane excludes the browser-heavy docs captures and the fixture lifecycle proofs; run those with `bun run test:e2e:visual` and `bun run test:e2e:fixtures`. `test:e2e:all` aggregates all three. Component appearance belongs in `*.screenshot.tsx` and runs with `bun run test:screenshots`; none of these are part of the default `bun test` lane.
+
+## Run-scoped cleanup
+
+`registerRunCleanup(callback)` registers teardown for an in-process resource that needs process-wide cleanup but cannot use a child application handle. The callback runs once after the suite, including after failures, and during `SIGINT`/`SIGTERM` teardown. Use it for narrow fixtures such as an in-process database handle that tests must access directly; it is not a general application or resource manager.
+
+## Consumer database fixtures
+
+`basis/testing` exports `withIsolatedDatabase` and `withDurableDatabase` with the same fixture implementation Basis uses. Pass the consumer's entity definitions explicitly to prepare and query that model in a transaction-isolated schema:
+
+```ts
+import { Graph } from 'basis/server'
+import { withIsolatedDatabase } from 'basis/testing'
+
+const graph = new Graph({
+  entities: [{
+    fields: [{ field: 'id', format: 'UUID' }, { field: 'label', type: 'String' }],
+    name: 'ConsumerNote',
+  }],
+})
+
+await withIsolatedDatabase('consumer', async database => {
+  await database.sql`INSERT INTO "Entity" ("id", "name", "entity") VALUES (... )`
+  await database.sql`INSERT INTO "ConsumerNote" ("id", "label") VALUES (... )`
+  const rows = await database.query('ConsumerNote', { fields: ['id', 'label'] })
+}, { entities: graph.definitions })
+```
+
+`test:consumer` proves this import and a real PostgreSQL transaction from a fresh Git-dependency install.
+
+## Database isolation
+
+Server database tests reuse one managed PostgreSQL service per checkout. The fixture keeps the container between runs and caches one migrated schema per exact entity-definition set; the first run creates it and later runs reuse it. Ordinary tests run inside one reserved transaction, set the cached schema, use savepoints for expected failures, and roll everything back whether the test succeeds or fails. DDL, data, `db.sql`, and entity-rooted `db.query` share that transaction. Cross-transaction tests use an explicitly committed unique schema and drop it in cleanup instead of pretending commit behavior can roll back. Fixture lifecycle proofs set `BASIS_DATABASE_FIXTURE_EPHEMERAL=1` when they need explicit container removal; `BASIS_TEST_FIXTURE_ROOT` overrides the persistent fixture directory.
+
+### Golden SQL assertions
+
+Server database tests assert complete SQL statements, not fragments. Register the test-only `toMatchSQL` matcher from `libraries/server/testing/toMatchSQL.ts`:
+
+```ts
+import { expect } from 'bun:test'
+import { toMatchSQL } from '../testing/toMatchSQL'
+
+expect.extend({ toMatchSQL })
+expect(statement).toMatchSQL(`SELECT "id" FROM "Note" WHERE "id" = $1`)
+```
+
+The matcher normalizes only insignificant whitespace outside quoted text; quoting, keywords, operators, placeholders, and ordered statement arrays remain significant. Dollar-quoted string contents, backslash escapes in `E'…'` strings, and line/nested block comment text—including line-comment newlines—are preserved rather than normalized. Use complete golden statements for phased DDL and compiled queries, and assert ordered bind values separately from their SQL text.
 
 ## Docker and determinism
 
-Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime publishes the container's `run-server` to a random localhost port and connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server; the container has no fixed name and no host-network assumption.
+Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime publishes the container's `run-server` to a random localhost port and connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server; the container is named from the installed Playwright version and the mounted Playwright runtime identity, and uses no host-network assumption.
 
-With no fixed identity, no lock files, no reference counts, and no PID protocols, there is nothing to coordinate between runs: each run owns exactly one container and removes it when it finishes.
+The container is named from the installed Playwright version. A normal development run reconnects to that healthy named run-server; an explicit ephemeral run uses a process-unique name and removes it at teardown. Browser contexts remain isolated per visit, and the component capture page remains reused within the process.
 
 ## Proving the contract
 
-`libraries/testing/runtime.lifecycle.test.ts` is the benchmark. It generates several test files — dozens of component snapshots, repeated captures within one test, and multiple `app.visit` snapshots — and runs them in one real child `bun test` process. The runtime records its lifecycle events to `BASIS_SNAPSHOT_ACTIVITY_LOG`, and the test asserts **one container start, one browser connection, and one teardown** for the run, reporting the measured runtime.
+`libraries/testing/runtime.lifecycle.e2e.ts` is the benchmark. It generates several test files — dozens of component snapshots, repeated captures within one test, and multiple `app.visit` snapshots — and runs them in one real child `bun test` process with `BASIS_SNAPSHOT_FIXTURE_EPHEMERAL=1`. The runtime records its lifecycle events to `BASIS_SNAPSHOT_ACTIVITY_LOG`, and the test asserts **one ephemeral container start, one browser connection, and one teardown** for the run, reporting the measured runtime. Normal visual runs attach to the version-named persistent container instead of launching again.
 
 ## Temp directories
 

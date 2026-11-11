@@ -14,17 +14,24 @@ import type { APIRoute } from '../types/APIRoute'
 import type { RouteContext } from '../types/RouteContext'
 import type { Socket, SocketHandlers } from '../types/Socket'
 import type { SseHandler } from '../types/SseChannel'
+import { runAsActor } from './ActorContext'
+import { Authorization } from './Authorization'
 import { Builder } from './Builder'
+import type { Database, DatabaseOptions, ManagedDatabaseOptions } from './Database'
+import { createDatabase, NullDatabase, openAdmin } from './Database'
 import { DEV_SHELL_ROUTE, devShellDirectory, writeDevShell } from './DevShell'
 import type { FavIconInput, IconOptions, IconRegistry, ResolvedFavIcon } from './FavIcon'
 import { FAVICON_URL, favIconResponse, iconResponse, matchIconPath, resolveFavIcon, resolveIcon } from './FavIcon'
+import type { Graph } from './Graph'
 import type { OAuthOptions } from './OAuth'
 import { OAuth } from './OAuth'
+import type { MigrationArtifact } from './Schema'
+import { DDL, physicalHash } from './Schema'
 import type { SocketData } from './Sockets'
 import { createSocket, normalizeSocketTemplate } from './Sockets'
 import { sseResponse } from './Sse'
 import type { StaticMount } from './StaticMount'
-import { normalizeMountPrefix, serveMount } from './StaticMount'
+import { containsInternalStateSegment, isInternalStatePath, normalizeMountPrefix, publicStaticFile, serveMount } from './StaticMount'
 
 /** Options for {@link Server.start}. */
 export interface ServerOptions {
@@ -85,7 +92,12 @@ export class Server {
 
   #apis = new Map<string, APIRoute>()
   #assets: string | null = null
+  #authorization: Authorization | null = null
+  #graph: Graph | null = null
   #builder: Builder | null = null
+  #closing: Promise<void> | null = null
+  #database: Database = new NullDatabase()
+  #databaseOptions: DatabaseOptions | null = null
   #development = true
   #entrypoints: [string, string][] = []
   #favIcon: ResolvedFavIcon | null = null
@@ -98,6 +110,7 @@ export class Server {
   #mounts: StaticMount[] = []
   #ready: Promise<void> = Promise.resolve()
   #readyError: Error | null = null
+  #schemaExpectation: MigrationArtifact | null = null
   #root: string = process.cwd()
   #server: BunServer<SocketData> | null = null
   #sockets = new Map<string, SocketHandlers>()
@@ -148,6 +161,25 @@ export class Server {
   }
 
   /**
+   * The canonical authorization capability when configured.
+   * @returns The authorization service, or null.
+   */
+  get auth(): Authorization | null {
+    return this.#authorization
+  }
+
+  /**
+   * The server-owned database capability.
+   *
+   * A server always has a database capability. When {@link database} has not
+   * configured one, this is a {@link NullDatabase} whose calls fail gracefully.
+   * @returns The database capability.
+   */
+  get db(): Database {
+    return this.#database
+  }
+
+  /**
    * Immutable runtime facts embedded into the SPA shell for the client
    * application context. `SERVICE_NAME`, `VERSION`, and `GIT_SHA` are read from
    * the platform environment; unknown values are `null`.
@@ -183,7 +215,16 @@ export class Server {
    * @returns The API response, or `null` when no template matches.
    */
   async handleAPI(uri: URI, request: Request): Promise<Response | null> {
-    const context: RouteContext = { logger: this.#logger, request }
+    const verified = this.#identity?.get(request) ?? null
+    const identity = this.#authorization
+      ? await this.#authorization.resolve(verified)
+      : verified
+    const context: RouteContext = {
+      db: this.#database,
+      identity,
+      logger: this.#logger,
+      request,
+    }
 
     for (const target of this.#targets(uri)) {
       if (!target) continue
@@ -194,6 +235,9 @@ export class Server {
         const params = parseTemplateURI(target, template)
         if (!params) continue
 
+        if (this.#authorization) {
+          return await runAsActor({ id: identity }, () => handler(params, context))
+        }
         return await handler(params, context)
       }
     }
@@ -234,7 +278,20 @@ export class Server {
             statusText: 'Method Not Allowed',
           })
         }
-        return sseResponse(params, { logger: this.#logger, request }, handler)
+        const verified = this.#identity?.get(request) ?? null
+        const identity = this.#authorization
+          ? await this.#authorization.resolve(verified)
+          : verified
+        const context: RouteContext = {
+          db: this.#database,
+          identity,
+          logger: this.#logger,
+          request,
+        }
+        if (this.#authorization) {
+          return runAsActor({ id: identity }, () => sseResponse(params, context, handler))
+        }
+        return sseResponse(params, context, handler)
       }
     }
 
@@ -247,10 +304,15 @@ export class Server {
    * @returns The asset response.
    */
   async handleAsset(uri: URI): Promise<Response> {
-    if (!this.#assets) return Server.NotFound
+    if (!this.#assets || isInternalStatePath(uri.route)) return Server.NotFound
 
-    const asset = Bun.file(path.join(this.#assets, uri.route))
-    if (await asset.exists() === false) return Server.NotFound
+    const filePath = path.join(this.#assets, uri.route)
+    if (containsInternalStateSegment(this.#assets) || containsInternalStateSegment(filePath)) {
+      return Server.NotFound
+    }
+
+    const asset = await publicStaticFile(filePath)
+    if (!asset) return Server.NotFound
 
     const version = asset.lastModified.toString()
 
@@ -335,7 +397,8 @@ export class Server {
    * @returns The UI response.
    */
   async handleUI(request?: Request): Promise<Response> {
-    const identity = request && this.#identity ? this.#identity.get(request) : null
+    const verified = request && this.#identity ? this.#identity.get(request) : null
+    const identity = this.#authorization ? await this.#authorization.resolve(verified) : verified
     const runtime: BasisRuntime = { ...this.runtime, identity }
 
     /*
@@ -433,6 +496,25 @@ export class Server {
       this.#assets ? [this.#assets] : [],
     )
 
+    let databaseOptions: ManagedDatabaseOptions = this.#databaseOptions ?? {}
+    if (this.#graph) {
+      databaseOptions = {
+        ...databaseOptions,
+        authorization: true,
+        entities: this.#graph.definitions,
+      }
+    }
+    if (this.#databaseOptions || this.#graph) {
+      this.#database = createDatabase(databaseOptions)
+      if (this.#graph) {
+        this.#authorization = new Authorization({
+          database: this.#database,
+          graph: this.#graph,
+        })
+      }
+    }
+    const databaseReady = this.#databaseReady()
+
     let routes: Bun.Serve.Routes<SocketData, string> | undefined
 
     if (development) {
@@ -451,15 +533,11 @@ export class Server {
 
       this.#readyError = null
       this.#status = 'starting'
-      this.#ready = Promise.resolve()
+      this.#ready = databaseReady
     } else {
       const builder = new Builder({
         development,
         logger: this.#logger,
-        onRebuild: () => {
-          this.#readyError = null
-          this.#status = 'ok'
-        },
         root: this.#root,
         watch: false,
       })
@@ -471,17 +549,9 @@ export class Server {
       this.#builder = builder
       this.#readyError = null
       this.#status = 'starting'
-      this.#ready = builder.initialBuild()
-        .then(() => undefined)
-        .catch((error: unknown) => {
-          const failure = error instanceof Error ? error : new Error(String(error))
-          this.#readyError = failure
-          this.#status = 'error'
-          this.#logger.error(`build failed: ${failure.message}`)
-          throw failure
-        })
-      // Avoid an unhandled rejection when a caller never awaits `ready()`.
-      void this.#ready.catch(() => undefined)
+      this.#ready = this.#trackReady(
+        Promise.all([builder.initialBuild(), databaseReady]).then(() => undefined),
+      )
     }
 
     this.#server = Bun.serve({
@@ -510,7 +580,10 @@ export class Server {
     process.on('SIGTERM', this.#handleSignal)
 
     // Development builds lazily; prove one build before reporting healthy.
-    if (development && routes) this.#warmDevelopment()
+    if (development) {
+      if (routes) this.#warmDevelopment(databaseReady)
+      else this.#ready = this.#trackReady(databaseReady)
+    }
 
     this.#logger.info(`listening http://${this.#server.hostname}:${this.#server.port}`)
 
@@ -518,7 +591,10 @@ export class Server {
   }
 
   /**
-   * Stops the server and its build watcher.
+   * Stops the server, its build watcher, and its database pool.
+   *
+   * Pool teardown is asynchronous; {@link shutdown} waits for it. This method
+   * keeps its synchronous contract for existing callers.
    * @returns The server.
    */
   stop = (): Server => {
@@ -533,7 +609,26 @@ export class Server {
     this.#server?.stop()
     this.#server = null
 
+    if (!this.#closing) {
+      const closing = this.#database.close()
+      void closing.catch((error: unknown) => {
+        const failure = error instanceof Error ? error : new Error(String(error))
+        this.#logger.error(`database close failed: ${failure.message}`)
+      })
+      this.#closing = closing
+    }
+
     return this
+  }
+
+  /**
+   * Stops the server and waits for asynchronous teardown, including the
+   * server-owned database pool.
+   * @returns A promise that settles when teardown finishes.
+   */
+  async shutdown(): Promise<void> {
+    this.stop()
+    await this.#closing
   }
 
   /**
@@ -562,11 +657,78 @@ export class Server {
    * @returns The server.
    */
   oauth(options: OAuthOptions): Server {
-    const flow = new OAuth(options)
+    const provider = options.session.provider
+    const resolve = options.identity
+    const flow = new OAuth({
+      ...options,
+      identity: async accessToken => {
+        const resolved = await resolve(accessToken)
+        if (resolved === null || !this.#authorization) return resolved
+        const subject = typeof resolved === 'string' ? resolved : resolved.subject
+        const profile: { displayName?: string, email?: string } = {}
+        if (typeof resolved !== 'string') {
+          if (resolved.displayName !== undefined) profile.displayName = resolved.displayName
+          if (resolved.email !== undefined) profile.email = resolved.email
+        }
+        return this.#authorization.enrollIdentity(provider, subject, profile)
+      },
+    })
     this.identity(options.session)
     this.api([HttpVerb.Get], 'oauth/login', () => flow.login())
     this.api([HttpVerb.Get], 'oauth/callback', (_params, { request }) => flow.callback(request))
     this.api([HttpVerb.Get], 'oauth/logout', (_params, { request }) => flow.logout(request))
+    return this
+  }
+
+  /**
+   * Configures the canonical application graph and PostgreSQL RLS capability.
+   *
+   * The graph owns roles and permissions; loading it never mutates PostgreSQL.
+   * The database is placed in restricted application-role mode. Bootstrap is
+   * explicit through {@link Authorization.bootstrap}; OAuth login never grants
+   * administration.
+   * @param graph - The application graph.
+   * @returns The server.
+   */
+  graph(graph: Graph): Server {
+    this.#graph = graph
+    return this
+  }
+
+  /**
+   * Requires the deployed schema to match an approved migration artifact.
+   *
+   * Readiness runs through the trusted administrative connection at startup and
+   * fails closed without applying any migration. {@link DDL.readiness} performs
+   * the check; this method only wires it into startup/health.
+   * @param artifact - Approved immutable migration artifact.
+   * @returns The server.
+   */
+  migration(artifact: MigrationArtifact): Server {
+    this.#schemaExpectation = artifact
+    return this
+  }
+
+  /**
+   * Configures the server-owned PostgreSQL capability.
+   *
+   * The server reconciles its application-scoped managed PostgreSQL service on
+   * `start`, discovers its Docker-allocated loopback port, and connects the
+   * pool before reporting healthy. The server owns the pool lifecycle; the
+   * managed database service outlives it.
+   * @param options - Optional image selection for the managed service.
+   * @returns The server.
+   */
+  database(options: DatabaseOptions = {}): Server {
+    const unsupported = ['adminUrl', 'appRole', 'authorization', 'entities', 'url']
+      .filter(key => key in options)
+    if (unsupported.length > 0) {
+      throw new Error(
+        `Server: unsupported database option(s): ${unsupported.join(', ')}. ` +
+        'Basis owns its managed PostgreSQL instance; provide the application model through Graph.',
+      )
+    }
+    this.#databaseOptions = options
     return this
   }
 
@@ -736,27 +898,86 @@ export class Server {
   }
 
   /**
-   * Build the development shell once so `/api/health` reflects a real build.
-   *
-   * Development compiles lazily on the first request, so `ready()` and
-   * `/api/health` stay `starting` until one build has actually succeeded. A failed
-   * build reports `error` rather than a healthy process.
+   * Tracks the combined startup readiness of the build and database.
+   * @param readiness - The pending startup work.
+   * @returns The tracked readiness promise.
    */
-  #warmDevelopment(): void {
-    this.#ready = fetch(this.#devShellURL())
-      .then(response => {
-        if (!response.ok) throw new Error(`development build failed (${response.status})`)
+  #trackReady(readiness: Promise<void>): Promise<void> {
+    const tracked = readiness
+      .then(() => {
+        this.#readyError = null
         this.#status = 'ok'
       })
       .catch((error: unknown) => {
         const failure = error instanceof Error ? error : new Error(String(error))
         this.#readyError = failure
         this.#status = 'error'
-        this.#logger.error(`build failed: ${failure.message}`)
+        this.#logger.error(`startup failed: ${failure.message}`)
         throw failure
       })
     // Avoid an unhandled rejection when a caller never awaits `ready()`.
-    void this.#ready.catch(() => undefined)
+    void tracked.catch(() => undefined)
+    return tracked
+  }
+
+  /**
+   * Build the development shell once so `/api/health` reflects a real build.
+   *
+   * Development compiles lazily on the first request, so `ready()` and
+   * `/api/health` stay `starting` until one build has actually succeeded. A failed
+   * build reports `error` rather than a healthy process.
+   * @param databaseReady - The pending database startup.
+   */
+  #warmDevelopment(databaseReady: Promise<void>): void {
+    const buildReady = fetch(this.#devShellURL()).then(response => {
+      if (!response.ok) throw new Error(`development build failed (${response.status})`)
+    })
+    this.#ready = this.#trackReady(
+      Promise.all([buildReady, databaseReady]).then(() => undefined),
+    )
+  }
+
+  /**
+   * Connect the database and validate any configured schema expectation.
+   * @returns A promise that resolves when the database path is ready.
+   */
+  #databaseReady(): Promise<void> {
+    if (this.#database instanceof NullDatabase) {
+      if (this.#schemaExpectation) {
+        return Promise.reject(new Error('Schema readiness requires a database'))
+      }
+      return Promise.resolve()
+    }
+    return this.#database.connect().then(async () => {
+      if (!this.#schemaExpectation) {
+        if (this.#graph && !this.#development) {
+          throw new Error(
+            'Graph-backed production requires an approved migration artifact; ' +
+            'install or migrate explicitly with DDL.plan -> DDL.review -> DDL.apply',
+          )
+        }
+        return
+      }
+      const artifact = this.#schemaExpectation
+      if (this.#graph) {
+        const expected = this.#graph.physicalSchema(artifact.appRole, artifact.superuser)
+        if (physicalHash(expected) !== artifact.targetHash) {
+          throw new Error(
+            'Approved migration artifact does not match the configured Graph; ' +
+            'review and apply a migration for the current Graph',
+          )
+        }
+      }
+      const admin = await openAdmin(this.#database)
+      try {
+        const result = await DDL.readiness(admin.sql, artifact)
+        if (!result.ready) {
+          throw new Error(`Schema readiness failed: ${result.discrepancies.join('; ')}`)
+        }
+      } finally {
+        await admin.close()
+      }
+    })
   }
 
   /**
@@ -891,10 +1112,9 @@ export class Server {
     return uri.type === 'api' ? [uri.route] : uri.route ? [] : [uri.type]
   }
 
-  /** Handles process shutdown signals by stopping and exiting cleanly. */
+  /** Handles process shutdown signals by stopping, closing the pool, and exiting cleanly. */
   #handleSignal = (): void => {
-    this.stop()
-    process.exit(0)
+    void this.shutdown().finally(() => process.exit(0))
   }
 
   /**

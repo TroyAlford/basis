@@ -8,23 +8,24 @@ interface Props {
   theme: string,
 }
 
-/** The Shiki runtime surface this component uses. */
+/** The locally pinned Shiki runtime surface. */
 interface Shiki {
-  /** Highlight `code` to Shiki HTML. */
+  /** Highlight source to Shiki HTML. */
   codeToHtml: (code: string, options: { lang: string, theme: string }) => Promise<string>,
 }
 
 /** The Shiki runtime, loaded at most once per document. */
 let runtime: Promise<Shiki> | null = null
 
+/** Highlighted HTML keyed by theme, language, and source. */
+const highlighted = new Map<string, string>()
+
 /**
- * Load the Shiki runtime, once per document.
+ * Load the installed Shiki runtime, once per document.
  * @returns The runtime.
  */
 function loadShiki(): Promise<Shiki> {
-  // @ts-expect-error - the runtime is loaded from a URL, not a package.
-  // eslint-disable-next-line @basis/import-extensions
-  runtime ??= import('https://esm.sh/shiki@3.0.0')
+  runtime ??= import('shiki')
   return runtime
 }
 
@@ -41,8 +42,13 @@ export async function highlight(
   theme = 'github-dark-high-contrast',
 ): Promise<string | null> {
   if (typeof globalThis.document === 'undefined') return null
+  const key = `${theme}\u0000${language}\u0000${code}`
+  const cached = highlighted.get(key)
+  if (cached !== undefined) return cached
   const { codeToHtml } = await loadShiki()
-  return codeToHtml(code, { lang: language, theme })
+  const html = await codeToHtml(code, { lang: language, theme })
+  highlighted.set(key, html)
+  return html
 }
 
 export class Code extends Component<Props> {

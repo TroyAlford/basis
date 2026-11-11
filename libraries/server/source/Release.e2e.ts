@@ -1,0 +1,492 @@
+import { Logger } from 'basis/logger'
+import { tempDirectory } from 'basis/testing'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { mkdir, readdir, rm, unlink, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { removeService } from '../testing/DatabaseFixture'
+import { installSchema } from '../testing/Schema'
+import { createDatabase, openAdmin } from './Database'
+import { Graph } from './Graph'
+import { DatabaseRelease, loadRelease, ReleaseError } from './Release'
+import type { MigrationArtifact } from './Schema'
+import { artifactChecksum, DDL } from './Schema'
+import { Server } from './Server'
+
+/**
+ * Build a migration artifact from one live model to another.
+ * @param current - Current Graph.
+ * @param next - Proposed Graph.
+ * @param install - Installation root.
+ * @param version - Reviewed migration version.
+ * @returns The reviewed artifact.
+ */
+async function nextArtifact(
+  current: Graph,
+  next: Graph,
+  install: string,
+  version = 'next-reviewed',
+): Promise<MigrationArtifact> {
+  const previous = process.cwd()
+  process.chdir(install)
+  const database = createDatabase({ authorization: true, entities: current.definitions })
+  try {
+    await database.connect()
+    const admin = await openAdmin(database)
+    try {
+      await admin.sql.unsafe('SET search_path TO "public"').simple()
+      const actual = await DDL.introspect(admin.sql)
+      expect(actual.tables.map(table => table.name)).toContain('Note')
+      const plan = DDL.plan({
+        actual,
+        appRole: 'basis_app',
+        desired: next,
+        previous: current,
+        previousPhysical: current.physicalSchema('basis_app', true),
+        superuser: true,
+      })
+      return DDL.review(plan, {
+        appRole: 'basis_app',
+        resolutions: plan.operations
+          .filter(operation => operation.risk === 'data')
+          .map(operation => ({
+            approved: true,
+            operationId: operation.id,
+            sql: operation.sql,
+          })),
+        schema: 'public',
+        superuser: true,
+        version,
+      })
+    } finally {
+      await admin.close()
+    }
+  } finally {
+    process.chdir(previous)
+    await database.close()
+  }
+}
+
+/**
+ * Write one release directory.
+ * @param directory - Target directory.
+ * @param version - Application release version.
+ * @param artifacts - Artifacts in order.
+ */
+async function writeRelease(
+  directory: string,
+  version: string,
+  artifacts: readonly MigrationArtifact[],
+): Promise<void> {
+  await mkdir(directory, { recursive: true })
+  const migrations: string[] = []
+  for (const artifact of artifacts) {
+    const filename = `${artifact.version}.json`
+    migrations.push(filename)
+    await writeFile(join(directory, filename), `${JSON.stringify(artifact, null, 2)}\n`)
+  }
+  await writeFile(join(directory, 'manifest.json'), `${JSON.stringify({ migrations, version }, null, 2)}\n`)
+}
+
+/**
+ * Replace the first operation with a real, transient PostgreSQL connection termination.
+ * @param artifact - Reviewed target artifact.
+ * @returns Artifact with a valid checksum and one transient operation.
+ */
+function transientArtifact(artifact: MigrationArtifact): MigrationArtifact {
+  const operation = artifact.operations[0]
+  if (!operation) throw new Error('Transient fault fixture requires at least one migration operation')
+  const operations = [
+    {
+      ...operation,
+      id: 'transient-failure',
+      sql: 'SELECT pg_terminate_backend(pg_backend_pid()) ' +
+        'FROM (SELECT nextval(\'public.basis_fault_once\') AS n) s WHERE s.n = 1',
+    },
+    ...artifact.operations,
+  ]
+  return { ...artifact, checksum: artifactChecksum({ ...artifact, operations }), operations }
+}
+
+/**
+ * Read readiness for a Graph on the managed source.
+ * @param install - Installation root.
+ * @param graph - Graph to check.
+ * @param artifact - Approved artifact.
+ * @returns Whether the source matches.
+ */
+async function sourceReady(
+  install: string,
+  graph: Graph,
+  artifact: MigrationArtifact,
+): Promise<boolean> {
+  const previous = process.cwd()
+  process.chdir(install)
+  const database = createDatabase({ authorization: true, entities: graph.definitions })
+  try {
+    await database.connect()
+    const admin = await openAdmin(database)
+    try {
+      return (await DDL.readiness(admin.sql, artifact)).ready
+    } finally {
+      await admin.close()
+    }
+  } finally {
+    process.chdir(previous)
+    await database.close()
+  }
+}
+
+/**
+ * Advance the one-shot transient-failure sequence in the source database.
+ * @param install - Installation root.
+ * @param graph - Current source Graph.
+ */
+async function advanceTransientFault(install: string, graph: Graph): Promise<void> {
+  const previous = process.cwd()
+  process.chdir(install)
+  const database = createDatabase({ authorization: true, entities: graph.definitions })
+  try {
+    await database.connect()
+    const admin = await openAdmin(database)
+    try {
+      await admin.sql`SELECT nextval('public.basis_fault_once')`
+    } finally {
+      await admin.close()
+    }
+  } finally {
+    process.chdir(previous)
+    await database.close()
+  }
+}
+
+const installs: string[] = []
+const originalCwd = process.cwd()
+const silent = new Logger({ silent: true })
+const application = join(import.meta.dir, '..', '..', '..', 'testing', 'server', 'Application.tsx')
+
+afterEach(async () => {
+  process.chdir(originalCwd)
+  for (const install of installs.splice(0)) {
+    removeService(install)
+    await rm(install, { force: true, recursive: true })
+  }
+})
+
+describe('versioned database releases', () => {
+  test('stages migrations on a candidate, backs up, and exposes a truthful result', async () => {
+    const install = tempDirectory('basis-release-')
+    installs.push(install)
+    const previous = process.cwd()
+    const graphA = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+    })
+    const graphB = new Graph({
+      entities: [{
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'extra', type: 'String' },
+        ],
+        name: 'Note',
+      }],
+    })
+    process.chdir(install)
+    const database = createDatabase({ authorization: true, entities: graphA.definitions })
+    let artifactA: MigrationArtifact
+    try {
+      await database.connect()
+      const admin = await openAdmin(database)
+      try {
+        artifactA = await installSchema(admin.sql, graphA, {
+          appRole: 'basis_app',
+          schema: 'public',
+          superuser: true,
+          version: '0001-initial',
+        })
+        expect((await DDL.introspect(admin.sql)).tables.length).toBeGreaterThan(0)
+        expect((await DDL.readiness(admin.sql, artifactA)).ready).toBe(true)
+      } finally {
+        await admin.close()
+      }
+    } finally {
+      process.chdir(previous)
+      await database.close()
+    }
+    const artifactB = await nextArtifact(graphA, graphB, install)
+    const releaseDirectory = join(install, 'migrations')
+    await writeRelease(releaseDirectory, '2.0.0', [artifactA, artifactB])
+
+    process.chdir(install)
+    const release = new DatabaseRelease({
+      graph: graphB,
+      migrations: releaseDirectory,
+    })
+    const plan = await release.plan()
+    expect(plan.applied).toHaveLength(1)
+    expect(plan.pending).toHaveLength(1)
+    expect(plan.upToDate).toBe(false)
+
+    const result = await release.apply()
+    expect(result.changed).toBe(true)
+    expect(result.applied).toEqual([artifactB.version])
+    expect(result.backup?.artifactVersion).toBe(artifactA.version)
+    expect(await sourceReady(install, graphB, artifactB)).toBe(true)
+
+    const previousCwd = process.cwd()
+    process.chdir(install)
+    const server = new Server()
+      .graph(graphB)
+      .database()
+      .migration(artifactB)
+      .root(install)
+      .main(application)
+      .start({ development: false, hostname: '127.0.0.1', logger: silent, port: 0 })
+    process.chdir(previousCwd)
+    try {
+      await expect(server.ready()).resolves.toBeUndefined()
+    } finally {
+      await server.shutdown()
+    }
+
+    const backupsBefore = (await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length
+    const noop = await release.apply()
+    expect(noop.changed).toBe(false)
+    expect(noop.applied).toEqual([])
+    expect(noop.backup).toBeUndefined()
+    expect((await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length).toBe(backupsBefore)
+
+    const missing = join(install, 'migrations-missing')
+    await writeRelease(missing, '2.0.0', [artifactA])
+    await expect(loadRelease(missing, graphB)).rejects.toThrow('do not reach the configured Graph')
+
+    const tampered = join(install, 'migrations-tampered')
+    await mkdir(tampered, { recursive: true })
+    await writeFile(join(tampered, `${artifactB.version}.json`), `${JSON.stringify({
+      ...artifactB,
+      operations: [],
+    }, null, 2)}\n`)
+    await writeFile(join(tampered, 'manifest.json'), `${JSON.stringify({
+      migrations: [`${artifactB.version}.json`],
+      version: '2.0.0',
+    }, null, 2)}\n`)
+    await expect(loadRelease(tampered, graphB)).rejects.toThrow('checksum')
+
+    const lock = join(install, '.basis', 'database', 'release.lock')
+    await writeFile(lock, `${process.pid}\n`, { mode: 0o600 })
+    await expect(release.apply()).rejects.toThrow('already locked')
+    await unlink(lock)
+  }, 240_000)
+
+  test('a failed candidate leaves the previous release live', async () => {
+    const install = tempDirectory('basis-release-failure-')
+    installs.push(install)
+    const previous = process.cwd()
+    const graphA = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+    })
+    const graphB = new Graph({
+      entities: [{
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'extra', type: 'String' },
+        ],
+        name: 'Note',
+      }],
+    })
+    const graphC = new Graph({
+      entities: [{
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'extra', type: 'String' },
+          { field: 'third', type: 'String' },
+        ],
+        name: 'Note',
+      }],
+    })
+    process.chdir(install)
+    const database = createDatabase({ authorization: true, entities: graphA.definitions })
+    let artifactA: MigrationArtifact
+    try {
+      await database.connect()
+      const admin = await openAdmin(database)
+      try {
+        artifactA = await installSchema(admin.sql, graphA, {
+          appRole: 'basis_app',
+          schema: 'public',
+          superuser: true,
+          version: '0001-initial',
+        })
+      } finally {
+        await admin.close()
+      }
+    } finally {
+      process.chdir(previous)
+      await database.close()
+    }
+    const artifactB = await nextArtifact(graphA, graphB, install)
+    const releaseB = join(install, 'migrations-b')
+    await writeRelease(releaseB, '2.0.0', [artifactA, artifactB])
+    process.chdir(install)
+    expect((await new DatabaseRelease({ graph: graphB, migrations: releaseB }).apply()).changed)
+      .toBe(true)
+
+    process.chdir(install)
+    const current = createDatabase({ authorization: true, entities: graphB.definitions })
+    let artifactC: MigrationArtifact
+    try {
+      await current.connect()
+      const admin = await openAdmin(current)
+      try {
+        await admin.sql.unsafe('SET search_path TO "public"').simple()
+        const plan = DDL.plan({
+          actual: await DDL.introspect(admin.sql),
+          appRole: 'basis_app',
+          desired: graphC,
+          previous: graphB,
+          previousPhysical: graphB.physicalSchema('basis_app', true),
+          superuser: true,
+        })
+        const operation = plan.operations.find(candidate => candidate.kind === 'add-column') ?? plan.operations[0]
+        artifactC = DDL.review(plan, {
+          appRole: 'basis_app',
+          resolutions: [{
+            approved: true,
+            operationId: operation.id,
+            sql: 'SELECT * FROM "missing_release_table"',
+          }],
+          schema: 'public',
+          superuser: true,
+          version: '0003-third',
+        })
+      } finally {
+        await admin.close()
+      }
+    } finally {
+      process.chdir(previous)
+      await current.close()
+    }
+    const releaseC = join(install, 'migrations-c')
+    await writeRelease(releaseC, '3.0.0', [artifactA, artifactB, artifactC])
+    process.chdir(install)
+    const failing = new DatabaseRelease({
+      graph: graphC,
+      migrations: releaseC,
+    })
+    const firstFailure = (await failing.apply().catch((error: unknown) => error)) as ReleaseError
+    expect(firstFailure).toBeInstanceOf(ReleaseError)
+    expect(firstFailure).toMatchObject({
+      code: 'MIGRATION_FAILED',
+      retryable: false,
+      version: '3.0.0',
+    })
+    expect(await failing.failure()).toMatchObject({
+      code: 'MIGRATION_FAILED',
+      retryable: false,
+      version: '3.0.0',
+    })
+    const backupsAfterFailure = (await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length
+    const repeated = new DatabaseRelease({
+      graph: graphC,
+      migrations: releaseC,
+    })
+    const repeatedFailure = (await repeated.apply().catch((error: unknown) => error)) as ReleaseError
+    expect(repeatedFailure).toBeInstanceOf(ReleaseError)
+    expect(repeatedFailure.code).toBe('MIGRATION_FAILED')
+    expect((await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length).toBe(backupsAfterFailure)
+    expect(await sourceReady(install, graphB, artifactB)).toBe(true)
+
+    const corrected = await nextArtifact(graphB, graphC, install, '0003-corrected')
+    await writeRelease(releaseC, '3.0.0', [artifactA, artifactB, corrected])
+    const correctedResult = await new DatabaseRelease({
+      graph: graphC,
+      migrations: releaseC,
+    }).apply()
+    expect(correctedResult.changed).toBe(true)
+    expect(correctedResult.applied).toEqual([corrected.version])
+    expect(await sourceReady(install, graphC, corrected)).toBe(true)
+  }, 240_000)
+
+  test('retries a transient candidate failure without quarantining the release', async () => {
+    const install = tempDirectory('basis-release-transient-')
+    installs.push(install)
+    const previous = process.cwd()
+    const graphA = new Graph({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+    })
+    const graphB = new Graph({
+      entities: [{
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'extra', type: 'String' },
+        ],
+        name: 'Note',
+      }],
+    })
+    process.chdir(install)
+    const database = createDatabase({ authorization: true, entities: graphA.definitions })
+    let artifactA: MigrationArtifact
+    try {
+      await database.connect()
+      const admin = await openAdmin(database)
+      try {
+        artifactA = await installSchema(admin.sql, graphA, {
+          appRole: 'basis_app',
+          schema: 'public',
+          superuser: true,
+          version: '0001-initial',
+        })
+        await admin.sql`CREATE SEQUENCE public.basis_fault_once START 1`
+      } finally {
+        await admin.close()
+      }
+    } finally {
+      process.chdir(previous)
+      await database.close()
+    }
+    const artifactB = await nextArtifact(graphA, graphB, install)
+    const releaseDirectory = join(install, 'migrations-transient')
+    await writeRelease(releaseDirectory, '4.0.0', [artifactA, transientArtifact(artifactB)])
+    process.chdir(install)
+    const release = new DatabaseRelease({
+      graph: graphB,
+      migrations: releaseDirectory,
+    })
+    const failure = (await release.apply().catch((error: unknown) => error)) as ReleaseError
+    expect(failure).toBeInstanceOf(ReleaseError)
+    expect(failure).toMatchObject({
+      code: 'RELEASE_TRANSIENT',
+      phase: 'migration',
+      retryable: true,
+      version: '4.0.0',
+    })
+    expect(await release.failure()).toMatchObject({
+      code: 'RELEASE_TRANSIENT',
+      phase: 'migration',
+      retryable: true,
+      version: '4.0.0',
+    })
+    const backupsAfterFailure = (await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length
+    await advanceTransientFault(install, graphB)
+    const retry = new DatabaseRelease({
+      graph: graphB,
+      migrations: releaseDirectory,
+    })
+    const result = await retry.apply()
+    expect(result.changed).toBe(true)
+    expect(result.applied).toEqual([artifactB.version])
+    expect(await retry.failure()).toBeNull()
+    expect((await readdir(join(install, '.basis', 'backups')))
+      .filter(name => name.endsWith('.dump'))
+      .length).toBe(backupsAfterFailure)
+    expect(await sourceReady(install, graphB, artifactB)).toBe(true)
+  }, 240_000)
+})
