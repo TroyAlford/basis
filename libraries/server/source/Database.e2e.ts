@@ -1059,6 +1059,8 @@ describe('Server database lifecycle', () => {
       { columnName: 'id', dataType: 'text', isNullable: 'NO' },
       { columnName: 'name', dataType: 'text', isNullable: 'NO' },
       { columnName: 'entity', dataType: 'text', isNullable: 'NO' },
+      { columnName: 'lastUpdatedBy.id', dataType: 'text', isNullable: 'YES' },
+      { columnName: 'lastUpdatedAt', dataType: 'timestamp with time zone', isNullable: 'YES' },
     ])
     expect(await database.sql<{ indexName: string }[]>`
       SELECT indexname AS "indexName"

@@ -2357,7 +2357,8 @@ function normalizeDefinition(value: string): string {
  */
 function columnSql(table: string, column: PhysicalColumn): string {
   const nullable = column.nullable || column.primaryKey ? '' : ' NOT NULL'
-  return `ALTER TABLE ${quote(table)} ADD COLUMN ${quote(column.name)} ${column.sqlType}${nullable}`
+  const defaultSql = column.default === undefined || column.default === null ? '' : ` DEFAULT ${column.default}`
+  return `ALTER TABLE ${quote(table)} ADD COLUMN ${quote(column.name)} ${column.sqlType}${nullable}${defaultSql}`
 }
 
 /**

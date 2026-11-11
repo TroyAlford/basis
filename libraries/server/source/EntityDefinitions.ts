@@ -57,6 +57,8 @@ export interface ScalarArrayElementDefinition {
 
 /** One scalar field definition. */
 export interface ScalarFieldDefinition {
+  /** Default SQL value expression, when present. */
+  readonly default?: unknown,
   /** Canonical format for an ID field. */
   readonly format?: IdentityFormat,
   /** Field name, in camelCase. */
@@ -71,6 +73,8 @@ export interface ScalarFieldDefinition {
 export interface EntityReferenceFieldDefinition {
   /** Derived physical column name, always `field + '.id'`. */
   readonly column: string,
+  /** Default referenced identity, when present. */
+  readonly default?: string,
   /** Derived collection name exposed on the target entity. */
   readonly inverse?: string,
   /** Logical field name used by entity-rooted queries. */
@@ -102,6 +106,8 @@ export interface InverseFieldDefinition {
 
 /** One opaque JSON field. */
 export interface JSONFieldDefinition {
+  /** Default JSON value, when present. */
+  readonly default?: unknown,
   /** Logical field name used by entity-rooted queries. */
   readonly name: string,
   /** Whether the field accepts NULL; omitted means NOT NULL. */
@@ -112,6 +118,8 @@ export interface JSONFieldDefinition {
 
 /** One native scalar-array field. */
 export interface ArrayFieldDefinition {
+  /** Default array value, when present. */
+  readonly default?: readonly unknown[],
   /** Scalar element descriptor. */
   readonly items: ScalarArrayElementDefinition,
   /** Logical field name used by entity-rooted queries. */
@@ -258,6 +266,8 @@ export interface EntityDefinition {
 interface TableColumn {
   /** Element type for native array columns. */
   readonly arrayType?: ScalarFieldType,
+  /** Default SQL expression, when present. */
+  readonly default?: string,
   /** Physical column name. */
   readonly name: string,
   /** Whether this column accepts NULL. */
@@ -442,6 +452,15 @@ function rootFields(format: IdentityFormat | undefined): readonly EffectiveField
     { ...(format ? { format } : {}), name: 'id', owner: 'Entity', type: FieldType.ID },
     { name: 'name', owner: 'Entity', type: FieldType.String },
     { name: 'entity', owner: 'Entity', type: FieldType.String },
+    {
+      column: 'lastUpdatedBy.id',
+      name: 'lastUpdatedBy',
+      nullable: true,
+      owner: 'Entity',
+      target: 'User',
+      type: FieldType.Entity,
+    },
+    { name: 'lastUpdatedAt', nullable: true, owner: 'Entity', type: FieldType.Timestamp },
   ]
 }
 
@@ -485,6 +504,8 @@ function identityRoot(entities: readonly EntityDefinition[]): TableDefinition {
       { name: 'id', primaryKey: true, type: FieldType.ID },
       { name: 'name', type: FieldType.String },
       { name: 'entity', type: FieldType.String },
+      { name: 'lastUpdatedBy.id', nullable: true, type: FieldType.String },
+      { name: 'lastUpdatedAt', nullable: true, type: FieldType.Timestamp },
     ],
     indexes: [
       { columns: ['name', 'id'], name: 'Entity_name_id_idx' },
@@ -639,6 +660,7 @@ export class EntityDefinitions {
   physicalSchema(): PhysicalSchema {
     const tables: PhysicalTable[] = this.tables.map(table => ({
       columns: table.columns.map(column => ({
+        ...(column.default === undefined ? {} : { default: column.default }),
         name: column.name,
         nullable: column.nullable === true,
         primaryKey: column.primaryKey === true,
@@ -659,7 +681,23 @@ export class EntityDefinitions {
       rowSecurity: false,
       sql: createTable(table),
     }))
+    const updateOwnerConstraint = this.entities.some(entity => entity.name === 'User')
+      ? [{
+        column: 'lastUpdatedBy.id',
+        definition: constraintDefinition(
+          'alter table "Entity" add constraint "Entity_lastUpdatedBy_fkey" ' +
+            'foreign key ("lastUpdatedBy.id") references "User" ("id") deferrable initially immediate',
+        ),
+        name: 'Entity_lastUpdatedBy_fkey',
+        sql: 'alter table "Entity" add constraint "Entity_lastUpdatedBy_fkey" ' +
+            'foreign key ("lastUpdatedBy.id") references "User" ("id") deferrable initially immediate',
+        table: 'Entity',
+        target: 'User',
+        targetColumn: 'id',
+      }] satisfies PhysicalConstraint[]
+      : []
     const constraints: PhysicalConstraint[] = [
+      ...updateOwnerConstraint,
       ...this.entities.map(entity => ({
         column: 'id',
         definition: constraintDefinition(addParentConstraint(entity)),
@@ -1424,6 +1462,77 @@ function parseNullable(
 }
 
 /**
+ * Validate one optional field default against its declared type.
+ * @param entityName - Owning entity name.
+ * @param fieldName - Field name.
+ * @param type - Declared field type.
+ * @param value - Field candidate.
+ * @param items - Array item type, when applicable.
+ * @returns The default value, or undefined when omitted.
+ */
+function parseDefault(
+  entityName: string,
+  fieldName: string,
+  type: ScalarFieldType | FieldType.Array | FieldType.JSON | FieldType.Entity,
+  value: Readonly<Record<string, unknown>>,
+  items?: ScalarFieldType,
+): unknown {
+  if (value.default === undefined) return undefined
+  const defaultValue = value.default
+  const invalidDefault = (): never => {
+    throw invalid(`field "${entityName}.${fieldName}" default must be a valid ${type} value`)
+  }
+  if (type === FieldType.Boolean) {
+    if (typeof defaultValue !== 'boolean') invalidDefault()
+    return defaultValue
+  }
+  if (type === FieldType.Number) {
+    if (typeof defaultValue !== 'number' || !Number.isFinite(defaultValue)) invalidDefault()
+    return defaultValue
+  }
+  if (type === FieldType.String) {
+    if (typeof defaultValue !== 'string') invalidDefault()
+    return defaultValue
+  }
+  if (type === FieldType.Date || type === FieldType.Timestamp) {
+    if (!(defaultValue instanceof Date) && (typeof defaultValue !== 'string' || defaultValue.length === 0)) {
+      invalidDefault()
+    }
+    return defaultValue
+  }
+  if (type === FieldType.Entity) {
+    if (typeof defaultValue !== 'string' || defaultValue.length === 0) invalidDefault()
+    return defaultValue
+  }
+  if (type === FieldType.JSON) {
+    try {
+      if (JSON.stringify(defaultValue) === undefined) invalidDefault()
+    } catch {
+      invalidDefault()
+    }
+    return defaultValue
+  }
+  if (type === FieldType.Array) {
+    if (!Array.isArray(defaultValue)) invalidDefault()
+    for (const item of defaultValue as readonly unknown[]) {
+      if (
+        (items === FieldType.Boolean && typeof item !== 'boolean')
+        || (items === FieldType.Number && (typeof item !== 'number' || !Number.isFinite(item)))
+        || (items === FieldType.String && typeof item !== 'string')
+        || (items === FieldType.ID && typeof item !== 'string')
+        || ((items === FieldType.Date || items === FieldType.Timestamp)
+          && !(item instanceof Date) && (typeof item !== 'string' || item.length === 0))
+      ) {
+        invalidDefault()
+      }
+    }
+    return defaultValue
+  }
+  invalidDefault()
+  return undefined
+}
+
+/**
  * Validate one field descriptor.
  * @param entityName - Owning entity name.
  * @param value - Field candidate.
@@ -1452,7 +1561,7 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   }
 
   if (value.type === FieldType.Entity) {
-    assertKnownKeys(value, ['field', 'inverse', 'nullable', 'target', 'type'], 'field')
+    assertKnownKeys(value, ['default', 'field', 'inverse', 'nullable', 'target', 'type'], 'field')
     if (ROOT_FIELD_NAMES.has(value.field) || value.field === 'id') {
       throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
     }
@@ -1467,10 +1576,12 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
     }
     validatePhysicalIdentifier(`${value.field}.id`, `reference field "${entityName}.${value.field}" column`)
     const nullable = parseNullable(entityName, value.field, value)
+    const defaultValue = parseDefault(entityName, value.field, FieldType.Entity, value)
     return {
       field: {
         column: `${value.field}.id`,
         ...(value.inverse !== undefined ? { inverse: value.inverse as string } : {}),
+        ...(defaultValue === undefined ? {} : { default: defaultValue as string }),
         name: value.field,
         ...(nullable === undefined ? {} : { nullable }),
         target: value.target,
@@ -1490,7 +1601,7 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   if (ROOT_FIELD_NAMES.has(value.field)) {
     throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
   }
-  assertKnownKeys(value, ['field', 'format', 'nullable', 'type'], 'field')
+  assertKnownKeys(value, ['default', 'field', 'format', 'nullable', 'type'], 'field')
   const type = value.type as string
   if (!SCALAR_FIELD_TYPES.has(type) || type === FieldType.ID) {
     throw invalid(`unsupported field type "${String(type)}" in "${entityName}.${value.field}"`)
@@ -1499,8 +1610,10 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
     throw invalid(`field "${entityName}.${value.field}" format is only valid on type ID`)
   }
   const nullable = parseNullable(entityName, value.field, value)
+  const defaultValue = parseDefault(entityName, value.field, type as ScalarFieldType, value)
   return {
     field: {
+      ...(defaultValue === undefined ? {} : { default: defaultValue }),
       name: value.field,
       ...(nullable === undefined ? {} : { nullable }),
       type: type as ScalarFieldType,
@@ -1551,13 +1664,19 @@ function parseJSONField(
   entityName: string,
   value: Readonly<Record<string, unknown>>,
 ): JSONFieldDefinition {
-  assertKnownKeys(value, ['field', 'nullable', 'type'], 'field')
+  assertKnownKeys(value, ['default', 'field', 'nullable', 'type'], 'field')
   const name = value.field as string
   if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
     throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
   }
   const nullable = parseNullable(entityName, name, value)
-  return { name, ...(nullable === undefined ? {} : { nullable }), type: FieldType.JSON }
+  const defaultValue = parseDefault(entityName, name, FieldType.JSON, value)
+  return {
+    ...(defaultValue === undefined ? {} : { default: defaultValue }),
+    name,
+    ...(nullable === undefined ? {} : { nullable }),
+    type: FieldType.JSON,
+  }
 }
 
 /**
@@ -1570,7 +1689,7 @@ function parseArrayField(
   entityName: string,
   value: Readonly<Record<string, unknown>>,
 ): ArrayFieldDefinition {
-  assertKnownKeys(value, ['field', 'items', 'nullable', 'type'], 'field')
+  assertKnownKeys(value, ['default', 'field', 'items', 'nullable', 'type'], 'field')
   const name = value.field as string
   if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
     throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
@@ -1588,7 +1707,9 @@ function parseArrayField(
       throw invalid(`array field "${entityName}.${name}" ID format must be UUID or Snowflake`)
     }
     const nullable = parseNullable(entityName, name, value)
+    const defaultValue = parseDefault(entityName, name, FieldType.Array, value, FieldType.ID)
     return {
+      ...(defaultValue === undefined ? {} : { default: defaultValue as readonly unknown[] }),
       items: {
         ...(items.format !== undefined ? { format: items.format as IdentityFormat } : {}),
         type: FieldType.ID,
@@ -1600,7 +1721,15 @@ function parseArrayField(
   }
   assertKnownKeys(items, ['type'], 'array item')
   const nullable = parseNullable(entityName, name, value)
+  const defaultValue = parseDefault(
+    entityName,
+    name,
+    FieldType.Array,
+    value,
+    items.type as ScalarFieldType,
+  )
   return {
+    ...(defaultValue === undefined ? {} : { default: defaultValue as readonly unknown[] }),
     items: { type: items.type as ScalarFieldType },
     name,
     ...(nullable === undefined ? {} : { nullable }),
@@ -1709,19 +1838,62 @@ function isPhysicalField(field: FieldDefinition): field is PhysicalFieldDefiniti
  * @returns Physical column metadata.
  */
 function fieldTableColumn(field: PhysicalFieldDefinition): TableColumn {
+  const defaultValue = field.default === undefined ? {} : { default: defaultSQL(field) }
   if (field.type === FieldType.Entity) {
-    return { name: field.column, nullable: field.nullable ?? true, type: FieldType.String }
+    return {
+      ...defaultValue,
+      name: field.column,
+      nullable: field.nullable ?? true,
+      type: FieldType.String,
+    }
   }
   if (field.type === FieldType.ID) return { name: field.name, primaryKey: true, type: FieldType.ID }
   if (field.type === FieldType.Array) {
     return {
+      ...defaultValue,
       arrayType: field.items.type,
       name: field.name,
       nullable: field.nullable === true,
       type: FieldType.Array,
     }
   }
-  return { name: field.name, nullable: field.nullable === true, type: field.type }
+  return { ...defaultValue, name: field.name, nullable: field.nullable === true, type: field.type }
+}
+
+/**
+ * Build a PostgreSQL default expression for one physical field.
+ * @param field - Physical field with a declared default.
+ * @returns SQL default expression.
+ */
+function defaultSQL(field: PhysicalFieldDefinition): string {
+  const value = field.default
+  if (value === null) return 'NULL'
+  if (field.type === FieldType.Entity) return quoteLiteral(String(value))
+  if (field.type === FieldType.JSON) return `${quoteLiteral(JSON.stringify(value))}::jsonb`
+  if (field.type === FieldType.Array) {
+    const items = field.items.type
+    return `ARRAY[${(value as readonly unknown[]).map(item => scalarDefault(item, items)).join(', ')}]`
+  }
+  return scalarDefault(value, field.type)
+}
+
+/**
+ * Build one scalar PostgreSQL default literal.
+ * @param value - Default value.
+ * @param type - Scalar field type.
+ * @returns SQL literal.
+ */
+function scalarDefault(value: unknown, type: ScalarFieldType): string {
+  if (value === null) return 'NULL'
+  if (type === FieldType.Boolean) return value === true ? 'true' : 'false'
+  if (type === FieldType.Number) return String(value)
+  if (type === FieldType.Date) {
+    return `${quoteLiteral(value instanceof Date ? value.toISOString().slice(0, 10) : String(value))}::date`
+  }
+  if (type === FieldType.Timestamp) {
+    return `${quoteLiteral(value instanceof Date ? value.toISOString() : String(value))}::timestamptz`
+  }
+  return quoteLiteral(String(value))
 }
 
 /**
@@ -1846,7 +2018,8 @@ function identityCheck(column: string, format: IdentityFormat | undefined): stri
 function createTable(table: TableDefinition): string {
   const columns = table.columns.map(column => {
     const nullability = column.primaryKey ? ' primary key' : column.nullable ? '' : ' not null'
-    return `${quoteIdentifier(column.name)} ${columnType(column)}${nullability}`
+    const defaultSql = column.default === undefined ? '' : ` default ${column.default}`
+    return `${quoteIdentifier(column.name)} ${columnType(column)}${nullability}${defaultSql}`
   })
   const checks = (table.checks ?? []).map(check => (
     `constraint ${quoteIdentifier(check.name)} check (${check.expression})`

@@ -58,6 +58,8 @@ function rootDdl(leaves: readonly string[]): readonly string[] {
       "id" text primary key,
       "name" text not null,
       "entity" text not null,
+      "lastUpdatedBy.id" text,
+      "lastUpdatedAt" timestamptz,
       constraint "Entity_id_format_check" check (${identityExpression('id')}),
       constraint "Entity_entity_check" check ("entity" in (${leaves.map(name => `'${name}'`).join(', ')}))
     )`,
@@ -226,7 +228,8 @@ describe('EntityDefinitions', () => {
     const root = identityDefinition()
     expect(root.name).toBe('Entity')
     expect(root.collections).toEqual([])
-    expect(root.effectiveFields.map(field => field.name)).toEqual(['id', 'name', 'entity'])
+    expect(root.effectiveFields.map(field => field.name))
+      .toEqual(['id', 'name', 'entity', 'lastUpdatedBy', 'lastUpdatedAt'])
     expect(root.effectiveFields.every(field => field.owner === 'Entity')).toBe(true)
   })
 
@@ -767,6 +770,56 @@ describe('EntityDefinitions', () => {
     })).toThrow('nullable must be a boolean')
   })
 
+  test('emits declared defaults on field columns', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { default: true, field: 'enabled', type: 'Boolean' },
+          { default: 1.5, field: 'score', type: 'Number' },
+          { default: "it's", field: 'label', type: 'String' },
+          { default: '2020-01-01T00:00:00.000Z', field: 'createdAt', type: 'Timestamp' },
+          { default: ['a', 'b'], field: 'tags', items: { type: 'String' }, type: 'Array' },
+          { default: { active: true }, field: 'payload', type: 'JSON' },
+        ],
+        name: 'Thing',
+      }],
+    })
+    const ddl = entities.ddl.join('\n')
+    expect(ddl).toContain('"enabled" boolean not null default true')
+    expect(ddl).toContain('"score" double precision not null default 1.5')
+    expect(ddl).toContain('"label" text not null default \'it\'\'s\'')
+    expect(ddl).toContain('"createdAt" timestamptz not null default \'2020-01-01T00:00:00.000Z\'::timestamptz')
+    expect(ddl).toContain('"tags" text[] not null default ARRAY[\'a\', \'b\']')
+    expect(ddl).toContain('"payload" jsonb not null default \'{"active":true}\'::jsonb')
+  })
+
+  test('rejects defaults that do not match the field type', () => {
+    expect(() => load({
+      entities: [{
+        fields: [{ default: 'yes', field: 'enabled', type: 'Boolean' }],
+        name: 'Thing',
+      }],
+    })).toThrow('default must be a valid Boolean value')
+  })
+
+  test('adds update tracking fields to every entity', () => {
+    const entities = load({ entities: [{ fields: [], name: 'Note' }] })
+    const note = entities.entity('Note')
+    expect(note?.effectiveFields.slice(-2)).toMatchObject([
+      {
+        column: 'lastUpdatedBy.id',
+        name: 'lastUpdatedBy',
+        nullable: true,
+        owner: 'Entity',
+        target: 'User',
+        type: FieldType.Entity,
+      },
+      { name: 'lastUpdatedAt', nullable: true, owner: 'Entity', type: FieldType.Timestamp },
+    ])
+    expect(entities.ddl.join('\n')).toContain('"lastUpdatedBy.id" text')
+    expect(entities.ddl.join('\n')).toContain('"lastUpdatedAt" timestamptz')
+  })
+
   test('accepts native scalar arrays and opaque JSON values', () => {
     const entities = load({
       entities: [{
@@ -857,6 +910,15 @@ describe('EntityDefinitions', () => {
       { format: 'UUID', name: 'id', owner: 'Entity', type: FieldType.ID },
       { name: 'name', owner: 'Entity', type: FieldType.String },
       { name: 'entity', owner: 'Entity', type: FieldType.String },
+      {
+        column: 'lastUpdatedBy.id',
+        name: 'lastUpdatedBy',
+        nullable: true,
+        owner: 'Entity',
+        target: 'User',
+        type: FieldType.Entity,
+      },
+      { name: 'lastUpdatedAt', nullable: true, owner: 'Entity', type: FieldType.Timestamp },
       { name: 'email', owner: 'User', type: FieldType.String },
       { name: 'permissions', owner: 'SystemUser', type: FieldType.String },
       {
@@ -1007,6 +1069,9 @@ describe('EntityDefinitions', () => {
         "company" text not null,
         constraint "Client_id_format_check" check (${identityExpression('id', 'UUID')})
       )`,
+      `alter table "Entity" add constraint "Entity_lastUpdatedBy_fkey"
+        foreign key ("lastUpdatedBy.id") references "User" ("id")
+        deferrable initially immediate`,
       `alter table "User" add constraint "User_Entity_mti_fkey"
         foreign key ("id") references "Entity" ("id")
         deferrable initially immediate`,

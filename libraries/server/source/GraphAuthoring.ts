@@ -19,6 +19,8 @@ export enum Cardinality {
 
 /** One authored scalar field. */
 export interface AuthoredScalarField {
+  /** Default value for the field. */
+  readonly default?: unknown,
   /** Field name, in camelCase. */
   readonly field: string,
   /** Whether the field accepts NULL; omitted means NOT NULL. */
@@ -37,6 +39,8 @@ export interface AuthoredIdentityField {
 
 /** One authored native array field. */
 export interface AuthoredArrayField {
+  /** Default array value for the field. */
+  readonly default?: readonly unknown[],
   /** Field name, in camelCase. */
   readonly field: string,
   /** Scalar array element descriptor. */
@@ -54,6 +58,8 @@ export interface AuthoredArrayField {
 
 /** One authored opaque JSON field. */
 export interface AuthoredJSONField {
+  /** Default JSON value for the field. */
+  readonly default?: unknown,
   /** Field name, in camelCase. */
   readonly field: string,
   /** Whether the field accepts NULL; omitted means NOT NULL. */
@@ -64,6 +70,8 @@ export interface AuthoredJSONField {
 
 /** One authored entity reference. */
 export interface AuthoredReferenceField {
+  /** Default referenced identity for the field. */
+  readonly default?: string,
   /** Field name, in camelCase. */
   readonly field: string,
   /** Optional inverse navigation name. */

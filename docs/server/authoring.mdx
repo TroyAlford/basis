@@ -27,6 +27,7 @@ export default new Graph({
     {
       fields: [
         { field: 'title', type: FieldType.String },
+        { default: false, field: 'active', type: FieldType.Boolean },
         { field: 'retiredAt', nullable: true, type: FieldType.Timestamp },
         { field: 'owner', inverse: 'notes', target: 'User', type: FieldType.Entity },
         { field: 'tags', items: { type: FieldType.String }, type: FieldType.Array },
@@ -38,9 +39,9 @@ export default new Graph({
 })
 ```
 
-The typed declaration accepts the same entity, relationship, array, JSON, reference, inverse, MTI, identity-format, and nullable-field shapes as canonical JSON. There is no decorator syntax, second registry, or alternative validator. Omitting `nullable` preserves the non-null default for scalar, array, and JSON fields; reference fields remain nullable by default unless `nullable: false` is declared. JSON remains an alternate input syntax for tools that load a parsed document; it feeds the same `Graph` construction path. A `Graph` is passed directly to `Server.graph(graph)`.
+The typed declaration accepts the same entity, relationship, array, JSON, reference, inverse, MTI, identity-format, and nullable-field shapes as canonical JSON. There is no decorator syntax, second registry, or alternative validator. Omitting `nullable` preserves the non-null default for scalar, array, and JSON fields; reference fields remain nullable by default unless `nullable: false` is declared. An optional `default` supplies the column default and must match the declared field type. JSON remains an alternate input syntax for tools that load a parsed document; it feeds the same `Graph` construction path. A `Graph` is passed directly to `Server.graph(graph)`.
 
-The constructed `graph.definitions` is the canonical model. Its narrow ontology queries are intentionally public: `ancestry(name)` returns the entity through its ancestors to `Entity`, `isA(name, ancestor)` includes identity, and `concreteDescendants(name)` returns concrete leaves in declaration order. A concrete entity is its own concrete descendant; abstract names are never returned as leaves; `Entity` covers every concrete leaf. Consumers use these queries instead of walking parent links themselves.
+Every entity inherits the update-tracking fields `lastUpdatedBy` and `lastUpdatedAt` in addition to the universal `id`, `name`, and `entity` fields. The constructed `graph.definitions` is the canonical model. Its narrow ontology queries are intentionally public: `ancestry(name)` returns the entity through its ancestors to `Entity`, `isA(name, ancestor)` includes identity, and `concreteDescendants(name)` returns concrete leaves in declaration order. A concrete entity is its own concrete descendant; abstract names are never returned as leaves; `Entity` covers every concrete leaf. Consumers use these queries instead of walking parent links themselves.
 
 ## Generated products
 
@@ -89,6 +90,8 @@ export interface Note extends Entity {
   readonly title: string
   readonly owner: UserRef | null
   readonly tags: readonly string[]
+  readonly lastUpdatedBy: UserRef | null
+  readonly lastUpdatedAt: string | null
 }
 
 export type NoteRef = Pick<Note, 'id' | 'name' | 'entity'>

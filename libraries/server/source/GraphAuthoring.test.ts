@@ -33,6 +33,17 @@ describe('Graph authoring types', () => {
     expect(graph.definitions.entity('Note')?.fields.find(field => field.name === 'title')?.type).toBe(FieldType.String)
   })
 
+  test('accepts default field authoring', () => {
+    const graph = new Graph({
+      entities: [{
+        fields: [{ default: false, field: 'active', type: FieldType.Boolean }],
+        name: 'Account',
+      }],
+    })
+    expect(graph.definitions.entity('Account')?.fields.find(field => field.name === 'active'))
+      .toMatchObject({ default: false, type: FieldType.Boolean })
+  })
+
   test('accepts nullable field authoring', () => {
     const graph = new Graph({
       entities: [{
