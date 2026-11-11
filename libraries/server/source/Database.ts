@@ -1,6 +1,5 @@
 import { runAsync } from 'basis/configuration'
 import { SQL as BunSQL } from 'bun'
-import { resolve } from 'node:path'
 import { currentActor } from './ActorContext'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { ManagedPostgresService } from './ManagedPostgresService'
@@ -345,7 +344,7 @@ class ManagedDatabase implements Database {
   constructor(entities?: EntityDefinitions, authorization = false, image?: string) {
     this.#authorization = authorization
     this.#entities = entities
-    this.#service = new ManagedPostgresService(resolve(process.cwd()), { image })
+    this.#service = new ManagedPostgresService({ image })
   }
 
   /**

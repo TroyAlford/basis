@@ -1,0 +1,13 @@
+{
+  "entities": [
+    {
+      "fields": [
+        {
+          "field": "title",
+          "type": "String"
+        }
+      ],
+      "name": "Note"
+    }
+  ]
+}

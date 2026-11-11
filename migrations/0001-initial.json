@@ -1,0 +1,2779 @@
+{
+  "appRole": "basis_app",
+  "checksum": "070098b8219808a347688cb13f497c44c63bf599de4ae160ce167ef7d0a57bf3",
+  "expected": {
+    "constraints": [
+      {
+        "column": "id",
+        "definition": "foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+        "name": "User_Entity_mti_fkey",
+        "sql": "alter table \"User\" add constraint \"User_Entity_mti_fkey\" foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+        "table": "User",
+        "target": "Entity",
+        "targetColumn": "id"
+      },
+      {
+        "column": "id",
+        "definition": "foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+        "name": "Role_Entity_mti_fkey",
+        "sql": "alter table \"Role\" add constraint \"Role_Entity_mti_fkey\" foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+        "table": "Role",
+        "target": "Entity",
+        "targetColumn": "id"
+      },
+      {
+        "column": "id",
+        "definition": "foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+        "name": "ExternalIdentity_Entity_mti_fkey",
+        "sql": "alter table \"ExternalIdentity\" add constraint \"ExternalIdentity_Entity_mti_fkey\" foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+        "table": "ExternalIdentity",
+        "target": "Entity",
+        "targetColumn": "id"
+      },
+      {
+        "column": "id",
+        "definition": "foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+        "name": "Note_Entity_mti_fkey",
+        "sql": "alter table \"Note\" add constraint \"Note_Entity_mti_fkey\" foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+        "table": "Note",
+        "target": "Entity",
+        "targetColumn": "id"
+      },
+      {
+        "column": "user.id",
+        "definition": "foreign key (\"user.id\") references \"User\" (\"id\") deferrable initially immediate",
+        "name": "ExternalIdentity_user_fkey",
+        "sql": "alter table \"ExternalIdentity\" add constraint \"ExternalIdentity_user_fkey\" foreign key (\"user.id\") references \"User\" (\"id\") deferrable initially immediate",
+        "table": "ExternalIdentity",
+        "target": "User",
+        "targetColumn": "id"
+      },
+      {
+        "column": "user.id",
+        "definition": "foreign key (\"user.id\") references \"User\" (\"id\") deferrable initially immediate",
+        "name": "UserRole_user_fkey",
+        "sql": "alter table \"UserRole\" add constraint \"UserRole_user_fkey\" foreign key (\"user.id\") references \"User\" (\"id\") deferrable initially immediate",
+        "table": "UserRole",
+        "target": "User",
+        "targetColumn": "id"
+      },
+      {
+        "column": "role.id",
+        "definition": "foreign key (\"role.id\") references \"Role\" (\"id\") deferrable initially immediate",
+        "name": "UserRole_role_fkey",
+        "sql": "alter table \"UserRole\" add constraint \"UserRole_role_fkey\" foreign key (\"role.id\") references \"Role\" (\"id\") deferrable initially immediate",
+        "table": "UserRole",
+        "target": "Role",
+        "targetColumn": "id"
+      }
+    ],
+    "extensions": [
+      "pg_trgm"
+    ],
+    "functions": [
+      {
+        "body": "\ndeclare\n  root_id text;\n  root_entity text;\nbegin\n  root_id := new.\"id\";\n  select \"entity\" into root_entity from \"Entity\" where \"id\" = root_id;\n  if not found then\n    return null;\n  end if;\n  case root_entity\n    when 'User' then\n        if not exists (select 1 from \"User\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    when 'Role' then\n        if not exists (select 1 from \"Role\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    when 'ExternalIdentity' then\n        if not exists (select 1 from \"ExternalIdentity\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    when 'Note' then\n        if not exists (select 1 from \"Note\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    else\n      raise exception 'unknown concrete entity %', root_entity;\n  end case;\n  return new;\nend\n",
+        "lifecycle": true,
+        "name": "Entity_validate_leaf",
+        "required": [
+          "Entity_validate_leaf"
+        ],
+        "securityDefiner": false,
+        "sql": "create or replace function \"Entity_validate_leaf\"() returns trigger language plpgsql as $$\ndeclare\n  root_id text;\n  root_entity text;\nbegin\n  root_id := new.\"id\";\n  select \"entity\" into root_entity from \"Entity\" where \"id\" = root_id;\n  if not found then\n    return null;\n  end if;\n  case root_entity\n    when 'User' then\n        if not exists (select 1 from \"User\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    when 'Role' then\n        if not exists (select 1 from \"Role\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    when 'ExternalIdentity' then\n        if not exists (select 1 from \"ExternalIdentity\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    when 'Note' then\n        if not exists (select 1 from \"Note\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    else\n      raise exception 'unknown concrete entity %', root_entity;\n  end case;\n  return new;\nend\n$$"
+      },
+      {
+        "body": "\ndeclare\n  key text;\n  root_entity text;\n  leaf_present integer;\nbegin\n  if tg_op = 'UPDATE'\n    and to_jsonb(old)->>'id' is distinct from to_jsonb(new)->>'id' then\n    raise exception 'leaf row identity is immutable';\n  end if;\n  if tg_op = 'DELETE' then\n    key := to_jsonb(old)->>'id';\n  else\n    key := to_jsonb(new)->>'id';\n  end if;\n  execute format('select 1 from %I where \"id\" = $1', tg_table_name)\n    into leaf_present using key;\n  if leaf_present is not null then\n    select \"entity\" into root_entity from \"Entity\" where \"id\" = key;\n    if not found then\n      raise exception 'leaf row % has no root row', key;\n    end if;\n    if root_entity is distinct from tg_table_name then\n      raise exception 'leaf row % must match root entity %, found %',\n        key, tg_table_name, root_entity;\n    end if;\n  elsif exists (\n    select 1 from \"Entity\" where \"id\" = key and \"entity\" = tg_table_name\n  ) then\n    raise exception 'deleting leaf row % would leave an incomplete root row', key;\n  end if;\n  return null;\nend\n",
+        "lifecycle": true,
+        "name": "Entity_validate_leaf_row",
+        "required": [
+          "Entity_validate_leaf_row"
+        ],
+        "securityDefiner": false,
+        "sql": "create or replace function \"Entity_validate_leaf_row\"() returns trigger language plpgsql as $$\ndeclare\n  key text;\n  root_entity text;\n  leaf_present integer;\nbegin\n  if tg_op = 'UPDATE'\n    and to_jsonb(old)->>'id' is distinct from to_jsonb(new)->>'id' then\n    raise exception 'leaf row identity is immutable';\n  end if;\n  if tg_op = 'DELETE' then\n    key := to_jsonb(old)->>'id';\n  else\n    key := to_jsonb(new)->>'id';\n  end if;\n  execute format('select 1 from %I where \"id\" = $1', tg_table_name)\n    into leaf_present using key;\n  if leaf_present is not null then\n    select \"entity\" into root_entity from \"Entity\" where \"id\" = key;\n    if not found then\n      raise exception 'leaf row % has no root row', key;\n    end if;\n    if root_entity is distinct from tg_table_name then\n      raise exception 'leaf row % must match root entity %, found %',\n        key, tg_table_name, root_entity;\n    end if;\n  elsif exists (\n    select 1 from \"Entity\" where \"id\" = key and \"entity\" = tg_table_name\n  ) then\n    raise exception 'deleting leaf row % would leave an incomplete root row', key;\n  end if;\n  return null;\nend\n$$"
+      },
+      {
+        "body": "\nbegin\n  if new.\"entity\" is distinct from old.\"entity\" then\n    raise exception 'leaf discriminator for root row % is immutable', old.\"id\";\n  end if;\n  return new;\nend\n",
+        "lifecycle": true,
+        "name": "Entity_leaf_immutable",
+        "required": [
+          "Entity_leaf_immutable"
+        ],
+        "securityDefiner": false,
+        "sql": "create or replace function \"Entity_leaf_immutable\"() returns trigger language plpgsql as $$\nbegin\n  if new.\"entity\" is distinct from old.\"entity\" then\n    raise exception 'leaf discriminator for root row % is immutable', old.\"id\";\n  end if;\n  return new;\nend\n$$"
+      },
+      {
+        "body": "SELECT EXISTS (\n          SELECT 1\n          FROM \"UserRole\" ur\n          WHERE ur.\"role.id\" = role_id\n            AND ur.\"user.id\" = nullif(current_setting('actor.id', true), '')\n        )",
+        "lifecycle": false,
+        "name": "basis.has_role",
+        "required": [
+          "basis.has_role"
+        ],
+        "searchPath": "public, basis, pg_temp",
+        "securityDefiner": true,
+        "signature": "role_id text",
+        "sql": "\n      CREATE OR REPLACE FUNCTION basis.has_role(role_id text)\n      RETURNS boolean\n      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n        SELECT EXISTS (\n          SELECT 1\n          FROM \"UserRole\" ur\n          WHERE ur.\"role.id\" = role_id\n            AND ur.\"user.id\" = nullif(current_setting('actor.id', true), '')\n        )\n      $$;\n    "
+      },
+      {
+        "body": "SELECT u.\"id\"\n        FROM \"User\" u\n        WHERE u.\"id\" = candidate\n          AND EXISTS (\n            SELECT 1\n            FROM \"ExternalIdentity\" e\n            WHERE e.\"user.id\" = u.\"id\" AND e.\"revoked\" = false\n          )",
+        "lifecycle": false,
+        "name": "basis.resolve_identity",
+        "required": [
+          "basis.resolve_identity"
+        ],
+        "searchPath": "public, basis, pg_temp",
+        "securityDefiner": true,
+        "signature": "candidate text",
+        "sql": "\n      CREATE OR REPLACE FUNCTION basis.resolve_identity(candidate text)\n      RETURNS text\n      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n        SELECT u.\"id\"\n        FROM \"User\" u\n        WHERE u.\"id\" = candidate\n          AND EXISTS (\n            SELECT 1\n            FROM \"ExternalIdentity\" e\n            WHERE e.\"user.id\" = u.\"id\" AND e.\"revoked\" = false\n          )\n      $$;\n    "
+      },
+      {
+        "body": "DECLARE\n        existing_revoked boolean;\n        existing_user text;\n        user_id text;\n        identity_id text;\n        user_name text;\n      BEGIN\n        IF provider_name IS NULL OR provider_name = ''\n          OR provider_subject IS NULL OR provider_subject = '' THEN\n          RETURN NULL;\n        END IF;\n        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));\n        SELECT e.\"revoked\", e.\"user.id\" INTO existing_revoked, existing_user\n        FROM \"ExternalIdentity\" e\n        WHERE e.\"provider\" = provider_name AND e.\"subject\" = provider_subject\n        FOR UPDATE;\n        IF FOUND THEN\n          IF existing_revoked THEN RETURN NULL; END IF;\n          RETURN existing_user;\n        END IF;\n        user_id := gen_random_uuid()::text;\n        user_name := coalesce(\n          nullif(display_name, ''),\n          nullif(email_address, ''),\n          provider_name || ':' || provider_subject\n        );\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\") VALUES (user_id, user_name, 'User');\n        INSERT INTO \"User\" (\"id\") VALUES (user_id);\n        identity_id := gen_random_uuid()::text;\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\")\n          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');\n        INSERT INTO \"ExternalIdentity\" (\"id\", \"provider\", \"subject\", \"revoked\", \"user.id\")\n          VALUES (identity_id, provider_name, provider_subject, false, user_id);\n        RETURN user_id;\n      END",
+        "lifecycle": false,
+        "name": "basis.enroll_identity",
+        "required": [
+          "basis.enroll_identity"
+        ],
+        "searchPath": "public, basis, pg_temp",
+        "securityDefiner": true,
+        "signature": "provider_name text, provider_subject text, display_name text, email_address text",
+        "sql": "\n      CREATE OR REPLACE FUNCTION basis.enroll_identity(\n        provider_name text,\n        provider_subject text,\n        display_name text,\n        email_address text\n      )\n      RETURNS text\n      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n      DECLARE\n        existing_revoked boolean;\n        existing_user text;\n        user_id text;\n        identity_id text;\n        user_name text;\n      BEGIN\n        IF provider_name IS NULL OR provider_name = ''\n          OR provider_subject IS NULL OR provider_subject = '' THEN\n          RETURN NULL;\n        END IF;\n        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));\n        SELECT e.\"revoked\", e.\"user.id\" INTO existing_revoked, existing_user\n        FROM \"ExternalIdentity\" e\n        WHERE e.\"provider\" = provider_name AND e.\"subject\" = provider_subject\n        FOR UPDATE;\n        IF FOUND THEN\n          IF existing_revoked THEN RETURN NULL; END IF;\n          RETURN existing_user;\n        END IF;\n        user_id := gen_random_uuid()::text;\n        user_name := coalesce(\n          nullif(display_name, ''),\n          nullif(email_address, ''),\n          provider_name || ':' || provider_subject\n        );\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\") VALUES (user_id, user_name, 'User');\n        INSERT INTO \"User\" (\"id\") VALUES (user_id);\n        identity_id := gen_random_uuid()::text;\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\")\n          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');\n        INSERT INTO \"ExternalIdentity\" (\"id\", \"provider\", \"subject\", \"revoked\", \"user.id\")\n          VALUES (identity_id, provider_name, provider_subject, false, user_id);\n        RETURN user_id;\n      END $$;\n    "
+      }
+    ],
+    "policies": [
+      {
+        "command": "SELECT",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_Entity_read",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Entity_read\" ON \"Entity\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+        "table": "Entity"
+      },
+      {
+        "command": "INSERT",
+        "definition": "USING TRUE WITH CHECK FALSE",
+        "name": "basis_Entity_create",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Entity_create\" ON \"Entity\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+        "table": "Entity"
+      },
+      {
+        "command": "UPDATE",
+        "definition": "USING FALSE WITH CHECK FALSE",
+        "name": "basis_Entity_update",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Entity_update\" ON \"Entity\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+        "table": "Entity"
+      },
+      {
+        "command": "DELETE",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_Entity_delete",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Entity_delete\" ON \"Entity\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+        "table": "Entity"
+      },
+      {
+        "command": "SELECT",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_User_read",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_User_read\" ON \"User\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+        "table": "User"
+      },
+      {
+        "command": "INSERT",
+        "definition": "USING TRUE WITH CHECK FALSE",
+        "name": "basis_User_create",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_User_create\" ON \"User\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+        "table": "User"
+      },
+      {
+        "command": "UPDATE",
+        "definition": "USING FALSE WITH CHECK FALSE",
+        "name": "basis_User_update",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_User_update\" ON \"User\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+        "table": "User"
+      },
+      {
+        "command": "DELETE",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_User_delete",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_User_delete\" ON \"User\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+        "table": "User"
+      },
+      {
+        "command": "SELECT",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_Role_read",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Role_read\" ON \"Role\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+        "table": "Role"
+      },
+      {
+        "command": "INSERT",
+        "definition": "USING TRUE WITH CHECK FALSE",
+        "name": "basis_Role_create",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Role_create\" ON \"Role\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+        "table": "Role"
+      },
+      {
+        "command": "UPDATE",
+        "definition": "USING FALSE WITH CHECK FALSE",
+        "name": "basis_Role_update",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Role_update\" ON \"Role\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+        "table": "Role"
+      },
+      {
+        "command": "DELETE",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_Role_delete",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Role_delete\" ON \"Role\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+        "table": "Role"
+      },
+      {
+        "command": "SELECT",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_ExternalIdentity_read",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_ExternalIdentity_read\" ON \"ExternalIdentity\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+        "table": "ExternalIdentity"
+      },
+      {
+        "command": "INSERT",
+        "definition": "USING TRUE WITH CHECK FALSE",
+        "name": "basis_ExternalIdentity_create",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_ExternalIdentity_create\" ON \"ExternalIdentity\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+        "table": "ExternalIdentity"
+      },
+      {
+        "command": "UPDATE",
+        "definition": "USING FALSE WITH CHECK FALSE",
+        "name": "basis_ExternalIdentity_update",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_ExternalIdentity_update\" ON \"ExternalIdentity\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+        "table": "ExternalIdentity"
+      },
+      {
+        "command": "DELETE",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_ExternalIdentity_delete",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_ExternalIdentity_delete\" ON \"ExternalIdentity\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+        "table": "ExternalIdentity"
+      },
+      {
+        "command": "SELECT",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_Note_read",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Note_read\" ON \"Note\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+        "table": "Note"
+      },
+      {
+        "command": "INSERT",
+        "definition": "USING TRUE WITH CHECK FALSE",
+        "name": "basis_Note_create",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Note_create\" ON \"Note\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+        "table": "Note"
+      },
+      {
+        "command": "UPDATE",
+        "definition": "USING FALSE WITH CHECK FALSE",
+        "name": "basis_Note_update",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Note_update\" ON \"Note\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+        "table": "Note"
+      },
+      {
+        "command": "DELETE",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_Note_delete",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_Note_delete\" ON \"Note\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+        "table": "Note"
+      },
+      {
+        "command": "SELECT",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_UserRole_read",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_UserRole_read\" ON \"UserRole\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+        "table": "UserRole"
+      },
+      {
+        "command": "INSERT",
+        "definition": "USING TRUE WITH CHECK FALSE",
+        "name": "basis_UserRole_create",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_UserRole_create\" ON \"UserRole\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+        "table": "UserRole"
+      },
+      {
+        "command": "UPDATE",
+        "definition": "USING FALSE WITH CHECK FALSE",
+        "name": "basis_UserRole_update",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_UserRole_update\" ON \"UserRole\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+        "table": "UserRole"
+      },
+      {
+        "command": "DELETE",
+        "definition": "USING FALSE WITH CHECK TRUE",
+        "name": "basis_UserRole_delete",
+        "permissive": "PERMISSIVE",
+        "roles": [
+          "basis_app"
+        ],
+        "sql": "CREATE POLICY \"basis_UserRole_delete\" ON \"UserRole\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+        "table": "UserRole"
+      }
+    ],
+    "tables": [
+      {
+        "columns": [
+          {
+            "name": "id",
+            "nullable": false,
+            "primaryKey": true,
+            "sqlType": "text"
+          },
+          {
+            "name": "name",
+            "nullable": false,
+            "primaryKey": false,
+            "sqlType": "text"
+          },
+          {
+            "name": "entity",
+            "nullable": false,
+            "primaryKey": false,
+            "sqlType": "text"
+          }
+        ],
+        "forceRowSecurity": true,
+        "indexes": [
+          {
+            "columns": [
+              "name",
+              "id"
+            ],
+            "method": "btree",
+            "name": "Entity_name_id_idx",
+            "operatorClasses": [],
+            "sql": "create index if not exists \"Entity_name_id_idx\" on \"Entity\" (\"name\", \"id\")",
+            "table": "Entity",
+            "unique": false
+          },
+          {
+            "columns": [
+              "name"
+            ],
+            "method": "gin",
+            "name": "Entity_name_trgm_idx",
+            "operatorClasses": [
+              "public.gin_trgm_ops"
+            ],
+            "sql": "create index if not exists \"Entity_name_trgm_idx\" on \"Entity\" using gin (\"name\" public.gin_trgm_ops)",
+            "table": "Entity",
+            "unique": false
+          }
+        ],
+        "name": "Entity",
+        "primaryKey": [
+          "id"
+        ],
+        "rowSecurity": true,
+        "sql": "create table \"Entity\" (\n\"id\" text primary key,\n\"name\" text not null,\n\"entity\" text not null,\nconstraint \"Entity_id_format_check\" check ((\"id\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or case\n    when \"id\" ~ '^(0|-?[1-9][0-9]*)$' and length(\"id\") <= 20\n      then \"id\"::numeric between -9223372036854775808 and 9223372036854775807\n    else false\n  end)),\nconstraint \"Entity_entity_check\" check (\"entity\" in ('User', 'Role', 'ExternalIdentity', 'Note'))\n)"
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "nullable": false,
+            "primaryKey": true,
+            "sqlType": "text"
+          }
+        ],
+        "forceRowSecurity": true,
+        "indexes": [],
+        "name": "User",
+        "primaryKey": [
+          "id"
+        ],
+        "rowSecurity": true,
+        "sql": "create table \"User\" (\n\"id\" text primary key,\nconstraint \"User_id_format_check\" check ((\"id\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or case\n    when \"id\" ~ '^(0|-?[1-9][0-9]*)$' and length(\"id\") <= 20\n      then \"id\"::numeric between -9223372036854775808 and 9223372036854775807\n    else false\n  end))\n)"
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "nullable": false,
+            "primaryKey": true,
+            "sqlType": "text"
+          },
+          {
+            "name": "description",
+            "nullable": false,
+            "primaryKey": false,
+            "sqlType": "text"
+          }
+        ],
+        "forceRowSecurity": true,
+        "indexes": [],
+        "name": "Role",
+        "primaryKey": [
+          "id"
+        ],
+        "rowSecurity": true,
+        "sql": "create table \"Role\" (\n\"id\" text primary key,\n\"description\" text not null,\nconstraint \"Role_id_format_check\" check ((\"id\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or case\n    when \"id\" ~ '^(0|-?[1-9][0-9]*)$' and length(\"id\") <= 20\n      then \"id\"::numeric between -9223372036854775808 and 9223372036854775807\n    else false\n  end))\n)"
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "nullable": false,
+            "primaryKey": true,
+            "sqlType": "text"
+          },
+          {
+            "name": "provider",
+            "nullable": false,
+            "primaryKey": false,
+            "sqlType": "text"
+          },
+          {
+            "name": "subject",
+            "nullable": false,
+            "primaryKey": false,
+            "sqlType": "text"
+          },
+          {
+            "name": "revoked",
+            "nullable": false,
+            "primaryKey": false,
+            "sqlType": "boolean"
+          },
+          {
+            "name": "user.id",
+            "nullable": true,
+            "primaryKey": false,
+            "sqlType": "text"
+          }
+        ],
+        "forceRowSecurity": true,
+        "indexes": [
+          {
+            "columns": [
+              "provider",
+              "subject"
+            ],
+            "name": "ExternalIdentity_provider_subject_key",
+            "operatorClasses": [],
+            "sql": "CREATE UNIQUE INDEX IF NOT EXISTS \"ExternalIdentity_provider_subject_key\" ON \"ExternalIdentity\" (\"provider\", \"subject\")",
+            "table": "ExternalIdentity",
+            "unique": true
+          }
+        ],
+        "name": "ExternalIdentity",
+        "primaryKey": [
+          "id"
+        ],
+        "rowSecurity": true,
+        "sql": "create table \"ExternalIdentity\" (\n\"id\" text primary key,\n\"provider\" text not null,\n\"subject\" text not null,\n\"revoked\" boolean not null,\n\"user.id\" text,\nconstraint \"ExternalIdentity_id_format_check\" check ((\"id\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or case\n    when \"id\" ~ '^(0|-?[1-9][0-9]*)$' and length(\"id\") <= 20\n      then \"id\"::numeric between -9223372036854775808 and 9223372036854775807\n    else false\n  end))\n)"
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "nullable": false,
+            "primaryKey": true,
+            "sqlType": "text"
+          },
+          {
+            "name": "title",
+            "nullable": false,
+            "primaryKey": false,
+            "sqlType": "text"
+          }
+        ],
+        "forceRowSecurity": true,
+        "indexes": [],
+        "name": "Note",
+        "primaryKey": [
+          "id"
+        ],
+        "rowSecurity": true,
+        "sql": "create table \"Note\" (\n\"id\" text primary key,\n\"title\" text not null,\nconstraint \"Note_id_format_check\" check ((\"id\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or case\n    when \"id\" ~ '^(0|-?[1-9][0-9]*)$' and length(\"id\") <= 20\n      then \"id\"::numeric between -9223372036854775808 and 9223372036854775807\n    else false\n  end))\n)"
+      },
+      {
+        "columns": [
+          {
+            "name": "user.id",
+            "nullable": false,
+            "primaryKey": false,
+            "sqlType": "text"
+          },
+          {
+            "name": "role.id",
+            "nullable": false,
+            "primaryKey": false,
+            "sqlType": "text"
+          }
+        ],
+        "forceRowSecurity": true,
+        "indexes": [
+          {
+            "columns": [
+              "user.id"
+            ],
+            "method": "btree",
+            "name": "UserRole_user_idx",
+            "operatorClasses": [],
+            "sql": "create index if not exists \"UserRole_user_idx\" on \"UserRole\" (\"user.id\")",
+            "table": "UserRole",
+            "unique": false
+          },
+          {
+            "columns": [
+              "role.id"
+            ],
+            "method": "btree",
+            "name": "UserRole_role_idx",
+            "operatorClasses": [],
+            "sql": "create index if not exists \"UserRole_role_idx\" on \"UserRole\" (\"role.id\")",
+            "table": "UserRole",
+            "unique": false
+          }
+        ],
+        "name": "UserRole",
+        "primaryKey": [
+          "user.id",
+          "role.id"
+        ],
+        "rowSecurity": true,
+        "sql": "create table \"UserRole\" (\n\"user.id\" text not null,\n\"role.id\" text not null,\nprimary key (\"user.id\", \"role.id\")\n)"
+      }
+    ],
+    "triggers": [
+      {
+        "constraint": true,
+        "deferrable": true,
+        "functionName": "Entity_validate_leaf",
+        "initDeferred": true,
+        "name": "Entity_leaf_check",
+        "sql": "create constraint trigger \"Entity_leaf_check\" after insert or update on \"Entity\" deferrable initially deferred for each row execute function \"Entity_validate_leaf\"()",
+        "table": "Entity",
+        "type": 21
+      },
+      {
+        "constraint": true,
+        "deferrable": true,
+        "functionName": "Entity_validate_leaf_row",
+        "initDeferred": true,
+        "name": "User_leaf_check",
+        "sql": "create constraint trigger \"User_leaf_check\" after insert or update or delete on \"User\" deferrable initially deferred for each row execute function \"Entity_validate_leaf_row\"()",
+        "table": "User",
+        "type": 29
+      },
+      {
+        "constraint": true,
+        "deferrable": true,
+        "functionName": "Entity_validate_leaf_row",
+        "initDeferred": true,
+        "name": "Role_leaf_check",
+        "sql": "create constraint trigger \"Role_leaf_check\" after insert or update or delete on \"Role\" deferrable initially deferred for each row execute function \"Entity_validate_leaf_row\"()",
+        "table": "Role",
+        "type": 29
+      },
+      {
+        "constraint": true,
+        "deferrable": true,
+        "functionName": "Entity_validate_leaf_row",
+        "initDeferred": true,
+        "name": "ExternalIdentity_leaf_check",
+        "sql": "create constraint trigger \"ExternalIdentity_leaf_check\" after insert or update or delete on \"ExternalIdentity\" deferrable initially deferred for each row execute function \"Entity_validate_leaf_row\"()",
+        "table": "ExternalIdentity",
+        "type": 29
+      },
+      {
+        "constraint": true,
+        "deferrable": true,
+        "functionName": "Entity_validate_leaf_row",
+        "initDeferred": true,
+        "name": "Note_leaf_check",
+        "sql": "create constraint trigger \"Note_leaf_check\" after insert or update or delete on \"Note\" deferrable initially deferred for each row execute function \"Entity_validate_leaf_row\"()",
+        "table": "Note",
+        "type": 29
+      },
+      {
+        "columns": [
+          "entity"
+        ],
+        "constraint": false,
+        "deferrable": false,
+        "functionName": "Entity_leaf_immutable",
+        "initDeferred": false,
+        "name": "Entity_leaf_immutable",
+        "sql": "create trigger \"Entity_leaf_immutable\" before update of \"entity\" on \"Entity\" for each row execute function \"Entity_leaf_immutable\"()",
+        "table": "Entity",
+        "type": 19
+      }
+    ],
+    "grants": [
+      {
+        "grantName": "grant:basis_app:table:Entity:SELECT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Entity:SELECT",
+        "object": "table",
+        "privilege": "SELECT",
+        "sql": "GRANT SELECT ON \"Entity\" TO \"basis_app\"",
+        "table": "Entity"
+      },
+      {
+        "grantName": "grant:basis_app:table:Entity:INSERT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Entity:INSERT",
+        "object": "table",
+        "privilege": "INSERT",
+        "sql": "GRANT INSERT ON \"Entity\" TO \"basis_app\"",
+        "table": "Entity"
+      },
+      {
+        "grantName": "grant:basis_app:table:Entity:UPDATE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Entity:UPDATE",
+        "object": "table",
+        "privilege": "UPDATE",
+        "sql": "GRANT UPDATE ON \"Entity\" TO \"basis_app\"",
+        "table": "Entity"
+      },
+      {
+        "grantName": "grant:basis_app:table:Entity:DELETE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Entity:DELETE",
+        "object": "table",
+        "privilege": "DELETE",
+        "sql": "GRANT DELETE ON \"Entity\" TO \"basis_app\"",
+        "table": "Entity"
+      },
+      {
+        "grantName": "grant:basis_app:table:User:SELECT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:User:SELECT",
+        "object": "table",
+        "privilege": "SELECT",
+        "sql": "GRANT SELECT ON \"User\" TO \"basis_app\"",
+        "table": "User"
+      },
+      {
+        "grantName": "grant:basis_app:table:User:INSERT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:User:INSERT",
+        "object": "table",
+        "privilege": "INSERT",
+        "sql": "GRANT INSERT ON \"User\" TO \"basis_app\"",
+        "table": "User"
+      },
+      {
+        "grantName": "grant:basis_app:table:User:UPDATE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:User:UPDATE",
+        "object": "table",
+        "privilege": "UPDATE",
+        "sql": "GRANT UPDATE ON \"User\" TO \"basis_app\"",
+        "table": "User"
+      },
+      {
+        "grantName": "grant:basis_app:table:User:DELETE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:User:DELETE",
+        "object": "table",
+        "privilege": "DELETE",
+        "sql": "GRANT DELETE ON \"User\" TO \"basis_app\"",
+        "table": "User"
+      },
+      {
+        "grantName": "grant:basis_app:table:Role:SELECT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Role:SELECT",
+        "object": "table",
+        "privilege": "SELECT",
+        "sql": "GRANT SELECT ON \"Role\" TO \"basis_app\"",
+        "table": "Role"
+      },
+      {
+        "grantName": "grant:basis_app:table:Role:INSERT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Role:INSERT",
+        "object": "table",
+        "privilege": "INSERT",
+        "sql": "GRANT INSERT ON \"Role\" TO \"basis_app\"",
+        "table": "Role"
+      },
+      {
+        "grantName": "grant:basis_app:table:Role:UPDATE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Role:UPDATE",
+        "object": "table",
+        "privilege": "UPDATE",
+        "sql": "GRANT UPDATE ON \"Role\" TO \"basis_app\"",
+        "table": "Role"
+      },
+      {
+        "grantName": "grant:basis_app:table:Role:DELETE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Role:DELETE",
+        "object": "table",
+        "privilege": "DELETE",
+        "sql": "GRANT DELETE ON \"Role\" TO \"basis_app\"",
+        "table": "Role"
+      },
+      {
+        "grantName": "grant:basis_app:table:ExternalIdentity:SELECT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:ExternalIdentity:SELECT",
+        "object": "table",
+        "privilege": "SELECT",
+        "sql": "GRANT SELECT ON \"ExternalIdentity\" TO \"basis_app\"",
+        "table": "ExternalIdentity"
+      },
+      {
+        "grantName": "grant:basis_app:table:ExternalIdentity:INSERT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:ExternalIdentity:INSERT",
+        "object": "table",
+        "privilege": "INSERT",
+        "sql": "GRANT INSERT ON \"ExternalIdentity\" TO \"basis_app\"",
+        "table": "ExternalIdentity"
+      },
+      {
+        "grantName": "grant:basis_app:table:ExternalIdentity:UPDATE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:ExternalIdentity:UPDATE",
+        "object": "table",
+        "privilege": "UPDATE",
+        "sql": "GRANT UPDATE ON \"ExternalIdentity\" TO \"basis_app\"",
+        "table": "ExternalIdentity"
+      },
+      {
+        "grantName": "grant:basis_app:table:ExternalIdentity:DELETE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:ExternalIdentity:DELETE",
+        "object": "table",
+        "privilege": "DELETE",
+        "sql": "GRANT DELETE ON \"ExternalIdentity\" TO \"basis_app\"",
+        "table": "ExternalIdentity"
+      },
+      {
+        "grantName": "grant:basis_app:table:Note:SELECT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Note:SELECT",
+        "object": "table",
+        "privilege": "SELECT",
+        "sql": "GRANT SELECT ON \"Note\" TO \"basis_app\"",
+        "table": "Note"
+      },
+      {
+        "grantName": "grant:basis_app:table:Note:INSERT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Note:INSERT",
+        "object": "table",
+        "privilege": "INSERT",
+        "sql": "GRANT INSERT ON \"Note\" TO \"basis_app\"",
+        "table": "Note"
+      },
+      {
+        "grantName": "grant:basis_app:table:Note:UPDATE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Note:UPDATE",
+        "object": "table",
+        "privilege": "UPDATE",
+        "sql": "GRANT UPDATE ON \"Note\" TO \"basis_app\"",
+        "table": "Note"
+      },
+      {
+        "grantName": "grant:basis_app:table:Note:DELETE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:Note:DELETE",
+        "object": "table",
+        "privilege": "DELETE",
+        "sql": "GRANT DELETE ON \"Note\" TO \"basis_app\"",
+        "table": "Note"
+      },
+      {
+        "grantName": "grant:basis_app:table:UserRole:SELECT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:UserRole:SELECT",
+        "object": "table",
+        "privilege": "SELECT",
+        "sql": "GRANT SELECT ON \"UserRole\" TO \"basis_app\"",
+        "table": "UserRole"
+      },
+      {
+        "grantName": "grant:basis_app:table:UserRole:INSERT",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:UserRole:INSERT",
+        "object": "table",
+        "privilege": "INSERT",
+        "sql": "GRANT INSERT ON \"UserRole\" TO \"basis_app\"",
+        "table": "UserRole"
+      },
+      {
+        "grantName": "grant:basis_app:table:UserRole:UPDATE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:UserRole:UPDATE",
+        "object": "table",
+        "privilege": "UPDATE",
+        "sql": "GRANT UPDATE ON \"UserRole\" TO \"basis_app\"",
+        "table": "UserRole"
+      },
+      {
+        "grantName": "grant:basis_app:table:UserRole:DELETE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:table:UserRole:DELETE",
+        "object": "table",
+        "privilege": "DELETE",
+        "sql": "GRANT DELETE ON \"UserRole\" TO \"basis_app\"",
+        "table": "UserRole"
+      },
+      {
+        "grantName": "grant:basis_app:schema:public:USAGE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:schema:public:USAGE",
+        "object": "schema",
+        "privilege": "USAGE",
+        "sql": "GRANT USAGE ON SCHEMA public TO \"basis_app\"",
+        "table": "public"
+      },
+      {
+        "grantName": "grant:basis_app:schema:basis:USAGE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:schema:basis:USAGE",
+        "object": "schema",
+        "privilege": "USAGE",
+        "sql": "GRANT USAGE ON SCHEMA basis TO \"basis_app\"",
+        "table": "basis"
+      },
+      {
+        "function": "basis.has_role",
+        "grantName": "grant:basis_app:function:basis.has_role:EXECUTE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:function:basis.has_role:EXECUTE",
+        "object": "function",
+        "privilege": "EXECUTE",
+        "sql": "GRANT EXECUTE ON FUNCTION basis.has_role(text) TO \"basis_app\""
+      },
+      {
+        "function": "basis.has_role",
+        "grantName": "grant:PUBLIC:function:basis.has_role:EXECUTE",
+        "grantee": "PUBLIC",
+        "kind": "revoke",
+        "name": "revoke:grant:PUBLIC:function:basis.has_role:EXECUTE",
+        "object": "function",
+        "privilege": "EXECUTE",
+        "sql": "REVOKE ALL ON FUNCTION basis.has_role(text) FROM PUBLIC"
+      },
+      {
+        "function": "basis.resolve_identity",
+        "grantName": "grant:basis_app:function:basis.resolve_identity:EXECUTE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:function:basis.resolve_identity:EXECUTE",
+        "object": "function",
+        "privilege": "EXECUTE",
+        "sql": "GRANT EXECUTE ON FUNCTION basis.resolve_identity(candidate text) TO \"basis_app\""
+      },
+      {
+        "function": "basis.resolve_identity",
+        "grantName": "grant:PUBLIC:function:basis.resolve_identity:EXECUTE",
+        "grantee": "PUBLIC",
+        "kind": "revoke",
+        "name": "revoke:grant:PUBLIC:function:basis.resolve_identity:EXECUTE",
+        "object": "function",
+        "privilege": "EXECUTE",
+        "sql": "REVOKE ALL ON FUNCTION basis.resolve_identity(candidate text) FROM PUBLIC"
+      },
+      {
+        "function": "basis.enroll_identity",
+        "grantName": "grant:basis_app:function:basis.enroll_identity:EXECUTE",
+        "grantee": "basis_app",
+        "kind": "grant",
+        "name": "grant:basis_app:function:basis.enroll_identity:EXECUTE",
+        "object": "function",
+        "privilege": "EXECUTE",
+        "sql": "GRANT EXECUTE ON FUNCTION basis.enroll_identity(provider_name text, provider_subject text, display_name text, email_address text) TO \"basis_app\""
+      },
+      {
+        "function": "basis.enroll_identity",
+        "grantName": "grant:PUBLIC:function:basis.enroll_identity:EXECUTE",
+        "grantee": "PUBLIC",
+        "kind": "revoke",
+        "name": "revoke:grant:PUBLIC:function:basis.enroll_identity:EXECUTE",
+        "object": "function",
+        "privilege": "EXECUTE",
+        "sql": "REVOKE ALL ON FUNCTION basis.enroll_identity(provider_name text, provider_subject text, display_name text, email_address text) FROM PUBLIC"
+      },
+      {
+        "grantName": "grant:basis_app:schema:public:CREATE",
+        "grantee": "basis_app",
+        "kind": "revoke",
+        "name": "revoke:grant:basis_app:schema:public:CREATE",
+        "object": "schema",
+        "privilege": "CREATE",
+        "sql": "REVOKE CREATE ON SCHEMA public FROM \"basis_app\"",
+        "table": "public"
+      },
+      {
+        "grantName": "grant:PUBLIC:schema:public:CREATE",
+        "grantee": "PUBLIC",
+        "kind": "revoke",
+        "name": "revoke:grant:PUBLIC:schema:public:CREATE",
+        "object": "schema",
+        "privilege": "CREATE",
+        "sql": "REVOKE CREATE ON SCHEMA public FROM PUBLIC",
+        "table": "public"
+      }
+    ],
+    "roles": [
+      {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "name": "Administrator"
+      }
+    ],
+    "schemas": [
+      "basis"
+    ]
+  },
+  "operations": [
+    {
+      "dependsOn": [],
+      "id": "extension:pg_trgm",
+      "kind": "extension",
+      "risk": "safe",
+      "sql": "CREATE EXTENSION IF NOT EXISTS \"pg_trgm\" WITH SCHEMA public",
+      "target": "pg_trgm",
+      "preconditions": [
+        "schema is writable"
+      ]
+    },
+    {
+      "dependsOn": [],
+      "id": "schema:basis",
+      "kind": "schema",
+      "risk": "safe",
+      "sql": "CREATE SCHEMA IF NOT EXISTS \"basis\"",
+      "target": "basis",
+      "preconditions": [
+        "schema is writable"
+      ]
+    },
+    {
+      "dependsOn": [],
+      "id": "table:Entity",
+      "kind": "table",
+      "risk": "safe",
+      "sql": "create table \"Entity\" (\n\"id\" text primary key,\n\"name\" text not null,\n\"entity\" text not null,\nconstraint \"Entity_id_format_check\" check ((\"id\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or case\n    when \"id\" ~ '^(0|-?[1-9][0-9]*)$' and length(\"id\") <= 20\n      then \"id\"::numeric between -9223372036854775808 and 9223372036854775807\n    else false\n  end)),\nconstraint \"Entity_entity_check\" check (\"entity\" in ('User', 'Role', 'ExternalIdentity', 'Note'))\n)",
+      "target": "Entity",
+      "preconditions": [
+        "schema is writable"
+      ]
+    },
+    {
+      "dependsOn": [],
+      "id": "table:ExternalIdentity",
+      "kind": "table",
+      "risk": "safe",
+      "sql": "create table \"ExternalIdentity\" (\n\"id\" text primary key,\n\"provider\" text not null,\n\"subject\" text not null,\n\"revoked\" boolean not null,\n\"user.id\" text,\nconstraint \"ExternalIdentity_id_format_check\" check ((\"id\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or case\n    when \"id\" ~ '^(0|-?[1-9][0-9]*)$' and length(\"id\") <= 20\n      then \"id\"::numeric between -9223372036854775808 and 9223372036854775807\n    else false\n  end))\n)",
+      "target": "ExternalIdentity",
+      "preconditions": [
+        "schema is writable"
+      ]
+    },
+    {
+      "dependsOn": [],
+      "id": "table:Note",
+      "kind": "table",
+      "risk": "safe",
+      "sql": "create table \"Note\" (\n\"id\" text primary key,\n\"title\" text not null,\nconstraint \"Note_id_format_check\" check ((\"id\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or case\n    when \"id\" ~ '^(0|-?[1-9][0-9]*)$' and length(\"id\") <= 20\n      then \"id\"::numeric between -9223372036854775808 and 9223372036854775807\n    else false\n  end))\n)",
+      "target": "Note",
+      "preconditions": [
+        "schema is writable"
+      ]
+    },
+    {
+      "dependsOn": [],
+      "id": "table:Role",
+      "kind": "table",
+      "risk": "safe",
+      "sql": "create table \"Role\" (\n\"id\" text primary key,\n\"description\" text not null,\nconstraint \"Role_id_format_check\" check ((\"id\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or case\n    when \"id\" ~ '^(0|-?[1-9][0-9]*)$' and length(\"id\") <= 20\n      then \"id\"::numeric between -9223372036854775808 and 9223372036854775807\n    else false\n  end))\n)",
+      "target": "Role",
+      "preconditions": [
+        "schema is writable"
+      ]
+    },
+    {
+      "dependsOn": [],
+      "id": "table:User",
+      "kind": "table",
+      "risk": "safe",
+      "sql": "create table \"User\" (\n\"id\" text primary key,\nconstraint \"User_id_format_check\" check ((\"id\" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or case\n    when \"id\" ~ '^(0|-?[1-9][0-9]*)$' and length(\"id\") <= 20\n      then \"id\"::numeric between -9223372036854775808 and 9223372036854775807\n    else false\n  end))\n)",
+      "target": "User",
+      "preconditions": [
+        "schema is writable"
+      ]
+    },
+    {
+      "dependsOn": [],
+      "id": "table:UserRole",
+      "kind": "table",
+      "risk": "safe",
+      "sql": "create table \"UserRole\" (\n\"user.id\" text not null,\n\"role.id\" text not null,\nprimary key (\"user.id\", \"role.id\")\n)",
+      "target": "UserRole",
+      "preconditions": [
+        "schema is writable"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity"
+      ],
+      "id": "index:Entity:Entity_name_id_idx",
+      "kind": "index",
+      "risk": "safe",
+      "sql": "create index if not exists \"Entity_name_id_idx\" on \"Entity\" (\"name\", \"id\")",
+      "target": "Entity.Entity_name_id_idx",
+      "preconditions": [
+        "completed:table:Entity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity"
+      ],
+      "id": "index:Entity:Entity_name_trgm_idx",
+      "kind": "index",
+      "risk": "safe",
+      "sql": "create index if not exists \"Entity_name_trgm_idx\" on \"Entity\" using gin (\"name\" public.gin_trgm_ops)",
+      "target": "Entity.Entity_name_trgm_idx",
+      "preconditions": [
+        "completed:table:Entity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:ExternalIdentity"
+      ],
+      "id": "index:ExternalIdentity:ExternalIdentity_provider_subject_key",
+      "kind": "index",
+      "risk": "safe",
+      "sql": "CREATE UNIQUE INDEX IF NOT EXISTS \"ExternalIdentity_provider_subject_key\" ON \"ExternalIdentity\" (\"provider\", \"subject\")",
+      "target": "ExternalIdentity.ExternalIdentity_provider_subject_key",
+      "preconditions": [
+        "completed:table:ExternalIdentity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:UserRole"
+      ],
+      "id": "index:UserRole:UserRole_role_idx",
+      "kind": "index",
+      "risk": "safe",
+      "sql": "create index if not exists \"UserRole_role_idx\" on \"UserRole\" (\"role.id\")",
+      "target": "UserRole.UserRole_role_idx",
+      "preconditions": [
+        "completed:table:UserRole"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:UserRole"
+      ],
+      "id": "index:UserRole:UserRole_user_idx",
+      "kind": "index",
+      "risk": "safe",
+      "sql": "create index if not exists \"UserRole_user_idx\" on \"UserRole\" (\"user.id\")",
+      "target": "UserRole.UserRole_user_idx",
+      "preconditions": [
+        "completed:table:UserRole"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "table:ExternalIdentity"
+      ],
+      "id": "constraint:ExternalIdentity_Entity_mti_fkey",
+      "kind": "constraint",
+      "risk": "safe",
+      "sql": "alter table \"ExternalIdentity\" add constraint \"ExternalIdentity_Entity_mti_fkey\" foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+      "target": "ExternalIdentity_Entity_mti_fkey",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:table:ExternalIdentity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:User",
+        "table:ExternalIdentity"
+      ],
+      "id": "constraint:ExternalIdentity_user_fkey",
+      "kind": "constraint",
+      "risk": "safe",
+      "sql": "alter table \"ExternalIdentity\" add constraint \"ExternalIdentity_user_fkey\" foreign key (\"user.id\") references \"User\" (\"id\") deferrable initially immediate",
+      "target": "ExternalIdentity_user_fkey",
+      "preconditions": [
+        "completed:table:User",
+        "completed:table:ExternalIdentity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "table:Note"
+      ],
+      "id": "constraint:Note_Entity_mti_fkey",
+      "kind": "constraint",
+      "risk": "safe",
+      "sql": "alter table \"Note\" add constraint \"Note_Entity_mti_fkey\" foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+      "target": "Note_Entity_mti_fkey",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:table:Note"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "table:Role"
+      ],
+      "id": "constraint:Role_Entity_mti_fkey",
+      "kind": "constraint",
+      "risk": "safe",
+      "sql": "alter table \"Role\" add constraint \"Role_Entity_mti_fkey\" foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+      "target": "Role_Entity_mti_fkey",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:table:Role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "table:User"
+      ],
+      "id": "constraint:User_Entity_mti_fkey",
+      "kind": "constraint",
+      "risk": "safe",
+      "sql": "alter table \"User\" add constraint \"User_Entity_mti_fkey\" foreign key (\"id\") references \"Entity\" (\"id\") deferrable initially immediate",
+      "target": "User_Entity_mti_fkey",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:table:User"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Role",
+        "table:UserRole"
+      ],
+      "id": "constraint:UserRole_role_fkey",
+      "kind": "constraint",
+      "risk": "safe",
+      "sql": "alter table \"UserRole\" add constraint \"UserRole_role_fkey\" foreign key (\"role.id\") references \"Role\" (\"id\") deferrable initially immediate",
+      "target": "UserRole_role_fkey",
+      "preconditions": [
+        "completed:table:Role",
+        "completed:table:UserRole"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:User",
+        "table:UserRole"
+      ],
+      "id": "constraint:UserRole_user_fkey",
+      "kind": "constraint",
+      "risk": "safe",
+      "sql": "alter table \"UserRole\" add constraint \"UserRole_user_fkey\" foreign key (\"user.id\") references \"User\" (\"id\") deferrable initially immediate",
+      "target": "UserRole_user_fkey",
+      "preconditions": [
+        "completed:table:User",
+        "completed:table:UserRole"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis"
+      ],
+      "id": "function:basis.enroll_identity",
+      "kind": "function",
+      "risk": "review",
+      "sql": "\n      CREATE OR REPLACE FUNCTION basis.enroll_identity(\n        provider_name text,\n        provider_subject text,\n        display_name text,\n        email_address text\n      )\n      RETURNS text\n      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n      DECLARE\n        existing_revoked boolean;\n        existing_user text;\n        user_id text;\n        identity_id text;\n        user_name text;\n      BEGIN\n        IF provider_name IS NULL OR provider_name = ''\n          OR provider_subject IS NULL OR provider_subject = '' THEN\n          RETURN NULL;\n        END IF;\n        PERFORM pg_advisory_xact_lock(hashtextextended(provider_name || ':' || provider_subject, 0));\n        SELECT e.\"revoked\", e.\"user.id\" INTO existing_revoked, existing_user\n        FROM \"ExternalIdentity\" e\n        WHERE e.\"provider\" = provider_name AND e.\"subject\" = provider_subject\n        FOR UPDATE;\n        IF FOUND THEN\n          IF existing_revoked THEN RETURN NULL; END IF;\n          RETURN existing_user;\n        END IF;\n        user_id := gen_random_uuid()::text;\n        user_name := coalesce(\n          nullif(display_name, ''),\n          nullif(email_address, ''),\n          provider_name || ':' || provider_subject\n        );\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\") VALUES (user_id, user_name, 'User');\n        INSERT INTO \"User\" (\"id\") VALUES (user_id);\n        identity_id := gen_random_uuid()::text;\n        INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\")\n          VALUES (identity_id, provider_name || ':' || provider_subject, 'ExternalIdentity');\n        INSERT INTO \"ExternalIdentity\" (\"id\", \"provider\", \"subject\", \"revoked\", \"user.id\")\n          VALUES (identity_id, provider_name, provider_subject, false, user_id);\n        RETURN user_id;\n      END $$;\n    ",
+      "target": "basis.enroll_identity",
+      "preconditions": [
+        "completed:schema:basis"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis"
+      ],
+      "id": "function:basis.has_role",
+      "kind": "function",
+      "risk": "review",
+      "sql": "\n      CREATE OR REPLACE FUNCTION basis.has_role(role_id text)\n      RETURNS boolean\n      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n        SELECT EXISTS (\n          SELECT 1\n          FROM \"UserRole\" ur\n          WHERE ur.\"role.id\" = role_id\n            AND ur.\"user.id\" = nullif(current_setting('actor.id', true), '')\n        )\n      $$;\n    ",
+      "target": "basis.has_role",
+      "preconditions": [
+        "completed:schema:basis"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis"
+      ],
+      "id": "function:basis.resolve_identity",
+      "kind": "function",
+      "risk": "review",
+      "sql": "\n      CREATE OR REPLACE FUNCTION basis.resolve_identity(candidate text)\n      RETURNS text\n      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, basis, pg_temp AS $$\n        SELECT u.\"id\"\n        FROM \"User\" u\n        WHERE u.\"id\" = candidate\n          AND EXISTS (\n            SELECT 1\n            FROM \"ExternalIdentity\" e\n            WHERE e.\"user.id\" = u.\"id\" AND e.\"revoked\" = false\n          )\n      $$;\n    ",
+      "target": "basis.resolve_identity",
+      "preconditions": [
+        "completed:schema:basis"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis"
+      ],
+      "id": "function:Entity_leaf_immutable",
+      "kind": "function",
+      "risk": "review",
+      "sql": "create or replace function \"Entity_leaf_immutable\"() returns trigger language plpgsql as $$\nbegin\n  if new.\"entity\" is distinct from old.\"entity\" then\n    raise exception 'leaf discriminator for root row % is immutable', old.\"id\";\n  end if;\n  return new;\nend\n$$",
+      "target": "Entity_leaf_immutable",
+      "preconditions": [
+        "completed:schema:basis"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis"
+      ],
+      "id": "function:Entity_validate_leaf",
+      "kind": "function",
+      "risk": "review",
+      "sql": "create or replace function \"Entity_validate_leaf\"() returns trigger language plpgsql as $$\ndeclare\n  root_id text;\n  root_entity text;\nbegin\n  root_id := new.\"id\";\n  select \"entity\" into root_entity from \"Entity\" where \"id\" = root_id;\n  if not found then\n    return null;\n  end if;\n  case root_entity\n    when 'User' then\n        if not exists (select 1 from \"User\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    when 'Role' then\n        if not exists (select 1 from \"Role\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    when 'ExternalIdentity' then\n        if not exists (select 1 from \"ExternalIdentity\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    when 'Note' then\n        if not exists (select 1 from \"Note\" where \"id\" = root_id) then\n          raise exception 'incomplete root row % for entity %', root_id, root_entity;\n        end if;\n    else\n      raise exception 'unknown concrete entity %', root_entity;\n  end case;\n  return new;\nend\n$$",
+      "target": "Entity_validate_leaf",
+      "preconditions": [
+        "completed:schema:basis"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis"
+      ],
+      "id": "function:Entity_validate_leaf_row",
+      "kind": "function",
+      "risk": "review",
+      "sql": "create or replace function \"Entity_validate_leaf_row\"() returns trigger language plpgsql as $$\ndeclare\n  key text;\n  root_entity text;\n  leaf_present integer;\nbegin\n  if tg_op = 'UPDATE'\n    and to_jsonb(old)->>'id' is distinct from to_jsonb(new)->>'id' then\n    raise exception 'leaf row identity is immutable';\n  end if;\n  if tg_op = 'DELETE' then\n    key := to_jsonb(old)->>'id';\n  else\n    key := to_jsonb(new)->>'id';\n  end if;\n  execute format('select 1 from %I where \"id\" = $1', tg_table_name)\n    into leaf_present using key;\n  if leaf_present is not null then\n    select \"entity\" into root_entity from \"Entity\" where \"id\" = key;\n    if not found then\n      raise exception 'leaf row % has no root row', key;\n    end if;\n    if root_entity is distinct from tg_table_name then\n      raise exception 'leaf row % must match root entity %, found %',\n        key, tg_table_name, root_entity;\n    end if;\n  elsif exists (\n    select 1 from \"Entity\" where \"id\" = key and \"entity\" = tg_table_name\n  ) then\n    raise exception 'deleting leaf row % would leave an incomplete root row', key;\n  end if;\n  return null;\nend\n$$",
+      "target": "Entity_validate_leaf_row",
+      "preconditions": [
+        "completed:schema:basis"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "function:Entity_validate_leaf"
+      ],
+      "id": "trigger:Entity_leaf_check",
+      "kind": "trigger",
+      "risk": "review",
+      "sql": "create constraint trigger \"Entity_leaf_check\" after insert or update on \"Entity\" deferrable initially deferred for each row execute function \"Entity_validate_leaf\"()",
+      "target": "Entity_leaf_check",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:function:Entity_validate_leaf"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "function:Entity_leaf_immutable"
+      ],
+      "id": "trigger:Entity_leaf_immutable",
+      "kind": "trigger",
+      "risk": "review",
+      "sql": "create trigger \"Entity_leaf_immutable\" before update of \"entity\" on \"Entity\" for each row execute function \"Entity_leaf_immutable\"()",
+      "target": "Entity_leaf_immutable",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:function:Entity_leaf_immutable"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:ExternalIdentity",
+        "function:Entity_validate_leaf_row"
+      ],
+      "id": "trigger:ExternalIdentity_leaf_check",
+      "kind": "trigger",
+      "risk": "review",
+      "sql": "create constraint trigger \"ExternalIdentity_leaf_check\" after insert or update or delete on \"ExternalIdentity\" deferrable initially deferred for each row execute function \"Entity_validate_leaf_row\"()",
+      "target": "ExternalIdentity_leaf_check",
+      "preconditions": [
+        "completed:table:ExternalIdentity",
+        "completed:function:Entity_validate_leaf_row"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Note",
+        "function:Entity_validate_leaf_row"
+      ],
+      "id": "trigger:Note_leaf_check",
+      "kind": "trigger",
+      "risk": "review",
+      "sql": "create constraint trigger \"Note_leaf_check\" after insert or update or delete on \"Note\" deferrable initially deferred for each row execute function \"Entity_validate_leaf_row\"()",
+      "target": "Note_leaf_check",
+      "preconditions": [
+        "completed:table:Note",
+        "completed:function:Entity_validate_leaf_row"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Role",
+        "function:Entity_validate_leaf_row"
+      ],
+      "id": "trigger:Role_leaf_check",
+      "kind": "trigger",
+      "risk": "review",
+      "sql": "create constraint trigger \"Role_leaf_check\" after insert or update or delete on \"Role\" deferrable initially deferred for each row execute function \"Entity_validate_leaf_row\"()",
+      "target": "Role_leaf_check",
+      "preconditions": [
+        "completed:table:Role",
+        "completed:function:Entity_validate_leaf_row"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:User",
+        "function:Entity_validate_leaf_row"
+      ],
+      "id": "trigger:User_leaf_check",
+      "kind": "trigger",
+      "risk": "review",
+      "sql": "create constraint trigger \"User_leaf_check\" after insert or update or delete on \"User\" deferrable initially deferred for each row execute function \"Entity_validate_leaf_row\"()",
+      "target": "User_leaf_check",
+      "preconditions": [
+        "completed:table:User",
+        "completed:function:Entity_validate_leaf_row"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity"
+      ],
+      "id": "force-rls:Entity",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"Entity\" FORCE ROW LEVEL SECURITY",
+      "target": "Entity",
+      "preconditions": [
+        "completed:table:Entity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:ExternalIdentity"
+      ],
+      "id": "force-rls:ExternalIdentity",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"ExternalIdentity\" FORCE ROW LEVEL SECURITY",
+      "target": "ExternalIdentity",
+      "preconditions": [
+        "completed:table:ExternalIdentity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Note"
+      ],
+      "id": "force-rls:Note",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"Note\" FORCE ROW LEVEL SECURITY",
+      "target": "Note",
+      "preconditions": [
+        "completed:table:Note"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Role"
+      ],
+      "id": "force-rls:Role",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"Role\" FORCE ROW LEVEL SECURITY",
+      "target": "Role",
+      "preconditions": [
+        "completed:table:Role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:User"
+      ],
+      "id": "force-rls:User",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"User\" FORCE ROW LEVEL SECURITY",
+      "target": "User",
+      "preconditions": [
+        "completed:table:User"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:UserRole"
+      ],
+      "id": "force-rls:UserRole",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"UserRole\" FORCE ROW LEVEL SECURITY",
+      "target": "UserRole",
+      "preconditions": [
+        "completed:table:UserRole"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Entity_create",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Entity_create\" ON \"Entity\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+      "target": "basis_Entity_create",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Entity_delete",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Entity_delete\" ON \"Entity\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+      "target": "basis_Entity_delete",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Entity_read",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Entity_read\" ON \"Entity\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+      "target": "basis_Entity_read",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Entity_update",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Entity_update\" ON \"Entity\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+      "target": "basis_Entity_update",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:ExternalIdentity",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_ExternalIdentity_create",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_ExternalIdentity_create\" ON \"ExternalIdentity\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+      "target": "basis_ExternalIdentity_create",
+      "preconditions": [
+        "completed:table:ExternalIdentity",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:ExternalIdentity",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_ExternalIdentity_delete",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_ExternalIdentity_delete\" ON \"ExternalIdentity\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+      "target": "basis_ExternalIdentity_delete",
+      "preconditions": [
+        "completed:table:ExternalIdentity",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:ExternalIdentity",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_ExternalIdentity_read",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_ExternalIdentity_read\" ON \"ExternalIdentity\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+      "target": "basis_ExternalIdentity_read",
+      "preconditions": [
+        "completed:table:ExternalIdentity",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:ExternalIdentity",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_ExternalIdentity_update",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_ExternalIdentity_update\" ON \"ExternalIdentity\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+      "target": "basis_ExternalIdentity_update",
+      "preconditions": [
+        "completed:table:ExternalIdentity",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Note",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Note_create",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Note_create\" ON \"Note\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+      "target": "basis_Note_create",
+      "preconditions": [
+        "completed:table:Note",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Note",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Note_delete",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Note_delete\" ON \"Note\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+      "target": "basis_Note_delete",
+      "preconditions": [
+        "completed:table:Note",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Note",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Note_read",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Note_read\" ON \"Note\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+      "target": "basis_Note_read",
+      "preconditions": [
+        "completed:table:Note",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Note",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Note_update",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Note_update\" ON \"Note\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+      "target": "basis_Note_update",
+      "preconditions": [
+        "completed:table:Note",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Role",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Role_create",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Role_create\" ON \"Role\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+      "target": "basis_Role_create",
+      "preconditions": [
+        "completed:table:Role",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Role",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Role_delete",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Role_delete\" ON \"Role\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+      "target": "basis_Role_delete",
+      "preconditions": [
+        "completed:table:Role",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Role",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Role_read",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Role_read\" ON \"Role\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+      "target": "basis_Role_read",
+      "preconditions": [
+        "completed:table:Role",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Role",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_Role_update",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_Role_update\" ON \"Role\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+      "target": "basis_Role_update",
+      "preconditions": [
+        "completed:table:Role",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:User",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_User_create",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_User_create\" ON \"User\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+      "target": "basis_User_create",
+      "preconditions": [
+        "completed:table:User",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:User",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_User_delete",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_User_delete\" ON \"User\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+      "target": "basis_User_delete",
+      "preconditions": [
+        "completed:table:User",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:User",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_User_read",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_User_read\" ON \"User\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+      "target": "basis_User_read",
+      "preconditions": [
+        "completed:table:User",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:User",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_User_update",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_User_update\" ON \"User\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+      "target": "basis_User_update",
+      "preconditions": [
+        "completed:table:User",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:UserRole",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_UserRole_create",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_UserRole_create\" ON \"UserRole\" FOR INSERT TO \"basis_app\" WITH CHECK (FALSE)",
+      "target": "basis_UserRole_create",
+      "preconditions": [
+        "completed:table:UserRole",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:UserRole",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_UserRole_delete",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_UserRole_delete\" ON \"UserRole\" FOR DELETE TO \"basis_app\" USING (FALSE)",
+      "target": "basis_UserRole_delete",
+      "preconditions": [
+        "completed:table:UserRole",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:UserRole",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_UserRole_read",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_UserRole_read\" ON \"UserRole\" FOR SELECT TO \"basis_app\" USING (FALSE)",
+      "target": "basis_UserRole_read",
+      "preconditions": [
+        "completed:table:UserRole",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:UserRole",
+        "schema:basis",
+        "function:Entity_validate_leaf",
+        "function:Entity_validate_leaf_row",
+        "function:Entity_leaf_immutable",
+        "function:basis.has_role",
+        "function:basis.resolve_identity",
+        "function:basis.enroll_identity"
+      ],
+      "id": "policy:basis_UserRole_update",
+      "kind": "policy",
+      "risk": "review",
+      "sql": "CREATE POLICY \"basis_UserRole_update\" ON \"UserRole\" FOR UPDATE TO \"basis_app\" USING (FALSE) WITH CHECK (FALSE)",
+      "target": "basis_UserRole_update",
+      "preconditions": [
+        "completed:table:UserRole",
+        "completed:schema:basis",
+        "completed:function:Entity_validate_leaf",
+        "completed:function:Entity_validate_leaf_row",
+        "completed:function:Entity_leaf_immutable",
+        "completed:function:basis.has_role",
+        "completed:function:basis.resolve_identity",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity"
+      ],
+      "id": "rls:Entity",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"Entity\" ENABLE ROW LEVEL SECURITY",
+      "target": "Entity",
+      "preconditions": [
+        "completed:table:Entity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:ExternalIdentity"
+      ],
+      "id": "rls:ExternalIdentity",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"ExternalIdentity\" ENABLE ROW LEVEL SECURITY",
+      "target": "ExternalIdentity",
+      "preconditions": [
+        "completed:table:ExternalIdentity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Note"
+      ],
+      "id": "rls:Note",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"Note\" ENABLE ROW LEVEL SECURITY",
+      "target": "Note",
+      "preconditions": [
+        "completed:table:Note"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Role"
+      ],
+      "id": "rls:Role",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"Role\" ENABLE ROW LEVEL SECURITY",
+      "target": "Role",
+      "preconditions": [
+        "completed:table:Role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:User"
+      ],
+      "id": "rls:User",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"User\" ENABLE ROW LEVEL SECURITY",
+      "target": "User",
+      "preconditions": [
+        "completed:table:User"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:UserRole"
+      ],
+      "id": "rls:UserRole",
+      "kind": "row-security",
+      "risk": "review",
+      "sql": "ALTER TABLE \"UserRole\" ENABLE ROW LEVEL SECURITY",
+      "target": "UserRole",
+      "preconditions": [
+        "completed:table:UserRole"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "function:basis.enroll_identity"
+      ],
+      "id": "grant:grant:basis_app:function:basis.enroll_identity:EXECUTE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT EXECUTE ON FUNCTION basis.enroll_identity(provider_name text, provider_subject text, display_name text, email_address text) TO \"basis_app\"",
+      "target": "grant:basis_app:function:basis.enroll_identity:EXECUTE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "function:basis.has_role"
+      ],
+      "id": "grant:grant:basis_app:function:basis.has_role:EXECUTE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT EXECUTE ON FUNCTION basis.has_role(text) TO \"basis_app\"",
+      "target": "grant:basis_app:function:basis.has_role:EXECUTE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:function:basis.has_role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "function:basis.resolve_identity"
+      ],
+      "id": "grant:grant:basis_app:function:basis.resolve_identity:EXECUTE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT EXECUTE ON FUNCTION basis.resolve_identity(candidate text) TO \"basis_app\"",
+      "target": "grant:basis_app:function:basis.resolve_identity:EXECUTE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:function:basis.resolve_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis"
+      ],
+      "id": "grant:grant:basis_app:schema:basis:USAGE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT USAGE ON SCHEMA basis TO \"basis_app\"",
+      "target": "grant:basis_app:schema:basis:USAGE",
+      "preconditions": [
+        "completed:schema:basis"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis"
+      ],
+      "id": "grant:grant:basis_app:schema:public:USAGE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT USAGE ON SCHEMA public TO \"basis_app\"",
+      "target": "grant:basis_app:schema:public:USAGE",
+      "preconditions": [
+        "completed:schema:basis"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Entity"
+      ],
+      "id": "grant:grant:basis_app:table:Entity:DELETE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT DELETE ON \"Entity\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Entity:DELETE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Entity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Entity"
+      ],
+      "id": "grant:grant:basis_app:table:Entity:INSERT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT INSERT ON \"Entity\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Entity:INSERT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Entity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Entity"
+      ],
+      "id": "grant:grant:basis_app:table:Entity:SELECT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT SELECT ON \"Entity\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Entity:SELECT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Entity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Entity"
+      ],
+      "id": "grant:grant:basis_app:table:Entity:UPDATE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT UPDATE ON \"Entity\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Entity:UPDATE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Entity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:ExternalIdentity"
+      ],
+      "id": "grant:grant:basis_app:table:ExternalIdentity:DELETE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT DELETE ON \"ExternalIdentity\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:ExternalIdentity:DELETE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:ExternalIdentity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:ExternalIdentity"
+      ],
+      "id": "grant:grant:basis_app:table:ExternalIdentity:INSERT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT INSERT ON \"ExternalIdentity\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:ExternalIdentity:INSERT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:ExternalIdentity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:ExternalIdentity"
+      ],
+      "id": "grant:grant:basis_app:table:ExternalIdentity:SELECT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT SELECT ON \"ExternalIdentity\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:ExternalIdentity:SELECT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:ExternalIdentity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:ExternalIdentity"
+      ],
+      "id": "grant:grant:basis_app:table:ExternalIdentity:UPDATE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT UPDATE ON \"ExternalIdentity\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:ExternalIdentity:UPDATE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:ExternalIdentity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Note"
+      ],
+      "id": "grant:grant:basis_app:table:Note:DELETE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT DELETE ON \"Note\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Note:DELETE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Note"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Note"
+      ],
+      "id": "grant:grant:basis_app:table:Note:INSERT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT INSERT ON \"Note\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Note:INSERT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Note"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Note"
+      ],
+      "id": "grant:grant:basis_app:table:Note:SELECT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT SELECT ON \"Note\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Note:SELECT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Note"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Note"
+      ],
+      "id": "grant:grant:basis_app:table:Note:UPDATE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT UPDATE ON \"Note\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Note:UPDATE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Note"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Role"
+      ],
+      "id": "grant:grant:basis_app:table:Role:DELETE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT DELETE ON \"Role\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Role:DELETE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Role"
+      ],
+      "id": "grant:grant:basis_app:table:Role:INSERT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT INSERT ON \"Role\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Role:INSERT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Role"
+      ],
+      "id": "grant:grant:basis_app:table:Role:SELECT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT SELECT ON \"Role\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Role:SELECT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:Role"
+      ],
+      "id": "grant:grant:basis_app:table:Role:UPDATE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT UPDATE ON \"Role\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:Role:UPDATE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:Role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:User"
+      ],
+      "id": "grant:grant:basis_app:table:User:DELETE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT DELETE ON \"User\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:User:DELETE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:User"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:User"
+      ],
+      "id": "grant:grant:basis_app:table:User:INSERT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT INSERT ON \"User\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:User:INSERT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:User"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:User"
+      ],
+      "id": "grant:grant:basis_app:table:User:SELECT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT SELECT ON \"User\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:User:SELECT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:User"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:User"
+      ],
+      "id": "grant:grant:basis_app:table:User:UPDATE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT UPDATE ON \"User\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:User:UPDATE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:User"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:UserRole"
+      ],
+      "id": "grant:grant:basis_app:table:UserRole:DELETE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT DELETE ON \"UserRole\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:UserRole:DELETE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:UserRole"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:UserRole"
+      ],
+      "id": "grant:grant:basis_app:table:UserRole:INSERT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT INSERT ON \"UserRole\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:UserRole:INSERT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:UserRole"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:UserRole"
+      ],
+      "id": "grant:grant:basis_app:table:UserRole:SELECT",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT SELECT ON \"UserRole\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:UserRole:SELECT",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:UserRole"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "table:UserRole"
+      ],
+      "id": "grant:grant:basis_app:table:UserRole:UPDATE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "GRANT UPDATE ON \"UserRole\" TO \"basis_app\"",
+      "target": "grant:basis_app:table:UserRole:UPDATE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:table:UserRole"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "function:basis.enroll_identity"
+      ],
+      "id": "grant:revoke:grant:PUBLIC:function:basis.enroll_identity:EXECUTE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "REVOKE ALL ON FUNCTION basis.enroll_identity(provider_name text, provider_subject text, display_name text, email_address text) FROM PUBLIC",
+      "target": "revoke:grant:PUBLIC:function:basis.enroll_identity:EXECUTE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:function:basis.enroll_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "function:basis.has_role"
+      ],
+      "id": "grant:revoke:grant:PUBLIC:function:basis.has_role:EXECUTE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "REVOKE ALL ON FUNCTION basis.has_role(text) FROM PUBLIC",
+      "target": "revoke:grant:PUBLIC:function:basis.has_role:EXECUTE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:function:basis.has_role"
+      ]
+    },
+    {
+      "dependsOn": [
+        "schema:basis",
+        "function:basis.resolve_identity"
+      ],
+      "id": "grant:revoke:grant:PUBLIC:function:basis.resolve_identity:EXECUTE",
+      "kind": "grant",
+      "risk": "review",
+      "sql": "REVOKE ALL ON FUNCTION basis.resolve_identity(candidate text) FROM PUBLIC",
+      "target": "revoke:grant:PUBLIC:function:basis.resolve_identity:EXECUTE",
+      "preconditions": [
+        "completed:schema:basis",
+        "completed:function:basis.resolve_identity"
+      ]
+    },
+    {
+      "dependsOn": [
+        "table:Entity",
+        "table:Role"
+      ],
+      "id": "role:00000000-0000-0000-0000-000000000001",
+      "kind": "role",
+      "risk": "review",
+      "sql": "INSERT INTO \"Entity\" (\"id\", \"name\", \"entity\") VALUES ('00000000-0000-0000-0000-000000000001', 'Administrator', 'Role'); INSERT INTO \"Role\" (\"id\", \"description\") VALUES ('00000000-0000-0000-0000-000000000001', '')",
+      "target": "00000000-0000-0000-0000-000000000001",
+      "preconditions": [
+        "completed:table:Entity",
+        "completed:table:Role"
+      ]
+    }
+  ],
+  "planHash": "ef99a555cb1165e7bcd6dd5c097ad56bd8e22165c38ae3a153a45d827af8e969",
+  "schema": "public",
+  "sourceHash": "7b4b9e5daeac7cff813a0886b3e8485b41cfbf3ab6779d020ecf45c908e5cbf7",
+  "superuser": true,
+  "targetHash": "cf0c82e25f83533a758842e9e92f34473e85d1974e2bb85f7a600aee32482b0c",
+  "version": "0001-initial"
+}

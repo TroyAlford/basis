@@ -1,8 +1,10 @@
 import { runAsync } from 'basis/configuration'
 import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, open, readFile } from 'node:fs/promises'
+import { chmod, open, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import type { Directory } from '../../utilities'
+import { directories } from '../../utilities'
 
 /**
  * Resolve the stable per-installation managed database identity.
@@ -53,6 +55,23 @@ export interface ManagedPostgresServiceOptions {
   readonly image?: string,
 }
 
+/** Durable phase of an interrupted cutover. */
+export type CutoverPhase = 'committed' | 'detached' | 'prepared'
+
+/** Minimum durable state needed to recover an interrupted cutover. */
+export interface CutoverJournal {
+  /** Candidate volume retained for diagnosis. */
+  readonly candidateVolume: string,
+  /** Durable cutover phase. */
+  readonly phase: CutoverPhase,
+  /** Proven source recovery volume. */
+  readonly recoveryVolume: string,
+  /** Source image needed to restart the recovery volume. */
+  readonly sourceImage: string,
+  /** Journal schema version. */
+  readonly version: 1,
+}
+
 /**
  * Extract the published localhost port from `docker port` output.
  * @param output - Output such as `127.0.0.1:49152`.
@@ -80,18 +99,19 @@ export class ManagedPostgresService {
   readonly volumeName: string
   /** The selected PostgreSQL image. */
   readonly image: string
+  readonly #database: Directory
 
   /**
-   * Build the service for one installation.
-   * @param installation - Application installation root.
+   * Build the service for the current application working directory.
    * @param options - Image override.
    */
-  constructor(installation: string, options: ManagedPostgresServiceOptions = {}) {
-    this.installation = resolve(installation)
+  constructor(options: ManagedPostgresServiceOptions = {}) {
+    this.installation = resolve(process.cwd())
     this.identity = managedDatabaseIdentity(this.installation)
     this.containerName = `basis-postgres-${this.identity}`
     this.volumeName = this.containerName
     this.image = options.image ?? MANAGED_IMAGE
+    this.#database = directories('database')
   }
 
   /**
@@ -101,12 +121,14 @@ export class ManagedPostgresService {
    */
   async ensure(authorization = false): Promise<ManagedServiceConnection> {
     if (!Bun.which('docker')) throw new Error(DOCKER_REQUIRED)
+    await this.#reconcileCutover()
     const state = await this.containerState()
     const hasVolume = await this.volumeExists()
     const secret = await this.secret(state === 'missing' && !hasVolume)
     if (!hasVolume) await this.createVolume(this.volumeName)
     if (state === 'missing') {
       await this.createContainer(this.containerName, this.volumeName, this.image, secret.file)
+      await this.waitReady()
     } else if (state === 'stopped') {
       await this.startContainer(this.containerName)
     }
@@ -202,14 +224,7 @@ export class ManagedPostgresService {
     create: boolean,
     name = 'password',
   ): Promise<{ file: string, password: string }> {
-    const stateRoot = join(this.installation, '.basis')
-    const directory = join(stateRoot, 'database')
-    await mkdir(stateRoot, { mode: 0o700, recursive: true })
-    await chmod(stateRoot, 0o700)
-    await mkdir(directory, { mode: 0o700, recursive: true })
-    await chmod(directory, 0o700)
-    await this.#protectState(directory)
-    const file = join(directory, name)
+    const file = await this.#database.file(name)
     if (create || name !== 'password') {
       try {
         const handle = await open(file, 'wx', 0o600)
@@ -241,21 +256,131 @@ export class ManagedPostgresService {
   }
 
   /**
-   * Ensure Git never stages the installation's database state.
-   * @param directory - The installation-local `.basis/database` directory.
+   * Persist the prepared cutover identity before any source detachment.
+   * @param journal - Cutover state.
    */
-  async #protectState(directory: string): Promise<void> {
-    const ignore = join(directory, '.gitignore')
-    try {
-      const handle = await open(ignore, 'wx', 0o644)
-      try {
-        await handle.writeFile('*\n')
-      } finally {
-        await handle.close()
+  async beginCutover(journal: Omit<CutoverJournal, 'phase' | 'version'>): Promise<void> {
+    await this.#writeCutover({ ...journal, phase: 'prepared', version: 1 })
+  }
+
+  /**
+   * Advance the durable cutover phase.
+   * @param phase - New phase.
+   */
+  async markCutover(phase: CutoverPhase): Promise<void> {
+    const journal = await this.#readCutover()
+    if (!journal) throw new Error('Database cutover journal is missing')
+    await this.#writeCutover({ ...journal, phase })
+  }
+
+  /**
+   * Remove the cutover journal after a committed or recovered outcome.
+   */
+  async clearCutover(): Promise<void> {
+    await rm(this.#cutoverPath(), { force: true })
+  }
+
+  /**
+   * Recover a cutover interrupted by process death before normal provisioning.
+   * @throws {Error} When the recovery volume or journal is missing or malformed.
+   */
+  async #reconcileCutover(): Promise<void> {
+    const journal = await this.#readCutover()
+    if (!journal) return
+    if (journal.phase === 'committed') {
+      if (!await this.volumeExists()) {
+        throw new Error(
+          'Database cutover was committed but the stable volume is missing; refusing to provision an empty replacement',
+        )
       }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      await this.clearCutover()
+      return
     }
+    const hasSource = await this.volumeExists()
+    if (journal.phase === 'prepared' && hasSource) {
+      const state = await this.containerState()
+      if (state === 'missing') {
+        const secret = await this.secret(false)
+        await this.createContainer(
+          this.containerName,
+          this.volumeName,
+          journal.sourceImage,
+          secret.file,
+        )
+        await this.waitReady()
+      }
+      await this.clearCutover()
+      return
+    }
+    if (!await this.volumeExists(journal.recoveryVolume)) {
+      throw new Error(
+        `Interrupted database cutover recovery volume "${journal.recoveryVolume}" is missing; ` +
+        'refusing to provision an empty replacement',
+      )
+    }
+    await this.removeContainer()
+    await this.removeVolume()
+    await this.createVolume()
+    await this.copyVolume(journal.recoveryVolume, this.volumeName, journal.sourceImage)
+    const secret = await this.secret(false)
+    await this.createContainer(
+      this.containerName,
+      this.volumeName,
+      journal.sourceImage,
+      secret.file,
+    )
+    await this.waitReady()
+    await this.clearCutover()
+  }
+
+  /**
+   * Read the durable cutover journal.
+   * @returns The journal, or null when absent.
+   */
+  async #readCutover(): Promise<CutoverJournal | null> {
+    let raw: string
+    try {
+      raw = await readFile(this.#cutoverPath(), 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+    let value: unknown
+    try {
+      value = JSON.parse(raw)
+    } catch (error) {
+      throw new Error('Database cutover journal is malformed; refusing to provision', { cause: error })
+    }
+    if (typeof value !== 'object' || value === null) {
+      throw new Error('Database cutover journal is malformed; refusing to provision')
+    }
+    const journal = value as Partial<CutoverJournal>
+    if (
+      journal.version !== 1
+      || !['committed', 'detached', 'prepared'].includes(journal.phase ?? '')
+      || typeof journal.candidateVolume !== 'string'
+      || typeof journal.recoveryVolume !== 'string'
+      || typeof journal.sourceImage !== 'string'
+    ) {
+      throw new Error('Database cutover journal is incomplete; refusing to provision')
+    }
+    return journal as CutoverJournal
+  }
+
+  /**
+   * Atomically persist the durable cutover journal.
+   * @param journal - Journal contents.
+   */
+  async #writeCutover(journal: CutoverJournal): Promise<void> {
+    await this.#database.json('cutover.json', journal)
+  }
+
+  /**
+   * Resolve the durable cutover journal path.
+   * @returns Absolute path.
+   */
+  #cutoverPath(): string {
+    return join(this.#database.path, 'cutover.json')
   }
 
   /**
@@ -416,12 +541,16 @@ export class ManagedPostgresService {
    */
   async waitReady(name = this.containerName): Promise<void> {
     const deadline = Date.now() + READY_TIMEOUT_MS
+    const args = [
+      'exec', name, 'pg_isready', '-h', '127.0.0.1',
+      '-U', MANAGED_DATABASE, '-d', MANAGED_DATABASE,
+    ]
     while (Date.now() < deadline) {
-      const result = await runAsync`docker exec ${name} pg_isready -U ${MANAGED_DATABASE} -d ${MANAGED_DATABASE}`
+      const result = await runAsync('docker', args)
       if (result.exitCode === 0) {
-        // The postgres image briefly starts a temporary server during initdb.
+        // The image's temporary initdb server has no TCP listener; confirm the final server stayed up.
         await Bun.sleep(1_000)
-        const confirmed = await runAsync`docker exec ${name} pg_isready -U ${MANAGED_DATABASE} -d ${MANAGED_DATABASE}`
+        const confirmed = await runAsync('docker', args)
         if (confirmed.exitCode === 0) return
       }
       await Bun.sleep(READY_POLL_MS)

@@ -131,6 +131,7 @@ export class Graph {
   readonly roles: readonly GraphRole[]
   /** Canonical graph-defined permissions. */
   readonly grants: readonly GraphGrant[]
+  readonly #options: GraphOptions
   readonly #rolesById: ReadonlyMap<string, GraphRole>
   readonly #rolesByName: ReadonlyMap<string, GraphRole>
   readonly #schema: string
@@ -140,6 +141,7 @@ export class Graph {
    * @param options - Application ontology, roles, and grants.
    */
   constructor(options: GraphOptions = {}) {
+    this.#options = options
     const application = normalizeGraphInput(options)
     const entities = application.entities
     const relationships = application.relationships ?? []
@@ -166,6 +168,21 @@ export class Graph {
     this.#rolesByName = new Map(this.roles.map(role => [role.name, role]))
     this.grants = (options.grants ?? []).map(grant => this.#normalizeGrant(grant))
     this.#assertPolicyTargets()
+  }
+
+  /**
+   * Materialize the authored graph options for a deterministic checked-in snapshot.
+   * @returns JSON-compatible graph authoring options.
+   */
+  toJSON(): GraphOptions {
+    const application = normalizeGraphInput(this.#options)
+    return {
+      ...(application.entities === undefined ? {} : { entities: application.entities }),
+      ...(application.relationships === undefined ? {} : { relationships: application.relationships }),
+      ...(this.#options.grants === undefined ? {} : { grants: this.#options.grants }),
+      ...(this.#options.roles === undefined ? {} : { roles: this.#options.roles }),
+      ...(this.#options.schema === undefined ? {} : { schema: this.#options.schema }),
+    }
   }
 
   /**

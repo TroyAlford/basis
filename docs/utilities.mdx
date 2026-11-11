@@ -4,7 +4,7 @@ title: Utilities
 
 # Utilities
 
-`@basis/utilities` is an **internal workspace**, not a supported Git-dependency import. Consumer-facing equivalents are exposed through supported surfaces such as `basis/logger` and `basis/react`. This page is an honest map for maintainers of what the internal index contains; do not import `@basis/utilities` from an application.
+`basis/utilities` is the supported consumer surface for shared deterministic primitives. Internal Basis packages continue to import the workspace directly; applications use the `basis/utilities` facade.
 
 ## String and naming
 
@@ -25,7 +25,19 @@ titleCase('model-first database') // 'Model First Database'
 
 ## Async and identity
 
-`AbortablePromise` provides cancellation-aware waiting. `hash` and `randomHash` create deterministic or random identifiers. `noop` is the shared no-op.
+`AbortablePromise` provides cancellation-aware waiting. `hash` and `randomHash` create deterministic or random identifiers. `checksum` provides SHA-256 integrity for structured values, raw bytes, and Bun files; structured values use stable key ordering unless `{ stable: false }` preserves a legacy byte layout. `checksum(Bun.file(path))` delegates to the platform's native `sha256sum`/`shasum` command and resolves without loading the file into application memory. `noop` is the shared no-op.
+
+## State directories
+
+`directories(folderName)` returns a lazy handle under `process.cwd()/.basis/<folderName>`. Its `json(filename)` form reads parsed JSON or returns `null` only when the file is absent; `json(filename, content, options)` writes atomically and returns the content. Directory paths reject absolute and traversal segments. `path` is available for binary files, and `file(filename)` ensures the directory before returning a file path.
+
+```ts
+import { directories } from 'basis/utilities'
+
+const database = directories('database')
+const state = await database.json('cutover.json')
+await database.json('cutover.json', { phase: 'prepared' }, { mode: 0o600 })
+```
 
 ## URI and runtime
 

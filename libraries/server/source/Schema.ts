@@ -1,5 +1,5 @@
 import type { SQL as BunSQL } from 'bun'
-import { createHash } from 'node:crypto'
+import { checksum } from '../../utilities'
 
 /** The category of one physical schema object. */
 export type PhysicalKind =
@@ -286,6 +286,32 @@ export interface MigrationArtifact {
   readonly targetHash: string,
   /** Immutable version identifier. */
   readonly version: string,
+}
+
+/** Stable migration-domain error codes. */
+export type MigrationErrorCode =
+  | 'MIGRATION_CHECKSUM'
+  | 'MIGRATION_DUPLICATE'
+  | 'MIGRATION_NONTRANSACTIONAL'
+  | 'MIGRATION_SOURCE_DRIFT'
+  | 'MIGRATION_VERIFICATION'
+
+/** One explicit migration-domain failure. */
+export class MigrationError extends Error {
+  /** Stable machine code. */
+  readonly code: MigrationErrorCode
+
+  /**
+   * Build a migration-domain error.
+   * @param code - Stable machine code.
+   * @param message - Diagnostic.
+   * @param cause - Original failure.
+   */
+  constructor(code: MigrationErrorCode, message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause })
+    this.name = 'MigrationError'
+    this.code = code
+  }
 }
 
 /** One successful migration apply result. */
@@ -1600,8 +1626,8 @@ function stripMigrationLedger(schema: PhysicalSchema): PhysicalSchema {
  */
 export function physicalHash(schema: PhysicalSchema, ignoreLedgerSchema = false): string {
   const stripped = stripMigrationLedger(schema)
-  if (!ignoreLedgerSchema) return hash(JSON.stringify(stableValue(stripped)))
-  return hash(JSON.stringify(stableValue({
+  if (!ignoreLedgerSchema) return checksum(JSON.stringify(stableValue(stripped)))
+  return checksum(JSON.stringify(stableValue({
     ...stripped,
     grants: (stripped.grants ?? []).filter(grant => grant.table !== 'basis'),
     schemas: (stripped.schemas ?? []).filter(name => name !== 'basis'),
@@ -1690,17 +1716,28 @@ export function review(
     checksum: '',
     expected: planResult.desired,
     operations,
-    planHash: hash(JSON.stringify(planResult)),
+    planHash: checksum(JSON.stringify(planResult)),
     schema: options.schema,
     sourceHash: planResult.actualHash ?? physicalHash(planResult.actual),
     superuser: options.superuser,
     targetHash: planResult.desiredHash ?? physicalHash(planResult.desired),
     version: options.version,
   } satisfies MigrationArtifact
-  artifact.checksum = migrationChecksum(artifact)
+  artifact.checksum = artifactChecksum(artifact)
   return {
     ...artifact,
     checksum: artifact.checksum,
+  }
+}
+
+/**
+ * Validate the immutable checksum of a reviewed migration artifact.
+ * @param artifact - Artifact to validate.
+ * @throws {Error} When the checksum does not match the artifact contents.
+ */
+export function verifyMigrationArtifact(artifact: MigrationArtifact): void {
+  if (artifactChecksum(artifact) !== artifact.checksum) {
+    throw new MigrationError('MIGRATION_CHECKSUM', 'Migration artifact checksum does not match its contents')
   }
 }
 
@@ -1715,8 +1752,8 @@ export async function applyMigration(
   sql: BunSQL,
   artifact: MigrationArtifact,
 ): Promise<MigrationApplyResult> {
-  if (migrationChecksum(artifact) !== artifact.checksum) {
-    throw new Error('Migration artifact checksum does not match its contents')
+  if (artifactChecksum(artifact) !== artifact.checksum) {
+    throw new MigrationError('MIGRATION_CHECKSUM', 'Migration artifact checksum does not match its contents')
   }
   if (artifact.operations.some(operation => /\bconcurrently\b/iu.test(operation.sql))) {
     return applyNontransactional(sql, artifact)
@@ -1742,14 +1779,22 @@ export async function applyMigration(
       WHERE checksum = ${artifact.checksum} OR version = ${artifact.version}
       LIMIT 1
     `
-    if (duplicate[0]) throw new Error(`Migration ${artifact.version} was already applied`)
+    if (duplicate[0]) {
+      throw new MigrationError('MIGRATION_DUPLICATE', `Migration ${artifact.version} was already applied`)
+    }
     const source = await introspect(tx)
     if (physicalHash(source, true) !== artifact.sourceHash) {
-      throw new Error('Migration source catalog has drifted from the reviewed plan')
+      throw new MigrationError(
+        'MIGRATION_SOURCE_DRIFT',
+        'Migration source catalog has drifted from the reviewed plan',
+      )
     }
     for (const operation of artifact.operations) {
       if (/\bconcurrently\b/iu.test(operation.sql)) {
-        throw new Error(`Nontransactional migration operation is not supported: ${operation.id}`)
+        throw new MigrationError(
+          'MIGRATION_NONTRANSACTIONAL',
+          `Nontransactional migration operation is not supported: ${operation.id}`,
+        )
       }
       await tx.unsafe(operation.sql).simple()
     }
@@ -1762,7 +1807,8 @@ export async function applyMigration(
       superuser: artifact.superuser,
     })
     if (verification.drift.length > 0 || verification.operations.length > 0) {
-      throw new Error(
+      throw new MigrationError(
+        'MIGRATION_VERIFICATION',
         `Migration verification failed: ${[
           ...verification.drift,
           ...verification.operations.map(operation => operation.id),
@@ -1827,8 +1873,8 @@ async function withMigrationContext<T>(
  * @param artifact - Reviewed migration artifact.
  * @returns SHA-256 checksum.
  */
-function migrationChecksum(artifact: MigrationArtifact): string {
-  return hash(JSON.stringify({
+export function artifactChecksum(artifact: MigrationArtifact): string {
+  return checksum(JSON.stringify({
     appRole: artifact.appRole,
     expected: artifact.expected,
     operations: artifact.operations,
@@ -1878,10 +1924,15 @@ async function applyNontransactional(
       WHERE checksum = ${artifact.checksum} OR version = ${artifact.version}
       LIMIT 1
       `
-      if (duplicate[0]) throw new Error(`Migration ${artifact.version} was already applied`)
+      if (duplicate[0]) {
+        throw new MigrationError('MIGRATION_DUPLICATE', `Migration ${artifact.version} was already applied`)
+      }
       const source = await introspect(db)
       if (physicalHash(source, true) !== artifact.sourceHash) {
-        throw new Error('Migration source catalog has drifted from the reviewed plan')
+        throw new MigrationError(
+          'MIGRATION_SOURCE_DRIFT',
+          'Migration source catalog has drifted from the reviewed plan',
+        )
       }
       for (const operation of artifact.operations) await db.unsafe(operation.sql).simple()
       const actual = stripMigrationLedger(await introspect(db))
@@ -1893,7 +1944,8 @@ async function applyNontransactional(
         superuser: artifact.superuser,
       })
       if (verification.drift.length > 0 || verification.operations.length > 0) {
-        throw new Error(
+        throw new MigrationError(
+          'MIGRATION_VERIFICATION',
           `Migration verification failed: ${[
             ...verification.drift,
             ...verification.operations.map(operation => operation.id),
@@ -1952,8 +2004,8 @@ export async function readiness(
   sql: BunSQL,
   artifact: MigrationArtifact,
 ): Promise<MigrationReadiness> {
-  if (migrationChecksum(artifact) !== artifact.checksum) {
-    throw new Error('Migration artifact checksum does not match its contents')
+  if (artifactChecksum(artifact) !== artifact.checksum) {
+    throw new MigrationError('MIGRATION_CHECKSUM', 'Migration artifact checksum does not match its contents')
   }
   return withMigrationContext(sql, async tx => {
     if (artifact.schema) await tx.unsafe(`SET LOCAL search_path TO ${quote(artifact.schema)}`).simple()
@@ -1983,7 +2035,7 @@ export async function readiness(
  * @returns The SHA-256 hex digest.
  */
 export function hash(source: string): string {
-  return createHash('sha256').update(source).digest('hex')
+  return checksum(source)
 }
 
 /**

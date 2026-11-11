@@ -1,8 +1,10 @@
 import { runAsync } from 'basis/configuration'
 import { SQL as BunSQL } from 'bun'
-import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { chmod, readFile, rm } from 'node:fs/promises'
+import type { Directory } from '../../utilities'
+import { checksum, directories } from '../../utilities'
+import { canonicalDataDigest } from './CanonicalData'
 import { MANAGED_APP_ROLE, ManagedPostgresService } from './ManagedPostgresService'
 import type { MigrationArtifact } from './Schema'
 import { DDL } from './Schema'
@@ -16,10 +18,6 @@ const MANIFEST_VERSION = 1
 export interface PostgresOperationsOptions {
   /** Approved physical/migration artifact corresponding to the backed-up version. */
   readonly artifact: MigrationArtifact,
-  /** Optional backup directory; defaults to `.basis/backups` below installation. */
-  readonly backupDirectory?: string,
-  /** Installation root; defaults to the current working directory. */
-  readonly installation?: string,
 }
 
 /** One completed database backup. */
@@ -100,11 +98,19 @@ interface BackupManifest {
   readonly version: 1,
 }
 
-/** One disposable restore container. */
-interface DisposableRestore {
-  /** Container name. */
+/** One verification contract for a database state. */
+export interface PostgresVerification {
+  /** Approved artifact for the state. */
+  readonly artifact: MigrationArtifact,
+  /** Canonical User/Role data digest for the state, when available. */
+  readonly dataDigest?: string,
+}
+
+/** One candidate volume and container. */
+export interface PostgresCandidate {
+  /** Candidate container name. */
   readonly container: string,
-  /** Volume name. */
+  /** Candidate volume name. */
   readonly volume: string,
 }
 
@@ -119,22 +125,18 @@ interface DisposableRestore {
  */
 export class ManagedPostgresOperations {
   readonly #artifact: MigrationArtifact
-  readonly #backupDirectory: string
-  readonly #installation: string
+  readonly #backupDirectory: Directory
   readonly #service: ManagedPostgresService
 
   /**
-   * Build operations for one managed installation.
-   * @param options - Installation, backup directory, and approved artifact.
+   * Build operations for the current application working directory.
+   * @param options - Approved artifact.
    * @param service - Package-local service seam used by focused tests.
    */
   constructor(options: PostgresOperationsOptions, service?: ManagedPostgresService) {
-    this.#installation = resolve(options.installation ?? process.cwd())
     this.#artifact = options.artifact
-    this.#service = service ?? new ManagedPostgresService(this.#installation)
-    this.#backupDirectory = resolve(
-      options.backupDirectory ?? join(this.#installation, '.basis', 'backups'),
-    )
+    this.#backupDirectory = directories('backups')
+    this.#service = service ?? new ManagedPostgresService()
   }
 
   /**
@@ -151,11 +153,9 @@ export class ManagedPostgresOperations {
     const connection = await this.#service.ensure(false)
     const createdAt = new Date().toISOString()
     const stem = `${createdAt.replaceAll(':', '-')}-${randomUUID().slice(0, 8)}`
-    const path = join(this.#backupDirectory, `${stem}.dump`)
+    const directory = this.#backupDirectory
+    const path = await directory.file(`${stem}.dump`)
     const manifest = `${path}.json`
-    await mkdir(this.#backupDirectory, { mode: 0o700, recursive: true })
-    await chmod(this.#backupDirectory, 0o700)
-    await this.#protectDirectory(this.#backupDirectory)
     const sql = new BunSQL(connection.ownerUrl)
     const remote = `/tmp/basis-backup-${randomUUID()}.dump`
     try {
@@ -164,7 +164,7 @@ export class ManagedPostgresOperations {
       if (!readiness.ready) {
         throw new Error(`Backup source schema is not ready: ${readiness.discrepancies.join('; ')}`)
       }
-      const before = await this.#canonicalDigest(sql)
+      const before = await canonicalDataDigest(sql)
       await this.#docker([
         'docker', 'exec', this.#service.containerName, 'pg_dump', '-U', DATABASE, '-d', DATABASE,
         '--format=custom', '--file', remote,
@@ -176,24 +176,24 @@ export class ManagedPostgresOperations {
       await this.#docker([
         'docker', 'exec', this.#service.containerName, 'rm', '-f', remote,
       ], 'backup cleanup failed')
-      const after = await this.#canonicalDigest(sql)
+      const after = await canonicalDataDigest(sql)
       if (before !== after) {
         throw new Error('Canonical User/Role data changed during backup; retry while the application is quiescent')
       }
       const image = await this.#service.containerImage()
-      const checksum = createHash('sha256').update(await readFile(path)).digest('hex')
+      const digest = await checksum(Bun.file(path))
       const record: BackupManifest = {
         artifact: this.#artifact,
-        checksum,
+        checksum: digest,
         createdAt,
         dataDigest: after,
         image,
         version: MANIFEST_VERSION,
       }
-      await writeFile(manifest, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 })
+      await directory.json(`${stem}.dump.json`, record)
       return {
         artifactVersion: this.#artifact.version,
-        checksum,
+        checksum: digest,
         createdAt,
         dataDigest: after,
         image,
@@ -248,7 +248,13 @@ export class ManagedPostgresOperations {
     const recovery = await this.backup()
     const manifest = await this.#readBackup(recovery.path)
     const target = await this.#prepareRestore(manifest, targetImage, recovery.path)
-    const warnings = await this.#cutover(target, targetImage, manifest, previousImage)
+    const warnings = await this.#cutover(
+      target,
+      targetImage,
+      manifest,
+      manifest,
+      previousImage,
+    )
     return { backup: recovery, image: targetImage, previousImage, warnings }
   }
 
@@ -264,7 +270,34 @@ export class ManagedPostgresOperations {
     const previousImage = await this.#service.containerImage()
     const targetImage = image ?? manifest.image
     const target = await this.#prepareRestore(manifest, targetImage, backup)
-    return { warnings: await this.#cutover(target, targetImage, manifest, previousImage) }
+    return {
+      warnings: await this.#cutover(
+        target,
+        targetImage,
+        manifest,
+        manifest,
+        previousImage,
+      ),
+    }
+  }
+
+  /**
+   * Promote an independently verified candidate volume into the managed source.
+   * The previous source is preserved and verified before detachment.
+   * @param candidate - Verified candidate container and volume.
+   * @param image - Candidate PostgreSQL image.
+   * @param recovery - Verification contract for the previous source.
+   * @param target - Verification contract for the candidate.
+   * @returns Cleanup warnings for post-commit resources left behind.
+   */
+  async promoteCandidate(
+    candidate: PostgresCandidate,
+    image: string,
+    recovery: PostgresVerification | null,
+    target: PostgresVerification,
+  ): Promise<readonly PostgresCleanupWarning[]> {
+    const previousImage = await this.#service.containerImage()
+    return this.#cutover(candidate, image, recovery, target, previousImage)
   }
 
   /**
@@ -278,7 +311,7 @@ export class ManagedPostgresOperations {
     manifest: BackupManifest,
     image: string,
     backupPath: string,
-  ): Promise<DisposableRestore> {
+  ): Promise<PostgresCandidate> {
     const secret = await this.#service.secret(false)
     const restore = {
       container: `basis-restore-${randomUUID()}`,
@@ -319,14 +352,16 @@ export class ManagedPostgresOperations {
    * Replace the source with a verified target while retaining the old volume.
    * @param restore - Verified disposable restore.
    * @param image - Target image.
-   * @param manifest - Recovery point manifest.
+   * @param recovery - Verification contract for the previous source.
+   * @param target - Verification contract for the replacement.
    * @param previousImage - Previous source image.
    * @returns Cleanup warnings for any post-commit resources left behind.
    */
   async #cutover(
-    restore: DisposableRestore,
+    restore: PostgresCandidate,
     image: string,
-    manifest: BackupManifest,
+    recovery: PostgresVerification | null,
+    target: PostgresVerification,
     previousImage: string,
   ): Promise<readonly PostgresCleanupWarning[]> {
     const state = await this.#service.containerState()
@@ -337,11 +372,17 @@ export class ManagedPostgresOperations {
     try {
       await this.#service.createVolume(recoveryVolume)
       await this.#service.copyVolume(this.#service.volumeName, recoveryVolume, previousImage)
-      await this.#verifyRecovery(recoveryVolume, previousImage, manifest)
+      await this.#verifyRecovery(recoveryVolume, previousImage, recovery)
+      await this.#service.beginCutover({
+        candidateVolume: restore.volume,
+        recoveryVolume,
+        sourceImage: previousImage,
+      })
       await this.#service.removeContainer()
       await this.#service.removeVolume()
       await this.#assertDetached()
       sourceDetached = true
+      await this.#service.markCutover('detached')
       await this.#service.createVolume()
       await this.#service.stopContainer(restore.container)
       await this.#service.removeContainer(restore.container)
@@ -354,14 +395,17 @@ export class ManagedPostgresOperations {
         secret.file,
       )
       await this.#service.waitReady()
-      await this.#verifyService(manifest)
+      await this.#verifyService(target)
+      await this.#service.markCutover('committed')
+      await this.#service.clearCutover()
       sourceCommitted = true
       return await this.#cleanupCommitted(restore.volume, recoveryVolume)
     } catch (error) {
       if (sourceCommitted) throw error
       if (!sourceDetached) {
         try {
-          await this.#recoverBeforeDetach(recoveryVolume, previousImage, manifest, restore)
+          await this.#recoverBeforeDetach(recoveryVolume, previousImage, recovery, restore)
+          await this.#service.clearCutover()
         } catch (recoveryError) {
           throw new Error(
             'PostgreSQL cutover failed before detaching the source ' +
@@ -374,7 +418,8 @@ export class ManagedPostgresOperations {
         throw error
       }
       try {
-        await this.#restoreRecovery(recoveryVolume, previousImage, manifest)
+        await this.#restoreRecovery(recoveryVolume, previousImage, recovery)
+        await this.#service.clearCutover()
         await this.#service.removeVolume(restore.volume)
         await this.#service.removeVolume(recoveryVolume)
       } catch (rollbackError) {
@@ -422,8 +467,9 @@ export class ManagedPostgresOperations {
   async #verifyRecovery(
     recoveryVolume: string,
     previousImage: string,
-    manifest: BackupManifest,
+    manifest: PostgresVerification | null,
   ): Promise<void> {
+    if (manifest === null) return
     const container = `basis-recovery-${randomUUID()}`
     const secret = await this.#service.secret(false)
     try {
@@ -446,8 +492,8 @@ export class ManagedPostgresOperations {
   async #recoverBeforeDetach(
     recoveryVolume: string,
     previousImage: string,
-    manifest: BackupManifest,
-    candidate: DisposableRestore,
+    manifest: PostgresVerification,
+    candidate: PostgresCandidate,
   ): Promise<void> {
     const hasVolume = await this.#service.volumeExists()
     if (hasVolume) {
@@ -466,7 +512,7 @@ export class ManagedPostgresOperations {
       } else {
         await this.#service.waitReady()
       }
-      await this.#verifyService(manifest)
+      if (manifest !== null) await this.#verifyService(manifest)
     } else {
       await this.#restoreRecovery(recoveryVolume, previousImage, manifest)
     }
@@ -496,7 +542,7 @@ export class ManagedPostgresOperations {
   async #restoreRecovery(
     recoveryVolume: string,
     previousImage: string,
-    manifest: BackupManifest,
+    manifest: PostgresVerification | null,
   ): Promise<void> {
     await this.#service.removeContainer()
     await this.#service.removeVolume()
@@ -510,14 +556,14 @@ export class ManagedPostgresOperations {
       secret.file,
     )
     await this.#service.waitReady()
-    await this.#verifyService(manifest)
+    if (manifest !== null) await this.#verifyService(manifest)
   }
 
   /**
    * Verify the live stable service against the approved backup version.
    * @param manifest - Recovery point manifest.
    */
-  async #verifyService(manifest: BackupManifest): Promise<void> {
+  async #verifyService(manifest: PostgresVerification): Promise<void> {
     const ownerUrl = await this.#service.ownerUrl()
     await this.#service.provisionApplicationRole(
       ownerUrl,
@@ -531,7 +577,7 @@ export class ManagedPostgresOperations {
    * @param ownerUrl - Administrative owner URL.
    * @param manifest - Recovery point manifest.
    */
-  async #verify(ownerUrl: string, manifest: BackupManifest): Promise<void> {
+  async #verify(ownerUrl: string, manifest: PostgresVerification): Promise<void> {
     const sql = new BunSQL(ownerUrl)
     try {
       await sql.connect()
@@ -539,41 +585,15 @@ export class ManagedPostgresOperations {
       if (!readiness.ready) {
         throw new Error(`Restored schema is not ready: ${readiness.discrepancies.join('; ')}`)
       }
-      const digest = await this.#canonicalDigest(sql)
-      if (digest !== manifest.dataDigest) {
-        throw new Error('Restored canonical User/Role data does not match the backup manifest')
+      if (manifest.dataDigest !== undefined) {
+        const digest = await canonicalDataDigest(sql)
+        if (digest !== manifest.dataDigest) {
+          throw new Error('Restored canonical User/Role data does not match the backup manifest')
+        }
       }
     } finally {
       await sql.close()
     }
-  }
-
-  /**
-   * Read the deterministic digest of canonical User/Role/UserRole data.
-   * @param sql - Administrative connection.
-   * @returns SHA-256 digest.
-   */
-  async #canonicalDigest(sql: BunSQL): Promise<string> {
-    const users = await sql<{ data: unknown }[]>`
-      SELECT to_jsonb(t) AS data
-      FROM "User" t
-      ORDER BY t."id"
-    `
-    const roles = await sql<{ data: unknown }[]>`
-      SELECT to_jsonb(t) AS data
-      FROM "Role" t
-      ORDER BY t."id"
-    `
-    const userRoles = await sql<{ data: unknown }[]>`
-      SELECT to_jsonb(t) AS data
-      FROM "UserRole" t
-      ORDER BY t."user.id", t."role.id"
-    `
-    return DDL.hash(JSON.stringify({
-      roles: roles.map(row => row.data),
-      userRoles: userRoles.map(row => row.data),
-      users: users.map(row => row.data),
-    }))
   }
 
   /**
@@ -596,8 +616,8 @@ export class ManagedPostgresOperations {
     if (typeof manifest.artifact !== 'object' || manifest.artifact === null) {
       throw new Error('Backup manifest is missing its approved artifact')
     }
-    const checksum = createHash('sha256').update(await readFile(path)).digest('hex')
-    if (checksum !== manifest.checksum) throw new Error('Backup archive checksum does not match its manifest')
+    const digest = await checksum(Bun.file(path))
+    if (digest !== manifest.checksum) throw new Error('Backup archive checksum does not match its manifest')
     return manifest as BackupManifest
   }
 
@@ -618,16 +638,9 @@ export class ManagedPostgresOperations {
    * Remove one disposable container and volume.
    * @param restore - Disposable restore handle.
    */
-  async #dispose(restore: Pick<DisposableRestore, 'container' | 'volume'>): Promise<void> {
+  async #dispose(restore: Pick<PostgresCandidate, 'container' | 'volume'>): Promise<void> {
     await this.#service.removeContainer(restore.container)
     await this.#service.removeVolume(restore.volume)
   }
 
-  /**
-   * Write a local ignore file for backup artifacts.
-   * @param directory - Backup directory.
-   */
-  async #protectDirectory(directory: string): Promise<void> {
-    await writeFile(join(directory, '.gitignore'), '*\n', { mode: 0o644 })
-  }
 }
