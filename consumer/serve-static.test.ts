@@ -38,13 +38,11 @@ describe('ensureServeStaticConfig', () => {
   })
 
   test('replaces a stale fenced block', () => {
-    const stale = [
-      '# >>> basis:development-server >>>',
-      '[serve.static]',
-      'plugins = ["./old.ts"]',
-      '# <<< basis:development-server <<<',
-      '',
-    ].join('\n')
+    const stale = `# >>> basis:development-server >>>
+[serve.static]
+plugins = ["./old.ts"]
+# <<< basis:development-server <<<
+`
     const { changed, text } = ensureServeStaticConfig(stale)
 
     expect(changed).toBe(true)

@@ -76,7 +76,9 @@ export function style(id: string, cssString: string): void {
  * @returns The concatenated CSS.
  */
 export function styles(): string {
-  return [...injected.values()].join('\n')
+  let css = ''
+  for (const value of injected.values()) css = css === '' ? value : `${css}\n${value}`
+  return css
 }
 
 /**

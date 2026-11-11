@@ -133,13 +133,11 @@ export class ThemeDocs extends DocumentationPage<State> {
     }
     const computed = getComputedStyle(target)
     const line = (name: string) => `  ${name}: ${computed.getPropertyValue(name).trim()};`
-    return [
-      '/* Preview element (scoped theme) */',
-      line('--basis-color-primary'),
-      line('--basis-color-contrast'),
-      line('--basis-font-size-md'),
-      line('--basis-radius-md'),
-    ].join('\n')
+    return `/* Preview element (scoped theme) */
+${line('--basis-color-primary')}
+${line('--basis-color-contrast')}
+${line('--basis-font-size-md')}
+${line('--basis-radius-md')}`
   }
 
   #applyColorScheme = (): void => {

@@ -235,13 +235,11 @@ describe('basis compliance', () => {
 
   test('stays authoritative when the repository config disables the rule', () => {
     const dir = makeComponentFixture({
-      config: [
-        `import { createConfig } from '${join(import.meta.dir, 'eslint.ts')}'`,
-        'export default createConfig({',
-        "  overrides: [{ files: ['**/*.tsx'], rules: { '@basis/component-architecture': 'off' } }],",
-        '})',
-        '',
-      ].join('\n'),
+      config: `import { createConfig } from '${join(import.meta.dir, 'eslint.ts')}'
+export default createConfig({
+  overrides: [{ files: ['**/*.tsx'], rules: { '@basis/component-architecture': 'off' } }],
+})
+`,
     })
     try {
       writeFileSync(join(dir, 'Hello.tsx'), ARCHITECTURE_VIOLATION)

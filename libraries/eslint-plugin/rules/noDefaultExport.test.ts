@@ -51,11 +51,9 @@ describe('noDefaultExport', () => {
   })
 
   test('leaves named exports untouched', () => {
-    const code = [
-      'export const foo = 1',
-      'export function bar() {}',
-      'export { foo as baz }',
-    ].join('\n')
+    const code = `export const foo = 1
+export function bar() {}
+export { foo as baz }`
     const output = lint(code)
     expect(output.fixed).toBe(false)
     expect(output.messages).toHaveLength(0)

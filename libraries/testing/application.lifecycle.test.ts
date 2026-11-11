@@ -18,30 +18,28 @@ const preload = join(repoRoot, 'libraries', 'testing', 'bun.ts')
 const application = join(repoRoot, 'libraries', 'testing', 'application.ts')
 
 /** The fixture server: appends `boot`/`stop` (with pid) to `$ACTIVITY_LOG`. */
-const APP_SOURCE = [
-  "import { appendFileSync } from 'node:fs'",
-  '',
-  'const log = process.env.ACTIVITY_LOG',
-  'const record = (event: string): void => {',
-  '  if (log) appendFileSync(log, `${event} ${process.pid}\\n`)',
-  '}',
-  '',
-  "record('boot')",
-  "record(`temp ${process.env.TMPDIR ?? ''}`)",
-  'Bun.serve({',
-  "  hostname: process.env.HOST ?? '127.0.0.1',",
-  '  port: Number(process.env.PORT ?? 0),',
-  "  routes: { '/api/health': () => new Response('ok') },",
-  '})',
-  '',
-  'const stop = (): void => {',
-  "  record('stop')",
-  '  process.exit(0)',
-  '}',
-  '',
-  "process.on('SIGTERM', stop)",
-  "process.on('SIGINT', stop)",
-].join('\n')
+const APP_SOURCE = `import { appendFileSync } from 'node:fs'
+
+const log = process.env.ACTIVITY_LOG
+const record = (event: string): void => {
+  if (log) appendFileSync(log, \`\${event} \${process.pid}\\n\`)
+}
+
+record('boot')
+record(\`temp \${process.env.TMPDIR ?? ''}\`)
+Bun.serve({
+  hostname: process.env.HOST ?? '127.0.0.1',
+  port: Number(process.env.PORT ?? 0),
+  routes: { '/api/health': () => new Response('ok') },
+})
+
+const stop = (): void => {
+  record('stop')
+  process.exit(0)
+}
+
+process.on('SIGTERM', stop)
+process.on('SIGINT', stop)`
 
 /** A fixture server that holds the lease open while its initial build completes. */
 const SLOW_APP_SOURCE = APP_SOURCE.replace("record('boot')", "record('boot')\nawait Bun.sleep(500)")
@@ -51,12 +49,10 @@ const SLOW_APP_SOURCE = APP_SOURCE.replace("record('boot')", "record('boot')\naw
  * @param body - The test declarations to include.
  * @returns The test module source.
  */
-const suite = (body: string): string => [
-  "import { expect, test } from 'bun:test'",
-  `import { stopApplications, useApplication } from '${application}'`,
-  '',
-  body,
-].join('\n')
+const suite = (body: string): string => `import { expect, test } from 'bun:test'
+import { stopApplications, useApplication } from '${application}'
+
+${body}`
 
 /**
  * A minimal test file that boots the same app.
@@ -77,11 +73,9 @@ function eagerPreload(entry: string, timeoutMs?: number): string {
   const options = timeoutMs === undefined
     ? `{ entry: '${entry}' }`
     : `{ entry: '${entry}', timeoutMs: ${timeoutMs} }`
-  return [
-    `import { useApplication } from '${application}'`,
-    `await useApplication(${options})`,
-    '',
-  ].join('\n')
+  return `import { useApplication } from '${application}'
+await useApplication(${options})
+`
 }
 
 /** One fixture directory and its activity log. */

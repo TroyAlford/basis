@@ -9,13 +9,11 @@ const START_MARKER = '# >>> basis:development-server >>>'
 const END_MARKER = '# <<< basis:development-server <<<'
 
 /** The fenced block Basis writes into a consumer's `bunfig.toml`. */
-const BLOCK = [
-  START_MARKER,
-  '[serve.static]',
-  `plugins = [${JSON.stringify(SERVE_STATIC_PLUGIN)}]`,
-  END_MARKER,
-  '',
-].join('\n')
+const BLOCK = `${START_MARKER}
+[serve.static]
+plugins = [${JSON.stringify(SERVE_STATIC_PLUGIN)}]
+${END_MARKER}
+`
 
 /** The result of ensuring the development-server plugin is configured. */
 export interface ServeStaticConfig {

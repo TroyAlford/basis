@@ -28,10 +28,8 @@ describe('snapshot runtime guidance', () => {
 
 describe('run-server endpoint parsing', () => {
   test('extracts the endpoint from the container log', () => {
-    const log = [
-      'Listening on ws://127.0.0.1:46565/',
-      '',
-    ].join('\n')
+    const log = `Listening on ws://127.0.0.1:46565/
+`
 
     expect(parseServerEndpoint(log)).toBe('ws://127.0.0.1:46565/')
   })
