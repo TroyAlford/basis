@@ -61,6 +61,8 @@ export interface ScalarFieldDefinition {
   readonly format?: IdentityFormat,
   /** Field name, in camelCase. */
   readonly name: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
   /** Scalar field type. */
   readonly type: ScalarFieldType,
 }
@@ -73,6 +75,8 @@ export interface EntityReferenceFieldDefinition {
   readonly inverse?: string,
   /** Logical field name used by entity-rooted queries. */
   readonly name: string,
+  /** Whether the reference accepts NULL; omitted preserves optional-reference behavior. */
+  readonly nullable?: boolean,
   /** Referenced entity name. */
   readonly target: string,
   /** Field-kind discriminator. */
@@ -100,6 +104,8 @@ export interface InverseFieldDefinition {
 export interface JSONFieldDefinition {
   /** Logical field name used by entity-rooted queries. */
   readonly name: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
   /** Field-kind discriminator. */
   readonly type: FieldType.JSON,
 }
@@ -110,6 +116,8 @@ export interface ArrayFieldDefinition {
   readonly items: ScalarArrayElementDefinition,
   /** Logical field name used by entity-rooted queries. */
   readonly name: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
   /** Field-kind discriminator. */
   readonly type: FieldType.Array,
 }
@@ -1397,6 +1405,25 @@ type ParsedFieldResult =
   | { readonly idFormat: IdentityFormat, readonly idRefinement: true }
 
 /**
+ * Validate one optional nullability declaration.
+ * @param entityName - Owning entity name.
+ * @param fieldName - Field name.
+ * @param value - Field candidate.
+ * @returns The declared boolean, or undefined when omitted.
+ */
+function parseNullable(
+  entityName: string,
+  fieldName: string,
+  value: Readonly<Record<string, unknown>>,
+): boolean | undefined {
+  if (value.nullable === undefined) return undefined
+  if (typeof value.nullable !== 'boolean') {
+    throw invalid(`field "${entityName}.${fieldName}" nullable must be a boolean`)
+  }
+  return value.nullable
+}
+
+/**
  * Validate one field descriptor.
  * @param entityName - Owning entity name.
  * @param value - Field candidate.
@@ -1425,7 +1452,7 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   }
 
   if (value.type === FieldType.Entity) {
-    assertKnownKeys(value, ['field', 'inverse', 'target', 'type'], 'field')
+    assertKnownKeys(value, ['field', 'inverse', 'nullable', 'target', 'type'], 'field')
     if (ROOT_FIELD_NAMES.has(value.field) || value.field === 'id') {
       throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
     }
@@ -1439,11 +1466,13 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
       throw invalid(`reference field "${entityName}.${value.field}" inverse must be a camelCase identifier`)
     }
     validatePhysicalIdentifier(`${value.field}.id`, `reference field "${entityName}.${value.field}" column`)
+    const nullable = parseNullable(entityName, value.field, value)
     return {
       field: {
         column: `${value.field}.id`,
         ...(value.inverse !== undefined ? { inverse: value.inverse as string } : {}),
         name: value.field,
+        ...(nullable === undefined ? {} : { nullable }),
         target: value.target,
         type: FieldType.Entity,
       },
@@ -1461,7 +1490,7 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   if (ROOT_FIELD_NAMES.has(value.field)) {
     throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
   }
-  assertKnownKeys(value, ['field', 'format', 'type'], 'field')
+  assertKnownKeys(value, ['field', 'format', 'nullable', 'type'], 'field')
   const type = value.type as string
   if (!SCALAR_FIELD_TYPES.has(type) || type === FieldType.ID) {
     throw invalid(`unsupported field type "${String(type)}" in "${entityName}.${value.field}"`)
@@ -1469,9 +1498,11 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   if (value.format !== undefined) {
     throw invalid(`field "${entityName}.${value.field}" format is only valid on type ID`)
   }
+  const nullable = parseNullable(entityName, value.field, value)
   return {
     field: {
       name: value.field,
+      ...(nullable === undefined ? {} : { nullable }),
       type: type as ScalarFieldType,
     },
   }
@@ -1520,12 +1551,13 @@ function parseJSONField(
   entityName: string,
   value: Readonly<Record<string, unknown>>,
 ): JSONFieldDefinition {
-  assertKnownKeys(value, ['field', 'type'], 'field')
+  assertKnownKeys(value, ['field', 'nullable', 'type'], 'field')
   const name = value.field as string
   if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
     throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
   }
-  return { name, type: FieldType.JSON }
+  const nullable = parseNullable(entityName, name, value)
+  return { name, ...(nullable === undefined ? {} : { nullable }), type: FieldType.JSON }
 }
 
 /**
@@ -1538,7 +1570,7 @@ function parseArrayField(
   entityName: string,
   value: Readonly<Record<string, unknown>>,
 ): ArrayFieldDefinition {
-  assertKnownKeys(value, ['field', 'items', 'type'], 'field')
+  assertKnownKeys(value, ['field', 'items', 'nullable', 'type'], 'field')
   const name = value.field as string
   if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
     throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
@@ -1555,17 +1587,25 @@ function parseArrayField(
     if (items.format !== undefined && (typeof items.format !== 'string' || !IDENTITY_FORMATS.has(items.format))) {
       throw invalid(`array field "${entityName}.${name}" ID format must be UUID or Snowflake`)
     }
+    const nullable = parseNullable(entityName, name, value)
     return {
       items: {
         ...(items.format !== undefined ? { format: items.format as IdentityFormat } : {}),
         type: FieldType.ID,
       },
       name,
+      ...(nullable === undefined ? {} : { nullable }),
       type: FieldType.Array,
     }
   }
   assertKnownKeys(items, ['type'], 'array item')
-  return { items: { type: items.type as ScalarFieldType }, name, type: FieldType.Array }
+  const nullable = parseNullable(entityName, name, value)
+  return {
+    items: { type: items.type as ScalarFieldType },
+    name,
+    ...(nullable === undefined ? {} : { nullable }),
+    type: FieldType.Array,
+  }
 }
 
 /**
@@ -1670,13 +1710,18 @@ function isPhysicalField(field: FieldDefinition): field is PhysicalFieldDefiniti
  */
 function fieldTableColumn(field: PhysicalFieldDefinition): TableColumn {
   if (field.type === FieldType.Entity) {
-    return { name: field.column, nullable: true, type: FieldType.String }
+    return { name: field.column, nullable: field.nullable ?? true, type: FieldType.String }
   }
   if (field.type === FieldType.ID) return { name: field.name, primaryKey: true, type: FieldType.ID }
   if (field.type === FieldType.Array) {
-    return { arrayType: field.items.type, name: field.name, type: FieldType.Array }
+    return {
+      arrayType: field.items.type,
+      name: field.name,
+      nullable: field.nullable === true,
+      type: FieldType.Array,
+    }
   }
-  return { name: field.name, type: field.type }
+  return { name: field.name, nullable: field.nullable === true, type: field.type }
 }
 
 /**

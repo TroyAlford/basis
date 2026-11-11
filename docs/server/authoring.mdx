@@ -27,6 +27,7 @@ export default new Graph({
     {
       fields: [
         { field: 'title', type: FieldType.String },
+        { field: 'retiredAt', nullable: true, type: FieldType.Timestamp },
         { field: 'owner', inverse: 'notes', target: 'User', type: FieldType.Entity },
         { field: 'tags', items: { type: FieldType.String }, type: FieldType.Array },
         { field: 'metadata', type: FieldType.JSON },
@@ -37,7 +38,7 @@ export default new Graph({
 })
 ```
 
-The typed declaration accepts the same entity, relationship, array, JSON, reference, inverse, MTI, and identity-format shapes as canonical JSON. There is no decorator syntax, second registry, or alternative validator. JSON remains an alternate input syntax for tools that load a parsed document; it feeds the same `Graph` construction path. A `Graph` is passed directly to `Server.graph(graph)`.
+The typed declaration accepts the same entity, relationship, array, JSON, reference, inverse, MTI, identity-format, and nullable-field shapes as canonical JSON. There is no decorator syntax, second registry, or alternative validator. Omitting `nullable` preserves the non-null default for scalar, array, and JSON fields; reference fields remain nullable by default unless `nullable: false` is declared. JSON remains an alternate input syntax for tools that load a parsed document; it feeds the same `Graph` construction path. A `Graph` is passed directly to `Server.graph(graph)`.
 
 The constructed `graph.definitions` is the canonical model. Its narrow ontology queries are intentionally public: `ancestry(name)` returns the entity through its ancestors to `Entity`, `isA(name, ancestor)` includes identity, and `concreteDescendants(name)` returns concrete leaves in declaration order. A concrete entity is its own concrete descendant; abstract names are never returned as leaves; `Entity` covers every concrete leaf. Consumers use these queries instead of walking parent links themselves.
 

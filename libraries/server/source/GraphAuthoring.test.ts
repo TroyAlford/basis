@@ -33,6 +33,17 @@ describe('Graph authoring types', () => {
     expect(graph.definitions.entity('Note')?.fields.find(field => field.name === 'title')?.type).toBe(FieldType.String)
   })
 
+  test('accepts nullable field authoring', () => {
+    const graph = new Graph({
+      entities: [{
+        fields: [{ field: 'retiredAt', nullable: true, type: FieldType.Timestamp }],
+        name: 'Account',
+      }],
+    })
+    const field = graph.definitions.entity('Account')?.fields.find(candidate => candidate.name === 'retiredAt')
+    expect((field as { nullable?: boolean } | undefined)?.nullable).toBe(true)
+  })
+
   test('keeps runtime validation authoritative for dynamic JSON', () => {
     expect(() => new Graph({ entities: '{"entities":[{"fields":[],"name":"Role"}]}' })).toThrow('reserved by Basis authorization') // eslint-disable-line @stylistic/max-len
     expect(() => new Graph({ entities: '{"entities":[{"fields":[{"field":"owner","target":"Missing","type":"Entity"}],"name":"Note"}]}' })) // eslint-disable-line @stylistic/max-len

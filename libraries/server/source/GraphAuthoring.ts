@@ -21,6 +21,8 @@ export enum Cardinality {
 export interface AuthoredScalarField {
   /** Field name, in camelCase. */
   readonly field: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
   /** Scalar field type. */
   readonly type: AuthoredScalar,
 }
@@ -44,6 +46,8 @@ export interface AuthoredArrayField {
     /** Scalar element type. */
     readonly type: Authored<ScalarFieldType>,
   },
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
   /** Array field type. */
   readonly type: Authored<FieldType.Array>,
 }
@@ -52,6 +56,8 @@ export interface AuthoredArrayField {
 export interface AuthoredJSONField {
   /** Field name, in camelCase. */
   readonly field: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
   /** JSON field type. */
   readonly type: Authored<FieldType.JSON>,
 }
@@ -62,6 +68,8 @@ export interface AuthoredReferenceField {
   readonly field: string,
   /** Optional inverse navigation name. */
   readonly inverse?: string,
+  /** Whether the reference accepts NULL; omitted preserves optional-reference behavior. */
+  readonly nullable?: boolean,
   /** Referenced entity name. */
   readonly target: string,
   /** Entity reference field type. */

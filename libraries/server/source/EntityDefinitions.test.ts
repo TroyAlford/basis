@@ -730,6 +730,43 @@ describe('EntityDefinitions', () => {
     })).toThrow('conflicts with an inherited navigation')
   })
 
+  test('emits nullable fields without NOT NULL while preserving defaults', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'retiredAt', nullable: true, type: 'Timestamp' },
+          { field: 'createdAt', type: 'Timestamp' },
+          { field: 'tags', items: { type: 'String' }, nullable: true, type: 'Array' },
+          { field: 'payload', nullable: true, type: 'JSON' },
+          { field: 'owner', nullable: false, target: 'User', type: 'Entity' },
+        ],
+        name: 'Account',
+      }, {
+        fields: [{ field: 'id', format: 'UUID' }],
+        name: 'User',
+      }],
+    })
+    const ddl = entities.ddl.join('\n')
+    expect(ddl).toContain('"retiredAt" timestamptz')
+    expect(ddl).not.toMatch(/"retiredAt" timestamptz not null/u)
+    expect(ddl).toContain('"createdAt" timestamptz not null')
+    expect(ddl).toContain('"tags" text[]')
+    expect(ddl).not.toMatch(/"tags" text\[\] not null/u)
+    expect(ddl).toContain('"payload" jsonb')
+    expect(ddl).not.toMatch(/"payload" jsonb not null/u)
+    expect(ddl).toContain('"owner.id" text not null')
+  })
+
+  test('rejects non-boolean nullable declarations', () => {
+    expect(() => load({
+      entities: [{
+        fields: [{ field: 'retiredAt', nullable: 'yes', type: 'Timestamp' }],
+        name: 'Account',
+      }],
+    })).toThrow('nullable must be a boolean')
+  })
+
   test('accepts native scalar arrays and opaque JSON values', () => {
     const entities = load({
       entities: [{
