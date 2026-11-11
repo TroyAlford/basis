@@ -2,6 +2,7 @@ import { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
 import { access, open, readFile, rm, unlink } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
+import type { Directory } from '../../utilities'
 import { checksum, directories } from '../../utilities'
 import { canonicalDataDigest } from './CanonicalData'
 import type { Graph } from './Graph'
@@ -414,6 +415,7 @@ export async function loadRelease(directory: string, graph: Graph): Promise<Load
  * contract, and only then promotes the candidate through the managed service.
  */
 export class DatabaseRelease {
+  readonly #database: Directory
   readonly #graph: Graph
   readonly #migrations: string
   readonly #service: ManagedPostgresService
@@ -423,6 +425,7 @@ export class DatabaseRelease {
    * @param options - Graph and migration directory.
    */
   constructor(options: DatabaseReleaseOptions) {
+    this.#database = directories('database')
     this.#graph = options.graph
     this.#migrations = resolve(options.migrations)
     this.#service = new ManagedPostgresService()
@@ -631,7 +634,7 @@ export class DatabaseRelease {
   async failure(): Promise<ReleaseFailure | null> {
     let value: unknown
     try {
-      value = await directories('database').json('release-failure.json')
+      value = await this.#database.json('release-failure.json')
     } catch (error) {
       throw new ReleaseError({
         candidateId: 'unknown',
@@ -664,7 +667,7 @@ export class DatabaseRelease {
    * Clear the durable failure record after a controller acknowledges it.
    */
   async clearFailure(): Promise<void> {
-    await rm(await directories('database').file('release-failure.json'), { force: true })
+    await rm(await this.#database.file('release-failure.json'), { force: true })
   }
 
   /**
@@ -704,7 +707,7 @@ export class DatabaseRelease {
    * @param failure - Failure record.
    */
   async #writeFailure(failure: ReleaseFailure): Promise<void> {
-    await directories('database').json('release-failure.json', failure)
+    await this.#database.json('release-failure.json', failure)
   }
 
   /**
@@ -790,7 +793,7 @@ export class DatabaseRelease {
    * @returns The unlock callback.
    */
   async #lock(): Promise<() => Promise<void>> {
-    const file = await directories('database').file(LOCK)
+    const file = await this.#database.file(LOCK)
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const handle = await open(file, 'wx', 0o600)

@@ -2,6 +2,7 @@ import { runAsync } from 'basis/configuration'
 import { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
 import { chmod, readFile, rm } from 'node:fs/promises'
+import type { Directory } from '../../utilities'
 import { checksum, directories } from '../../utilities'
 import { canonicalDataDigest } from './CanonicalData'
 import { MANAGED_APP_ROLE, ManagedPostgresService } from './ManagedPostgresService'
@@ -124,6 +125,7 @@ export interface PostgresCandidate {
  */
 export class ManagedPostgresOperations {
   readonly #artifact: MigrationArtifact
+  readonly #backupDirectory: Directory
   readonly #service: ManagedPostgresService
 
   /**
@@ -133,6 +135,7 @@ export class ManagedPostgresOperations {
    */
   constructor(options: PostgresOperationsOptions, service?: ManagedPostgresService) {
     this.#artifact = options.artifact
+    this.#backupDirectory = directories('backups')
     this.#service = service ?? new ManagedPostgresService()
   }
 
@@ -150,7 +153,7 @@ export class ManagedPostgresOperations {
     const connection = await this.#service.ensure(false)
     const createdAt = new Date().toISOString()
     const stem = `${createdAt.replaceAll(':', '-')}-${randomUUID().slice(0, 8)}`
-    const directory = directories('backups')
+    const directory = this.#backupDirectory
     const path = await directory.file(`${stem}.dump`)
     const manifest = `${path}.json`
     const sql = new BunSQL(connection.ownerUrl)

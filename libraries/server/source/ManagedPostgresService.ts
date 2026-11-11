@@ -3,6 +3,7 @@ import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, open, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import type { Directory } from '../../utilities'
 import { directories } from '../../utilities'
 
 /**
@@ -98,6 +99,7 @@ export class ManagedPostgresService {
   readonly volumeName: string
   /** The selected PostgreSQL image. */
   readonly image: string
+  readonly #database: Directory
 
   /**
    * Build the service for the current application working directory.
@@ -109,6 +111,7 @@ export class ManagedPostgresService {
     this.containerName = `basis-postgres-${this.identity}`
     this.volumeName = this.containerName
     this.image = options.image ?? MANAGED_IMAGE
+    this.#database = directories('database')
   }
 
   /**
@@ -221,8 +224,7 @@ export class ManagedPostgresService {
     create: boolean,
     name = 'password',
   ): Promise<{ file: string, password: string }> {
-    const directory = directories('database')
-    const file = await directory.file(name)
+    const file = await this.#database.file(name)
     if (create || name !== 'password') {
       try {
         const handle = await open(file, 'wx', 0o600)
@@ -370,7 +372,7 @@ export class ManagedPostgresService {
    * @param journal - Journal contents.
    */
   async #writeCutover(journal: CutoverJournal): Promise<void> {
-    await directories('database').json('cutover.json', journal)
+    await this.#database.json('cutover.json', journal)
   }
 
   /**
@@ -378,7 +380,7 @@ export class ManagedPostgresService {
    * @returns Absolute path.
    */
   #cutoverPath(): string {
-    return join(directories('database').path, 'cutover.json')
+    return join(this.#database.path, 'cutover.json')
   }
 
   /**
