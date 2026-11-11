@@ -49,12 +49,8 @@ describe('sqlTemplateFormat', () => {
 
   test('does not reformat interpolated expressions while wrapping SQL', () => {
     const expression = "sql.array(tag.aliasesForThisParticularlyLongFieldName, 'TEXT')"
-    const code = [
-      'const query = sql`select',
-      `\${${expression}},`,
-      '${tag.anotherExtremelyLongFieldNameForTesting},',
-      '${tag.thirdLongFieldNameForTesting}`',
-    ].join(' ')
+    const tail = '${tag.anotherExtremelyLongFieldNameForTesting}, ${tag.thirdLongFieldNameForTesting}'
+    const code = `const query = sql\`select \${${expression}}, ${tail}\``
     const output = lint(code)
     expect(output.fixed).toBe(true)
     expect(output.output).toContain(`\${${expression}}`)
