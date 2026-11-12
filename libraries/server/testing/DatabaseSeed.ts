@@ -21,7 +21,7 @@ export async function withSeedDatabase<T>(
   callback: (database: SeedDatabase) => Promise<T>,
 ): Promise<T> {
   const fixture = await useDatabaseFixture('database-seed')
-  const reserved = await fixture.server.db.sql.reserve()
+  const reserved = await fixture.database.sql.reserve()
   try {
     await reserved.unsafe(`set search_path to "${SEED_SCHEMA}"`).simple()
     return await callback({ sql: reserved as unknown as SQL })

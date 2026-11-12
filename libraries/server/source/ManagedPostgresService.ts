@@ -128,6 +128,7 @@ export class ManagedPostgresService {
     if (!hasVolume) await this.createVolume(this.volumeName)
     if (state === 'missing') {
       await this.createContainer(this.containerName, this.volumeName, this.image, secret.file)
+      await this.waitReady()
     } else if (state === 'stopped') {
       await this.startContainer(this.containerName)
     }
@@ -459,20 +460,13 @@ export class ManagedPostgresService {
       '-p', `127.0.0.1::${MANAGED_PORT}`,
       image,
     ])
-    if (run.exitCode === 0) {
-      await this.waitReady(name)
-      return
-    }
+    if (run.exitCode === 0) return
     const state = await this.containerState(name)
     if (state === 'missing') {
       const detail = run.stderr.trim() || `docker run exited with ${run.exitCode}`
       throw new Error(`PostgreSQL service failed to start: ${detail}`)
     }
-    /*
-     * Another process won the create race. Attach to that service and wait for
-     * it to finish initializing instead of reporting failure or creating a twin.
-     */
-    await this.startContainer(name)
+    if (state === 'stopped') await this.startContainer(name)
   }
 
   /**

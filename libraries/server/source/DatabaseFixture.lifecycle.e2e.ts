@@ -62,8 +62,8 @@ import { expect, test } from 'bun:test'
 import { useDatabaseFixture } from ${JSON.stringify(fixtureModule)}
 
 test(${JSON.stringify(label)}, async () => {
-  const { server } = await useDatabaseFixture(${JSON.stringify(label)})
-  expect(server.db.closed).toBe(false)
+  const { database } = await useDatabaseFixture(${JSON.stringify(label)})
+  expect(database.closed).toBe(false)
 ${body}
 }, 120_000)
   `.trim()

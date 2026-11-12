@@ -36,7 +36,7 @@ test('observes the same instance and no cross-file write', async () => {
   if (!existsSync(proofPath)) throw new Error('the first identity file did not record its proof')
   const proof = JSON.parse(readFileSync(proofPath, 'utf8')) as TransferProof
   const fixture = await useDatabaseFixture('instance-b')
-  const [identity] = await fixture.server.db.sql<{ started: string }[]>`
+  const [identity] = await fixture.database.sql<{ started: string }[]>`
     SELECT pg_postmaster_start_time()::text AS started
   `
   expect(identity?.started).toBe(proof.started)

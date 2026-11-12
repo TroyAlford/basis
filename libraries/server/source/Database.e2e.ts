@@ -2911,8 +2911,8 @@ describe('Server database lifecycle', () => {
       })).toEqual([{ value: 1.5 }])
     }, { fresh: true })
 
-    const { server } = await useDatabaseFixture('rollback-success-check')
-    expect(await server.db.sql<{ present: boolean }[]>`
+    const { database } = await useDatabaseFixture('rollback-success-check')
+    expect(await database.sql<{ present: boolean }[]>`
       SELECT to_regclass(${`"${schema}"."NumberRow"`}) IS NOT NULL AS present
     `).toEqual([{ present: false }])
   }, 120_000)
@@ -2927,8 +2927,8 @@ describe('Server database lifecycle', () => {
       throw new Error('forced isolated failure')
     }, { fresh: true })).rejects.toThrow('forced isolated failure')
 
-    const { server } = await useDatabaseFixture('rollback-failure-check')
-    expect(await server.db.sql<{ present: boolean }[]>`
+    const { database } = await useDatabaseFixture('rollback-failure-check')
+    expect(await database.sql<{ present: boolean }[]>`
       SELECT to_regclass(${`"${schema}"."FailureProbe"`}) IS NOT NULL AS present
     `).toEqual([{ present: false }])
   }, 120_000)
@@ -2966,8 +2966,8 @@ describe('Server database lifecycle', () => {
     ])
 
     expect(new Set(schemas).size).toBe(2)
-    const { server } = await useDatabaseFixture('concurrent-check')
-    expect(await server.db.sql<{ count: number }[]>`
+    const { database } = await useDatabaseFixture('concurrent-check')
+    expect(await database.sql<{ count: number }[]>`
       SELECT count(*)::int AS count
       FROM pg_catalog.pg_namespace
       WHERE nspname IN (${schemas[0]}, ${schemas[1]})
@@ -2986,15 +2986,15 @@ describe('Server database lifecycle', () => {
       throw new Error('forced durable failure')
     })).rejects.toThrow('forced durable failure')
 
-    const { server } = await useDatabaseFixture('durable-failure-check')
-    expect(await server.db.sql<{ present: boolean }[]>`
+    const { database } = await useDatabaseFixture('durable-failure-check')
+    expect(await database.sql<{ present: boolean }[]>`
       SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema} ) AS present
     `).toEqual([{ present: false }])
   }, 120_000)
 
   test.serial('leaves no isolated database schemas behind', async () => {
-    const { server } = await useDatabaseFixture('schema-leak-check')
-    expect(await server.db.sql<{ count: number }[]>`
+    const { database } = await useDatabaseFixture('schema-leak-check')
+    expect(await database.sql<{ count: number }[]>`
       SELECT count(*)::int AS count
       FROM pg_catalog.pg_namespace
       WHERE nspname like 'basis_test_%'

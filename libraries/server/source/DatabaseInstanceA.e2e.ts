@@ -26,7 +26,7 @@ const fixtureModule = join(import.meta.dir, '..', 'testing', 'DatabaseFixture.ts
 test('records the shared instance identity and rolls back its write', async () => {
   process.env.BASIS_DATABASE_ACTIVITY_LOG = activityPath
   const fixture = await useDatabaseFixture('instance-a')
-  const [identity] = await fixture.server.db.sql<{ started: string }[]>`
+  const [identity] = await fixture.database.sql<{ started: string }[]>`
     SELECT pg_postmaster_start_time()::text AS started
   `
   const container = containers(fixture.install)[0]
@@ -53,7 +53,7 @@ test('records the shared instance identity and rolls back its write', async () =
     const { useDatabaseFixture } = await import(${JSON.stringify(pathToFileURL(fixtureModule).href)})
     const fixture = await useDatabaseFixture('subprocess-attach')
     console.log(JSON.stringify({ install: fixture.install, pid: process.pid }))
-    await fixture.server.shutdown()
+    await fixture.database.close()
   `
   const child = Bun.spawn([process.execPath, '-e', code], {
     cwd: repoRoot,

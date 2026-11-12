@@ -308,7 +308,7 @@ describe('Reviewed schema evolution', () => {
   test('applies a CONCURRENTLY operation through a reserved pooled session', async () => {
     const fixture = await useDatabaseFixture('migration-concurrent')
     const schema = `migration_concurrent_${randomUUID().replaceAll('-', '').slice(0, 12)}`
-    const admin = fixture.server.db.sql
+    const admin = fixture.database.sql
     await admin.unsafe(`CREATE SCHEMA "${schema}"`).simple()
     try {
       const reserved = await admin.reserve()
@@ -344,7 +344,7 @@ describe('Reviewed schema evolution', () => {
   test('records a failed nontransactional migration without claiming readiness', async () => {
     const fixture = await useDatabaseFixture('migration-concurrent-failure')
     const schema = `migration_concurrent_fail_${randomUUID().replaceAll('-', '').slice(0, 12)}`
-    const admin = fixture.server.db.sql
+    const admin = fixture.database.sql
     await admin.unsafe(`CREATE SCHEMA "${schema}"`).simple()
     try {
       const reserved = await admin.reserve()
