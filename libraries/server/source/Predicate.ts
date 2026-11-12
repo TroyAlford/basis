@@ -486,6 +486,7 @@ export function arrayMemberEntity(
   return {
     abstract: false,
     collections: [],
+    constraints: [],
     effectiveFields: [{ ...member, owner: 'Entity' }],
     fields: [member],
     inverseFields: [],

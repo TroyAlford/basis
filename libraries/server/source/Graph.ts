@@ -186,6 +186,14 @@ export class Graph {
   }
 
   /**
+   * Every normalized declarative constraint in the graph.
+   * @returns Canonical uniqueness constraints.
+   */
+  get constraints() {
+    return this.definitions.constraints
+  }
+
+  /**
    * Resolve one role by canonical id, authored alias, or name.
    * @param role - Role id or name.
    * @returns The role, or undefined.
@@ -821,6 +829,7 @@ export class Graph {
     return {
       abstract: false,
       collections: [],
+      constraints: relationship.constraints,
       effectiveFields: fields,
       fields: fields as EntityDefinition['fields'],
       inverseFields: [],
