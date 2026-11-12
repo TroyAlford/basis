@@ -1192,7 +1192,7 @@ export function plan(options: PlanOptions): SchemaPlan {
             id: `column-type:${table.name}:${column.name}`,
             kind: 'alter-column',
             risk: 'data',
-            sql: `ALTER TABLE ${quote(table.name)} ALTER COLUMN ${quote(column.name)} TYPE ${column.sqlType}`,
+            sql: `ALTER TABLE ${quote(table.name)} ALTER COLUMN ${quoteColumn(column.name)} TYPE ${column.sqlType}`,
             target: `${table.name}.${column.name}`,
           })
         } else {
@@ -1206,7 +1206,7 @@ export function plan(options: PlanOptions): SchemaPlan {
             id: `column-null:${table.name}:${column.name}`,
             kind: 'alter-column',
             risk: 'review',
-            sql: `ALTER TABLE ${quote(table.name)} ALTER COLUMN ${quote(column.name)} ` +
+            sql: `ALTER TABLE ${quote(table.name)} ALTER COLUMN ${quoteColumn(column.name)} ` +
               (column.nullable ? 'DROP NOT NULL' : 'SET NOT NULL'),
             target: `${table.name}.${column.name}`,
           })
@@ -1223,7 +1223,7 @@ export function plan(options: PlanOptions): SchemaPlan {
             id: `column-default:${table.name}:${column.name}`,
             kind: 'alter-column',
             risk: 'review',
-            sql: `ALTER TABLE ${quote(table.name)} ALTER COLUMN ${quote(column.name)} ` +
+            sql: `ALTER TABLE ${quote(table.name)} ALTER COLUMN ${quoteColumn(column.name)} ` +
               (desiredDefault === undefined ? 'DROP DEFAULT' : `SET DEFAULT ${desiredDefault}`),
             target: `${table.name}.${column.name}`,
           })
@@ -1243,7 +1243,7 @@ export function plan(options: PlanOptions): SchemaPlan {
           id: `drop-column:${table.name}:${column.name}`,
           kind: 'drop-column',
           risk: 'data',
-          sql: `ALTER TABLE ${quote(table.name)} DROP COLUMN ${quote(column.name)}`,
+          sql: `ALTER TABLE ${quote(table.name)} DROP COLUMN ${quoteColumn(column.name)}`,
           target: `${table.name}.${column.name}`,
         })
       } else {
@@ -2615,7 +2615,7 @@ function indexChanged(index: PhysicalIndex, existing: PhysicalIndex): boolean {
 function columnSql(table: string, column: PhysicalColumn): string {
   const nullable = column.nullable || column.primaryKey ? '' : ' NOT NULL'
   const defaultSql = column.default === undefined || column.default === null ? '' : ` DEFAULT ${column.default}`
-  return `ALTER TABLE ${quote(table)} ADD COLUMN ${quote(column.name)} ${column.sqlType}${nullable}${defaultSql}`
+  return `ALTER TABLE ${quote(table)} ADD COLUMN ${quoteColumn(column.name)} ${column.sqlType}${nullable}${defaultSql}`
 }
 
 /**
@@ -2641,4 +2641,13 @@ function sameType(left: string, right: string): boolean {
  */
 function quote(identifier: string): string {
   return identifier.split('.').map(part => `"${part.replaceAll('"', '""')}"`).join('.')
+}
+
+/**
+ * Quote one physical column identifier, including dotted reference columns.
+ * @param identifier - Complete column name.
+ * @returns Quoted identifier.
+ */
+function quoteColumn(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`
 }
