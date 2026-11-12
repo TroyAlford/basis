@@ -308,13 +308,18 @@ describe('Reviewed schema evolution', () => {
   test('applies a CONCURRENTLY operation through a reserved pooled session', async () => {
     const fixture = await useDatabaseFixture('migration-concurrent')
     const schema = `migration_concurrent_${randomUUID().replaceAll('-', '').slice(0, 12)}`
-    const admin = fixture.server.db.sql
+    const admin = fixture.database.sql
     await admin.unsafe(`CREATE SCHEMA "${schema}"`).simple()
     try {
       const reserved = await admin.reserve()
-      await reserved.unsafe(`SET search_path TO "${schema}"`).simple()
-      const actual = await DDL.introspect(reserved)
-      reserved.release()
+      let actual: Awaited<ReturnType<typeof DDL.introspect>>
+      try {
+        await reserved.unsafe(`SET search_path TO "${schema}"`).simple()
+        actual = await DDL.introspect(reserved)
+      } finally {
+        await reserved.unsafe('RESET search_path').simple()
+        reserved.release()
+      }
       const desired = model('Note')
       const plan = DDL.plan({ actual, desired })
       const index = plan.operations.find(operation => operation.kind === 'index')
@@ -339,13 +344,18 @@ describe('Reviewed schema evolution', () => {
   test('records a failed nontransactional migration without claiming readiness', async () => {
     const fixture = await useDatabaseFixture('migration-concurrent-failure')
     const schema = `migration_concurrent_fail_${randomUUID().replaceAll('-', '').slice(0, 12)}`
-    const admin = fixture.server.db.sql
+    const admin = fixture.database.sql
     await admin.unsafe(`CREATE SCHEMA "${schema}"`).simple()
     try {
       const reserved = await admin.reserve()
-      await reserved.unsafe(`SET search_path TO "${schema}"`).simple()
-      const actual = await DDL.introspect(reserved)
-      reserved.release()
+      let actual: Awaited<ReturnType<typeof DDL.introspect>>
+      try {
+        await reserved.unsafe(`SET search_path TO "${schema}"`).simple()
+        actual = await DDL.introspect(reserved)
+      } finally {
+        await reserved.unsafe('RESET search_path').simple()
+        reserved.release()
+      }
       const plan = DDL.plan({ actual, desired: model('Note') })
       const index = plan.operations.find(operation => operation.kind === 'index')
       if (!index) throw new Error('migration plan did not contain an index')

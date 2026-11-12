@@ -206,7 +206,7 @@ async function seedFixture(
 }
 
 describe('Query planning', () => {
-  test('measures correlated and CTE count strategies on representative parents and children', async () => {
+  test.serial('measures correlated and CTE count strategies on representative parents and children', async () => {
     await withIsolatedDatabase('query-planning', async database => {
       await database.use(definitions)
       const people = await seedFixture(database, 24, index => (index % 5) + 1)
@@ -323,7 +323,7 @@ describe('Query planning', () => {
     })
   }, 120_000)
 
-  test('measures count strategies at a larger parent/child scale', async () => {
+  test.serial('measures count strategies at a larger parent/child scale', async () => {
     await withIsolatedDatabase('query-planning-scale', async database => {
       await database.use(definitions)
       await seedFixture(database, 120, index => (index % 8) + 1)

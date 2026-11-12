@@ -92,13 +92,13 @@ Run the repository's real checks locally before pushing:
   bun run lint
   bun run lint:ts
   bun run test:unit
-  bun run test:component
-  bun run test:contract
-  bun run test:server
+  bun run test:database
+  bun run test:e2e
   bun run test:lifecycle
-  bun run test:screenshots
-  bun run test:e2e:all
   bun run test:consumer
+
+The destructive recovery proofs are an explicit, separately measured lane:
+  bun run test:recovery
 
 For the snapshot runtime on its own:
   bun test libraries/testing/matchScreenshot.screenshot.tsx

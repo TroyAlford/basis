@@ -35,9 +35,14 @@ jobs:
       - name: Run Markdown lint
         run: bun run lint:md
 
-  run-tests:
+  impact:
+    name: Impact
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    outputs:
+      lanes: ${{ steps.lanes.outputs.lanes }}
+      decision: ${{ steps.impact.outputs.decision }}
+      decision-hash: ${{ steps.impact.outputs.decision-hash }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -91,60 +96,143 @@ jobs:
           POLICY_PRESENT: ${{ steps.policy.outputs.present }}
         run: |
           set -euo pipefail
-          lanes=(unit component contract server lifecycle screenshots e2e visual database-fixtures fixture-lifecycle hmr docs)
+          lanes=(unit database e2e lifecycle docs)
           if [ "$POLICY_PRESENT" != "true" ]; then
-            for lane in "${lanes[@]}"; do echo "$lane-needed=true" >> "$GITHUB_OUTPUT"; done
+            json='{}'
+            for lane in "${lanes[@]}"; do
+              json=$(jq -c --arg lane "$lane" '. + {($lane): true}' <<<"$json")
+            done
+            echo "lanes=$json" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          json='{}'
           for lane in "${lanes[@]}"; do
-            value=$(jq -r --arg lane "$lane" '.suites[$lane].needed' impact-decision.json)
-            if [ "$value" != "true" ] && [ "$value" != "false" ]; then
-              echo "::error::Impact decision for lane '$lane' is not a boolean" >&2
-              exit 1
+            if jq -e --arg lane "$lane" '.suites | has($lane)' impact-decision.json >/dev/null; then
+              value=$(jq -r --arg lane "$lane" '.suites[$lane].needed' impact-decision.json)
+              if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+                echo "::error::Impact decision for lane '$lane' is not a boolean" >&2
+                exit 1
+              fi
+            else
+              # A lane added by this PR is absent from the trusted base policy.
+              # Run it conservatively rather than silently skipping new coverage.
+              echo "::notice::Base impact policy does not declare lane '$lane'; running it."
+              value=true
             fi
-            echo "$lane-needed=$value" >> "$GITHUB_OUTPUT"
+            json=$(jq -c --arg lane "$lane" --argjson needed "$value" '. + {($lane): $needed}' <<<"$json")
           done
+          echo "lanes=$json" >> "$GITHUB_OUTPUT"
+
+  unit:
+    name: Unit and screenshots
+    if: ${{ !github.event.pull_request.draft && (fromJSON(needs.impact.outputs.lanes).unit == true || fromJSON(needs.impact.outputs.lanes).docs == true) }}
+    needs: [impact]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+      - name: Fetch pull-request head and base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr-head"
+          git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
+          git checkout --detach refs/remotes/origin/pr-head
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
       - name: Warm the Playwright container image
-        if: steps.lanes.outputs.screenshots-needed == 'true' || steps.lanes.outputs.visual-needed == 'true'
+        if: ${{ fromJSON(needs.impact.outputs.lanes).unit == true }}
         run: |
           image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
           docker pull "$image"
-      - name: Run unit tests
-        if: steps.lanes.outputs.unit-needed == 'true'
-        run: bun run test:unit
-      - name: Run component tests
-        if: steps.lanes.outputs.component-needed == 'true'
-        run: bun run test:component
-      - name: Run contract tests
-        if: steps.lanes.outputs.contract-needed == 'true'
-        run: bun run test:contract
-      - name: Run server integration tests
-        if: steps.lanes.outputs.server-needed == 'true'
-        run: bun run test:server
-      - name: Run test lifecycle tests
-        if: steps.lanes.outputs.lifecycle-needed == 'true'
-        run: bun run test:lifecycle
-      - name: Run docs checks
-        if: steps.lanes.outputs.docs-needed == 'true'
-        run: bun run docs:check
-      - name: Run screenshot tests
-        if: steps.lanes.outputs.screenshots-needed == 'true'
-        run: bun run test:screenshots
-      - name: Run end-to-end tests
-        if: steps.lanes.outputs.e2e-needed == 'true'
+      - name: Run unit tests, screenshots and docs concurrently
+        env:
+          UNIT: ${{ fromJSON(needs.impact.outputs.lanes).unit }}
+          DOCS: ${{ fromJSON(needs.impact.outputs.lanes).docs }}
+        run: |
+          set -uo pipefail
+          pids=()
+          launch() { "$@" & pids+=("$!"); }
+          if [ "$UNIT" = "true" ]; then launch bun run test:unit; fi
+          if [ "$DOCS" = "true" ]; then launch bun run docs:check; fi
+          status=0
+          for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+          exit "$status"
+
+  database:
+    name: Database
+    if: ${{ !github.event.pull_request.draft && fromJSON(needs.impact.outputs.lanes).database == true }}
+    needs: [impact]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+      - name: Fetch pull-request head and base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr-head"
+          git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
+          git checkout --detach refs/remotes/origin/pr-head
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Run one shared database suite
+        env:
+          BASIS_DATABASE_FIXTURE_EPHEMERAL: '1'
+        run: |
+          set -euo pipefail
+          start=$(date +%s%3N)
+          bun run test:database
+          end=$(date +%s%3N)
+          echo "Database lane wall clock: $((end - start)) ms" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  e2e:
+    name: End-to-end
+    if: ${{ !github.event.pull_request.draft && fromJSON(needs.impact.outputs.lanes).e2e == true }}
+    needs: [impact]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+      - name: Fetch pull-request head and base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr-head"
+          git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
+          git checkout --detach refs/remotes/origin/pr-head
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Warm the Playwright container image
+        run: |
+          image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
+          docker pull "$image"
+      - name: Run browser end-to-end tests
         run: bun run test:e2e
-      - name: Run visual end-to-end tests
-        if: steps.lanes.outputs.visual-needed == 'true'
-        run: bun run test:e2e:visual
-      - name: Run database fixture tests
-        if: steps.lanes.outputs.database-fixtures-needed == 'true'
-        run: bun run test:e2e:database-fixtures
-      - name: Run fixture lifecycle tests
-        if: steps.lanes.outputs.fixture-lifecycle-needed == 'true'
-        run: bun test ./libraries/server/source/DatabaseFixture.lifecycle.e2e.ts ./libraries/testing/runtime.lifecycle.e2e.ts
-      - name: Run HMR tests
-        if: steps.lanes.outputs.hmr-needed == 'true'
-        run: bun run test:e2e:hmr
       - name: Upload snapshot artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -152,6 +240,38 @@ jobs:
           name: screenshots
           path: '**/__screenshots__/**'
           if-no-files-found: ignore
+
+  lifecycle:
+    name: Lifecycle
+    if: ${{ !github.event.pull_request.draft && fromJSON(needs.impact.outputs.lanes).lifecycle == true }}
+    needs: [impact]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+      - name: Fetch pull-request head and base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr-head"
+          git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          test "$(git rev-parse refs/remotes/origin/pr-head)" = "$HEAD_SHA"
+          git checkout --detach refs/remotes/origin/pr-head
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .tool-versions
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Warm the Playwright container image
+        run: |
+          image="mcr.microsoft.com/playwright:v$(bun -e 'console.log(require("./node_modules/playwright/package.json").version)')-noble"
+          docker pull "$image"
+      - name: Run destructive and lifecycle proofs in parallel
+        run: bun run test:lifecycle
 
   type-check:
     if: ${{ !github.event.pull_request.draft }}
@@ -202,28 +322,80 @@ jobs:
         with:
           fail-on-findings: 'false'
 
-  # Code CI's only required status context. It judges the five code jobs that
-  # ran in this same workflow run; it never reads check runs from another run.
+  # Code CI's only required status context. It judges the jobs in this same
+  # workflow run and accepts a skipped suite only when the exact-run impact
+  # decision marks that suite as not needed.
   required:
     name: required
     if: ${{ always() && !github.event.pull_request.draft }}
-    needs: [eslint, run-tests, type-check, knip, consumer-install]
+    needs:
+      - eslint
+      - impact
+      - unit
+      - database
+      - e2e
+      - lifecycle
+      - type-check
+      - knip
+      - consumer-install
     runs-on: ubuntu-latest
     steps:
-      - name: Require every code job to succeed in this run
+      - name: Require every selected code job to succeed in this run
         env:
           NEEDS: ${{ toJSON(needs) }}
+          LANES: ${{ needs.impact.outputs.lanes }}
+          DECISION: ${{ needs.impact.outputs.decision }}
+          DECISION_HASH: ${{ needs.impact.outputs.decision-hash }}
         run: |
           set -euo pipefail
-          failed=''
-          for job in eslint run-tests type-check knip consumer-install; do
-            result=$(jq -r --arg job "$job" '.[$job].result // "missing"' <<<"$NEEDS")
-            if [[ "$result" != "success" ]]; then
-              failed+="${job} (${result}) "
-            fi
+          failed=0
+          fail() { echo "::error::$*" >&2; failed=1; }
+          result() { jq -r --arg job "$1" '.[$job].result // "missing"' <<<"$NEEDS"; }
+
+          for job in eslint impact type-check knip consumer-install; do
+            value=$(result "$job")
+            if [[ "$value" != "success" ]]; then fail "$job ($value)"; fi
           done
-          if [[ -n "$failed" ]]; then
-            echo "::error::Required code jobs did not pass in this run: ${failed}"
+
+          if [[ -z "${DECISION:-}" || -z "${DECISION_HASH:-}" ]]; then
+            fail "impact decision or decision hash is missing"
+          fi
+          if ! jq -e 'type == "object"' <<<"${LANES:-null}" >/dev/null 2>&1; then
+            fail "impact lane decision is missing or malformed"
             exit 1
           fi
-          echo "All required code jobs succeeded in this run."
+          for lane in unit database e2e lifecycle docs; do
+            needed=$(jq -r --arg lane "$lane" 'if has($lane) then .[$lane] else "missing" end' <<<"$LANES")
+            if [[ "$needed" != "true" && "$needed" != "false" ]]; then
+              fail "impact decision for lane '$lane' is missing or malformed"
+            fi
+          done
+
+          check_group() {
+            local job=$1
+            shift
+            local value
+            value=$(result "$job")
+            if [[ "$value" == "success" ]]; then return; fi
+            if [[ "$value" != "skipped" ]]; then
+              fail "$job ($value)"
+              return
+            fi
+            for lane in "$@"; do
+              local needed
+              needed=$(jq -r --arg lane "$lane" 'if has($lane) then .[$lane] else "missing" end' <<<"$LANES")
+              if [[ "$needed" == "true" ]]; then
+                fail "$job was skipped but lane '$lane' was required"
+              elif [[ "$needed" != "false" ]]; then
+                fail "impact decision for lane '$lane' is missing or malformed"
+              fi
+            done
+          }
+
+          check_group unit unit docs
+          check_group database database
+          check_group e2e e2e
+          check_group lifecycle lifecycle
+
+          if [[ "$failed" -ne 0 ]]; then exit 1; fi
+          echo "All selected required code jobs succeeded in this run."

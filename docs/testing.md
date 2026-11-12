@@ -10,34 +10,29 @@ Snapshot tests pin the rendered output of a component or an application page to 
 
 A test file's suffix selects its lane. Bun's default discovery runs only `.test` and `.spec`; the screenshot and end-to-end lanes stay opt-in and run only when a command names their files explicitly.
 
-| Suffix                                                  | Purpose                                                                                             | Default `bun test`? | Canonical command  |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- | ------------------ |
-| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests via `render`, `Simulate`, `waitFor` | Yes                 | `bun test`         |
-| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level visual-regression contracts via `matchScreenshot`; no application mount             | No                  | `test:screenshots` |
-| `*.e2e.ts` / `*.e2e.tsx`                                | Feature-level `useApplication().visit()` journeys in a real browser; may capture screenshots        | No                  | `test:e2e`         |
+| Suffix                                                  | Purpose                                                                                             | Default `bun test`? | Canonical command |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- | ----------------- |
+| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests via `render`, `Simulate`, `waitFor` | Yes                 | `test:unit`       |
+| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level visual-regression contracts via `matchScreenshot`; no application mount             | No                  | `test:unit`       |
+| `*.e2e.ts` / `*.e2e.tsx`                                | Feature-level `useApplication().visit()` journeys in a real browser; may capture screenshots        | No                  | `test:e2e`        |
+
+The end-to-end suffix is partitioned into a database suite and a browser suite. A `*.e2e.ts` file is not automatically a database test; its lane is the command that names it. There are four test jobs: unit/screenshots, database, browser e2e, and lifecycle.
 
 ```json
 {
   "scripts": {
     "test": "bun run test:unit",
-    "test:unit": "bun test ./source/unit/**/*.test.ts",
-    "test:coverage": "bun run test:unit --coverage",
-    "test:component": "bun test ./source/components/**/*.test.tsx",
-    "test:contract": "bun test ./source/contract/*.test.ts",
-    "test:server": "bun test ./source/server/*.test.ts",
-    "test:lifecycle": "bun test ./source/lifecycle/*.test.ts",
-    "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
-    "test:e2e": "bun test ./source/e2e/*.e2e.ts",
-    "test:e2e:visual": "bun test ./source/e2e/visual/*.e2e.ts",
-    "test:e2e:database-fixtures": "bun test ./source/e2e/fixtures/database/*.e2e.ts",
-    "test:e2e:fixtures": "bun run test:e2e:database-fixtures && bun test ./source/e2e/fixtures/*.e2e.ts",
-    "test:e2e:all": "bun run test:e2e && bun run test:e2e:visual && bun run test:e2e:fixtures",
-    "test:all": "bun run test:unit && bun run test:component && bun run test:contract && bun run test:server && bun run test:lifecycle && bun run test:screenshots && bun run test:e2e:all"
+    "test:unit": "bun test --parallel <all *.test.* and *.screenshot.* files>",
+    "test:database": "bun test --concurrent --max-concurrency=8 <database e2e files>",
+    "test:e2e": "bun test <browser e2e files>",
+    "test:lifecycle": "bun test --parallel=2 --concurrent <fixture and recovery proofs>",
+    "test:recovery": "bun test <destructive database proofs>",
+    "test:all": "bun run test:unit && bun run test:database && bun run test:e2e && bun run test:lifecycle && bun run test:recovery"
   }
 }
 ```
 
-Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots`, `test:e2e`, `test:e2e:visual`, and `test:e2e:fixtures` as separate steps in the impact-selected Visual job. `test:unit` is the ordinary warm lane; component, contract, server, lifecycle, browser-visual, and database fixture/seed tests have their own commands. Coverage is opt-in with `test:coverage`. The database fixture lane owns independent-install, restart, and prebuilt 500k-row seed proofs so ordinary behavior E2E never pays their container setup cost. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. Basis CI runs the four test jobs in parallel: `test:unit` fans test files across Bun worker processes and includes screenshots, `test:database` runs one seeded PostgreSQL instance, `test:e2e` runs the browser journeys, and `test:lifecycle` runs the small fixture/recovery proofs concurrently. `test:recovery` is the explicit manual lane for the expensive destructive database proofs; it is not part of the required CI feedback path. Coverage is opt-in with `test:coverage`. `test:all` is deliberate full acceptance, not the ordinary edit loop.
 
 Basis recognizes all three lanes when it attributes a caller, registers a test, and scopes orphan pruning. That recognition never makes a heavy lane a default test: Bun still discovers only `.test` and `.spec`.
 
@@ -71,7 +66,7 @@ The runtime is memoised on `globalThis`, so every test file in the process resol
 
 ## Component captures
 
-`matchScreenshot(<Button>Save</Button>)` renders the element to a standalone document with `react-dom/server`, inlines Basis's component styles and default theme, and loads it into one reused page with `setContent`. Each capture replaces that page's document, so the page — and the browser behind it — is created once. Playwright round-trips are kept to a minimum: one `evaluate` that waits for fonts and measures the element, then one screenshot. Put these captures in `*.screenshot.tsx` and run them with `bun run test:screenshots`.
+`matchScreenshot(<Button>Save</Button>)` renders the element to a standalone document with `react-dom/server`, inlines Basis's component styles and default theme, and loads it into one reused page with `setContent`. Each capture replaces that page's document, so the page — and the browser behind it — is created once. Playwright round-trips are kept to a minimum: one `evaluate` that waits for fonts and measures the element, then one screenshot. Put these captures in `*.screenshot.tsx` and run them with `bun run test:unit`.
 
 Components whose meaningful state only exists after mount — the resolved `Await`, a rendered `Mermaid` diagram, a placed `Tooltip` — are captured live through `app.visit` in `visual.live.e2e.ts`. Everything else is a static element capture.
 
@@ -92,7 +87,7 @@ test('renders the application', async () => {
 })
 ```
 
-Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Docs highlighting is locally pinned through `shiki` and Mermaid uses the local SSR-capable renderer, so visual journeys do not fetch a CDN. The behavior lane excludes the browser-heavy docs captures and the fixture lifecycle proofs; run those with `bun run test:e2e:visual` and `bun run test:e2e:fixtures`. `test:e2e:all` aggregates all three. Component appearance belongs in `*.screenshot.tsx` and runs with `bun run test:screenshots`; none of these are part of the default `bun test` lane.
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`. Docs highlighting is locally pinned through `shiki` and Mermaid uses the local SSR-capable renderer, so visual journeys do not fetch a CDN. Component appearance belongs in `*.screenshot.tsx` and runs in the unit lane; neither lane is part of the default `bun test` discovery.
 
 ## Run-scoped cleanup
 
@@ -124,7 +119,38 @@ await withIsolatedDatabase('consumer', async database => {
 
 ## Database isolation
 
-Server database tests reuse one managed PostgreSQL service per checkout. The fixture keeps the container between runs and caches one migrated schema per exact entity-definition set; the first run creates it and later runs reuse it. Ordinary tests run inside one reserved transaction, set the cached schema, use savepoints for expected failures, and roll everything back whether the test succeeds or fails. DDL, data, `db.sql`, and entity-rooted `db.query` share that transaction. Cross-transaction tests use an explicitly committed unique schema and drop it in cleanup instead of pretending commit behavior can roll back. Fixture lifecycle proofs set `BASIS_DATABASE_FIXTURE_EPHEMERAL=1` when they need explicit container removal; `BASIS_TEST_FIXTURE_ROOT` overrides the persistent fixture directory.
+`bun run test:database` is the ordinary shared-database lane. It starts **one** PostgreSQL container per runner/suite execution, from the immutable seeded test image, and runs every database test file under one Bun invocation:
+
+```sh
+BASIS_E2E_FAST=1 BASIS_DATABASE_FIXTURE_EPHEMERAL=1 \
+  bun test --concurrent --max-concurrency=8 \
+  ./libraries/server/source/Database.e2e.ts \
+  ./libraries/server/source/DatabaseSeed.e2e.ts \
+  ./libraries/server/source/Migration.e2e.ts \
+  ./libraries/server/source/QueryParity.e2e.ts \
+  ./libraries/server/source/QueryPlanning.e2e.ts \
+  ./libraries/server/source/Schema.e2e.ts
+```
+
+The image already contains the 500,000-row seeded dataset in its own data directory. It is pulled once per checksum and rebuilt only when the committed fixture inputs change. The ordinary fixture runs that image without a mounted data volume, then attaches to the same container on later runs. The seeded proof therefore reads the same database instance as every ordinary test instead of starting a second container.
+
+The concurrency bound is eight tests against a ten-connection pool, leaving headroom for the fixture's own schema and cleanup work. `--concurrent` overlaps async tests inside a file; files share the same process-wide fixture, so the database is never restarted between files. The suite does not use `--parallel`.
+
+The first run installs the canonical shared schema once and caches one migrated schema per exact entity-definition set. CI sets `BASIS_DATABASE_FIXTURE_EPHEMERAL=1`, so the run makes exactly one cleanup decision and removes the container at the end; no test volume exists. Ordinary tests run inside one reserved transaction, set the cached schema transaction-locally, use savepoints for expected failures, and roll everything back whether the test succeeds or fails. DDL, data, `db.sql`, and entity-rooted `db.query` share that transaction. Cross-transaction tests use an explicitly committed unique schema and drop it in cleanup instead of pretending commit behavior can roll back. Reserved connections used outside a transaction reset `search_path` before they return to the pool. `BASIS_TEST_FIXTURE_ROOT` overrides the persistent fixture directory.
+
+### Database execution inventory
+
+| Lane                 | Owner of PostgreSQL                               | Connection model                                                     | Destructive container work                     | Concurrency                   | Command          |
+| -------------------- | ------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------- | ---------------- |
+| Unit and screenshots | No PostgreSQL                                     | In-process; Playwright container for screenshots                     | No                                             | Bun `--parallel` file workers | `test:unit`      |
+| Database             | One seeded PostgreSQL container per runner/suite  | Reserved connection + transaction; unique schemas for committed work | No                                             | `--concurrent`, max 8         | `test:database`  |
+| E2E                  | No PostgreSQL                                     | One application server identity; Playwright container                | No                                             | Independent journeys          | `test:e2e`       |
+| Lifecycle            | Child fixtures own short-lived installation roots | Startup, teardown and interrupted cutover recovery                   | Yes, isolated per proof                        | Files and tests overlap       | `test:lifecycle` |
+| Recovery (manual)    | Each case owns its temporary installation/service | Real owner/app roles and public schema                               | Yes: restart, replace, backup/restore, cutover | Sequential destructive proofs | `test:recovery`  |
+
+Every additional ordinary service is a regression. The fixture starts the seeded container once and every ordinary database file shares it.
+
+The destructive recovery proofs remain real, but they are an explicitly measured manual lane because replacing and restoring containers cannot share the ordinary database instance. Do not move ordinary SQL coverage there.
 
 ### Golden SQL assertions
 
@@ -171,11 +197,11 @@ Plain `mkdtemp(os.tmpdir())` is captured the same way. The optional `base` place
 bun test --update-snapshots
 
 # A visual or end-to-end lane
-bun run test:screenshots --update-snapshots
+bun run test:unit --update-snapshots
 bun run test:e2e --update-snapshots
 
 # Or set the environment variable for any lane
-UPDATE_SNAPSHOTS=1 bun run test:screenshots
+UPDATE_SNAPSHOTS=1 bun run test:unit
 ```
 
 A committed baseline is only rewritten when the run explicitly updates. A failed or browser-less run never mutates a committed snapshot; a comparison failure writes nothing, and any legacy `.actual` / `.diff` artefacts from an older run are cleared on the next pass. Obsolete snapshots are pruned only while updating, and only for files whose entire suite executed.

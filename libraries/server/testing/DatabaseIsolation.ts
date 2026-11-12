@@ -85,7 +85,7 @@ export async function withIsolatedDatabase<T>(
   const fixture = await useDatabaseFixture(label)
   const entities = options.entities ?? fixture.entities
   const schema = options.fresh ? schemaName() : await fixture.schemaFor(entities)
-  const reserved = await fixture.server.db.sql.reserve()
+  const reserved = await fixture.database.sql.reserve()
   let transactionStarted = false
   try {
     await reserved.unsafe('begin').simple()
@@ -124,10 +124,10 @@ export async function withDurableDatabase<T>(
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
   const schema = schemaName()
-  await fixture.server.db.sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
+  await fixture.database.sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
 
   const transaction = <Result>(work: BunSQL.TransactionContextCallback<Result>) => (
-    fixture.server.db.tx(async sql => {
+    fixture.database.tx(async sql => {
       await setSearchPath(sql, schema)
       return await work(sql)
     })
@@ -143,8 +143,8 @@ export async function withDurableDatabase<T>(
   }
 
   const cleanup = async (): Promise<void> => {
-    await fixture.server.db.sql.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`).simple()
-    const remaining = await fixture.server.db.sql<{ present: boolean }[]>`
+    await fixture.database.sql.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`).simple()
+    const remaining = await fixture.database.sql<{ present: boolean }[]>`
       SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema} ) AS present
     `
     if (remaining[0]?.present) throw new Error(`Database test schema "${schema}" was not removed`)

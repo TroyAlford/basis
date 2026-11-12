@@ -17,11 +17,11 @@ It registers happy-dom, every matcher, and the shared browser lifecycle. A plain
 
 A test file's suffix selects its lane. Bun's default discovery runs only `.test` and `.spec`, so cheap model, DOM, and mounted-component tests stay in the fast command; screenshot and end-to-end lanes stay opt-in. Basis recognizes every lane for caller attribution, test registration, and snapshot pruning — it does not make an expensive lane a default test.
 
-| Suffix                                                  | Purpose                                                                                             | Default `bun test`? | Canonical command  |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- | ------------------ |
-| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests via `render`, `Simulate`, `waitFor` | Yes                 | `bun test`         |
-| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level visual contracts via `matchScreenshot`; no application mount                        | No                  | `test:screenshots` |
-| `*.e2e.ts` / `*.e2e.tsx`                                | Feature-level `useApplication().visit()` journeys in a real browser; may capture screenshots        | No                  | `test:e2e`         |
+| Suffix                                                  | Purpose                                                                                             | Default `bun test`? | Canonical command |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- | ----------------- |
+| `*.test.ts` / `*.test.tsx` (including `*.dom.test.tsx`) | Pure model/store/server tests and mounted Basis component tests via `render`, `Simulate`, `waitFor` | Yes                 | `test:unit`       |
+| `*.screenshot.tsx` / `*.screenshot.ts`                  | Component-level visual contracts via `matchScreenshot`; no application mount                        | No                  | `test:unit`       |
+| `*.e2e.ts` / `*.e2e.tsx`                                | Feature-level `useApplication().visit()` journeys in a real browser; may capture screenshots        | No                  | `test:e2e`        |
 
 The consumer scripts follow the same shape:
 
@@ -29,28 +29,21 @@ The consumer scripts follow the same shape:
 {
   "scripts": {
     "test": "bun run test:unit",
-    "test:unit": "bun test ./source/unit/**/*.test.ts",
-    "test:coverage": "bun run test:unit --coverage",
-    "test:component": "bun test ./source/components/**/*.test.tsx",
-    "test:contract": "bun test ./source/contract/*.test.ts",
-    "test:server": "bun test ./source/server/*.test.ts",
-    "test:lifecycle": "bun test ./source/lifecycle/*.test.ts",
-    "test:screenshots": "bun test ./source/visual/captures/*.screenshot.tsx",
-    "test:e2e": "bun test ./source/e2e/*.e2e.ts",
-    "test:e2e:visual": "bun test ./source/e2e/visual/*.e2e.ts",
-    "test:e2e:database-fixtures": "bun test ./source/e2e/fixtures/database/*.e2e.ts",
-    "test:e2e:fixtures": "bun run test:e2e:database-fixtures && bun test ./source/e2e/fixtures/*.e2e.ts",
-    "test:e2e:all": "bun run test:e2e && bun run test:e2e:visual && bun run test:e2e:fixtures",
-    "test:all": "bun run test:unit && bun run test:component && bun run test:contract && bun run test:server && bun run test:lifecycle && bun run test:screenshots && bun run test:e2e:all"
+    "test:unit": "bun test --parallel <all *.test.* and *.screenshot.* files>",
+    "test:database": "bun test --concurrent --max-concurrency=8 <database e2e files>",
+    "test:e2e": "bun test <browser e2e files>",
+    "test:lifecycle": "bun test --parallel=2 --concurrent <fixture and recovery proofs>",
+    "test:recovery": "bun test <destructive database proofs>",
+    "test:all": "bun run test:unit && bun run test:database && bun run test:e2e && bun run test:lifecycle && bun run test:recovery"
   }
 }
 ```
 
-Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory, such as `./source/visual/captures/*.screenshot.tsx`; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. The reference CI workflow runs `test:screenshots`, `test:e2e`, `test:e2e:visual`, and `test:e2e:fixtures` as separate steps in the impact-selected Visual job. `test:unit` is the ordinary warm lane; component, contract, server, lifecycle, browser-visual, and database fixture/seed tests have their own commands. Coverage is opt-in with `test:coverage`. The database fixture lane owns independent-install, restart, and prebuilt 500k-row seed proofs so ordinary behavior E2E never pays their container setup cost. `test:all` is deliberate full acceptance, not the ordinary edit loop.
+Explicit file paths execute the custom suffixes under the pinned Bun version. Shell-expanded `*` globs work when a lane lives in a flat directory; for a nested tree, pass the files explicitly (Basis's own lane scripts collect them with `find`). Do not add `[test].pathIgnorePatterns` or `--path-ignore-patterns`. Keep `[test] preload = ["basis/testing/bun"]`; the preload supplies the shared browser lifecycle and pruning. Basis CI runs four test jobs in parallel: unit/screenshots, one seeded database, browser e2e, and lifecycle. The destructive database recovery proofs remain available through `test:recovery` on demand rather than in the required feedback path. Coverage is opt-in with `test:coverage`. `test:all` is deliberate full acceptance, not the ordinary edit loop.
 
 Visual snapshots assert appearance; mounted component tests assert behavior; end-to-end journeys validate actual browser and integration boundaries.
 
-Visual snapshots capture Chromium inside Docker. Install Docker and make sure the daemon is running before `test:screenshots` or `test:e2e`; the snapshot runtime starts one pinned `mcr.microsoft.com/playwright` container and never launches a host browser.
+Visual snapshots capture Chromium inside Docker. Install Docker and make sure the daemon is running before `test:unit` or `test:e2e`; the snapshot runtime starts one pinned `mcr.microsoft.com/playwright` container and never launches a host browser.
 
 ## Temp directories
 
@@ -88,7 +81,7 @@ test('renders a button', async () => {
 })
 ```
 
-Visual captures live in `*.screenshot.tsx` (or `*.screenshot.ts`) and are not discovered by the default `bun test`; run `bun run test:screenshots` (or name the file explicitly) to capture or compare them. Mounted component tests that assert behavior stay in `*.test.tsx`, where the fast command discovers them.
+Visual captures live in `*.screenshot.tsx` (or `*.screenshot.ts`) and are not discovered by the default `bun test`; run `bun run test:unit` (or name the file explicitly) to capture or compare them. Mounted component tests that assert behavior stay in `*.test.tsx`, where the fast command discovers them.
 
 `matchScreenshot(subject, hint?, options?)` is a plain async function — not an `expect.extend` matcher — because Bun drives async matchers synchronously on its event loop, which makes the Playwright calls inside them dramatically slower than the same calls awaited normally. It accepts a React element, a Playwright `Page`, or a `Locator`. A React element is rendered to HTML, the component styles and the default theme are inlined, and the capture is cropped to the rendered content; a page is captured at its viewport and a locator at its element box.
 
@@ -129,7 +122,7 @@ test('renders the application', async () => {
 })
 ```
 
-Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`, not the default test command. The behavior lane excludes browser-heavy docs captures and fixture lifecycle proofs; use `bun run test:e2e:visual` and `bun run test:e2e:fixtures` for those, or `test:e2e:all` for the aggregate. `useApplication({ entry })` attaches to one detached development server per `(cwd, entry, env, development)` identity, starting it on a free loopback port and `/api/health` when needed. The server stays alive between runs with HMR enabled and is shared by every test file in the run (concurrent callers await the same boot instead of racing). Set `BASIS_APPLICATION_FIXTURE_EPHEMERAL=1` for a run-scoped server that the preload stops; `BASIS_APPLICATION_FIXTURE_ROOT` overrides the persistent fixture directory. `startApplication` remains the dedicated per-call primitive.
+Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run test:e2e`, not the default test command. Docs captures and mounted-component journeys run in the same browser lane. `useApplication({ entry })` attaches to one detached development server per `(cwd, entry, env, development)` identity, starting it on a free loopback port and `/api/health` when needed. The server stays alive between runs with HMR enabled and is shared by every test file in the run (concurrent callers await the same boot instead of racing). Set `BASIS_APPLICATION_FIXTURE_EPHEMERAL=1` for a run-scoped server that the preload stops; `BASIS_APPLICATION_FIXTURE_ROOT` overrides the persistent fixture directory. `startApplication` remains the dedicated per-call primitive.
 
 `startApplication({ entry })` is the low-level primitive behind it, with the same shape but a dedicated per-call lifecycle (`stop()` is idempotent). Use it only when a test needs a clean server of its own.
 
