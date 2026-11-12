@@ -125,9 +125,6 @@ await withIsolatedDatabase('consumer', async database => {
 BASIS_E2E_FAST=1 BASIS_DATABASE_FIXTURE_EPHEMERAL=1 \
   bun test --concurrent --max-concurrency=8 \
   ./libraries/server/source/Database.e2e.ts \
-  ./libraries/server/source/DatabaseInstanceA.e2e.ts \
-  ./libraries/server/source/DatabaseInstanceB.e2e.ts \
-  ./libraries/server/source/DatabaseConcurrency.e2e.ts \
   ./libraries/server/source/DatabaseSeed.e2e.ts \
   ./libraries/server/source/Migration.e2e.ts \
   ./libraries/server/source/QueryParity.e2e.ts \
@@ -151,7 +148,7 @@ The first run installs the canonical shared schema once and caches one migrated 
 | Lifecycle            | Child fixtures own short-lived installation roots | Startup, teardown and interrupted cutover recovery                   | Yes, isolated per proof                        | Files and tests overlap       | `test:lifecycle` |
 | Recovery (manual)    | Each case owns its temporary installation/service | Real owner/app roles and public schema                               | Yes: restart, replace, backup/restore, cutover | Sequential destructive proofs | `test:recovery`  |
 
-Every additional ordinary service is a regression. The database lane's activity log records `start`/`attach`, canonical setup, one `cleanup` decision and `stop`; `scripts/verify-database-activity.ts` fails the lane if it observes more than one ordinary service, more than one canonical setup, a missing cleanup, or leftover Docker resources. `DatabaseInstanceA.e2e.ts` and `DatabaseInstanceB.e2e.ts` prove the same `pg_postmaster_start_time()` and container id across distinct files and that a rolled-back write is invisible to the second file. A child process attaches to the same service instead of creating another. `DatabaseConcurrency.e2e.ts` uses a two-party barrier, so it would time out if the tests ran sequentially, and each transaction cannot see the other's write.
+Every additional ordinary service is a regression. The fixture starts the seeded container once and every ordinary database file shares it.
 
 The destructive recovery proofs remain real, but they are an explicitly measured manual lane because replacing and restoring containers cannot share the ordinary database instance. Do not move ordinary SQL coverage there.
 

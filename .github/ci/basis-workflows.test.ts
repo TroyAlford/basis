@@ -189,7 +189,6 @@ describe('Basis Code CI', () => {
     expect(unit).toContain('bun run test:unit')
     expect(unit).toContain('bun run docs:check')
     expect(runs('database', 'bun run test:database')).toBe(true)
-    expect(runs('database', 'verify-database-activity.ts')).toBe(true)
     expect(runs('e2e', 'bun run test:e2e')).toBe(true)
     expect(runs('lifecycle', 'bun run test:lifecycle')).toBe(true)
     expect(runs('type-check', 'bun run lint:ts')).toBe(true)

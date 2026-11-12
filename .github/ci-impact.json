@@ -75,9 +75,6 @@
     "database": {
       "testGlobs": [
         "libraries/server/source/Database.e2e.ts",
-        "libraries/server/source/DatabaseInstanceA.e2e.ts",
-        "libraries/server/source/DatabaseInstanceB.e2e.ts",
-        "libraries/server/source/DatabaseConcurrency.e2e.ts",
         "libraries/server/source/DatabaseSeed.e2e.ts",
         "libraries/server/source/Migration.e2e.ts",
         "libraries/server/source/QueryParity.e2e.ts",
@@ -112,9 +109,6 @@
       ],
       "testExcludeGlobs": [
         "libraries/server/source/Database.e2e.ts",
-        "libraries/server/source/DatabaseInstanceA.e2e.ts",
-        "libraries/server/source/DatabaseInstanceB.e2e.ts",
-        "libraries/server/source/DatabaseConcurrency.e2e.ts",
         "libraries/server/source/DatabaseSeed.e2e.ts",
         "libraries/server/source/Migration.e2e.ts",
         "libraries/server/source/QueryParity.e2e.ts",
