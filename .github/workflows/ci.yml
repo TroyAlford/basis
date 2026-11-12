@@ -107,10 +107,17 @@ jobs:
           fi
           json='{}'
           for lane in "${lanes[@]}"; do
-            value=$(jq -r --arg lane "$lane" '.suites[$lane].needed' impact-decision.json)
-            if [ "$value" != "true" ] && [ "$value" != "false" ]; then
-              echo "::error::Impact decision for lane '$lane' is not a boolean" >&2
-              exit 1
+            if jq -e --arg lane "$lane" '.suites | has($lane)' impact-decision.json >/dev/null; then
+              value=$(jq -r --arg lane "$lane" '.suites[$lane].needed' impact-decision.json)
+              if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+                echo "::error::Impact decision for lane '$lane' is not a boolean" >&2
+                exit 1
+              fi
+            else
+              # A lane added by this PR is absent from the trusted base policy.
+              # Run it conservatively rather than silently skipping new coverage.
+              echo "::notice::Base impact policy does not declare lane '$lane'; running it."
+              value=true
             fi
             json=$(jq -c --arg lane "$lane" --argjson needed "$value" '. + {($lane): $needed}' <<<"$json")
           done

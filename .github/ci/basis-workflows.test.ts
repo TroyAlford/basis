@@ -255,6 +255,11 @@ describe('Basis Code CI', () => {
     const malformed = runLaneStep({ suites: { ...suites, unit: { needed: 'yes' } } })
     expect(malformed.code).not.toBe(0)
     expect(malformed.output).toContain('is not a boolean')
+
+    const missing = runLaneStep({ suites: { unit: { needed: false } } })
+    expect(missing.code).toBe(0)
+    expect(missing.output).toContain('"unit":false')
+    expect(missing.output).toContain('"database":true')
   })
 
   test('uses a per-PR concurrency group that ignores the event action', () => {
