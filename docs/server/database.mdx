@@ -98,9 +98,9 @@ const campaign = graph.definitions.entity('Campaign')
 const membership = graph.definitions.relationship('Membership')
 ```
 
-Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular forward references use `Entity`; reciprocal navigation fields use `Inverse`; scalar arrays use `Array` with scalar `items`; and opaque structured values use `JSON`. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, authored `abstract` boolean, `column`, `Collection`, `ValueCollection`, `Structured`, `Junction`, or mapping descriptor.
+Entity definitions use `name`, optional `extends`, and mandatory `fields`. Field descriptors always start with `field`; scalar fields use the exact serialized types `ID`, `String`, `Boolean`, `Date`, `Number`, and `Timestamp`; singular forward references use `Entity`; reciprocal navigation fields use `Inverse`; scalar arrays use `Array` with scalar `items`; and opaque structured values use `JSON`. `fields` may be empty. There is no authored primary-key flag, alternative primary-key name, authored `abstract` boolean, `column`, `Collection`, `ValueCollection`, `Structured`, `Junction`, or mapping descriptor. Fields also accept optional `nullable: boolean` and `default` values. Scalar, array, and JSON fields omit `NOT NULL` only when `nullable: true`; when omitted they are non-null. Reference columns remain nullable by default for compatibility, and `nullable: false` makes a reference column non-null. A `default` must match the field type and is emitted as a PostgreSQL default expression. Repeatable navigation (`Inverse`) fields have no physical column and do not accept nullability or defaults.
 
-The implicit system root owns `id: ID`, `name: String`, and the concrete-leaf `entity` discriminator. The universal lightweight object shape is `{ id, name, entity }`. `id` is always the primary key; every ordinary entity table receives generated `id text primary key` storage and a parent foreign-key column. Root field names are reserved from ordinary declarations.
+The implicit system root owns `id: ID`, `name: String`, the concrete-leaf `entity` discriminator, and the update-tracking fields `lastUpdatedBy` (a nullable reference to `User`) and `lastUpdatedAt` (a nullable `Timestamp` backed by `timestamptz`). The universal lightweight object shape remains `{ id, name, entity }`. `id` is always the primary key; every ordinary entity table receives generated `id text primary key` storage and a parent foreign-key column. Root field names are reserved from ordinary declarations.
 
 Identity and ordinary fields are inherited. The only inherited refinement is an `id` entry containing `format` and no `type`:
 
@@ -117,8 +117,21 @@ A singular forward reference is a field with `type: "Entity"`, an explicit `targ
 
 - `Article.author` is addressed as `"Article"."author.id"` in direct SQL and stores text that targets the referenced entity's shared `id`.
 - Logical `author` is selectable as a singular projection; `author.name` traverses to the referenced target.
-- Reference columns are nullable; omit the value for a missing optional reference.
+- Reference columns are nullable by default; set `nullable: false` to require a value, or omit it for an optional reference.
 - `inverse` must be paired with an authored `Inverse` field on the target. A forward reference without `inverse` remains an independent relationship with no inferred reverse navigation.
+
+A physical field can declare `unique: true` to create a single-column unique index. Entities and named relationships can declare named composite uniqueness constraints with a human-readable name, description, `type: "Uniqueness"`, and the canonical logical fields to cover:
+
+```json
+{
+  "name": "One Membership Per Campaign",
+  "description": "Each user may only have one Membership per Campaign.",
+  "type": "Uniqueness",
+  "fields": ["userId", "campaignId"]
+}
+```
+
+Constraint fields must resolve to physical columns owned by the same table; references use their derived dotted columns (`userId.id`, `campaignId.id`), and navigation/non-physical or cross-table fields are rejected. Field shorthand and named constraints normalize into the same canonical constraint collection. PostgreSQL unique indexes enforce the constraints; nullable columns retain PostgreSQL's normal multiple-NULL behavior.
 
 A reciprocal navigation is a navigation-only field with `type: "Inverse"`, a `target`, the forward field name in `inverse`, and `cardinality: "One" | "Many"`. It creates no PostgreSQL column and is never a predicate or ordering scalar. `One` means zero or one, so it is nullable and physically enforced with a unique index on the forward FK; `Many` uses the normal reverse-lookup index.
 

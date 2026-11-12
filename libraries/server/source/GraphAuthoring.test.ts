@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { FieldType } from './EntityDefinitions'
+import { Constraint, FieldType } from './EntityDefinitions'
 import { Graph } from './Graph'
 import { Server } from './Server'
 
@@ -31,6 +31,46 @@ describe('Graph authoring types', () => {
       }],
     })
     expect(graph.definitions.entity('Note')?.fields.find(field => field.name === 'title')?.type).toBe(FieldType.String)
+  })
+
+  test('accepts default field authoring', () => {
+    const graph = new Graph({
+      entities: [{
+        fields: [{ default: false, field: 'active', type: FieldType.Boolean }],
+        name: 'Account',
+      }],
+    })
+    expect(graph.definitions.entity('Account')?.fields.find(field => field.name === 'active'))
+      .toMatchObject({ default: false, type: FieldType.Boolean })
+  })
+
+  test('accepts typed uniqueness constraints', () => {
+    const graph = new Graph({
+      entities: [{
+        constraints: [{
+          description: 'One label per account.',
+          fields: ['label'],
+          name: 'One Label Per Account',
+          type: Constraint.Uniqueness,
+        }],
+        fields: [{ field: 'label', type: FieldType.String, unique: true }],
+        name: 'Account',
+      }],
+    })
+    expect(graph.definitions.constraints).toHaveLength(2)
+    expect(graph.definitions.constraints.every(constraint => constraint.type === Constraint.Uniqueness))
+      .toBe(true)
+  })
+
+  test('accepts nullable field authoring', () => {
+    const graph = new Graph({
+      entities: [{
+        fields: [{ field: 'retiredAt', nullable: true, type: FieldType.Timestamp }],
+        name: 'Account',
+      }],
+    })
+    const field = graph.definitions.entity('Account')?.fields.find(candidate => candidate.name === 'retiredAt')
+    expect((field as { nullable?: boolean } | undefined)?.nullable).toBe(true)
   })
 
   test('keeps runtime validation authoritative for dynamic JSON', () => {

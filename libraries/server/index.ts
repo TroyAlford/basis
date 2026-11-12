@@ -36,6 +36,7 @@ export type {
 export type { AuthorizationOptions, BootstrapResult, EffectiveGrant } from './source/Authorization'
 export type {
   AuthoredArrayField,
+  AuthoredConstraint,
   AuthoredDocument,
   AuthoredEntity,
   AuthoredField,
@@ -46,6 +47,7 @@ export type {
   AuthoredRelationship,
   AuthoredRelationshipEndpoint,
   AuthoredScalarField,
+  AuthoredUniquenessConstraint,
 } from './source/GraphAuthoring'
 export type {
   GrantDefinition,
@@ -58,7 +60,7 @@ export type {
 export { NullDatabase } from './source/Database'
 export type { Database, DatabaseOptions, QueryOptions } from './source/Database'
 export { SortDirection } from './source/SortDirection'
-export { FieldType } from './source/EntityDefinitions'
+export { Constraint, FieldType } from './source/EntityDefinitions'
 export { Operator } from './source/Operator'
 export type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
 export type { ArrayScope, CollectionScope, CountScope, QueryScope } from './source/SQL'
@@ -67,6 +69,7 @@ export type {
   AssociationDefinition,
   DerivedCollectionDefinition,
   DerivedSingularDefinition,
+  ConstraintDefinition,
   EffectiveFieldDefinition,
   EntityDefinition,
   EntityDefinitions,
@@ -84,6 +87,7 @@ export type {
   ScalarArrayElementDefinition,
   ScalarFieldDefinition,
   ScalarFieldType,
+  UniqueConstraintDefinition,
 } from './source/EntityDefinitions'
 export { OAuth } from './source/OAuth'
 export type { OAuthIdentity, OAuthOptions } from './source/OAuth'
