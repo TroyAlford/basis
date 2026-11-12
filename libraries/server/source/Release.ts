@@ -5,11 +5,10 @@ import { basename, join, resolve } from 'node:path'
 import type { Directory } from '../../utilities'
 import { checksum, directories } from '../../utilities'
 import { canonicalDataDigest } from './CanonicalData'
-import type { Graph } from './Graph'
 import { MANAGED_APP_ROLE, ManagedPostgresService } from './ManagedPostgresService'
 import type { PostgresBackup, PostgresCleanupWarning, PostgresVerification } from './PostgresOperations'
 import { ManagedPostgresOperations } from './PostgresOperations'
-import type { MigrationArtifact } from './Schema'
+import type { MigrationArtifact, PhysicalModel } from './Schema'
 import { DDL, MigrationError, physicalHash, verifyMigrationArtifact } from './Schema'
 
 /** The checked-in release manifest filename. */
@@ -336,8 +335,8 @@ export class ReleaseError extends Error {
 
 /** Options for one host-run database release. */
 export interface DatabaseReleaseOptions {
-  /** Current application Graph. */
-  readonly graph: Graph,
+  /** Current application physical model. */
+  readonly graph: PhysicalModel,
   /** Reviewed migrations directory containing `manifest.json`. */
   readonly migrations: string,
 }
@@ -357,10 +356,10 @@ function candidateIdentity(release: LoadedRelease): string {
 /**
  * Load and validate a checked-in migration release.
  * @param directory - Directory containing `manifest.json` and migration files.
- * @param graph - Current application Graph.
+ * @param graph - Current application physical model.
  * @returns The ordered release.
  */
-export async function loadRelease(directory: string, graph: Graph): Promise<LoadedRelease> {
+export async function loadRelease(directory: string, graph: PhysicalModel): Promise<LoadedRelease> {
   const root = resolve(directory)
   const parsed = JSON.parse(await readFile(join(root, MANIFEST), 'utf8')) as unknown
   if (typeof parsed !== 'object' || parsed === null) throw new Error('Release manifest is not an object')
@@ -416,13 +415,13 @@ export async function loadRelease(directory: string, graph: Graph): Promise<Load
  */
 export class DatabaseRelease {
   readonly #database: Directory
-  readonly #graph: Graph
+  readonly #graph: PhysicalModel
   readonly #migrations: string
   readonly #service: ManagedPostgresService
 
   /**
    * Build a release coordinator for the current application working directory.
-   * @param options - Graph and migration directory.
+   * @param options - Physical model and migration directory.
    */
   constructor(options: DatabaseReleaseOptions) {
     this.#database = directories('database')

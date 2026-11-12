@@ -1,3 +1,4 @@
+import type { MigrationArtifact, PhysicalModel } from 'basis/server'
 import { DatabaseRelease, Graph, loadRelease } from 'basis/server'
 import { directories } from 'basis/utilities'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -68,21 +69,31 @@ async function main(): Promise<number> {
   await mkdir(install, { recursive: true })
   const baseMigrations = join(sandbox, 'base-migrations')
   let baseGraph: Graph | null = null
+  let baseModel: PhysicalModel | null = null
   try {
     const baseGraphSource = gitFile(base, GRAPH)
     const baseManifest = gitFile(base, join(MIGRATIONS, 'manifest.json'))
     if (baseGraphSource !== null) {
       baseGraph = loadSnapshot(baseGraphSource)
       await materialize(base, MIGRATIONS, baseMigrations)
+      const manifest = JSON.parse(baseManifest ?? '{}') as { migrations?: readonly unknown[] }
+      const artifactName = manifest.migrations?.at(-1)
+      if (typeof artifactName !== 'string') {
+        throw new Error('Base revision migration manifest has no migration')
+      }
+      const artifact = JSON.parse(
+        await readFile(join(baseMigrations, artifactName), 'utf8'),
+      ) as MigrationArtifact
+      baseModel = { physicalSchema: () => artifact.expected }
     } else if (baseManifest !== null) {
       throw new Error('Base revision has migrations but no graph.json snapshot')
     }
     const headGraph = loadSnapshot(await readFile(join(root, GRAPH), 'utf8'))
     const headRelease = await loadRelease(join(root, MIGRATIONS), headGraph)
     process.chdir(install)
-    if (baseGraph) {
+    if (baseModel) {
       await new DatabaseRelease({
-        graph: baseGraph,
+        graph: baseModel,
         migrations: baseMigrations,
       }).apply()
     }
