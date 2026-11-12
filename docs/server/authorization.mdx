@@ -79,6 +79,68 @@ Graph predicates are normalized when the graph loads and compiled into PostgreSQ
 
 Inherited MTI predicate fields use a narrow, row-scoped Boolean policy helper generated from the compiled predicate. The helper answers only whether the compiled predicate matches one row identity; it does not return field values or accept arbitrary expression text.
 
+## Relationship membership predicates
+
+Graph roles are global role memberships. A resource-specific membership is ordinary Graph relationship data, not another global role. Declare the relationship and grant access through its collection navigation:
+
+```ts
+const graph = new Graph({
+  entities: [
+    { name: 'Workspace', fields: [] },
+    { name: 'User', fields: [] },
+  ],
+  relationships: [{
+    name: 'WorkspaceMembership',
+    between: [
+      { field: 'workspace', target: 'Workspace', inverse: 'members' },
+      { field: 'user', target: 'User', inverse: 'workspaces' },
+    ],
+    fields: [{ field: 'role', type: 'String' }],
+  }],
+  grants: [{
+    role: 'public',
+    action: 'read',
+    target: 'Workspace',
+    predicate: 'members $contains (id = $me)',
+  }],
+})
+```
+
+`members` is the inverse collection declared by the authenticated endpoint. `$me` is the verified transaction actor, so this predicate means: the current actor is connected to the Workspace by at least one `WorkspaceMembership`. An anonymous actor has no actor id and does not match. Changing membership rows changes access immediately; no graph rebuild or policy reinstall is required.
+
+Relationship-owned scalar properties participate through the lower-cased relationship-name prefix. Keep the identity and role requirements in one member requirement so PostgreSQL evaluates them against the same relationship row:
+
+```ts
+{
+  role: 'public',
+  action: 'update',
+  target: 'Workspace',
+  predicate: "members $contains (id = $me $and workspaceMembership.role = 'Owner')",
+}
+```
+
+The equivalent structured predicate is:
+
+```ts
+{
+  field: 'members',
+  operator: '$contains',
+  filters: [{
+    operator: '$and',
+    filters: [
+      { field: 'id', operator: '$eq', value: '$me' },
+      { field: 'workspaceMembership.role', operator: '$eq', value: 'Owner' },
+    ],
+  }],
+}
+```
+
+Authorization predicates support existential `$contains` with exactly one member requirement, `$empty`, logical `$and`/`$or`/`$not`, and ordinary comparisons on the matched identity and relationship-owned scalar fields. Inverse collections and named-relationship collections both work. Multiple independent `$contains` requirements for the same collection, nested collections, `$all`, arrays/JSON relationship properties, inherited non-root collection target fields, and cross-collection captures are rejected because their authorization meaning is ambiguous or not bounded.
+
+Collection predicates are compiled through a generated, row-scoped Boolean policy helper. The helper uses `SECURITY DEFINER` with a fixed search path and is executable only by the application role; its body contains the validated Graph predicate and returns only a Boolean. It reads the transaction-local `actor.id`, so it cannot expose membership rows, grant table visibility, or create a privileged application capability. The membership and resource tables keep their own RLS policies, including when `FORCE ROW LEVEL SECURITY` is enabled.
+
+A resource role such as Owner, Editor, or Viewer is relationship data, not a Graph role. Applications may still enforce domain rules such as preventing removal of the last Owner in ordinary application transactions. Existing direct predicates such as `owner = $me` continue to use the unchanged policy path.
+
 ## `$me` is search shorthand
 
 `$me` is available in ordinary entity searches, separate from RLS:

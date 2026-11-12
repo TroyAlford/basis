@@ -194,4 +194,241 @@ describe('Graph', () => {
     expect(schema.functions.some(fn => fn.name === 'basis.matches')).toBe(false)
     expect(schema.functions.some(fn => fn.name === 'basis.policy_field')).toBe(false)
   })
+  test('normalizes and compiles named-relationship membership policies', () => {
+    const membershipGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'title', type: 'String' }], name: 'Workspace' },
+        { fields: [], name: 'User' },
+      ],
+      grants: [{
+        action: 'read',
+        predicate: "members $contains (id = $me $and workspaceMembership.role = 'Owner')",
+        role: 'public',
+        target: 'Workspace',
+      }],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+      }],
+    })
+    expect(membershipGraph.grants[0]?.predicate).toEqual({
+      field: 'members',
+      filters: [{
+        filters: [
+          { field: 'id', operator: Operator.Comparison.Equal, value: '$me' },
+          { field: 'workspaceMembership.role', operator: Operator.Comparison.Equal, value: 'Owner' },
+        ],
+        operator: Operator.Logical.And,
+      }],
+      operator: Operator.Comparison.Contains,
+    })
+    const schema = membershipGraph.physicalSchema('basis_app', true)
+    const helper = schema.functions.find(fn => fn.name.startsWith('basis.policy_'))
+    expect(helper?.securityDefiner).toBe(true)
+    expect(helper?.searchPath).toBe('public, basis, pg_temp')
+    expect(helper?.sql).toContain('FROM "WorkspaceMembership" AS')
+    expect(helper?.sql).toContain('"__policy_members_rel"."workspace.id" = "__row"."id"')
+    expect(helper?.sql).toContain('"__policy_members_rel"."role"')
+    expect(helper?.sql).toContain("current_setting('actor.id', true)")
+    const policy = schema.policies.find(candidate => (
+      candidate.table === 'Workspace' && candidate.command === 'SELECT'
+    ))
+    expect(policy?.sql).toContain(`basis.${helper?.name.split('.').at(-1)}`)
+    expect(schema.grants.some(grant => grant.function === helper?.name && grant.kind === 'grant'))
+      .toBe(true)
+    expect(schema.grants.some(grant => grant.function === helper?.name && grant.kind === 'revoke'))
+      .toBe(true)
+  })
+
+  test('normalizes structured and string membership predicates identically', () => {
+    const source = 'members $contains (id = $me)'
+    const entities = [
+      { fields: [{ field: 'title', type: 'String' }], name: 'Workspace' },
+      { fields: [], name: 'User' },
+    ] as const
+    const relationships = [{
+      between: [
+        { field: 'workspace', inverse: 'members', target: 'Workspace' },
+        { field: 'user', inverse: 'workspaces', target: 'User' },
+      ],
+      fields: [{ field: 'role', type: 'String' }],
+      name: 'WorkspaceMembership',
+    }] as const
+    const stringGraph = new Graph({
+      entities,
+      grants: [{ action: 'read', predicate: source, role: 'public', target: 'Workspace' }],
+      relationships,
+    })
+    const structuredGraph = new Graph({
+      entities,
+      grants: [{
+        action: 'read',
+        predicate: {
+          field: 'members',
+          filters: [{ field: 'id', operator: '$eq', value: '$me' }],
+          operator: '$contains',
+        },
+        role: 'public',
+        target: 'Workspace',
+      }],
+      relationships,
+    })
+    expect(structuredGraph.grants).toEqual(stringGraph.grants)
+    expect(structuredGraph.physicalSchema('basis_app', true).policies)
+      .toEqual(stringGraph.physicalSchema('basis_app', true).policies)
+  })
+
+  test('supports inverse collection membership policies', () => {
+    const inverseGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            { field: 'owner', inverse: 'articles', target: 'User', type: 'Entity' },
+          ],
+          name: 'Article',
+        },
+        {
+          fields: [{
+            cardinality: 'Many',
+            field: 'articles',
+            inverse: 'owner',
+            target: 'Article',
+            type: 'Inverse',
+          }],
+          name: 'User',
+        },
+      ],
+      grants: [{
+        action: 'read',
+        predicate: 'articles $contains (id = $me)',
+        role: 'public',
+        target: 'User',
+      }],
+    })
+    const helper = inverseGraph.physicalSchema('basis_app', true).functions
+      .find(fn => fn.name.startsWith('basis.policy_'))
+    expect(helper?.sql).toContain('FROM "Article" AS')
+    expect(helper?.sql).toContain('"owner.id"')
+    expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
+  })
+
+  test('rejects unsupported authorization collection predicates', () => {
+    const make = (predicate: string, action: 'read' | 'create' = 'read'): Graph => new Graph({
+      entities: [
+        { fields: [{ field: 'title', type: 'String' }], name: 'Workspace' },
+        { fields: [], name: 'User' },
+      ],
+      grants: [{ action, predicate, role: 'public', target: 'Workspace' }],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+      }],
+    })
+    expect(() => make('unknown $contains (id = $me)')).toThrow('Unknown collection or array navigation')
+    expect(() => make("members $contains (workspaceMembership.missing = 'Owner')"))
+      .toThrow('unknown relationship field')
+    expect(() => make("members $contains [(id = $me), (workspaceMembership.role = 'Owner')]"))
+      .toThrow('exactly one member requirement')
+    expect(() => make('members $all (id = $me)')).toThrow('$all collection policy predicates')
+    expect(() => make('members $contains (id = $me)', 'create'))
+      .toThrow('create grants cannot use collection predicates')
+    expect(() => make("members $contains (id = $me) $and members $contains (workspaceMembership.role = 'Owner')"))
+      .toThrow('multiple $contains requirements')
+  })
+
+  test('supports collection $empty policies', () => {
+    const emptyGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'title', type: 'String' }], name: 'Workspace' },
+        { fields: [], name: 'User' },
+      ],
+      grants: [{
+        action: 'read',
+        predicate: 'members $empty',
+        role: 'public',
+        target: 'Workspace',
+      }],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+      }],
+    })
+    const helper = emptyGraph.physicalSchema('basis_app', true).functions
+      .find(fn => fn.name.startsWith('basis.policy_'))
+    expect(helper?.sql).toContain('NOT EXISTS (SELECT 1 FROM "WorkspaceMembership" AS')
+  })
+
+  test('allows a single membership check combined with $empty', () => {
+    const combined = new Graph({
+      entities: [
+        { fields: [], name: 'Workspace' },
+        { fields: [], name: 'User' },
+      ],
+      grants: [{
+        action: 'read',
+        predicate: 'members $empty $or members $contains (id = $me)',
+        role: 'public',
+        target: 'Workspace',
+      }],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+      }],
+    })
+    expect(combined.physicalSchema('basis_app', true).functions
+      .some(fn => fn.name.startsWith('basis.policy_'))).toBe(true)
+  })
+
+  test('composes inherited membership and direct owner grants', () => {
+    const composed = new Graph({
+      entities: [
+        { fields: [{ field: 'title', type: 'String' }], name: 'Resource' },
+        { extends: 'Resource', fields: [{ field: 'owner', target: 'User', type: 'Entity' }], name: 'Workspace' },
+        { fields: [], name: 'User' },
+      ],
+      grants: [
+        { action: 'read', predicate: 'owner = $me', role: 'public', target: 'Workspace' },
+        { action: 'read', predicate: 'members $contains (id = $me)', role: 'public', target: 'Resource' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Resource' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+      }],
+    })
+    const schema = composed.physicalSchema('basis_app', true)
+    const helperNames = schema.functions
+      .map(fn => fn.name)
+      .filter(name => name.startsWith('basis.policy_'))
+    expect(helperNames).toHaveLength(1)
+    const policy = schema.policies.find(candidate => (
+      candidate.table === 'Workspace' && candidate.command === 'SELECT'
+    ))
+    expect(policy?.sql).toContain('"Workspace"."owner.id"')
+    expect(policy?.sql).toContain(`${helperNames[0]}("Workspace"."id")`)
+    expect(policy?.sql).toContain(' OR ')
+    expect(schema.functions.find(fn => fn.name === helperNames[0])?.sql)
+      .toContain('FROM "Resource" AS "__row"')
+  })
+
 })
