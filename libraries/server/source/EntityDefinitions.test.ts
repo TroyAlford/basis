@@ -820,6 +820,112 @@ describe('EntityDefinitions', () => {
     expect(entities.ddl.join('\n')).toContain('"lastUpdatedAt" timestamptz')
   })
 
+  test('normalizes field and named uniqueness constraints into unique indexes', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'email', type: 'String', unique: true },
+          ],
+          name: 'User',
+        },
+        {
+          constraints: [{
+            description: 'Each user may only have one Membership per Campaign.',
+            fields: ['userId', 'campaignId'],
+            name: 'One Membership Per Campaign',
+            type: 'Uniqueness',
+          }],
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'userId', target: 'User', type: 'Entity' },
+            { field: 'campaignId', target: 'Campaign', type: 'Entity' },
+          ],
+          name: 'Membership',
+        },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Campaign' },
+      ],
+    })
+    expect(entities.entity('User')?.constraints).toMatchObject([{
+      fields: ['email'],
+      name: 'User email must be unique',
+      type: 'Uniqueness',
+    }])
+    expect(entities.entity('Membership')?.constraints).toMatchObject([{
+      description: 'Each user may only have one Membership per Campaign.',
+      fields: ['userId', 'campaignId'],
+      name: 'One Membership Per Campaign',
+      type: 'Uniqueness',
+    }])
+    expect(entities.constraints).toHaveLength(2)
+    const ddl = entities.ddl.join('\n')
+    expect(ddl).toContain('create unique index if not exists "User_email_unique"')
+    expect(ddl).toContain('create unique index if not exists "Membership_one_membership_per_campaign"')
+    expect(ddl).toContain('("userId.id", "campaignId.id")')
+  })
+
+  test('normalizes named relationship uniqueness constraints', () => {
+    const entities = load({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Campaign' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'user', inverse: 'campaigns', target: 'User' },
+          { field: 'campaign', inverse: 'members', target: 'Campaign' },
+        ],
+        constraints: [{
+          description: 'Each user may join a campaign once.',
+          fields: ['user', 'campaign'],
+          name: 'Unique Membership',
+          type: 'Uniqueness',
+        }],
+        fields: [],
+        name: 'Membership',
+      }],
+    })
+    expect(entities.relationship('Membership')?.constraints).toMatchObject([{
+      fields: ['user', 'campaign'],
+      name: 'Unique Membership',
+      type: 'Uniqueness',
+    }])
+    expect(entities.ddl.join('\n')).toContain(
+      'create unique index if not exists "Membership_unique_membership" on "Membership" ("user.id", "campaign.id")',
+    )
+  })
+
+  test('rejects invalid uniqueness declarations', () => {
+    const model = (fields: unknown[], constraints?: unknown[]) => ({
+      entities: [{
+        ...(constraints === undefined ? {} : { constraints }),
+        fields,
+        name: 'Thing',
+      }],
+    })
+    expect(() => load(model([{ field: 'title', type: 'String', unique: false }])))
+      .toThrow('unique must be true')
+    expect(() => load(model([{ field: 'title', type: 'String' }], [{
+      description: 'One title',
+      fields: ['missing'],
+      name: 'Missing Field',
+      type: 'Uniqueness',
+    }]))).toThrow('unknown physical field "missing"')
+    expect(() => load(model([{ field: 'title', type: 'String' }], [{
+      description: 'Duplicate fields',
+      fields: ['title', 'title'],
+      name: 'Duplicate Fields',
+      type: 'Uniqueness',
+    }]))).toThrow('fields must be distinct')
+    expect(() => load(model([{ field: 'title', type: 'String' }], [{
+      description: 'Wrong type',
+      fields: ['title'],
+      name: 'Wrong Type',
+      type: 'Other',
+    }]))).toThrow('type must be Uniqueness')
+  })
+
   test('accepts native scalar arrays and opaque JSON values', () => {
     const entities = load({
       entities: [{

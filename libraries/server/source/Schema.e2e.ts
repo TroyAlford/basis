@@ -84,6 +84,234 @@ describe('DDL schema planning', () => {
     }, { fresh: true })
   })
 
+  test('evolves declared defaults without false drift', async () => {
+    const model = (value?: string): EntityDefinitions => EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [{
+          field: 'label',
+          type: 'String',
+          ...(value === undefined ? {} : { default: value }),
+        }],
+        name: 'Note',
+      }],
+    }))
+    const first = model('a')
+    const second = model('b')
+    const removed = model()
+    await withIsolatedDatabase('schema-default-evolution', async database => {
+      await installSchema(database.sql, first)
+      const installed = await DDL.introspect(database.sql)
+      const stable = DDL.plan({
+        actual: installed,
+        desired: first,
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      expect(stable.drift).toEqual([])
+      expect(stable.operations).toEqual([])
+
+      const introduced = DDL.plan({
+        actual: installed,
+        desired: second,
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      expect(introduced.operations.find(operation => operation.id === 'column-default:Note:label')?.sql)
+        .toContain("SET DEFAULT 'b'")
+      await installSchema(database.sql, second, {
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      const changed = await DDL.introspect(database.sql)
+      expect(DDL.plan({
+        actual: changed,
+        desired: second,
+        previous: second,
+        previousPhysical: second.physicalSchema(),
+      }).drift).toEqual([])
+
+      const dropped = DDL.plan({
+        actual: changed,
+        desired: removed,
+        previous: second,
+        previousPhysical: second.physicalSchema(),
+      })
+      expect(dropped.operations.find(operation => operation.id === 'column-default:Note:label')?.sql)
+        .toContain('DROP DEFAULT')
+      await installSchema(database.sql, removed, {
+        previous: second,
+        previousPhysical: second.physicalSchema(),
+      })
+      const droppedInstalled = await DDL.introspect(database.sql)
+      expect(DDL.plan({
+        actual: droppedInstalled,
+        desired: removed,
+        previous: removed,
+        previousPhysical: removed.physicalSchema(),
+      }).drift).toEqual([])
+
+      await database.sql.unsafe('ALTER TABLE "Note" ALTER COLUMN "label" SET DEFAULT \'out-of-band\'').simple()
+      const outOfBand = await DDL.introspect(database.sql)
+      const drift = DDL.plan({
+        actual: outOfBand,
+        desired: removed,
+        previous: removed,
+        previousPhysical: removed.physicalSchema(),
+      })
+      expect(drift.drift.join(' ')).toContain('column default changed')
+    }, { fresh: true })
+  })
+
+  test('plans reviewed identity changes to unique indexes', async () => {
+    const unique = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [{ field: 'title', type: 'String', unique: true }],
+        name: 'Note',
+      }],
+    }))
+    const plain = EntityDefinitions.load(JSON.stringify({
+      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+    }))
+    await withIsolatedDatabase('schema-unique-evolution', async database => {
+      await installSchema(database.sql, unique)
+      const actual = await DDL.introspect(database.sql)
+      const remove = DDL.plan({
+        actual,
+        desired: plain,
+        previous: unique,
+        previousPhysical: unique.physicalSchema(),
+      })
+      expect(remove.operations.some(operation => operation.id === 'index-drop:Note:Note_title_unique'))
+        .toBe(true)
+      expect(remove.drift).toEqual([])
+      await installSchema(database.sql, plain, {
+        previous: unique,
+        previousPhysical: unique.physicalSchema(),
+      })
+      const plainActual = await DDL.introspect(database.sql)
+      expect(DDL.plan({
+        actual: plainActual,
+        desired: plain,
+        previous: plain,
+        previousPhysical: plain.physicalSchema(),
+      }).drift).toEqual([])
+
+      await database.sql.unsafe('CREATE UNIQUE INDEX "Note_title_unique" ON "Note" ("title")').simple()
+      const outOfBand = await DDL.introspect(database.sql)
+      const drift = DDL.plan({
+        actual: outOfBand,
+        desired: plain,
+        previous: plain,
+        previousPhysical: plain.physicalSchema(),
+      })
+      expect(drift.drift.join(' ')).toContain('unexpected index')
+    }, { fresh: true })
+  })
+
+  test('enforces single and composite uniqueness on PostgreSQL', async () => {
+    const model = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'email', nullable: true, type: 'String', unique: true },
+          ],
+          name: 'User',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'title', type: 'String' },
+          ],
+          name: 'Campaign',
+        },
+        {
+          constraints: [{
+            description: 'Each user may only have one Membership per Campaign.',
+            fields: ['userId', 'campaignId'],
+            name: 'One Membership Per Campaign',
+            type: 'Uniqueness',
+          }],
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'userId', target: 'User', type: 'Entity' },
+            { field: 'campaignId', target: 'Campaign', type: 'Entity' },
+          ],
+          name: 'Membership',
+        },
+      ],
+    }))
+    await withIsolatedDatabase('schema-unique', async database => {
+      await installSchema(database.sql, model)
+      const userId = randomUUID()
+      const otherUserId = randomUUID()
+      const campaignId = randomUUID()
+      const otherCampaignId = randomUUID()
+      const insertEntity = async (id: string, name: string, entity: string) => {
+        await database.sql`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES (${id}, ${name}, ${entity})
+        `
+      }
+      await insertEntity(userId, 'user@example.com', 'User')
+      await insertEntity(otherUserId, 'other@example.com', 'User')
+      await insertEntity(campaignId, 'Campaign', 'Campaign')
+      await insertEntity(otherCampaignId, 'Other Campaign', 'Campaign')
+      await database.sql`
+        INSERT INTO "User" ("id", "email")
+        VALUES (${userId}, 'user@example.com')
+      `
+      await database.sql`
+        INSERT INTO "User" ("id", "email")
+        VALUES (${otherUserId}, NULL)
+      `
+      const nullEmailId = randomUUID()
+      await insertEntity(nullEmailId, 'null@example.com', 'User')
+      await database.sql`
+        INSERT INTO "User" ("id", "email")
+        VALUES (${nullEmailId}, NULL)
+      `
+      await database.sql`
+        INSERT INTO "Campaign" ("id", "title")
+        VALUES (${campaignId}, 'Campaign')
+      `
+      await database.sql`
+        INSERT INTO "Campaign" ("id", "title")
+        VALUES (${otherCampaignId}, 'Other Campaign')
+      `
+      const membership = randomUUID()
+      await insertEntity(membership, 'Membership', 'Membership')
+      await database.sql`
+        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        VALUES (${membership}, ${userId}, ${campaignId})
+      `
+      const duplicateId = randomUUID()
+      await insertEntity(duplicateId, 'Duplicate Membership', 'Membership')
+      await expect(database.captureError(async () => database.sql`
+        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        VALUES (${duplicateId}, ${userId}, ${campaignId})
+      `)).resolves.toBeInstanceOf(Error)
+      const distinctId = randomUUID()
+      await insertEntity(distinctId, 'Distinct Membership', 'Membership')
+      await database.sql`
+        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        VALUES (${distinctId}, ${otherUserId}, ${campaignId})
+      `
+      const nullRightId = randomUUID()
+      await insertEntity(nullRightId, 'Null Right Membership', 'Membership')
+      await expect(database.sql`
+        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        VALUES (${nullRightId}, ${otherUserId}, NULL)
+      `).resolves.toBeDefined()
+      const nullLeftId = randomUUID()
+      await insertEntity(nullLeftId, 'Null Left Membership', 'Membership')
+      await expect(database.sql`
+        INSERT INTO "Membership" ("id", "userId.id", "campaignId.id")
+        VALUES (${nullLeftId}, ${userId}, NULL)
+      `).resolves.toBeDefined()
+    }, { fresh: true })
+  })
+
   test('plans a named relationship table additively', async () => {
     const previous = EntityDefinitions.load(JSON.stringify({
       entities: [{ fields: [], name: 'Campaign' }, { fields: [], name: 'User' }],

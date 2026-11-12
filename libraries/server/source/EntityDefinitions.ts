@@ -35,6 +35,12 @@ export enum FieldType {
   Timestamp = 'Timestamp',
 }
 
+/** Supported declarative constraint kinds. */
+export enum Constraint {
+  /** A unique index over one or more physical fields. */
+  Uniqueness = 'Uniqueness',
+}
+
 /** Field types that represent scalar values. */
 export type ScalarFieldType =
   | FieldType.Boolean
@@ -67,6 +73,8 @@ export interface ScalarFieldDefinition {
   readonly nullable?: boolean,
   /** Scalar field type. */
   readonly type: ScalarFieldType,
+  /** Whether this field requires a unique index. */
+  readonly unique?: true,
 }
 
 /** One singular entity-reference field. */
@@ -85,6 +93,8 @@ export interface EntityReferenceFieldDefinition {
   readonly target: string,
   /** Field-kind discriminator. */
   readonly type: FieldType.Entity,
+  /** Whether this reference requires a unique index. */
+  readonly unique?: true,
 }
 
 /** Supported reciprocal navigation cardinalities. */
@@ -114,6 +124,8 @@ export interface JSONFieldDefinition {
   readonly nullable?: boolean,
   /** Field-kind discriminator. */
   readonly type: FieldType.JSON,
+  /** Whether this field requires a unique index. */
+  readonly unique?: true,
 }
 
 /** One native scalar-array field. */
@@ -128,6 +140,8 @@ export interface ArrayFieldDefinition {
   readonly nullable?: boolean,
   /** Field-kind discriminator. */
   readonly type: FieldType.Array,
+  /** Whether this field requires a unique index. */
+  readonly unique?: true,
 }
 
 /** A scalar, native array, or opaque JSON field usable in a predicate. */
@@ -164,6 +178,8 @@ export type RelationshipFieldDefinition =
 export interface RelationshipDefinition {
   /** The two endpoint descriptors in authored order. */
   readonly between: readonly [RelationshipEndpointDefinition, RelationshipEndpointDefinition],
+  /** Declarative constraints owned by this relationship. */
+  readonly constraints: readonly ConstraintDefinition[],
   /** Properties owned by the relationship itself. */
   readonly fields: readonly RelationshipFieldDefinition[],
   /** Relationship name, in PascalCase. */
@@ -238,12 +254,33 @@ export type EffectiveFieldDefinition =
     readonly owner: string,
   }
 
+/** One normalized declarative uniqueness constraint. */
+export interface UniqueConstraintDefinition {
+  /** Human-readable diagnostic description. */
+  readonly description: string,
+  /** Canonical logical fields covered by the constraint. */
+  readonly fields: readonly string[],
+  /** Deterministic physical unique-index name. */
+  readonly index: string,
+  /** Human-readable constraint name. */
+  readonly name: string,
+  /** Owning entity or relationship name. */
+  readonly owner: string,
+  /** Constraint discriminator. */
+  readonly type: Constraint.Uniqueness,
+}
+
+/** One normalized declarative constraint. */
+export type ConstraintDefinition = UniqueConstraintDefinition
+
 /** One entity definition. */
 export interface EntityDefinition {
   /** Whether this entity has descendants and cannot be a concrete leaf. */
   readonly abstract: boolean,
   /** Derived inverse and relationship collection navigations exposed on this entity. */
   readonly collections: readonly DerivedCollectionDefinition[],
+  /** Locally owned declarative constraints. */
+  readonly constraints: readonly ConstraintDefinition[],
   /** Effective inherited and locally owned physical fields. */
   readonly effectiveFields: readonly EffectiveFieldDefinition[],
   /** Declared parent entity, when present. */
@@ -288,6 +325,8 @@ interface TableIndex {
   readonly name: string,
   /** Optional operator class applied to every column. */
   readonly opclass?: string,
+  /** Whether adding or replacing this index requires review. */
+  readonly review?: boolean,
   /** Whether the index enforces uniqueness. */
   readonly unique?: boolean,
 }
@@ -472,6 +511,7 @@ export function identityDefinition(): EntityDefinition {
   return {
     abstract: false,
     collections: [],
+    constraints: [],
     effectiveFields: rootFields(undefined),
     fields: [],
     inverseFields: [],
@@ -651,6 +691,17 @@ export class EntityDefinitions {
   }
 
   /**
+   * Return every authored declarative constraint with its owner.
+   * @returns Canonical constraints in entity then relationship order.
+   */
+  get constraints(): readonly ConstraintDefinition[] {
+    return [
+      ...this.entities.flatMap(entity => entity.constraints),
+      ...this.relationships.flatMap(relationship => relationship.constraints),
+    ]
+  }
+
+  /**
    * Compile the canonical physical schema shared by planning and introspection.
    *
    * Security roles, grants, functions, and policies are compiled by {@link Graph}.
@@ -672,6 +723,7 @@ export class EntityDefinitions {
         method: index.method ?? 'btree',
         name: index.name,
         operatorClasses: index.opclass === undefined ? [] : [index.opclass],
+        review: index.review === true,
         sql: createIndex(table, index),
         table: table.name,
         unique: index.unique === true,
@@ -902,6 +954,7 @@ function parseEntityDocument(value: unknown): ParsedEntityDocument {
   const resolved = seeds.map(seed => resolveEntity(seed, byName, formats, children))
   const relationships = parseRelationships(value.relationships, byName)
   validateRelationshipPhysicalNames(relationships)
+  validateConstraintNames(resolved, relationships)
   const associations = resolveAssociations(resolved)
   const navigations = deriveNavigations(resolved, relationships, associations)
   return {
@@ -1075,6 +1128,33 @@ function validateRelationshipPhysicalNames(
 }
 
 /**
+ * Validate human-readable constraint names and deterministic index names globally.
+ * @param entities - Resolved entities.
+ * @param relationships - Named relationships.
+ */
+function validateConstraintNames(
+  entities: readonly EntityDefinition[],
+  relationships: readonly RelationshipDefinition[],
+): void {
+  const names = new Set<string>()
+  const indexes = new Set<string>()
+  const all = [
+    ...entities.flatMap(entity => entity.constraints),
+    ...relationships.flatMap(relationship => relationship.constraints),
+  ]
+  for (const constraint of all) {
+    if (names.has(constraint.name)) {
+      throw invalid(`duplicate constraint name "${constraint.name}"`)
+    }
+    names.add(constraint.name)
+    if (indexes.has(constraint.index)) {
+      throw invalid(`duplicate constraint index "${constraint.index}"`)
+    }
+    indexes.add(constraint.index)
+  }
+}
+
+/**
  * Validate one named relationship.
  * @param value - Relationship candidate.
  * @param byName - Parsed entities by name.
@@ -1085,7 +1165,7 @@ function parseRelationship(
   byName: ReadonlyMap<string, EntitySeed>,
 ): RelationshipDefinition {
   if (!isRecord(value)) throw invalid('relationship must be an object')
-  assertKnownKeys(value, ['between', 'fields', 'name'], 'relationship')
+  assertKnownKeys(value, ['between', 'constraints', 'fields', 'name'], 'relationship')
   if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
     throw invalid('relationship name must be a PascalCase identifier')
   }
@@ -1115,7 +1195,17 @@ function parseRelationship(
     validatePhysicalIdentifier(field.name, `relationship "${name}" field`)
     return field
   })
-  return { between: [first, second], fields, name }
+  const columns = new Map<string, string>()
+  for (const endpoint of [first, second]) columns.set(endpoint.field, `${endpoint.field}.id`)
+  for (const field of fields) {
+    columns.set(field.name, fieldColumn(field))
+    columns.set(fieldColumn(field), fieldColumn(field))
+  }
+  const constraints = [
+    ...fieldConstraints(name, fields),
+    ...parseConstraints(name, value.constraints, columns),
+  ]
+  return { between: [first, second], constraints, fields, name }
 }
 
 /**
@@ -1334,6 +1424,8 @@ function validateEffectiveNavigations(
 
 /** A parsed entity before reference targets are resolved. */
 interface EntitySeed {
+  /** Declarative constraints owned by this entity. */
+  readonly constraints: readonly ConstraintDefinition[],
   /** Declared parent entity, when present. */
   readonly extends?: string,
   /** Locally owned fields, excluding the `id` refinement. */
@@ -1403,7 +1495,7 @@ function validateAncestry(
  */
 function parseEntity(value: unknown): EntitySeed {
   if (!isRecord(value)) throw invalid('entity must be an object')
-  assertKnownKeys(value, ['extends', 'fields', 'name'], 'entity')
+  assertKnownKeys(value, ['constraints', 'extends', 'fields', 'name'], 'entity')
   if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
     throw invalid('entity name must be a PascalCase identifier')
   }
@@ -1434,13 +1526,60 @@ function parseEntity(value: unknown): EntitySeed {
     names.add(field.name)
     fields.push(field)
   }
-  return { extends: value.extends as string | undefined, fields, idFormat, name: value.name }
+  const columns = new Map<string, string>()
+  for (const field of fields.filter(isPhysicalField)) {
+    columns.set(field.name, fieldColumn(field))
+    columns.set(fieldColumn(field), fieldColumn(field))
+  }
+  const constraints = [
+    ...fieldConstraints(value.name, fields.filter(isPhysicalField)),
+    ...parseConstraints(value.name, value.constraints, columns),
+  ]
+  return {
+    constraints,
+    extends: value.extends as string | undefined,
+    fields,
+    idFormat,
+    name: value.name,
+  }
 }
 
 /** Parsed field result, including the special `id` refinement. */
 type ParsedFieldResult =
   | { readonly field: FieldDefinition }
   | { readonly idFormat: IdentityFormat, readonly idRefinement: true }
+
+/**
+ * Validate one optional unique-field shorthand.
+ * @param entityName - Owning entity or relationship name.
+ * @param fieldName - Field name.
+ * @param value - Field candidate.
+ * @returns True when the field requires uniqueness.
+ */
+function parseUnique(
+  entityName: string,
+  fieldName: string,
+  value: Readonly<Record<string, unknown>>,
+): true | undefined {
+  if (value.unique === undefined) return undefined
+  if (value.unique !== true) {
+    throw invalid(`field "${entityName}.${fieldName}" unique must be true`)
+  }
+  return true
+}
+
+/**
+ * Build the deterministic physical index name for a unique constraint.
+ * @param owner - Owning entity or relationship.
+ * @param name - Human-readable constraint name.
+ * @returns Physical index name.
+ */
+function uniqueIndexName(owner: string, name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/gu, '_').replace(/^_+|_+$/gu, '')
+  const index = `${owner}_${slug || 'unique'}`
+  validatePhysicalIdentifier(index, 'unique constraint index')
+  return index
+}
 
 /**
  * Validate one optional nullability declaration.
@@ -1533,6 +1672,87 @@ function parseDefault(
 }
 
 /**
+ * Validate authored declarative constraints against physical fields.
+ * @param owner - Owning entity or relationship name.
+ * @param value - Constraint list.
+ * @param columns - Logical and physical field names mapped to columns.
+ * @returns Normalized constraints.
+ */
+function parseConstraints(
+  owner: string,
+  value: unknown,
+  columns: ReadonlyMap<string, string>,
+): readonly ConstraintDefinition[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw invalid(`constraints for "${owner}" must be an array`)
+  const names = new Set<string>()
+  return value.map(candidate => {
+    if (!isRecord(candidate)) throw invalid(`constraint for "${owner}" must be an object`)
+    assertKnownKeys(candidate, ['description', 'fields', 'name', 'type'], 'constraint')
+    if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0) {
+      throw invalid(`constraint for "${owner}" must have a non-empty name`)
+    }
+    if (typeof candidate.description !== 'string' || candidate.description.trim().length === 0) {
+      throw invalid(`constraint "${candidate.name}" must have a non-empty description`)
+    }
+    if (candidate.type !== Constraint.Uniqueness) {
+      throw invalid(`constraint "${candidate.name}" type must be Uniqueness`)
+    }
+    if (names.has(candidate.name)) throw invalid(`duplicate constraint "${owner}.${candidate.name}"`)
+    names.add(candidate.name)
+    if (!Array.isArray(candidate.fields) || candidate.fields.length === 0) {
+      throw invalid(`constraint "${candidate.name}" must have a non-empty fields array`)
+    }
+    const fields = candidate.fields.map(field => {
+      if (typeof field !== 'string' || field.length === 0) {
+        throw invalid(`constraint "${candidate.name}" fields must be non-empty strings`)
+      }
+      if (!columns.has(field)) {
+        throw invalid(`constraint "${candidate.name}" references unknown physical field "${field}"`)
+      }
+      return field
+    })
+    if (new Set(fields).size !== fields.length) {
+      throw invalid(`constraint "${candidate.name}" fields must be distinct`)
+    }
+    return {
+      description: candidate.description,
+      fields,
+      index: uniqueIndexName(owner, candidate.name),
+      name: candidate.name,
+      owner,
+      type: Constraint.Uniqueness,
+    }
+  })
+}
+
+/**
+ * Build shorthand constraints from fields marked unique.
+ * @param owner - Owning entity or relationship name.
+ * @param fields - Physical fields.
+ * @returns Field-level uniqueness constraints.
+ */
+function fieldConstraints(
+  owner: string,
+  fields: readonly PhysicalFieldDefinition[],
+): readonly ConstraintDefinition[] {
+  return fields
+    .filter(field => field.unique === true)
+    .map(field => {
+      const fieldName = field.name
+      const name = `${owner} ${fieldName} must be unique`
+      return {
+        description: `Each ${owner} must have a unique ${fieldName}.`,
+        fields: [fieldName],
+        index: uniqueIndexName(owner, `${fieldName} unique`),
+        name,
+        owner,
+        type: Constraint.Uniqueness,
+      }
+    })
+}
+
+/**
  * Validate one field descriptor.
  * @param entityName - Owning entity name.
  * @param value - Field candidate.
@@ -1561,7 +1781,7 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   }
 
   if (value.type === FieldType.Entity) {
-    assertKnownKeys(value, ['default', 'field', 'inverse', 'nullable', 'target', 'type'], 'field')
+    assertKnownKeys(value, ['default', 'field', 'inverse', 'nullable', 'target', 'type', 'unique'], 'field')
     if (ROOT_FIELD_NAMES.has(value.field) || value.field === 'id') {
       throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
     }
@@ -1577,6 +1797,7 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
     validatePhysicalIdentifier(`${value.field}.id`, `reference field "${entityName}.${value.field}" column`)
     const nullable = parseNullable(entityName, value.field, value)
     const defaultValue = parseDefault(entityName, value.field, FieldType.Entity, value)
+    const unique = parseUnique(entityName, value.field, value)
     return {
       field: {
         column: `${value.field}.id`,
@@ -1585,6 +1806,7 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
         name: value.field,
         ...(nullable === undefined ? {} : { nullable }),
         target: value.target,
+        ...(unique === undefined ? {} : { unique }),
         type: FieldType.Entity,
       },
     }
@@ -1601,7 +1823,7 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   if (ROOT_FIELD_NAMES.has(value.field)) {
     throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
   }
-  assertKnownKeys(value, ['default', 'field', 'format', 'nullable', 'type'], 'field')
+  assertKnownKeys(value, ['default', 'field', 'format', 'nullable', 'type', 'unique'], 'field')
   const type = value.type as string
   if (!SCALAR_FIELD_TYPES.has(type) || type === FieldType.ID) {
     throw invalid(`unsupported field type "${String(type)}" in "${entityName}.${value.field}"`)
@@ -1611,12 +1833,14 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   }
   const nullable = parseNullable(entityName, value.field, value)
   const defaultValue = parseDefault(entityName, value.field, type as ScalarFieldType, value)
+  const unique = parseUnique(entityName, value.field, value)
   return {
     field: {
       ...(defaultValue === undefined ? {} : { default: defaultValue }),
       name: value.field,
       ...(nullable === undefined ? {} : { nullable }),
       type: type as ScalarFieldType,
+      ...(unique === undefined ? {} : { unique }),
     },
   }
 }
@@ -1664,18 +1888,20 @@ function parseJSONField(
   entityName: string,
   value: Readonly<Record<string, unknown>>,
 ): JSONFieldDefinition {
-  assertKnownKeys(value, ['default', 'field', 'nullable', 'type'], 'field')
+  assertKnownKeys(value, ['default', 'field', 'nullable', 'type', 'unique'], 'field')
   const name = value.field as string
   if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
     throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
   }
   const nullable = parseNullable(entityName, name, value)
   const defaultValue = parseDefault(entityName, name, FieldType.JSON, value)
+  const unique = parseUnique(entityName, name, value)
   return {
     ...(defaultValue === undefined ? {} : { default: defaultValue }),
     name,
     ...(nullable === undefined ? {} : { nullable }),
     type: FieldType.JSON,
+    ...(unique === undefined ? {} : { unique }),
   }
 }
 
@@ -1689,7 +1915,7 @@ function parseArrayField(
   entityName: string,
   value: Readonly<Record<string, unknown>>,
 ): ArrayFieldDefinition {
-  assertKnownKeys(value, ['default', 'field', 'items', 'nullable', 'type'], 'field')
+  assertKnownKeys(value, ['default', 'field', 'items', 'nullable', 'type', 'unique'], 'field')
   const name = value.field as string
   if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
     throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
@@ -1708,6 +1934,7 @@ function parseArrayField(
     }
     const nullable = parseNullable(entityName, name, value)
     const defaultValue = parseDefault(entityName, name, FieldType.Array, value, FieldType.ID)
+    const unique = parseUnique(entityName, name, value)
     return {
       ...(defaultValue === undefined ? {} : { default: defaultValue as readonly unknown[] }),
       items: {
@@ -1717,6 +1944,7 @@ function parseArrayField(
       name,
       ...(nullable === undefined ? {} : { nullable }),
       type: FieldType.Array,
+      ...(unique === undefined ? {} : { unique }),
     }
   }
   assertKnownKeys(items, ['type'], 'array item')
@@ -1728,12 +1956,14 @@ function parseArrayField(
     value,
     items.type as ScalarFieldType,
   )
+  const unique = parseUnique(entityName, name, value)
   return {
     ...(defaultValue === undefined ? {} : { default: defaultValue as readonly unknown[] }),
     items: { type: items.type as ScalarFieldType },
     name,
     ...(nullable === undefined ? {} : { nullable }),
     type: FieldType.Array,
+    ...(unique === undefined ? {} : { unique }),
   }
 }
 
@@ -1788,6 +2018,7 @@ function resolveEntity(
   return {
     abstract: (children.get(seed.name)?.length ?? 0) > 0,
     collections: [],
+    constraints: seed.constraints,
     effectiveFields: effective,
     ...(seed.extends ? { extends: seed.extends } : {}),
     fields: [idField, ...seed.fields],
@@ -1809,13 +2040,20 @@ function entityTable(
   entity: EntityDefinition,
   indexes: readonly TableIndex[] = [],
 ): TableDefinition {
+  const columns = new Map<string, string>()
+  for (const field of entity.fields.filter(isPhysicalField)) {
+    columns.set(field.name, fieldColumn(field))
+    columns.set(fieldColumn(field), fieldColumn(field))
+  }
   return {
     checks: [{
       expression: identityCheck('id', entity.idFormat),
       name: `${entity.name}_id_format_check`,
     }],
     columns: entity.fields.filter(isPhysicalField).map(fieldTableColumn),
-    ...(indexes.length > 0 ? { indexes } : {}),
+    ...(indexes.length + entity.constraints.length > 0
+      ? { indexes: validatedIndexes(entity.name, [...indexes, ...uniqueIndexes(entity.constraints, columns)]) }
+      : {}),
     name: entity.name,
   }
 }
@@ -1897,6 +2135,43 @@ function scalarDefault(value: unknown, type: ScalarFieldType): string {
 }
 
 /**
+ * Build unique indexes from declarative constraints.
+ * @param constraints - Constraints owned by one table.
+ * @param columns - Logical and physical field names mapped to columns.
+ * @returns Unique index metadata.
+ */
+function uniqueIndexes(
+  constraints: readonly ConstraintDefinition[],
+  columns: ReadonlyMap<string, string>,
+): readonly TableIndex[] {
+  return constraints.map(constraint => ({
+    columns: constraint.fields.map(field => {
+      const column = columns.get(field)
+      if (!column) throw invalid(`constraint "${constraint.name}" has no physical column "${field}"`)
+      return column
+    }),
+    name: constraint.index,
+    review: true,
+    unique: true,
+  }))
+}
+
+/**
+ * Combine generated and declared indexes while rejecting duplicate names.
+ * @param owner - Owning table.
+ * @param indexes - Candidate indexes.
+ * @returns Combined indexes.
+ */
+function validatedIndexes(owner: string, indexes: readonly TableIndex[]): readonly TableIndex[] {
+  const names = new Set<string>()
+  for (const index of indexes) {
+    if (names.has(index.name)) throw invalid(`duplicate physical index "${owner}.${index.name}"`)
+    names.add(index.name)
+  }
+  return indexes
+}
+
+/**
  * Derive indexes for physical forward FKs used by reciprocal navigations.
  * @param associations - Validated reciprocal associations.
  * @returns Deduplicated indexes by owning entity table.
@@ -1944,12 +2219,22 @@ function relationshipTable(relationship: RelationshipDefinition): TableDefinitio
     name: `${endpoint.field}.id`,
     type: FieldType.String,
   })) satisfies TableColumn[]
-  return {
-    columns: [...endpointColumns, ...relationship.fields.map(fieldTableColumn)],
-    indexes: relationship.between.map(endpoint => ({
+  const columns = new Map<string, string>()
+  for (const endpoint of relationship.between) columns.set(endpoint.field, `${endpoint.field}.id`)
+  for (const field of relationship.fields) {
+    columns.set(field.name, fieldColumn(field))
+    columns.set(fieldColumn(field), fieldColumn(field))
+  }
+  const indexes = [
+    ...relationship.between.map(endpoint => ({
       columns: [`${endpoint.field}.id`],
       name: `${relationship.name}_${endpoint.field}_idx`,
     })),
+    ...uniqueIndexes(relationship.constraints, columns),
+  ]
+  return {
+    columns: [...endpointColumns, ...relationship.fields.map(fieldTableColumn)],
+    indexes: validatedIndexes(relationship.name, indexes),
     name: relationship.name,
     primaryKey: endpointColumns.map(column => column.name),
   }

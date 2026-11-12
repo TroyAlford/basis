@@ -34,6 +34,8 @@ export interface PhysicalIndex {
   readonly operatorClassDefaults?: readonly boolean[],
   /** Operator classes for key columns, when known. */
   readonly operatorClasses?: readonly string[],
+  /** Whether the index is owned by a declarative constraint. */
+  readonly review?: boolean,
   /** Complete create-index SQL when compiled from a desired model. */
   readonly sql: string,
   /** Owning table name. */
@@ -1113,7 +1115,7 @@ export function plan(options: PlanOptions): SchemaPlan {
           dependsOn: [`table:${table.name}`],
           id: `index:${table.name}:${index.name}`,
           kind: 'index',
-          risk: 'safe',
+          risk: index.review === true ? 'review' : 'safe',
           sql: index.sql,
           target: `${table.name}.${index.name}`,
         })
@@ -1212,8 +1214,22 @@ export function plan(options: PlanOptions): SchemaPlan {
           drift.push(`column nullability changed: ${table.name}.${column.name}`)
         }
       }
-      if (column.default !== undefined && existing.default !== column.default) {
-        drift.push(`column default changed: ${table.name}.${column.name}`)
+      const desiredDefault = column.default ?? undefined
+      if (!sameDefault(existing.default, desiredDefault)) {
+        const previousDefault = previousColumn?.default ?? undefined
+        if (previousColumn && sameDefault(previousDefault, existing.default)) {
+          operations.push({
+            dependsOn: [`table:${table.name}`],
+            id: `column-default:${table.name}:${column.name}`,
+            kind: 'alter-column',
+            risk: 'review',
+            sql: `ALTER TABLE ${quote(table.name)} ALTER COLUMN ${quote(column.name)} ` +
+              (desiredDefault === undefined ? 'DROP DEFAULT' : `SET DEFAULT ${desiredDefault}`),
+            target: `${table.name}.${column.name}`,
+          })
+        } else {
+          drift.push(`column default changed: ${table.name}.${column.name}`)
+        }
       }
     }
     const desiredColumns = new Set(table.columns.map(column => column.name))
@@ -1252,19 +1268,46 @@ export function plan(options: PlanOptions): SchemaPlan {
         })
         continue
       }
-      if (
-        existing.valid === false
-        || (index.unique !== undefined && existing.unique !== index.unique)
-        || (index.columns !== undefined && (existing.columns ?? []).join(',') !== index.columns.join(','))
-        || (existing.method !== undefined && (index.method ?? 'btree') !== existing.method)
-        || !sameIndexOperatorClasses(index, existing)
-        || (existing.definition !== undefined && !sameIndexDefinition(index.sql, existing.definition))
-      ) {
-        drift.push(`index definition changed: ${table.name}.${index.name}`)
+      if (indexChanged(index, existing)) {
+        const previousIndex = previousTablesPhysical.get(table.name)
+          ?.indexes.find(candidate => candidate.name === index.name)
+        if (previousIndex && !indexChanged(previousIndex, existing)) {
+          const dropId = `index-drop:${table.name}:${index.name}`
+          operations.push({
+            dependsOn: [`table:${table.name}`],
+            id: dropId,
+            kind: 'index',
+            risk: 'review',
+            sql: `DROP INDEX ${quote(index.name)}`,
+            target: `${table.name}.${index.name}`,
+          })
+          operations.push({
+            dependsOn: [dropId],
+            id: `index:${table.name}:${index.name}`,
+            kind: 'index',
+            risk: index.review === true ? 'review' : 'safe',
+            sql: index.sql,
+            target: `${table.name}.${index.name}`,
+          })
+        } else {
+          drift.push(`index definition changed: ${table.name}.${index.name}`)
+        }
       }
     }
     for (const index of actualIndexes.values()) {
-      if (!table.indexes.some(desiredIndex => desiredIndex.name === index.name)) {
+      if (table.indexes.some(desiredIndex => desiredIndex.name === index.name)) continue
+      const previousIndex = previousTablesPhysical.get(table.name)
+        ?.indexes.find(candidate => candidate.name === index.name)
+      if (previousIndex) {
+        operations.push({
+          dependsOn: [`table:${table.name}`],
+          id: `index-drop:${table.name}:${index.name}`,
+          kind: 'index',
+          risk: 'review',
+          sql: `DROP INDEX ${quote(index.name)}`,
+          target: `${table.name}.${index.name}`,
+        })
+      } else {
         drift.push(`unexpected index: ${table.name}.${index.name}`)
       }
     }
@@ -2347,6 +2390,45 @@ function normalizeDefinition(value: string): string {
     normalized += character.toLowerCase()
   }
   return normalized.replaceAll('initiallyimmediate', '')
+}
+
+/**
+ * Normalize one PostgreSQL default expression for comparison.
+ * @param value - Catalog or authored default expression.
+ * @returns Comparable expression text.
+ */
+function defaultKey(value: string | null | undefined): string {
+  if (value === undefined || value === null) return ''
+  return value
+    .replace(/::[A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_]+)*(?:\[\])?/gu, '')
+    .replace(/\s+/gu, ' ')
+    .replace(/^\((.*)\)$/u, '$1')
+    .trim()
+}
+
+/**
+ * Whether two default expressions describe the same default.
+ * @param left - Existing default.
+ * @param right - Desired default.
+ * @returns Whether they are equivalent.
+ */
+function sameDefault(left: string | null | undefined, right: string | null | undefined): boolean {
+  return defaultKey(left) === defaultKey(right)
+}
+
+/**
+ * Whether one desired index differs from a live index.
+ * @param index - Desired index.
+ * @param existing - Live index.
+ * @returns Whether the index must be replaced.
+ */
+function indexChanged(index: PhysicalIndex, existing: PhysicalIndex): boolean {
+  return existing.valid === false
+    || (index.unique !== undefined && existing.unique !== index.unique)
+    || (index.columns !== undefined && (existing.columns ?? []).join(',') !== index.columns.join(','))
+    || (existing.method !== undefined && (index.method ?? 'btree') !== existing.method)
+    || !sameIndexOperatorClasses(index, existing)
+    || (existing.definition !== undefined && !sameIndexDefinition(index.sql, existing.definition))
 }
 
 /**

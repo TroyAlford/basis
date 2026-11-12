@@ -120,6 +120,19 @@ A singular forward reference is a field with `type: "Entity"`, an explicit `targ
 - Reference columns are nullable by default; set `nullable: false` to require a value, or omit it for an optional reference.
 - `inverse` must be paired with an authored `Inverse` field on the target. A forward reference without `inverse` remains an independent relationship with no inferred reverse navigation.
 
+A physical field can declare `unique: true` to create a single-column unique index. Entities and named relationships can declare named composite uniqueness constraints with a human-readable name, description, `type: "Uniqueness"`, and the canonical logical fields to cover:
+
+```json
+{
+  "name": "One Membership Per Campaign",
+  "description": "Each user may only have one Membership per Campaign.",
+  "type": "Uniqueness",
+  "fields": ["userId", "campaignId"]
+}
+```
+
+Constraint fields must resolve to physical columns owned by the same table; references use their derived dotted columns (`userId.id`, `campaignId.id`), and navigation/non-physical or cross-table fields are rejected. Field shorthand and named constraints normalize into the same canonical constraint collection. PostgreSQL unique indexes enforce the constraints; nullable columns retain PostgreSQL's normal multiple-NULL behavior.
+
 A reciprocal navigation is a navigation-only field with `type: "Inverse"`, a `target`, the forward field name in `inverse`, and `cardinality: "One" | "Many"`. It creates no PostgreSQL column and is never a predicate or ordering scalar. `One` means zero or one, so it is nullable and physically enforced with a unique index on the forward FK; `Many` uses the normal reverse-lookup index.
 
 ```json
