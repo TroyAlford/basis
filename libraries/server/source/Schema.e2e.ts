@@ -464,7 +464,7 @@ describe('DDL schema planning', () => {
     ))).toBe(true)
   })
 
-  test('plans real catalog policy and role changes', async () => {
+  test.serial('plans real catalog policy and role changes', async () => {
     await withIsolatedDatabase('schema-plan-catalog-policy', async database => {
       const appRole = `basis_plan_app_${randomUUID().replaceAll('-', '').slice(0, 12)}`
       await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
@@ -563,7 +563,7 @@ describe('DDL schema planning', () => {
     expect(drop).toBeGreaterThan(replacement)
   })
 
-  test('executes the ordered policy/helper replacement sequence in PostgreSQL', async () => {
+  test.serial('executes the ordered policy/helper replacement sequence in PostgreSQL', async () => {
     await withIsolatedDatabase('schema-plan-catalog-helper', async database => {
       const appRole = `basis_plan_helper_${randomUUID().replaceAll('-', '').slice(0, 12)}`
       await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
@@ -702,7 +702,7 @@ describe('DDL schema planning', () => {
     expect(plan.operations.some(operation => operation.sql.includes('basis.matches'))).toBe(false)
   })
 
-  test('revokes public schema CREATE through the reviewed graph plan', async () => {
+  test.serial('revokes public schema CREATE through the reviewed graph plan', async () => {
     const appRole = `basis_public_${randomUUID().replaceAll('-', '').slice(0, 12)}`
     await withIsolatedDatabase('schema-public-create', async database => {
       await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()

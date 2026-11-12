@@ -4,9 +4,11 @@ import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { seedImage } from '../../../testing/database/seed/image'
 import { registerRunCleanup } from '../../testing/lifecycle'
 import { EntityDefinitions } from '../source/EntityDefinitions'
 import { Server } from '../source/Server'
+import { ensureSeedImage, prepareSeedVolume } from './DatabaseImage'
 import { installSchema } from './Schema'
 
 /** Activity-log environment variable used by the lifecycle proof. */
@@ -203,9 +205,27 @@ export async function useDatabaseFixture(label: string): Promise<DatabaseFixture
 async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFixture> {
   const service = `basis-database-fixture-${randomUUID()}`
   const install = fixtureInstall()
-  const existing = containers(install).length > 0
+  let existing = containers(install).length > 0
+  if (existing && Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
+    removeService(install)
+    existing = false
+  }
+  if (existing) {
+    const [container] = containers(install)
+    const image = container
+      ? run`docker inspect --format {{.Config.Image}} ${container}`.stdout.trim()
+      : ''
+    if (image !== seedImage()) {
+      removeService(install)
+      existing = false
+    }
+  }
   const schemas = new Map<string, Promise<string>>()
   scope.pending = { install, service }
+  if (!existing) {
+    const image = await ensureSeedImage()
+    await prepareSeedVolume(install, image)
+  }
   const server = await startForInstall(install)
   const schemaFor = (entities: EntityDefinitions): Promise<string> => {
     const schema = fixtureSchemaName(entities)
@@ -229,6 +249,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
     }
     await fixture.schemaFor(sharedEntities)
     record(`${existing ? 'attach' : 'start'} ${service} ${install} ${process.pid}`)
+    if (!existing) record(`canonical ${service} ${install} ${process.pid}`)
     return fixture
   } catch (error) {
     await server.shutdown()
@@ -302,7 +323,7 @@ async function startForInstall(install: string): Promise<Server> {
   try {
     const server = new Server()
       .root(install)
-      .database()
+      .database({ image: seedImage() })
       .start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
     await server.ready()
     return server
@@ -367,6 +388,7 @@ async function ensureSchema(
     await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
     await sql.unsafe(`set local search_path to ${quoteIdentifier(schema)}`).simple()
     await installSchema(sql, entities, { version: `fixture:${schema}` })
+    record(`schema ${schema}`)
   })
   return schema
 }

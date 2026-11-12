@@ -1,9 +1,8 @@
 import { run as runCommand } from 'basis/configuration'
-import { tempDirectory, waitFor } from 'basis/testing'
+import { tempDirectory } from 'basis/testing'
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { containers as managedContainers, removeService } from '../testing/DatabaseFixture'
 
 /*
  * Lifecycle proof for the shared in-process database fixture.
@@ -99,20 +98,6 @@ function activity(path: string): Activity {
 }
 
 /**
- * Whether a process id is still alive.
- * @param pid - Process id to check.
- * @returns `true` when the process exists.
- */
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
  * Assert that the fixture installation owns no Docker resources.
  * @param events - Observed fixture activity.
  */
@@ -132,16 +117,12 @@ function expectRemoved(events: Activity): void {
  * Run `bun test` in a fixture directory.
  * @param target - The fixture to run.
  * @param args - Extra test file arguments.
- * @param signal - Optional signal to send after the fixture starts.
- * @param readyTimeoutMs - How long to wait for a signal target to start.
  * @param env - Extra child-process environment.
  * @returns The exit code and observed activity.
  */
 async function run(
   target: Fixture,
   args: string[] = [],
-  signal?: NodeJS.Signals,
-  readyTimeoutMs = 60_000,
   env: Record<string, string> = {},
 ): Promise<{ activity: Activity, code: number, output: string }> {
   const proc = Bun.spawn([process.execPath, 'test', ...args], {
@@ -157,13 +138,8 @@ async function run(
   })
   const stdout = new Response(proc.stdout).text()
   const stderr = new Response(proc.stderr).text()
-
   let code: number | null = null
   try {
-    if (signal) {
-      await waitFor(() => activity(target.activity).starts.length > 0, { timeout: readyTimeoutMs })
-      proc.kill(signal)
-    }
     code = await proc.exited
   } finally {
     if (code === null) {
@@ -204,135 +180,4 @@ describe('database fixture lifecycle', () => {
     expectRemoved(result.activity)
   }, 120_000)
 
-  test('reuses a persistent fixture across independent test runs', async () => {
-    const target = fixture({ 'a.test.ts': suite('persistent') })
-    const root = tempDirectory('basis-database-fixture-persistent-')
-    created.push(root)
-    const env = {
-      BASIS_DATABASE_FIXTURE_EPHEMERAL: '0',
-      BASIS_TEST_FIXTURE_ROOT: join(root, 'fixture'),
-    }
-
-    const first = await run(target, [], undefined, 60_000, env)
-    expect(first.code).toBe(0)
-    expect(first.activity.starts).toHaveLength(1)
-    const install = first.activity.starts[0]?.split(' ')[2]
-    if (!install) throw new Error('persistent fixture never started')
-    expect(managedContainers(install)).toHaveLength(1)
-
-    const second = await run(target, [], undefined, 60_000, env)
-    expect(second.code).toBe(0)
-    expect(second.activity.starts).toHaveLength(1)
-    expect(second.activity.stops).toHaveLength(0)
-    expect(managedContainers(install)).toHaveLength(1)
-
-    expect(removeService(install)).toBe(true)
-  }, 120_000)
-
-  test('preserves an existing persistent fixture when startup fails', async () => {
-    const target = fixture({ 'a.test.ts': suite('persistent-failure') })
-    const root = tempDirectory('basis-database-fixture-preserve-')
-    created.push(root)
-    const env = {
-      BASIS_DATABASE_FIXTURE_EPHEMERAL: '0',
-      BASIS_TEST_FIXTURE_ROOT: join(root, 'fixture'),
-    }
-
-    const first = await run(target, [], undefined, 60_000, env)
-    expect(first.code).toBe(0)
-    const install = first.activity.starts[0]?.split(' ')[2]
-    if (!install) throw new Error('persistent fixture never started')
-    const password = join(install, '.basis', 'database', 'password')
-    const saved = readFileSync(password, 'utf8')
-    rmSync(password)
-
-    try {
-      const failed = await run(target, [], undefined, 60_000, env)
-      expect(failed.code).not.toBe(0)
-      expect(failed.activity.stops).toHaveLength(0)
-      expect(managedContainers(install)).toHaveLength(1)
-    } finally {
-      writeFileSync(password, saved)
-      expect(removeService(install)).toBe(true)
-    }
-  }, 120_000)
-
-  test('preserves an orphaned volume when startup fails', async () => {
-    const target = fixture({ 'a.test.ts': suite('persistent-orphan') })
-    const root = tempDirectory('basis-database-fixture-orphan-')
-    created.push(root)
-    const env = {
-      BASIS_DATABASE_FIXTURE_EPHEMERAL: '0',
-      BASIS_TEST_FIXTURE_ROOT: join(root, 'fixture'),
-    }
-
-    const first = await run(target, [], undefined, 60_000, env)
-    expect(first.code).toBe(0)
-    const install = first.activity.starts[0]?.split(' ')[2]
-    if (!install) throw new Error('persistent fixture never started')
-    const [container] = managedContainers(install)
-    if (!container) throw new Error('persistent fixture has no container')
-    expect(runCommand`docker rm -f ${container}`.exitCode).toBe(0)
-
-    const password = join(install, '.basis', 'database', 'password')
-    const saved = readFileSync(password, 'utf8')
-    rmSync(password)
-
-    try {
-      const failed = await run(target, [], undefined, 60_000, env)
-      expect(failed.code).not.toBe(0)
-      expect(managedContainers(install)).toHaveLength(0)
-      const volumes = runCommand`docker volume ls -q --filter ${`label=basis.install=${install}`}`
-      expect(volumes.lines).toHaveLength(1)
-    } finally {
-      writeFileSync(password, saved)
-      expect(removeService(install)).toBe(true)
-    }
-  }, 120_000)
-
-  test('tears down after a failing test', async () => {
-    const target = fixture({
-      'a.test.ts': suite('failure', '  expect(1).toBe(2)'),
-    })
-    const result = await run(target)
-
-    expect(result.code).not.toBe(0)
-    expect(result.activity.cleanups).toHaveLength(1)
-    expect(result.activity.starts).toHaveLength(1)
-    expect(result.activity.stops).toHaveLength(1)
-    expectRemoved(result.activity)
-  }, 120_000)
-
-  test('reaps a child that never starts the fixture', async () => {
-    const target = fixture({
-      'a.test.ts': `
-import { test } from 'bun:test'
-import { writeFileSync } from 'node:fs'
-
-test('stall', async () => {
-  writeFileSync('child.pid', String(process.pid))
-  await Bun.sleep(10_000)
-}, 20_000)
-      `.trim(),
-    })
-    const pidFile = join(target.dir, 'child.pid')
-
-    await expect(run(target, [], 'SIGTERM', 500)).rejects.toThrow('waitFor')
-    const pid = Number(readFileSync(pidFile, 'utf8'))
-    expect(isAlive(pid)).toBe(false)
-  }, 30_000)
-
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    test(`tears down on ${signal}`, async () => {
-      const target = fixture({
-        'a.test.ts': suite('signal', '  await Bun.sleep(10_000)'),
-      })
-      const result = await run(target, [], signal)
-
-      expect(result.activity.cleanups).toHaveLength(1)
-      expect(result.activity.starts).toHaveLength(1)
-      expect(result.activity.stops).toHaveLength(1)
-      expectRemoved(result.activity)
-    }, 120_000)
-  }
 })

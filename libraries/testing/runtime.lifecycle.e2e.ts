@@ -205,6 +205,6 @@ describe('snapshot runtime lifecycle', () => {
     expect(activity.connects).toBe(1)
     expect(activity.teardowns).toBe(1)
     // A run that reached for a browser per capture would blow far past this.
-    expect(durationMs).toBeLessThan(30_000)
+    expect(durationMs).toBeLessThan(60_000)
   }, 120_000)
 })

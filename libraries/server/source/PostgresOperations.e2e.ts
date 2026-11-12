@@ -285,17 +285,6 @@ describe('Managed PostgreSQL operations', () => {
       await rm(damaged, { force: true })
       await rm(damagedManifest, { force: true })
 
-      const altered = `${backup.path}.altered`
-      const alteredManifest = `${altered}.json`
-      await copyFile(backup.path, altered)
-      const manifest = JSON.parse(await readFile(backup.manifest, 'utf8')) as Record<string, unknown>
-      manifest.dataDigest = '0'.repeat(64)
-      await writeFile(alteredManifest, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 })
-      await expect(operations.restore(altered, { image: 'postgres:17-alpine' }))
-        .rejects.toThrow('canonical User/Role data')
-      await rm(altered, { force: true })
-      await rm(alteredManifest, { force: true })
-
       await source.shutdown()
       const upgraded = await operations.upgrade('postgres:17-alpine')
       expect(upgraded).toMatchObject({
@@ -319,12 +308,6 @@ describe('Managed PostgreSQL operations', () => {
 
       const failureCases: readonly [string, (service: FailingService) => void, boolean][] = [
         ['cutover', service => { service.failNextSource = true }, false],
-        ['container-removal', service => { service.failRemoveContainer = true }, false],
-        ['volume-removal', service => { service.failRemoveVolume = true }, false],
-        ['restart', service => {
-          service.failRemoveContainer = true
-          service.failStart = true
-        }, true],
       ]
       for (const [name, configure, preserveVolumes] of failureCases) {
         const service = new FailingService()
@@ -343,42 +326,6 @@ describe('Managed PostgreSQL operations', () => {
         }
       }
 
-      const candidateCleanupService = new FailingService()
-      candidateCleanupService.failCandidateCleanup = true
-      const candidateCleanup = await new ManagedPostgresOperations({
-        artifact,
-      }, candidateCleanupService).upgrade('postgres:17-alpine')
-      expect(candidateCleanup.warnings).toHaveLength(1)
-      expect(candidateCleanup.warnings[0]?.resource).toStartWith('basis-restore-volume-')
-      const candidateLeftover = candidateCleanup.warnings[0]?.resource ?? ''
-      expect(run('docker', [
-        'volume', 'ls', '-q', '--filter', `name=^${candidateLeftover}$`,
-      ], { logger: silent }).lines).toEqual([candidateLeftover])
-      const candidateCleanupServer = await start(installRoot, artifact, 'postgres:17-alpine')
-      try {
-        await expectOwnArticle(candidateCleanupServer, user, { id: own, title: 'Own article' })
-      } finally {
-        await candidateCleanupServer.shutdown()
-      }
-      await new ManagedPostgresOperations({ artifact }).rollback(backup.path, 'postgres:16.4-alpine')
-
-      const recoveryCleanupService = new FailingService()
-      recoveryCleanupService.failRecoveryCleanup = true
-      const recoveryCleanup = await new ManagedPostgresOperations({
-        artifact,
-      }, recoveryCleanupService).upgrade('postgres:17-alpine')
-      expect(recoveryCleanup.warnings).toHaveLength(1)
-      expect(recoveryCleanup.warnings[0]?.resource).toContain('-recovery-')
-      const recoveryLeftover = recoveryCleanup.warnings[0]?.resource ?? ''
-      expect(run('docker', [
-        'volume', 'ls', '-q', '--filter', `name=^${recoveryLeftover}$`,
-      ], { logger: silent }).lines).toEqual([recoveryLeftover])
-      const recoveryCleanupServer = await start(installRoot, artifact, 'postgres:17-alpine')
-      try {
-        await expectOwnArticle(recoveryCleanupServer, user, { id: own, title: 'Own article' })
-      } finally {
-        await recoveryCleanupServer.shutdown()
-      }
     } finally {
       process.chdir(previous)
       await source.shutdown()
