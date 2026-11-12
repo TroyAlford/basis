@@ -162,6 +162,66 @@ describe('DDL schema planning', () => {
     }, { fresh: true })
   })
 
+  test('compares default expressions without conflating literal contents', async () => {
+    const model = (label: string, role: string): EntityDefinitions => EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { default: '2020-01-01T00:00:00.000Z', field: 'createdAt', type: 'Timestamp' },
+          { default: label, field: 'label', type: 'String' },
+          { default: { role }, field: 'payload', type: 'JSON' },
+        ],
+        name: 'LiteralDefault',
+      }],
+    }))
+    const first = model('a', 'admin')
+    const changed = model('a::text', 'admin::text')
+    await withIsolatedDatabase('schema-default-literals', async database => {
+      await installSchema(database.sql, first)
+      const installed = await DDL.introspect(database.sql)
+      expect(DDL.plan({
+        actual: installed,
+        desired: first,
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })).toMatchObject({ drift: [], operations: [] })
+
+      const plan = DDL.plan({
+        actual: installed,
+        desired: changed,
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      expect(plan.drift).toEqual([])
+      expect(plan.operations.find(operation => operation.id === 'column-default:LiteralDefault:label')?.sql)
+        .toContain("SET DEFAULT 'a::text'")
+      expect(plan.operations.find(operation => operation.id === 'column-default:LiteralDefault:payload')?.sql)
+        .toContain('admin::text')
+
+      await installSchema(database.sql, changed, {
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      const changedInstalled = await DDL.introspect(database.sql)
+      expect(DDL.plan({
+        actual: changedInstalled,
+        desired: changed,
+        previous: changed,
+        previousPhysical: changed.physicalSchema(),
+      })).toMatchObject({ drift: [], operations: [] })
+
+      await database.sql.unsafe(
+        'ALTER TABLE "LiteralDefault" ALTER COLUMN "label" SET DEFAULT \'out-of-band::text\'',
+      ).simple()
+      const outOfBand = await DDL.introspect(database.sql)
+      expect(DDL.plan({
+        actual: outOfBand,
+        desired: changed,
+        previous: changed,
+        previousPhysical: changed.physicalSchema(),
+      }).drift.join(' ')).toContain('column default changed')
+    }, { fresh: true })
+  })
+
   test('plans reviewed identity changes to unique indexes', async () => {
     const unique = EntityDefinitions.load(JSON.stringify({
       entities: [{

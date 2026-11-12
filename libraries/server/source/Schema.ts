@@ -2392,6 +2392,146 @@ function normalizeDefinition(value: string): string {
   return normalized.replaceAll('initiallyimmediate', '')
 }
 
+/** One token in a constrained PostgreSQL default expression. */
+interface DefaultToken {
+  /** Token kind. */
+  readonly kind: 'identifier' | 'literal' | 'number' | 'symbol' | 'word',
+  /** Exact token text. */
+  readonly value: string,
+}
+
+/**
+ * Tokenize one constrained PostgreSQL default expression.
+ * @param value - Default expression.
+ * @returns Tokens with literal contents preserved exactly.
+ */
+function tokenizeDefault(value: string): readonly DefaultToken[] {
+  const tokens: DefaultToken[] = []
+  let index = 0
+  while (index < value.length) {
+    const character = value[index] as string
+    if (/\s/u.test(character)) {
+      index += 1
+      continue
+    }
+    if (character === "'") {
+      const start = index
+      index += 1
+      while (index < value.length) {
+        if (value[index] !== "'") {
+          index += 1
+          continue
+        }
+        if (value[index + 1] === "'") {
+          index += 2
+          continue
+        }
+        index += 1
+        break
+      }
+      tokens.push({ kind: 'literal', value: value.slice(start, index) })
+      continue
+    }
+    if (character === '"') {
+      const start = index
+      index += 1
+      while (index < value.length) {
+        if (value[index] !== '"') {
+          index += 1
+          continue
+        }
+        if (value[index + 1] === '"') {
+          index += 2
+          continue
+        }
+        index += 1
+        break
+      }
+      tokens.push({ kind: 'identifier', value: value.slice(start, index) })
+      continue
+    }
+    if (character === ':' && value[index + 1] === ':') {
+      tokens.push({ kind: 'symbol', value: '::' })
+      index += 2
+      continue
+    }
+    if (/[A-Za-z_]/u.test(character)) {
+      const start = index
+      index += 1
+      while (index < value.length && /[A-Za-z0-9_$]/u.test(value[index] as string)) index += 1
+      tokens.push({ kind: 'word', value: value.slice(start, index) })
+      continue
+    }
+    if (/[0-9]/u.test(character)) {
+      const start = index
+      index += 1
+      while (index < value.length && /[0-9.eE+-]/u.test(value[index] as string)) index += 1
+      tokens.push({ kind: 'number', value: value.slice(start, index) })
+      continue
+    }
+    tokens.push({ kind: 'symbol', value: character })
+    index += 1
+  }
+  return tokens
+}
+
+/**
+ * Decode one standard PostgreSQL string literal.
+ * @param value - Quoted literal token.
+ * @returns Literal contents.
+ */
+function decodeDefaultLiteral(value: string): string {
+  return value.slice(1, -1).replaceAll("''", "'")
+}
+
+/**
+ * Encode one standard PostgreSQL string literal.
+ * @param value - Literal contents.
+ * @returns Quoted literal token.
+ */
+function encodeDefaultLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
+}
+
+/**
+ * Sort JSON object keys recursively for canonical comparison.
+ * @param value - Parsed JSON value.
+ * @returns Canonically ordered value.
+ */
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(item => canonicalJson(item))
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map(key => [key, canonicalJson((value as Record<string, unknown>)[key])]),
+  )
+}
+
+/**
+ * Canonicalize one literal according to its explicit cast.
+ * @param value - Quoted literal token.
+ * @param type - Cast type without schema or whitespace.
+ * @returns Canonical quoted literal, or undefined when the literal stays textual.
+ */
+function canonicalTypedLiteral(value: string, type: string): string | undefined {
+  const text = decodeDefaultLiteral(value)
+  if (type === 'json' || type === 'jsonb') {
+    try {
+      return encodeDefaultLiteral(JSON.stringify(canonicalJson(JSON.parse(text))))
+    } catch {
+      return undefined
+    }
+  }
+  if (type === 'timestamptz' || type === 'timestampwithtimezone') {
+    const milliseconds = Date.parse(text)
+    if (Number.isFinite(milliseconds)) {
+      return encodeDefaultLiteral(new Date(milliseconds).toISOString())
+    }
+  }
+  return undefined
+}
+
 /**
  * Normalize one PostgreSQL default expression for comparison.
  * @param value - Catalog or authored default expression.
@@ -2399,11 +2539,46 @@ function normalizeDefinition(value: string): string {
  */
 function defaultKey(value: string | null | undefined): string {
   if (value === undefined || value === null) return ''
-  return value
-    .replace(/::[A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_]+)*(?:\[\])?/gu, '')
-    .replace(/\s+/gu, ' ')
-    .replace(/^\((.*)\)$/u, '$1')
-    .trim()
+  const tokens = tokenizeDefault(value)
+  const output: DefaultToken[] = []
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] as DefaultToken
+    if (token.value !== '::') {
+      output.push({
+        kind: token.kind,
+        value: token.kind === 'word' ? token.value.toLowerCase() : token.value,
+      })
+      continue
+    }
+    const type: string[] = []
+    index += 1
+    while (index < tokens.length) {
+      const candidate = tokens[index] as DefaultToken
+      if (
+        candidate.kind === 'word'
+        || candidate.kind === 'identifier'
+        || candidate.value === '['
+        || candidate.value === ']'
+        || candidate.value === '.'
+      ) {
+        type.push(candidate.value)
+        index += 1
+        continue
+      }
+      break
+    }
+    index -= 1
+    const previous = output.at(-1)
+    if (previous?.kind === 'literal') {
+      const canonical = canonicalTypedLiteral(previous.value, type.join('').toLowerCase())
+      if (canonical !== undefined) output[output.length - 1] = { kind: 'literal', value: canonical }
+    }
+  }
+  let normalized = output.map(token => token.value).join('')
+  while (normalized.startsWith('(') && normalized.endsWith(')')) {
+    normalized = normalized.slice(1, -1)
+  }
+  return normalized
 }
 
 /**
