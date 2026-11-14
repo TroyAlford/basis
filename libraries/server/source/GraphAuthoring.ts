@@ -24,6 +24,14 @@ export interface AuthoredScalarField {
   readonly default?: unknown,
   /** Field name, in camelCase. */
   readonly field: string,
+  /** Maximum length for String fields. */
+  readonly maxLength?: number,
+  /** Inclusive maximum for Number fields. */
+  readonly maximum?: number,
+  /** Minimum length for String fields. */
+  readonly minLength?: number,
+  /** Inclusive minimum for Number fields. */
+  readonly minimum?: number,
   /** Whether the field accepts NULL; omitted means NOT NULL. */
   readonly nullable?: boolean,
   /** Scalar field type. */

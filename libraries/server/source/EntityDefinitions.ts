@@ -67,6 +67,14 @@ export interface ScalarFieldDefinition {
   readonly default?: unknown,
   /** Canonical format for an ID field. */
   readonly format?: IdentityFormat,
+  /** Maximum string length for String fields. */
+  readonly maxLength?: number,
+  /** Inclusive maximum for Number fields. */
+  readonly maximum?: number,
+  /** Minimum string length for String fields. */
+  readonly minLength?: number,
+  /** Inclusive minimum for Number fields. */
+  readonly minimum?: number,
   /** Field name, in camelCase. */
   readonly name: string,
   /** Whether the field accepts NULL; omitted means NOT NULL. */
@@ -1600,6 +1608,88 @@ function parseNullable(
   return value.nullable
 }
 
+/** Canonical scalar bounds. */
+interface FieldBounds {
+  /** Maximum string length. */
+  readonly maxLength?: number,
+  /** Inclusive numeric maximum. */
+  readonly maximum?: number,
+  /** Minimum string length. */
+  readonly minLength?: number,
+  /** Inclusive numeric minimum. */
+  readonly minimum?: number,
+}
+
+/**
+ * Validate one scalar field's declarative bounds.
+ * @param entityName - Owning entity or relationship name.
+ * @param fieldName - Field name.
+ * @param type - Declared field type.
+ * @param value - Field candidate.
+ * @returns Its canonical bounds.
+ */
+function parseBounds(
+  entityName: string,
+  fieldName: string,
+  type: ScalarFieldType,
+  value: Readonly<Record<string, unknown>>,
+): FieldBounds {
+  const label = `field "${entityName}.${fieldName}"`
+  const numberBounds = type === FieldType.Number
+  if (!numberBounds && (value.minimum !== undefined || value.maximum !== undefined)) {
+    throw invalid(`${label} numeric bounds are only valid on Number fields`)
+  }
+  if (type !== FieldType.String && (value.minLength !== undefined || value.maxLength !== undefined)) {
+    throw invalid(`${label} length bounds are only valid on String fields`)
+  }
+  const minimum = parseFiniteBound(label, 'minimum', value.minimum)
+  const maximum = parseFiniteBound(label, 'maximum', value.maximum)
+  const minLength = parseLengthBound(label, 'minLength', value.minLength)
+  const maxLength = parseLengthBound(label, 'maxLength', value.maxLength)
+  if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
+    throw invalid(`${label} minimum must not exceed maximum`)
+  }
+  if (minLength !== undefined && maxLength !== undefined && minLength > maxLength) {
+    throw invalid(`${label} minLength must not exceed maxLength`)
+  }
+  return {
+    ...(maximum === undefined ? {} : { maximum }),
+    ...(maxLength === undefined ? {} : { maxLength }),
+    ...(minimum === undefined ? {} : { minimum }),
+    ...(minLength === undefined ? {} : { minLength }),
+  }
+}
+
+/**
+ * Validate one finite numeric bound.
+ * @param label - Field diagnostic label.
+ * @param name - Bound name.
+ * @param value - Bound candidate.
+ * @returns The finite bound, or undefined.
+ */
+function parseFiniteBound(label: string, name: string, value: unknown): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw invalid(`${label} ${name} must be a finite number`)
+  }
+  return value
+}
+
+/**
+ * Validate one non-negative integer length bound.
+ * @param label - Field diagnostic label.
+ * @param name - Bound name.
+ * @param value - Bound candidate.
+ * @returns The length bound, or undefined.
+ */
+function parseLengthBound(label: string, name: string, value: unknown): number | undefined {
+  if (value === undefined) return undefined
+  if (!Number.isInteger(value) || (value as number) < 0) {
+    throw invalid(`${label} ${name} must be a non-negative integer`)
+  }
+  return value as number
+}
+
 /**
  * Validate one optional field default against its declared type.
  * @param entityName - Owning entity name.
@@ -1823,7 +1913,18 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   if (ROOT_FIELD_NAMES.has(value.field)) {
     throw invalid(`field "${entityName}.${value.field}" is reserved for the universal identity root`)
   }
-  assertKnownKeys(value, ['default', 'field', 'format', 'nullable', 'type', 'unique'], 'field')
+  assertKnownKeys(value, [
+    'default',
+    'field',
+    'format',
+    'maximum',
+    'maxLength',
+    'minimum',
+    'minLength',
+    'nullable',
+    'type',
+    'unique',
+  ], 'field')
   const type = value.type as string
   if (!SCALAR_FIELD_TYPES.has(type) || type === FieldType.ID) {
     throw invalid(`unsupported field type "${String(type)}" in "${entityName}.${value.field}"`)
@@ -1833,10 +1934,12 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
   }
   const nullable = parseNullable(entityName, value.field, value)
   const defaultValue = parseDefault(entityName, value.field, type as ScalarFieldType, value)
+  const bounds = parseBounds(entityName, value.field, type as ScalarFieldType, value)
   const unique = parseUnique(entityName, value.field, value)
   return {
     field: {
       ...(defaultValue === undefined ? {} : { default: defaultValue }),
+      ...bounds,
       name: value.field,
       ...(nullable === undefined ? {} : { nullable }),
       type: type as ScalarFieldType,
@@ -2046,10 +2149,13 @@ function entityTable(
     columns.set(fieldColumn(field), fieldColumn(field))
   }
   return {
-    checks: [{
-      expression: identityCheck('id', entity.idFormat),
-      name: `${entity.name}_id_format_check`,
-    }],
+    checks: [
+      {
+        expression: identityCheck('id', entity.idFormat),
+        name: `${entity.name}_id_format_check`,
+      },
+      ...boundChecks(entity.name, entity.fields.filter(isPhysicalField)),
+    ],
     columns: entity.fields.filter(isPhysicalField).map(fieldTableColumn),
     ...(indexes.length + entity.constraints.length > 0
       ? { indexes: validatedIndexes(entity.name, [...indexes, ...uniqueIndexes(entity.constraints, columns)]) }
@@ -2068,6 +2174,43 @@ type PhysicalFieldDefinition = Exclude<FieldDefinition, InverseFieldDefinition>
  */
 function isPhysicalField(field: FieldDefinition): field is PhysicalFieldDefinition {
   return field.type !== FieldType.Inverse
+}
+
+/**
+ * Build physical check constraints for declared scalar bounds.
+ * @param owner - Owning entity or relationship table.
+ * @param fields - Physical fields.
+ * @returns Bound checks in field order.
+ */
+function boundChecks(
+  owner: string,
+  fields: readonly PhysicalFieldDefinition[],
+): readonly TableCheck[] {
+  const checks: TableCheck[] = []
+  for (const field of fields) {
+    const expressions: string[] = []
+    const column = quoteIdentifier(fieldColumn(field))
+    if (field.type === FieldType.Number) {
+      if (field.minimum !== undefined) expressions.push(`${column} >= ${String(field.minimum)}`)
+      if (field.maximum !== undefined) expressions.push(`${column} <= ${String(field.maximum)}`)
+    }
+    if (field.type === FieldType.String) {
+      if (field.minLength !== undefined) {
+        expressions.push(`char_length(${column}) >= ${String(field.minLength)}`)
+      }
+      if (field.maxLength !== undefined) {
+        expressions.push(`char_length(${column}) <= ${String(field.maxLength)}`)
+      }
+    }
+    if (expressions.length === 0) continue
+    const name = `${owner}_${field.name}_bounds_check`
+    validatePhysicalIdentifier(name, 'bounds check')
+    checks.push({
+      expression: `(${column} IS NULL OR (${expressions.join(' AND ')}))`,
+      name,
+    })
+  }
+  return checks
 }
 
 /**
@@ -2233,6 +2376,7 @@ function relationshipTable(relationship: RelationshipDefinition): TableDefinitio
     ...uniqueIndexes(relationship.constraints, columns),
   ]
   return {
+    checks: boundChecks(relationship.name, relationship.fields),
     columns: [...endpointColumns, ...relationship.fields.map(fieldTableColumn)],
     indexes: validatedIndexes(relationship.name, indexes),
     name: relationship.name,

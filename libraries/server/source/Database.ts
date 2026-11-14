@@ -1,12 +1,18 @@
 import { runAsync } from 'basis/configuration'
-import { SQL as BunSQL } from 'bun'
+import type { TransactionSQL } from 'bun'
+import { SQL } from 'bun'
 import { currentActor } from './ActorContext'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { ManagedPostgresService } from './ManagedPostgresService'
+import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from './Mutation'
+import { mutationRunner } from './Mutation'
 import { compilePolymorphicQuery } from './PolymorphicQuery'
 import type { Filter } from './Predicate'
 export { managedDatabaseIdentity } from './ManagedPostgresService'
 import type { OrderBy } from './SQL'
+
+/** A transaction-scoped SQL client with the Graph mutation vocabulary. */
+export type DatabaseTransaction = TransactionSQL & MutationDatabase
 
 /** The pool defaults used by the managed PostgreSQL connection. */
 const POOL_DEFAULTS = {
@@ -25,7 +31,7 @@ export interface AdminConnection {
   /** Closes the privileged connection. */
   close(): Promise<void>,
   /** The privileged connection's SQL capability. */
-  readonly sql: BunSQL,
+  readonly sql: SQL,
 }
 
 /** Options for a server-owned database capability. */
@@ -128,7 +134,7 @@ function prepareEntityQuery(
  * @throws {Error} When the entity or query is invalid.
  */
 export async function queryEntity<T = Record<string, unknown>>(
-  sql: BunSQL,
+  sql: SQL,
   entities: EntityDefinitions,
   entity: string,
   options: QueryOptions,
@@ -156,19 +162,53 @@ export async function openAdmin(database: Database): Promise<AdminConnection> {
 }
 
 /** A server-owned database capability. */
-export interface Database {
+export interface Database extends MutationDatabase {
   /** Closes the database pool and releases its resources. */
   close(): Promise<void>,
   /** Whether the pool has been closed. */
   readonly closed: boolean,
   /** Establishes the database pool's connection. */
   connect(): Promise<void>,
+  /**
+   * Creates one entity or a finite batch atomically.
+   * @param entity - Exact concrete entity name.
+   * @param values - One value object or finite iterable.
+   * @returns The created count.
+   */
+  create(entity: string, values: MutationValues | Iterable<MutationValues>): Promise<CreateResult>,
+  /**
+   * Deletes every actor-authorized match.
+   * @param entity - Entity or abstract ancestor name.
+   * @param filter - Existing filter form.
+   * @returns The deleted count.
+   */
+  delete(entity: string, filter: MutationFilter): Promise<DeleteResult>,
+  /**
+   * Patches every actor-authorized match.
+   * @param entity - Entity or abstract ancestor name.
+   * @param filter - Existing filter form.
+   * @param changes - Field values to patch.
+   * @returns The edited count.
+   */
+  edit(entity: string, filter: MutationFilter, changes: MutationValues): Promise<EditResult>,
   /** Projects effective scalar and singular reference paths from one canonical entity. */
   query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]>,
   /** The pooled Bun SQL tagged-template API. */
-  readonly sql: BunSQL,
-  /** Runs a callback inside a pooled Bun transaction. */
-  tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>>,
+  readonly sql: SQL,
+  /**
+   * Runs a callback inside one pooled Bun transaction.
+   * @param callback - Transaction-scoped work with native SQL and mutation verbs.
+   * @returns The callback result after commit.
+   */
+  tx<T>(callback: (tx: DatabaseTransaction) => T | Promise<T>): Promise<SQL.ContextCallbackResult<T>>,
+  /**
+   * Edits exactly one authorized match or creates one.
+   * @param entity - Exact concrete entity name.
+   * @param filter - Existing filter form.
+   * @param values - Values used by either branch.
+   * @returns Which branch ran.
+   */
+  upsert(entity: string, filter: MutationFilter, values: MutationValues): Promise<UpsertResult>,
 }
 
 /**
@@ -180,7 +220,7 @@ class PostgresDatabase implements Database {
   #closed = false
   #closing: Promise<void> | null = null
   #entities: EntityDefinitions | undefined
-  #sql: BunSQL
+  #sql: SQL
 
   /**
    * Creates the pool.
@@ -189,7 +229,7 @@ class PostgresDatabase implements Database {
    */
   constructor(url: string | URL, entities?: EntityDefinitions) {
     this.#entities = entities
-    this.#sql = new BunSQL({ ...POOL_DEFAULTS, url })
+    this.#sql = new SQL({ ...POOL_DEFAULTS, url })
   }
 
   /**
@@ -204,7 +244,7 @@ class PostgresDatabase implements Database {
    * The pooled Bun SQL tagged-template API.
    * @returns The underlying Bun SQL instance.
    */
-  get sql(): BunSQL {
+  get sql(): SQL {
     return this.#sql
   }
 
@@ -231,6 +271,37 @@ class PostgresDatabase implements Database {
   }
 
   /**
+   * Create one entity or a finite batch atomically.
+   * @param entity - Exact concrete entity name.
+   * @param values - One value object or finite iterable.
+   * @returns The created count.
+   */
+  create(entity: string, values: MutationValues | Iterable<MutationValues>): Promise<CreateResult> {
+    return this.#mutate(transaction => transaction.create(entity, values))
+  }
+
+  /**
+   * Delete every actor-authorized match.
+   * @param entity - Entity or abstract ancestor name.
+   * @param filter - Existing filter form.
+   * @returns The deleted count.
+   */
+  delete(entity: string, filter: MutationFilter): Promise<DeleteResult> {
+    return this.#mutate(transaction => transaction.delete(entity, filter))
+  }
+
+  /**
+   * Patch every actor-authorized match.
+   * @param entity - Entity or abstract ancestor name.
+   * @param filter - Existing filter form.
+   * @param changes - Field values to patch.
+   * @returns The edited count.
+   */
+  edit(entity: string, filter: MutationFilter, changes: MutationValues): Promise<EditResult> {
+    return this.#mutate(transaction => transaction.edit(entity, filter, changes))
+  }
+
+  /**
    * Project effective scalar and singular reference paths from one entity.
    * @param entity - Exact canonical entity name.
    * @param options - Scalar fields and singular reference paths to project.
@@ -245,18 +316,97 @@ class PostgresDatabase implements Database {
 
   /**
    * Runs a callback inside a Bun transaction on this pool.
-   * @param callback - Transaction-scoped work.
+   * @param callback - Transaction-scoped work with native SQL and mutation verbs.
    * @returns The callback result after commit.
    * @throws {Error} When the pool is closed or the callback fails.
    */
-  tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>> {
+  tx<T>(callback: (tx: DatabaseTransaction) => T | Promise<T>): Promise<SQL.ContextCallbackResult<T>> {
     if (this.#closed) return Promise.reject(new Error('Database is closed'))
     return this.#sql.begin(async tx => {
       const actor = currentActor()
       await tx`select set_config('actor.id', ${actor?.id ?? ''}, true)`
-      return callback(tx)
+      return callback(this.#transaction(tx))
     })
   }
+
+  /**
+   * Edit exactly one authorized match or create one.
+   * @param entity - Exact concrete entity name.
+   * @param filter - Existing filter form.
+   * @param values - Values used by either branch.
+   * @returns Which branch ran.
+   */
+  upsert(entity: string, filter: MutationFilter, values: MutationValues): Promise<UpsertResult> {
+    return this.#mutate(transaction => transaction.upsert(entity, filter, values))
+  }
+
+  /**
+   * Run one mutation through the standard pooled transaction boundary.
+   * @param work - Mutation work.
+   * @returns The mutation result.
+   */
+  #mutate<T>(work: (transaction: DatabaseTransaction) => Promise<T>): Promise<T> {
+    return this.tx(work)
+  }
+
+  /**
+   * Attach mutation verbs to one native transaction client.
+   * @param tx - Bun transaction client.
+   * @returns The same transaction with mutation verbs.
+   */
+  #transaction(tx: TransactionSQL): DatabaseTransaction {
+    return transactionWithMutations(this.#entities, tx)
+  }
+}
+
+/**
+ * Attach the Graph mutation vocabulary to one native Bun transaction client.
+ * @param entities - Canonical definitions, or undefined when unconfigured.
+ * @param tx - Bun transaction client.
+ * @returns The same transaction with mutation verbs.
+ */
+export function transactionWithMutations(
+  entities: EntityDefinitions | undefined,
+  tx: TransactionSQL,
+): DatabaseTransaction {
+  if (!entities) {
+    return new Proxy(tx, {
+      apply: (target, _thisArg, args) => Reflect.apply(target, target, args),
+      get: (target, property, receiver) => {
+        if (property === 'create' || property === 'delete' || property === 'edit' || property === 'upsert') {
+          return () => Promise.reject(new Error('No entity definitions are configured for this database'))
+        }
+        return boundTransactionMember(target, property, receiver)
+      },
+    }) as DatabaseTransaction
+  }
+  const mutations = mutationRunner(entities, tx)
+  return new Proxy(tx, {
+    apply: (target, _thisArg, args) => Reflect.apply(target, target, args),
+    get: (target, property, receiver) => {
+      if (property === 'create') return mutations.create
+      if (property === 'delete') return mutations.delete
+      if (property === 'edit') return mutations.edit
+      if (property === 'upsert') return mutations.upsert
+      return boundTransactionMember(target, property, receiver)
+    },
+  }) as DatabaseTransaction
+}
+
+/**
+ * Preserve native transaction member binding through the mutation proxy.
+ * @param target - Native transaction client.
+ * @param property - Requested member.
+ * @param receiver - Proxy receiver.
+ * @returns The member value or bound function.
+ */
+function boundTransactionMember(
+  target: TransactionSQL,
+  property: string | symbol,
+  receiver: unknown,
+): unknown {
+  const value = Reflect.get(target, property, receiver)
+  return typeof value === 'function' ? value.bind(target) : value
 }
 
 /** The database capability used when a server has no database configured. */
@@ -275,7 +425,7 @@ export class NullDatabase implements Database {
    * Throws because no database is configured.
    * @throws {Error} Always, naming the missing configuration.
    */
-  get sql(): BunSQL {
+  get sql(): SQL {
     throw new Error('No database is configured for this server')
   }
 
@@ -299,6 +449,44 @@ export class NullDatabase implements Database {
   /**
    * Rejects because no database is configured.
    * @param entity - Entity name; unused without a database.
+   * @param values - Mutation values; unused without a database.
+   * @returns A rejected promise naming the missing configuration.
+   */
+  create(entity: string, values: MutationValues | Iterable<MutationValues>): Promise<CreateResult> {
+    void entity
+    void values
+    return Promise.reject(new Error('No database is configured for this server'))
+  }
+
+  /**
+   * Rejects because no database is configured.
+   * @param entity - Entity name; unused without a database.
+   * @param filter - Mutation filter; unused without a database.
+   * @returns A rejected promise naming the missing configuration.
+   */
+  delete(entity: string, filter: MutationFilter): Promise<DeleteResult> {
+    void entity
+    void filter
+    return Promise.reject(new Error('No database is configured for this server'))
+  }
+
+  /**
+   * Rejects because no database is configured.
+   * @param entity - Entity name; unused without a database.
+   * @param filter - Mutation filter; unused without a database.
+   * @param changes - Mutation changes; unused without a database.
+   * @returns A rejected promise naming the missing configuration.
+   */
+  edit(entity: string, filter: MutationFilter, changes: MutationValues): Promise<EditResult> {
+    void entity
+    void filter
+    void changes
+    return Promise.reject(new Error('No database is configured for this server'))
+  }
+
+  /**
+   * Rejects because no database is configured.
+   * @param entity - Entity name; unused without a database.
    * @param options - Query options; unused without a database.
    * @returns A rejected promise naming the missing configuration.
    */
@@ -313,8 +501,26 @@ export class NullDatabase implements Database {
    * @param callback - Transaction-scoped work; unused without a database.
    * @returns A rejected promise naming the missing configuration.
    */
-  tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>> {
+  tx<T>(callback: (tx: DatabaseTransaction) => T | Promise<T>): Promise<SQL.ContextCallbackResult<T>> {
     void callback
+    return Promise.reject(new Error('No database is configured for this server'))
+  }
+
+  /**
+   * Rejects because no database is configured.
+   * @param entity - Entity name; unused without a database.
+   * @param filter - Mutation filter; unused without a database.
+   * @param values - Mutation values; unused without a database.
+   * @returns A rejected promise naming the missing configuration.
+   */
+  upsert(
+    entity: string,
+    filter: MutationFilter,
+    values: MutationValues,
+  ): Promise<UpsertResult> {
+    void entity
+    void filter
+    void values
     return Promise.reject(new Error('No database is configured for this server'))
   }
 }
@@ -360,9 +566,43 @@ class ManagedDatabase implements Database {
    * @returns The connected pool's Bun SQL instance.
    * @throws {Error} Before the managed database is connected or after close.
    */
-  get sql(): BunSQL {
+  get sql(): SQL {
     if (!this.#database) throw new Error('Managed database is not connected')
     return this.#database.sql
+  }
+
+  /**
+   * Create one entity or a finite batch atomically.
+   * @param entity - Exact concrete entity name.
+   * @param values - One value object or finite iterable.
+   * @returns The created count.
+   */
+  create(entity: string, values: MutationValues | Iterable<MutationValues>): Promise<CreateResult> {
+    if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
+    return this.#database.create(entity, values)
+  }
+
+  /**
+   * Delete every actor-authorized match.
+   * @param entity - Entity or abstract ancestor name.
+   * @param filter - Existing filter form.
+   * @returns The deleted count.
+   */
+  delete(entity: string, filter: MutationFilter): Promise<DeleteResult> {
+    if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
+    return this.#database.delete(entity, filter)
+  }
+
+  /**
+   * Patch every actor-authorized match.
+   * @param entity - Entity or abstract ancestor name.
+   * @param filter - Existing filter form.
+   * @param changes - Field values to patch.
+   * @returns The edited count.
+   */
+  edit(entity: string, filter: MutationFilter, changes: MutationValues): Promise<EditResult> {
+    if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
+    return this.#database.edit(entity, filter, changes)
   }
 
   /**
@@ -379,13 +619,25 @@ class ManagedDatabase implements Database {
 
   /**
    * Runs a callback inside a pooled Bun transaction.
-   * @param callback - Transaction-scoped work.
+   * @param callback - Transaction-scoped work with native SQL and mutation verbs.
    * @returns The callback result after commit.
    * @throws {Error} When the managed pool is not connected or the callback fails.
    */
-  tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>> {
+  tx<T>(callback: (tx: DatabaseTransaction) => T | Promise<T>): Promise<SQL.ContextCallbackResult<T>> {
     if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
     return this.#database.tx(callback)
+  }
+
+  /**
+   * Edit exactly one authorized match or create one.
+   * @param entity - Exact concrete entity name.
+   * @param filter - Existing filter form.
+   * @param values - Values used by either branch.
+   * @returns Which branch ran.
+   */
+  upsert(entity: string, filter: MutationFilter, values: MutationValues): Promise<UpsertResult> {
+    if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
+    return this.#database.upsert(entity, filter, values)
   }
 
   /**
