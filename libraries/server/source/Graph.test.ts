@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID } from './Graph'
+import { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID, Security } from './Graph'
 import { Operator } from './Operator'
 
 const graph = new Graph({
@@ -429,6 +429,216 @@ describe('Graph', () => {
     expect(policy?.sql).toContain(' OR ')
     expect(schema.functions.find(fn => fn.name === helperNames[0])?.sql)
       .toContain('FROM "Resource" AS "__row"')
+  })
+
+  test('compiles named capabilities and entity security into one policy authority', () => {
+    enum Capability {
+      Manage = 'manageCampaigns',
+      View = 'viewCampaigns',
+    }
+    enum MembershipRole {
+      Owner = 'Owner',
+      Viewer = 'Viewer',
+    }
+    const security = {
+      [Action.Read]: [
+        { grant: Capability.Manage },
+        {
+          grant: Capability.View,
+          where: {
+            field: 'members',
+            filters: [{
+              filters: [
+                { field: 'id', operator: Operator.Comparison.Equal, value: '$me' },
+                {
+                  field: 'workspaceMembership.role',
+                  operator: Operator.Comparison.Equal,
+                  value: MembershipRole.Owner,
+                },
+              ],
+              operator: Operator.Logical.And,
+            }],
+            operator: Operator.Comparison.Contains,
+          },
+        },
+      ],
+      [Action.Update]: { grant: Capability.Manage },
+    }
+    const capabilityGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'title', type: 'String' }], name: 'Workspace', security },
+        { fields: [], name: 'User' },
+      ],
+      grants: {
+        [Capability.Manage]: { description: 'Manage campaigns' },
+        [Capability.View]: { description: 'View campaigns' },
+      },
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+      }],
+      roles: {
+        owner: { grants: [Capability.View, Capability.Manage], name: 'Owner group' },
+        viewer: { grants: [Capability.View], name: 'Viewer group' },
+      },
+    } as never)
+    expect(capabilityGraph.capabilities).toEqual([
+      { description: 'Manage campaigns', name: Capability.Manage },
+      { description: 'View campaigns', name: Capability.View },
+    ])
+    expect(capabilityGraph.roles.find(role => role.name === 'Owner group')?.grants)
+      .toEqual([Capability.View, Capability.Manage])
+    expect(capabilityGraph.security).toMatchObject([
+      { action: Action.Read, owner: 'Workspace' },
+      { action: Action.Update, owner: 'Workspace' },
+    ])
+    const readGrants = capabilityGraph.grants.filter(grant => grant.action === Action.Read)
+    expect(readGrants).toHaveLength(3)
+    const schema = capabilityGraph.physicalSchema('basis_app', true)
+    const read = schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'SELECT')
+    const update = schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'UPDATE')
+    const create = schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'INSERT')
+    const remove = schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'DELETE')
+    expect(read?.sql).toContain('basis.has_role')
+    expect(read?.sql).toContain('basis.policy_')
+    expect(update?.sql).toContain('basis.has_role')
+    expect(update?.sql).toContain('basis.policy_')
+    expect(create?.sql).toContain('FALSE')
+    expect(remove?.sql).toContain('FALSE')
+  })
+
+  test('supports explicit public security without implicit writes', () => {
+    const publicGraph = new Graph({
+      entities: [{
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'Workspace',
+        security: { [Action.Read]: Security.Public },
+      }],
+    } as never)
+    const schema = publicGraph.physicalSchema('basis_app', true)
+    expect(schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'SELECT')?.sql)
+      .toContain('TRUE')
+    expect(schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'UPDATE')?.sql)
+      .toContain('FALSE')
+    expect(schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'INSERT')?.sql)
+      .toContain('FALSE')
+    expect(schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'DELETE')?.sql)
+      .toContain('FALSE')
+  })
+
+  test('requires read for every write and rejects security on an inherited pair', () => {
+    const writeOnly = new Graph({
+      entities: [{
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'Workspace',
+        security: { [Action.Update]: Security.Public },
+      }],
+    } as never)
+    expect(writeOnly.accessExpression('update', 'Workspace', { id: 'row' })).toBeNull()
+    expect(() => new Graph({
+      entities: [
+        {
+          fields: [],
+          name: 'Resource',
+          security: { [Action.Read]: Security.Public },
+        },
+        {
+          extends: 'Resource',
+          fields: [],
+          name: 'Workspace',
+          security: { [Action.Update]: Security.Public },
+        },
+      ],
+    } as never)).toThrow('security is declared on both "Resource" and "Workspace"')
+    expect(() => new Graph({
+      entities: [
+        { fields: [], name: 'Resource', security: { [Action.Read]: Security.Public } },
+        { extends: 'Resource', fields: [], name: 'Workspace' },
+        { extends: 'Workspace', fields: [], name: 'Room', security: { [Action.Delete]: Security.Public } },
+      ],
+    } as never)).toThrow('security is declared on both "Resource" and "Room"')
+  })
+
+  test('inherits a single parent security contract through descendants', () => {
+    const inherited = new Graph({
+      entities: [
+        {
+          fields: [],
+          name: 'Resource',
+          security: { [Action.Read]: Security.Public },
+        },
+        { extends: 'Resource', fields: [], name: 'Workspace' },
+        { extends: 'Workspace', fields: [], name: 'Room' },
+      ],
+    } as never)
+    const schema = inherited.physicalSchema('basis_app', true)
+    expect(schema.policies.find(policy => policy.table === 'Workspace' && policy.command === 'SELECT')?.sql)
+      .toContain('TRUE')
+    expect(schema.policies.find(policy => policy.table === 'Room' && policy.command === 'SELECT')?.sql)
+      .toContain('TRUE')
+  })
+
+  test('allows sibling security when no ancestor declares security', () => {
+    const siblings = new Graph({
+      entities: [
+        { fields: [], name: 'Resource' },
+        {
+          extends: 'Resource',
+          fields: [],
+          name: 'Workspace',
+          security: { [Action.Read]: Security.Public },
+        },
+        {
+          extends: 'Resource',
+          fields: [],
+          name: 'Folder',
+          security: { [Action.Read]: Security.Public },
+        },
+      ],
+    } as never)
+    expect(siblings.security).toHaveLength(2)
+  })
+
+  test('applies explicit public security to named relationship tables', () => {
+    const relationshipSecurity = new Graph({
+      entities: [
+        { fields: [], name: 'Workspace' },
+        { fields: [], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+        security: { [Action.Read]: Security.Public },
+      }],
+    } as never)
+    const schema = relationshipSecurity.physicalSchema('basis_app', true)
+    expect(schema.policies.find(policy => (
+      policy.table === 'WorkspaceMembership' && policy.command === 'SELECT'
+    ))?.sql).toContain('TRUE')
+  })
+
+  test('rejects unknown capabilities, roles, and actions in security declarations', () => {
+    const base = {
+      grants: { Known: { description: 'Known' } },
+      roles: { viewer: { grants: ['Known'], name: 'Viewer' } },
+    }
+    const make = (security: unknown): Graph => new Graph({
+      ...base,
+      entities: [{ fields: [], name: 'Workspace', security }],
+    } as never)
+    expect(() => make({ read: { grant: 'Missing' } })).toThrow('unknown capability "Missing"')
+    expect(() => make({ read: { role: 'Missing' } })).toThrow('unknown role "Missing"')
+    expect(() => make({ read: { role: 'public' } })).toThrow('must use Security.Public')
+    expect(() => make({ invalid: Security.Public })).toThrow('unknown action "invalid"')
+    expect(() => make({ read: {} })).toThrow('exactly one of grant or role')
   })
 
 })

@@ -7,7 +7,12 @@ title: Authorization & Row-Level Security
 Basis owns one canonical application graph. The graph declares the ontology, the stable roles that exist, and the role/action/row permissions that PostgreSQL enforces. Loading a graph never mutates the database. `server.graph(graph)` puts `server.db` on the restricted application role, and PostgreSQL compiles the graph's permissions into real row-level-security policies.
 
 ```ts
-import { Graph, Server } from 'basis/server'
+import { Action, Graph, Server } from 'basis/server'
+
+enum Capability {
+  ManageArticle = 'manageArticle',
+  ViewArticle = 'viewArticle',
+}
 
 const graph = new Graph({
   entities: [{
@@ -16,16 +21,27 @@ const graph = new Graph({
       { field: 'title', type: 'String' },
       { field: 'owner', type: 'Entity', target: 'User' },
     ],
+    security: {
+      [Action.Read]: [{
+        grant: Capability.ViewArticle,
+        where: { field: 'owner', operator: '$eq', value: '$me' },
+      }],
+      [Action.Create]: { grant: Capability.ManageArticle },
+      [Action.Update]: { grant: Capability.ManageArticle },
+      [Action.Delete]: { grant: Capability.ManageArticle },
+    },
   }],
-  roles: {
-    editor: { name: 'Editor' },
+  grants: {
+    [Capability.ManageArticle]: { description: 'Manage articles' },
+    [Capability.ViewArticle]: { description: 'View articles' },
   },
-  grants: [
-    { role: 'public', action: 'read', target: 'Article', predicate: 'owner = $me' },
-    { role: 'editor', action: 'read', target: 'Article' },
-    { role: 'editor', action: 'update', target: 'Article' },
-    { role: 'admin', action: 'manage', target: '*' },
-  ],
+  roles: {
+    editor: { name: 'Editor', grants: [Capability.ViewArticle] },
+    administrator: {
+      name: 'Administrator',
+      grants: [Capability.ManageArticle, Capability.ViewArticle],
+    },
+  },
 })
 
 const server = new Server()
@@ -34,7 +50,6 @@ const server = new Server()
   .database()
   .start()
 ```
-
 The application root conventionally exports `graph.ts` as `export default new Graph({...})`. Keep the application graph in one module and pass it to the server. `Graph` composes the application ontology with the system `User`, `Role`, `ExternalIdentity`, and `UserRole` definitions. Application `User` inherits `Entity`'s `id`, `name`, and `entity`; do not redeclare those fields. `Role` is an identified entity with a stable UUID `id`, an inherited mutable `name`, and an optional `description`.
 
 ## Roles and membership
@@ -64,29 +79,104 @@ Install the graph schema first through reviewed `DDL.plan → review → apply`;
 
 Automatic creation of a new `User` requires exactly one concrete `User` descendant. A graph may declare multiple concrete User subtypes for application-managed accounts; existing provider bindings still resolve, but a new automatic signup raises an explicit ambiguity error instead of choosing by declaration order. Enrollment supplies the canonical root name and the optional `User.email` value only; OAuth receives those profile values from the provider `identity` callback. It does not synthesize application-owned fields. If the selected User or one of its concrete subtypes has a required field that the enrollment call does not provide, PostgreSQL rejects creation and leaves no partial identity behind.
 
-## Grants and predicates
+## Capabilities, roles, and security
 
-The closed action vocabulary is `read`, `create`, `update`, `delete`, and `manage`. A grant binds one graph role, one target entity or relationship, one action, and an optional validated row predicate.
+The graph declares reusable **capabilities** in `grants`; a capability is a named positive permission, not a role attachment:
 
-- Applicable grants combine as OR.
-- No applicable grant means denied.
-- A conditional grant never becomes unconditional without an explicit unconditional grant.
-- `manage` authors controlled security administration; it does not grant blanket data writes or PostgreSQL `BYPASSRLS`.
-- Predicates use the same `Filter`/`Predicate`/`QueryNormalizer` vocabulary as entity queries.
-- Graph changes require a new graph and schema plan. There is no runtime grant registry duplicating the graph.
+```ts
+grants: {
+  [Capability.ViewCampaigns]: { description: 'View campaigns' },
+  [Capability.ManageCampaigns]: { description: 'Manage campaigns' },
+}
+```
 
-Graph predicates are normalized when the graph loads and compiled into PostgreSQL `CREATE POLICY ... USING (...)` and `WITH CHECK (...)` expressions. PostgreSQL validates and evaluates them as SQL; Basis does not interpret business predicates at request time. RLS covers the universal `Entity` root, every MTI ancestor and concrete table, and every named relationship table. Reads deny by returning no rows. Creates use `WITH CHECK`; updates check old and new rows; deletes check the old row. Default deny applies to tables without applicable grants.
+Roles group capabilities. A user receives capabilities through verified `UserRole` membership in those roles; multiple roles may confer the same capability:
 
-Inherited MTI predicate fields use a narrow, row-scoped Boolean policy helper generated from the compiled predicate. The helper answers only whether the compiled predicate matches one row identity; it does not return field values or accept arbitrary expression text.
+```ts
+roles: {
+  advisor: { name: 'Advisor', grants: [Capability.ViewCampaigns] },
+  administrator: {
+    name: 'Administrator',
+    grants: [Capability.ViewCampaigns, Capability.ManageCampaigns],
+  },
+}
+```
+
+Each entity and named relationship owns an action-keyed `security` declaration. An action value is either explicit `Security.Public` or one or more alternative rules combined with OR. Each rule requires one of `grant` or `role`, optionally combined with a canonical row predicate in `where`:
+
+```ts
+security: {
+  [Action.Read]: [
+    { grant: Capability.ManageCampaigns },
+    {
+      grant: Capability.ViewCampaigns,
+      where: { field: 'owner', operator: '$eq', value: '$me' },
+    },
+  ],
+  [Action.Update]: { grant: Capability.ManageCampaigns },
+  [Action.Delete]: { grant: Capability.ManageCampaigns },
+  // Create omitted means denied.
+}
+```
+
+- Missing action means denied, for reads and writes.
+- Public access is explicit only: `[Action.Read]: Security.Public`; it never implies another action.
+- A `{ role: 'someRole' }` rule requires that Graph role; `{ grant: Capability.X }` requires any role that confers the capability.
+- Rules are positive alternatives. No negative grant or precedence exists.
+- Every `create`, `update`, and `delete` additionally requires `read` for the same row. A create must satisfy read on the proposed resulting row; it cannot be created only to become visible after a later membership insert.
+- One security declaration owns an entity hierarchy. If an entity declares `security`, none of its ancestors or descendants may declare one, even for disjoint actions; Graph construction fails with both owner names. A single declaration inherits unchanged to all physical descendants. Siblings may each declare security when no ancestor does.
+
+The closed action vocabulary is `read`, `create`, `update`, `delete`, and `manage`. `manage` is an administration qualifier and cannot carry a row predicate. Predicates use the same `Filter`/`Predicate`/`QueryNormalizer` vocabulary as entity queries. Graph changes require a new graph and schema plan; there is no runtime grant registry duplicating the graph.
+
+Graph predicates are normalized when the graph loads and compiled into PostgreSQL `CREATE POLICY ... USING (...)` and `WITH CHECK (...)` expressions. RLS covers the universal `Entity` root, every MTI ancestor and concrete table, and every named relationship table. Reads deny by returning no rows. Default deny applies to tables without a matching action declaration.
+
+The previous target-bound `grants: [{ role, action, target, predicate }]` form is accepted only as a compatibility adapter and normalizes into the same canonical grant list; new graphs should use capabilities and entity/relationship security.
 
 ## Relationship membership predicates
 
 Graph roles are global role memberships. A resource-specific membership is ordinary Graph relationship data, not another global role. Declare the relationship and grant access through its collection navigation:
 
 ```ts
+enum WorkspaceCapability {
+  View = 'viewWorkspace',
+  Edit = 'editWorkspace',
+}
+
+enum MembershipRole {
+  Owner = 'Owner',
+  Viewer = 'Viewer',
+}
+
 const graph = new Graph({
   entities: [
-    { name: 'Workspace', fields: [] },
+    {
+      name: 'Workspace',
+      fields: [],
+      security: {
+        [Action.Read]: {
+          grant: WorkspaceCapability.View,
+          where: 'members $contains (id = $me)',
+        },
+        [Action.Update]: {
+          grant: WorkspaceCapability.Edit,
+          where: {
+            field: 'members',
+            operator: '$contains',
+            filters: [{
+              operator: '$and',
+              filters: [
+                { field: 'id', operator: '$eq', value: '$me' },
+                {
+                  field: 'workspaceMembership.role',
+                  operator: '$eq',
+                  value: MembershipRole.Owner,
+                },
+              ],
+            }],
+          },
+        },
+      },
+    },
     { name: 'User', fields: [] },
   ],
   relationships: [{
@@ -97,25 +187,41 @@ const graph = new Graph({
     ],
     fields: [{ field: 'role', type: 'String' }],
   }],
-  grants: [{
-    role: 'public',
-    action: 'read',
-    target: 'Workspace',
-    predicate: 'members $contains (id = $me)',
-  }],
+  grants: {
+    [WorkspaceCapability.View]: { description: 'View a workspace' },
+    [WorkspaceCapability.Edit]: { description: 'Edit a workspace' },
+  },
+  roles: {
+    member: { grants: [WorkspaceCapability.View], name: 'Workspace member' },
+    owner: {
+      name: 'Workspace owner',
+      grants: [WorkspaceCapability.View, WorkspaceCapability.Edit],
+    },
+  },
 })
 ```
-
 `members` is the inverse collection declared by the authenticated endpoint. `$me` is the verified transaction actor, so this predicate means: the current actor is connected to the Workspace by at least one `WorkspaceMembership`. An anonymous actor has no actor id and does not match. Changing membership rows changes access immediately; no graph rebuild or policy reinstall is required.
 
 Relationship-owned scalar properties participate through the lower-cased relationship-name prefix. Keep the identity and role requirements in one member requirement so PostgreSQL evaluates them against the same relationship row:
 
 ```ts
-{
-  role: 'public',
-  action: 'update',
-  target: 'Workspace',
-  predicate: "members $contains (id = $me $and workspaceMembership.role = 'Owner')",
+[Action.Update]: {
+  grant: WorkspaceCapability.Edit,
+  where: {
+    field: 'members',
+    operator: '$contains',
+    filters: [{
+      operator: '$and',
+      filters: [
+        { field: 'id', operator: '$eq', value: '$me' },
+        {
+          field: 'workspaceMembership.role',
+          operator: '$eq',
+          value: MembershipRole.Owner,
+        },
+      ],
+    }],
+  },
 }
 ```
 
@@ -129,7 +235,7 @@ The equivalent structured predicate is:
     operator: '$and',
     filters: [
       { field: 'id', operator: '$eq', value: '$me' },
-      { field: 'workspaceMembership.role', operator: '$eq', value: 'Owner' },
+      { field: 'workspaceMembership.role', operator: '$eq', value: MembershipRole.Owner },
     ],
   }],
 }
@@ -178,8 +284,8 @@ The administrative connection is an internal provisioning capability and is not 
 
 ## Inspection and administration
 
-`server.auth!.can(action, target, row?)` executes the compiled policy expression and returns whether PostgreSQL permits the action for the current request actor. `server.auth!.effective(userId)` lists graph grants effective for a user, including Public grants. `server.auth!.revokeIdentity(provider, subject)` revokes a provider binding.
+`server.auth!.can(action, target, row?)` executes the compiled policy expression and returns whether PostgreSQL permits the action for the current request actor. `server.auth!.effective(userId)` lists the expanded capability/role grants effective for a user, including explicit Public grants. `server.auth!.revokeIdentity(provider, subject)` revokes a provider binding.
 
 Identity resolution and enrollment use one narrow system-owned security-definer function. OAuth calls it through the restricted application path; `bootstrap()` invokes the same function through its administrative connection. Request-time enrollment does not require the owner credential. Provider subjects are never treated as canonical entity ids, and revoked bindings fail closed. The administrative connection remains reserved for explicit bootstrap and schema provisioning.
 
-The graph's roles, grants, RLS policies, schemas, indexes, and security functions are part of the typed physical schema compiled by `Graph.physicalSchema` and planned by `DDL.plan`. See [Schema Inspection & Planning](./schema.mdx).
+The graph's roles, capabilities, entity/relationship security declarations, RLS policies, schemas, indexes, and security functions are part of the typed physical schema compiled by `Graph.physicalSchema` and planned by `DDL.plan`. See [Schema Inspection & Planning](./schema.mdx).

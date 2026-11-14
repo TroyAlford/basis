@@ -8,7 +8,7 @@ import { removeService } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
-import { ADMIN_ROLE_ID } from './Graph'
+import { Action, ADMIN_ROLE_ID } from './Graph'
 import { Graph } from './Graph'
 import { Server } from './Server'
 
@@ -47,6 +47,8 @@ const graph = new Graph({
     { action: 'read', predicate: 'owner = $me', role: 'public', target: 'Article' },
     { action: 'read', role: 'public', target: 'Post' },
     { action: 'create', predicate: "title = 'Allowed'", role: 'public', target: 'Article' },
+    { action: 'read', role: 'admin', target: 'Employee' },
+    { action: 'read', role: 'admin', target: 'ApplicationUser' },
     { action: 'read', role: 'editor', target: 'Article' },
     { action: 'update', role: 'editor', target: 'Article' },
     { action: 'read', role: 'limited', target: 'Article' },
@@ -261,6 +263,7 @@ describe('Authorization RLS', () => {
       `))).rejects.toThrow()
 
       expect(await asActor(user, () => authorization.can('create', 'Article', {
+        owner: user,
         title: 'Allowed',
       }))).toBe(true)
       expect(await asActor(user, () => authorization.can('create', 'Article', {
@@ -811,6 +814,138 @@ describe('Authorization RLS', () => {
       expect(await asActor(alice, () => server.db.query('Resource', {
         fields: ['id', 'title'],
       }))).toEqual([{ id: workspace, title: 'Allowed' }])
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 120_000)
+
+  test('requires read for writes on the real PostgreSQL path', async () => {
+    enum Capability {
+      Edit = 'editNote',
+      View = 'viewNote',
+    }
+    const writeGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        {
+          fields: [
+            { field: 'owner', target: 'User', type: 'Entity' },
+            { field: 'title', type: 'String' },
+          ],
+          name: 'Note',
+          security: {
+            [Action.Read]: [{
+              grant: Capability.View,
+              where: { field: 'owner', operator: '$eq', value: '$me' },
+            }],
+            [Action.Create]: { grant: Capability.Edit },
+            [Action.Update]: { grant: Capability.Edit },
+            [Action.Delete]: { grant: Capability.Edit },
+          },
+        },
+      ],
+      grants: {
+        [Capability.Edit]: { description: 'Edit notes' },
+        [Capability.View]: { description: 'View notes' },
+      },
+      roles: {
+        editor: { grants: [Capability.Edit, Capability.View], name: 'Editor group' },
+        writer: { grants: [Capability.Edit], name: 'Writer group' },
+      },
+    } as never)
+    const install = tempDirectory('basis-authorization-write-read-')
+    const server = await start(install, writeGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const bootstrap = await authorization.bootstrap({
+        displayName: 'Admin',
+        email: 'admin@example.com',
+        provider: 'test',
+        subject: 'admin',
+      })
+      if (!bootstrap.userId) throw new Error('bootstrap did not create an administrator')
+      const alice = await authorization.enrollIdentity('test', 'alice', { email: 'alice@example.com' })
+      const bob = await authorization.enrollIdentity('test', 'bob', { email: 'bob@example.com' })
+      if (!alice || !bob) throw new Error('users were not enrolled')
+      const editor = writeGraph.role('editor')
+      const writer = writeGraph.role('writer')
+      if (!editor || !writer) throw new Error('roles were not loaded')
+      await admin.sql`
+        INSERT INTO "UserRole" ("user.id", "role.id")
+        VALUES (${alice}, ${editor.id}), (${bob}, ${writer.id})
+      `
+      const note = randomUUID()
+      await admin.sql.begin(async tx => {
+        await tx`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES (${note}, 'Alice note', 'Note')
+        `
+        await tx`
+          INSERT INTO "Note" ("id", "owner.id", "title")
+          VALUES (${note}, ${alice}, 'Alice note')
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      expect(await asActor(alice, () => server.db.query('Note', {
+        fields: ['id', 'title'],
+      }))).toEqual([{ id: note, title: 'Alice note' }])
+      expect(await asActor(bob, () => server.db.query('Note', {
+        fields: ['id', 'title'],
+      }))).toEqual([])
+
+      const update = (actor: string, id: string) => asActor(actor, () => server.db.tx(async sql => (
+        sql<{ id: string }[]>`
+          UPDATE "Note"
+          SET "title" = 'Updated'
+          WHERE "id" = ${id}
+          RETURNING "id"
+        `
+      )))
+      expect(await update(alice, note)).toHaveLength(1)
+      expect(await update(bob, note)).toHaveLength(0)
+
+      const create = (actor: string, owner: string, title: string) => asActor(actor, () => (
+        server.db.tx(async sql => {
+          const id = randomUUID()
+          await sql`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${id}, ${title}, 'Note')
+          `
+          await sql`
+            INSERT INTO "Note" ("id", "owner.id", "title")
+            VALUES (${id}, ${owner}, ${title})
+          `
+          return id
+        })
+      ))
+      await expect(create(bob, bob, 'Bob note')).rejects.toThrow()
+      const [orphans] = await admin.sql<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM "Entity" WHERE "name" = 'Bob note'
+      `
+      expect(orphans?.count).toBe(0)
+      await expect(create(alice, alice, 'Alice note')).resolves.toBeTruthy()
+      expect(await asActor(bob, () => authorization.can('create', 'Note', {
+        owner: bob,
+        title: 'Bob note',
+      }))).toBe(false)
+      expect(await asActor(alice, () => authorization.can('create', 'Note', {
+        owner: alice,
+        title: 'Alice note',
+      }))).toBe(true)
+      expect(await asActor(bob, () => authorization.can('update', 'Note', { id: note }))).toBe(false)
+      expect(await asActor(alice, () => authorization.can('update', 'Note', { id: note }))).toBe(true)
+
+      const remove = (actor: string) => asActor(actor, () => server.db.tx(async sql => sql<{ id: string }[]>`
+        DELETE FROM "Note"
+        WHERE "id" = ${note}
+        RETURNING "id"
+      `))
+      expect(await remove(bob)).toHaveLength(0)
+      expect(await remove(alice)).toHaveLength(1)
     } finally {
       await admin.close()
       await server.shutdown()

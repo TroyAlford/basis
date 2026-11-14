@@ -19,6 +19,12 @@ export enum Action {
   Update = 'update',
 }
 
+/** Explicit public-access sentinel for entity and relationship security. */
+export enum Security {
+  /** Allow the action to every request. */
+  Public = 'public',
+}
+
 /** The built-in principal used by grants that apply to every request. */
 export const PUBLIC_ROLE_ID = 'public'
 /** The stable identifier for the graph's built-in administrator role. */
@@ -30,6 +36,8 @@ const DEFAULT_APP_ROLE = 'basis_app'
 export interface RoleDetails {
   /** Optional role description. */
   readonly description?: string,
+  /** Named capabilities assigned to this role. */
+  readonly grants?: readonly string[],
   /** Mutable human-readable role name. */
   readonly name: string,
 }
@@ -70,12 +78,45 @@ export interface GraphGrant {
   readonly target: string,
 }
 
+/** One typed named capability declaration. */
+export interface GrantCapability {
+  /** Optional human-readable capability description. */
+  readonly description?: string,
+  /** Capability name used by security rules and role assignments. */
+  readonly name: string,
+}
+
+/** Named capability declarations or the legacy target-bound grant list. */
+export type GrantSource =
+  | Readonly<Record<string, { readonly description?: string }>>
+  | readonly GrantDefinition[]
+
+/** One normalized rule alternative inside an action security declaration. */
+export interface SecurityRuleDefinition {
+  /** Named capability required by this alternative. */
+  readonly grant?: string,
+  /** Graph role required by this alternative. */
+  readonly role?: string,
+  /** Canonical row predicate required by this alternative, or null. */
+  readonly where: Filter | null,
+}
+
+/** One normalized action security declaration. */
+export interface SecurityDefinition {
+  /** Closed action. */
+  readonly action: Action,
+  /** Entity or relationship owning the declaration. */
+  readonly owner: string,
+  /** Alternative rules combined with OR. */
+  readonly rules: readonly SecurityRuleDefinition[],
+}
+
 /** Canonical graph authoring options. */
 export interface GraphOptions {
   /** Application ontology as JSON text, a document, or an entity array. */
   readonly entities?: AuthoredDocument | readonly AuthoredEntity[] | string,
   /** Graph-defined permission declarations. */
-  readonly grants?: readonly GrantDefinition[],
+  readonly grants?: GrantSource,
   /** Application relationships when `entities` is an entity array. */
   readonly relationships?: readonly AuthoredRelationship[],
   /** Role authoring forms and stable identifiers. */
@@ -114,9 +155,9 @@ const RESERVED_NAMES = new Set(['Role', 'ExternalIdentity', 'UserRole'])
 /** Security entities whose `manage` grant means controlled administration. */
 const MANAGED_ENTITIES = new Set(['Role', 'UserRole', 'ExternalIdentity'])
 /** The built-in administrator role. */
-const ADMIN_ROLE: GraphRole = { id: ADMIN_ROLE_ID, name: 'Administrator' }
+const ADMIN_ROLE: GraphRole = { grants: [], id: ADMIN_ROLE_ID, name: 'Administrator' }
 /** The built-in public principal. */
-const PUBLIC_ROLE: GraphRole = { id: PUBLIC_ROLE_ID, name: 'Public' }
+const PUBLIC_ROLE: GraphRole = { grants: [], id: PUBLIC_ROLE_ID, name: 'Public' }
 /**
  * The one application-facing canonical graph.
  *
@@ -127,10 +168,15 @@ const PUBLIC_ROLE: GraphRole = { id: PUBLIC_ROLE_ID, name: 'Public' }
 export class Graph {
   /** The combined application and security ontology. */
   readonly definitions: EntityDefinitions
+  /** Named reusable capabilities declared by the graph. */
+  readonly capabilities: readonly GrantCapability[]
+  /** Canonical graph-defined permissions in one normalized list. */
+  readonly grants: readonly GraphGrant[]
   /** Canonical roles, including the built-in public principal. */
   readonly roles: readonly GraphRole[]
-  /** Canonical graph-defined permissions. */
-  readonly grants: readonly GraphGrant[]
+  /** Canonical action security declarations. */
+  readonly security: readonly SecurityDefinition[]
+  readonly #capabilities: ReadonlyMap<string, GrantCapability>
   readonly #options: GraphOptions
   readonly #rolesById: ReadonlyMap<string, GraphRole>
   readonly #rolesByName: ReadonlyMap<string, GraphRole>
@@ -143,8 +189,10 @@ export class Graph {
   constructor(options: GraphOptions = {}) {
     this.#options = options
     const application = normalizeGraphInput(options)
-    const entities = application.entities
-    const relationships = application.relationships ?? []
+    const securitySources = new Map<string, unknown>()
+    const entities = (application.entities ?? []).map(entity => takeSecurity(entity, securitySources))
+    const relationships = (application.relationships ?? [])
+      .map(relationship => takeSecurity(relationship, securitySources))
     for (const entity of entities) {
       const name = entityName(entity)
       if (RESERVED_NAMES.has(name)) {
@@ -152,9 +200,9 @@ export class Graph {
       }
     }
     const hasUser = entities.some(entity => entityName(entity) === 'User')
-    const security = SYSTEM_DOCUMENT.entities ?? []
+    const systemEntities = SYSTEM_DOCUMENT.entities ?? []
     const allEntities = [
-      ...security.filter(entity => hasUser === false || entityName(entity) !== 'User'),
+      ...systemEntities.filter(entity => hasUser === false || entityName(entity) !== 'User'),
       ...entities,
     ]
     this.definitions = EntityDefinitions.fromDocument({
@@ -162,11 +210,19 @@ export class Graph {
       entities: allEntities,
       relationships: [...(SYSTEM_DOCUMENT.relationships ?? []), ...relationships],
     })
+    this.#capabilities = capabilitiesFrom(options.grants)
+    this.capabilities = [...this.#capabilities.values()]
     this.roles = normalizeRoles(options.roles)
     this.#schema = options.schema ?? 'public'
     this.#rolesById = new Map(this.roles.map(role => [role.id, role]))
     this.#rolesByName = new Map(this.roles.map(role => [role.name, role]))
-    this.grants = (options.grants ?? []).map(grant => this.#normalizeGrant(grant))
+    this.#assertRoleCapabilities()
+    this.security = this.#normalizeSecurity(securitySources)
+    this.#assertSecurityInheritance()
+    const legacy = Array.isArray(options.grants)
+      ? options.grants.map(grant => this.#normalizeGrant(grant))
+      : []
+    this.grants = [...legacy, ...this.#expandSecurity()]
     this.#assertPolicyTargets()
   }
 
@@ -323,11 +379,29 @@ export class Graph {
   createExpression(target: string, row: Record<string, unknown> = {}): string | null {
     const entity = this.#policyEntity(target)
     if (!entity) return null
+    const readable = this.#rowExpression(target, Action.Read, row)
+    const creatable = this.#rowExpression(target, Action.Create, row)
+    if (!readable || !creatable) return null
+    return `((${readable}) AND (${creatable}))`
+  }
+
+  /**
+   * Compile action rules against proposed row values for create checks.
+   * @param target - Entity or relationship being created.
+   * @param action - Action being evaluated.
+   * @param row - Proposed new-row values.
+   * @returns SQL expression, or null when no rule applies.
+   */
+  #rowExpression(
+    target: string,
+    action: Action,
+    row: Record<string, unknown>,
+  ): string | null {
     const targets = new Set(['*', ...this.#ancestry(target)])
     const conditions: string[] = []
     for (const grant of this.grants) {
       if (!targets.has(grant.target)) continue
-      const actionMatches = grant.action === Action.Create
+      const actionMatches = grant.action === action
         || (MANAGED_ENTITIES.has(target) && grant.action === Action.Manage)
       if (!actionMatches) continue
       const role = roleCondition(grant.role)
@@ -383,6 +457,142 @@ export class Graph {
    */
   manageExpression(target: string): string | null {
     return this.#manageExpression(target)
+  }
+
+  /**
+   * Validate that every role references a declared capability.
+   */
+  #assertRoleCapabilities(): void {
+    for (const role of this.roles) {
+      for (const name of role.grants ?? []) {
+        if (!this.#capabilities.has(name)) {
+          throw new Error(`Graph: role "${role.name}" references unknown capability "${name}"`)
+        }
+      }
+    }
+  }
+
+  /**
+   * Normalize authored entity and relationship security declarations.
+   * @param sources - Raw security declarations keyed by owner name.
+   * @returns Canonical security declarations.
+   */
+  #normalizeSecurity(sources: ReadonlyMap<string, unknown>): readonly SecurityDefinition[] {
+    const declarations: SecurityDefinition[] = []
+    for (const [owner, raw] of sources) {
+      if (!this.definitions.entity(owner) && !this.definitions.relationship(owner)) {
+        throw new Error(`Graph: security owner "${owner}" is not a declared entity or relationship`)
+      }
+      if (!isRecordLike(raw)) {
+        throw new Error(`Graph: security for "${owner}" must be an object`)
+      }
+      for (const [actionName, value] of Object.entries(raw)) {
+        const action = actionValue(actionName)
+        const rules = this.#normalizeSecurityRules(owner, action, value)
+        declarations.push({ action, owner, rules })
+      }
+    }
+    return declarations
+  }
+
+  /**
+   * Normalize one action's alternatives or explicit public sentinel.
+   * @param owner - Entity or relationship owner.
+   * @param action - Action being declared.
+   * @param value - Authored action security.
+   * @returns Canonical alternative rules.
+   */
+  #normalizeSecurityRules(
+    owner: string,
+    action: Action,
+    value: unknown,
+  ): readonly SecurityRuleDefinition[] {
+    if (value === Security.Public) return [{ where: null }]
+    const candidates = Array.isArray(value) ? value : [value]
+    return candidates.map(candidate => {
+      if (candidate === Security.Public) return { where: null }
+      if (!isRecordLike(candidate)) {
+        throw new Error(`Graph: security rule for "${owner}" must be an object`)
+      }
+      const keys = Object.keys(candidate)
+      if (keys.some(key => key !== 'grant' && key !== 'role' && key !== 'where')) {
+        throw new Error(`Graph: security rule for "${owner}" has an unknown property`)
+      }
+      const hasGrant = candidate.grant !== undefined
+      const hasRole = candidate.role !== undefined
+      if (hasGrant === hasRole) {
+        throw new Error(
+          `Graph: security rule for "${owner}" must declare exactly one of grant or role, ` +
+          'or use Security.Public',
+        )
+      }
+      const where = candidate.where === undefined || candidate.where === null
+        ? null
+        : this.#normalizePredicate(owner, candidate.where as GrantDefinition['predicate'])
+      if (action === Action.Create && where && filterContainsCollection(where)) {
+        throw new Error(`Graph: create security for "${owner}" cannot use collection predicates`)
+      }
+      if (action === Action.Manage && where) {
+        throw new Error(`Graph: manage security for "${owner}" cannot use a row predicate`)
+      }
+      if (hasGrant) {
+        if (typeof candidate.grant !== 'string' || !this.#capabilities.has(candidate.grant)) {
+          throw new Error(`Graph: unknown capability "${String(candidate.grant)}" for "${owner}"`)
+        }
+        return { grant: candidate.grant, where }
+      }
+      if (typeof candidate.role !== 'string') {
+        throw new Error(`Graph: security role for "${owner}" must be a string`)
+      }
+      const role = this.role(candidate.role)
+      if (!role) throw new Error(`Graph: unknown role "${candidate.role}"`)
+      if (role.id === PUBLIC_ROLE_ID) {
+        throw new Error(`Graph: security for "${owner}" must use Security.Public for public access`)
+      }
+      return { role: role.id, where }
+    })
+  }
+
+  /**
+   * Expand normalized security declarations into the one compiler grant list.
+   * @returns Expanded grants in declaration order.
+   */
+  #expandSecurity(): GraphGrant[] {
+    const grants: GraphGrant[] = []
+    for (const declaration of this.security) {
+      for (const rule of declaration.rules) {
+        const roles = rule.grant === undefined
+          ? rule.role === undefined
+            ? [PUBLIC_ROLE.id]
+            : [rule.role]
+          : this.roles.filter(role => (role.grants ?? []).includes(rule.grant as string)).map(role => role.id)
+        for (const role of roles) {
+          grants.push({
+            action: declaration.action,
+            predicate: rule.where,
+            role,
+            target: declaration.owner,
+          })
+        }
+      }
+    }
+    return grants
+  }
+
+  /**
+   * Reject authoring security on both an entity and any of its ancestors.
+   */
+  #assertSecurityInheritance(): void {
+    const owners = new Set(this.security.map(declaration => declaration.owner))
+    for (const owner of owners) {
+      if (!this.definitions.entity(owner)) continue
+      for (const ancestor of this.definitions.ancestry(owner)) {
+        if (ancestor === 'Entity' || ancestor === owner) continue
+        if (owners.has(ancestor)) {
+          throw new Error(`Graph: security is declared on both "${ancestor}" and "${owner}"`)
+        }
+      }
+    }
   }
 
   #assertPolicyTargets(): void {
@@ -715,6 +925,33 @@ export class Graph {
     roleOnly: boolean,
     table: string,
   ): string | null {
+    const conditions = this.#actionConditions(leaf, action, alias, roleOnly, table)
+    if (conditions.length === 0) return null
+    if (action === Action.Read || roleOnly) return `(${conditions.join(' OR ')})`
+    if (action !== Action.Create && action !== Action.Update && action !== Action.Delete) {
+      return `(${conditions.join(' OR ')})`
+    }
+    const readable = this.#actionConditions(leaf, Action.Read, alias, false, table)
+    if (readable.length === 0) return null
+    return `((${readable.join(' OR ')}) AND (${conditions.join(' OR ')}))`
+  }
+
+  /**
+   * Compile the direct action rules before the READ prerequisite is applied.
+   * @param leaf - Concrete entity or relationship table.
+   * @param action - Action being evaluated.
+   * @param alias - Row alias.
+   * @param roleOnly - Whether predicates are omitted.
+   * @param table - Grant target table.
+   * @returns Matching rule expressions.
+   */
+  #actionConditions(
+    leaf: string,
+    action: Action,
+    alias: string,
+    roleOnly: boolean,
+    table: string,
+  ): string[] {
     const targets = new Set(['*', 'Entity', ...this.#ancestry(leaf)])
     const conditions: string[] = []
     for (const grant of this.grants) {
@@ -729,7 +966,7 @@ export class Graph {
       }
       conditions.push(`(${role} AND ${predicate})`)
     }
-    return conditions.length === 0 ? null : `(${conditions.join(' OR ')})`
+    return conditions
   }
 
   #compilePredicate(grant: GraphGrant, alias: string, table: string): string {
@@ -969,9 +1206,9 @@ export class Graph {
   }
 
   #manageExpression(target: string): string | null {
+    const targets = new Set(['*', ...this.#ancestry(target), target])
     const conditions = this.grants
-      .filter(grant => grant.action === Action.Manage
-        && (grant.target === '*' || grant.target === target))
+      .filter(grant => grant.action === Action.Manage && targets.has(grant.target))
       .map(grant => roleCondition(grant.role))
     return conditions.length === 0 ? null : `(${conditions.join(' OR ')})`
   }
@@ -1271,6 +1508,52 @@ function entityName(entity: unknown): string {
 }
 
 /**
+ * Extract an authored security declaration from one entity or relationship.
+ * @param value - Authored candidate.
+ * @param security - Output map keyed by owner name.
+ * @returns The candidate without its `security` property.
+ */
+function takeSecurity<T>(value: T, security: Map<string, unknown>): T {
+  if (!isRecordLike(value) || !('security' in value)) return value
+  const source = value as Record<string, unknown>
+  const name = source.name
+  if (typeof name === 'string') security.set(name, source.security)
+  const rest: Record<string, unknown> = { ...source }
+  delete rest.security
+  return rest as T
+}
+
+/**
+ * Normalize typed named capability declarations.
+ * @param source - Capability declarations or legacy grants.
+ * @returns Capabilities keyed by name.
+ */
+function capabilitiesFrom(source?: GrantSource): ReadonlyMap<string, GrantCapability> {
+  const capabilities = new Map<string, GrantCapability>()
+  if (source === undefined || Array.isArray(source)) return capabilities
+  for (const [name, details] of Object.entries(source)) {
+    if (name.trim().length === 0) throw new Error('Graph: capability names must be non-empty')
+    if (!isRecordLike(details)) {
+      throw new Error(`Graph: capability "${name}" must be an object`)
+    }
+    capabilities.set(name, {
+      ...(typeof details.description === 'string' ? { description: details.description } : {}),
+      name,
+    })
+  }
+  return capabilities
+}
+
+/**
+ * Whether a value is a plain non-array object.
+ * @param value - Candidate value.
+ * @returns Whether it is an object.
+ */
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
  * Normalize the authored role forms.
  * @param source - Role source.
  * @returns Roles including built-ins, without duplicates.
@@ -1290,6 +1573,7 @@ function normalizeRoles(source?: RoleSource): readonly GraphRole[] {
     const canonical = roleIdentity(id)
     roles.set(canonical, {
       ...(details.description === undefined ? {} : { description: details.description }),
+      grants: [...(details.grants ?? [])],
       id: canonical,
       name: details.name || id,
     })
@@ -1496,7 +1780,7 @@ function filterFieldNames(filter: Filter): string[] {
  * @param action - Action input.
  * @returns The validated action.
  */
-function actionValue(action: Action | `${Action}`): Action {
+function actionValue(action: string): Action {
   if (!Object.values(Action).includes(action as Action)) {
     throw new Error(`Graph: unknown action "${action}"`)
   }
