@@ -58,7 +58,23 @@ export type {
   RoleSource,
 } from './source/Graph'
 export { NullDatabase } from './source/Database'
-export type { Database, DatabaseOptions, QueryOptions } from './source/Database'
+export type {
+  Database,
+  DatabaseOptions,
+  DatabaseTransaction,
+  QueryOptions,
+} from './source/Database'
+export { MutationError } from './source/Mutation'
+export type {
+  CreateResult,
+  DeleteResult,
+  EditResult,
+  MutationDatabase,
+  MutationErrorCode,
+  MutationFilter,
+  MutationValues,
+  UpsertResult,
+} from './source/Mutation'
 export { SortDirection } from './source/SortDirection'
 export { Constraint, FieldType } from './source/EntityDefinitions'
 export { Operator } from './source/Operator'

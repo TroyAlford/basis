@@ -60,8 +60,8 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
     const fields = entity.effectiveFields
       .filter(field => field.name !== 'id' && field.name !== 'name' && field.name !== 'entity')
     const base = {
-      entity: discriminatorSchema(entity, definitions),
-      id: { type: 'string' },
+      entity: { ...discriminatorSchema(entity, definitions), readOnly: true },
+      id: { readOnly: true, type: 'string' },
       name: { type: 'string' },
     }
     const input = {
@@ -71,11 +71,25 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
     const output = {
       ...base,
       entity: discriminatorSchema(entity, definitions),
+      id: { type: 'string' },
       ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'output', definitions)])),
     }
+    const required = fields
+      .filter(field => field.default === undefined && (
+        field.type === FieldType.Entity ? field.nullable === false : field.nullable !== true
+      ))
+      .map(field => field.name)
     schemas[entity.name] = {
-      create: { properties: input, required: ['entity', 'name'], type: 'object' },
-      output: { properties: output, required: ['id', 'entity', 'name'], type: 'object' },
+      create: {
+        properties: input,
+        required: ['entity', 'name', ...required],
+        type: 'object',
+      },
+      output: {
+        properties: output,
+        required: ['id', 'entity', 'name', ...required],
+        type: 'object',
+      },
       update: { properties: input, type: 'object' },
     }
   }
@@ -143,7 +157,28 @@ function schemaForField(
     type: 'array',
   }
   if (field.type === FieldType.JSON) return {}
-  return schemaForScalar(field.type)
+  const schema = {
+    ...schemaForScalar(field.type),
+    ...boundsFor(field),
+  }
+  return mode === 'input' && (field.name === 'lastUpdatedBy' || field.name === 'lastUpdatedAt')
+    ? { ...schema, readOnly: true }
+    : schema
+}
+
+/**
+ * Render canonical scalar bounds as JSON Schema keywords.
+ * @param field - Effective scalar field.
+ * @returns JSON Schema bounds.
+ */
+function boundsFor(field: EffectiveFieldDefinition): Record<string, number> {
+  if (field.type !== FieldType.Number && field.type !== FieldType.String) return {}
+  return {
+    ...(field.type === FieldType.Number && field.maximum !== undefined ? { maximum: field.maximum } : {}),
+    ...(field.type === FieldType.Number && field.minimum !== undefined ? { minimum: field.minimum } : {}),
+    ...(field.type === FieldType.String && field.maxLength !== undefined ? { maxLength: field.maxLength } : {}),
+    ...(field.type === FieldType.String && field.minLength !== undefined ? { minLength: field.minLength } : {}),
+  }
 }
 
 /**

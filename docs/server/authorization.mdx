@@ -77,6 +77,8 @@ The closed action vocabulary is `read`, `create`, `update`, `delete`, and `manag
 
 Graph predicates are normalized when the graph loads and compiled into PostgreSQL `CREATE POLICY ... USING (...)` and `WITH CHECK (...)` expressions. PostgreSQL validates and evaluates them as SQL; Basis does not interpret business predicates at request time. RLS covers the universal `Entity` root, every MTI ancestor and concrete table, and every named relationship table. Reads deny by returning no rows. Creates use `WITH CHECK`; updates check old and new rows; deletes check the old row. Default deny applies to tables without applicable grants.
 
+The Graph mutation verbs (`db.create`, `db.edit`, `db.delete`, `db.upsert`) run on the same restricted application pool with the request's `actor.id`. Read authorization never becomes write authorization: `edit` and `delete` select through the canonical filter compiler, then PostgreSQL re-checks every write against the update/delete policies and returns only the rows the actor may actually mutate. Counts therefore exclude unauthorized matches without disclosing that they exist. A create denied by `WITH CHECK` fails as an authorization error; uniqueness, reference, check, and inheritance violations fail as constraint errors. Mixed `db.tx` callbacks keep the same actor across native SQL and mutation verbs.
+
 Inherited MTI predicate fields use a narrow, row-scoped Boolean policy helper generated from the compiled predicate. The helper answers only whether the compiled predicate matches one row identity; it does not return field values or accept arbitrary expression text.
 
 ## `$me` is search shorthand

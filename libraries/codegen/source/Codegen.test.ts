@@ -69,6 +69,38 @@ describe('codegen', () => {
     }).properties.createdAt?.format).toBe('date-time')
   })
 
+  test('reflects canonical bounds, required fields, and generated fields', () => {
+    const graph = new Graph({
+      entities: [{
+        fields: [
+          { field: 'score', maximum: 10, minimum: 0, type: FieldType.Number },
+          { field: 'title', maxLength: 20, minLength: 2, type: FieldType.String },
+          { field: 'nickname', nullable: true, type: FieldType.String },
+        ],
+        name: 'Thing',
+      }],
+    })
+    const schemas = generateJSONSchemas(graph)
+    const create = schemas.Thing?.create as {
+      properties: Record<string, {
+        maxLength?: number,
+        maximum?: number,
+        minLength?: number,
+        minimum?: number,
+        readOnly?: boolean,
+      }>,
+      required: string[],
+    }
+    expect(create.required).toEqual(['entity', 'name', 'score', 'title'])
+    expect(create.properties.id?.readOnly).toBe(true)
+    expect(create.properties.entity?.readOnly).toBe(true)
+    expect(create.properties.score?.minimum).toBe(0)
+    expect(create.properties.score?.maximum).toBe(10)
+    expect(create.properties.title?.minLength).toBe(2)
+    expect(create.properties.title?.maxLength).toBe(20)
+    expect(create.properties.nickname?.readOnly).toBeUndefined()
+  })
+
   test('uses concrete descendants for abstract reference output discriminators', () => {
     const abstract = new Graph({
       entities: [
