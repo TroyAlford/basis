@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto'
-import type { EntityDefinition, QueryFieldDefinition } from './EntityDefinitions'
+import type { DerivedCollectionDefinition, EntityDefinition, QueryFieldDefinition } from './EntityDefinitions'
 import { EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
 import type { AuthoredDocument, AuthoredEntity, AuthoredRelationship } from './GraphAuthoring'
 import { Operator } from './Operator'
-import type { Filter } from './Predicate'
+import type { CollectionFilterScope, Filter } from './Predicate'
 import { Predicate } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalPolicy, PhysicalSchema, PhysicalTable } from './Schema'
-import type { QueryScope } from './SQL'
+import type { CollectionScope, QueryScope } from './SQL'
 import { SQL } from './SQL'
 
 /** The closed authorization action vocabulary. */
@@ -17,6 +17,12 @@ export enum Action {
   Manage = 'manage',
   Read = 'read',
   Update = 'update',
+}
+
+/** Explicit public-access sentinel for entity and relationship security. */
+export enum Security {
+  /** Allow the action to every request. */
+  Public = 'public',
 }
 
 /** The built-in principal used by grants that apply to every request. */
@@ -30,6 +36,8 @@ const DEFAULT_APP_ROLE = 'basis_app'
 export interface RoleDetails {
   /** Optional role description. */
   readonly description?: string,
+  /** Named capabilities assigned to this role. */
+  readonly grants?: readonly string[],
   /** Mutable human-readable role name. */
   readonly name: string,
 }
@@ -70,12 +78,45 @@ export interface GraphGrant {
   readonly target: string,
 }
 
+/** One typed named capability declaration. */
+export interface GrantCapability {
+  /** Optional human-readable capability description. */
+  readonly description?: string,
+  /** Capability name used by security rules and role assignments. */
+  readonly name: string,
+}
+
+/** Named capability declarations or the legacy target-bound grant list. */
+export type GrantSource =
+  | Readonly<Record<string, { readonly description?: string }>>
+  | readonly GrantDefinition[]
+
+/** One normalized rule alternative inside an action security declaration. */
+export interface SecurityRuleDefinition {
+  /** Named capability required by this alternative. */
+  readonly grant?: string,
+  /** Graph role required by this alternative. */
+  readonly role?: string,
+  /** Canonical row predicate required by this alternative, or null. */
+  readonly where: Filter | null,
+}
+
+/** One normalized action security declaration. */
+export interface SecurityDefinition {
+  /** Closed action. */
+  readonly action: Action,
+  /** Entity or relationship owning the declaration. */
+  readonly owner: string,
+  /** Alternative rules combined with OR. */
+  readonly rules: readonly SecurityRuleDefinition[],
+}
+
 /** Canonical graph authoring options. */
 export interface GraphOptions {
   /** Application ontology as JSON text, a document, or an entity array. */
   readonly entities?: AuthoredDocument | readonly AuthoredEntity[] | string,
   /** Graph-defined permission declarations. */
-  readonly grants?: readonly GrantDefinition[],
+  readonly grants?: GrantSource,
   /** Application relationships when `entities` is an entity array. */
   readonly relationships?: readonly AuthoredRelationship[],
   /** Role authoring forms and stable identifiers. */
@@ -114,9 +155,9 @@ const RESERVED_NAMES = new Set(['Role', 'ExternalIdentity', 'UserRole'])
 /** Security entities whose `manage` grant means controlled administration. */
 const MANAGED_ENTITIES = new Set(['Role', 'UserRole', 'ExternalIdentity'])
 /** The built-in administrator role. */
-const ADMIN_ROLE: GraphRole = { id: ADMIN_ROLE_ID, name: 'Administrator' }
+const ADMIN_ROLE: GraphRole = { grants: [], id: ADMIN_ROLE_ID, name: 'Administrator' }
 /** The built-in public principal. */
-const PUBLIC_ROLE: GraphRole = { id: PUBLIC_ROLE_ID, name: 'Public' }
+const PUBLIC_ROLE: GraphRole = { grants: [], id: PUBLIC_ROLE_ID, name: 'Public' }
 /**
  * The one application-facing canonical graph.
  *
@@ -127,10 +168,15 @@ const PUBLIC_ROLE: GraphRole = { id: PUBLIC_ROLE_ID, name: 'Public' }
 export class Graph {
   /** The combined application and security ontology. */
   readonly definitions: EntityDefinitions
+  /** Named reusable capabilities declared by the graph. */
+  readonly capabilities: readonly GrantCapability[]
+  /** Canonical graph-defined permissions in one normalized list. */
+  readonly grants: readonly GraphGrant[]
   /** Canonical roles, including the built-in public principal. */
   readonly roles: readonly GraphRole[]
-  /** Canonical graph-defined permissions. */
-  readonly grants: readonly GraphGrant[]
+  /** Canonical action security declarations. */
+  readonly security: readonly SecurityDefinition[]
+  readonly #capabilities: ReadonlyMap<string, GrantCapability>
   readonly #options: GraphOptions
   readonly #rolesById: ReadonlyMap<string, GraphRole>
   readonly #rolesByName: ReadonlyMap<string, GraphRole>
@@ -143,8 +189,10 @@ export class Graph {
   constructor(options: GraphOptions = {}) {
     this.#options = options
     const application = normalizeGraphInput(options)
-    const entities = application.entities
-    const relationships = application.relationships ?? []
+    const securitySources = new Map<string, unknown>()
+    const entities = (application.entities ?? []).map(entity => takeSecurity(entity, securitySources))
+    const relationships = (application.relationships ?? [])
+      .map(relationship => takeSecurity(relationship, securitySources))
     for (const entity of entities) {
       const name = entityName(entity)
       if (RESERVED_NAMES.has(name)) {
@@ -152,9 +200,9 @@ export class Graph {
       }
     }
     const hasUser = entities.some(entity => entityName(entity) === 'User')
-    const security = SYSTEM_DOCUMENT.entities ?? []
+    const systemEntities = SYSTEM_DOCUMENT.entities ?? []
     const allEntities = [
-      ...security.filter(entity => hasUser === false || entityName(entity) !== 'User'),
+      ...systemEntities.filter(entity => hasUser === false || entityName(entity) !== 'User'),
       ...entities,
     ]
     this.definitions = EntityDefinitions.fromDocument({
@@ -162,11 +210,19 @@ export class Graph {
       entities: allEntities,
       relationships: [...(SYSTEM_DOCUMENT.relationships ?? []), ...relationships],
     })
+    this.#capabilities = capabilitiesFrom(options.grants)
+    this.capabilities = [...this.#capabilities.values()]
     this.roles = normalizeRoles(options.roles)
     this.#schema = options.schema ?? 'public'
     this.#rolesById = new Map(this.roles.map(role => [role.id, role]))
     this.#rolesByName = new Map(this.roles.map(role => [role.name, role]))
-    this.grants = (options.grants ?? []).map(grant => this.#normalizeGrant(grant))
+    this.#assertRoleCapabilities()
+    this.security = this.#normalizeSecurity(securitySources)
+    this.#assertSecurityInheritance()
+    const legacy = Array.isArray(options.grants)
+      ? options.grants.map(grant => this.#normalizeGrant(grant))
+      : []
+    this.grants = [...legacy, ...this.#expandSecurity()]
     this.#assertPolicyTargets()
   }
 
@@ -323,11 +379,29 @@ export class Graph {
   createExpression(target: string, row: Record<string, unknown> = {}): string | null {
     const entity = this.#policyEntity(target)
     if (!entity) return null
+    const readable = this.#rowExpression(target, Action.Read, row)
+    const creatable = this.#rowExpression(target, Action.Create, row)
+    if (!readable || !creatable) return null
+    return `((${readable}) AND (${creatable}))`
+  }
+
+  /**
+   * Compile action rules against proposed row values for create checks.
+   * @param target - Entity or relationship being created.
+   * @param action - Action being evaluated.
+   * @param row - Proposed new-row values.
+   * @returns SQL expression, or null when no rule applies.
+   */
+  #rowExpression(
+    target: string,
+    action: Action,
+    row: Record<string, unknown>,
+  ): string | null {
     const targets = new Set(['*', ...this.#ancestry(target)])
     const conditions: string[] = []
     for (const grant of this.grants) {
       if (!targets.has(grant.target)) continue
-      const actionMatches = grant.action === Action.Create
+      const actionMatches = grant.action === action
         || (MANAGED_ENTITIES.has(target) && grant.action === Action.Manage)
       if (!actionMatches) continue
       const role = roleCondition(grant.role)
@@ -356,8 +430,8 @@ export class Graph {
     }
     const scope: QueryScope = {
       array: name => {
-        const field = policyField(entity, name)
-        if (field.type !== FieldType.Array) return undefined
+        const field = entity.effectiveFields.find(candidate => candidate.name === name)
+        if (!field || field.type !== FieldType.Array) return undefined
         return {
           expression: literal(valueFor(field.name)),
           field,
@@ -385,6 +459,142 @@ export class Graph {
     return this.#manageExpression(target)
   }
 
+  /**
+   * Validate that every role references a declared capability.
+   */
+  #assertRoleCapabilities(): void {
+    for (const role of this.roles) {
+      for (const name of role.grants ?? []) {
+        if (!this.#capabilities.has(name)) {
+          throw new Error(`Graph: role "${role.name}" references unknown capability "${name}"`)
+        }
+      }
+    }
+  }
+
+  /**
+   * Normalize authored entity and relationship security declarations.
+   * @param sources - Raw security declarations keyed by owner name.
+   * @returns Canonical security declarations.
+   */
+  #normalizeSecurity(sources: ReadonlyMap<string, unknown>): readonly SecurityDefinition[] {
+    const declarations: SecurityDefinition[] = []
+    for (const [owner, raw] of sources) {
+      if (!this.definitions.entity(owner) && !this.definitions.relationship(owner)) {
+        throw new Error(`Graph: security owner "${owner}" is not a declared entity or relationship`)
+      }
+      if (!isRecordLike(raw)) {
+        throw new Error(`Graph: security for "${owner}" must be an object`)
+      }
+      for (const [actionName, value] of Object.entries(raw)) {
+        const action = actionValue(actionName)
+        const rules = this.#normalizeSecurityRules(owner, action, value)
+        declarations.push({ action, owner, rules })
+      }
+    }
+    return declarations
+  }
+
+  /**
+   * Normalize one action's alternatives or explicit public sentinel.
+   * @param owner - Entity or relationship owner.
+   * @param action - Action being declared.
+   * @param value - Authored action security.
+   * @returns Canonical alternative rules.
+   */
+  #normalizeSecurityRules(
+    owner: string,
+    action: Action,
+    value: unknown,
+  ): readonly SecurityRuleDefinition[] {
+    if (value === Security.Public) return [{ where: null }]
+    const candidates = Array.isArray(value) ? value : [value]
+    return candidates.map(candidate => {
+      if (candidate === Security.Public) return { where: null }
+      if (!isRecordLike(candidate)) {
+        throw new Error(`Graph: security rule for "${owner}" must be an object`)
+      }
+      const keys = Object.keys(candidate)
+      if (keys.some(key => key !== 'grant' && key !== 'role' && key !== 'where')) {
+        throw new Error(`Graph: security rule for "${owner}" has an unknown property`)
+      }
+      const hasGrant = candidate.grant !== undefined
+      const hasRole = candidate.role !== undefined
+      if (hasGrant === hasRole) {
+        throw new Error(
+          `Graph: security rule for "${owner}" must declare exactly one of grant or role, ` +
+          'or use Security.Public',
+        )
+      }
+      const where = candidate.where === undefined || candidate.where === null
+        ? null
+        : this.#normalizePredicate(owner, candidate.where as GrantDefinition['predicate'])
+      if (action === Action.Create && where && filterContainsCollection(where)) {
+        throw new Error(`Graph: create security for "${owner}" cannot use collection predicates`)
+      }
+      if (action === Action.Manage && where) {
+        throw new Error(`Graph: manage security for "${owner}" cannot use a row predicate`)
+      }
+      if (hasGrant) {
+        if (typeof candidate.grant !== 'string' || !this.#capabilities.has(candidate.grant)) {
+          throw new Error(`Graph: unknown capability "${String(candidate.grant)}" for "${owner}"`)
+        }
+        return { grant: candidate.grant, where }
+      }
+      if (typeof candidate.role !== 'string') {
+        throw new Error(`Graph: security role for "${owner}" must be a string`)
+      }
+      const role = this.role(candidate.role)
+      if (!role) throw new Error(`Graph: unknown role "${candidate.role}"`)
+      if (role.id === PUBLIC_ROLE_ID) {
+        throw new Error(`Graph: security for "${owner}" must use Security.Public for public access`)
+      }
+      return { role: role.id, where }
+    })
+  }
+
+  /**
+   * Expand normalized security declarations into the one compiler grant list.
+   * @returns Expanded grants in declaration order.
+   */
+  #expandSecurity(): GraphGrant[] {
+    const grants: GraphGrant[] = []
+    for (const declaration of this.security) {
+      for (const rule of declaration.rules) {
+        const roles = rule.grant === undefined
+          ? rule.role === undefined
+            ? [PUBLIC_ROLE.id]
+            : [rule.role]
+          : this.roles.filter(role => (role.grants ?? []).includes(rule.grant as string)).map(role => role.id)
+        for (const role of roles) {
+          grants.push({
+            action: declaration.action,
+            predicate: rule.where,
+            role,
+            target: declaration.owner,
+          })
+        }
+      }
+    }
+    return grants
+  }
+
+  /**
+   * Reject authoring security on both an entity and any of its ancestors.
+   */
+  #assertSecurityInheritance(): void {
+    const owners = new Set(this.security.map(declaration => declaration.owner))
+    for (const owner of owners) {
+      if (!this.definitions.entity(owner)) continue
+      for (const ancestor of this.definitions.ancestry(owner)) {
+        if (ancestor === 'Entity' || ancestor === owner) continue
+        if (owners.has(ancestor)) {
+          throw new Error(`Graph: security is declared on both "${ancestor}" and "${owner}"`)
+        }
+      }
+    }
+  }
+
   #assertPolicyTargets(): void {
     for (const grant of this.grants) {
       if (grant.target === '*') {
@@ -397,6 +607,9 @@ export class Graph {
       }
       if (grant.action === Action.Manage && grant.predicate) {
         throw new Error('Graph: manage grants cannot carry a row predicate')
+      }
+      if (grant.action === Action.Create && grant.predicate && filterContainsCollection(grant.predicate)) {
+        throw new Error('Graph: create grants cannot use collection predicates')
       }
     }
   }
@@ -416,19 +629,193 @@ export class Graph {
     if (input === null || input === undefined) return null
     if (target === '*') throw new Error('Graph: a wildcard grant cannot carry a predicate')
     if (target === 'Entity') {
+      const entity = identityDefinition()
+      const collection = (name: string): CollectionFilterScope | undefined => (
+        this.#collectionFilterScope(entity, name)
+      )
       const filter = typeof input === 'string'
-        ? QueryNormalizer.normalize(identityDefinition(), input, name => policyField(identityDefinition(), name))
-        : Predicate.normalize(identityDefinition(), input, name => policyField(identityDefinition(), name))
+        ? QueryNormalizer.normalize(entity, input, name => policyField(entity, name), collection)
+        : Predicate.normalize(entity, input, name => policyField(entity, name), collection)
       if (filter) assertPolicySafe(filter)
       return filter
     }
     const entity = this.#policyEntity(target)
     if (!entity) throw new Error(`Graph: unknown grant target "${target}"`)
+    const collection = (name: string): CollectionFilterScope | undefined => (
+      this.#collectionFilterScope(entity, name)
+    )
     const filter = typeof input === 'string'
-      ? QueryNormalizer.normalize(entity, input, name => policyField(entity, name))
-      : Predicate.normalize(entity, input, name => policyField(entity, name))
+      ? QueryNormalizer.normalize(entity, input, name => policyField(entity, name), collection)
+      : Predicate.normalize(entity, input, name => policyField(entity, name), collection)
     if (filter) assertPolicySafe(filter)
     return filter
+  }
+
+  /**
+   * Resolve a collection navigation for policy normalization.
+   * @param entity - Entity whose collection is referenced.
+   * @param name - Collection navigation name.
+   * @returns Collection scope, or undefined when not a collection.
+   */
+  #collectionFilterScope(
+    entity: EntityDefinition,
+    name: string,
+  ): CollectionFilterScope | undefined {
+    const collection = entity.collections.find(candidate => candidate.name === name)
+    if (!collection) return undefined
+    const target = this.#collectionTarget(collection)
+    return {
+      definition: target,
+      field: path => this.#collectionField(collection, target, path),
+    }
+  }
+
+  /**
+   * Resolve the target entity of one collection navigation.
+   * @param collection - Collection metadata.
+   * @returns Target entity definition.
+   */
+  #collectionTarget(collection: DerivedCollectionDefinition): EntityDefinition {
+    if (collection.target === 'Entity') return identityDefinition()
+    const target = this.#policyEntity(collection.target)
+    if (!target) throw new Error(`Graph: unknown collection target "${collection.target}"`)
+    return target
+  }
+
+  /**
+   * Resolve one member field inside an authorization collection.
+   * @param collection - Collection metadata.
+   * @param target - Collection target entity.
+   * @param path - Member path or named-relationship property.
+   * @returns Policy-safe field metadata.
+   */
+  #collectionField(
+    collection: DerivedCollectionDefinition,
+    target: EntityDefinition,
+    path: string,
+  ): QueryFieldDefinition {
+    const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
+    if (collection.kind === 'relationship') {
+      const prefix = `${lowerFirst(collection.relationship.name)}.`
+      if (normalized.startsWith(prefix)) {
+        const propertyName = normalized.slice(prefix.length)
+        const property = collection.relationship.fields.find(candidate => candidate.name === propertyName)
+        if (!property) {
+          throw new Error(
+            `Graph: unknown relationship field "${collection.relationship.name}.${propertyName}"`,
+          )
+        }
+        if (property.type === FieldType.Array || property.type === FieldType.JSON) {
+          throw new Error(
+            `Graph: relationship field "${collection.relationship.name}.${propertyName}" is not policy-safe`,
+          )
+        }
+        return { ...property, name: normalized }
+      }
+    }
+    return policyField(target, normalized)
+  }
+
+  /**
+   * Build the correlated SQL scope for one authorization collection.
+   * @param entity - Entity whose collection is referenced.
+   * @param name - Collection navigation name.
+   * @param parentAlias - Alias of the resource row being authorized.
+   * @returns Collection scope, or undefined when not a collection.
+   */
+  #collectionSqlScope(
+    entity: EntityDefinition,
+    name: string,
+    parentAlias: string,
+  ): CollectionScope | undefined {
+    const collection = entity.collections.find(candidate => candidate.name === name)
+    if (!collection) return undefined
+    const target = this.#collectionTarget(collection)
+    const suffix = name.replace(/[^A-Za-z0-9_]/gu, '_')
+    const relationshipAlias = `__policy_${suffix}_rel`
+    const targetAlias = `__policy_${suffix}_target`
+    const rootAlias = `__policy_${suffix}_root`
+    let relation: string
+    let condition: string
+    if (collection.kind === 'inverse') {
+      if (collection.target === 'Entity') {
+        throw new Error(`Graph: inverse collection "${name}" cannot target Entity in a policy`)
+      }
+      relation = `${quoteIdentifier(collection.target)} AS ${quoteIdentifier(targetAlias)} ` +
+        `JOIN "Entity" AS ${quoteIdentifier(rootAlias)} ` +
+        `ON ${quoteIdentifier(rootAlias)}.${quoteIdentifier('id')} = ` +
+        `${quoteIdentifier(targetAlias)}.${quoteIdentifier('id')}`
+      condition = `${quoteIdentifier(targetAlias)}.${quoteIdentifier(collection.reference.column)} = ` +
+        `${quoteIdentifier(parentAlias)}.${quoteIdentifier('id')}`
+    } else {
+      const relationship = collection.relationship
+      const local = relationship.between[collection.endpoint]
+      const remote = relationship.between[collection.endpoint === 0 ? 1 : 0]
+      const remoteColumn = `${remote.field}.id`
+      relation = `${quoteIdentifier(relationship.name)} AS ${quoteIdentifier(relationshipAlias)}`
+      if (collection.target === 'Entity') {
+        relation += ` JOIN "Entity" AS ${quoteIdentifier(rootAlias)} ` +
+          `ON ${quoteIdentifier(rootAlias)}.${quoteIdentifier('id')} = ` +
+          `${quoteIdentifier(relationshipAlias)}.${quoteIdentifier(remoteColumn)}`
+      } else {
+        relation += ` JOIN ${quoteIdentifier(collection.target)} AS ${quoteIdentifier(targetAlias)} ` +
+          `ON ${quoteIdentifier(targetAlias)}.${quoteIdentifier('id')} = ` +
+          `${quoteIdentifier(relationshipAlias)}.${quoteIdentifier(remoteColumn)} ` +
+          `JOIN "Entity" AS ${quoteIdentifier(rootAlias)} ` +
+          `ON ${quoteIdentifier(rootAlias)}.${quoteIdentifier('id')} = ` +
+          `${quoteIdentifier(targetAlias)}.${quoteIdentifier('id')}`
+      }
+      condition = `${quoteIdentifier(relationshipAlias)}.${quoteIdentifier(`${local.field}.id`)} = ` +
+        `${quoteIdentifier(parentAlias)}.${quoteIdentifier('id')}`
+    }
+    const expressions = new Map<string, string>()
+    const resolve = (path: string): QueryFieldDefinition => {
+      const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
+      if (collection.kind === 'relationship') {
+        const prefix = `${lowerFirst(collection.relationship.name)}.`
+        if (normalized.startsWith(prefix)) {
+          const propertyName = normalized.slice(prefix.length)
+          const property = collection.relationship.fields.find(candidate => candidate.name === propertyName)
+          if (!property) {
+            throw new Error(
+              `Graph: unknown relationship field "${collection.relationship.name}.${propertyName}"`,
+            )
+          }
+          if (property.type === FieldType.Array || property.type === FieldType.JSON) {
+            throw new Error(
+              `Graph: relationship field "${collection.relationship.name}.${propertyName}" is not policy-safe`,
+            )
+          }
+          expressions.set(normalized, `${quoteIdentifier(relationshipAlias)}.${quoteIdentifier(property.name)}`)
+          return { ...property, name: normalized }
+        }
+      }
+      const field = policyField(target, normalized)
+      const root = normalized.split('.', 1)[0] ?? normalized
+      const source = target.effectiveFields.find(candidate => candidate.name === root)
+      if (!source) throw new Error(`Graph: unknown collection field "${target.name}.${normalized}"`)
+      if (source.owner !== 'Entity' && source.owner !== target.name) {
+        throw new Error(
+          `Graph: inherited collection field "${target.name}.${normalized}" is not policy-safe`,
+        )
+      }
+      const expression = source.owner === 'Entity'
+        ? `${quoteIdentifier(rootAlias)}.${quoteIdentifier(field.name)}`
+        : `${quoteIdentifier(targetAlias)}.${quoteIdentifier(field.name)}`
+      expressions.set(field.name, expression)
+      return field
+    }
+    return {
+      condition,
+      definition: target,
+      expression: field => {
+        const expression = expressions.get(field.name)
+        if (!expression) throw new Error(`Graph: unresolved collection field "${field.name}"`)
+        return expression
+      },
+      field: resolve,
+      relation,
+    }
   }
 
   #policies(appRole: string): PhysicalPolicy[] {
@@ -538,6 +925,33 @@ export class Graph {
     roleOnly: boolean,
     table: string,
   ): string | null {
+    const conditions = this.#actionConditions(leaf, action, alias, roleOnly, table)
+    if (conditions.length === 0) return null
+    if (action === Action.Read || roleOnly) return `(${conditions.join(' OR ')})`
+    if (action !== Action.Create && action !== Action.Update && action !== Action.Delete) {
+      return `(${conditions.join(' OR ')})`
+    }
+    const readable = this.#actionConditions(leaf, Action.Read, alias, false, table)
+    if (readable.length === 0) return null
+    return `((${readable.join(' OR ')}) AND (${conditions.join(' OR ')}))`
+  }
+
+  /**
+   * Compile the direct action rules before the READ prerequisite is applied.
+   * @param leaf - Concrete entity or relationship table.
+   * @param action - Action being evaluated.
+   * @param alias - Row alias.
+   * @param roleOnly - Whether predicates are omitted.
+   * @param table - Grant target table.
+   * @returns Matching rule expressions.
+   */
+  #actionConditions(
+    leaf: string,
+    action: Action,
+    alias: string,
+    roleOnly: boolean,
+    table: string,
+  ): string[] {
     const targets = new Set(['*', 'Entity', ...this.#ancestry(leaf)])
     const conditions: string[] = []
     for (const grant of this.grants) {
@@ -552,7 +966,7 @@ export class Graph {
       }
       conditions.push(`(${role} AND ${predicate})`)
     }
-    return conditions.length === 0 ? null : `(${conditions.join(' OR ')})`
+    return conditions
   }
 
   #compilePredicate(grant: GraphGrant, alias: string, table: string): string {
@@ -608,8 +1022,8 @@ export class Graph {
     }
     const scope: QueryScope = {
       array: name => {
-        const field = policyField(entity, name)
-        if (field.type !== FieldType.Array) return undefined
+        const field = entity.effectiveFields.find(candidate => candidate.name === name)
+        if (!field || field.type !== FieldType.Array) return undefined
         return {
           expression: expression(field),
           field,
@@ -620,6 +1034,7 @@ export class Graph {
           },
         }
       },
+      collection: name => this.#collectionSqlScope(entity, name, alias),
       definition: entity,
       expression,
       field: name => policyField(entity, name),
@@ -791,9 +1206,9 @@ export class Graph {
   }
 
   #manageExpression(target: string): string | null {
+    const targets = new Set(['*', ...this.#ancestry(target), target])
     const conditions = this.grants
-      .filter(grant => grant.action === Action.Manage
-        && (grant.target === '*' || grant.target === target))
+      .filter(grant => grant.action === Action.Manage && targets.has(grant.target))
       .map(grant => roleCondition(grant.role))
     return conditions.length === 0 ? null : `(${conditions.join(' OR ')})`
   }
@@ -1093,6 +1508,52 @@ function entityName(entity: unknown): string {
 }
 
 /**
+ * Extract an authored security declaration from one entity or relationship.
+ * @param value - Authored candidate.
+ * @param security - Output map keyed by owner name.
+ * @returns The candidate without its `security` property.
+ */
+function takeSecurity<T>(value: T, security: Map<string, unknown>): T {
+  if (!isRecordLike(value) || !('security' in value)) return value
+  const source = value as Record<string, unknown>
+  const name = source.name
+  if (typeof name === 'string') security.set(name, source.security)
+  const rest: Record<string, unknown> = { ...source }
+  delete rest.security
+  return rest as T
+}
+
+/**
+ * Normalize typed named capability declarations.
+ * @param source - Capability declarations or legacy grants.
+ * @returns Capabilities keyed by name.
+ */
+function capabilitiesFrom(source?: GrantSource): ReadonlyMap<string, GrantCapability> {
+  const capabilities = new Map<string, GrantCapability>()
+  if (source === undefined || Array.isArray(source)) return capabilities
+  for (const [name, details] of Object.entries(source)) {
+    if (name.trim().length === 0) throw new Error('Graph: capability names must be non-empty')
+    if (!isRecordLike(details)) {
+      throw new Error(`Graph: capability "${name}" must be an object`)
+    }
+    capabilities.set(name, {
+      ...(typeof details.description === 'string' ? { description: details.description } : {}),
+      name,
+    })
+  }
+  return capabilities
+}
+
+/**
+ * Whether a value is a plain non-array object.
+ * @param value - Candidate value.
+ * @returns Whether it is an object.
+ */
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
  * Normalize the authored role forms.
  * @param source - Role source.
  * @returns Roles including built-ins, without duplicates.
@@ -1112,6 +1573,7 @@ function normalizeRoles(source?: RoleSource): readonly GraphRole[] {
     const canonical = roleIdentity(id)
     roles.set(canonical, {
       ...(details.description === undefined ? {} : { description: details.description }),
+      grants: [...(details.grants ?? [])],
       id: canonical,
       name: details.name || id,
     })
@@ -1131,6 +1593,15 @@ function roleIdentity(id: string): string {
   const digest = createHash('sha256').update(id).digest('hex')
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-` +
     `${digest.slice(16, 20)}-${digest.slice(20, 32)}`
+}
+
+/**
+ * Lowercase only the first character of a relationship name.
+ * @param value - Relationship name.
+ * @returns Its nested member-property prefix.
+ */
+function lowerFirst(value: string): string {
+  return value.length === 0 ? value : `${value[0]?.toLowerCase()}${value.slice(1)}`
 }
 
 /**
@@ -1154,15 +1625,69 @@ function policyField(entity: EntityDefinition, name: string): QueryFieldDefiniti
 }
 
 /**
+ * Whether a filter is the canonical `$all` lowering.
+ * @param filter - Canonical predicate.
+ * @returns Whether it is `Not(Contains(Not(P)))`.
+ */
+function isUniversalCollectionFilter(filter: Filter): boolean {
+  if (!('filters' in filter) || 'field' in filter || filter.operator !== Operator.Logical.Not) {
+    return false
+  }
+  const child = filter.filters[0]
+  if (!child || !('filters' in child) || !('field' in child)
+    || child.operator !== Operator.Comparison.Contains || child.filters.length !== 1) {
+    return false
+  }
+  const requirement = child.filters[0]
+  return Boolean(requirement && 'filters' in requirement && !('field' in requirement)
+    && requirement.operator === Operator.Logical.Not)
+}
+
+/**
  * Reject predicate constructs that are not safe in a static policy.
  * @param filter - Canonical predicate.
+ * @param insideCollection - Whether the current node is inside a member requirement.
+ * @param containsByCollection - Collections already used by one `$contains` requirement.
  */
-function assertPolicySafe(filter: Filter): void {
+function assertPolicySafe(
+  filter: Filter,
+  insideCollection = false,
+  containsByCollection = new Set<string>(),
+): void {
   if ('filters' in filter) {
-    if ('field' in filter) {
-      throw new Error('Graph: collection policy predicates are not supported')
+    if (isUniversalCollectionFilter(filter)) {
+      throw new Error('Graph: $all collection policy predicates are not supported')
     }
-    for (const child of filter.filters) assertPolicySafe(child)
+    if ('field' in filter) {
+      if (insideCollection) {
+        throw new Error('Graph: nested collection policy predicates are not supported')
+      }
+      if (filter.operator === Operator.Collection.All) {
+        throw new Error('Graph: $all collection policy predicates are not supported')
+      }
+      if (filter.operator !== Operator.Comparison.Contains
+        && filter.operator !== Operator.Comparison.Empty) {
+        throw new Error(`Graph: collection operator "${filter.operator}" is not policy-safe`)
+      }
+      if (filter.operator === Operator.Comparison.Contains) {
+        if (filter.filters.length !== 1) {
+          throw new Error('Graph: collection $contains requires exactly one member requirement')
+        }
+        if (containsByCollection.has(filter.field)) {
+          throw new Error(`Graph: collection "${filter.field}" has multiple $contains requirements`)
+        }
+        containsByCollection.add(filter.field)
+      } else if (filter.filters.length !== 0) {
+        throw new Error('Graph: collection $empty cannot carry member requirements')
+      }
+      for (const child of filter.filters) {
+        assertPolicySafe(child, true, containsByCollection)
+      }
+      return
+    }
+    for (const child of filter.filters) {
+      assertPolicySafe(child, insideCollection, containsByCollection)
+    }
     return
   }
   if (!('field' in filter) || !('operator' in filter)) {
@@ -1172,6 +1697,18 @@ function assertPolicySafe(filter: Filter): void {
     || filter.operator === Operator.Comparison.SequenceEqual) {
     throw new Error(`Graph: operator "${filter.operator}" is not policy-safe`)
   }
+}
+
+/**
+ * Whether one predicate contains a collection comparison.
+ * @param filter - Canonical predicate.
+ * @returns Whether a collection filter is present.
+ */
+function filterContainsCollection(filter: Filter): boolean {
+  if ('filters' in filter) {
+    return 'field' in filter || filter.filters.some(child => filterContainsCollection(child))
+  }
+  return false
 }
 
 /**
@@ -1230,7 +1767,10 @@ function inline(sql: string, values: readonly unknown[]): string {
  */
 function filterFieldNames(filter: Filter): string[] {
   if ('filters' in filter) {
-    return filter.filters.flatMap(child => filterFieldNames(child))
+    return [
+      ...('field' in filter ? [filter.field] : []),
+      ...filter.filters.flatMap(child => filterFieldNames(child)),
+    ]
   }
   return 'field' in filter ? [filter.field] : []
 }
@@ -1240,7 +1780,7 @@ function filterFieldNames(filter: Filter): string[] {
  * @param action - Action input.
  * @returns The validated action.
  */
-function actionValue(action: Action | `${Action}`): Action {
+function actionValue(action: string): Action {
   if (!Object.values(Action).includes(action as Action)) {
     throw new Error(`Graph: unknown action "${action}"`)
   }

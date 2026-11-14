@@ -3,7 +3,7 @@ export type { HealthOptions, HealthStatus } from './apis/health'
 export { HttpVerb } from '../utilities'
 export { Authorization } from './source/Authorization'
 export { Cardinality } from './source/GraphAuthoring'
-export { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID } from './source/Graph'
+export { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID, Security } from './source/Graph'
 export { DDL, physicalHash } from './source/Schema'
 export { ManagedPostgresOperations } from './source/PostgresOperations'
 export { DatabaseRelease, loadRelease, ReleaseError } from './source/Release'
@@ -30,7 +30,7 @@ export type {
 export type {
   PhysicalColumn, PhysicalConstraint, PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalRole,
   PhysicalKind, PhysicalPolicy, PhysicalSchema, PhysicalTable, PhysicalTrigger,
-  MigrationApplyResult, MigrationArtifact, MigrationReadiness, MigrationResolution,
+  MigrationApplyOptions, MigrationApplyResult, MigrationArtifact, MigrationReadiness, MigrationResolution,
   MigrationReviewOptions, PhysicalModel, PlanOptions, SchemaOperation, SchemaPlan,
 } from './source/Schema'
 export type { AuthorizationOptions, BootstrapResult, EffectiveGrant } from './source/Authorization'
@@ -47,12 +47,18 @@ export type {
   AuthoredRelationship,
   AuthoredRelationshipEndpoint,
   AuthoredScalarField,
+  AuthoredSecurity,
+  AuthoredSecurityRule,
   AuthoredUniquenessConstraint,
 } from './source/GraphAuthoring'
 export type {
+  GrantCapability,
   GrantDefinition,
+  GrantSource,
   GraphGrant,
   GraphOptions,
+  SecurityDefinition,
+  SecurityRuleDefinition,
   GraphRole,
   RoleDetails,
   RoleSource,

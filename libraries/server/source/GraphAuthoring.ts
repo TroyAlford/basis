@@ -1,6 +1,8 @@
 import type { IdentityFormat, ScalarFieldType } from './EntityDefinitions'
 import type { FieldType } from './EntityDefinitions'
 import type { Constraint } from './EntityDefinitions'
+import type { Action, Security } from './Graph'
+import type { Filter } from './Predicate'
 
 /** Authored spelling of one canonical field kind. */
 type Authored<T extends FieldType> = T | `${T}`
@@ -131,6 +133,22 @@ export interface AuthoredUniquenessConstraint {
 /** One authored declarative constraint. */
 export type AuthoredConstraint = AuthoredUniquenessConstraint
 
+/** One authored entity security rule. */
+export interface AuthoredSecurityRule {
+  /** Named reusable capability required by this rule. */
+  readonly grant?: string,
+  /** Graph role required by this rule. */
+  readonly role?: string,
+  /** Row predicate normalized by the canonical Predicate/QueryNormalizer path. */
+  readonly where?: Filter | Readonly<Record<string, unknown>> | string | null,
+}
+
+/** Entity or relationship security keyed by the closed action vocabulary. */
+export type AuthoredSecurity = Partial<Record<
+  Action,
+  Security | AuthoredSecurityRule | readonly AuthoredSecurityRule[]
+>>
+
 /** One authored entity. */
 export interface AuthoredEntity {
   /** Declarative constraints owned by this entity. */
@@ -141,6 +159,8 @@ export interface AuthoredEntity {
   readonly fields: readonly AuthoredField[],
   /** Exact entity name. */
   readonly name: string,
+  /** Action-keyed security declaration owned by this entity. */
+  readonly security?: AuthoredSecurity,
 }
 
 /** One authored relationship endpoint. */
@@ -163,6 +183,8 @@ export interface AuthoredRelationship {
   readonly fields: readonly (AuthoredArrayField | AuthoredJSONField | AuthoredScalarField)[],
   /** Relationship name. */
   readonly name: string,
+  /** Action-keyed security declaration owned by this relationship. */
+  readonly security?: AuthoredSecurity,
 }
 
 /** JSON-compatible typed authoring document. */
