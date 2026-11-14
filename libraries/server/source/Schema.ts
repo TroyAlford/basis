@@ -1784,16 +1784,24 @@ export function verifyMigrationArtifact(artifact: MigrationArtifact): void {
   }
 }
 
+/** Options for applying one reviewed migration artifact. */
+export interface MigrationApplyOptions {
+  /** Verify the live source catalog against the artifact source hash; defaults to true. */
+  readonly verifySource?: boolean,
+}
+
 /**
  * Apply one reviewed migration artifact through the administrative connection.
  * @param sql - Trusted PostgreSQL capability with DDL privileges.
  * @param artifact - Reviewed immutable migration artifact.
+ * @param options - Apply options; source verification is enabled by default.
  * @returns The apply result.
  * @throws {Error} On source drift, duplicate application, failed SQL, or verification failure.
  */
 export async function applyMigration(
   sql: BunSQL,
   artifact: MigrationArtifact,
+  options: MigrationApplyOptions = {},
 ): Promise<MigrationApplyResult> {
   if (artifactChecksum(artifact) !== artifact.checksum) {
     throw new MigrationError('MIGRATION_CHECKSUM', 'Migration artifact checksum does not match its contents')
@@ -1825,12 +1833,14 @@ export async function applyMigration(
     if (duplicate[0]) {
       throw new MigrationError('MIGRATION_DUPLICATE', `Migration ${artifact.version} was already applied`)
     }
-    const source = await introspect(tx)
-    if (physicalHash(source, true) !== artifact.sourceHash) {
-      throw new MigrationError(
-        'MIGRATION_SOURCE_DRIFT',
-        'Migration source catalog has drifted from the reviewed plan',
-      )
+    if (options.verifySource !== false) {
+      const source = await introspect(tx)
+      if (physicalHash(source, true) !== artifact.sourceHash) {
+        throw new MigrationError(
+          'MIGRATION_SOURCE_DRIFT',
+          'Migration source catalog has drifted from the reviewed plan',
+        )
+      }
     }
     for (const operation of artifact.operations) {
       if (/\bconcurrently\b/iu.test(operation.sql)) {

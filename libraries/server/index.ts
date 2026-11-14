@@ -30,7 +30,7 @@ export type {
 export type {
   PhysicalColumn, PhysicalConstraint, PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalRole,
   PhysicalKind, PhysicalPolicy, PhysicalSchema, PhysicalTable, PhysicalTrigger,
-  MigrationApplyResult, MigrationArtifact, MigrationReadiness, MigrationResolution,
+  MigrationApplyOptions, MigrationApplyResult, MigrationArtifact, MigrationReadiness, MigrationResolution,
   MigrationReviewOptions, PhysicalModel, PlanOptions, SchemaOperation, SchemaPlan,
 } from './source/Schema'
 export type { AuthorizationOptions, BootstrapResult, EffectiveGrant } from './source/Authorization'
