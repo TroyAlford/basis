@@ -2,8 +2,11 @@ import Ajv2020 from 'ajv/dist/2020'
 import addFormats from 'ajv-formats'
 import { FieldType, Graph } from 'basis/server'
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { withIsolatedDatabase } from '../../server/testing/DatabaseIsolation'
-import { generateJSONSchemas } from '../index'
+import { generateJSONSchemas, generateTypes } from '../index'
 
 const graph = new Graph({
   entities: [
@@ -91,4 +94,52 @@ describe('Codegen output contracts', () => {
       expect(validate({ ...rows[0], requiredOwner: null })).toBe(false)
     })
   }, 120_000)
+
+  test('typechecks generated enum declarations and nullable enum fields', async () => {
+    const enumGraph = new Graph({
+      entities: [{
+        fields: [
+          { enum: 'AccessLevel', field: 'access', type: FieldType.Enum },
+          {
+            enum: 'AccessLevel',
+            field: 'optional',
+            nullable: true,
+            type: FieldType.Enum,
+          },
+        ],
+        name: 'EnumOutput',
+      }],
+      enums: {
+        AccessLevel: {
+          owner: 'Can manage this resource.',
+          viewer: 'Can view this resource.',
+        },
+      },
+    })
+    const directory = await mkdtemp(join(tmpdir(), 'basis-enum-output-'))
+    try {
+      const file = join(directory, 'types.ts')
+      const types = generateTypes(enumGraph)
+      expect(types).toContain('export enum AccessLevel')
+      expect(types).toContain('readonly optional: AccessLevel | null')
+      await writeFile(file, types)
+      const result = Bun.spawnSync({
+        cmd: [
+          process.execPath,
+          './node_modules/@typescript/native/bin/tsc',
+          '--ignoreConfig',
+          '--noEmit',
+          '--skipLibCheck',
+          '--strict',
+          file,
+        ],
+        cwd: process.cwd(),
+        stderr: 'pipe',
+        stdout: 'pipe',
+      })
+      expect(result.exitCode).toBe(0)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  }, 30_000)
 })

@@ -466,6 +466,40 @@ const cases: readonly ParityCase[] = [
       value: { meta: { active: true } },
     },
   },
+  {
+    entity: 'Person',
+    expected: [grace, linus],
+    source: 'manager.pets $contains (age > 5)',
+    structured: {
+      field: 'manager.pets',
+      filters: [{ field: 'age', operator: Operator.Comparison.GreaterThan, value: 5 }],
+      operator: Operator.Comparison.Contains,
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [grace],
+    source: 'pets $contains (owner.manager.pets $contains (age > 0))',
+    structured: {
+      field: 'pets',
+      filters: [{
+        field: 'owner.manager.pets',
+        filters: [{ field: 'age', operator: Operator.Comparison.GreaterThan, value: 0 }],
+        operator: Operator.Comparison.Contains,
+      }],
+      operator: Operator.Comparison.Contains,
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [],
+    source: 'manager.pets $contains (id = $me)',
+    structured: {
+      field: 'manager.pets',
+      filters: [{ field: 'id', operator: Operator.Comparison.Equal, value: '$me' }],
+      operator: Operator.Comparison.Contains,
+    },
+  },
 ]
 
 describe('Query parity gate', () => {

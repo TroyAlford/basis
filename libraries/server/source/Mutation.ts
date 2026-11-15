@@ -1,9 +1,9 @@
 import type { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
-import type { ArrayFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarArrayElementDefinition } from './EntityDefinitions'
+import type { ArrayFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, RelationshipDefinition, ScalarArrayElementDefinition } from './EntityDefinitions'
 import { Constraint, isCanonicalSnowflake, isCanonicalUUID, relationshipEntityDefinition } from './EntityDefinitions'
 import { FieldType } from './FieldType'
-import { compileEntityPredicate, compileEntityRecordQuery, compilePolymorphicQuery } from './PolymorphicQuery'
+import { compileEntityPredicate, compileEntityRecordQuery, compilePolymorphicQuery, normalizeEntityFilter } from './PolymorphicQuery'
 import { postgresScalarType } from './PostgresTypes'
 import type { Filter } from './Predicate'
 
@@ -92,8 +92,8 @@ export interface UpsertResult<RecordShape extends MutationRecord = MutationRecor
 /** The Graph-native mutation vocabulary. */
 export interface MutationDatabase {
   /**
-   * Create one entity or a finite synchronous batch atomically.
-   * @param entity - Exact concrete entity name.
+   * Create one entity or named relationship edge, or a finite synchronous batch atomically.
+   * @param entity - Exact concrete entity or named relationship name.
    * @param values - One value object or a finite iterable of value objects.
    * @returns The created count, plus the hydrated record for a single object.
    */
@@ -102,8 +102,8 @@ export interface MutationDatabase {
     values: MutationValues | Iterable<MutationValues>,
   ): Promise<CreateResult>,
   /**
-   * Delete every actor-authorized entity selected by the filter.
-   * @param entity - Exact entity or abstract ancestor name.
+   * Delete every actor-authorized entity or named relationship edge selected by the filter.
+   * @param entity - Exact entity, abstract ancestor, or named relationship name.
    * @param filter - Existing string, structured, or shorthand filter.
    * @returns The deleted count.
    */
@@ -112,8 +112,8 @@ export interface MutationDatabase {
     filter: MutationFilter,
   ): Promise<DeleteResult>,
   /**
-   * Patch every actor-authorized entity selected by the filter.
-   * @param entity - Exact entity or abstract ancestor name.
+   * Patch every actor-authorized entity or relationship-owned property selected by the filter.
+   * @param entity - Exact entity, abstract ancestor, or named relationship name.
    * @param filter - Existing string, structured, or shorthand filter.
    * @param changes - Field values to patch.
    * @returns The edited count, plus the record when exactly one row was edited.
@@ -124,7 +124,8 @@ export interface MutationDatabase {
     changes: MutationValues,
   ): Promise<EditResult>,
   /**
-   * Edit exactly one authorized match, or create when none is visible to the actor.
+   * Edit exactly one authorized entity match, or create when none is visible to the actor.
+   * Named relationships use create/edit/delete instead.
    * @param entity - Exact concrete entity name.
    * @param filter - Existing string, structured, or shorthand filter.
    * @param values - Values used by the edit or create branch.
@@ -174,6 +175,8 @@ export interface MutationValidation {
   readonly sql: BunSQL,
   /** Created or updated entity identities by physical owner table. */
   readonly touched: Map<string, Set<string>>,
+  /** Created or updated relationship edge keys (endpoint identities joined by NUL). */
+  readonly touchedRelationships?: Map<string, Set<string>>,
 }
 
 /** Keyword arguments used by one mutation owner. */
@@ -225,7 +228,7 @@ export function createMutationValidation(
   entities: EntityDefinitions,
   sql: BunSQL,
 ): MutationValidation {
-  return { entities, sql, touched: new Map() }
+  return { entities, sql, touched: new Map(), touchedRelationships: new Map() }
 }
 
 /**
@@ -272,6 +275,42 @@ export async function validateMutationState(validation: MutationValidation): Pro
       }
     }
   }
+  const touchedRelationships = validation.touchedRelationships ?? new Map<string, Set<string>>()
+  for (const [owner, keys] of touchedRelationships) {
+    if (keys.size === 0) continue
+    const relationship = entities.relationship(owner)
+    if (!relationship) continue
+    const definition = relationshipEntityDefinition(relationship)
+    const constraints = definition.constraints.filter(
+      constraint => constraint.type === Constraint.Validation,
+    )
+    for (const constraint of constraints) {
+      if (constraint.type !== Constraint.Validation) continue
+      const compiled = compileEntityPredicate(entities, definition, constraint.where, '__row')
+      const values: unknown[] = [...compiled.values]
+      const [first, second] = relationship.between
+      if (!first || !second) throw new MutationError('operation', 'Relationship has incomplete endpoints')
+      const conditions = [...keys].map(key => {
+        const [a = '', b = ''] = key.split('\u0000')
+        values.push(a, b)
+        return `("__row".${quote(`${first.field}.id`)} = $${values.length - 1} ` +
+          `AND "__row".${quote(`${second.field}.id`)} = $${values.length})`
+      })
+      const joins = compiled.joins.length === 0 ? '' : ` ${compiled.joins.join(' ')}`
+      const withClause = compiled.ctes.length === 0 ? '' : `WITH ${compiled.ctes.join(', ')} `
+      const rows = await sql.unsafe<Record<string, unknown>[]>(
+        `${withClause}SELECT 1 FROM ${quote(owner)} AS "__row"${joins} ` +
+        `WHERE (${conditions.join(' OR ')}) AND NOT COALESCE((${compiled.sql}), FALSE) LIMIT 1`,
+        values,
+      )
+      if (rows.length > 0) {
+        throw new MutationError(
+          'constraint',
+          `Constraint "${constraint.name}" on "${owner}" was violated`,
+        )
+      }
+    }
+  }
 }
 
 /**
@@ -289,6 +328,8 @@ async function create(
   input: MutationValues | Iterable<MutationValues>,
 ): Promise<CreateResult> {
   const { entities, sql } = options
+  const relationship = entities.relationship(entity)
+  if (relationship) return createRelationship(options, relationship, input)
   const definition = requireConcrete(entities, entity)
   const single = isPlainRecord(input)
   const values = materialize(input)
@@ -324,6 +365,8 @@ async function edit(
   changes: MutationValues,
 ): Promise<EditResult> {
   const { entities, sql } = options
+  const relationship = entities.relationship(entity)
+  if (relationship) return editRelationship(options, relationship, filter, changes)
   const definition = requireEntity(entities, entity)
   const normalized = prepareChanges(entities, definition, changes, '/changes')
   const matches = await selectMatches({ entities, sql }, definition, filter)
@@ -348,10 +391,13 @@ async function edit(
  * @returns The deleted count.
  */
 async function remove(
-  { entities, sql }: MutationOptions,
+  options: MutationOptions,
   entity: string,
   filter: MutationFilter,
 ): Promise<DeleteResult> {
+  const { entities, sql } = options
+  const relationship = entities.relationship(entity)
+  if (relationship) return deleteRelationship(options, relationship, filter)
   const definition = requireEntity(entities, entity)
   const matches = await selectMatches({ entities, sql }, definition, filter)
   let deleted = 0
@@ -380,6 +426,8 @@ async function upsert(
   values: MutationValues,
 ): Promise<UpsertResult> {
   const { entities, sql } = options
+  const relationship = entities.relationship(entity)
+  if (relationship) return upsertRelationship(options, relationship, filter, values)
   const definition = requireConcrete(entities, entity)
   await lockEntity(sql, entity)
   const matches = await selectMatches({ entities, sql }, definition, filter)
@@ -451,6 +499,291 @@ async function createUpsert(
     await sql.unsafe(`RELEASE SAVEPOINT ${quote(name)}`).catch(() => undefined)
     throw error
   }
+}
+
+/** One selected named-relationship edge. */
+interface RelationshipEdge {
+  /** First endpoint identity in authored order. */
+  readonly a: string,
+  /** Second endpoint identity in authored order. */
+  readonly b: string,
+}
+
+/** One prepared named-relationship create value. */
+interface PreparedRelationshipCreate {
+  /** Submitted endpoint and property values. */
+  readonly values: MutationValues,
+}
+
+/**
+ * Create one named relationship edge or a finite batch atomically.
+ * @param options - Canonical definitions and transaction client.
+ * @param relationship - Named relationship definition.
+ * @param input - One value object or a finite iterable.
+ * @returns The created count.
+ */
+async function createRelationship(
+  options: MutationOptions,
+  relationship: RelationshipDefinition,
+  input: MutationValues | Iterable<MutationValues>,
+): Promise<CreateResult> {
+  const single = isPlainRecord(input)
+  const values = materialize(input)
+  const prepared = values.map((value, index) => prepareRelationshipCreate(
+    options.entities,
+    relationship,
+    value,
+    single ? '/values' : `/values/${index}`,
+  ))
+  for (const item of prepared) await insertRelationship(options, relationship, item)
+  return { created: prepared.length }
+}
+
+/**
+ * Validate one named relationship create value.
+ * @param entities - Canonical entity definitions.
+ * @param relationship - Named relationship definition.
+ * @param input - Submitted value.
+ * @param base - Payload-rooted JSON Pointer.
+ * @returns The prepared values.
+ */
+function prepareRelationshipCreate(
+  entities: EntityDefinitions,
+  relationship: RelationshipDefinition,
+  input: MutationValues,
+  base: string,
+): PreparedRelationshipCreate {
+  if (!isPlainRecord(input)) {
+    throw new MutationError('validation', 'Create values must be plain objects', { path: base })
+  }
+  const definition = relationshipEntityDefinition(relationship)
+  const values: Record<string, unknown> = {}
+  const fields = new Map(definition.effectiveFields.map(field => [field.name, field]))
+  for (const [name, value] of Object.entries(input)) {
+    const field = fields.get(name)
+    if (!field) {
+      throw new MutationError('validation', `Unknown field "${name}" on ${relationship.name}`, {
+        path: `${base}/${pointer(name)}`,
+      })
+    }
+    values[name] = validateValue(definition, field, value, `${base}/${pointer(name)}`)
+  }
+  for (const endpoint of relationship.between) {
+    if (!Object.hasOwn(values, endpoint.field)) {
+      throw new MutationError(
+        'validation',
+        `Field "${endpoint.field}" is required`,
+        { path: `${base}/${pointer(endpoint.field)}` },
+      )
+    }
+  }
+  for (const field of relationship.fields) {
+    const effective = definition.effectiveFields.find(candidate => candidate.name === field.name)
+    if (effective && requiredField(effective) && !Object.hasOwn(values, field.name)) {
+      throw new MutationError('validation', `Field "${field.name}" is required`, {
+        path: `${base}/${pointer(field.name)}`,
+      })
+    }
+  }
+  return { values }
+}
+
+/**
+ * Insert one named relationship edge.
+ * @param options - Canonical definitions and transaction client.
+ * @param relationship - Named relationship definition.
+ * @param item - Prepared values.
+ */
+async function insertRelationship(
+  options: MutationOptions,
+  relationship: RelationshipDefinition,
+  item: PreparedRelationshipCreate,
+): Promise<void> {
+  const definition = relationshipEntityDefinition(relationship)
+  const columns: WriteColumn[] = relationship.between.map(endpoint => ({
+    column: `${endpoint.field}.id`,
+    value: item.values[endpoint.field],
+  }))
+  for (const field of relationship.fields) {
+    if (!Object.hasOwn(item.values, field.name)) continue
+    columns.push({
+      column: field.name,
+      field: definition.effectiveFields.find(candidate => candidate.name === field.name),
+      value: item.values[field.name],
+    })
+  }
+  await execute(options.sql, insertStatement(relationship.name, columns))
+  touchRelationship(options.validation, relationship, item.values)
+}
+
+/**
+ * Select every actor-visible named relationship edge matching a filter.
+ * @param options - Canonical definitions and transaction client.
+ * @param relationship - Named relationship definition.
+ * @param filter - Existing mutation filter.
+ * @returns Matching endpoint identities.
+ */
+async function selectRelationshipEdges(
+  options: MutationOptions,
+  relationship: RelationshipDefinition,
+  filter: MutationFilter,
+): Promise<readonly RelationshipEdge[]> {
+  const definition = relationshipEntityDefinition(relationship)
+  const normalized = normalizeEntityFilter(options.entities, definition, filter)
+  if (!normalized) return []
+  const compiled = compileEntityPredicate(options.entities, definition, normalized, 't')
+  const [first, second] = relationship.between
+  if (!first || !second) throw new MutationError('operation', 'Relationship has incomplete endpoints')
+  const joins = compiled.joins.length === 0 ? '' : ` ${compiled.joins.join(' ')}`
+  const withClause = compiled.ctes.length === 0 ? '' : `WITH ${compiled.ctes.join(', ')} `
+  const rows = await execute(options.sql, {
+    sql: `${withClause}SELECT t.${quote(`${first.field}.id`)} AS "a", ` +
+      `t.${quote(`${second.field}.id`)} AS "b" FROM ${quote(relationship.name)} t${joins} ` +
+      `WHERE ${compiled.sql}`,
+    values: compiled.values,
+  })
+  return rows.map(row => ({ a: String(row.a), b: String(row.b) }))
+}
+
+/**
+ * Patch named relationship properties on every authorized matching edge.
+ * @param options - Canonical definitions and transaction client.
+ * @param relationship - Named relationship definition.
+ * @param filter - Existing mutation filter.
+ * @param changes - Relationship property changes.
+ * @returns The edited count.
+ */
+async function editRelationship(
+  options: MutationOptions,
+  relationship: RelationshipDefinition,
+  filter: MutationFilter,
+  changes: MutationValues,
+): Promise<EditResult> {
+  if (!isPlainRecord(changes)) {
+    throw new MutationError('validation', 'Changes must be a plain object', { path: '/changes' })
+  }
+  const definition = relationshipEntityDefinition(relationship)
+  const values = new Map<string, unknown>()
+  for (const [name, value] of Object.entries(changes)) {
+    if (relationship.between.some(endpoint => endpoint.field === name)) {
+      throw new MutationError('validation', `Field "${name}" is an immutable relationship endpoint`, {
+        path: `/changes/${pointer(name)}`,
+      })
+    }
+    const field = relationship.fields.find(candidate => candidate.name === name)
+    if (!field) {
+      throw new MutationError('validation', `Unknown field "${name}" on ${relationship.name}`, {
+        path: `/changes/${pointer(name)}`,
+      })
+    }
+    const effective = definition.effectiveFields.find(candidate => candidate.name === name)
+    if (!effective) {
+      throw new MutationError('validation', `Unknown field "${name}" on ${relationship.name}`, {
+        path: `/changes/${pointer(name)}`,
+      })
+    }
+    values.set(name, validateValue(definition, effective, value, `/changes/${pointer(name)}`))
+  }
+  if (values.size === 0) return { edited: 0 }
+  const matches = await selectRelationshipEdges(options, relationship, filter)
+  if (matches.length === 0) return { edited: 0 }
+  const bindings: unknown[] = []
+  const assignments = [...values].map(([name, value]) => (
+    `${quote(name)} = ${bindValue(value, relationship.fields.find(field => field.name === name), bindings)}`
+  ))
+  const [first, second] = relationship.between
+  if (!first || !second) throw new MutationError('operation', 'Relationship has incomplete endpoints')
+  const keys = matches.map(edge => {
+    bindings.push(edge.a, edge.b)
+    return `($${bindings.length - 1}, $${bindings.length})`
+  })
+  const rows = await execute(options.sql, {
+    sql: `UPDATE ${quote(relationship.name)} SET ${assignments.join(', ')} ` +
+      `WHERE (${quote(`${first.field}.id`)}, ${quote(`${second.field}.id`)}) IN (${keys.join(', ')}) ` +
+      `RETURNING ${quote(`${first.field}.id`)} AS "a", ${quote(`${second.field}.id`)} AS "b"`,
+    values: bindings,
+  })
+  for (const row of rows) {
+    touchRelationship(options.validation, relationship, {
+      [first.field]: row.a,
+      [second.field]: row.b,
+    })
+  }
+  return { edited: rows.length }
+}
+
+/**
+ * Delete every actor-authorized named relationship edge matching a filter.
+ * @param options - Canonical definitions and transaction client.
+ * @param relationship - Named relationship definition.
+ * @param filter - Existing mutation filter.
+ * @returns The deleted count.
+ */
+async function deleteRelationship(
+  options: MutationOptions,
+  relationship: RelationshipDefinition,
+  filter: MutationFilter,
+): Promise<DeleteResult> {
+  const matches = await selectRelationshipEdges(options, relationship, filter)
+  if (matches.length === 0) return { deleted: 0 }
+  const [first, second] = relationship.between
+  if (!first || !second) throw new MutationError('operation', 'Relationship has incomplete endpoints')
+  const bindings: unknown[] = []
+  const keys = matches.map(edge => {
+    bindings.push(edge.a, edge.b)
+    return `($${bindings.length - 1}, $${bindings.length})`
+  })
+  const rows = await execute(options.sql, {
+    sql: `DELETE FROM ${quote(relationship.name)} ` +
+      `WHERE (${quote(`${first.field}.id`)}, ${quote(`${second.field}.id`)}) IN (${keys.join(', ')}) ` +
+      `RETURNING ${quote(`${first.field}.id`)} AS "a"`,
+    values: bindings,
+  })
+  return { deleted: rows.length }
+}
+
+/**
+ * Reject relationship upsert until an edge record contract exists.
+ * @param options - Canonical definitions and transaction client.
+ * @param relationship - Named relationship definition.
+ * @param filter - Existing mutation filter.
+ * @param values - Values used by either branch.
+ * @returns Never.
+ */
+async function upsertRelationship(
+  options: MutationOptions,
+  relationship: RelationshipDefinition,
+  filter: MutationFilter,
+  values: MutationValues,
+): Promise<UpsertResult> {
+  void options
+  void filter
+  void values
+  throw new MutationError(
+    'operation',
+    `Upsert is not supported for named relationship "${relationship.name}"; use create, edit, or delete`,
+  )
+}
+
+/**
+ * Record one relationship edge as created or updated for commit validation.
+ * @param validation - Transaction-scoped validation state, when active.
+ * @param relationship - Named relationship definition.
+ * @param values - Endpoint values.
+ */
+function touchRelationship(
+  validation: MutationValidation | undefined,
+  relationship: RelationshipDefinition,
+  values: MutationValues,
+): void {
+  if (!validation) return
+  const key = relationship.between
+    .map(endpoint => String(values[endpoint.field] ?? ''))
+    .join('\u0000')
+  const touched = validation.touchedRelationships ?? new Map<string, Set<string>>()
+  const edges = touched.get(relationship.name) ?? new Set<string>()
+  edges.add(key)
+  touched.set(relationship.name, edges)
 }
 
 /**

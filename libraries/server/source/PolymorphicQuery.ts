@@ -746,6 +746,8 @@ class QueryProjection {
     const identities = new Set<string>()
     const resolved = new Map<string, QueryFieldDefinition>()
     const joins: string[] = []
+    const nestedCollections = new Map<string, CollectionScope | undefined>()
+    const arrayScopes = new Map<string, ArrayScope | undefined>()
     const sink: FilterJoinScope = {
       alias: prefix => this.#nextAlias(prefix),
       cache: new Map(),
@@ -787,6 +789,7 @@ class QueryProjection {
       return result.field
     }
     const array = (path: string): ArrayScope | undefined => {
+      if (arrayScopes.has(path)) return arrayScopes.get(path)
       const pathSegments = path.split('.')
       if (pathSegments.some(segment => segment.length === 0)) return undefined
       const arrayJoins: string[] = []
@@ -801,19 +804,27 @@ class QueryProjection {
         if (result.field.type !== FieldType.Array) return undefined
         for (const sql of arrayJoins) sink.join(sql)
         const field = result.field
-        return {
+        const scope: ArrayScope = {
           consume: units => this.#consume(units),
           expression: result.expression,
           field,
           member: arrayItemField(field),
         }
+        arrayScopes.set(path, scope)
+        return scope
       } catch {
+        arrayScopes.set(path, undefined)
         return undefined
       }
     }
     const scope: CollectionScope = {
       array,
-      collection: nested => this.#buildCollectionScope(context, nested, `${key}.${nested}`, sink),
+      collection: nested => {
+        if (nestedCollections.has(nested)) return nestedCollections.get(nested)
+        const nestedScope = this.#buildCollectionScope(context, nested, `${key}.${nested}`, sink)
+        nestedCollections.set(nested, nestedScope)
+        return nestedScope
+      },
       condition,
       consume: units => this.#consume(units),
       definition: plan.target ?? identityDefinition(),

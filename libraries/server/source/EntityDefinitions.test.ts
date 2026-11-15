@@ -790,7 +790,7 @@ describe('EntityDefinitions', () => {
     expect(ddl).toContain('"score" double precision not null default 1.5')
     expect(ddl).toContain('"label" text not null default \'it\'\'s\'')
     expect(ddl).toContain('"createdAt" timestamptz not null default \'2020-01-01T00:00:00.000Z\'::timestamptz')
-    expect(ddl).toContain('"tags" text[] not null default ARRAY[\'a\', \'b\']')
+    expect(ddl).toContain('"tags" text[] not null default ARRAY[\'a\'::text, \'b\'::text]')
     expect(ddl).toContain('"payload" jsonb not null default \'{"active":true}\'::jsonb')
   })
 
@@ -1428,7 +1428,7 @@ describe('EntityDefinitions', () => {
         numbers: 'ARRAY[]::double precision[]',
         strings: 'ARRAY[]::text[]',
         timestamps: 'ARRAY[]::timestamptz[]',
-        values: "ARRAY['one']::text[]",
+        values: "ARRAY['one'::text]",
       })
   })
 })

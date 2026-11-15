@@ -1149,6 +1149,12 @@ describe('Authorization RLS', () => {
       expect(await announcements(owner)).toEqual([{ id: announcement }])
       expect(await announcements(editor)).toEqual([{ id: announcement }])
       expect(await announcements(null)).toEqual([])
+
+      await admin.sql`
+        DELETE FROM "Membership"
+        WHERE "organization.id" = ${organization} AND "user.id" = ${owner}
+      `
+      expect(await documents(owner)).toEqual([])
     } finally {
       await admin.close()
       await server.shutdown()

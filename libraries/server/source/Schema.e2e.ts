@@ -836,13 +836,14 @@ describe('DDL schema planning', () => {
       previousPhysical: previous.physicalSchema('basis_app', false),
     })
     const drops = plan.operations.filter(operation => operation.id.startsWith('drop-function:basis.policy_'))
-    expect(drops).toHaveLength(1)
-    expect(drops[0]?.sql).toContain('(root_id text)')
-    expect(drops[0]?.sql.endsWith('()')).toBe(false)
+    expect(drops.length).toBeGreaterThanOrEqual(1)
+    const persisted = drops.find(operation => operation.sql.includes('(root_id text)'))
+    expect(persisted).toBeDefined()
+    expect(persisted?.sql.endsWith('()')).toBe(false)
     const replacement = plan.operations.findIndex(operation => (
       operation.kind === 'policy' && operation.id.endsWith(':replace')
     ))
-    const drop = plan.operations.findIndex(operation => operation.id === drops[0]?.id)
+    const drop = plan.operations.findIndex(operation => operation.id === persisted?.id)
     expect(replacement).toBeGreaterThan(-1)
     expect(drop).toBeGreaterThan(replacement)
   })
@@ -873,7 +874,7 @@ describe('DDL schema planning', () => {
         superuser: false,
       })
       const oldHelpers = (previous.physicalSchema(appRole, false).functions ?? [])
-        .filter(fn => fn.name.startsWith('basis.policy_'))
+        .filter(fn => /^basis\.policy_[0-9a-f]+$/u.test(fn.name))
         .map(fn => fn.name)
       expect(oldHelpers).toHaveLength(1)
       const executable = plan.operations.filter(operation => (
@@ -1031,6 +1032,22 @@ describe('DDL schema planning', () => {
           { default: [], field: 'numbers', items: { type: 'Number' }, type: 'Array' },
           { default: [], field: 'strings', items: { type: 'String' }, type: 'Array' },
           { default: [], field: 'timestamps', items: { type: 'Timestamp' }, type: 'Array' },
+          { default: ['one'], field: 'labels', items: { type: 'String' }, type: 'Array' },
+          { default: [1, 2], field: 'counts', items: { type: 'Number' }, type: 'Array' },
+          { default: [true], field: 'flags', items: { type: 'Boolean' }, type: 'Array' },
+          { default: ['2020-01-01'], field: 'days', items: { type: 'Date' }, type: 'Array' },
+          {
+            default: ['2020-01-01T00:00:00.000Z'],
+            field: 'instants',
+            items: { type: 'Timestamp' },
+            type: 'Array',
+          },
+          {
+            default: ['00000000-0000-4000-8000-000000000001'],
+            field: 'relatedIds',
+            items: { type: 'ID' },
+            type: 'Array',
+          },
         ],
         name: 'EnumDocument',
       }],
@@ -1054,24 +1071,47 @@ describe('DDL schema planning', () => {
       `
       const [row] = await database.sql<{
         booleans: boolean[],
+        counts: number[],
         dates: string[],
+        days: Date[],
+        flags: boolean[],
         ids: string[],
+        instants: Date[],
+        labels: string[],
         numbers: number[],
+        relatedIds: string[],
         strings: string[],
         timestamps: string[],
       }[]>`
-        SELECT "booleans", "dates", "ids", "numbers", "strings", "timestamps"
+        SELECT "booleans",
+          "counts",
+          "dates",
+          "days",
+          "flags",
+          "ids",
+          "instants",
+          "labels",
+          "numbers",
+          "relatedIds",
+          "strings",
+          "timestamps"
         FROM "EnumDocument"
         WHERE "id" = ${id}
       `
-      expect(row).toEqual({
+      expect(row).toMatchObject({
         booleans: [],
+        counts: [1, 2],
         dates: [],
+        days: [new Date('2020-01-01T00:00:00.000Z')],
+        flags: [true],
         ids: [],
+        labels: ['one'],
         numbers: [],
+        relatedIds: ['00000000-0000-4000-8000-000000000001'],
         strings: [],
         timestamps: [],
       })
+      expect(row?.instants).toEqual([new Date('2020-01-01T00:00:00.000Z')])
 
       const invalidId = randomUUID()
       await database.sql`

@@ -2606,6 +2606,18 @@ function fieldTableColumn(field: PhysicalFieldDefinition): TableColumn {
 }
 
 /**
+ * Format one timestamp default the way PostgreSQL renders a timestamp literal.
+ * @param value - Date or parseable timestamp string.
+ * @returns PostgreSQL timestamp text.
+ */
+function postgresTimestampLiteral(value: unknown): string {
+  const milliseconds = value instanceof Date ? value.getTime() : Date.parse(String(value))
+  if (!Number.isFinite(milliseconds)) return String(value)
+  const iso = new Date(milliseconds).toISOString()
+  return iso.replace('T', ' ').replace(/\.000Z$/u, '+00').replace(/Z$/u, '+00')
+}
+
+/**
  * Build a PostgreSQL default expression for one physical field.
  * @param field - Physical field with a declared default.
  * @returns SQL default expression.
@@ -2619,8 +2631,18 @@ function defaultSQL(field: PhysicalFieldDefinition): string {
   if (field.type === FieldType.Array) {
     const items = field.items.type
     const type = `${postgresScalarType(items)}[]`
-    const elements = (value as readonly unknown[]).map(item => scalarDefault(item, items))
-    return elements.length === 0 ? `ARRAY[]::${type}` : `ARRAY[${elements.join(', ')}]::${type}`
+    if ((value as readonly unknown[]).length === 0) return `ARRAY[]::${type}`
+    const elements = (value as readonly unknown[]).map(item => {
+      if (item === null) return 'NULL'
+      if (items === FieldType.Timestamp) {
+        return `${quoteLiteral(postgresTimestampLiteral(item))}::timestamp with time zone`
+      }
+      if (items === FieldType.String || items === FieldType.ID) {
+        return `${quoteLiteral(String(item))}::text`
+      }
+      return scalarDefault(item, items)
+    })
+    return `ARRAY[${elements.join(', ')}]`
   }
   return scalarDefault(value, field.type)
 }

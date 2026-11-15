@@ -312,7 +312,7 @@ describe('Graph', () => {
     expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
   })
 
-  test('accepts canonical collection policy predicates and rejects create collections', () => {
+  test('accepts canonical collection policy predicates for every action', () => {
     const make = (predicate: string, action: 'read' | 'create' = 'read'): Graph => new Graph({
       entities: [
         {
@@ -337,8 +337,7 @@ describe('Graph', () => {
     expect(make("members $contains [(id = $me), (workspaceMembership.role = 'Owner')]"))
       .toBeInstanceOf(Graph)
     expect(make('members $all (id = $me)')).toBeInstanceOf(Graph)
-    expect(() => make('members $contains (id = $me)', 'create'))
-      .toThrow('create security for "Workspace" cannot use collection predicates')
+    expect(make('members $contains (id = $me)', 'create')).toBeInstanceOf(Graph)
     expect(make("members $contains (id = $me) $and members $contains (workspaceMembership.role = 'Owner')"))
       .toBeInstanceOf(Graph)
   })
@@ -421,7 +420,7 @@ describe('Graph', () => {
     const schema = composed.physicalSchema('basis_app', true)
     const helperNames = schema.functions
       .map(fn => fn.name)
-      .filter(name => name.startsWith('basis.policy_'))
+      .filter(name => /^basis\.policy_[0-9a-f]+$/u.test(name))
     expect(helperNames).toHaveLength(2)
     const policy = schema.policies.find(candidate => (
       candidate.table === 'Workspace' && candidate.command === 'SELECT'

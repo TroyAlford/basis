@@ -6,6 +6,7 @@ import { removeService } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
+import { Constraint } from './EntityDefinitions'
 import { Action, Graph, Security } from './Graph'
 import { MutationError } from './Mutation'
 import { Operator } from './Operator'
@@ -489,6 +490,434 @@ describe('Graph mutation authorization', () => {
         { id: memberProject.id, title: 'Member updated' },
         { id: otherProject.id, title: 'Other project' },
       ])
+    } finally {
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 180_000)
+
+  test('validates named relationship edges and multi-hop entity constraints in db.tx', async () => {
+    const publicActions = {
+      [Action.Create]: Security.Public,
+      [Action.Delete]: Security.Public,
+      [Action.Read]: Security.Public,
+      [Action.Update]: Security.Public,
+    }
+    const edgeGraph = new Graph({
+      entities: [
+        { fields: [], name: 'User', security: publicActions },
+        {
+          fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
+          name: 'Asset',
+          security: publicActions,
+        },
+        {
+          fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
+          name: 'Document',
+          security: publicActions,
+        },
+        {
+          fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+          name: 'Section',
+          security: publicActions,
+        },
+        {
+          constraints: [{
+            description: 'The section document and asset must share an owner.',
+            name: 'sameOwnerPath',
+            type: Constraint.Validation,
+            where: 'section.document.owner = asset.owner',
+          }],
+          fields: [
+            { field: 'asset', target: 'Asset', type: 'Entity' },
+            { field: 'section', target: 'Section', type: 'Entity' },
+          ],
+          name: 'Anchor',
+          security: publicActions,
+        },
+      ],
+      relationships: [{
+        between: [
+          { field: 'asset', inverse: 'attachments', target: 'Asset' },
+          { field: 'document', inverse: 'documents', target: 'Document' },
+        ],
+        constraints: [{
+          description: 'The asset and document must share an owner.',
+          name: 'sameOwnerEdge',
+          type: Constraint.Validation,
+          where: 'asset.owner = document.owner',
+        }],
+        fields: [{ field: 'note', nullable: true, type: 'String' }],
+        name: 'Attachment',
+        security: publicActions,
+      }],
+    })
+    const install = tempDirectory('basis-mutation-edge-validation-')
+    const server = await start(install, edgeGraph)
+    try {
+      const owner = await server.db.create('User', { name: 'Owner' })
+      const other = await server.db.create('User', { name: 'Other' })
+      const asset = await server.db.create('Asset', { name: 'Asset', owner: owner.record?.id })
+      const otherAsset = await server.db.create('Asset', {
+        name: 'Other asset',
+        owner: other.record?.id,
+      })
+      const repairAsset = await server.db.create('Asset', {
+        name: 'Repair asset',
+        owner: owner.record?.id,
+      })
+      const document = await server.db.create('Document', {
+        name: 'Document',
+        owner: owner.record?.id,
+      })
+      const section = await server.db.create('Section', {
+        document: document.record?.id,
+        name: 'Section',
+      })
+
+      expect(await server.db.tx(async sql => sql.create('Attachment', {
+        asset: asset.record?.id,
+        document: document.record?.id,
+        note: 'matching',
+      }))).toEqual({ created: 1 })
+      expect(await server.db.tx(async sql => sql.edit(
+        'Attachment',
+        { field: 'asset', operator: Operator.Comparison.Equal, value: asset.record?.id },
+        { note: 'edited' },
+      ))).toEqual({ edited: 1 })
+
+      const failure = await server.db.tx(async sql => {
+        await sql.create('User', { name: 'Rollback owner' })
+        return sql.create('Attachment', {
+          asset: otherAsset.record?.id,
+          document: document.record?.id,
+        })
+      }).catch((error: unknown) => error)
+      expect(failure).toBeInstanceOf(MutationError)
+      expect(failure).toMatchObject({ code: 'constraint' })
+      expect((failure as MutationError).message).toContain('sameOwnerEdge')
+      expect((failure as MutationError).message).toContain('Attachment')
+      expect(await server.db.query('User', {
+        fields: ['id'],
+        where: { field: 'name', operator: Operator.Comparison.Equal, value: 'Rollback owner' },
+      })).toEqual([])
+
+      await server.db.tx(async sql => {
+        await sql.create('Attachment', {
+          asset: otherAsset.record?.id,
+          document: document.record?.id,
+        })
+        await sql.delete('Attachment', {
+          field: 'asset',
+          operator: Operator.Comparison.Equal,
+          value: otherAsset.record?.id,
+        })
+        await sql.create('Attachment', {
+          asset: repairAsset.record?.id,
+          document: document.record?.id,
+        })
+      })
+
+      expect(await server.db.tx(async sql => sql.create('Anchor', {
+        asset: asset.record?.id,
+        name: 'Matching anchor',
+        section: section.record?.id,
+      }))).toMatchObject({ created: 1 })
+
+      const anchorFailure = await server.db.tx(async sql => {
+        await sql.create('User', { name: 'Anchor rollback' })
+        return sql.create('Anchor', {
+          asset: otherAsset.record?.id,
+          name: 'Mismatched anchor',
+          section: section.record?.id,
+        })
+      }).catch((error: unknown) => error)
+      expect(anchorFailure).toBeInstanceOf(MutationError)
+      expect(anchorFailure).toMatchObject({ code: 'constraint' })
+      expect((anchorFailure as MutationError).message).toContain('sameOwnerPath')
+      expect(await server.db.query('User', {
+        fields: ['id'],
+        where: { field: 'name', operator: Operator.Comparison.Equal, value: 'Anchor rollback' },
+      })).toEqual([])
+
+      expect(await server.db.delete('Attachment', {
+        field: 'document',
+        operator: Operator.Comparison.Equal,
+        value: document.record?.id,
+      })).toEqual({ deleted: 2 })
+    } finally {
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 180_000)
+
+  test('checks proposed reference paths for update policies and reacts to membership changes', async () => {
+    const membershipGraph = new Graph({
+      entities: [
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Organization',
+          security: {
+            [Action.Create]: Security.Public,
+            [Action.Read]: Security.Public,
+          },
+        },
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        {
+          fields: [
+            { field: 'organization', target: 'Organization', type: 'Entity' },
+            { field: 'title', type: 'String' },
+          ],
+          name: 'Document',
+          security: {
+            [Action.Create]: { where: 'organization.members $contains (id = $me)' },
+            [Action.Read]: { where: 'organization.members $contains (id = $me)' },
+            [Action.Update]: { where: 'organization.members $contains (id = $me)' },
+          },
+        },
+        {
+          fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+          name: 'Section',
+        },
+        {
+          fields: [
+            { field: 'section', target: 'Section', type: 'Entity' },
+            { field: 'title', type: 'String' },
+          ],
+          name: 'Page',
+          security: {
+            [Action.Read]: {
+              where: 'section.document.organization.members $contains (id = $me)',
+            },
+            [Action.Update]: {
+              where: 'section.document.organization.members $contains (id = $me)',
+            },
+          },
+        },
+      ],
+      relationships: [{
+        between: [
+          { field: 'organization', inverse: 'members', target: 'Organization' },
+          { field: 'user', inverse: 'users', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+        security: {
+          [Action.Create]: Security.Public,
+          [Action.Delete]: Security.Public,
+          [Action.Read]: Security.Public,
+          [Action.Update]: Security.Public,
+        },
+      }],
+    })
+    const install = tempDirectory('basis-mutation-proposed-paths-')
+    const server = await start(install, membershipGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const worker = await authorization.enrollIdentity('test', 'proposed-worker', {
+        email: 'worker@example.com',
+      })
+      if (!worker) throw new Error('worker was not enrolled')
+      const organizationA = randomUUID()
+      const organizationB = randomUUID()
+      const documentA = randomUUID()
+      const documentB = randomUUID()
+      const sectionA = randomUUID()
+      const sectionB = randomUUID()
+      const page = randomUUID()
+      await admin.sql.begin(async tx => {
+        for (const [id, title, entity] of [
+          [organizationA, 'Organization A', 'Organization'],
+          [organizationB, 'Organization B', 'Organization'],
+          [documentA, 'Document A', 'Document'],
+          [documentB, 'Document B', 'Document'],
+          [sectionA, 'Section A', 'Section'],
+          [sectionB, 'Section B', 'Section'],
+          [page, 'Page', 'Page'],
+        ] as const) {
+          await tx`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${id}, ${title}, ${entity})
+          `
+        }
+        await tx`
+          INSERT INTO "Organization" ("id", "title")
+          VALUES (${organizationA}, 'Organization A'), (${organizationB}, 'Organization B')
+        `
+        await tx`
+          INSERT INTO "Document" ("id", "title", "organization.id")
+          VALUES (${documentA}, 'Document A', ${organizationA}),
+            (${documentB}, 'Document B', ${organizationB})
+        `
+        await tx`
+          INSERT INTO "Section" ("id", "document.id")
+          VALUES (${sectionA}, ${documentA}), (${sectionB}, ${documentB})
+        `
+        await tx`
+          INSERT INTO "Page" ("id", "title", "section.id")
+          VALUES (${page}, 'Page', ${sectionA})
+        `
+        await tx`
+          INSERT INTO "Membership" ("organization.id", "user.id", "role")
+          VALUES (${organizationA}, ${worker}, 'Owner')
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      expect(await asActor(worker, () => server.db.edit(
+        'Page',
+        { field: 'title', operator: Operator.Comparison.Equal, value: 'Page' },
+        { title: 'Page edited' },
+      ))).toMatchObject({ edited: 1 })
+
+      const blocked = await asActor(worker, () => server.db.edit(
+        'Page',
+        { field: 'title', operator: Operator.Comparison.Equal, value: 'Page edited' },
+        { section: sectionB },
+      )).catch((error: unknown) => error)
+      expect(blocked).toBeInstanceOf(MutationError)
+      expect(blocked).toMatchObject({ code: 'authorization' })
+
+      expect(await asActor(worker, () => server.db.create('Document', {
+        name: 'Created in A',
+        organization: organizationA,
+        title: 'Created in A',
+      }))).toMatchObject({ created: 1 })
+      const deniedCreate = await asActor(worker, () => server.db.create('Document', {
+        name: 'Created in B',
+        organization: organizationB,
+        title: 'Created in B',
+      })).catch((error: unknown) => error)
+      expect(deniedCreate).toBeInstanceOf(MutationError)
+      expect(deniedCreate).toMatchObject({ code: 'authorization' })
+      expect(await asActor(worker, () => server.db.query('Document', {
+        fields: ['id'],
+        where: { field: 'title', operator: Operator.Comparison.Equal, value: 'Created in B' },
+      }))).toEqual([])
+
+      await admin.sql`
+        INSERT INTO "Membership" ("organization.id", "user.id", "role")
+        VALUES (${organizationB}, ${worker}, 'Viewer')
+      `
+      expect(await asActor(worker, () => server.db.edit(
+        'Page',
+        { field: 'title', operator: Operator.Comparison.Equal, value: 'Page edited' },
+        { section: sectionB },
+      ))).toMatchObject({ edited: 1 })
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 180_000)
+
+  test('rolls back final-state validation through the real db.tx boundary', async () => {
+    const publicActions = {
+      [Action.Create]: Security.Public,
+      [Action.Delete]: Security.Public,
+      [Action.Read]: Security.Public,
+      [Action.Update]: Security.Public,
+    }
+    const stateGraph = new Graph({
+      entities: [
+        { fields: [], name: 'User', security: publicActions },
+        {
+          fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
+          name: 'Revision',
+          security: publicActions,
+        },
+        {
+          constraints: [{
+            description: 'The document and revision must share an owner.',
+            name: 'consistentRevision',
+            type: Constraint.Validation,
+            where: 'revision = null OR owner = revision.owner',
+          }],
+          fields: [
+            { field: 'owner', target: 'User', type: 'Entity' },
+            { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
+            { field: 'title', type: 'String' },
+          ],
+          name: 'Document',
+          security: publicActions,
+        },
+      ],
+    })
+    const install = tempDirectory('basis-mutation-tx-validation-')
+    const server = await start(install, stateGraph)
+    try {
+      const owner = await server.db.create('User', { name: 'Owner' })
+      const other = await server.db.create('User', { name: 'Other' })
+      const revision = await server.db.create('Revision', {
+        name: 'Revision',
+        owner: owner.record?.id,
+      })
+      const filter = (title: string) => ({
+        field: 'title',
+        operator: Operator.Comparison.Equal,
+        value: title,
+      })
+
+      expect(await server.db.create('Document', {
+        name: 'Valid',
+        owner: owner.record?.id,
+        revision: revision.record?.id,
+        title: 'Valid',
+      })).toMatchObject({ created: 1 })
+
+      const createFailure = await server.db.tx(async sql => {
+        await sql.create('User', { name: 'Rollback' })
+        await sql.create('Document', {
+          name: 'Invalid',
+          owner: other.record?.id,
+          revision: revision.record?.id,
+          title: 'Invalid',
+        })
+      }).catch((error: unknown) => error)
+      expect(createFailure).toBeInstanceOf(MutationError)
+      expect(createFailure).toMatchObject({ code: 'constraint' })
+      expect((createFailure as MutationError).message).toContain('consistentRevision')
+      expect((createFailure as MutationError).message).toContain('Document')
+      expect(await server.db.query('User', {
+        fields: ['id'],
+        where: { field: 'name', operator: Operator.Comparison.Equal, value: 'Rollback' },
+      })).toEqual([])
+
+      const editFailure = await server.db.tx(async sql => sql.edit('Document', filter('Valid'), {
+        owner: other.record?.id,
+      })).catch((error: unknown) => error)
+      expect(editFailure).toBeInstanceOf(MutationError)
+      expect(editFailure).toMatchObject({ code: 'constraint' })
+      expect(await server.db.query<{ owner: { entity: string, id: string, name: string } }>('Document', {
+        fields: ['owner'],
+        where: filter('Valid'),
+      })).toEqual([{ owner: { entity: 'User', id: owner.record?.id, name: 'Owner' } }])
+
+      const upsertFailure = await server.db.tx(async sql => sql.upsert('Document', filter('Upserted'), {
+        name: 'Upserted',
+        owner: other.record?.id,
+        revision: revision.record?.id,
+        title: 'Upserted',
+      })).catch((error: unknown) => error)
+      expect(upsertFailure).toBeInstanceOf(MutationError)
+      expect(upsertFailure).toMatchObject({ code: 'constraint' })
+      expect(await server.db.query('Document', { fields: ['id'], where: filter('Upserted') }))
+        .toEqual([])
+
+      await server.db.tx(async sql => {
+        await sql.create('Document', {
+          name: 'Repair',
+          owner: other.record?.id,
+          revision: revision.record?.id,
+          title: 'Repair',
+        })
+        await sql.edit('Document', filter('Repair'), { owner: owner.record?.id })
+      })
+      expect(await server.db.query<{ owner: { entity: string, id: string, name: string } }>('Document', {
+        fields: ['owner'],
+        where: filter('Repair'),
+      })).toEqual([{ owner: { entity: 'User', id: owner.record?.id, name: 'Owner' } }])
     } finally {
       await server.shutdown()
       removeService(install)
