@@ -64,13 +64,20 @@ describe('Graph mutations', () => {
         email: 'ada@example.com',
         name: 'Ada',
       })
-      expect(user).toEqual({ created: 1 })
+      expect(user).toMatchObject({ created: 1 })
+      expect(user.record).toMatchObject({ email: 'ada@example.com', entity: 'User', name: 'Ada' })
+      expect(user.record?.id).toMatch(/^[0-9a-f-]{36}$/u)
       const employee = await database.create('Employee', {
         department: 'Engineering',
         email: 'grace@example.com',
         name: 'Grace',
       })
-      expect(employee).toEqual({ created: 1 })
+      expect(employee).toMatchObject({ created: 1 })
+      expect(employee.record).toMatchObject({
+        department: 'Engineering',
+        entity: 'Employee',
+        name: 'Grace',
+      })
       const users = await database.query('Person', {
         fields: ['email', 'name'],
         orderBy: 'email',
@@ -116,6 +123,96 @@ describe('Graph mutations', () => {
     })
   }, 120_000)
 
+  test('returns hydrated records for single mutations and counts only for sets', async () => {
+    await withIsolatedDatabase('mutation-records', async database => {
+      await database.use(definitions)
+      const user = await database.create('User', { email: 'ada@example.com', name: 'Ada' })
+      expect(user.record).toMatchObject({ email: 'ada@example.com', entity: 'User', name: 'Ada' })
+      expect(user.record?.id).toMatch(/^[0-9a-f-]{36}$/u)
+      const supplied = '00000000-0000-4000-8000-000000000010'
+      expect(await database.create('User', {
+        email: 'explicit@example.com',
+        id: supplied,
+        name: 'Explicit',
+      })).toMatchObject({ created: 1, record: { id: supplied } })
+
+      const created = await database.create('Article', {
+        name: 'Record',
+        owner: user.record.id,
+        title: 'Record',
+      })
+      expect(created).toMatchObject({
+        created: 1,
+        record: {
+          entity: 'Article',
+          name: 'Record',
+          owner: { entity: 'User', id: user.record.id, name: 'Ada' },
+          payload: null,
+          score: 0,
+          tags: null,
+          title: 'Record',
+        },
+      })
+      const bulk = await database.create('Article', [{
+        name: 'Bulk',
+        owner: user.record.id,
+        title: 'Bulk',
+      }])
+      expect(bulk).toEqual({ created: 1 })
+      expect(Object.hasOwn(bulk, 'record')).toBe(false)
+      const invalid = await database.captureError(() => database.create('Article', {
+        name: 'Invalid',
+        owner: '00000000-0000-4000-8000-000000000099',
+        title: 'Invalid',
+      }))
+      expect(invalid).toBeInstanceOf(MutationError)
+      expect((invalid as MutationError).code).toBe('constraint')
+      expect(await database.query('Article', {
+        fields: ['id'],
+        where: 'title == \'Invalid\'',
+      })).toEqual([])
+
+      const singleEdit = await database.edit(
+        'Article',
+        { field: 'id', operator: '$eq', value: created.record.id },
+        { title: 'Single edit' },
+      )
+      expect(singleEdit).toMatchObject({
+        edited: 1,
+        record: {
+          id: created.record.id,
+          owner: { entity: 'User', id: user.record.id, name: 'Ada' },
+          title: 'Single edit',
+        },
+      })
+      expect(await database.edit('Article', 'title == \'Missing\'', { title: 'Never' }))
+        .toEqual({ edited: 0 })
+      await database.create('Article', [
+        { name: 'Multi', owner: user.record.id, title: 'Multi' },
+        { name: 'Multi', owner: user.record.id, title: 'Multi' },
+      ])
+      expect(await database.edit('Article', 'title == \'Multi\'', { title: 'Multi edited' }))
+        .toEqual({ edited: 2 })
+
+      const upsertCreate = await database.upsert('Article', 'title == \'Upsert\'', {
+        name: 'Upsert',
+        owner: user.record.id,
+        title: 'Upsert',
+      })
+      expect(upsertCreate).toMatchObject({
+        created: 1,
+        edited: 0,
+        record: { entity: 'Article', score: 0, title: 'Upsert' },
+      })
+      const upsertEdit = await database.upsert('Article', 'title == \'Upsert\'', { score: 7 })
+      expect(upsertEdit).toMatchObject({
+        created: 0,
+        edited: 1,
+        record: { id: upsertCreate.record.id, score: 7, title: 'Upsert' },
+      })
+    })
+  }, 120_000)
+
   test('validates payloads and rolls an entire batch back on a database constraint', async () => {
     await withIsolatedDatabase('mutation-create-rollback', async database => {
       await database.use(definitions)
@@ -136,7 +233,10 @@ describe('Graph mutations', () => {
         name: 'Duplicate',
         owner: ada.id,
         title: 'Duplicate',
-      })).toEqual({ created: 1 })
+      })).toMatchObject({
+        created: 1,
+        record: { id, owner: { entity: 'User', id: ada.id, name: 'Ada' }, title: 'Duplicate' },
+      })
       const duplicate = await database.captureError(() => database.create('Article', [
         { name: 'Third', owner: ada.id, title: 'Third' },
         { id, name: 'Fourth', owner: ada.id, title: 'Fourth' },
@@ -185,7 +285,7 @@ describe('Graph mutations', () => {
       }))
       expect(nulls.path).toBe('/changes/title')
       expect(await database.edit('Article', 'title == \'Keep\'', { payload: null }))
-        .toEqual({ edited: 1 })
+        .toMatchObject({ edited: 1, record: { payload: null, title: 'Keep' } })
     })
   }, 120_000)
 
@@ -220,17 +320,27 @@ describe('Graph mutations', () => {
       await database.create('User', { email: 'ada@example.com', name: 'Ada' })
       const [ada] = await database.query<{ id: string }>('User', { fields: ['id'] })
       if (!ada) throw new Error('Ada was not created')
-      expect(await database.upsert('Article', 'title == \'One\'', {
+      const created = await database.upsert('Article', 'title == \'One\'', {
         name: 'One',
         owner: ada.id,
         score: 3,
         title: 'One',
-      })).toEqual({ created: 1, edited: 0 })
-      expect(await database.upsert('Article', 'title == \'One\'', {
+      })
+      expect(created).toMatchObject({
+        created: 1,
+        edited: 0,
+        record: { score: 3, title: 'One' },
+      })
+      const edited = await database.upsert('Article', 'title == \'One\'', {
         name: 'One',
         score: 9,
         title: 'One',
-      })).toEqual({ created: 0, edited: 1 })
+      })
+      expect(edited).toMatchObject({
+        created: 0,
+        edited: 1,
+        record: { id: created.record.id, score: 9, title: 'One' },
+      })
       await database.create('Article', { name: 'Two', owner: ada.id, title: 'Two' })
       const ambiguous = await mutationFailure(() => database.upsert(
         'Article',
@@ -270,17 +380,22 @@ describe('Graph mutations', () => {
       ))
       expect(idMismatch.code).toBe('operation')
       expect(await database.query('Article', { fields: ['title'] })).toEqual([])
-      expect(await database.upsert('Article', 'title == \'Toby\'', {
+      const created = await database.upsert('Article', 'title == \'Toby\'', {
         name: 'Toby',
         owner: ada.id,
         score: 3,
         title: 'Toby',
-      })).toEqual({ created: 1, edited: 0 })
+      })
+      expect(created).toMatchObject({ created: 1, edited: 0, record: { title: 'Toby' } })
       expect(await database.upsert('Article', {
         field: 'title',
         operator: '$eq',
         value: 'Toby',
-      }, { score: 8 })).toEqual({ created: 0, edited: 1 })
+      }, { score: 8 })).toMatchObject({
+        created: 0,
+        edited: 1,
+        record: { id: created.record.id, score: 8, title: 'Toby' },
+      })
       expect(await database.query('Article', { fields: ['score', 'title'] }))
         .toEqual([{ score: 8, title: 'Toby' }])
     })

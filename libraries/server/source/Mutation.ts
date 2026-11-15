@@ -46,16 +46,30 @@ export class MutationError extends Error {
   }
 }
 
+/** One hydrated persisted mutation record. */
+export type MutationRecord = Readonly<Record<string, unknown>> & {
+  /** Concrete entity discriminator. */
+  readonly entity: string,
+  /** Canonical root identity. */
+  readonly id: string,
+  /** Root display name. */
+  readonly name: string,
+}
+
 /** Result of a create operation. */
 export interface CreateResult {
   /** Number of entities created. */
   readonly created: number,
+  /** Hydrated record for a single-object create; absent for batch input. */
+  readonly record?: MutationRecord,
 }
 
 /** Result of an edit operation. */
 export interface EditResult {
   /** Number of entities edited. */
   readonly edited: number,
+  /** Hydrated record when exactly one authorized row was edited. */
+  readonly record?: MutationRecord,
 }
 
 /** Result of a delete operation. */
@@ -70,6 +84,8 @@ export interface UpsertResult {
   readonly created: number,
   /** `1` when the edit branch ran, otherwise `0`. */
   readonly edited: number,
+  /** Hydrated created or edited record. */
+  readonly record: MutationRecord,
 }
 
 /** The Graph-native mutation vocabulary. */
@@ -78,7 +94,7 @@ export interface MutationDatabase {
    * Create one entity or a finite synchronous batch atomically.
    * @param entity - Exact concrete entity name.
    * @param values - One value object or a finite iterable of value objects.
-   * @returns The created count.
+   * @returns The created count, plus the hydrated record for a single object.
    */
   create(
     entity: string,
@@ -99,7 +115,7 @@ export interface MutationDatabase {
    * @param entity - Exact entity or abstract ancestor name.
    * @param filter - Existing string, structured, or shorthand filter.
    * @param changes - Field values to patch.
-   * @returns The edited count.
+   * @returns The edited count, plus the record when exactly one row was edited.
    */
   edit(
     entity: string,
@@ -111,7 +127,7 @@ export interface MutationDatabase {
    * @param entity - Exact concrete entity name.
    * @param filter - Existing string, structured, or shorthand filter.
    * @param values - Values used by the edit or create branch.
-   * @returns Which branch ran.
+   * @returns Which branch ran and the hydrated created or edited record.
    */
   upsert(
     entity: string,
@@ -203,7 +219,13 @@ async function create(
     single ? '/values' : `/values/${index}`,
   ))
   for (const item of prepared) await insert(entities, sql, definition, item)
-  return { created: prepared.length }
+  if (!single) return { created: prepared.length }
+  const [item] = prepared
+  if (!item) return { created: 0 }
+  return {
+    created: 1,
+    record: await readRecord({ entities, sql }, definition, item.id),
+  }
 }
 
 /**
@@ -225,8 +247,15 @@ async function edit(
   const definition = requireEntity(entities, entity)
   const normalized = prepareChanges(entities, definition, changes, '/changes')
   const matches = await selectMatches({ entities, sql }, definition, filter)
-  const edited = await applyEdit({ entities, sql }, definition, matches, normalized)
-  return { edited }
+  const mutable = await applyEdit({ entities, sql }, definition, matches, normalized)
+  if (mutable.length !== 1) return { edited: mutable.length }
+  const [identity] = mutable
+  if (!identity) return { edited: 0 }
+  const leaf = requireConcrete(entities, identity.entity)
+  return {
+    edited: 1,
+    record: await readRecord({ entities, sql }, leaf, identity.id),
+  }
 }
 
 /**
@@ -289,7 +318,13 @@ async function upsert(
   }
   const changes = prepareChanges(entities, definition, values, '/values')
   await applyChanges({ entities, sql }, definition, mutable, changes)
-  return { created: 0, edited: 1 }
+  const [identity] = mutable
+  if (!identity) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
+  return {
+    created: 0,
+    edited: 1,
+    record: await readRecord({ entities, sql }, definition, identity.id),
+  }
 }
 
 /**
@@ -324,7 +359,11 @@ async function createUpsert(
       )
     }
     await execute(sql, { sql: `RELEASE SAVEPOINT ${quote(name)}`, values: [] })
-    return { created: 1, edited: 0 }
+    return {
+      created: 1,
+      edited: 0,
+      record: await readRecord({ entities, sql }, definition, item.id),
+    }
   } catch (error) {
     await sql.unsafe(`ROLLBACK TO SAVEPOINT ${quote(name)}`).catch(() => undefined)
     await sql.unsafe(`RELEASE SAVEPOINT ${quote(name)}`).catch(() => undefined)
@@ -345,11 +384,11 @@ async function applyEdit(
   definition: EntityDefinition,
   matches: readonly SelectedIdentity[],
   changes: ReadonlyMap<string, unknown>,
-): Promise<number> {
-  if (matches.length === 0) return 0
+): Promise<readonly SelectedIdentity[]> {
+  if (matches.length === 0) return []
   const mutable = await authorizeEdit(options, definition, matches)
   await applyChanges(options, definition, mutable, changes)
-  return mutable.length
+  return mutable
 }
 
 /**
@@ -1043,6 +1082,39 @@ function materialize(input: MutationValues | Iterable<MutationValues>): readonly
     values.push(value)
   }
   return values
+}
+
+/**
+ * Read one persisted record through the canonical query compiler and hydrator.
+ * @param options - Canonical definitions and transaction client.
+ * @param options.entities - Canonical entity definitions.
+ * @param options.sql - Transaction-scoped SQL client.
+ * @param definition - Concrete entity definition.
+ * @param id - Canonical identity.
+ * @returns The hydrated record.
+ * @throws {MutationError} When the persisted row cannot be read.
+ */
+async function readRecord(
+  { entities, sql }: MutationOptions,
+  definition: EntityDefinition,
+  id: string,
+): Promise<MutationRecord> {
+  let compiled: ReturnType<typeof compilePolymorphicQuery>
+  try {
+    compiled = compilePolymorphicQuery(entities, definition, {
+      fields: definition.effectiveFields.map(field => field.name),
+      limit: 1,
+      where: { id },
+    })
+  } catch (error) {
+    throw filterFailure(error)
+  }
+  const rows = await execute(sql, { sql: compiled.sql, values: compiled.values })
+  const [row] = rows
+  if (!row) {
+    throw new MutationError('infrastructure', `Persisted ${definition.name} record was not found`)
+  }
+  return compiled.hydrate(row) as MutationRecord
 }
 
 /**

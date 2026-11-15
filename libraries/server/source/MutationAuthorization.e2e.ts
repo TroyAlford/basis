@@ -306,23 +306,32 @@ describe('Graph mutation authorization', () => {
       expect((denied as MutationError).code).toBe('authorization')
 
       await asActor(admin, () => authorization.assignRole(worker, creator.id))
-      expect(await asActor(worker, () => server.db.create('Article', {
+      const created = await asActor(worker, () => server.db.create('Article', {
         name: 'Created',
         rank: 5,
         score: 5,
         title: 'Created',
-      }))).toEqual({ created: 1 })
+      }))
+      expect(created).toMatchObject({
+        created: 1,
+        record: { entity: 'Article', id: expect.any(String), title: 'Created' },
+      })
 
-      expect(await asActor(worker, () => server.db.upsert(
+      const upsertCreated = await asActor(worker, () => server.db.upsert(
         'Article',
         compare('rank', Operator.Comparison.Equal, 200),
         { name: 'Upserted', rank: 200, score: 1, title: 'Upserted' },
-      ))).toEqual({ created: 1, edited: 0 })
+      ))
+      expect(upsertCreated).toMatchObject({
+        created: 1,
+        edited: 0,
+        record: { rank: 200, title: 'Upserted' },
+      })
       expect(await asActor(worker, () => server.db.upsert(
         'Article',
         compare('rank', Operator.Comparison.Equal, 50),
         { score: 2 },
-      ))).toEqual({ created: 0, edited: 1 })
+      ))).toMatchObject({ created: 0, edited: 1, record: { score: 2 } })
       const readOnly = compare('rank', Operator.Comparison.Equal, 80)
       const nonmatching = await asActor(worker, () => server.db.upsert(
         'Article',
@@ -343,7 +352,7 @@ describe('Graph mutation authorization', () => {
         'Article',
         readOnly,
         { name: 'Read only', rank: 80, score: 2, title: 'Read only' },
-      ))).toEqual({ created: 1, edited: 0 })
+      ))).toMatchObject({ created: 1, edited: 0, record: { rank: 80, score: 2 } })
       const rows = await asActor(worker, () => server.db.query<{
         rank: number,
         score: number,
@@ -386,7 +395,7 @@ describe('Graph mutation authorization', () => {
         'Draft',
         compare('rank', Operator.Comparison.GreaterThanOrEqual, 0),
         { title: 'Edited' },
-      ))).toEqual({ edited: 1 })
+      ))).toMatchObject({ edited: 1, record: { title: 'Edited' } })
       expect(await asActor(worker, () => server.db.delete(
         'Draft',
         compare('rank', Operator.Comparison.Equal, 50),
@@ -414,7 +423,10 @@ describe('Graph mutation authorization', () => {
         rank: 10,
         score: 5,
         title: 'Readable create',
-      }))).toEqual({ created: 1 })
+      }))).toMatchObject({
+        created: 1,
+        record: { entity: 'Draft', rank: 10, title: 'Readable create' },
+      })
 
       const readable = await asActor(admin, () => server.db.query<{ id: string }>('Draft', {
         fields: ['id'],
@@ -460,7 +472,10 @@ describe('Graph mutation authorization', () => {
         'Project',
         compare('id', Operator.Comparison.Equal, memberProject.id),
         { title: 'Member updated' },
-      ))).toEqual({ edited: 1 })
+      ))).toMatchObject({
+        edited: 1,
+        record: { code: 'A', entity: 'Project', title: 'Member updated' },
+      })
       expect(await asActor(worker, () => server.db.edit(
         'Project',
         compare('id', Operator.Comparison.Equal, otherProject.id),

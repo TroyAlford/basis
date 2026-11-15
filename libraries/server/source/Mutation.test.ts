@@ -87,7 +87,7 @@ describe('Mutation', () => {
   test('validates canonical create values before any write', async () => {
     const sql = new FakeSQL()
     const mutations = runner(sql)
-    expect(await mutations.create('Pet', { name: 'Toby', species: 'Frog' }))
+    expect(await mutations.create('Pet', [{ name: 'Toby', species: 'Frog' }]))
       .toEqual({ created: 1 })
     expect(sql.calls.map(call => call.sql)).toEqual([
       'INSERT INTO "Entity" ("id", "name", "entity") VALUES ($1, $2, $3)',
@@ -100,11 +100,11 @@ describe('Mutation', () => {
   test('inserts the complete MTI chain with owned fields only', async () => {
     const sql = new FakeSQL()
     const mutations = runner(sql)
-    expect(await mutations.create('Member', {
+    expect(await mutations.create('Member', [{
       department: 'Engineering',
       email: 'ada@example.com',
       name: 'Ada',
-    })).toEqual({ created: 1 })
+    }])).toEqual({ created: 1 })
     expect(sql.calls.map(call => call.sql)).toEqual([
       'INSERT INTO "Entity" ("id", "name", "entity") VALUES ($1, $2, $3)',
       'INSERT INTO "User" ("id", "email") VALUES ($1, $2)',

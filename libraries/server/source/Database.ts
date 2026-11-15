@@ -173,7 +173,7 @@ export interface Database extends MutationDatabase {
    * Creates one entity or a finite batch atomically.
    * @param entity - Exact concrete entity name.
    * @param values - One value object or finite iterable.
-   * @returns The created count.
+   * @returns The created count, plus the hydrated record for a single object.
    */
   create(entity: string, values: MutationValues | Iterable<MutationValues>): Promise<CreateResult>,
   /**
@@ -188,7 +188,7 @@ export interface Database extends MutationDatabase {
    * @param entity - Entity or abstract ancestor name.
    * @param filter - Existing filter form.
    * @param changes - Field values to patch.
-   * @returns The edited count.
+   * @returns The edited count, plus the record when exactly one row matched.
    */
   edit(entity: string, filter: MutationFilter, changes: MutationValues): Promise<EditResult>,
   /** Projects effective scalar and singular reference paths from one canonical entity. */
@@ -206,7 +206,7 @@ export interface Database extends MutationDatabase {
    * @param entity - Exact concrete entity name.
    * @param filter - Existing filter form.
    * @param values - Values used by either branch.
-   * @returns Which branch ran.
+   * @returns Which branch ran and the hydrated created or edited record.
    */
   upsert(entity: string, filter: MutationFilter, values: MutationValues): Promise<UpsertResult>,
 }

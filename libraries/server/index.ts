@@ -77,6 +77,7 @@ export type {
   MutationDatabase,
   MutationErrorCode,
   MutationFilter,
+  MutationRecord,
   MutationValues,
   UpsertResult,
 } from './source/Mutation'

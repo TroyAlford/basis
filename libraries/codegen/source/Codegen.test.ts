@@ -8,6 +8,20 @@ import { join } from 'node:path'
 import { MutationError, mutationRunner } from '../../server/source/Mutation'
 import { emitter, generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from '../index'
 
+/**
+ * Build a fake transaction client that returns one record for read-back queries.
+ * @returns The fake SQL capability.
+ */
+function fakeSQL(): SQL {
+  return {
+    async unsafe(sql: string): Promise<Record<string, unknown>[]> {
+      return sql.trimStart().startsWith('SELECT')
+        ? [{ entity: 'Entity', id: '00000000-0000-4000-8000-000000000001', name: 'Record' }]
+        : []
+    },
+  } as unknown as SQL
+}
+
 const document = {
   entities: [
     {
@@ -228,18 +242,13 @@ describe('codegen', () => {
     expect(anyValidate({ id: uuid, name: 'AnyThing' })).toBe(true)
     expect(anyValidate({ id: '123', name: 'AnyThing' })).toBe(true)
     expect(anyValidate({ id: 'garbage', name: 'AnyThing' })).toBe(false)
-    const sql = {
-      async unsafe(): Promise<Record<string, unknown>[]> {
-        return []
-      },
-    } as unknown as SQL
-    const mutations = mutationRunner(graph.definitions, sql)
+    const mutations = mutationRunner(graph.definitions, fakeSQL())
     await expect(mutations.create('SnowThing', { name: 'SnowThing' }))
       .rejects.toBeInstanceOf(MutationError)
     await expect(mutations.create('SnowThing', { id: 'garbage', name: 'SnowThing' }))
       .rejects.toBeInstanceOf(MutationError)
     expect(await mutations.create('SnowThing', { id: '123', name: 'SnowThing' }))
-      .toEqual({ created: 1 })
+      .toMatchObject({ created: 1 })
     await expect(mutations.create('UuidThing', { id: 'garbage', name: 'UuidThing' }))
       .rejects.toBeInstanceOf(MutationError)
   })
@@ -259,18 +268,13 @@ describe('codegen', () => {
     const ajv = new Ajv({ allErrors: true })
     const validateCreate = ajv.compile(schemas.Thing?.create as object)
     const validateUpdate = ajv.compile(schemas.Thing?.update as object)
-    const sql = {
-      async unsafe(): Promise<Record<string, unknown>[]> {
-        return []
-      },
-    } as unknown as SQL
-    const mutations = mutationRunner(graph.definitions, sql)
+    const mutations = mutationRunner(graph.definitions, fakeSQL())
     const valid = { name: 'Valid', score: 5, title: 'Good' }
     expect(validateCreate(valid)).toBe(true)
-    expect(await mutations.create('Thing', valid)).toEqual({ created: 1 })
+    expect(await mutations.create('Thing', valid)).toMatchObject({ created: 1 })
     const validNull = { name: 'Null', nickname: null, score: 5, title: 'Good' }
     expect(validateCreate(validNull)).toBe(true)
-    expect(await mutations.create('Thing', validNull)).toEqual({ created: 1 })
+    expect(await mutations.create('Thing', validNull)).toMatchObject({ created: 1 })
     const invalidCreate = [
       { name: 'Missing', score: 5 },
       { extra: true, name: 'Unknown', score: 5, title: 'Good' },
