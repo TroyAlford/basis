@@ -182,7 +182,7 @@ The JSON Schema emitter produces one standards-compliant Draft 2020-12 entity do
       "allOf": [{ "$ref": "#/$defs/Reference" }],
       "properties": {
         "lastUpdatedAt": { "anyOf": [{ "format": "date-time", "type": "string" }, { "type": "null" }] },
-        "lastUpdatedBy": { "anyOf": [{ "$ref": "#/$defs/Reference" }, { "type": "null" }] }
+        "lastUpdatedBy": { "anyOf": [{ "allOf": [{ "$ref": "#/$defs/Reference" }, { "properties": { "entity": { "const": "User" } }, "type": "object" }] }, { "type": "null" }] }
       },
       "required": ["lastUpdatedAt", "lastUpdatedBy"],
       "type": "object"
@@ -191,7 +191,7 @@ The JSON Schema emitter produces one standards-compliant Draft 2020-12 entity do
       "allOf": [{ "$ref": "#/$defs/Entity" }],
       "properties": {
         "entity": { "const": "Note", "type": "string" },
-        "owner": { "anyOf": [{ "$ref": "#/$defs/Reference" }, { "type": "null" }] },
+        "owner": { "anyOf": [{ "allOf": [{ "$ref": "#/$defs/Reference" }, { "properties": { "entity": { "const": "User" } }, "type": "object" }] }, { "type": "null" }] },
         "title": { "type": "string" }
       },
       "required": ["entity", "title", "owner"],
@@ -201,7 +201,7 @@ The JSON Schema emitter produces one standards-compliant Draft 2020-12 entity do
 }
 ```
 
-This document describes stored entities, not `db.create/edit/delete/upsert` payloads or authorization. AJV or other JSON Schema tooling can consume it for interoperability tests; it is not the mutation validator.
+Each referencing property composes the shared `Reference` with a property-local target discriminator, so `Note.owner` accepts a `User` identity but rejects a `Note` identity. This document describes stored entities, not `db.create/edit/delete/upsert` payloads or authorization. AJV or other JSON Schema tooling can consume it for interoperability tests; it is not the mutation validator.
 
 `logicalErd` renders navigation-facing entity fields:
 
@@ -264,5 +264,6 @@ erDiagram
 - Use `Entity` fields with `target` for stored references and `Inverse` fields for reciprocal navigation.
 - Use `Cardinality.One` or `Cardinality.Many` on inverse declarations.
 - Keep generated files generated. Edit the canonical authoring source, then regenerate.
+- Entity names reserved by generated TypeScript and JSON Schema products (`Reference`, `Entities`, `EntityMap`, `CreateMap`, `UpdateMap`, `ReferenceMap`) are rejected by Graph authoring.
 
 See [Schema Inspection & Planning](./schema.mdx) for the physical compiler and migration workflow.

@@ -24,7 +24,7 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
     .sort((left, right) => left.name.localeCompare(right.name))
   return {
     $defs: {
-      Entity: rootEntitySchema(),
+      Entity: rootEntitySchema(definitions),
       Reference: referenceSchema(definitions),
       ...Object.fromEntries(entityDefinitions.map(entity => [
         entity.name,
@@ -38,9 +38,12 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
 
 /**
  * Render the universal Entity root definition.
+ * @param definitions - Canonical definitions.
  * @returns Entity JSON Schema.
  */
-function rootEntitySchema(): Readonly<Record<string, unknown>> {
+function rootEntitySchema(
+  definitions: Graph['definitions'],
+): Readonly<Record<string, unknown>> {
   return {
     allOf: [{ $ref: '#/$defs/Reference' }],
     properties: {
@@ -48,7 +51,7 @@ function rootEntitySchema(): Readonly<Record<string, unknown>> {
         anyOf: [{ format: 'date-time', type: 'string' }, { type: 'null' }],
       },
       lastUpdatedBy: {
-        anyOf: [{ $ref: '#/$defs/Reference' }, { type: 'null' }],
+        anyOf: [referenceForTarget('User', definitions), { type: 'null' }],
       },
     },
     required: ['lastUpdatedAt', 'lastUpdatedBy'],
@@ -92,7 +95,7 @@ function entitySchema(
   if (entity.idFormat !== undefined) properties.id = identitySchema(entity.idFormat)
   for (const field of entity.fields) {
     if (field.type === FieldType.Inverse || field.name === 'id') continue
-    properties[field.name] = fieldSchema(field)
+    properties[field.name] = fieldSchema(field, definitions)
     required.push(field.name)
   }
   return {
@@ -106,12 +109,16 @@ function entitySchema(
 /**
  * Render one field's JSON Schema.
  * @param field - Field definition.
+ * @param definitions - Canonical definitions.
  * @returns JSON Schema fragment.
  */
-function fieldSchema(field: FieldDefinition): Record<string, unknown> {
+function fieldSchema(
+  field: FieldDefinition,
+  definitions: Graph['definitions'],
+): Record<string, unknown> {
   if (field.type === FieldType.Inverse) return {}
   if (field.type === FieldType.Entity) {
-    const reference = { $ref: '#/$defs/Reference' }
+    const reference = referenceForTarget(field.target, definitions)
     return field.nullable === false ? reference : { anyOf: [reference, { type: 'null' }] }
   }
   if (field.type === FieldType.Array) {
@@ -127,6 +134,43 @@ function fieldSchema(field: FieldDefinition): Record<string, unknown> {
     ...schemaForScalar(field.type),
     ...boundsFor(field),
   }, field)
+}
+
+/**
+ * Constrain the shared Reference identity to one canonical target.
+ * @param target - Referenced entity name, or `Entity`.
+ * @param definitions - Canonical definitions.
+ * @returns Reference schema narrowed to the target discriminator.
+ */
+function referenceForTarget(
+  target: string,
+  definitions: Graph['definitions'],
+): Record<string, unknown> {
+  return {
+    allOf: [
+      { $ref: '#/$defs/Reference' },
+      {
+        properties: { entity: targetDiscriminatorSchema(target, definitions) },
+        type: 'object',
+      },
+    ],
+  }
+}
+
+/**
+ * Render the discriminator constraint for one reference target.
+ * @param target - Referenced entity name, or `Entity`.
+ * @param definitions - Canonical definitions.
+ * @returns JSON Schema discriminator constraint.
+ */
+function targetDiscriminatorSchema(
+  target: string,
+  definitions: Graph['definitions'],
+): Record<string, unknown> {
+  if (target === 'Entity') return rootDiscriminatorSchema(definitions)
+  const entity = definitions.entity(target)
+  if (!entity) throw new Error(`Unknown reference target "${target}"`)
+  return discriminatorSchema(entity, definitions)
 }
 
 /**

@@ -104,6 +104,20 @@ describe('codegen', () => {
       tags: ['a'],
       title: 'Title',
     })).toBe(true)
+    expect(validate({
+      createdAt: '2020-01-01T00:00:00.000Z',
+      dueOn: '2020-01-01',
+      entity: 'Note',
+      id,
+      lastUpdatedAt: null,
+      lastUpdatedBy: null,
+      metadata: { kind: 'note' },
+      name: 'Note',
+      owner: { entity: 'Note', id, name: 'Wrong target' },
+      subject: null,
+      tags: ['a'],
+      title: 'Title',
+    })).toBe(false)
   })
 
   test('materializes independent TypeScript and JSON Schema emitters', async () => {
@@ -184,13 +198,19 @@ describe('codegen', () => {
     expect(base.properties?.base).toBeDefined()
     expect(child.allOf?.[0]?.$ref).toBe('#/$defs/Base')
     expect(grandchild.allOf?.[0]?.$ref).toBe('#/$defs/Child')
-    expect(holder.properties?.requiredChild).toEqual({ $ref: '#/$defs/Reference' })
-    expect(holder.properties?.optionalChild).toEqual({
-      anyOf: [{ $ref: '#/$defs/Reference' }, { type: 'null' }],
-    })
+    expect((holder.properties?.requiredChild as {
+      allOf?: { $ref?: string }[],
+    }).allOf?.[0]?.$ref).toBe('#/$defs/Reference')
+    expect((holder.properties?.requiredChild as {
+      allOf?: { properties?: { entity?: { enum?: string[] } } }[],
+    }).allOf?.[1]?.properties?.entity?.enum).toEqual(['Grandchild'])
+    expect((holder.properties?.optionalChild as {
+      anyOf?: { allOf?: { $ref?: string }[] }[],
+    }).anyOf?.[0]?.allOf?.[0]?.$ref).toBe('#/$defs/Reference')
     expect(schemas.$defs.Node).toBeDefined()
-    expect((schemas.$defs.Node as { properties?: Record<string, unknown> }).properties?.parent)
-      .toEqual({ anyOf: [{ $ref: '#/$defs/Reference' }, { type: 'null' }] })
+    expect(((schemas.$defs.Node as { properties?: Record<string, unknown> }).properties?.parent as {
+      anyOf?: { allOf?: { properties?: { entity?: { const?: string } } }[] }[],
+    }).anyOf?.[0]?.allOf?.[1]?.properties?.entity?.const).toBe('Node')
 
     const id = '00000000-0000-4000-8000-000000000001'
     const childRepresentation = {
