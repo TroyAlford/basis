@@ -93,6 +93,7 @@ async function main(): Promise<number> {
     process.chdir(install)
     if (baseModel) {
       await new DatabaseRelease({
+        allowSourceDrift: true,
         graph: baseModel,
         migrations: baseMigrations,
       }).apply()

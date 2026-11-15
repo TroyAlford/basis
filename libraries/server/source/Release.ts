@@ -335,6 +335,8 @@ export class ReleaseError extends Error {
 
 /** Options for one host-run database release. */
 export interface DatabaseReleaseOptions {
+  /** Whether historical source hashes may differ from the current catalog. */
+  readonly allowSourceDrift?: boolean,
   /** Current application physical model. */
   readonly graph: PhysicalModel,
   /** Reviewed migrations directory containing `manifest.json`. */
@@ -414,6 +416,7 @@ export async function loadRelease(directory: string, graph: PhysicalModel): Prom
  * contract, and only then promotes the candidate through the managed service.
  */
 export class DatabaseRelease {
+  readonly #allowSourceDrift: boolean
   readonly #database: Directory
   readonly #graph: PhysicalModel
   readonly #migrations: string
@@ -424,6 +427,7 @@ export class DatabaseRelease {
    * @param options - Physical model and migration directory.
    */
   constructor(options: DatabaseReleaseOptions) {
+    this.#allowSourceDrift = options.allowSourceDrift === true
     this.#database = directories('database')
     this.#graph = options.graph
     this.#migrations = resolve(options.migrations)
@@ -540,7 +544,7 @@ export class DatabaseRelease {
         throw new ReleaseDeterministicError('Candidate ledger does not match the live release baseline')
       }
       for (const artifact of candidatePlan.pending) {
-        await DDL.apply(candidateSql, artifact)
+        await DDL.apply(candidateSql, artifact, { verifySource: !this.#allowSourceDrift })
         const readiness = await DDL.readiness(candidateSql, artifact)
         if (!readiness.ready) {
           throw new ReleaseDeterministicError(
