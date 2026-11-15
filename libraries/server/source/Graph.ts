@@ -6,8 +6,6 @@ import { compileEntityPredicate, normalizeEntityFilter } from './PolymorphicQuer
 import { postgresScalarType } from './PostgresTypes'
 import type { Filter } from './Predicate'
 import type { PhysicalFunction, PhysicalGrant, PhysicalIndex, PhysicalPolicy, PhysicalSchema, PhysicalTable } from './Schema'
-import type { QueryScope } from './SQL'
-import { SQL } from './SQL'
 
 /** The closed authorization action vocabulary. */
 export enum Action {
@@ -419,8 +417,46 @@ export class Graph {
   }
 
   #compilePredicateForRow(grant: GraphGrant, row: Record<string, unknown>): string {
-    const entity = grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target)
-    if (!entity) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
+    const base = grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target)
+    if (!base) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
+    const definition = this.#proposedRowEntity(base)
+    const compiled = compileEntityPredicate(
+      this.definitions,
+      definition,
+      grant.predicate as Filter,
+      '__row',
+    )
+    const predicate = `(${inline(compiled.sql, compiled.values)})`
+    const joins = compiled.joins.length === 0 ? '' : ` ${compiled.joins.join(' ')}`
+    const withClause = compiled.ctes.length === 0 ? '' : `WITH ${compiled.ctes.join(', ')} `
+    return `EXISTS (${withClause}SELECT 1 FROM ${this.#proposedRowRelation(base, row)} "__row"${joins} ` +
+      `WHERE ${predicate})`
+  }
+
+  /**
+   * Build the canonical row-shaped definition used by public proposed-row expressions.
+   * @param entity - Canonical predicate owner.
+   * @returns Entity whose effective fields all read from the proposed row alias.
+   */
+  #proposedRowEntity(entity: EntityDefinition): EntityDefinition {
+    const fields = entity.effectiveFields.map(field => ({ ...field, owner: entity.name }))
+    return {
+      ...entity,
+      abstract: false,
+      collections: entity.collections,
+      effectiveFields: fields,
+      fields: fields as EntityDefinition['fields'],
+      singularNavigations: entity.singularNavigations,
+    }
+  }
+
+  /**
+   * Build the derived row relation for one public proposed-row expression.
+   * @param entity - Canonical predicate owner.
+   * @param row - Proposed row values.
+   * @returns Derived relation SQL.
+   */
+  #proposedRowRelation(entity: EntityDefinition, row: Record<string, unknown>): string {
     const valueFor = (name: string): unknown => {
       if (Object.hasOwn(row, name)) return row[name]
       const root = name.split('.', 1)[0] ?? name
@@ -433,44 +469,12 @@ export class Graph {
       }
       return undefined
     }
-    const scope: QueryScope = {
-      array: name => {
-        const field = entity.effectiveFields.find(candidate => candidate.name === name)
-        if (!field || field.type !== FieldType.Array) return undefined
-        return {
-          expression: literal(valueFor(field.name)),
-          field,
-          member: {
-            ...(field.items.format ? { format: field.items.format } : {}),
-            name: field.name,
-            type: field.items.type,
-          },
-        }
-      },
-      definition: entity,
-      expression: field => (field.name === '$me'
-        ? "nullif(current_setting('actor.id', true), '')"
-        : literal(valueFor(field.name.split('.', 1)[0] ?? field.name))),
-      field: name => {
-        if (name === '$me') return { name, type: FieldType.ID }
-        if (name.endsWith('.id')) {
-          const root = name.slice(0, -3)
-          const field = entity.effectiveFields.find(candidate => (
-            candidate.name === root && candidate.type === FieldType.Entity
-          ))
-          if (!field) throw new Error(`Graph: unknown reference path "${entity.name}.${name}"`)
-          return { name, type: FieldType.ID }
-        }
-        if (name.includes('.')) {
-          throw new Error(`Graph: create security cannot derive field path "${entity.name}.${name}"`)
-        }
-        const field = entity.effectiveFields.find(candidate => candidate.name === name)
-        if (!field) throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
-        return field.type === FieldType.Entity ? { name: field.column, type: FieldType.ID } : field
-      },
-    }
-    const where = SQL.where(this.definitions, entity.name, grant.predicate as Filter, scope)
-    return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
+    const columns = entity.effectiveFields.map(field => {
+      const column = field.type === FieldType.Entity ? field.column : field.name
+      return `${literal(valueFor(field.name))} AS ${quoteIdentifier(column)}`
+    })
+    if (columns.length === 0) throw new Error(`Graph: predicate owner "${entity.name}" has no fields`)
+    return `(SELECT ${columns.join(', ')})`
   }
 
   /**

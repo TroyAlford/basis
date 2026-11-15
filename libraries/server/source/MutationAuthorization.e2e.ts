@@ -662,7 +662,11 @@ describe('Graph mutation authorization', () => {
             [Action.Read]: Security.Public,
           },
         },
-        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        {
+          fields: [{ field: 'email', type: 'String' }],
+          name: 'User',
+          security: { [Action.Read]: Security.Public },
+        },
         {
           fields: [
             { field: 'organization', target: 'Organization', type: 'Entity' },
@@ -796,10 +800,31 @@ describe('Graph mutation authorization', () => {
         where: { field: 'title', operator: Operator.Comparison.Equal, value: 'Created in B' },
       }))).toEqual([])
 
+      const proposedRow = {
+        id: randomUUID(),
+        name: 'Proposed',
+        organization: organizationA,
+        title: 'Proposed',
+      }
+      const proposedExpression = authorization.graph.createExpression('Document', proposedRow)
+      if (!proposedExpression) throw new Error('createExpression did not compile')
+      const evaluate = (expression: string) => asActor(worker, () => server.db.tx(async sql => {
+        const rows = await sql.unsafe<{ allowed: boolean }[]>(`SELECT (${expression}) AS "allowed"`)
+        return rows[0]?.allowed
+      }))
+      expect(await evaluate(proposedExpression)).toBe(true)
+      const deniedExpression = authorization.graph.accessExpression(Action.Create, 'Document', {
+        ...proposedRow,
+        organization: organizationB,
+      })
+      if (!deniedExpression) throw new Error('accessExpression did not compile')
+      expect(await evaluate(deniedExpression)).toBe(false)
+
       await admin.sql`
         INSERT INTO "Membership" ("organization.id", "user.id", "role")
         VALUES (${organizationB}, ${worker}, 'Viewer')
       `
+      expect(await evaluate(deniedExpression)).toBe(true)
       expect(await asActor(worker, () => server.db.edit(
         'Page',
         { field: 'title', operator: Operator.Comparison.Equal, value: 'Page edited' },

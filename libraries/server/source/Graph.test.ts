@@ -696,4 +696,64 @@ describe('Graph', () => {
     expect(() => make({ read: { where: null } })).toThrow('must declare grant, role, or a non-empty where')
   })
 
+  test('compiles public proposed-row expressions through the canonical resolver', () => {
+    const proposedGraph = new Graph({
+      entities: [
+        { fields: [], name: 'User' },
+        { fields: [], name: 'Organization' },
+        {
+          fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+          name: 'Section',
+        },
+        {
+          fields: [
+            { field: 'organization', target: 'Organization', type: 'Entity' },
+            { field: 'owner', target: 'User', type: 'Entity' },
+            { field: 'section', target: 'Section', type: 'Entity' },
+            { field: 'title', type: 'String' },
+          ],
+          name: 'Document',
+          security: {
+            [Action.Read]: Security.Public,
+            [Action.Create]: [
+              { where: '$me != null' },
+              { where: 'owner = $me' },
+              { where: 'section.document.owner = $me' },
+              {
+                where: 'organization.members $contains ' +
+                  "(id = $me $and membership.role = 'Owner')",
+              },
+            ],
+          },
+        },
+      ],
+      relationships: [{
+        between: [
+          { field: 'organization', inverse: 'members', target: 'Organization' },
+          { field: 'user', inverse: 'organizations', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+      }],
+    })
+    const id = '00000000-0000-4000-8000-000000000001'
+    const row = {
+      id,
+      name: 'Document',
+      organization: id,
+      owner: id,
+      section: id,
+      title: 'Document',
+    }
+    const created = proposedGraph.createExpression('Document', row)
+    const accessed = proposedGraph.accessExpression(Action.Create, 'Document', row)
+    expect(created).not.toBeNull()
+    expect(accessed).not.toBeNull()
+    expect(created).toContain("current_setting('actor.id', true)")
+    expect(created).toContain('EXISTS (')
+    expect(created).toContain('FROM "Membership"')
+    expect(accessed).toContain('EXISTS (')
+    expect(() => proposedGraph.createExpression('Document', { id, name: 'Document', title: 'Document' }))
+      .not.toThrow()
+  })
 })
