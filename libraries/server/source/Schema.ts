@@ -66,6 +66,8 @@ export interface PhysicalConstraint {
 
 /** One typed physical check constraint. */
 export interface PhysicalCheck {
+  /** Checked column for a named enum check. */
+  readonly column?: string,
   /** Complete catalog definition, when introspected. */
   readonly definition?: string,
   /** Constraint name. */
@@ -552,13 +554,13 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   for (const row of checkRows) {
     const name = `${row.schema === 'basis' ? 'basis.' : ''}${row.table}`
     const checks = checksByTable.get(name) ?? []
-    const values = row.constraint.endsWith('_enum_check')
-      ? enumCheckValues(row.definition)
+    const enumCheck = row.constraint.endsWith('_enum_check')
+      ? enumCheckDefinition(row.definition)
       : undefined
     checks.push({
       definition: row.definition,
       name: row.constraint,
-      ...(values ? { values } : {}),
+      ...(enumCheck ?? {}),
     })
     checksByTable.set(name, checks)
   }
@@ -1775,6 +1777,7 @@ export function physicalHash(schema: PhysicalSchema, ignoreLedgerSchema = false)
     tables: stripped.tables.map(table => ({
       ...table,
       checks: (table.checks ?? []).map(check => ({
+        ...(check.column ? { column: check.column } : {}),
         name: check.name,
         ...(check.values ? { values: check.values } : {}),
       })),
@@ -2713,37 +2716,102 @@ function sameDefault(left: string | null | undefined, right: string | null | und
 }
 
 /**
- * Extract the persisted values from one introspected enum check definition.
+ * Extract the strict semantics of one introspected enum check definition.
+ *
+ * The accepted shape is exactly a nullable guard plus one allowed-value
+ * condition on the same column: `col IS NULL OR col IN (...)`,
+ * `col = ANY (ARRAY[...])`, or the single-value `col = 'value'` form. Any extra
+ * clause, wrong column, changed null guard, or unrecognized shape is rejected.
  * @param definition - PostgreSQL `pg_get_constraintdef` output.
- * @returns The allowed values, or undefined when the shape is not an enum check.
+ * @returns The checked column and allowed values, or undefined for any other shape.
  */
-function enumCheckValues(definition: string): readonly string[] | undefined {
-  const body = /(?:=\s*ANY\s*\(\s*ARRAY\s*\[|IN\s*\()([\s\S]*?)(?:\]\s*\)|\))/iu.exec(definition)?.[1]
-  const values: string[] = []
-  if (body) {
-    const literal = /'((?:[^']|'')*)'/gu
-    let match: RegExpExecArray | null
-    while ((match = literal.exec(body)) !== null) values.push((match[1] as string).replaceAll("''", "'"))
-  } else {
-    const literal = /=\s*'((?:[^']|'')*)'/gu
-    let match: RegExpExecArray | null
-    while ((match = literal.exec(definition)) !== null) {
-      values.push((match[1] as string).replaceAll("''", "'"))
-    }
-  }
-  return values.length === 0 ? undefined : values
+function enumCheckDefinition(
+  definition: string,
+): { readonly column: string, readonly values: readonly string[] } | undefined {
+  const expression = stripOuterParens(definition.trim().replace(/^CHECK\s+/iu, ''))
+  // Long anchored shape patterns stay single-line so the exact accepted grammar is auditable.
+
+  const guard = /^\(?\s*"?([A-Za-z0-9_.]+)"?\s+IS\s+NULL\s*\)?\s+OR\s+\(?\s*"?([A-Za-z0-9_.]+)"?\s*/iu.exec(expression)
+  if (!guard) return undefined
+  const column = guard[1] as string
+  if (guard[2] !== column) return undefined
+  // eslint-disable-next-line @stylistic/max-len
+  const value = /^(?:=\s*ANY\s*\(\s*ARRAY\s*\[([\s\S]+?)\]\s*\)|IN\s*\(([\s\S]+?)\)|=\s*'((?:[^']|'')*)'(?:\s*::[A-Za-z0-9_ ."]+)?)\s*\)?$/iu
+    .exec(expression.slice(guard[0].length))
+  if (!value) return undefined
+  const valuesPart = value[1] ?? value[2] ?? (value[3] === undefined ? undefined : `'${value[3]}'`)
+  if (!valuesPart) return undefined
+  const values = enumLiterals(valuesPart)
+  return values.length === 0 ? undefined : { column, values }
 }
 
 /**
- * Whether one desired enum check's allowed values match the live check.
+ * Parse one comma-separated list of enum literals with only optional casts.
+ * @param source - Literal list without surrounding brackets.
+ * @returns The decoded values, or an empty array when extra tokens are present.
+ */
+function enumLiterals(source: string): readonly string[] {
+  const values: string[] = []
+  let remainder = source
+  const literal = /'((?:[^']|'')*)'/gu
+  let match: RegExpExecArray | null
+  while ((match = literal.exec(source)) !== null) {
+    values.push((match[1] as string).replaceAll("''", "'"))
+    remainder = remainder.replace(match[0], '')
+  }
+  const residual = remainder
+    .replace(/::[A-Za-z0-9_ ."]+/gu, '')
+    .replaceAll(',', '')
+    .trim()
+  return residual === '' ? values : []
+}
+
+/**
+ * Remove balanced parentheses that wrap the entire expression.
+ * @param value - SQL expression.
+ * @returns The unwrapped expression.
+ */
+function stripOuterParens(value: string): string {
+  let result = value
+  while (result.startsWith('(') && result.endsWith(')') && wrapsWholeExpression(result)) {
+    result = result.slice(1, -1).trim()
+  }
+  return result
+}
+
+/**
+ * Whether the first parenthesis closes at the final character.
+ * @param value - SQL expression beginning and ending with parentheses.
+ * @returns Whether the outer pair encloses the whole expression.
+ */
+function wrapsWholeExpression(value: string): boolean {
+  let depth = 0
+  let quoted = false
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] as string
+    if (character === "'") quoted = !quoted
+    if (quoted) continue
+    if (character === '(') depth += 1
+    if (character === ')') {
+      depth -= 1
+      if (depth === 0) return index === value.length - 1
+    }
+  }
+  return false
+}
+
+/**
+ * Whether one desired enum check's semantics match the live check.
  * @param desired - Desired check.
  * @param actual - Live check.
- * @returns Whether both describe the same allowed values.
+ * @returns Whether both describe the same checked column and allowed-value set.
  */
 function sameCheckValues(desired: PhysicalCheck, actual: PhysicalCheck): boolean {
   if (!desired.values) return true
-  if (!actual.values) return false
-  return desired.values.join('\u0000') === actual.values.join('\u0000')
+  if (!actual.values || !desired.column || actual.column !== desired.column) return false
+  const wanted = [...desired.values].sort().join('\u0000')
+  const found = [...actual.values].sort().join('\u0000')
+  return wanted === found
 }
 
 /**

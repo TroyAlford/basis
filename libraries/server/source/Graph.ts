@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { collectionSqlRelation } from './CollectionSql'
 import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefinition, QueryFieldDefinition } from './EntityDefinitions'
-import { EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
+import { Constraint, EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
 import type { AuthoredDocument, AuthoredEntity, AuthoredEnumSource, AuthoredRelationship, AuthoredSecurity } from './GraphAuthoring'
 import { Operator } from './Operator'
 import { resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
@@ -307,6 +307,7 @@ export class Graph {
         ...base.functions,
         hasRole,
         ...this.#policyFunctions(),
+        ...this.#validationFunctions(),
         ...this.#identityFunctions(),
       ],
       grants: this.#grants(appRole),
@@ -1387,6 +1388,55 @@ export class Graph {
     return functions
   }
 
+  /**
+   * Build one reviewed SECURITY DEFINER Boolean helper per entity validation constraint.
+   *
+   * The helper evaluates the canonical constraint predicate against the final
+   * row inside the caller's native transaction, independently of the writer's
+   * current READ visibility. It returns only a Boolean and never row content.
+   * Relationship constraints are skipped because no Graph-native edge-write
+   * boundary exists.
+   * @returns Validation helper functions.
+   */
+  #validationFunctions(): PhysicalFunction[] {
+    const functions: PhysicalFunction[] = []
+    for (const constraint of this.definitions.constraints) {
+      if (constraint.type !== Constraint.Validation || !constraint.validator) continue
+      const owner = this.definitions.entity(constraint.owner)
+      if (!owner) continue
+      const grant: GraphGrant = {
+        action: Action.Read,
+        predicate: constraint.where,
+        role: PUBLIC_ROLE_ID,
+        target: constraint.owner,
+      }
+      const predicate = this.#compileDirectPredicate(grant, '__row', constraint.owner, true)
+      const sql = `
+        CREATE OR REPLACE FUNCTION ${constraint.validator}(root_id text)
+        RETURNS boolean
+        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
+          SELECT EXISTS (
+            SELECT 1
+            FROM ${quoteIdentifier(constraint.owner)} AS "__row"
+            WHERE "__row".${quoteIdentifier('id')} = root_id
+              AND ${predicate}
+          )
+        $$;
+      `
+      functions.push({
+        body: /\$\$([\s\S]*?)\$\$/u.exec(sql)?.[1]?.trim() ?? '',
+        lifecycle: false,
+        name: constraint.validator,
+        required: [constraint.validator],
+        searchPath: this.#searchPath(),
+        securityDefiner: true,
+        signature: 'root_id text',
+        sql,
+      })
+    }
+    return functions
+  }
+
   #manageExpression(target: string): string | null {
     const targets = new Set([...this.#ancestry(target), target])
     const conditions = this.grants
@@ -1525,7 +1575,7 @@ export class Graph {
       privilege: 'EXECUTE',
       sql: 'REVOKE ALL ON FUNCTION basis.has_role(text) FROM PUBLIC',
     })
-    for (const fn of this.#policyFunctions()) {
+    for (const fn of [...this.#policyFunctions(), ...this.#validationFunctions()]) {
       const helperGrant = `grant:${appRole}:function:${fn.name}:EXECUTE`
       grants.push({
         function: fn.name,

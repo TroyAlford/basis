@@ -2,7 +2,6 @@ import type { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
 import type { ArrayFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarArrayElementDefinition } from './EntityDefinitions'
 import { FieldType, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
-import { Operator } from './Operator'
 import { compileEntityRecordQuery, compilePolymorphicQuery } from './PolymorphicQuery'
 import { postgresScalarType } from './PostgresTypes'
 import type { Filter } from './Predicate'
@@ -233,10 +232,10 @@ export function mutationRunner(entities: EntityDefinitions, sql: BunSQL): Mutati
  * Validation runs after the caller's callback resolves and before commit. A
  * FALSE or UNKNOWN predicate for one surviving written subject aborts the whole
  * transaction through the standard mutation error boundary. Deleted subjects are
- * skipped by recorded mutation intent, never by probing whether the actor can
- * still see the row; a row that becomes invisible to the writer is still treated
- * as surviving, so validation fails closed instead of mistaking invisibility
- * for deletion.
+ * skipped by recorded mutation intent, never by probing visibility. Surviving
+ * subjects are evaluated through their Graph-managed SECURITY DEFINER Boolean
+ * helper, which reads the transaction-final row regardless of the writer's final
+ * READ permission and returns only a Boolean.
  * @param entities - Canonical entity definitions.
  * @param sql - Native transaction client.
  * @throws {MutationError} When a surviving written subject violates a validation constraint.
@@ -255,20 +254,17 @@ export async function validateTransactionState(
     for (const [id, state] of states) {
       if (state === 'deleted') continue
       for (const constraint of constraints) {
-        const where: Filter = {
-          filters: [
-            constraint.where,
-            { field: 'id', operator: Operator.Comparison.Equal, value: id },
-          ],
-          operator: Operator.Logical.And,
+        if (!constraint.validator) {
+          throw new MutationError(
+            'infrastructure',
+            `Validation constraint "${constraint.name}" has no Graph-managed validator`,
+          )
         }
-        const compiled = compilePolymorphicQuery(entities, definition, {
-          fields: ['id'],
-          limit: 1,
-          where,
+        const [result] = await execute(sql, {
+          sql: `SELECT ${constraint.validator}($1) AS "valid"`,
+          values: [id],
         })
-        const rows = await execute(sql, { sql: compiled.sql, values: compiled.values })
-        if (rows.length === 0) {
+        if (result?.valid !== true) {
           throw new MutationError(
             'constraint',
             `Validation constraint "${constraint.name}" on "${constraint.owner}" failed`,

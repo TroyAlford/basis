@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { comparableFieldType, resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilterScope, Filter } from './Predicate'
@@ -333,6 +334,8 @@ export interface ValidationConstraintDefinition {
   readonly owner: string,
   /** Constraint discriminator. */
   readonly type: Constraint.Validation,
+  /** Graph-managed SECURITY DEFINER Boolean validity helper. */
+  readonly validator?: string,
   /** Canonical positive valid-state predicate. */
   readonly where: Filter,
 }
@@ -414,6 +417,8 @@ interface TableDefinition {
 
 /** One table-level check constraint. */
 interface TableCheck {
+  /** Checked column for a named enum check. */
+  readonly column?: string,
   /** SQL boolean expression. */
   readonly expression: string,
   /** Constraint name. */
@@ -804,6 +809,7 @@ export class EntityDefinitions {
   physicalSchema(): PhysicalSchema {
     const tables: PhysicalTable[] = this.tables.map(table => ({
       checks: (table.checks ?? []).map(check => ({
+        ...(check.column ? { column: check.column } : {}),
         name: check.name,
         sql: addCheckSql(table.name, check),
         ...(check.values ? { values: check.values } : {}),
@@ -1228,8 +1234,23 @@ function normalizeConstraintList(
       throw invalid(`validation constraint "${constraint.name}" must declare a non-empty where`)
     }
     validateConstraintFilter(owner, entities, where)
-    return { ...constraint, where }
+    return { ...constraint, validator: validationFunctionName(owner.name, constraint.name, where), where }
   })
+}
+
+/**
+ * Build the deterministic Graph-managed validity helper name for one constraint.
+ * @param owner - Constraint owner.
+ * @param name - Constraint name.
+ * @param where - Canonical predicate.
+ * @returns A length-safe `basis.validate_*` function name.
+ */
+function validationFunctionName(owner: string, name: string, where: Filter): string {
+  const hash = createHash('sha256')
+    .update(JSON.stringify({ name, owner, where }))
+    .digest('hex')
+    .slice(0, 16)
+  return `basis.validate_${hash}`
 }
 
 /**
@@ -2711,6 +2732,7 @@ function enumChecks(
     const name = `${owner}_${field.name}_enum_check`
     validatePhysicalIdentifier(name, 'enum check')
     checks.push({
+      column: fieldColumn(field),
       expression: `(${column} IS NULL OR ${column} IN (${values}))`,
       name,
       values: enumeration.values.map(candidate => candidate.value),

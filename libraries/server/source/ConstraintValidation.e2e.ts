@@ -347,13 +347,16 @@ describe('Graph validation constraints', () => {
     const connection = await openAdmin(server.db)
     try {
       const workspace = randomUUID()
+      const validWorkspace = randomUUID()
       await connection.sql.begin(async tx => {
-        await tx`INSERT INTO "Entity" ("id", "name", "entity") VALUES (${workspace}, 'Workspace', 'Workspace')`
-        await tx`INSERT INTO "Workspace" ("id", "title", "flag") VALUES (${workspace}, 'Workspace', TRUE)`
-        await tx`
-          INSERT INTO "WorkspaceMember" ("workspace.id", "user.id", "role")
-          VALUES (${workspace}, ${admin}, 'Owner')
-        `
+        for (const [id, title] of [[workspace, 'Workspace'], [validWorkspace, 'Valid workspace']] as const) {
+          await tx`INSERT INTO "Entity" ("id", "name", "entity") VALUES (${id}, ${title}, 'Workspace')`
+          await tx`INSERT INTO "Workspace" ("id", "title", "flag") VALUES (${id}, ${title}, TRUE)`
+          await tx`
+            INSERT INTO "WorkspaceMember" ("workspace.id", "user.id", "role")
+            VALUES (${id}, ${admin}, 'Owner')
+          `
+        }
       })
       const asAdmin = <T>(work: () => T): T => runAsActor({ id: admin }, work)
       const failure = await asAdmin(() => server.db.tx(async sql => {
@@ -376,6 +379,24 @@ describe('Graph validation constraints', () => {
         [workspace],
       )
       expect(membership?.id).toBe(admin)
+
+      await asAdmin(() => server.db.tx(async sql => {
+        await sql.edit('Workspace', { id: validWorkspace }, { title: 'Valid edit' })
+        await sql`
+          DELETE FROM "WorkspaceMember"
+          WHERE "workspace.id" = ${validWorkspace}
+        `
+      }))
+      const [validState] = await connection.sql.unsafe<{ flag: boolean, title: string }[]>(
+        'SELECT "flag", "title" FROM "Workspace" WHERE "id" = $1',
+        [validWorkspace],
+      )
+      expect(validState).toEqual({ flag: true, title: 'Valid edit' })
+      const validMembership = await connection.sql.unsafe<{ id: string }[]>(
+        'SELECT "user.id" AS "id" FROM "WorkspaceMember" WHERE "workspace.id" = $1',
+        [validWorkspace],
+      )
+      expect(validMembership).toEqual([])
     } finally {
       await connection.close()
       await server.shutdown()

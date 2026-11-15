@@ -295,6 +295,25 @@ describe('DDL schema planning', () => {
         'check definition changed: EnumRecord.EnumRecord_access_enum_check',
       )
       expect(plan.blocked).toBe(true)
+
+      await database.sql
+        .unsafe('ALTER TABLE "EnumRecord" DROP CONSTRAINT "EnumRecord_access_enum_check"')
+        .simple()
+      await database.sql.unsafe(
+        'ALTER TABLE "EnumRecord" ADD CONSTRAINT "EnumRecord_access_enum_check" ' +
+        'CHECK ("access" IN (\'editor\', \'owner\') OR TRUE)',
+      ).simple()
+      const weakenedValues = await DDL.introspect(database.sql)
+      const weakenedPlan = DDL.plan({
+        actual: weakenedValues,
+        desired: model,
+        previous: model,
+        previousPhysical: model.physicalSchema(),
+      })
+      expect(weakenedPlan.drift.join(' ')).toContain(
+        'check definition changed: EnumRecord.EnumRecord_access_enum_check',
+      )
+      expect(weakenedPlan.blocked).toBe(true)
     }, { fresh: true })
   })
 
