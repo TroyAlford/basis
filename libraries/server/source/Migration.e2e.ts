@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { useDatabaseFixture } from '../testing/DatabaseFixture'
 import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
 import { EntityDefinitions } from './EntityDefinitions'
-import { Graph } from './Graph'
+import { Action, Graph, Security } from './Graph'
 import { DDL } from './Schema'
 
 /**
@@ -173,8 +173,11 @@ describe('Reviewed schema evolution', () => {
       const appRole = `basis_graph_app_${randomUUID().replaceAll('-', '').slice(0, 12)}`
       await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
       const graph = new Graph({
-        entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-        grants: [{ action: 'read', role: 'public', target: 'Note' }],
+        entities: [{
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Note',
+          security: { [Action.Read]: Security.Public },
+        }],
         schema: database.schema,
       })
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()

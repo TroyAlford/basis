@@ -6,11 +6,35 @@ import { removeService } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
-import { Graph } from './Graph'
+import { Action, Graph, Security } from './Graph'
 import { MutationError } from './Mutation'
+import { Operator } from './Operator'
 import { Server } from './Server'
 
 const silent = new Logger({ silent: true })
+
+/** Numeric limits used by the authorization fixtures. */
+enum Limit {
+  Delete = 40,
+  Read = 30,
+  Update = 70,
+}
+
+/** Relationship membership role used by the where-only fixture. */
+enum MembershipRole {
+  Owner = 'Owner',
+}
+
+/**
+ * Build a canonical comparison filter.
+ * @param field - Field name.
+ * @param operator - Closed comparison operator.
+ * @param value - Comparison value.
+ * @returns The structured filter.
+ */
+function compare(field: string, operator: Operator.Comparison, value: unknown) {
+  return { field, operator, value }
+}
 
 const graph = new Graph({
   entities: [
@@ -23,36 +47,137 @@ const graph = new Graph({
         { field: 'title', type: 'String' },
       ],
       name: 'Article',
+      security: {
+        [Action.Read]: Security.Public,
+        [Action.Create]: [
+          { role: 'admin' },
+          { role: 'creator', where: compare('score', Operator.Comparison.GreaterThanOrEqual, 0) },
+        ],
+        [Action.Update]: [
+          { role: 'admin' },
+          { role: 'updater', where: compare('rank', Operator.Comparison.LessThan, Limit.Update) },
+        ],
+        [Action.Delete]: [
+          { role: 'admin' },
+          { role: 'deleter', where: compare('rank', Operator.Comparison.LessThan, Limit.Delete) },
+        ],
+      },
     },
-  ],
-  grants: [
-    { action: 'create', role: 'admin', target: '*' },
-    { action: 'delete', role: 'admin', target: '*' },
-    { action: 'manage', role: 'admin', target: '*' },
-    { action: 'read', role: 'admin', target: '*' },
-    { action: 'update', role: 'admin', target: '*' },
-    { action: 'read', role: 'public', target: 'Article' },
-    { action: 'create', predicate: 'score >= 0', role: 'creator', target: 'Article' },
-    { action: 'delete', predicate: 'rank < 40', role: 'deleter', target: 'Article' },
-    { action: 'update', predicate: 'rank < 70', role: 'updater', target: 'Article' },
   ],
   roles: {
     creator: { name: 'Creator' },
     deleter: { name: 'Deleter' },
     updater: { name: 'Updater' },
   },
+  security: {
+    ExternalIdentity: { [Action.Manage]: { role: 'admin' } },
+    Role: { [Action.Manage]: { role: 'admin' } },
+    UserRole: { [Action.Manage]: { role: 'admin' } },
+  },
+})
+
+const readGateGraph = new Graph({
+  entities: [
+    { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+    {
+      fields: [
+        { field: 'rank', type: 'Number' },
+        { field: 'score', maximum: 10, minimum: 0, type: 'Number' },
+        { field: 'title', type: 'String' },
+      ],
+      name: 'Draft',
+      security: {
+        [Action.Read]: [
+          { role: 'admin' },
+          { role: 'reader', where: compare('rank', Operator.Comparison.LessThan, Limit.Read) },
+        ],
+        [Action.Create]: [
+          { role: 'admin' },
+          { role: 'creator', where: compare('score', Operator.Comparison.GreaterThanOrEqual, 0) },
+        ],
+        [Action.Update]: [
+          { role: 'admin' },
+          { role: 'updater', where: compare('rank', Operator.Comparison.LessThan, Limit.Update) },
+        ],
+        [Action.Delete]: [
+          { role: 'admin' },
+          { role: 'deleter', where: compare('rank', Operator.Comparison.LessThan, 90) },
+        ],
+      },
+    },
+    {
+      fields: [{ field: 'title', type: 'String' }],
+      name: 'Workspace',
+      security: {
+        [Action.Read]: [
+          { role: 'admin' },
+          {
+            where: {
+              field: 'members',
+              filters: [compare('id', Operator.Comparison.Equal, '$me')],
+              operator: Operator.Comparison.Contains,
+            },
+          },
+        ],
+        [Action.Create]: { role: 'admin' },
+        [Action.Update]: {
+          where: {
+            field: 'members',
+            filters: [
+              {
+                filters: [
+                  compare('id', Operator.Comparison.Equal, '$me'),
+                  compare('workspaceMembership.role', Operator.Comparison.Equal, MembershipRole.Owner),
+                ],
+                operator: Operator.Logical.And,
+              },
+            ],
+            operator: Operator.Comparison.Contains,
+          },
+        },
+        [Action.Delete]: { role: 'admin' },
+      },
+    },
+    { extends: 'Workspace', fields: [{ field: 'code', type: 'String' }], name: 'Project' },
+  ],
+  relationships: [{
+    between: [
+      { field: 'workspace', inverse: 'members', target: 'Workspace' },
+      { field: 'user', inverse: 'workspaces', target: 'User' },
+    ],
+    fields: [{ field: 'role', type: 'String' }],
+    name: 'WorkspaceMembership',
+    security: {
+      [Action.Create]: { role: 'admin' },
+      [Action.Delete]: { role: 'admin' },
+      [Action.Read]: { role: 'admin' },
+      [Action.Update]: { role: 'admin' },
+    },
+  }],
+  roles: {
+    creator: { name: 'Creator' },
+    deleter: { name: 'Deleter' },
+    reader: { name: 'Reader' },
+    updater: { name: 'Updater' },
+  },
+  security: {
+    ExternalIdentity: { [Action.Manage]: { role: 'admin' } },
+    Role: { [Action.Manage]: { role: 'admin' } },
+    UserRole: { [Action.Manage]: { role: 'admin' } },
+  },
 })
 
 /**
- * Start one isolated authorization server with the mutation graph.
+ * Start one isolated authorization server with a mutation graph.
  * @param install - Temporary installation root.
+ * @param applicationGraph - Graph to install for the server.
  * @returns The started server.
  */
-async function start(install: string): Promise<Server> {
+async function start(install: string, applicationGraph: Graph): Promise<Server> {
   const previous = process.cwd()
   process.chdir(install)
   const server = new Server()
-    .graph(graph)
+    .graph(applicationGraph)
     .database()
     .root(install)
   server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
@@ -63,7 +188,7 @@ async function start(install: string): Promise<Server> {
   }
   const admin = await openAdmin(server.db)
   try {
-    await installSchema(admin.sql, graph, {
+    await installSchema(admin.sql, applicationGraph, {
       appRole: 'basis_app',
       schema: 'public',
       superuser: true,
@@ -75,33 +200,53 @@ async function start(install: string): Promise<Server> {
   return server
 }
 
+/**
+ * Bootstrap an administrator and assign roles to one enrolled worker.
+ * @param server - Started server.
+ * @param roleNames - Roles assigned to the worker.
+ * @returns The administrator and worker identities.
+ */
+async function bootstrapActors(
+  server: Server,
+  roleNames: readonly string[],
+): Promise<{ readonly admin: string, readonly worker: string }> {
+  const authorization = server.auth
+  if (!authorization) throw new Error('authorization did not initialize')
+  const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+  const admin = await authorization.bootstrap({
+    displayName: 'Admin',
+    email: 'admin@example.com',
+    provider: 'test',
+    subject: 'admin',
+  })
+  if (!admin.userId) throw new Error('bootstrap did not create an administrator')
+  const worker = await authorization.enrollIdentity('test', 'worker', {
+    email: 'worker@example.com',
+  })
+  if (!worker) throw new Error('worker was not enrolled')
+  for (const name of roleNames) {
+    const details = authorization.graph.role(name)
+    if (!details) throw new Error(`role "${name}" was not loaded`)
+    await asActor(admin.userId, () => authorization.assignRole(worker, details.id))
+  }
+  return { admin: admin.userId, worker }
+}
+
 describe('Graph mutation authorization', () => {
-  test('counts only mutable rows and never makes reads the write authority', async () => {
+  test('selects READ-visible candidates and counts only writes passing READ plus the specific action', async () => {
     const install = tempDirectory('basis-mutation-authorization-')
-    const server = await start(install)
+    const server = await start(install, graph)
     try {
       const authorization = server.auth
       if (!authorization) throw new Error('authorization did not initialize')
       const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
-      const admin = await authorization.bootstrap({
-        displayName: 'Admin',
-        email: 'admin@example.com',
-        provider: 'test',
-        subject: 'admin',
-      })
-      if (!admin.userId) throw new Error('bootstrap did not create an administrator')
-      const worker = await authorization.enrollIdentity('test', 'worker', {
-        email: 'worker@example.com',
-      })
-      if (!worker) throw new Error('worker was not enrolled')
+      const { admin, worker } = await bootstrapActors(server, ['updater', 'deleter'])
       const updater = graph.role('updater')
       const deleter = graph.role('deleter')
       const creator = graph.role('creator')
       if (!updater || !deleter || !creator) throw new Error('roles were not loaded')
-      await asActor(admin.userId, () => authorization.assignRole(worker, updater.id))
-      await asActor(admin.userId, () => authorization.assignRole(worker, deleter.id))
 
-      expect(await asActor(admin.userId, () => server.db.create('Article', Array.from(
+      expect(await asActor(admin, () => server.db.create('Article', Array.from(
         { length: 100 },
         (_value, rank) => ({
           name: `Article ${rank}`,
@@ -113,9 +258,10 @@ describe('Graph mutation authorization', () => {
       expect(await asActor(worker, () => server.db.query('Article', { fields: ['id'], limit: null })))
         .toHaveLength(100)
 
+      const scoreFive = compare('score', Operator.Comparison.Equal, 5)
       const ambiguous = await asActor(worker, () => server.db.upsert(
         'Article',
-        'score == 5',
+        scoreFive,
         { name: 'Ambiguous', rank: 200, score: 5, title: 'Ambiguous' },
       )).catch((error: unknown) => error)
       expect(ambiguous).toBeInstanceOf(MutationError)
@@ -125,7 +271,7 @@ describe('Graph mutation authorization', () => {
 
       expect(await asActor(worker, () => server.db.edit(
         'Article',
-        'score == 5',
+        scoreFive,
         { score: 6 },
       ))).toEqual({ edited: 70 })
       const edited = await asActor(worker, () => server.db.query<{
@@ -134,11 +280,11 @@ describe('Graph mutation authorization', () => {
       }>('Article', { fields: ['rank', 'score'], limit: null, orderBy: 'rank' }))
       expect(edited.filter(row => row.score === 6)).toHaveLength(70)
       expect(edited.filter(row => row.score === 5)).toHaveLength(30)
-      expect(edited.filter(row => row.rank < 70 && row.score === 6)).toHaveLength(70)
+      expect(edited.filter(row => row.rank < Limit.Update && row.score === 6)).toHaveLength(70)
 
       expect(await asActor(worker, () => server.db.delete(
         'Article',
-        'score == 6',
+        compare('score', Operator.Comparison.Equal, 6),
       ))).toEqual({ deleted: 40 })
       expect(await asActor(worker, () => server.db.query('Article', { fields: ['id'], limit: null })))
         .toHaveLength(60)
@@ -152,7 +298,7 @@ describe('Graph mutation authorization', () => {
       expect(denied).toBeInstanceOf(MutationError)
       expect((denied as MutationError).code).toBe('authorization')
 
-      await asActor(admin.userId, () => authorization.assignRole(worker, creator.id))
+      await asActor(admin, () => authorization.assignRole(worker, creator.id))
       expect(await asActor(worker, () => server.db.create('Article', {
         name: 'Created',
         rank: 5,
@@ -162,24 +308,145 @@ describe('Graph mutation authorization', () => {
 
       expect(await asActor(worker, () => server.db.upsert(
         'Article',
-        'rank == 200',
+        compare('rank', Operator.Comparison.Equal, 200),
         { name: 'Upserted', rank: 200, score: 1, title: 'Upserted' },
       ))).toEqual({ created: 1, edited: 0 })
       expect(await asActor(worker, () => server.db.upsert(
         'Article',
-        'rank == 50',
+        compare('rank', Operator.Comparison.Equal, 50),
         { score: 2 },
       ))).toEqual({ created: 0, edited: 1 })
       expect(await asActor(worker, () => server.db.upsert(
         'Article',
-        'rank == 80',
+        compare('rank', Operator.Comparison.Equal, 80),
         { name: 'Read only', rank: 81, score: 2, title: 'Read only' },
       ))).toEqual({ created: 1, edited: 0 })
       const rows = await asActor(worker, () => server.db.query<{
         rank: number,
         score: number,
-      }>('Article', { fields: ['rank', 'score'], limit: null, where: 'rank == 80' }))
+      }>('Article', {
+        fields: ['rank', 'score'],
+        limit: null,
+        where: compare('rank', Operator.Comparison.Equal, 80),
+      }))
       expect(rows).toEqual([{ rank: 80, score: 5 }])
+    } finally {
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 180_000)
+
+  test('requires READ before writes, checks new rows, and honors inherited membership security', async () => {
+    const install = tempDirectory('basis-mutation-read-gate-')
+    const server = await start(install, readGateGraph)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      const { admin, worker } = await bootstrapActors(
+        server,
+        ['creator', 'deleter', 'reader', 'updater'],
+      )
+      await asActor(admin, () => server.db.create('Draft', [
+        { name: 'Readable', rank: 10, score: 5, title: 'Readable' },
+        { name: 'Hidden action', rank: 50, score: 5, title: 'Hidden action' },
+        { name: 'Hidden create', rank: 80, score: 5, title: 'Hidden create' },
+      ]))
+      expect(await asActor(worker, () => server.db.query('Draft', { fields: ['id'], limit: null })))
+        .toHaveLength(1)
+
+      expect(await asActor(worker, () => server.db.edit(
+        'Draft',
+        compare('rank', Operator.Comparison.GreaterThanOrEqual, 0),
+        { title: 'Edited' },
+      ))).toEqual({ edited: 1 })
+      expect(await asActor(worker, () => server.db.delete(
+        'Draft',
+        compare('rank', Operator.Comparison.Equal, 50),
+      ))).toEqual({ deleted: 0 })
+      const stillPresent = await asActor(admin, () => server.db.query<{ rank: number }>('Draft', {
+        fields: ['rank'],
+        limit: null,
+        where: compare('rank', Operator.Comparison.Equal, 50),
+      }))
+      expect(stillPresent).toEqual([{ rank: 50 }])
+
+      const deniedCreate = await asActor(worker, () => server.db.create('Draft', {
+        name: 'No read',
+        rank: 80,
+        score: 5,
+        title: 'No read',
+      })).catch((error: unknown) => error)
+      expect(deniedCreate).toBeInstanceOf(MutationError)
+      expect((deniedCreate as MutationError).code).toBe('authorization')
+      expect(await asActor(admin, () => server.db.query('Draft', { fields: ['id'], limit: null })))
+        .toHaveLength(3)
+
+      expect(await asActor(worker, () => server.db.create('Draft', {
+        name: 'Readable create',
+        rank: 10,
+        score: 5,
+        title: 'Readable create',
+      }))).toEqual({ created: 1 })
+
+      const readable = await asActor(admin, () => server.db.query<{ id: string }>('Draft', {
+        fields: ['id'],
+        limit: null,
+        where: compare('rank', Operator.Comparison.Equal, 10),
+      }))
+      expect(readable).toHaveLength(2)
+      const first = readable[0]
+      if (!first) throw new Error('Readable draft was not created')
+      const changedRead = await asActor(worker, () => server.db.edit(
+        'Draft',
+        compare('id', Operator.Comparison.Equal, first.id),
+        { rank: 80 },
+      )).catch((error: unknown) => error)
+      expect(changedRead).toBeInstanceOf(MutationError)
+      expect((changedRead as MutationError).code).toBe('authorization')
+      expect(await asActor(admin, () => server.db.query('Draft', {
+        fields: ['rank'],
+        limit: null,
+        where: compare('id', Operator.Comparison.Equal, first.id),
+      }))).toEqual([{ rank: 10 }])
+
+      await asActor(admin, () => server.db.create('Project', [
+        { code: 'A', name: 'Member project', title: 'Member project' },
+        { code: 'B', name: 'Other project', title: 'Other project' },
+      ]))
+      const projects = await asActor(admin, () => server.db.query<{ code: string, id: string }>('Project', {
+        fields: ['id', 'code'],
+        limit: null,
+        orderBy: 'code',
+      }))
+      expect(projects).toHaveLength(2)
+      const [memberProject, otherProject] = projects
+      if (!memberProject || !otherProject) throw new Error('Projects were not created')
+      await asActor(admin, () => server.db.tx(async sql => {
+        await sql`
+          INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
+          VALUES (${memberProject.id}, ${worker}, ${MembershipRole.Owner})
+        `
+      }))
+
+      expect(await asActor(worker, () => server.db.edit(
+        'Project',
+        compare('id', Operator.Comparison.Equal, memberProject.id),
+        { title: 'Member updated' },
+      ))).toEqual({ edited: 1 })
+      expect(await asActor(worker, () => server.db.edit(
+        'Project',
+        compare('id', Operator.Comparison.Equal, otherProject.id),
+        { title: 'Other updated' },
+      ))).toEqual({ edited: 0 })
+      expect(await asActor(admin, () => server.db.query<{ id: string, title: string }>('Project', {
+        fields: ['id', 'title'],
+        limit: null,
+        orderBy: 'code',
+      }))).toEqual([
+        { id: memberProject.id, title: 'Member updated' },
+        { id: otherProject.id, title: 'Other project' },
+      ])
     } finally {
       await server.shutdown()
       removeService(install)

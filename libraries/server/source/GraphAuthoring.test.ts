@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { Constraint, FieldType } from './EntityDefinitions'
-import { Graph } from './Graph'
+import { Action, Graph, Security } from './Graph'
+import { Operator } from './Operator'
 import { Server } from './Server'
 
 /**
@@ -60,6 +61,29 @@ describe('Graph authoring types', () => {
     expect(graph.definitions.constraints).toHaveLength(2)
     expect(graph.definitions.constraints.every(constraint => constraint.type === Constraint.Uniqueness))
       .toBe(true)
+  })
+
+  test('accepts typed capabilities and entity security', () => {
+    enum Capability {
+      View = 'viewAccount',
+    }
+    const graph = new Graph({
+      entities: [{
+        fields: [{ field: 'owner', target: 'User', type: FieldType.Entity }],
+        name: 'Account',
+        security: {
+          [Action.Read]: [{
+            grant: Capability.View,
+            where: { field: 'owner', operator: Operator.Comparison.Equal, value: '$me' },
+          }],
+          [Action.Update]: Security.Public,
+        },
+      }],
+      grants: { [Capability.View]: { description: 'View accounts' } },
+      roles: { viewer: { grants: [Capability.View], name: 'Viewer' } },
+    })
+    expect(graph.security).toHaveLength(2)
+    expect(graph.capabilities).toEqual([{ description: 'View accounts', name: Capability.View }])
   })
 
   test('accepts nullable field authoring', () => {

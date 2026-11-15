@@ -3,8 +3,38 @@ import { randomUUID } from 'node:crypto'
 import { withIsolatedDatabase } from '../testing/DatabaseIsolation'
 import { installSchema } from '../testing/Schema'
 import { EntityDefinitions } from './EntityDefinitions'
-import { Graph } from './Graph'
+import { Action, Graph, Security } from './Graph'
+import type { AuthoredEntity, AuthoredSecurity } from './GraphAuthoring'
 import { DDL } from './Schema'
+
+/** Public-read security used by simple planning fixtures. */
+const publicRead: AuthoredSecurity = { [Action.Read]: Security.Public }
+
+/**
+ * Build the standard Note entity with an explicit read policy.
+ * @param security - Security declaration; defaults to public read.
+ * @returns Authored Note entity.
+ */
+function noteEntity(security: AuthoredSecurity = publicRead): AuthoredEntity {
+  return { fields: [{ field: 'title', type: 'String' }], name: 'Note', security }
+}
+
+/**
+ * Build an inherited Profile/Employee fixture with an Employee read predicate.
+ * @param email - Employee email predicate value.
+ * @returns Profile and Employee declarations.
+ */
+function employeeEntities(email: string): readonly AuthoredEntity[] {
+  return [
+    { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
+    {
+      extends: 'Profile',
+      fields: [],
+      name: 'Employee',
+      security: { [Action.Read]: { where: `email = '${email}'` } },
+    },
+  ]
+}
 
 /**
  * Load one small canonical model.
@@ -434,17 +464,12 @@ describe('DDL schema planning', () => {
 
   test('includes RLS and grants for a newly authorized table', async () => {
     const previous = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-      grants: [{ action: 'read', role: 'public', target: 'Note' }],
+      entities: [noteEntity()],
     })
     const desired = new Graph({
       entities: [
-        { fields: [{ field: 'title', type: 'String' }], name: 'Note' },
-        { fields: [{ field: 'title', type: 'String' }], name: 'Tag' },
-      ],
-      grants: [
-        { action: 'read', role: 'public', target: 'Note' },
-        { action: 'read', role: 'public', target: 'Tag' },
+        noteEntity(),
+        { fields: [{ field: 'title', type: 'String' }], name: 'Tag', security: publicRead },
       ],
     })
     await withIsolatedDatabase('schema-plan-new-auth-table', async database => {
@@ -511,8 +536,7 @@ describe('DDL schema planning', () => {
 
   test('plans missing RLS and authorization enforcement for an existing model', async () => {
     const model = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-      grants: [{ action: 'read', role: 'public', target: 'Note' }],
+      entities: [noteEntity()],
     })
     await withIsolatedDatabase('schema-plan-rls', async database => {
       await installSchema(database.sql, model.definitions)
@@ -535,8 +559,7 @@ describe('DDL schema planning', () => {
 
   test('compiles stable typed identities for authorization privileges', () => {
     const model = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-      grants: [{ action: 'read', role: 'public', target: 'Note' }],
+      entities: [noteEntity()],
     })
     const grants = model.physicalSchema('basis_app', false, true).grants ?? []
     expect(grants.some(grant => grant.name === 'grant:basis_app:table:Note:SELECT')).toBe(true)
@@ -548,20 +571,23 @@ describe('DDL schema planning', () => {
   })
 
   test('does not equate policy literals or Boolean precedence', () => {
-    const entities = [{
-      fields: [
-        { field: 'title', type: 'String' },
-        { field: 'active', type: 'Boolean' },
-      ],
-      name: 'Note',
-    }] as const
+    const fields = [
+      { field: 'title', type: 'String' },
+      { field: 'active', type: 'Boolean' },
+    ] as const
     const literal = new Graph({
-      entities,
-      grants: [{ action: 'read', predicate: "title = 'a b'", role: 'public', target: 'Note' }],
+      entities: [{
+        fields,
+        name: 'Note',
+        security: { [Action.Read]: { where: "title = 'a b'" } },
+      }],
     })
     const literalChanged = new Graph({
-      entities,
-      grants: [{ action: 'read', predicate: "title = 'ab'", role: 'public', target: 'Note' }],
+      entities: [{
+        fields,
+        name: 'Note',
+        security: { [Action.Read]: { where: "title = 'ab'" } },
+      }],
     })
     const literalPlan = DDL.plan({
       actual: literal.physicalSchema('basis_app', false),
@@ -574,45 +600,17 @@ describe('DDL schema planning', () => {
     ))).toBe(true)
 
     const left = new Graph({
-      entities,
-      grants: [{
-        action: 'read',
-        predicate: {
-          filters: [
-            { field: 'title', operator: '$eq', value: 'x' },
-            {
-              filters: [
-                { field: 'active', operator: '$eq', value: true },
-                { field: 'title', operator: '$eq', value: 'y' },
-              ],
-              operator: '$or',
-            },
-          ],
-          operator: '$and',
-        },
-        role: 'public',
-        target: 'Note',
+      entities: [{
+        fields,
+        name: 'Note',
+        security: { [Action.Read]: { where: "title = 'x' $and active = true" } },
       }],
     })
     const right = new Graph({
-      entities,
-      grants: [{
-        action: 'read',
-        predicate: {
-          filters: [
-            {
-              filters: [
-                { field: 'title', operator: '$eq', value: 'x' },
-                { field: 'active', operator: '$eq', value: true },
-              ],
-              operator: '$and',
-            },
-            { field: 'title', operator: '$eq', value: 'y' },
-          ],
-          operator: '$or',
-        },
-        role: 'public',
-        target: 'Note',
+      entities: [{
+        fields,
+        name: 'Note',
+        security: { [Action.Read]: { where: "title = 'x' $or active = true" } },
       }],
     })
     const precedencePlan = DDL.plan({
@@ -628,8 +626,7 @@ describe('DDL schema planning', () => {
 
   test('blocks an existing policy deployment without historical provenance', () => {
     const model = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-      grants: [{ action: 'read', predicate: "title = 'x'", role: 'public', target: 'Note' }],
+      entities: [noteEntity()],
     })
     const actual = model.physicalSchema('basis_app', false)
     const plan = DDL.plan({
@@ -645,8 +642,7 @@ describe('DDL schema planning', () => {
 
   test('plans a generator-output change and blocks unexpected live policy drift', () => {
     const model = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-      grants: [{ action: 'read', predicate: "title = 'x'", role: 'public', target: 'Note' }],
+      entities: [noteEntity()],
     })
     const historical = model.physicalSchema('basis_app', false)
     const policy = historical.policies.find(candidate => candidate.name === 'basis_Note_read')
@@ -719,27 +715,45 @@ describe('DDL schema planning', () => {
   })
 
   test('does not erase a Boolean clause after a JSON cast', () => {
-    const entities = [{
-      fields: [
-        { field: 'details', type: 'JSON' },
-        { field: 'active', type: 'Boolean' },
-      ],
-      name: 'Note',
-    }] as const
-    const predicate = (operator: '$and' | '$or') => ({
-      filters: [
-        { field: 'details', operator: '$contains', value: { type: 'safe' } },
-        { field: 'active', operator: '$eq', value: true },
-      ],
-      operator,
-    })
     const left = new Graph({
-      entities,
-      grants: [{ action: 'read', predicate: predicate('$and'), role: 'public', target: 'Note' }],
+      entities: [{
+        fields: [
+          { field: 'details', type: 'JSON' },
+          { field: 'active', type: 'Boolean' },
+        ],
+        name: 'Note',
+        security: {
+          [Action.Read]: {
+            where: {
+              filters: [
+                { field: 'details', operator: '$contains', value: { type: 'safe' } },
+                { field: 'active', operator: '$eq', value: true },
+              ],
+              operator: '$and',
+            },
+          },
+        },
+      }],
     })
     const right = new Graph({
-      entities,
-      grants: [{ action: 'read', predicate: predicate('$or'), role: 'public', target: 'Note' }],
+      entities: [{
+        fields: [
+          { field: 'details', type: 'JSON' },
+          { field: 'active', type: 'Boolean' },
+        ],
+        name: 'Note',
+        security: {
+          [Action.Read]: {
+            where: {
+              filters: [
+                { field: 'details', operator: '$contains', value: { type: 'safe' } },
+                { field: 'active', operator: '$eq', value: true },
+              ],
+              operator: '$or',
+            },
+          },
+        },
+      }],
     })
     const plan = DDL.plan({
       actual: left.physicalSchema('basis_app', false),
@@ -757,14 +771,12 @@ describe('DDL schema planning', () => {
       const appRole = `basis_plan_app_${randomUUID().replaceAll('-', '').slice(0, 12)}`
       await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
       const previous = new Graph({
-        entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-        grants: [{ action: 'read', predicate: "title = 'x'", role: 'editor', target: 'Note' }],
+        entities: [noteEntity()],
         roles: { editor: { name: 'Editor' } },
         schema: database.schema,
       })
       const desired = new Graph({
-        entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-        grants: [{ action: 'read', predicate: "title = 'y'", role: 'editor', target: 'Note' }],
+        entities: [noteEntity()],
         roles: { editor: { name: 'Editor Renamed' } },
         schema: database.schema,
       })
@@ -791,7 +803,7 @@ describe('DDL schema planning', () => {
 
   test('reports unexpected deployed graph roles as drift', () => {
     const model = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      entities: [noteEntity()],
       roles: { editor: { name: 'Editor' } },
     })
     const physical = model.physicalSchema('basis_app', false)
@@ -810,27 +822,11 @@ describe('DDL schema planning', () => {
   })
 
   test('drops replaced predicate helpers with their canonical signature', () => {
-    const entities = [
-      { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
-      { extends: 'Profile', fields: [], name: 'Employee' },
-    ] as const
     const previous = new Graph({
-      entities,
-      grants: [{
-        action: 'read',
-        predicate: "email = 'x'",
-        role: 'public',
-        target: 'Employee',
-      }],
+      entities: employeeEntities('x'),
     })
     const desired = new Graph({
-      entities,
-      grants: [{
-        action: 'read',
-        predicate: "email = 'y'",
-        role: 'public',
-        target: 'Employee',
-      }],
+      entities: employeeEntities('y'),
     })
     const plan = DDL.plan({
       actual: previous.physicalSchema('basis_app', false),
@@ -855,28 +851,12 @@ describe('DDL schema planning', () => {
     await withIsolatedDatabase('schema-plan-catalog-helper', async database => {
       const appRole = `basis_plan_helper_${randomUUID().replaceAll('-', '').slice(0, 12)}`
       await database.sql.unsafe(`CREATE ROLE "${appRole}" NOLOGIN`).simple()
-      const entities = [
-        { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
-        { extends: 'Profile', fields: [], name: 'Employee' },
-      ] as const
       const previous = new Graph({
-        entities,
-        grants: [{
-          action: 'read',
-          predicate: "email = 'x'",
-          role: 'public',
-          target: 'Employee',
-        }],
+        entities: employeeEntities('x'),
         schema: database.schema,
       })
       const desired = new Graph({
-        entities,
-        grants: [{
-          action: 'read',
-          predicate: "email = 'y'",
-          role: 'public',
-          target: 'Employee',
-        }],
+        entities: employeeEntities('y'),
         schema: database.schema,
       })
       await installSchema(database.sql, previous, {
@@ -909,11 +889,11 @@ describe('DDL schema planning', () => {
 
   test('plans graph role metadata changes while preserving role identity', () => {
     const previous = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      entities: [noteEntity()],
       roles: { editor: { name: 'Editor' } },
     })
     const desired = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
+      entities: [noteEntity()],
       roles: { editor: { name: 'Editor Renamed' } },
     })
     const role = previous.role('editor')
@@ -934,12 +914,10 @@ describe('DDL schema planning', () => {
 
   test('plans a reviewed policy replacement instead of drift', () => {
     const previous = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-      grants: [{ action: 'read', predicate: "title = 'x'", role: 'public', target: 'Note' }],
+      entities: [noteEntity({ [Action.Read]: { where: "title = 'x'" } })],
     })
     const desired = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-      grants: [{ action: 'read', predicate: "title = 'y'", role: 'public', target: 'Note' }],
+      entities: [noteEntity({ [Action.Read]: { where: "title = 'y'" } })],
     })
     const plan = DDL.plan({
       actual: previous.physicalSchema('basis_app', false),
@@ -959,14 +937,13 @@ describe('DDL schema planning', () => {
     const model = new Graph({
       entities: [
         { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
-        { extends: 'Profile', fields: [], name: 'Employee' },
+        {
+          extends: 'Profile',
+          fields: [],
+          name: 'Employee',
+          security: { [Action.Read]: { where: "email = 'x'" } },
+        },
       ],
-      grants: [{
-        action: 'read',
-        predicate: "email = 'x'",
-        role: 'public',
-        target: 'Employee',
-      }],
     })
     const empty = {
       constraints: [],
@@ -1045,8 +1022,7 @@ describe('DDL schema planning', () => {
 
   test('includes authorization objects in the desired physical output', async () => {
     const model = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'Note' }],
-      grants: [{ action: 'read', role: 'public', target: 'Note' }],
+      entities: [noteEntity()],
     })
     const empty = {
       constraints: [],

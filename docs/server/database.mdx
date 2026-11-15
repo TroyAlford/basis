@@ -248,7 +248,7 @@ Instance writes may use parameterized `db.sql` inside `db.tx`, or the Graph-nati
 
 ## Graph mutations
 
-`server.db` exposes four explicit verbs. They validate against the canonical Graph before any write and then let PostgreSQL constraints and row-level security remain the final authority:
+`server.db` exposes four explicit verbs. They validate against the canonical Graph before any write and then let PostgreSQL constraints and row-level security remain the final authority. The Graph read-before-write rule applies: create, edit, delete, and upsert require READ on the affected or proposed row in addition to the specific write action, so a filter never grants write access by itself:
 
 ```ts
 await server.db.create('Pet', { name: 'Toby', species: 'Frog' })
