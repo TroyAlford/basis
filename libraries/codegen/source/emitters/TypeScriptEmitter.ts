@@ -210,5 +210,4 @@ export const TypeScriptEmitter = emitter(
 )
 
 // Emitter modules are discovered and invoked by their default export.
-// eslint-disable-next-line @basis/no-default-export
 export default TypeScriptEmitter
