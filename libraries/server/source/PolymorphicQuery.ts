@@ -1,7 +1,8 @@
-import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType, identityDefinition } from './EntityDefinitions'
+import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition } from './EntityDefinitions'
+import { identityDefinition } from './EntityDefinitions'
+import { FieldType } from './FieldType'
 import type { Filter } from './Predicate'
-import { arrayItemField } from './Predicate'
+import { arrayItemField, Predicate } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { ArrayScope, CollectionScope, CountScope, OrderBy, QueryScope } from './SQL'
 import { SQL } from './SQL'
@@ -195,8 +196,8 @@ interface CollectionRelationPlan {
   readonly collection: DerivedCollectionDefinition,
   /** Correlated condition against the owning occurrence. */
   readonly condition: string,
-  /** Alias of the owning occurrence. */
-  readonly parentAlias: string,
+  /** Expression yielding the owning identity. */
+  readonly parentExpression: string,
   /** Expression yielding the owning identity for grouped counts. */
   readonly parentId: string,
   /** Base SQL relation containing target rows. */
@@ -272,6 +273,7 @@ class QueryProjection {
    * @param definition - Root entity being queried.
    * @param collections - Per-collection preview overrides.
    * @param budget - Projection limits; defaults to the public query budget.
+   * @param rootAlias - Physical alias for the root occurrence table.
    */
   constructor(
     entities: EntityDefinitions,
@@ -282,12 +284,13 @@ class QueryProjection {
       readonly relationshipFields?: readonly string[],
     }>>,
     budget: ProjectionBudget = PUBLIC_PROJECTION_BUDGET,
+    rootAlias = 't',
   ) {
     this.#entities = entities
     this.#collections = collections
     this.#budget = budget
     this.root = {
-      baseAlias: 't',
+      baseAlias: rootAlias,
       collections: new Map(definition.collections.map(collection => [collection.name, collection])),
       definition,
       descendants: descendantFields(entities, definition),
@@ -412,7 +415,11 @@ class QueryProjection {
       const collection = context.collections.get(segment)
       if (collection) {
         const key = fullName.slice(0, -7)
-        const plan = this.#collectionPlan(collection, context.baseAlias, key)
+        const plan = this.#collectionPlan(
+          collection,
+          `"${context.baseAlias}".${quote('id')}`,
+          key,
+        )
         this.#consume(plan.work)
         const count = this.#collectionCountExpression(plan, `${fullName}\u0000${context.baseAlias}`)
         return {
@@ -599,16 +606,16 @@ class QueryProjection {
   /**
    * Build or reuse one collection relation plan.
    * @param collection - Collection navigation.
-   * @param parentAlias - Alias of the occurrence owning the collection.
+   * @param parentExpression - SQL identity expression of the owning occurrence.
    * @param key - Stable logical collection path.
    * @returns The reusable relation plan.
    */
   #collectionPlan(
     collection: DerivedCollectionDefinition,
-    parentAlias: string,
+    parentExpression: string,
     key: string,
   ): CollectionRelationPlan {
-    const planKey = `${key}\u0000${parentAlias}`
+    const planKey = `${key}\u0000${parentExpression}`
     const cached = this.#collectionPlans.get(planKey)
     if (cached) return cached
     const targetName = collection.target
@@ -624,12 +631,11 @@ class QueryProjection {
     if (collection.kind === 'inverse') {
       if (targetAlias === undefined) {
         relation = `"Entity" "${rootAlias}"`
-        condition = `"${rootAlias}".${quote('id')} = "${parentAlias}".${quote('id')}`
+        condition = `"${rootAlias}".${quote('id')} = ${parentExpression}`
       } else {
         relation = `"${targetName}" "${targetAlias}" JOIN "Entity" "${rootAlias}" ` +
           `ON "${rootAlias}".${quote('id')} = "${targetAlias}".${quote('id')}`
-        condition = `"${targetAlias}".${quote(collection.reference.column)} = ` +
-          `"${parentAlias}".${quote('id')}`
+        condition = `"${targetAlias}".${quote(collection.reference.column)} = ${parentExpression}`
       }
       parentId = targetAlias === undefined
         ? `"${rootAlias}".${quote('id')}`
@@ -647,14 +653,13 @@ class QueryProjection {
           `ON "${targetAlias}".${quote('id')} = "${relationshipAlias}".${remoteColumn} ` +
           `JOIN "Entity" "${rootAlias}" ON "${rootAlias}".${quote('id')} = "${targetAlias}".${quote('id')}`
       }
-      condition = `"${relationshipAlias}".${quote(`${local.field}.id`)} = ` +
-        `"${parentAlias}".${quote('id')}`
+      condition = `"${relationshipAlias}".${quote(`${local.field}.id`)} = ${parentExpression}`
       parentId = `"${relationshipAlias}".${quote(`${local.field}.id`)}`
     }
     const plan: CollectionRelationPlan = {
       collection,
       condition,
-      parentAlias,
+      parentExpression,
       parentId,
       relation,
       relationshipAlias,
@@ -671,23 +676,69 @@ class QueryProjection {
 
   /**
    * Build the correlated scope used by one collection comparison.
-   * @param name - Root collection navigation name.
-   * @returns Collection scope, or undefined when the name is not a collection.
+   * @param name - Root collection navigation name or dotted path.
+   * @returns Collection scope, or undefined when the path is not a collection.
    */
   collectionScope(name: string): CollectionScope | undefined {
     const cached = this.#collectionScopes.get(name)
     if (cached) return cached
-    const collection = this.root.collections.get(name)
+    const scope = this.#buildCollectionScope(
+      this.root,
+      name,
+      name,
+      this.#outerFilterScope(),
+    )
+    if (scope) this.#collectionScopes.set(name, scope)
+    return scope
+  }
+
+  /**
+   * Build one correlated collection scope relative to an occurrence.
+   * @param base - Occurrence where the path starts.
+   * @param name - Collection navigation name or dotted path.
+   * @param key - Stable logical collection path.
+   * @param prefixSink - Join sink owning prefix reference joins.
+   * @returns Collection scope, or undefined when the path is not a collection.
+   */
+  #buildCollectionScope(
+    base: EntityContext,
+    name: string,
+    key: string,
+    prefixSink: FilterJoinScope,
+  ): CollectionScope | undefined {
+    const segments = name.split('.')
+    if (segments.some(segment => segment.length === 0)) {
+      throw new Error(`Invalid filter path "${name}"`)
+    }
+    const collectionName = segments.pop() as string
+    const buffered: string[] = []
+    const attempt: FilterJoinScope = {
+      alias: prefix => this.#nextAlias(prefix),
+      cache: new Map(),
+      consume: units => this.#consume(units),
+      join: sql => buffered.push(sql),
+    }
+    const owner = segments.length === 0
+      ? base
+      : this.#resolveOccurrence(base, segments, key, 0, attempt)
+    const collection = owner.collections.get(collectionName)
     if (!collection) return undefined
-    const plan = this.#collectionPlan(collection, this.root.baseAlias, name)
+    for (const sql of buffered) prefixSink.join(sql)
+    const parentExpression = `"${owner.baseAlias}".${quote('id')}`
+    const plan = this.#collectionPlan(collection, parentExpression, key)
     this.#consume(plan.work)
     const relationship = plan.collection.kind === 'relationship' ? plan.collection.relationship : undefined
     const relationshipAlias = plan.relationshipAlias
     const condition = plan.condition
-    this.#countFields.set(
-      `${name}.$count`,
-      this.#collectionCountExpression(plan, `${name}.$count\u0000${this.root.baseAlias}`),
-    )
+    if (base === this.root) {
+      this.#countFields.set(
+        `${collectionName}.$count`,
+        this.#collectionCountExpression(
+          plan,
+          `${collectionName}.$count\u0000${this.root.baseAlias}`,
+        ),
+      )
+    }
     const context: EntityContext = plan.target === undefined
       ? rootContext(this.#entities, plan.rootAlias)
       : targetContext(this.#entities, plan.target, plan.targetAlias as string, plan.rootAlias)
@@ -719,21 +770,50 @@ class QueryProjection {
               `Relationship field "${relationship.name}.${propertyName}" is not a scalar property`,
             )
           }
-          const field: ScalarFieldDefinition = { ...property, name: path }
+          const field: QueryFieldDefinition = { ...property, name: path }
           resolved.set(path, field)
           expressions.set(path, `"${relationshipAlias}".${quote(property.name)}`)
           return field
         }
       }
-      const segments = path.split('.')
-      if (segments.some(segment => segment.length === 0)) throw new Error(`Invalid filter path "${path}"`)
-      const result = this.#resolveFilterPath(context, segments, path, '', 0, sink)
+      const pathSegments = path.split('.')
+      if (pathSegments.some(segment => segment.length === 0)) {
+        throw new Error(`Invalid filter path "${path}"`)
+      }
+      const result = this.#resolveFilterPath(context, pathSegments, path, '', 0, sink)
       resolved.set(path, result.field)
       expressions.set(path, result.expression)
       if (result.identity) identities.add(path)
       return result.field
     }
+    const array = (path: string): ArrayScope | undefined => {
+      const pathSegments = path.split('.')
+      if (pathSegments.some(segment => segment.length === 0)) return undefined
+      const arrayJoins: string[] = []
+      const arrayAttempt: FilterJoinScope = {
+        alias: prefix => this.#nextAlias(prefix),
+        cache: new Map(),
+        consume: units => this.#consume(units),
+        join: sql => arrayJoins.push(sql),
+      }
+      try {
+        const result = this.#resolveFilterPath(context, pathSegments, path, '', 0, arrayAttempt)
+        if (result.field.type !== FieldType.Array) return undefined
+        for (const sql of arrayJoins) sink.join(sql)
+        const field = result.field
+        return {
+          consume: units => this.#consume(units),
+          expression: result.expression,
+          field,
+          member: arrayItemField(field),
+        }
+      } catch {
+        return undefined
+      }
+    }
     const scope: CollectionScope = {
+      array,
+      collection: nested => this.#buildCollectionScope(context, nested, `${key}.${nested}`, sink),
       condition,
       consume: units => this.#consume(units),
       definition: plan.target ?? identityDefinition(),
@@ -747,8 +827,62 @@ class QueryProjection {
       get relation() { return [plan.relation, ...joins].join(' ') },
       get work() { return plan.work + joins.length },
     }
-    this.#collectionScopes.set(name, scope)
     return scope
+  }
+
+  /**
+   * Resolve one composed path of singular reference fields.
+   * @param base - Starting occurrence.
+   * @param segments - Reference path segments.
+   * @param key - Stable logical prefix key.
+   * @param depth - Reference hops already traversed.
+   * @param scope - Local join sink.
+   * @returns The target occurrence.
+   */
+  #resolveOccurrence(
+    base: EntityContext,
+    segments: readonly string[],
+    key: string,
+    depth: number,
+    scope: FilterJoinScope,
+  ): EntityContext {
+    let context = base
+    let contextKey = key
+    let hops = depth
+    for (const segment of segments) {
+      if (hops >= MAX_REFERENCE_DEPTH) {
+        throw new Error(`Reference path "${key}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
+      }
+      const field = context.effective.get(segment)
+      if (field) {
+        if (field.type !== FieldType.Entity) {
+          throw new Error(`Filter path "${key}" traverses non-reference field "${segment}"`)
+        }
+        const sourceAlias = this.#ownerAlias(context, field.owner, false, scope)
+        const childKey = `${contextKey}.${segment}`
+        context = this.#filterTarget(field, sourceAlias, childKey, scope)
+        contextKey = childKey
+        hops += 1
+        continue
+      }
+      const descendant = context.descendants.get(segment)
+      if (!descendant) throw new Error(`Unknown field "${context.definition.name}.${segment}"`)
+      if (descendant.type !== FieldType.Entity) {
+        throw new Error(`Filter path "${key}" traverses non-reference field "${segment}"`)
+      }
+      if (descendant.variants.length !== 1) {
+        throw new Error(
+          `Collection path "${key}" traverses polymorphic descendant field "${segment}"`,
+        )
+      }
+      const variant = descendant.variants[0] as DescendantVariant
+      const owner = this.#ownerAlias(context, variant.owner, true, scope)
+      const childKey = `${contextKey}.${segment}`
+      context = this.#filterTarget(variant.field, owner, childKey, scope)
+      contextKey = childKey
+      hops += 1
+    }
+    return context
   }
 
   /**
@@ -772,7 +906,7 @@ class QueryProjection {
       )
       this.joins.push(
         `LEFT JOIN "${cteName}" "${joinAlias}" ` +
-        `ON "${joinAlias}"."parent_id" = "${plan.parentAlias}".${quote('id')}`,
+        `ON "${joinAlias}"."parent_id" = ${plan.parentExpression}`,
       )
       expression = `COALESCE("${joinAlias}"."total", 0)`
       return expression
@@ -899,7 +1033,11 @@ class QueryProjection {
       const collection = node.context.collections.get(name)
       if (collection) {
         const key = collectionKey(node.path, collection.name)
-        const plan = this.#collectionPlan(collection, node.context.baseAlias, key)
+        const plan = this.#collectionPlan(
+          collection,
+          `"${node.context.baseAlias}".${quote('id')}`,
+          key,
+        )
         this.#consume(plan.work)
         const count = this.#collectionCountExpression(plan, `${path}\u0000${node.context.baseAlias}`)
         this.#addComputedScalar(node, `${name}.$count`, count.expression)
@@ -1238,7 +1376,11 @@ class QueryProjection {
         name: collection.relationship.name,
       }
     }
-    const plan = this.#collectionPlan(collection, node.context.baseAlias, key)
+    const plan = this.#collectionPlan(
+      collection,
+      `"${node.context.baseAlias}".${quote('id')}`,
+      key,
+    )
     this.#consume(plan.work)
     this.#addCollectionColumns(
       node,
@@ -1609,28 +1751,7 @@ export function compilePolymorphicQuery(
   )
   if (definition.abstract) projection.ensureRoot()
   const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
-  const field = (name: string): QueryFieldDefinition => {
-    const value = projection.root.effective.get(name)
-    if (!value) throw new Error(`Unknown field "${definition.name}.${name}"`)
-    if (value.type === FieldType.Entity) {
-      throw new Error(
-        `Query field "${definition.name}.${name}" is an entity reference; ` +
-        'references cannot be used in predicates or ordering',
-      )
-    }
-    return value
-  }
-  const scope: QueryScope = {
-    array: name => projection.arrayScope(name),
-    collection: name => projection.collectionScope(name),
-    definition: synthetic,
-    expression: value => projection.expression(value),
-    field,
-    filterCount: name => projection.filterCount(name),
-    filterField: name => projection.filterField(name),
-    filterKind: name => projection.filterKind(name),
-    orderField: name => projection.orderField(name),
-  }
+  const scope = createQueryScope(projection, synthetic)
   const where = typeof options.where === 'string'
     ? QueryNormalizer.normalize(synthetic, options.where, scope.filterField, scope.collection, scope.array) ?? undefined
     : options.where
@@ -1675,6 +1796,107 @@ export function compilePolymorphicQuery(
       pagination.sql,
     ].filter(part => part !== '').join(' '),
     values: [...predicate.values, ...projection.values, ...pagination.values],
+  }
+}
+
+/**
+ * Build the canonical predicate scope for one entity-shaped occurrence.
+ * @param projection - Projection compiler owning path resolution and joins.
+ * @param definition - Entity-shaped definition.
+ * @returns Predicate scope backed by the canonical path resolver.
+ */
+function createQueryScope(
+  projection: QueryProjection,
+  definition: EntityDefinition,
+): QueryScope {
+  const field = (name: string): QueryFieldDefinition => {
+    const value = projection.root.effective.get(name)
+    if (!value) throw new Error(`Unknown field "${definition.name}.${name}"`)
+    if (value.type === FieldType.Entity) {
+      throw new Error(
+        `Query field "${definition.name}.${name}" is an entity reference; ` +
+        'references cannot be used in predicates or ordering',
+      )
+    }
+    return value
+  }
+  const actor = (name: string): QueryFieldDefinition | undefined => (
+    name === '$me' ? { name: '$me', type: FieldType.ID } : undefined
+  )
+  return {
+    array: name => projection.arrayScope(name),
+    collection: name => projection.collectionScope(name),
+    definition,
+    expression: value => projection.expression(value),
+    field: name => actor(name) ?? field(name),
+    filterCount: name => projection.filterCount(name),
+    filterField: name => actor(name) ?? projection.filterField(name),
+    filterKind: name => projection.filterKind(name),
+    orderField: name => projection.orderField(name),
+  }
+}
+
+/** One predicate compiled by the canonical query path resolver. */
+export interface CompiledEntityPredicate {
+  /** Common table expressions required by collection counts. */
+  readonly ctes: readonly string[],
+  /** Additional joins required by reference and collection paths. */
+  readonly joins: readonly string[],
+  /** Parameterized boolean expression without the `WHERE` keyword. */
+  readonly sql: string,
+  /** Values bound to `$1`, `$2`, … */
+  readonly values: readonly unknown[],
+}
+
+/**
+ * Normalize one predicate against the canonical query path resolver.
+ * @param entities - Canonical definitions.
+ * @param definition - Entity-shaped owner.
+ * @param input - Structured, string, or canonical predicate.
+ * @returns The canonical filter, or null for empty input.
+ */
+export function normalizeEntityFilter(
+  entities: EntityDefinitions,
+  definition: EntityDefinition,
+  input: Filter | Readonly<Record<string, unknown>> | string,
+): Filter | null {
+  const projection = new QueryProjection(entities, definition)
+  const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
+  const scope = createQueryScope(projection, synthetic)
+  return typeof input === 'string'
+    ? QueryNormalizer.normalize(synthetic, input, scope.filterField, scope.collection, scope.array)
+    : Predicate.normalize(synthetic, input, scope.filterField, scope.collection, scope.array)
+}
+
+/**
+ * Compile one predicate through the canonical query path resolver.
+ * @param entities - Canonical definitions.
+ * @param definition - Entity-shaped owner.
+ * @param filter - Canonical predicate.
+ * @param rootAlias - Physical alias of the owner table.
+ * @returns Parameterized predicate, required joins, and CTEs.
+ */
+export function compileEntityPredicate(
+  entities: EntityDefinitions,
+  definition: EntityDefinition,
+  filter: Filter,
+  rootAlias = '__row',
+): CompiledEntityPredicate {
+  const projection = new QueryProjection(
+    entities,
+    definition,
+    undefined,
+    PUBLIC_PROJECTION_BUDGET,
+    rootAlias,
+  )
+  const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
+  const scope = createQueryScope(projection, synthetic)
+  const where = SQL.where(entities, definition.name, filter, scope)
+  return {
+    ctes: projection.ctes,
+    joins: projection.joins,
+    sql: where.sql.replace(/^WHERE /u, ''),
+    values: where.values,
   }
 }
 
@@ -1830,6 +2052,7 @@ function fieldContract(field: FieldDefinition): string {
   }
   if (field.type === FieldType.Entity) return `Entity:${field.target}`
   if (field.type === FieldType.Inverse) return `Inverse:${field.target}:${field.inverse}:${field.cardinality}`
+  if (field.type === FieldType.Enum) return `Enum:${field.enum}`
   return `${field.type}:${field.format ?? ''}`
 }
 

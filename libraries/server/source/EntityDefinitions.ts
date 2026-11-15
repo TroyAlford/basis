@@ -1,45 +1,24 @@
+import { FieldType } from './FieldType'
+import { normalizeEntityFilter } from './PolymorphicQuery'
 import { postgresScalarType } from './PostgresTypes'
+import type { Filter } from './Predicate'
 import type { PhysicalConstraint, PhysicalSchema, PhysicalTable } from './Schema'
+
+export { FieldType }
 
 /** Enable PostgreSQL trigram search for universal names. */
 const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with schema public'
-
-/**
- * Canonical field types.
- *
- * `Entity` is the singular reference kind. `Array` holds scalar values in a
- * native PostgreSQL array. `JSON` is an opaque structured value. Entity
- * collections are navigations derived from inverse references or named
- * top-level relationships, never authored as fields.
- */
-export enum FieldType {
-  /** Native scalar array. */
-  Array = 'Array',
-  /** Boolean value. */
-  Boolean = 'Boolean',
-  /** Calendar date without a time of day. */
-  Date = 'Date',
-  /** Singular reference to another entity. */
-  Entity = 'Entity',
-  /** Universal text identity. */
-  ID = 'ID',
-  /** Navigation-only reciprocal field. */
-  Inverse = 'Inverse',
-  /** Opaque JSON value. */
-  JSON = 'JSON',
-  /** Numeric value, including integers and floating point numbers. */
-  Number = 'Number',
-  /** Text value. */
-  String = 'String',
-  /** Instant in time. */
-  Timestamp = 'Timestamp',
-}
 
 /** Supported declarative constraint kinds. */
 export enum Constraint {
   /** A unique index over one or more physical fields. */
   Uniqueness = 'Uniqueness',
+  /** A positive validity predicate over transaction-visible state. */
+  Validation = 'Validation',
 }
+
+/** One named reusable Graph enum: persisted value to end-user description. */
+export type GraphEnumDefinition = Readonly<Record<string, string>>
 
 /** Field types that represent scalar values. */
 export type ScalarFieldType =
@@ -122,6 +101,24 @@ export interface InverseFieldDefinition {
   readonly type: FieldType.Inverse,
 }
 
+/** One named Graph enum field. */
+export interface EnumFieldDefinition {
+  /** Persisted default value, when present. */
+  readonly default?: string,
+  /** Declared Graph enum name. */
+  readonly enum: string,
+  /** Logical field name used by entity-rooted queries. */
+  readonly name: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
+  /** Field-kind discriminator. */
+  readonly type: FieldType.Enum,
+  /** Whether this field requires a unique index. */
+  readonly unique?: true,
+  /** Permitted persisted values. */
+  readonly values: readonly string[],
+}
+
 /** One opaque JSON field. */
 export interface JSONFieldDefinition {
   /** Default JSON value, when present. */
@@ -155,12 +152,14 @@ export interface ArrayFieldDefinition {
 /** A scalar, native array, or opaque JSON field usable in a predicate. */
 export type QueryFieldDefinition =
   | ArrayFieldDefinition
+  | EnumFieldDefinition
   | JSONFieldDefinition
   | ScalarFieldDefinition
 
 /** One logical entity field. */
 export type FieldDefinition =
   | ArrayFieldDefinition
+  | EnumFieldDefinition
   | JSONFieldDefinition
   | ScalarFieldDefinition
   | EntityReferenceFieldDefinition
@@ -179,6 +178,7 @@ export interface RelationshipEndpointDefinition {
 /** A property owned by a named relationship rather than either endpoint. */
 export type RelationshipFieldDefinition =
   | ArrayFieldDefinition
+  | EnumFieldDefinition
   | JSONFieldDefinition
   | ScalarFieldDefinition
 
@@ -278,8 +278,22 @@ export interface UniqueConstraintDefinition {
   readonly type: Constraint.Uniqueness,
 }
 
+/** One normalized declarative validation constraint. */
+export interface ValidationConstraintDefinition {
+  /** Human-readable diagnostic description. */
+  readonly description: string,
+  /** Human-readable constraint name. */
+  readonly name: string,
+  /** Owning entity or relationship name. */
+  readonly owner: string,
+  /** Constraint discriminator. */
+  readonly type: Constraint.Validation,
+  /** Positive validity condition over the resulting row or edge. */
+  readonly where: Filter,
+}
+
 /** One normalized declarative constraint. */
-export type ConstraintDefinition = UniqueConstraintDefinition
+export type ConstraintDefinition = UniqueConstraintDefinition | ValidationConstraintDefinition
 
 /** One entity definition. */
 export interface EntityDefinition {
@@ -341,10 +355,12 @@ interface TableIndex {
 
 /** Internal physical table metadata shared by system and model-owned tables. */
 interface TableDefinition {
-  /** Table-level check constraints. */
+  /** Table-level check constraints created with the table. */
   readonly checks?: readonly TableCheck[],
   /** Columns in physical order. */
   readonly columns: readonly TableColumn[],
+  /** Named enum checks installed as reviewed physical constraints. */
+  readonly enumChecks?: readonly TableCheck[],
   /** Table indexes, created after the table. */
   readonly indexes?: readonly TableIndex[],
   /** Physical table name. */
@@ -355,6 +371,8 @@ interface TableDefinition {
 
 /** One table-level check constraint. */
 interface TableCheck {
+  /** Catalog-comparable constraint definition, when it differs from the DDL expression. */
+  readonly definition?: string,
   /** SQL boolean expression. */
   readonly expression: string,
   /** Constraint name. */
@@ -530,6 +548,37 @@ export function identityDefinition(): EntityDefinition {
 }
 
 /**
+ * Build the entity-shaped view of one named relationship occurrence.
+ * @param relationship - Named relationship definition.
+ * @returns Entity metadata for its endpoints and relationship-owned fields.
+ */
+export function relationshipEntityDefinition(
+  relationship: RelationshipDefinition,
+): EntityDefinition {
+  const fields: EffectiveFieldDefinition[] = [
+    ...relationship.between.map(endpoint => ({
+      column: `${endpoint.field}.id`,
+      name: endpoint.field,
+      owner: relationship.name,
+      target: endpoint.target,
+      type: FieldType.Entity as const,
+    })),
+    ...relationship.fields.map(field => ({ ...field, owner: relationship.name })),
+  ]
+  return {
+    abstract: false,
+    collections: [],
+    constraints: relationship.constraints,
+    effectiveFields: fields,
+    fields: fields as EntityDefinition['fields'],
+    inverseFields: [],
+    name: relationship.name,
+    parent: 'Entity',
+    singularNavigations: [],
+  }
+}
+
+/**
  * Build the system-owned universal identity root.
  * @param entities - Validated entity definitions.
  * @returns The physical identity-root table.
@@ -574,6 +623,8 @@ export class EntityDefinitions {
   readonly associations: readonly AssociationDefinition[]
   /** Entities in their declared order. */
   readonly entities: readonly EntityDefinition[]
+  /** Named Graph enums in authored order. */
+  readonly enums: Readonly<Record<string, GraphEnumDefinition>>
   /** Named first-class relationships in their declared order. */
   readonly relationships: readonly RelationshipDefinition[]
   /** Derived collection navigations exposed by the universal identity root. */
@@ -596,6 +647,7 @@ export class EntityDefinitions {
     return new EntityDefinitions(
       document.associations,
       document.entities,
+      document.enums,
       document.relationships,
       document.rootCollections,
       document.rootSingularNavigations,
@@ -622,19 +674,22 @@ export class EntityDefinitions {
    * Creates entity definitions from already-validated definitions.
    * @param associations - Validated reciprocal associations.
    * @param entities - Validated entity definitions.
+   * @param enums - Named Graph enums.
    * @param relationships - Named relationship definitions.
    * @param rootCollections - Collection navigations exposed by the universal identity root.
    * @param rootSingularNavigations - Singular navigations exposed by the universal identity root.
    */
-  private constructor(
+  constructor(
     associations: readonly AssociationDefinition[],
     entities: readonly EntityDefinition[],
+    enums: Readonly<Record<string, GraphEnumDefinition>>,
     relationships: readonly RelationshipDefinition[],
     rootCollections: readonly DerivedCollectionDefinition[],
     rootSingularNavigations: readonly DerivedSingularDefinition[],
   ) {
     this.associations = associations
     this.entities = entities
+    this.enums = enums
     this.relationships = relationships
     this.#rootCollections = rootCollections
     this.#rootSingularNavigations = rootSingularNavigations
@@ -788,6 +843,13 @@ export class EntityDefinitions {
           target: definition.target,
           targetColumn: 'id',
         }))),
+      ...this.tables.flatMap(table => (table.enumChecks ?? []).map(check => ({
+        definition: check.definition ?? `check (${check.expression})`,
+        name: check.name,
+        sql: `alter table ${quoteIdentifier(table.name)} ` +
+          `add constraint ${quoteIdentifier(check.name)} check (${check.expression})`,
+        table: table.name,
+      }))),
     ]
     const lifecycle = lifecycleDefinitions(this.entities)
     return {
@@ -825,8 +887,10 @@ export class EntityDefinitions {
     const inverseIndexes = inverseReferenceIndexes(this.associations)
     return [
       identityRoot(this.entities),
-      ...this.entities.map(entity => entityTable(entity, inverseIndexes.get(entity.name) ?? [])),
-      ...this.relationships.map(relationshipTable),
+      ...this.entities.map(entity => (
+        entityTable(entity, inverseIndexes.get(entity.name) ?? [], this.enums)
+      )),
+      ...this.relationships.map(relationship => relationshipTable(relationship, this.enums)),
     ]
   }
 
@@ -922,6 +986,8 @@ interface ParsedEntityDocument {
   readonly associations: readonly AssociationDefinition[],
   /** Resolved entities in declaration order. */
   readonly entities: readonly EntityDefinition[],
+  /** Named Graph enums in authored order. */
+  readonly enums: Readonly<Record<string, GraphEnumDefinition>>,
   /** Named relationships in declaration order. */
   readonly relationships: readonly RelationshipDefinition[],
   /** Derived collection navigations exposed by the universal identity root. */
@@ -937,12 +1003,13 @@ interface ParsedEntityDocument {
  */
 function parseEntityDocument(value: unknown): ParsedEntityDocument {
   if (!isRecord(value)) throw invalid('entity definitions must be an object')
-  assertKnownKeys(value, ['entities', 'relationships'], 'top-level')
+  assertKnownKeys(value, ['entities', 'enums', 'relationships'], 'top-level')
   if (!Array.isArray(value.entities) || value.entities.length === 0) {
     throw invalid('entities must be a non-empty array')
   }
 
-  const seeds = value.entities.map(parseEntity)
+  const enums = parseEnums(value.enums)
+  const seeds = value.entities.map(candidate => parseEntity(candidate, enums))
   const byName = new Map<string, EntitySeed>()
   for (const seed of seeds) {
     if (byName.has(seed.name)) throw invalid(`duplicate entity "${seed.name}"`)
@@ -957,25 +1024,102 @@ function parseEntityDocument(value: unknown): ParsedEntityDocument {
       }
     }
   }
+  for (const name of Object.keys(enums)) {
+    if (byName.has(name)) throw invalid(`enum name "${name}" collides with an entity`)
+  }
   const formats = effectiveFormats(byName)
   const children = childrenByEntity(seeds)
   const resolved = seeds.map(seed => resolveEntity(seed, byName, formats, children))
-  const relationships = parseRelationships(value.relationships, byName)
+  const relationshipSeeds = parseRelationships(value.relationships, byName, enums)
+  const relationships = relationshipSeeds.map(seed => seed.definition)
+  for (const name of Object.keys(enums)) {
+    if (relationships.some(relationship => relationship.name === name)) {
+      throw invalid(`enum name "${name}" collides with a relationship`)
+    }
+  }
   validateRelationshipPhysicalNames(relationships)
-  validateConstraintNames(resolved, relationships)
   const associations = resolveAssociations(resolved)
   const navigations = deriveNavigations(resolved, relationships, associations)
+  const entities = resolved.map(entity => ({
+    ...entity,
+    collections: navigations.collections.get(entity.name) ?? [],
+    singularNavigations: navigations.singular.get(entity.name) ?? [],
+  }))
+  const preliminary = new EntityDefinitions(
+    associations,
+    entities,
+    enums,
+    relationships,
+    navigations.collections.get('Entity') ?? [],
+    navigations.singular.get('Entity') ?? [],
+  )
+  const normalizedEntities = entities.map((entity, index) => ({
+    ...entity,
+    constraints: normalizeConstraintSeeds(
+      preliminary,
+      entity.name,
+      (seeds[index] as EntitySeed).constraints,
+      entity,
+    ),
+  }))
+  const normalizedRelationships = relationshipSeeds.map(seed => ({
+    ...seed.definition,
+    constraints: normalizeConstraintSeeds(
+      preliminary,
+      seed.definition.name,
+      seed.constraints,
+      relationshipEntityDefinition(seed.definition),
+    ),
+  }))
+  validateConstraintNames(normalizedEntities, normalizedRelationships)
   return {
     associations,
-    entities: resolved.map(entity => ({
-      ...entity,
-      collections: navigations.collections.get(entity.name) ?? [],
-      singularNavigations: navigations.singular.get(entity.name) ?? [],
-    })),
-    relationships,
+    entities: normalizedEntities,
+    enums,
+    relationships: normalizedRelationships,
     rootCollections: navigations.collections.get('Entity') ?? [],
     rootSingularNavigations: navigations.singular.get('Entity') ?? [],
   }
+}
+
+/**
+ * Normalize authored constraints against their resolved owner.
+ * @param entities - Preliminary canonical definitions.
+ * @param owner - Owning entity or relationship name.
+ * @param seeds - Raw authored constraints.
+ * @param definition - Owner entity-shaped definition.
+ * @returns Normalized constraints.
+ */
+function normalizeConstraintSeeds(
+  entities: EntityDefinitions,
+  owner: string,
+  seeds: readonly ConstraintSeed[],
+  definition: EntityDefinition,
+): readonly ConstraintDefinition[] {
+  return seeds.map(seed => {
+    if (seed.type === Constraint.Uniqueness) return seed
+    let where: Filter | null
+    try {
+      where = normalizeEntityFilter(
+        entities,
+        definition,
+        seed.where as Readonly<Record<string, unknown>> | string,
+      )
+    } catch (error) {
+      throw invalid(
+        `constraint "${seed.name}" on "${owner}" has an invalid where condition: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    if (!where) throw invalid(`constraint "${seed.name}" on "${owner}" must define a non-empty where condition`)
+    return {
+      description: seed.description,
+      name: seed.name,
+      owner,
+      type: Constraint.Validation,
+      where,
+    }
+  })
 }
 
 /**
@@ -1084,21 +1228,32 @@ interface DerivedNavigations {
   readonly singular: ReadonlyMap<string, readonly DerivedSingularDefinition[]>,
 }
 
+/** One validated relationship and its owner-aware constraint seeds. */
+interface RelationshipSeed {
+  /** Raw constraints before validation normalization. */
+  readonly constraints: readonly ConstraintSeed[],
+  /** Validated relationship definition. */
+  readonly definition: RelationshipDefinition,
+}
+
 /**
  * Validate named relationships against the resolved entity graph.
  * @param value - Optional relationship array.
  * @param byName - Parsed entities by name.
- * @returns Validated relationship definitions.
+ * @param enums - Declared Graph enums.
+ * @returns Validated relationship seeds.
  */
 function parseRelationships(
   value: unknown,
   byName: ReadonlyMap<string, EntitySeed>,
-): readonly RelationshipDefinition[] {
+  enums: Readonly<Record<string, GraphEnumDefinition>>,
+): readonly RelationshipSeed[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) throw invalid('relationships must be an array')
   const names = new Set<string>()
   return value.map(candidate => {
-    const relationship = parseRelationship(candidate, byName)
+    const seed = parseRelationship(candidate, byName, enums)
+    const relationship = seed.definition
     if (relationship.name === 'Entity' || byName.has(relationship.name)) {
       throw invalid(`relationship "${relationship.name}" conflicts with an entity name`)
     }
@@ -1106,7 +1261,7 @@ function parseRelationships(
       throw invalid(`duplicate relationship "${relationship.name}"`)
     }
     names.add(relationship.name)
-    return relationship
+    return seed
   })
 }
 
@@ -1155,6 +1310,7 @@ function validateConstraintNames(
       throw invalid(`duplicate constraint name "${constraint.name}"`)
     }
     names.add(constraint.name)
+    if (constraint.type !== Constraint.Uniqueness) continue
     if (indexes.has(constraint.index)) {
       throw invalid(`duplicate constraint index "${constraint.index}"`)
     }
@@ -1166,12 +1322,14 @@ function validateConstraintNames(
  * Validate one named relationship.
  * @param value - Relationship candidate.
  * @param byName - Parsed entities by name.
+ * @param enums - Declared Graph enums.
  * @returns The validated relationship.
  */
 function parseRelationship(
   value: unknown,
   byName: ReadonlyMap<string, EntitySeed>,
-): RelationshipDefinition {
+  enums: Readonly<Record<string, GraphEnumDefinition>>,
+): RelationshipSeed {
   if (!isRecord(value)) throw invalid('relationship must be an object')
   assertKnownKeys(value, ['between', 'constraints', 'fields', 'name'], 'relationship')
   if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
@@ -1195,7 +1353,7 @@ function parseRelationship(
   }
   const fieldNames = new Set<string>()
   const fields = value.fields.map(candidate => {
-    const field = parseRelationshipField(name, candidate)
+    const field = parseRelationshipField(name, candidate, enums)
     if (fieldNames.has(field.name)) {
       throw invalid(`duplicate field "${name}.${field.name}"`)
     }
@@ -1213,7 +1371,19 @@ function parseRelationship(
     ...fieldConstraints(name, fields),
     ...parseConstraints(name, value.constraints, columns),
   ]
-  return { between: [first, second], constraints, fields, name }
+  return {
+    constraints,
+    definition: {
+      between: [first, second],
+      constraints: constraints.filter(
+        (constraint): constraint is UniqueConstraintDefinition => (
+          constraint.type === Constraint.Uniqueness
+        ),
+      ),
+      fields,
+      name,
+    },
+  }
 }
 
 /**
@@ -1257,13 +1427,15 @@ function parseRelationshipEndpoint(
  * Validate one property owned by a named relationship.
  * @param relationshipName - Owning relationship name.
  * @param value - Field candidate.
+ * @param enums - Declared Graph enums.
  * @returns The validated relationship field.
  */
 function parseRelationshipField(
   relationshipName: string,
   value: unknown,
+  enums: Readonly<Record<string, GraphEnumDefinition>>,
 ): RelationshipFieldDefinition {
-  const parsed = parseField(relationshipName, value)
+  const parsed = parseField(relationshipName, value, enums)
   if ('idRefinement' in parsed) {
     throw invalid(`relationship "${relationshipName}" may not declare an id refinement`)
   }
@@ -1431,9 +1603,24 @@ function validateEffectiveNavigations(
 }
 
 /** A parsed entity before reference targets are resolved. */
+/** One authored validation constraint before owner-aware normalization. */
+interface ValidationConstraintSeed {
+  /** Human-readable diagnostic description. */
+  readonly description: string,
+  /** Human-readable constraint name. */
+  readonly name: string,
+  /** Constraint discriminator. */
+  readonly type: Constraint.Validation,
+  /** Authored positive validity condition. */
+  readonly where: unknown,
+}
+
+/** One authored constraint before owner-aware normalization. */
+type ConstraintSeed = UniqueConstraintDefinition | ValidationConstraintSeed
+
 interface EntitySeed {
   /** Declarative constraints owned by this entity. */
-  readonly constraints: readonly ConstraintDefinition[],
+  readonly constraints: readonly ConstraintSeed[],
   /** Declared parent entity, when present. */
   readonly extends?: string,
   /** Locally owned fields, excluding the `id` refinement. */
@@ -1497,11 +1684,72 @@ function validateAncestry(
 }
 
 /**
+ * Derive the generated TypeScript member identifier for one persisted enum value.
+ * @param value - Persisted string value.
+ * @returns PascalCase identifier.
+ * @throws {Error} When the value has no valid identifier spelling.
+ */
+export function enumMemberIdentifier(value: string): string {
+  const parts = value.split(/[^A-Za-z0-9]+/u).filter(part => part.length > 0)
+  const identifier = parts
+    .map(part => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
+    .join('')
+  if (!/^[A-Z][A-Za-z0-9]*$/u.test(identifier)) {
+    throw invalid(`enum value "${value}" does not produce a valid TypeScript member identifier`)
+  }
+  return identifier
+}
+
+/**
+ * Validate and normalize the Graph enum declarations.
+ * @param value - Parsed enum declarations.
+ * @returns Named enum definitions in authored order.
+ */
+function parseEnums(value: unknown): Readonly<Record<string, GraphEnumDefinition>> {
+  if (value === undefined) return {}
+  if (!isRecord(value)) throw invalid('enums must be an object')
+  const result: Record<string, GraphEnumDefinition> = {}
+  for (const [name, declaration] of Object.entries(value)) {
+    if (!/^[A-Z][A-Za-z0-9]*$/u.test(name)) {
+      throw invalid(`enum name "${name}" must be a PascalCase identifier`)
+    }
+    validatePhysicalIdentifier(name, 'enum name')
+    if (name === 'Entity') throw invalid('enum name "Entity" is reserved for the universal identity root')
+    if (!isRecord(declaration) || Object.keys(declaration).length === 0) {
+      throw invalid(`enum "${name}" must declare a non-empty value vocabulary`)
+    }
+    const members = new Map<string, string>()
+    const entries: [string, string][] = []
+    for (const [member, description] of Object.entries(declaration)) {
+      if (member.length === 0) throw invalid(`enum "${name}" values must be non-empty strings`)
+      if (typeof description !== 'string' || description.trim().length === 0) {
+        throw invalid(`enum "${name}.${member}" must have a non-empty description`)
+      }
+      const identifier = enumMemberIdentifier(member)
+      if (members.has(identifier)) {
+        throw invalid(
+          `enum "${name}" values "${members.get(identifier)}" and "${member}" ` +
+          `both generate member "${identifier}"`,
+        )
+      }
+      members.set(identifier, member)
+      entries.push([member, description])
+    }
+    result[name] = Object.freeze(Object.fromEntries(entries))
+  }
+  return result
+}
+
+/**
  * Validate one entity definition.
  * @param value - Parsed entity candidate.
+ * @param enums - Declared Graph enums.
  * @returns The validated entity seed.
  */
-function parseEntity(value: unknown): EntitySeed {
+function parseEntity(
+  value: unknown,
+  enums: Readonly<Record<string, GraphEnumDefinition>>,
+): EntitySeed {
   if (!isRecord(value)) throw invalid('entity must be an object')
   assertKnownKeys(value, ['constraints', 'extends', 'fields', 'name'], 'entity')
   if (typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.name)) {
@@ -1523,7 +1771,7 @@ function parseEntity(value: unknown): EntitySeed {
   const fields: FieldDefinition[] = []
   let idFormat: IdentityFormat | undefined
   for (const candidate of value.fields) {
-    const parsed = parseField(value.name, candidate)
+    const parsed = parseField(value.name, candidate, enums)
     if ('idRefinement' in parsed) {
       if (idFormat) throw invalid(`duplicate id refinement in entity "${value.name}"`)
       idFormat = parsed.idFormat
@@ -1772,24 +2020,44 @@ function parseConstraints(
   owner: string,
   value: unknown,
   columns: ReadonlyMap<string, string>,
-): readonly ConstraintDefinition[] {
+): readonly ConstraintSeed[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) throw invalid(`constraints for "${owner}" must be an array`)
   const names = new Set<string>()
   return value.map(candidate => {
     if (!isRecord(candidate)) throw invalid(`constraint for "${owner}" must be an object`)
-    assertKnownKeys(candidate, ['description', 'fields', 'name', 'type'], 'constraint')
+    assertKnownKeys(
+      candidate,
+      candidate.type === Constraint.Validation
+        ? ['description', 'name', 'type', 'where']
+        : ['description', 'fields', 'name', 'type'],
+      'constraint',
+    )
     if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0) {
       throw invalid(`constraint for "${owner}" must have a non-empty name`)
     }
     if (typeof candidate.description !== 'string' || candidate.description.trim().length === 0) {
       throw invalid(`constraint "${candidate.name}" must have a non-empty description`)
     }
-    if (candidate.type !== Constraint.Uniqueness) {
-      throw invalid(`constraint "${candidate.name}" type must be Uniqueness`)
-    }
     if (names.has(candidate.name)) throw invalid(`duplicate constraint "${owner}.${candidate.name}"`)
     names.add(candidate.name)
+    if (candidate.type === Constraint.Validation) {
+      if (candidate.where === null || candidate.where === undefined) {
+        throw invalid(`constraint "${candidate.name}" must define a non-empty where condition`)
+      }
+      if (typeof candidate.where !== 'string' && !isRecord(candidate.where)) {
+        throw invalid(`constraint "${candidate.name}" where must be a string or structured predicate`)
+      }
+      return {
+        description: candidate.description,
+        name: candidate.name,
+        type: Constraint.Validation,
+        where: candidate.where,
+      }
+    }
+    if (candidate.type !== Constraint.Uniqueness) {
+      throw invalid(`constraint "${candidate.name}" type must be Uniqueness or Validation`)
+    }
     if (!Array.isArray(candidate.fields) || candidate.fields.length === 0) {
       throw invalid(`constraint "${candidate.name}" must have a non-empty fields array`)
     }
@@ -1846,9 +2114,14 @@ function fieldConstraints(
  * Validate one field descriptor.
  * @param entityName - Owning entity name.
  * @param value - Field candidate.
+ * @param enums - Declared Graph enums.
  * @returns The parsed field or id refinement.
  */
-function parseField(entityName: string, value: unknown): ParsedFieldResult {
+function parseField(
+  entityName: string,
+  value: unknown,
+  enums: Readonly<Record<string, GraphEnumDefinition>>,
+): ParsedFieldResult {
   if (!isRecord(value)) throw invalid(`field "${entityName}" must be an object`)
   if (typeof value.field !== 'string' || !/^[a-z][A-Za-z0-9]*$/.test(value.field)) {
     throw invalid(`field name must be a camelCase identifier in "${entityName}"`)
@@ -1860,6 +2133,10 @@ function parseField(entityName: string, value: unknown): ParsedFieldResult {
 
   if (value.type === FieldType.Array) {
     return { field: parseArrayField(entityName, value) }
+  }
+
+  if (value.type === FieldType.Enum) {
+    return { field: parseEnumField(entityName, value, enums) }
   }
 
   if (value.type === FieldType.Inverse) {
@@ -1978,6 +2255,50 @@ function parseInverseField(
     name,
     target: value.target,
     type: FieldType.Inverse,
+  }
+}
+
+/**
+ * Validate one named Graph enum field descriptor.
+ * @param entityName - Owning entity or relationship name.
+ * @param value - Field candidate.
+ * @param enums - Declared Graph enums.
+ * @returns The validated enum field.
+ */
+function parseEnumField(
+  entityName: string,
+  value: Readonly<Record<string, unknown>>,
+  enums: Readonly<Record<string, GraphEnumDefinition>>,
+): EnumFieldDefinition {
+  assertKnownKeys(value, ['default', 'enum', 'field', 'nullable', 'type', 'unique'], 'field')
+  const name = value.field as string
+  if (name === 'id' || ROOT_FIELD_NAMES.has(name)) {
+    throw invalid(`field "${entityName}.${name}" is reserved for the universal identity root`)
+  }
+  if (typeof value.enum !== 'string' || value.enum.length === 0) {
+    throw invalid(`field "${entityName}.${name}" enum must be a declared enum name`)
+  }
+  const definition = enums[value.enum]
+  if (!definition) throw invalid(`field "${entityName}.${name}" references unknown enum "${value.enum}"`)
+  const nullable = parseNullable(entityName, name, value)
+  let defaultValue: string | undefined
+  if (value.default !== undefined) {
+    if (typeof value.default !== 'string' || !Object.hasOwn(definition, value.default)) {
+      throw invalid(
+        `field "${entityName}.${name}" default must be one of enum "${value.enum}" values`,
+      )
+    }
+    defaultValue = value.default
+  }
+  const unique = parseUnique(entityName, name, value)
+  return {
+    ...(defaultValue === undefined ? {} : { default: defaultValue }),
+    enum: value.enum,
+    name,
+    ...(nullable === undefined ? {} : { nullable }),
+    type: FieldType.Enum,
+    ...(unique === undefined ? {} : { unique }),
+    values: Object.keys(definition),
   }
 }
 
@@ -2121,7 +2442,9 @@ function resolveEntity(
   return {
     abstract: (children.get(seed.name)?.length ?? 0) > 0,
     collections: [],
-    constraints: seed.constraints,
+    constraints: seed.constraints.filter(
+      (constraint): constraint is UniqueConstraintDefinition => constraint.type === Constraint.Uniqueness,
+    ),
     effectiveFields: effective,
     ...(seed.extends ? { extends: seed.extends } : {}),
     fields: [idField, ...seed.fields],
@@ -2137,11 +2460,13 @@ function resolveEntity(
  * Build one entity table from locally owned fields.
  * @param entity - Validated entity.
  * @param indexes - Additional indexes derived from inverse references.
+ * @param enums - Declared Graph enums.
  * @returns Its physical table metadata.
  */
 function entityTable(
   entity: EntityDefinition,
-  indexes: readonly TableIndex[] = [],
+  indexes: readonly TableIndex[],
+  enums: Readonly<Record<string, GraphEnumDefinition>>,
 ): TableDefinition {
   const columns = new Map<string, string>()
   for (const field of entity.fields.filter(isPhysicalField)) {
@@ -2157,6 +2482,7 @@ function entityTable(
       ...boundChecks(entity.name, entity.fields.filter(isPhysicalField)),
     ],
     columns: entity.fields.filter(isPhysicalField).map(fieldTableColumn),
+    enumChecks: enumChecks(entity.name, entity.fields.filter(isPhysicalField), enums),
     ...(indexes.length + entity.constraints.length > 0
       ? { indexes: validatedIndexes(entity.name, [...indexes, ...uniqueIndexes(entity.constraints, columns)]) }
       : {}),
@@ -2214,7 +2540,42 @@ function boundChecks(
 }
 
 /**
- * Build one physical table column from a scalar, array, JSON or reference field.
+ * Build named CHECK constraints for declared Graph enum fields.
+ * @param owner - Owning entity or relationship table.
+ * @param fields - Physical fields.
+ * @param enums - Declared Graph enums.
+ * @returns Enum checks in field order.
+ */
+function enumChecks(
+  owner: string,
+  fields: readonly PhysicalFieldDefinition[],
+  enums: Readonly<Record<string, GraphEnumDefinition>>,
+): readonly TableCheck[] {
+  const checks: TableCheck[] = []
+  for (const field of fields) {
+    if (field.type !== FieldType.Enum) continue
+    const definition = enums[field.enum]
+    if (!definition) throw invalid(`field "${owner}.${field.name}" references unknown enum "${field.enum}"`)
+    const name = `${owner}_${field.name}_enum_check`
+    validatePhysicalIdentifier(name, 'enum check')
+    const column = quoteIdentifier(fieldColumn(field))
+    const values = Object.keys(definition).map(quoteLiteral).join(', ')
+    const membership = `${column} = ANY (ARRAY[${values}]::text[])`
+    const catalogValues = Object.keys(definition).map(value => `${quoteLiteral(value)}::text`).join(', ')
+    const catalogMembership = `${column} = ANY (ARRAY[${catalogValues}])`
+    checks.push({
+      definition: field.nullable === true
+        ? `check (((${column} IS NULL) OR (${catalogMembership})))`
+        : `check ((${catalogMembership}))`,
+      expression: field.nullable === true ? `(${column} IS NULL OR (${membership}))` : `(${membership})`,
+      name,
+    })
+  }
+  return checks
+}
+
+/**
+ * Build one physical table column from a scalar, enum, array, JSON or reference field.
  * @param field - Logical physical field.
  * @returns Physical column metadata.
  */
@@ -2229,6 +2590,9 @@ function fieldTableColumn(field: PhysicalFieldDefinition): TableColumn {
     }
   }
   if (field.type === FieldType.ID) return { name: field.name, primaryKey: true, type: FieldType.ID }
+  if (field.type === FieldType.Enum) {
+    return { ...defaultValue, name: field.name, nullable: field.nullable === true, type: FieldType.String }
+  }
   if (field.type === FieldType.Array) {
     return {
       ...defaultValue,
@@ -2251,9 +2615,12 @@ function defaultSQL(field: PhysicalFieldDefinition): string {
   if (value === null) return 'NULL'
   if (field.type === FieldType.Entity) return quoteLiteral(String(value))
   if (field.type === FieldType.JSON) return `${quoteLiteral(JSON.stringify(value))}::jsonb`
+  if (field.type === FieldType.Enum) return quoteLiteral(String(value))
   if (field.type === FieldType.Array) {
     const items = field.items.type
-    return `ARRAY[${(value as readonly unknown[]).map(item => scalarDefault(item, items)).join(', ')}]`
+    const type = `${postgresScalarType(items)}[]`
+    const elements = (value as readonly unknown[]).map(item => scalarDefault(item, items))
+    return elements.length === 0 ? `ARRAY[]::${type}` : `ARRAY[${elements.join(', ')}]::${type}`
   }
   return scalarDefault(value, field.type)
 }
@@ -2287,16 +2654,20 @@ function uniqueIndexes(
   constraints: readonly ConstraintDefinition[],
   columns: ReadonlyMap<string, string>,
 ): readonly TableIndex[] {
-  return constraints.map(constraint => ({
-    columns: constraint.fields.map(field => {
-      const column = columns.get(field)
-      if (!column) throw invalid(`constraint "${constraint.name}" has no physical column "${field}"`)
-      return column
-    }),
-    name: constraint.index,
-    review: true,
-    unique: true,
-  }))
+  return constraints
+    .filter((constraint): constraint is UniqueConstraintDefinition => (
+      constraint.type === Constraint.Uniqueness
+    ))
+    .map(constraint => ({
+      columns: constraint.fields.map(field => {
+        const column = columns.get(field)
+        if (!column) throw invalid(`constraint "${constraint.name}" has no physical column "${field}"`)
+        return column
+      }),
+      name: constraint.index,
+      review: true,
+      unique: true,
+    }))
 }
 
 /**
@@ -2355,9 +2726,13 @@ interface RelationshipForeignKeyDefinition {
 /**
  * Build one physical relationship table.
  * @param relationship - Named relationship definition.
+ * @param enums - Declared Graph enums.
  * @returns Its table metadata.
  */
-function relationshipTable(relationship: RelationshipDefinition): TableDefinition {
+function relationshipTable(
+  relationship: RelationshipDefinition,
+  enums: Readonly<Record<string, GraphEnumDefinition>>,
+): TableDefinition {
   const endpointColumns = relationship.between.map(endpoint => ({
     name: `${endpoint.field}.id`,
     type: FieldType.String,
@@ -2378,6 +2753,7 @@ function relationshipTable(relationship: RelationshipDefinition): TableDefinitio
   return {
     checks: boundChecks(relationship.name, relationship.fields),
     columns: [...endpointColumns, ...relationship.fields.map(fieldTableColumn)],
+    enumChecks: enumChecks(relationship.name, relationship.fields, enums),
     indexes: validatedIndexes(relationship.name, indexes),
     name: relationship.name,
     primaryKey: endpointColumns.map(column => column.name),

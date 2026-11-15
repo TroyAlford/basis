@@ -239,6 +239,7 @@ describe('EntityDefinitions', () => {
       'Boolean',
       'Date',
       'Entity',
+      'Enum',
       'ID',
       'Inverse',
       'JSON',
@@ -1321,5 +1322,113 @@ describe('EntityDefinitions', () => {
     expect(() => load({
       entities: [{ fields: [{ field: 'owner', target: 'Note', type: 'Entity' }], name: 'Note' }],
     })).not.toThrow()
+  })
+
+  test('normalizes named enums into shared text fields and named checks', () => {
+    const definitions = load({
+      entities: [{
+        fields: [
+          { default: 'viewer', enum: 'AccessLevel', field: 'access', type: 'Enum' },
+          { enum: 'AccessLevel', field: 'optional', nullable: true, type: 'Enum' },
+        ],
+        name: 'Document',
+      }],
+      enums: {
+        AccessLevel: {
+          editor: 'Can modify this resource.',
+          owner: 'Can manage this resource.',
+          viewer: 'Can view this resource.',
+        },
+      },
+    })
+    expect(definitions.enums.AccessLevel).toEqual({
+      editor: 'Can modify this resource.',
+      owner: 'Can manage this resource.',
+      viewer: 'Can view this resource.',
+    })
+    const entity = definitions.entity('Document')
+    const access = entity?.fields.find(field => field.name === 'access')
+    expect(access).toMatchObject({
+      default: 'viewer',
+      enum: 'AccessLevel',
+      type: FieldType.Enum,
+    })
+    expect(access && 'values' in access ? access.values : []).toEqual(
+      expect.arrayContaining(['owner', 'editor', 'viewer']),
+    )
+    const table = definitions.physicalSchema().tables.find(candidate => candidate.name === 'Document')
+    expect(table?.columns.find(column => column.name === 'access')).toMatchObject({
+      default: "'viewer'",
+      nullable: false,
+      sqlType: 'text',
+    })
+    expect(table?.sql).not.toContain('enum_check')
+    const checks = definitions.physicalSchema().constraints.filter(constraint => (
+      constraint.name.includes('enum_check')
+    ))
+    expect(checks.map(check => check.name)).toEqual([
+      'Document_access_enum_check',
+      'Document_optional_enum_check',
+    ])
+    expect(checks[0]?.sql).toContain('check (("access" = ANY')
+    expect(checks[1]?.definition).toContain('IS NULL')
+  })
+
+  test('rejects invalid enum declarations, values, and generated collisions', () => {
+    const base = (enumDeclarations: unknown, field: unknown) => ({
+      entities: [{ fields: [field], name: 'Document' }],
+      enums: enumDeclarations,
+    })
+    const invalidEnumName = 'access_level'
+    expect(() => load(base({ [invalidEnumName]: { owner: 'Owner' } }, {
+      enum: invalidEnumName, field: 'access', type: 'Enum',
+    }))).toThrow('PascalCase')
+    expect(() => load(base({ AccessLevel: {} }, {
+      enum: 'AccessLevel', field: 'access', type: 'Enum',
+    }))).toThrow('non-empty value vocabulary')
+    expect(() => load(base({ AccessLevel: { owner: '' } }, {
+      enum: 'AccessLevel', field: 'access', type: 'Enum',
+    }))).toThrow('non-empty description')
+    expect(() => load(base({ AccessLevel: { owner: 'Owner' } }, {
+      enum: 'Missing', field: 'access', type: 'Enum',
+    }))).toThrow('references unknown enum')
+    expect(() => load(base({ AccessLevel: { owner: 'Owner' } }, {
+      default: 'editor', enum: 'AccessLevel', field: 'access', type: 'Enum',
+    }))).toThrow('default must be one of')
+    expect(() => load(base({ AccessLevel: { Owner: 'Duplicate', owner: 'Owner' } }, {
+      enum: 'AccessLevel', field: 'access', type: 'Enum',
+    }))).toThrow('both generate member "Owner"')
+    expect(() => load({
+      entities: [{ fields: [], name: 'AccessLevel' }],
+      enums: { AccessLevel: { owner: 'Owner' } },
+    })).toThrow('collides with an entity')
+  })
+
+  test('emits typed PostgreSQL defaults for every supported array element type', () => {
+    const definitions = load({
+      entities: [{
+        fields: [
+          { default: [], field: 'booleans', items: { type: 'Boolean' }, type: 'Array' },
+          { default: [], field: 'dates', items: { type: 'Date' }, type: 'Array' },
+          { default: [], field: 'ids', items: { type: 'ID' }, type: 'Array' },
+          { default: [], field: 'numbers', items: { type: 'Number' }, type: 'Array' },
+          { default: [], field: 'strings', items: { type: 'String' }, type: 'Array' },
+          { default: [], field: 'timestamps', items: { type: 'Timestamp' }, type: 'Array' },
+          { default: ['one'], field: 'values', items: { type: 'String' }, type: 'Array' },
+        ],
+        name: 'TypedArrays',
+      }],
+    })
+    const table = definitions.physicalSchema().tables.find(candidate => candidate.name === 'TypedArrays')
+    expect(Object.fromEntries((table?.columns ?? []).map(column => [column.name, column.default])))
+      .toMatchObject({
+        booleans: 'ARRAY[]::boolean[]',
+        dates: 'ARRAY[]::date[]',
+        ids: 'ARRAY[]::text[]',
+        numbers: 'ARRAY[]::double precision[]',
+        strings: 'ARRAY[]::text[]',
+        timestamps: 'ARRAY[]::timestamptz[]',
+        values: "ARRAY['one']::text[]",
+      })
   })
 })

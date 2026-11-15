@@ -1020,6 +1020,72 @@ describe('DDL schema planning', () => {
     }, { fresh: true })
   })
 
+  test('installs named enum checks and typed empty array defaults', async () => {
+    const model = new Graph({
+      entities: [{
+        fields: [
+          { enum: 'AccessLevel', field: 'access', type: 'Enum' },
+          { default: [], field: 'booleans', items: { type: 'Boolean' }, type: 'Array' },
+          { default: [], field: 'dates', items: { type: 'Date' }, type: 'Array' },
+          { default: [], field: 'ids', items: { type: 'ID' }, type: 'Array' },
+          { default: [], field: 'numbers', items: { type: 'Number' }, type: 'Array' },
+          { default: [], field: 'strings', items: { type: 'String' }, type: 'Array' },
+          { default: [], field: 'timestamps', items: { type: 'Timestamp' }, type: 'Array' },
+        ],
+        name: 'EnumDocument',
+      }],
+      enums: {
+        AccessLevel: {
+          editor: 'Can edit.',
+          viewer: 'Can view.',
+        },
+      },
+    })
+    await withIsolatedDatabase('schema-enum-arrays', async database => {
+      await database.use(model.definitions)
+      const id = randomUUID()
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${id}, 'Allowed', 'EnumDocument')
+      `
+      await database.sql`
+        INSERT INTO "EnumDocument" ("id", "access")
+        VALUES (${id}, 'viewer')
+      `
+      const [row] = await database.sql<{
+        booleans: boolean[],
+        dates: string[],
+        ids: string[],
+        numbers: number[],
+        strings: string[],
+        timestamps: string[],
+      }[]>`
+        SELECT "booleans", "dates", "ids", "numbers", "strings", "timestamps"
+        FROM "EnumDocument"
+        WHERE "id" = ${id}
+      `
+      expect(row).toEqual({
+        booleans: [],
+        dates: [],
+        ids: [],
+        numbers: [],
+        strings: [],
+        timestamps: [],
+      })
+
+      const invalidId = randomUUID()
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${invalidId}, 'Invalid', 'EnumDocument')
+      `
+      const failure = await database.captureError(ctx => ctx.sql`
+        INSERT INTO "EnumDocument" ("id", "access")
+        VALUES (${invalidId}, 'invalid')
+      `)
+      expect(failure).toMatchObject({ errno: '23514' })
+    })
+  }, 120_000)
+
   test('includes authorization objects in the desired physical output', async () => {
     const model = new Graph({
       entities: [noteEntity()],

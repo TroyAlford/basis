@@ -149,6 +149,34 @@ Scalar predicates are two-valued, including SQL `NULL`:
 
 These rules are shared by the structured and string forms.
 
+### Field operands and actor presence
+
+A comparison may compare two field paths through the same resolver, type checks, parameterization, and null semantics:
+
+```ts
+const fieldComparisons = [
+  {
+    structured: { field: 'owner', operator: '$eq', value: { $field: 'revision.owner' } },
+    source: 'owner = revision.owner',
+  },
+  {
+    structured: { field: 'section.document.owner', operator: '$eq', value: { $field: 'asset.owner' } },
+    source: 'section.document.owner = asset.owner',
+  },
+]
+```
+
+The structured operand is always the exact single-key marker `{ "$field": "path" }`, so it cannot be confused with an ordinary JSON literal object. Both sides must have compatible types; reference identities must compare with reference identities, and enum fields must use the same enum. String and structured forms produce the same canonical predicate and SQL. Uppercase `AND`, `OR`, and `NOT` are accepted as logical keywords alongside the canonical `$and`/`$or`/`$not` spellings.
+
+The actor value `$me` is the verified current User id, and SQL `NULL` for anonymous requests. It is accepted as a comparison field for the zero-row-field checks `$me != null` and `$me = null`, which compile to an actor-presence predicate rather than JavaScript truthiness:
+
+```ts
+const actorPresence = [
+  { source: '$me != null', meaning: 'authenticated actor' },
+  { source: '$me = null', meaning: 'anonymous request' },
+]
+```
+
 ## Stage 17 — reference paths (implemented)
 
 Reference predicates are now supported through the shared `db.query` path. Structured and string forms normalize through the same field-aware resolver and SQL compiler:
@@ -213,6 +241,18 @@ const referencePaths = [
 ## Stage 18 — collection comparisons (implemented)
 
 Relationship collections use the same model-aware matching idiom that native arrays will use in stage 19. The operator states the intent; the canonical field type selects the physical implementation. `$contains` has the symbolic alias `~=`.
+
+Collection navigations compose with singular reference paths and with one another. The resolver walks the same Graph used by projections, then emits correlated existential SQL inside the existing statement and finite work budget:
+
+```ts
+const composedCollections = [
+  "organization.members $contains (id = $me)",
+  "organization.members $contains (id = $me AND membership.role = 'owner')",
+  "section.document.organization.members $contains (id = $me)",
+]
+```
+
+A parenthesized member requirement correlates every comparison to the same occurrence, so `id = $me AND membership.role = 'owner'` must match one membership. A bracketed list `[(id = $me), (membership.role = 'owner')]` remains independent requirements and may match different occurrences. Nested collection and native-array member predicates use the same scoped resolvers.
 
 ```ts
 const collectionComparisons = [
@@ -491,22 +531,22 @@ const countPredicates = [
 
 Representative evidence from the analyzed 24-parent / 70-child fixture (local PostgreSQL; timings are illustrative, not CI thresholds):
 
-| Variant                     | Buffers | Execution ms | Planning ms | SQL bytes | Rows |
-| --------------------------- | ------: | -----------: | ----------: | --------: | ---: |
-| production @2               |       3 |        0.216 |       0.155 |       356 |   19 |
-| correlated @2               |      25 |        0.255 |       0.057 |       168 |   19 |
-| CTE default @2              |       2 |        0.193 |       0.079 |       315 |   19 |
-| CTE materialized @2         |       2 |        0.193 |       0.078 |       327 |   19 |
-| CTE not materialized @2     |       2 |        0.161 |       0.078 |       331 |   19 |
-| selective production @2     |       3 |        0.218 |       0.153 |       393 |    1 |
-| selective correlated @2     |       3 |        0.069 |       0.078 |       220 |    1 |
-| selective CTE default @2    |       2 |        0.061 |       0.095 |       367 |    1 |
-| unindexed production @2     |       3 |        0.216 |       0.188 |       393 |    1 |
-| unindexed correlated @2     |       3 |        0.094 |       0.055 |       220 |    1 |
-| unindexed CTE default @2    |       2 |        0.106 |       0.076 |       367 |    1 |
-| scale production @4         |      17 |        0.871 |       0.193 |       356 |   25 |
-| scale correlated @4         |     127 |        0.304 |       0.066 |       168 |   25 |
-| scale CTE default @4        |      10 |        0.426 |       0.083 |       315 |   25 |
+| Variant                  | Buffers | Execution ms | Planning ms | SQL bytes | Rows |
+| ------------------------ | ------: | -----------: | ----------: | --------: | ---: |
+| production @2            |       3 |        0.216 |       0.155 |       356 |   19 |
+| correlated @2            |      25 |        0.255 |       0.057 |       168 |   19 |
+| CTE default @2           |       2 |        0.193 |       0.079 |       315 |   19 |
+| CTE materialized @2      |       2 |        0.193 |       0.078 |       327 |   19 |
+| CTE not materialized @2  |       2 |        0.161 |       0.078 |       331 |   19 |
+| selective production @2  |       3 |        0.218 |       0.153 |       393 |    1 |
+| selective correlated @2  |       3 |        0.069 |       0.078 |       220 |    1 |
+| selective CTE default @2 |       2 |        0.061 |       0.095 |       367 |    1 |
+| unindexed production @2  |       3 |        0.216 |       0.188 |       393 |    1 |
+| unindexed correlated @2  |       3 |        0.094 |       0.055 |       220 |    1 |
+| unindexed CTE default @2 |       2 |        0.106 |       0.076 |       367 |    1 |
+| scale production @4      |      17 |        0.871 |       0.193 |       356 |   25 |
+| scale correlated @4      |     127 |        0.304 |       0.066 |       168 |   25 |
+| scale CTE default @4     |      10 |        0.426 |       0.083 |       315 |   25 |
 
 The default grouped CTE is selected for numeric count thresholds because it held buffer use to 2 blocks versus 25 for correlated in the indexed small-scale run and 10 versus 127 in the larger-scale run, avoiding per-parent index probes. It is not a blanket latency win: correlated execution was lower for the selective and unindexed conditions and for the larger scale, while the CTE was lower in the nonselective @2 run. Materialized CTE was not consistently better. Collection predicates and previews remain correlated, and canonical relationship-collection zero/nonzero counts remain `NOT EXISTS`/`EXISTS`. The benchmark emits its 23-measurement small-scale matrix and 3-measurement larger-scale matrix through `QueryPlanning.e2e.ts` for re-checking.
 
@@ -532,7 +572,7 @@ Explicit exclusions for this contract:
 
 - `QueryNormalizer` applies scalar metadata and accepts the query compiler’s field, reference-path, and collection resolvers. It lowers `$all` to the shared counterexample canonical form.
 
-- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, collection/array member validation, Array/JSON operand validation, and null/empty lowering. `QueryProjection.filterField` and `QueryProjection.collectionScope` supply path resolution and correlated relation construction for `db.query`.
+- `Predicate` owns structured shorthand/explicit validation, canonical logical expansion, collection/array member validation, field operands, Array/JSON operand validation, and null/empty lowering. `QueryProjection.filterField` and `QueryProjection.collectionScope` supply the one path resolver and correlated relation construction for `db.query`, authorization policies, and validation constraints.
 
 - `SQL.where` and `compilePolymorphicQuery` share the canonical filter and finite work accounting; collection comparisons compile as correlated `EXISTS`/`NOT EXISTS` inside that same statement, with independent `EXISTS` per bracketed requirement. Array/JSON predicates compile through the same comparison registry with parameterized array elements and opaque JSON values. Scoped `@` members compile as array `unnest` predicates or entity-collection semijoins in the same statement.
 

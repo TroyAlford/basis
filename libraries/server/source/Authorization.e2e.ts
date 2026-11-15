@@ -1052,4 +1052,108 @@ describe('Authorization RLS', () => {
     }
   }, 120_000)
 
+  test('enforces composed membership paths and authenticated actor presence', async () => {
+    const composedGraph = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'organization', target: 'Organization', type: 'Entity' },
+            { field: 'title', type: 'String' },
+          ],
+          name: 'Document',
+          security: {
+            [Action.Read]: {
+              where: 'organization.members $contains ' +
+                "(id = $me $and membership.role = 'Owner')",
+            },
+          },
+        },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Organization',
+        },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Announcement',
+          security: { [Action.Read]: { where: '$me != null' } },
+        },
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'organization', inverse: 'members', target: 'Organization' },
+          { field: 'user', inverse: 'organizations', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+      }],
+    })
+    const install = tempDirectory('basis-authorization-composed-')
+    const server = await start(install, composedGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const bootstrap = await authorization.bootstrap({
+        displayName: 'Admin',
+        email: 'admin@example.com',
+        provider: 'test',
+        subject: 'admin',
+      })
+      if (!bootstrap.userId) throw new Error('bootstrap did not create an administrator')
+      const owner = await authorization.enrollIdentity('test', 'owner', { email: 'owner@example.com' })
+      const editor = await authorization.enrollIdentity('test', 'editor', { email: 'editor@example.com' })
+      if (!owner || !editor) throw new Error('membership users were not enrolled')
+      const organization = randomUUID()
+      const document = randomUUID()
+      const announcement = randomUUID()
+      await admin.sql.begin(async tx => {
+        for (const [id, title, entity] of [
+          [organization, 'Organization', 'Organization'],
+          [document, 'Document', 'Document'],
+          [announcement, 'Announcement', 'Announcement'],
+        ] as const) {
+          await tx`
+            INSERT INTO "Entity" ("id", "name", "entity")
+            VALUES (${id}, ${title}, ${entity})
+          `
+        }
+        await tx`
+          INSERT INTO "Organization" ("id", "title")
+          VALUES (${organization}, 'Organization')
+        `
+        await tx`
+          INSERT INTO "Document" ("id", "title", "organization.id")
+          VALUES (${document}, 'Document', ${organization})
+        `
+        await tx`
+          INSERT INTO "Announcement" ("id", "title")
+          VALUES (${announcement}, 'Announcement')
+        `
+        await tx`
+          INSERT INTO "Membership" ("organization.id", "user.id", "role")
+          VALUES (${organization}, ${owner}, 'Owner'), (${organization}, ${editor}, 'Editor')
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      const documents = (actor: string | null) => asActor(actor, () => server.db.query('Document', {
+        fields: ['id'],
+      }))
+      expect(await documents(owner)).toEqual([{ id: document }])
+      expect(await documents(editor)).toEqual([])
+      expect(await documents(null)).toEqual([])
+
+      const announcements = (actor: string | null) => asActor(actor, () => (
+        server.db.query('Announcement', { fields: ['id'] })
+      ))
+      expect(await announcements(owner)).toEqual([{ id: announcement }])
+      expect(await announcements(editor)).toEqual([{ id: announcement }])
+      expect(await announcements(null)).toEqual([])
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 120_000)
+
 })

@@ -1,5 +1,5 @@
-import type { EffectiveFieldDefinition, EntityDefinition, FieldDefinition, Graph, ScalarFieldDefinition } from 'basis/server'
-import { FieldType } from 'basis/server'
+import type { EffectiveFieldDefinition, EntityDefinition, FieldDefinition, Graph, GraphEnumDefinition, ScalarFieldDefinition } from 'basis/server'
+import { enumMemberIdentifier, FieldType } from 'basis/server'
 import type { EmittedFile } from '../emitter'
 import { emitter } from '../emitter'
 
@@ -15,9 +15,11 @@ export function generateTypes(graph: Graph): string {
     .map(entity => `    ${entity.name} = '${entity.name}',`)
     .join('\n')
   const blocks: string[] = [
-    `/** Generated from the canonical Basis entity definitions. Do not edit by hand. */
-
-export enum $BasisEntities {
+    '/** Generated from the canonical Basis entity definitions. Do not edit by hand. */',
+    ...Object.keys(definitions.enums)
+      .sort((left, right) => left.localeCompare(right))
+      .map(name => enumBlock(name, definitions.enums[name] as GraphEnumDefinition)),
+    `export enum $BasisEntities {
 ${enumMembers.replaceAll('    ', '  ')}
 }
 
@@ -34,6 +36,55 @@ export interface $BasisEntity extends $BasisReference {
   ]
   for (const entity of entities) blocks.push(entityBlock(entity, definitions))
   return `${blocks.join('\n\n')}\n`
+}
+
+/**
+ * Render one named Graph enum and its member descriptions.
+ * @param name - Enum name.
+ * @param definition - Persisted values mapped to descriptions.
+ * @returns Generated TypeScript enum block.
+ */
+function enumBlock(name: string, definition: GraphEnumDefinition): string {
+  const members = Object.entries(definition).map(([value, description]) => (
+    `${jsdoc(description, '  ')}\n  ${enumMemberIdentifier(value)} = ${quote(value)},`
+  ))
+  return `export enum ${name} {\n${members.join('\n')}\n}`
+}
+
+/**
+ * Render one escaped JSDoc block.
+ * @param description - End-user description.
+ * @param indent - Indentation applied to every line.
+ * @returns JSDoc comment text.
+ */
+function jsdoc(description: string, indent: string): string {
+  const safe = description.replaceAll('*/', '*\\/')
+  return [
+    `${indent}/**`,
+    ...safe.split(/\r?\n/u).map(line => `${indent} * ${line}`),
+    `${indent} */`,
+  ].join('\n')
+}
+
+/**
+ * Quote one TypeScript string literal.
+ * @param value - Persisted value.
+ * @returns A single-quoted literal.
+ */
+function quote(value: string): string {
+  const escaped = value
+    .replaceAll('\\', '\\\\')
+    .replaceAll("'", "\\'")
+    .replaceAll('\b', '\\b')
+    .replaceAll('\f', '\\f')
+    .replaceAll('\n', '\\n')
+    .replaceAll('\r', '\\r')
+    .replaceAll('\t', '\\t')
+    .replaceAll('\v', '\\v')
+    .replaceAll('\0', '\\0')
+    .replaceAll('\u2028', '\\u2028')
+    .replaceAll('\u2029', '\\u2029')
+  return `'${escaped}'`
 }
 
 /**
@@ -84,6 +135,9 @@ function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
   if (field.type === FieldType.Array) {
     const array = `readonly ${scalarType(field.items.type)}[]`
     return field.nullable === true ? `${array} | null` : array
+  }
+  if (field.type === FieldType.Enum) {
+    return field.nullable === true ? `${field.enum} | null` : field.enum
   }
   if (field.type === FieldType.JSON) return 'unknown'
   if (field.type === FieldType.Inverse) return 'unknown'

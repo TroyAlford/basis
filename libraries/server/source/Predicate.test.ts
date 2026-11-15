@@ -474,6 +474,6 @@ describe('Predicate.normalize', () => {
       field: 'pets',
       operator: Operator.Comparison.Equal,
       value: null,
-    })).toThrow('not valid for collection navigation')
+    })).toThrow('inverse navigation')
   })
 })

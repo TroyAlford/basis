@@ -16,7 +16,7 @@ interface QueryLiteralBase {
 /** A primitive syntax literal. */
 interface QueryScalarLiteral extends QueryLiteralBase {
   /** Literal category. */
-  readonly kind: 'boolean' | 'null' | 'number' | 'string',
+  readonly kind: 'boolean' | 'field' | 'null' | 'number' | 'string',
   /** Decoded scalar value, or raw source spelling for numbers. */
   readonly value: string | boolean | null,
 }
@@ -254,7 +254,14 @@ class Parser {
    * @returns The parsed expression, or null on failure.
    */
   #parseField(): QueryExpression | null {
-    const field = this.#expect(TokenType.Field, 'Expected a field name')
+    const next = this.#peek()
+    let field: Token | null
+    if (next.type === TokenType.Actor) {
+      this.#index += 1
+      field = next
+    } else {
+      field = this.#expect(TokenType.Field, 'Expected a field name')
+    }
     if (!field) return null
 
     let negations = 0
@@ -400,6 +407,16 @@ class Parser {
     const token = this.#peek()
     if (token.type === TokenType.LeftBracket) return this.#parseArrayLiteral()
     if (token.type === TokenType.LeftBrace) return this.#parseObjectLiteral()
+    if (token.type === TokenType.Field) {
+      this.#index += 1
+      return {
+        end: token.end,
+        kind: 'field',
+        raw: token.raw,
+        start: token.start,
+        value: token.value as string,
+      }
+    }
     switch (token.type) {
       case TokenType.Actor:
         this.#index += 1

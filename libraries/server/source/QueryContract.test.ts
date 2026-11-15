@@ -874,7 +874,7 @@ describe('Query contract', () => {
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: "pets $contains (tags $contains (title = 'Ada'))",
-    })).toThrow('Unknown collection or array navigation')
+    })).toThrow('Unknown scoped member field')
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id'],
       where: "members $contains (membership.tags = 'urgent')",
@@ -898,7 +898,7 @@ describe('Query contract', () => {
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: { field: 'pets', operator: Operator.Comparison.Equal, value: null },
-    })).toThrow('not valid for collection navigation')
+    })).toThrow('Unknown field')
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
       where: {
@@ -1003,5 +1003,112 @@ describe('Query contract', () => {
 
   test('preserves the source diagnostic offset for malformed string input', () => {
     expect(() => QueryNormalizer.normalize(note, "title = 'unterminated")).toThrow('at 8')
+  })
+
+  test('resolves composed collection paths with same-member correlation', () => {
+    const membership = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'organization', target: 'Organization', type: 'Entity' },
+            { field: 'section', target: 'Section', type: 'Entity' },
+          ],
+          name: 'Document',
+        },
+        {
+          fields: [{ field: 'document', target: 'Document', type: 'Entity' }],
+          name: 'Section',
+        },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Organization',
+        },
+        { fields: [], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'organization', inverse: 'members', target: 'Organization' },
+          { field: 'user', inverse: 'organizations', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'Membership',
+      }],
+    }))
+    const source = 'section.document.organization.members $contains ' +
+      "(id = $me $and membership.role = 'owner')"
+    const structured = {
+      field: 'section.document.organization.members',
+      filters: [{
+        filters: [
+          { field: 'id', operator: Operator.Comparison.Equal, value: '$me' },
+          { field: 'membership.role', operator: Operator.Comparison.Equal, value: 'owner' },
+        ],
+        operator: Operator.Logical.And,
+      }],
+      operator: Operator.Comparison.Contains,
+    }
+    const fromSource = compileEntityQuery(membership, 'Document', { fields: ['id'], where: source })
+    const fromStructure = compileEntityQuery(membership, 'Document', {
+      fields: ['id'],
+      where: structured as never,
+    })
+    expect(fromSource.sql).toBe(fromStructure.sql)
+    expect(fromSource.sql.match(/EXISTS \(SELECT 1 FROM "Membership"/gu)).toHaveLength(1)
+    expect(fromSource.sql).toContain('"role" IS NOT DISTINCT FROM')
+    expect(fromSource.sql).toContain("current_setting('actor.id', true)")
+
+    const independent = compileEntityQuery(membership, 'Document', {
+      fields: ['id'],
+      where: 'section.document.organization.members ' +
+        "$contains [(id = $me), (membership.role = 'owner')]",
+    })
+    expect(independent.sql.match(/EXISTS \(SELECT 1 FROM "Membership"/gu)).toHaveLength(2)
+  })
+
+  test('compares field paths through the same resolver and supports actor null checks', () => {
+    const documents = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'owner', target: 'User', type: 'Entity' },
+            { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
+          ],
+          name: 'Document',
+        },
+        {
+          fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
+          name: 'Revision',
+        },
+        { fields: [], name: 'User' },
+      ],
+    }))
+    const source = compileEntityQuery(documents, 'Document', {
+      fields: ['id'],
+      where: 'owner = revision.owner',
+    })
+    const structured = compileEntityQuery(documents, 'Document', {
+      fields: ['id'],
+      where: {
+        field: 'owner',
+        operator: Operator.Comparison.Equal,
+        value: { $field: 'revision.owner' },
+      } as never,
+    })
+    expect(source.sql).toBe(structured.sql)
+    expect(source.sql).toContain('IS NOT DISTINCT FROM')
+    expect(() => compileEntityQuery(documents, 'Document', {
+      fields: ['id'],
+      where: { field: 'owner', operator: Operator.Comparison.Equal, value: { $field: 'revision.owner' } } as never,
+    })).not.toThrow()
+    const authenticated = compileEntityQuery(documents, 'Document', {
+      fields: ['id'],
+      where: '$me != null',
+    })
+    expect(authenticated.sql).toContain("current_setting('actor.id', true)")
+    const anonymous = compileEntityQuery(documents, 'Document', {
+      fields: ['id'],
+      where: '$me = null',
+    })
+    expect(anonymous.sql).toContain('IS NULL')
   })
 })

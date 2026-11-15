@@ -71,6 +71,22 @@ export interface AuthoredArrayField {
   readonly unique?: true,
 }
 
+/** One authored named Graph enum field. */
+export interface AuthoredEnumField {
+  /** Default persisted enum value for the field. */
+  readonly default?: string,
+  /** Declared Graph enum name. */
+  readonly enum: string,
+  /** Field name, in camelCase. */
+  readonly field: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
+  /** Enum field type. */
+  readonly type: Authored<FieldType.Enum>,
+  /** Whether the field requires uniqueness. */
+  readonly unique?: true,
+}
+
 /** One authored opaque JSON field. */
 export interface AuthoredJSONField {
   /** Default JSON value for the field. */
@@ -120,6 +136,7 @@ export interface AuthoredInverseField {
 /** Any authored entity field. */
 export type AuthoredField =
   | AuthoredArrayField
+  | AuthoredEnumField
   | AuthoredIdentityField
   | AuthoredInverseField
   | AuthoredJSONField
@@ -138,8 +155,20 @@ export interface AuthoredUniquenessConstraint {
   readonly type: Constraint.Uniqueness,
 }
 
+/** One authored positive validity constraint. */
+export interface AuthoredValidationConstraint {
+  /** Human-readable diagnostic description. */
+  readonly description: string,
+  /** Human-readable constraint name. */
+  readonly name: string,
+  /** Constraint discriminator. */
+  readonly type: Constraint.Validation,
+  /** Positive validity condition normalized by the canonical predicate path. */
+  readonly where: Filter | Readonly<Record<string, unknown>> | string,
+}
+
 /** One authored declarative constraint. */
-export type AuthoredConstraint = AuthoredUniquenessConstraint
+export type AuthoredConstraint = AuthoredUniquenessConstraint | AuthoredValidationConstraint
 
 /** One authored entity security rule. */
 export interface AuthoredSecurityRule {
@@ -188,7 +217,9 @@ export interface AuthoredRelationship {
   /** Declarative constraints owned by this relationship. */
   readonly constraints?: readonly AuthoredConstraint[],
   /** Relationship-owned fields. */
-  readonly fields: readonly (AuthoredArrayField | AuthoredJSONField | AuthoredScalarField)[],
+  readonly fields: readonly (
+    AuthoredArrayField | AuthoredEnumField | AuthoredJSONField | AuthoredScalarField
+  )[],
   /** Relationship name. */
   readonly name: string,
   /** Action-keyed security declaration owned by this relationship. */
@@ -199,6 +230,8 @@ export interface AuthoredRelationship {
 export interface AuthoredDocument {
   /** Entity declarations. */
   readonly entities: readonly AuthoredEntity[],
+  /** Named reusable Graph enum declarations. */
+  readonly enums?: Readonly<Record<string, Readonly<Record<string, string>>>>,
   /** Named relationship declarations. */
   readonly relationships?: readonly AuthoredRelationship[],
 }

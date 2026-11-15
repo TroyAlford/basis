@@ -1,4 +1,4 @@
-import type { SQL as BunSQL } from 'bun'
+import type { SQL as BunSQL, TransactionSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
 import type { QueryOptions } from '../source/Database'
 import { queryEntity } from '../source/Database'
@@ -31,7 +31,7 @@ export interface IsolatedDatabase extends MutationDatabase {
   /** Schema selected by this test transaction. */
   readonly schema: string,
   /** The transaction-bound Bun SQL client. */
-  readonly sql: BunSQL,
+  readonly sql: TransactionSQL,
   /** Select a cached schema for one exact entity definition set. */
   use(entities: EntityDefinitions): Promise<void>,
 }
@@ -214,8 +214,8 @@ class IsolatedDatabaseContext implements IsolatedDatabase {
    * The transaction-bound SQL client.
    * @returns The reserved SQL client.
    */
-  get sql(): BunSQL {
-    return this.connection
+  get sql(): TransactionSQL {
+    return this.connection as unknown as TransactionSQL
   }
 
   /**

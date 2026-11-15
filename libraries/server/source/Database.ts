@@ -4,8 +4,8 @@ import { SQL } from 'bun'
 import { currentActor } from './ActorContext'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { ManagedPostgresService } from './ManagedPostgresService'
-import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from './Mutation'
-import { mutationRunner } from './Mutation'
+import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValidation, MutationValues, UpsertResult } from './Mutation'
+import { createMutationValidation, mutationRunner, validateMutationState } from './Mutation'
 import { compilePolymorphicQuery } from './PolymorphicQuery'
 import type { Filter } from './Predicate'
 export { managedDatabaseIdentity } from './ManagedPostgresService'
@@ -325,7 +325,12 @@ class PostgresDatabase implements Database {
     return this.#sql.begin(async tx => {
       const actor = currentActor()
       await tx`select set_config('actor.id', ${actor?.id ?? ''}, true)`
-      return callback(this.#transaction(tx))
+      const validation = this.#entities
+        ? createMutationValidation(this.#entities, tx)
+        : undefined
+      const result = await callback(this.#transaction(tx, validation))
+      if (validation) await validateMutationState(validation)
+      return result
     })
   }
 
@@ -352,10 +357,11 @@ class PostgresDatabase implements Database {
   /**
    * Attach mutation verbs to one native transaction client.
    * @param tx - Bun transaction client.
+   * @param validation - Transaction-scoped validation state, when active.
    * @returns The same transaction with mutation verbs.
    */
-  #transaction(tx: TransactionSQL): DatabaseTransaction {
-    return transactionWithMutations(this.#entities, tx)
+  #transaction(tx: TransactionSQL, validation?: MutationValidation): DatabaseTransaction {
+    return transactionWithMutations(this.#entities, tx, validation)
   }
 }
 
@@ -363,11 +369,13 @@ class PostgresDatabase implements Database {
  * Attach the Graph mutation vocabulary to one native Bun transaction client.
  * @param entities - Canonical definitions, or undefined when unconfigured.
  * @param tx - Bun transaction client.
+ * @param validation - Transaction-scoped validation state, when active.
  * @returns The same transaction with mutation verbs.
  */
 export function transactionWithMutations(
   entities: EntityDefinitions | undefined,
   tx: TransactionSQL,
+  validation?: MutationValidation,
 ): DatabaseTransaction {
   if (!entities) {
     return new Proxy(tx, {
@@ -380,7 +388,7 @@ export function transactionWithMutations(
       },
     }) as DatabaseTransaction
   }
-  const mutations = mutationRunner(entities, tx)
+  const mutations = mutationRunner(entities, tx, validation)
   return new Proxy(tx, {
     apply: (target, _thisArg, args) => Reflect.apply(target, target, args),
     get: (target, property, receiver) => {

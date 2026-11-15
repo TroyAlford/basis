@@ -109,6 +109,55 @@ describe('Graph authoring types', () => {
     })).toThrow('unknown top-level property "entites"')
   })
 
+  test('accepts typed named enums and validation constraints', () => {
+    const graph = new Graph({
+      entities: [{
+        constraints: [{
+          description: 'Related records must belong to the same parent.',
+          name: 'consistentAssociation',
+          type: Constraint.Validation,
+          where: 'revision = null OR owner = revision.owner',
+        }],
+        fields: [
+          { enum: 'AccessLevel', field: 'access', type: FieldType.Enum },
+          { field: 'owner', target: 'User', type: 'Entity' },
+          { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
+        ],
+        name: 'Document',
+      }, {
+        fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
+        name: 'Revision',
+      }, { fields: [], name: 'User' }],
+      enums: {
+        AccessLevel: {
+          owner: 'Can manage this resource.',
+          viewer: 'Can view this resource.',
+        },
+      },
+    })
+    expect(graph.toJSON()).toMatchObject({
+      enums: {
+        AccessLevel: {
+          owner: 'Can manage this resource.',
+          viewer: 'Can view this resource.',
+        },
+      },
+    })
+    expect(graph.definitions.entity('Document')?.constraints[0]).toMatchObject({
+      name: 'consistentAssociation',
+      type: Constraint.Validation,
+    })
+  })
+
+  test('keeps enum descriptions out of physical schema drift', () => {
+    const graph = (owner: string) => new Graph({
+      entities: [{ fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }], name: 'Document' }],
+      enums: { AccessLevel: { owner } },
+    })
+    expect(graph('First description.').definitions.physicalSchema())
+      .toEqual(graph('Changed description.').definitions.physicalSchema())
+  })
+
   test('rejects a pre-validated EntityDefinitions model', () => {
     const definitions = new Graph({ entities: [{ fields: [], name: 'Note' }] }).definitions
     expect(() => new Graph({ entities: definitions } as never))

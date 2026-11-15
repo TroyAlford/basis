@@ -3,7 +3,7 @@ import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIs
 import { installSchema } from '../testing/Schema'
 import { transactionWithMutations } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
-import { MutationError } from './Mutation'
+import { createMutationValidation, MutationError, validateMutationState } from './Mutation'
 
 const definitions = EntityDefinitions.load(JSON.stringify({
   entities: [
@@ -535,6 +535,68 @@ describe('Graph mutations', () => {
         WHERE "email" = 'rollback@example.com'
       `)
       expect(rolledBack[0]?.count).toBe(0)
+    })
+  }, 120_000)
+
+  test('validates declarative state predicates against transaction-visible results', async () => {
+    const validationDefinitions = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          constraints: [{
+            description: 'Related records must belong to the same parent.',
+            name: 'consistentRevision',
+            type: 'Validation',
+            where: 'revision = null OR owner = revision.owner',
+          }],
+          fields: [
+            { field: 'owner', target: 'User', type: 'Entity' },
+            { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
+          ],
+          name: 'Document',
+        },
+        {
+          fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
+          name: 'Revision',
+        },
+        { fields: [], name: 'User' },
+      ],
+    }))
+    await withIsolatedDatabase('mutation-validation-state', async database => {
+      await database.use(validationDefinitions)
+      const validation = createMutationValidation(validationDefinitions, database.sql)
+      const mutations = transactionWithMutations(validationDefinitions, database.sql, validation)
+      const owner = await mutations.create('User', { name: 'Owner' })
+      const other = await mutations.create('User', { name: 'Other' })
+      const revision = await mutations.create('Revision', {
+        name: 'Revision',
+        owner: owner.record?.id,
+      })
+      await mutations.create('Document', {
+        name: 'Valid',
+        owner: owner.record?.id,
+        revision: revision.record?.id,
+      })
+      await validateMutationState(validation)
+
+      const invalid = createMutationValidation(validationDefinitions, database.sql)
+      const invalidMutations = transactionWithMutations(
+        validationDefinitions,
+        database.sql,
+        invalid,
+      )
+      const invalidRevision = await invalidMutations.create('Revision', {
+        name: 'Revision 2',
+        owner: owner.record?.id,
+      })
+      await invalidMutations.create('Document', {
+        name: 'Invalid',
+        owner: other.record?.id,
+        revision: invalidRevision.record?.id,
+      })
+      const failure = await mutationFailure(() => validateMutationState(invalid))
+      expect(failure.code).toBe('constraint')
+      expect(failure.message).toContain('consistentRevision')
+      expect(failure.message).toContain('Document')
     })
   }, 120_000)
 })

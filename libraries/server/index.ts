@@ -37,6 +37,7 @@ export type { AuthorizationOptions, BootstrapResult, EffectiveGrant } from './so
 export type {
   AuthoredArrayField,
   AuthoredConstraint,
+  AuthoredEnumField,
   AuthoredDocument,
   AuthoredEntity,
   AuthoredField,
@@ -50,6 +51,7 @@ export type {
   AuthoredSecurity,
   AuthoredSecurityRule,
   AuthoredUniquenessConstraint,
+  AuthoredValidationConstraint,
 } from './source/GraphAuthoring'
 export type {
   GrantCapability,
@@ -69,7 +71,11 @@ export type {
   DatabaseTransaction,
   QueryOptions,
 } from './source/Database'
-export { MutationError } from './source/Mutation'
+export {
+  createMutationValidation,
+  MutationError,
+  validateMutationState,
+} from './source/Mutation'
 export type {
   CreateResult,
   DeleteResult,
@@ -78,12 +84,14 @@ export type {
   MutationErrorCode,
   MutationFilter,
   MutationRecord,
+  MutationValidation,
   MutationValues,
   UpsertResult,
 } from './source/Mutation'
 export { SortDirection } from './source/SortDirection'
 export {
   Constraint,
+  enumMemberIdentifier,
   FieldType,
   SNOWFLAKE_IDENTITY_PATTERN,
   UUID_IDENTITY_PATTERN,
@@ -98,10 +106,12 @@ export type {
   DerivedSingularDefinition,
   ConstraintDefinition,
   EffectiveFieldDefinition,
+  EnumFieldDefinition,
   EntityDefinition,
   EntityDefinitions,
   EntityReferenceFieldDefinition,
   FieldDefinition,
+  GraphEnumDefinition,
   InverseCardinality,
   InverseDerivedCollectionDefinition,
   InverseFieldDefinition,
@@ -115,6 +125,7 @@ export type {
   ScalarFieldDefinition,
   ScalarFieldType,
   UniqueConstraintDefinition,
+  ValidationConstraintDefinition,
 } from './source/EntityDefinitions'
 export { OAuth } from './source/OAuth'
 export type { OAuthIdentity, OAuthOptions } from './source/OAuth'

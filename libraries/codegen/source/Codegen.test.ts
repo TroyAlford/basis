@@ -497,6 +497,37 @@ const owner: Note['owner'] = { entity: $BasisEntities.AdminUser, id: '1', name: 
     }
   }, 30_000)
 
+  test('emits named Graph enums with descriptions and enum-typed fields', () => {
+    const graph = new Graph({
+      entities: [{
+        fields: [
+          { enum: 'AccessLevel', field: 'access', type: FieldType.Enum },
+          { enum: 'AccessLevel', field: 'optional', nullable: true, type: FieldType.Enum },
+        ],
+        name: 'Document',
+      }],
+      enums: {
+        AccessLevel: {
+          owner: 'Can manage */ this resource.\nSecond line.',
+          viewer: 'Can view this resource.',
+        },
+      },
+    })
+    const types = generateTypes(graph)
+    expect(types).toContain('export enum AccessLevel {')
+    expect(types).toContain('  Owner = \'owner\',')
+    expect(types).toContain('  Viewer = \'viewer\',')
+    expect(types).toContain('Can manage *\\/ this resource.')
+    expect(types).toContain('readonly access: AccessLevel')
+    expect(types).toContain('readonly optional: AccessLevel | null')
+    const schemas = generateJSONSchemas(graph)
+    expect(schemas.$defs.Document).toMatchObject({
+      properties: {
+        access: { enum: ['owner', 'viewer'], type: 'string' },
+      },
+    })
+  })
+
   test('emits TypeScript that compiles', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'basis-authored-types-'))
     try {

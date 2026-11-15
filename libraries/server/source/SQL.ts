@@ -1,9 +1,9 @@
-import type { ArrayFieldDefinition, EntityDefinition, EntityDefinitions, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType } from './EntityDefinitions'
+import type { ArrayFieldDefinition, EntityDefinition, EntityDefinitions, EnumFieldDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import { FieldType } from './FieldType'
 import { Operator } from './Operator'
 import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './Predicate'
-import { arrayItemField, Predicate } from './Predicate'
+import { arrayItemField, isFieldOperand, Predicate } from './Predicate'
 import { SortDirection } from './SortDirection'
 
 /** A validated ordering clause. */
@@ -36,8 +36,8 @@ export type OrderBy =
 
 /** A validated root projection. */
 export interface SQLSelection {
-  /** Selected root scalar field definitions, in output order. */
-  readonly fields: readonly ScalarFieldDefinition[],
+  /** Selected root scalar or enum field definitions, in output order. */
+  readonly fields: readonly (EnumFieldDefinition | ScalarFieldDefinition)[],
   /** Quoted PostgreSQL `SELECT` clause. */
   readonly sql: string,
 }
@@ -52,7 +52,11 @@ export interface SQLPredicate {
 
 /** Scoped relation used to evaluate one collection comparison. */
 export interface CollectionScope {
-  /** Correlated join condition against the root occurrence. */
+  /** Nested native-array fields exposed by the related item. */
+  readonly array?: (name: string) => ArrayScope | undefined,
+  /** Nested collection navigations exposed by the related item. */
+  readonly collection?: (name: string) => CollectionScope | undefined,
+  /** Correlated join condition against the owning occurrence. */
   readonly condition: string,
   /** Consume finite compiler work for one emitted correlated predicate. */
   readonly consume?: (units?: number) => void,
@@ -167,6 +171,7 @@ interface LogicalDefinition {
 const ALL_FIELD_TYPES = new Set<FieldType>([
   FieldType.Boolean,
   FieldType.Date,
+  FieldType.Enum,
   FieldType.ID,
   FieldType.Number,
   FieldType.String,
@@ -282,9 +287,12 @@ function whereClause(
   scope?: QueryScope,
 ): SQLPredicate {
   const entity = scope?.definition ?? definition(entities, entityName)
-  const resolve = scope?.filterField ?? (name => (
-    scope ? scope.field(name) : queryField(entity, name)
-  ))
+  const resolve = (name: string): QueryFieldDefinition => {
+    if (name === '$me') return { name: '$me', type: FieldType.ID }
+    return scope
+      ? (scope.filterField ?? scope.field)(name)
+      : queryField(entity, name)
+  }
   const array = scope?.array ?? (name => {
     try {
       const field = queryField(entity, name)
@@ -298,6 +306,10 @@ function whereClause(
   const filter = Predicate.normalize(entity, where, resolve, scope?.collection, array)
   if (!filter) return { sql: '', values: [] }
 
+  const actor = 'nullif(current_setting(\'actor.id\', true), \'\')'
+  const columnOf = (active: QueryScope, field: QueryFieldDefinition): string => (
+    field.name === '$me' ? actor : active.expression(field)
+  )
   const values: BoundScalar[] = []
   const bind = (value: BoundScalar): string => {
     if (value === '$me') return 'nullif(current_setting(\'actor.id\', true), \'\')'
@@ -315,7 +327,7 @@ function whereClause(
   const compile = (node: Filter, active: QueryScope): string => {
     if ('field' in node && 'filters' in node) {
       const collection = active.collection?.(node.field)
-      const arrayScope = active.array?.(node.field)
+      const arrayScope = collection ? undefined : active.array?.(node.field)
       if (!collection && !arrayScope) {
         throw new Error(`Unknown collection or array navigation "${node.field}"`)
       }
@@ -377,7 +389,10 @@ function whereClause(
     const comparison = comparisonDefinitions.get(node.operator as Operator.Comparison)
     if (comparison) {
       const comparisonFilter = node as ComparisonFilter
-      const field = (active.filterField ?? active.field)(comparisonFilter.field)
+      const resolveActive = (name: string): QueryFieldDefinition => (
+        name === '$me' ? { name: '$me', type: FieldType.ID } : (active.filterField ?? active.field)(name)
+      )
+      const field = resolveActive(comparisonFilter.field)
       const count = active.filterCount?.(comparisonFilter.field)
       if (count && comparisonFilter.operator === Operator.Comparison.Equal && comparisonFilter.value === 0) {
         return count.empty
@@ -399,8 +414,11 @@ function whereClause(
           `Query operator "${comparisonFilter.operator}" is not valid for field "${entity.name}.${field.name}"`,
         )
       }
+      if (isFieldOperand(comparisonFilter.value)) {
+        return fieldComparison(active, field, comparisonFilter, entity.name)
+      }
       const operand = comparison.validateOperand(field, comparisonFilter.operator, comparisonFilter.value)
-      return comparison.build(field, active.expression(field), operand, bind)
+      return comparison.build(field, columnOf(active, field), operand, bind)
     }
 
     const logical = logicalDefinitions.get(node.operator as Operator.Logical)
@@ -440,6 +458,66 @@ function rangeDefinition(
     },
     validateOperand: (field, compare, raw) => Predicate.operand(field, compare, raw),
   }
+}
+
+/**
+ * Build one field-to-field comparison through the same scoped resolver.
+ * @param scope - Active predicate scope.
+ * @param left - Left field definition.
+ * @param filter - Comparison carrying the field operand.
+ * @param entityName - Owner name used in diagnostics.
+ * @returns SQL boolean expression.
+ * @throws {Error} When the operators or types are incompatible.
+ */
+function fieldComparison(
+  scope: QueryScope,
+  left: QueryFieldDefinition,
+  filter: ComparisonFilter,
+  entityName: string,
+): string {
+  const operand = filter.value as { readonly $field: string }
+  const resolve = scope.filterField ?? scope.field
+  const right = resolve(operand.$field)
+  if (left.type !== right.type) {
+    throw new Error(
+      `Query field comparison "${entityName}.${filter.field}" and "${operand.$field}" ` +
+      'must have compatible types',
+    )
+  }
+  if (left.type === FieldType.Enum && right.type === FieldType.Enum && left.enum !== right.enum) {
+    throw new Error(
+      `Query field comparison "${filter.field}" and "${operand.$field}" use different enums`,
+    )
+  }
+  const leftIdentity = scope.filterKind?.(filter.field) === 'identity'
+  const rightIdentity = scope.filterKind?.(operand.$field) === 'identity'
+  if (leftIdentity !== rightIdentity) {
+    throw new Error(
+      `Query field comparison "${filter.field}" and "${operand.$field}" ` +
+      'must both be reference identities or both be values',
+    )
+  }
+  const operators: Partial<Record<Operator.Comparison, string>> = {
+    [Operator.Comparison.Equal]: 'IS NOT DISTINCT FROM',
+    [Operator.Comparison.GreaterThan]: '>',
+    [Operator.Comparison.GreaterThanOrEqual]: '>=',
+    [Operator.Comparison.LessThan]: '<',
+    [Operator.Comparison.LessThanOrEqual]: '<=',
+  }
+  const operator = operators[filter.operator]
+  if (!operator) {
+    throw new Error(
+      `Query operator "${filter.operator}" is not valid for a field-to-field comparison`,
+    )
+  }
+  const leftSql = left.name === '$me'
+    ? 'nullif(current_setting(\'actor.id\', true), \'\')'
+    : scope.expression(left)
+  const rightSql = right.name === '$me'
+    ? 'nullif(current_setting(\'actor.id\', true), \'\')'
+    : scope.expression(right)
+  const sql = `${leftSql} ${operator} ${rightSql}`
+  return operator === 'IS NOT DISTINCT FROM' ? sql : `COALESCE(${sql}, FALSE)`
 }
 
 /**
@@ -578,7 +656,7 @@ function arrayExpression(
  * @returns The scalar field definition.
  * @throws {Error} When the field is unknown or is an entity reference.
  */
-function scalarField(entity: EntityDefinition, name: string): ScalarFieldDefinition {
+function scalarField(entity: EntityDefinition, name: string): EnumFieldDefinition | ScalarFieldDefinition {
   const field = entity.fields.find(candidate => candidate.name === name)
   if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
   if (field.type === FieldType.Entity) {

@@ -4,7 +4,10 @@ import { EntityDefinitions } from '../../server/source/EntityDefinitions'
 /** Canonical entity property order. */
 const ENTITY_KEYS = ['name', 'extends', 'fields'] as const
 /** Canonical field property order. */
-const FIELD_KEYS = ['field', 'type', 'format', 'target', 'inverse', 'cardinality', 'items'] as const
+const FIELD_KEYS = [
+  'field', 'type', 'enum', 'format', 'target', 'inverse', 'cardinality', 'items',
+  'nullable', 'default', 'unique', 'minLength', 'maxLength', 'minimum', 'maximum',
+] as const
 /** Canonical array element property order. */
 const ELEMENT_KEYS = ['type', 'format'] as const
 /** Canonical relationship property order. */
@@ -39,7 +42,9 @@ export function formatEntityDocument(value: unknown): { formatted: string, issue
       orderRelationship(relationship as Record<string, unknown>)
     ))
   }
-  const document = relationships === undefined ? { entities } : { entities, relationships }
+  const document: Record<string, unknown> = { entities }
+  if (isRecord(value.enums)) document.enums = value.enums
+  if (relationships !== undefined) document.relationships = relationships
   return {
     formatted: `${JSON.stringify(document, null, 2)}\n`,
     issues: [],

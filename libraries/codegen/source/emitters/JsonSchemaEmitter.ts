@@ -130,6 +130,9 @@ function fieldSchema(
   if (field.type === FieldType.JSON) {
     return field.nullable === true ? {} : { not: { type: 'null' } }
   }
+  if (field.type === FieldType.Enum) {
+    return nullableSchema({ enum: [...field.values], type: 'string' }, field)
+  }
   return nullableSchema({
     ...schemaForScalar(field.type),
     ...boundsFor(field),

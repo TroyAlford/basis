@@ -174,7 +174,7 @@ describe('Graph', () => {
     expect(graph.role('editor')?.name).toBe('Editor')
     expect(graph.grants[0]).toEqual({
       action: Action.Read,
-      predicate: { field: 'owner.id', operator: Operator.Comparison.Equal, value: '$me' },
+      predicate: { field: 'owner', operator: Operator.Comparison.Equal, value: '$me' },
       role: PUBLIC_ROLE_ID,
       target: 'Article',
     })
@@ -186,7 +186,9 @@ describe('Graph', () => {
     expect(schema.tables.every(table => table.forceRowSecurity)).toBe(true)
     const read = schema.policies.find(policy => policy.table === 'Article' && policy.command === 'SELECT')
     const update = schema.policies.find(policy => policy.table === 'Article' && policy.command === 'UPDATE')
-    expect(read?.sql).toContain('current_setting(\'actor.id\', true)')
+    expect(read?.sql).toContain('basis.policy_')
+    expect(schema.functions.find(fn => fn.name.startsWith('basis.policy_'))?.sql)
+      .toContain('current_setting(\'actor.id\', true)')
     expect(read?.sql).toContain('CREATE POLICY')
     expect(update?.sql).toContain('USING')
     expect(update?.sql).toContain('WITH CHECK')
@@ -235,9 +237,9 @@ describe('Graph', () => {
     const helper = schema.functions.find(fn => fn.name.startsWith('basis.policy_'))
     expect(helper?.securityDefiner).toBe(true)
     expect(helper?.searchPath).toBe('public, basis, pg_temp')
-    expect(helper?.sql).toContain('FROM "WorkspaceMembership" AS')
-    expect(helper?.sql).toContain('"__policy_members_rel"."workspace.id" = "__row"."id"')
-    expect(helper?.sql).toContain('"__policy_members_rel"."role"')
+    expect(helper?.sql).toContain('FROM "WorkspaceMembership" "cj')
+    expect(helper?.sql).toContain('"workspace.id" = "__row"."id"')
+    expect(helper?.sql).toContain('"role"')
     expect(helper?.sql).toContain("current_setting('actor.id', true)")
     const policy = schema.policies.find(candidate => (
       candidate.table === 'Workspace' && candidate.command === 'SELECT'
@@ -305,12 +307,12 @@ describe('Graph', () => {
     })
     const helper = inverseGraph.physicalSchema('basis_app', true).functions
       .find(fn => fn.name.startsWith('basis.policy_'))
-    expect(helper?.sql).toContain('FROM "Article" AS')
+    expect(helper?.sql).toContain('FROM "Article" "ct')
     expect(helper?.sql).toContain('"owner.id"')
     expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
   })
 
-  test('rejects unsupported authorization collection predicates', () => {
+  test('accepts canonical collection policy predicates and rejects create collections', () => {
     const make = (predicate: string, action: 'read' | 'create' = 'read'): Graph => new Graph({
       entities: [
         {
@@ -331,14 +333,14 @@ describe('Graph', () => {
     })
     expect(() => make('unknown $contains (id = $me)')).toThrow('Unknown collection or array navigation')
     expect(() => make("members $contains (workspaceMembership.missing = 'Owner')"))
-      .toThrow('unknown relationship field')
-    expect(() => make("members $contains [(id = $me), (workspaceMembership.role = 'Owner')]"))
-      .toThrow('exactly one member requirement')
-    expect(() => make('members $all (id = $me)')).toThrow('$all collection policy predicates')
+      .toThrow('Unknown relationship field')
+    expect(make("members $contains [(id = $me), (workspaceMembership.role = 'Owner')]"))
+      .toBeInstanceOf(Graph)
+    expect(make('members $all (id = $me)')).toBeInstanceOf(Graph)
     expect(() => make('members $contains (id = $me)', 'create'))
       .toThrow('create security for "Workspace" cannot use collection predicates')
-    expect(() => make("members $contains (id = $me) $and members $contains (workspaceMembership.role = 'Owner')"))
-      .toThrow('multiple $contains requirements')
+    expect(make("members $contains (id = $me) $and members $contains (workspaceMembership.role = 'Owner')"))
+      .toBeInstanceOf(Graph)
   })
 
   test('supports collection $empty policies', () => {
@@ -362,7 +364,7 @@ describe('Graph', () => {
     })
     const helper = emptyGraph.physicalSchema('basis_app', true).functions
       .find(fn => fn.name.startsWith('basis.policy_'))
-    expect(helper?.sql).toContain('NOT EXISTS (SELECT 1 FROM "WorkspaceMembership" AS')
+    expect(helper?.sql).toContain('NOT EXISTS (SELECT 1 FROM "WorkspaceMembership" "cj')
   })
 
   test('allows a single membership check combined with $empty', () => {
@@ -420,14 +422,16 @@ describe('Graph', () => {
     const helperNames = schema.functions
       .map(fn => fn.name)
       .filter(name => name.startsWith('basis.policy_'))
-    expect(helperNames).toHaveLength(1)
+    expect(helperNames).toHaveLength(2)
     const policy = schema.policies.find(candidate => (
       candidate.table === 'Workspace' && candidate.command === 'SELECT'
     ))
-    expect(policy?.sql).toContain(`${helperNames[0]}("Workspace"."id")`)
-    expect(policy?.sql).toContain('"Workspace"."owner.id"')
-    expect(schema.functions.find(fn => fn.name === helperNames[0])?.sql)
-      .toContain('"WorkspaceMembership"')
+    for (const helperName of helperNames) {
+      expect(policy?.sql).toContain(`${helperName}("Workspace"."id")`)
+    }
+    expect(schema.functions.some(fn => (
+      helperNames.includes(fn.name) && fn.sql.includes('"WorkspaceMembership"')
+    ))).toBe(true)
   })
 
   test('compiles named capabilities and entity security into one policy authority', () => {

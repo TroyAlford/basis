@@ -143,6 +143,16 @@ This uses the same action rules and compiler; it is not a separate authorization
 
 Graph predicates are normalized when the graph loads and compiled into PostgreSQL `CREATE POLICY ... USING (...)` and `WITH CHECK (...)` expressions. RLS covers the universal `Entity` root, every MTI ancestor and concrete table, and every named relationship table. Reads deny by returning no rows. Default deny applies to tables without a matching action declaration.
 
+An ordinary policy can authorize any authenticated actor without assigning a global role by declaring the actor-presence predicate:
+
+```ts
+security: {
+  [Action.Read]: { where: '$me != null' },
+}
+```
+
+`$me` is the verified current User id and SQL `NULL` for anonymous requests. `$me != null` therefore authorizes authenticated actors and denies anonymous requests; `$me = null` is its anonymous counterpart. This is the same predicate compiler used by queries, not a JavaScript truthiness check or a new `Authenticated` role/sentinel. Omitting an action still denies authenticated and anonymous users alike; signed-in status never implies a missing action, and `Security.Public` remains the only unconditional anonymous opt-in.
+
 The Graph mutation verbs (`db.create`, `db.edit`, `db.delete`, `db.upsert`) run on the same restricted application pool with the request's `actor.id`. The agreed two-gate rule applies: every create, update, and delete additionally requires `read` on the affected or resulting row, while PostgreSQL's action-specific policies determine whether the write itself is allowed. `edit` and `delete` select through the canonical filter compiler, then PostgreSQL re-checks every write and returns only the rows the actor may actually mutate. Counts therefore exclude unauthorized matches without disclosing that they exist. A create denied by the read or create policy fails as an authorization error; uniqueness, reference, check, and inheritance violations fail as constraint errors. Mixed `db.tx` callbacks keep the same actor across native SQL and mutation verbs.
 
 ## Relationship membership predicates
@@ -251,9 +261,16 @@ The equivalent structured predicate is:
 }
 ```
 
-Authorization predicates support existential `$contains` with exactly one member requirement, `$empty`, logical `$and`/`$or`/`$not`, and ordinary comparisons on the matched identity and relationship-owned scalar fields. Inverse collections and named-relationship collections both work. Multiple independent `$contains` requirements for the same collection, nested collections, `$all`, arrays/JSON relationship properties, inherited non-root collection target fields, and cross-collection captures are rejected because their authorization meaning is ambiguous or not bounded.
+Authorization predicates use the same canonical path resolver, predicate grammar, normalization, and SQL compiler as entity queries. They support existential `$contains`, independent bracketed requirements, `$all`, `$empty`, logical `$and`/`$or`/`$not`, ordinary comparisons on the matched identity and relationship-owned scalar fields, composed singular-reference paths, nested collection/array member predicates, and field-to-field comparisons. Inverse collections and named-relationship collections both work. A parenthesized member requirement correlates every comparison against the same collection occurrence; bracketed requirements remain independent.
 
-Collection predicates are compiled through a generated, row-scoped Boolean policy helper. The helper uses `SECURITY DEFINER` with a fixed search path and is executable only by the application role; its body contains the validated Graph predicate and returns only a Boolean. It reads the transaction-local `actor.id`, so it cannot expose membership rows, grant table visibility, or create a privileged application capability. The membership and resource tables keep their own RLS policies, including when `FORCE ROW LEVEL SECURITY` is enabled.
+```ts
+where: 'section.document.organization.members $contains ' +
+  "(id = $me AND membership.role = 'owner')"
+```
+
+There is no policy-only query dialect or one-hop special case. Canonical path, cardinality, type, unknown-field, and finite-work-budget errors fail closed before PostgreSQL sees a policy. Principled restrictions that remain are the proposed-row limits on `create` collections and `manage` predicates, which cannot be evaluated without a resulting row.
+
+Graph predicates with a `where` are compiled through a generated, row-scoped Boolean policy helper. The helper uses `SECURITY DEFINER` with a fixed search path and is executable only by the application role; its body contains the validated Graph predicate and returns only a Boolean. It reads the transaction-local `actor.id`, so it cannot expose membership rows, grant table visibility, or create a privileged application capability. The membership and resource tables keep their own RLS policies, including when `FORCE ROW LEVEL SECURITY` is enabled.
 
 A resource role such as Owner, Editor, or Viewer is relationship data, not a Graph role. Applications may still enforce domain rules such as preventing removal of the last Owner in ordinary application transactions. Existing direct predicates such as `owner = $me` continue to use the unchanged policy path.
 

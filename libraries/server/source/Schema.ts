@@ -491,7 +491,8 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     FROM pg_constraint con
     JOIN pg_class c ON c.oid = con.conrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname IN (current_schema(), 'basis') AND con.contype = 'f'
+    WHERE n.nspname IN (current_schema(),
+      'basis') AND (con.contype = 'f' OR (con.contype = 'c' AND con.conname LIKE '%\\_enum\\_check'))
     ORDER BY n.nspname, c.relname, con.conname
   `
   const primaryRows = await sql<{

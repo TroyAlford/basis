@@ -89,6 +89,9 @@ const OPERATORS = new Map<string, QueryOperator.Collection | QueryOperator.Compa
   ['===', QueryOperator.Comparison.SequenceEqual],
   ['<>', QueryOperator.Comparison.NotEqual],
   ['!', QueryOperator.Logical.Not],
+  ['AND', QueryOperator.Logical.And],
+  ['OR', QueryOperator.Logical.Or],
+  ['NOT', QueryOperator.Logical.Not],
 ])
 
 /** Whether a character may begin an identifier. */
@@ -450,6 +453,12 @@ function fieldToken(source: string, start: number, diagnostics: QueryDiagnostic[
       return { end, raw, start, type: TokenType.Boolean, value: raw === 'true' }
     }
     if (raw === 'null') return { end, raw, start, type: TokenType.Null, value: null }
+    const operator = OPERATORS.get(raw)
+    if (operator === QueryOperator.Logical.And
+      || operator === QueryOperator.Logical.Or
+      || operator === QueryOperator.Logical.Not) {
+      return { end, operator, raw, start, type: TokenType.Operator, value: raw }
+    }
   }
 
   return { end, raw, start, type: TokenType.Field, value: raw }

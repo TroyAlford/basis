@@ -1,5 +1,5 @@
 import type { ArrayFieldDefinition, EntityDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
-import { FieldType } from './EntityDefinitions'
+import { FieldType } from './FieldType'
 import { Operator } from './Operator'
 import { normalizeScalar } from './ScalarNormalization'
 
@@ -36,6 +36,10 @@ export interface CollectionFilter {
 
 /** Entity-shaped context used to normalize a collection's inner predicates. */
 export interface CollectionFilterScope {
+  /** Nested native-array fields exposed by the related item. */
+  readonly array?: ArrayResolver,
+  /** Nested collection navigations exposed by the related item. */
+  readonly collection?: CollectionResolver,
   /** Related item entity type. */
   readonly definition: EntityDefinition,
   /** Resolve one inner value field or path. */
@@ -56,8 +60,27 @@ export interface ArrayFilterScope {
 /** Resolve a native array for filter normalization. */
 export type ArrayResolver = (name: string) => ArrayFilterScope | undefined
 
+/** A canonical reference to another field path in the same predicate scope. */
+export interface FieldOperand {
+  /** Logical field path resolved by the canonical Graph path resolver. */
+  readonly $field: string,
+}
+
 /** A canonical serializable where filter. */
 export type Filter = CollectionFilter | ComparisonFilter | LogicalFilter
+
+/**
+ * Whether one value is the canonical field-operand marker.
+ * @param value - Candidate operand.
+ * @returns `true` for a single-key `{ $field: string }` object.
+ */
+export function isFieldOperand(value: unknown): value is FieldOperand {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const keys = Object.keys(value)
+  return keys.length === 1 && keys[0] === '$field'
+    && typeof (value as { $field?: unknown }).$field === 'string'
+    && ((value as { $field: string }).$field.length > 0)
+}
 
 /** Maximum number of elements accepted in one array operand. */
 const MAX_ARRAY_OPERAND = 128
@@ -216,7 +239,21 @@ export const Predicate = {
     operator: Operator.Comparison,
     raw: unknown,
   ): unknown {
+    if (isFieldOperand(raw)) {
+      if (field.type === FieldType.Array || field.type === FieldType.JSON) {
+        throw new Error(`Query operator "${operator}" cannot compare field "${field.name}" to a field path`)
+      }
+      return raw
+    }
     if (field.type === FieldType.Array) return arrayOperand(field, operator, raw)
+    if (field.type === FieldType.Enum) {
+      if (raw === null && (operator === Operator.Comparison.Equal
+        || operator === Operator.Comparison.NotEqual)) return null
+      if (raw === '$me' || typeof raw !== 'string' || !field.values.includes(raw)) {
+        throw new Error(`Query operand for "${field.name}" is not a declared enum value`)
+      }
+      return raw
+    }
     if (field.type === FieldType.JSON) {
       if (operator !== Operator.Comparison.Contains) {
         throw new Error(`Query operator "${operator}" is not valid for JSON field "${field.name}"`)
@@ -308,7 +345,10 @@ function explicit(
   const operator = input.operator
   if (typeof operator !== 'string') throw new Error('Query operator must be a string')
 
-  const collectionScope = typeof input.field === 'string'
+  const collectionOperator = operator === Operator.Comparison.Empty
+    || operator === Operator.Comparison.Contains
+    || operator === Operator.Collection.All
+  const collectionScope = collectionOperator && typeof input.field === 'string'
     ? collection?.(input.field)
     : undefined
   if (collectionScope) {
@@ -323,7 +363,14 @@ function explicit(
         throw new Error(`Query ${operator} requires a non-empty filters array`)
       }
       const filters = input.filters.map(filter => (
-        child(collectionScope.definition, operator, filter, collectionScope.field)
+        child(
+          collectionScope.definition,
+          operator,
+          filter,
+          collectionScope.field,
+          collectionScope.collection,
+          collectionScope.array,
+        )
       ))
       if (operator === Operator.Collection.All) return Predicate.universal(input.field as string, filters)
       return {
@@ -337,10 +384,11 @@ function explicit(
     )
   }
   const arrayScope = typeof input.field === 'string'
+    && Array.isArray(input.filters)
+    && (operator === Operator.Comparison.Contains || operator === Operator.Collection.All)
     ? array?.(input.field)
     : undefined
-  if (arrayScope && Array.isArray(input.filters)
-    && (operator === Operator.Comparison.Contains || operator === Operator.Collection.All)) {
+  if (arrayScope) {
     assertKeys(input, ['field', 'filters', 'operator'])
     if (!Array.isArray(input.filters) || input.filters.length === 0) {
       throw new Error(`Query ${operator} requires a non-empty filters array`)
@@ -351,7 +399,11 @@ function explicit(
       child(memberEntity, operator, filter, name => arrayMemberResolver(name, member))
     ))
     if (operator === Operator.Collection.All) return Predicate.universal(input.field as string, filters)
-    return { field: input.field as string, filters, operator }
+    return {
+      field: input.field as string,
+      filters,
+      operator: operator as Operator.Comparison.Contains,
+    }
   }
   if (operator === Operator.Collection.All) {
     throw new Error(`Unknown collection navigation "${String(input.field)}"`)

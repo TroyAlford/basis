@@ -1,4 +1,4 @@
-import type { EntityDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import type { EntityDefinition, EnumFieldDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { ArrayResolver, CollectionResolver, Filter } from './Predicate'
@@ -66,7 +66,9 @@ function expression(
   if (node.kind === 'collection') {
     const scope = collection?.(node.field)
     if (scope) {
-      const filters = node.filters.map(filter => expression(scope.definition, filter, scope.field))
+      const filters = node.filters.map(filter => (
+        expression(scope.definition, filter, scope.field, scope.collection, scope.array)
+      ))
       if (node.operator === Operator.Collection.All) return Predicate.universal(node.field, filters)
       return { field: node.field, filters, operator: node.operator }
     }
@@ -157,6 +159,7 @@ function assertValues(node: QueryComparison, count: number): void {
  * @returns The typed canonical operand.
  */
 function literal(field: QueryFieldDefinition, node: QueryLiteral): unknown {
+  if (node.kind === 'field') return { $field: node.value as string }
   if (node.kind === 'array') {
     if (field.type === FieldType.Array) {
       const item = arrayItemField(field)
@@ -180,7 +183,10 @@ function literal(field: QueryFieldDefinition, node: QueryLiteral): unknown {
  * @param node - Scalar syntax literal.
  * @returns The typed scalar value.
  */
-function scalarLiteral(field: ScalarFieldDefinition, node: QueryLiteral): unknown {
+function scalarLiteral(
+  field: EnumFieldDefinition | ScalarFieldDefinition,
+  node: QueryLiteral,
+): unknown {
   if (node.kind === 'array' || node.kind === 'object') {
     throw new Error(`Query operand for "${field.name}" must be a scalar literal`)
   }
@@ -200,6 +206,7 @@ function scalarLiteral(field: ScalarFieldDefinition, node: QueryLiteral): unknow
 
   if (
     (field.type === FieldType.Date
+      || field.type === FieldType.Enum
       || field.type === FieldType.String
       || field.type === FieldType.Timestamp)
     && node.kind === 'string'
