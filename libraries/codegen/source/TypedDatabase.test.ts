@@ -90,7 +90,8 @@ async function run() {
       title: 'Transactional',
     })
     await tx.delete('Note', 'id == 1')
-    void await tx.query('Note', { fields: ['id', 'title'] })
+    // @ts-expect-error Graph projection queries are top-level only
+    await tx.query('Note', { fields: ['id', 'title'] })
     // @ts-expect-error invalid entity inside a typed transaction
     await tx.create('Missing', { name: 'Missing' })
     return created

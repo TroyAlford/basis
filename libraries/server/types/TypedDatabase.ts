@@ -212,13 +212,13 @@ interface TypedOperations<
   ): Promise<UpsertResult<Models[Name] & MutationRecord>>,
 }
 
-/** A transaction client with typed mutation and query operations. */
+/** A transaction client with typed mutation operations. */
 export type TypedDatabaseTransaction<
   Models extends ObjectMap<Models>,
   Creates extends ObjectMap<Creates>,
   Updates extends ObjectMap<Updates>,
   References extends ObjectMap<References>,
-> = TransactionSQL & TypedOperations<Models, Creates, Updates, References>
+> = TransactionSQL & Omit<TypedOperations<Models, Creates, Updates, References>, 'query'>
 
 /** A database facade bound to generated entity and mutation maps. */
 export type TypedDatabase<
@@ -229,7 +229,7 @@ export type TypedDatabase<
 > = Omit<Database, 'create' | 'delete' | 'edit' | 'query' | 'tx' | 'upsert'>
   & TypedOperations<Models, Creates, Updates, References> & {
     /**
-     * Run one native Bun transaction with typed mutation/query verbs.
+     * Run one native Bun transaction with typed mutation verbs.
      * @param callback - Transaction-scoped typed work.
      * @returns The callback result after commit.
      */
