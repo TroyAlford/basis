@@ -1,5 +1,5 @@
 /* eslint-disable @stylistic/jsx/indent, @stylistic/ts/indent */
-import type { PathOf, TypeAt } from '@basis/utilities'
+import type { PathOf, TypeAt } from 'basis/utilities'
 import type { Database, QueryOptions } from '../source/Database'
 import type { CreateResult, EditResult, MutationFilter, MutationRecord, UpsertResult } from '../source/Mutation'
 
