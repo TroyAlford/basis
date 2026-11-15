@@ -364,9 +364,10 @@ async function remove(
   let deleted = 0
   for (const [leaf, identities] of groupByIdentity(matches)) {
     const ids = identities.map(identity => identity.id)
-    for (const id of ids) recordSubject(sql, leaf, id, 'deleted')
     const ancestry = entities.ancestry(leaf).slice(1).filter(table => table !== 'Entity')
-    deleted += (await deleteChain(sql, leaf, ancestry, ids)).length
+    const deletedIds = await deleteChain(sql, leaf, ancestry, ids)
+    for (const id of deletedIds) recordSubject(sql, leaf, id, 'deleted')
+    deleted += deletedIds.length
   }
   return { deleted }
 }

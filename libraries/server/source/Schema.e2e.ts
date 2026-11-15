@@ -268,6 +268,36 @@ describe('DDL schema planning', () => {
     }, { fresh: true })
   })
 
+  test('treats a weakened live enum check as drift', async () => {
+    const model = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }],
+        name: 'EnumRecord',
+      }],
+      enums: { AccessLevel: { editor: 'Editor access.', owner: 'Owner access.' } },
+    }))
+    await withIsolatedDatabase('schema-enum-tamper', async database => {
+      await installSchema(database.sql, model)
+      await database.sql
+        .unsafe('ALTER TABLE "EnumRecord" DROP CONSTRAINT "EnumRecord_access_enum_check"')
+        .simple()
+      await database.sql
+        .unsafe('ALTER TABLE "EnumRecord" ADD CONSTRAINT "EnumRecord_access_enum_check" CHECK ("access" IS NOT NULL)')
+        .simple()
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual,
+        desired: model,
+        previous: model,
+        previousPhysical: model.physicalSchema(),
+      })
+      expect(plan.drift.join(' ')).toContain(
+        'check definition changed: EnumRecord.EnumRecord_access_enum_check',
+      )
+      expect(plan.blocked).toBe(true)
+    }, { fresh: true })
+  })
+
   test('treats enum description edits as metadata-only changes', async () => {
     const model = (owner: string): EntityDefinitions => EntityDefinitions.load(JSON.stringify({
       entities: [{ fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }], name: 'EnumRecord' }],

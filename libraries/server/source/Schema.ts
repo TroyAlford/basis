@@ -2719,11 +2719,18 @@ function sameDefault(left: string | null | undefined, right: string | null | und
  */
 function enumCheckValues(definition: string): readonly string[] | undefined {
   const body = /(?:=\s*ANY\s*\(\s*ARRAY\s*\[|IN\s*\()([\s\S]*?)(?:\]\s*\)|\))/iu.exec(definition)?.[1]
-  if (!body) return undefined
   const values: string[] = []
-  const literal = /'((?:[^']|'')*)'/gu
-  let match: RegExpExecArray | null
-  while ((match = literal.exec(body)) !== null) values.push((match[1] as string).replaceAll("''", "'"))
+  if (body) {
+    const literal = /'((?:[^']|'')*)'/gu
+    let match: RegExpExecArray | null
+    while ((match = literal.exec(body)) !== null) values.push((match[1] as string).replaceAll("''", "'"))
+  } else {
+    const literal = /=\s*'((?:[^']|'')*)'/gu
+    let match: RegExpExecArray | null
+    while ((match = literal.exec(definition)) !== null) {
+      values.push((match[1] as string).replaceAll("''", "'"))
+    }
+  }
   return values.length === 0 ? undefined : values
 }
 
@@ -2734,7 +2741,8 @@ function enumCheckValues(definition: string): readonly string[] | undefined {
  * @returns Whether both describe the same allowed values.
  */
 function sameCheckValues(desired: PhysicalCheck, actual: PhysicalCheck): boolean {
-  if (!desired.values || !actual.values) return true
+  if (!desired.values) return true
+  if (!actual.values) return false
   return desired.values.join('\u0000') === actual.values.join('\u0000')
 }
 

@@ -382,4 +382,90 @@ describe('Graph validation constraints', () => {
       removeService(install)
     }
   }, 120_000)
+
+  test('keeps validation armed when an attempted delete removes no rows', async () => {
+    const deleteGraph = new Graph({
+      entities: [{
+        constraints: [{
+          description: 'A guarded item must remain flagged.',
+          name: 'requiresFlag',
+          type: Constraint.Validation,
+          where: 'flag = true',
+        }],
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'flag', type: 'Boolean' },
+        ],
+        name: 'GuardedItem',
+        security: {
+          [Action.Create]: { role: 'admin' },
+          [Action.Delete]: { role: 'deleter' },
+          [Action.Read]: { role: 'writer' },
+          [Action.Update]: { role: 'writer' },
+        },
+      }],
+      roles: {
+        deleter: { name: 'Deleter' },
+        writer: { name: 'Writer' },
+      },
+      security: {
+        ExternalIdentity: { [Action.Manage]: { role: 'admin' } },
+        Role: { [Action.Manage]: { role: 'admin' } },
+        UserRole: { [Action.Manage]: { role: 'admin' } },
+      },
+    })
+    const install = tempDirectory('basis-constraint-denied-delete-')
+    const { admin, server } = await start(install, deleteGraph)
+    const connection = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const writerRole = deleteGraph.role('writer')
+      const deleterRole = deleteGraph.role('deleter')
+      if (!writerRole || !deleterRole) throw new Error('roles were not loaded')
+      const writer = await authorization.enrollIdentity('test', 'writer', { email: 'writer@example.com' })
+      const closer = await authorization.enrollIdentity('test', 'closer', { email: 'closer@example.com' })
+      if (!writer || !closer) throw new Error('actors were not enrolled')
+      const asAdmin = <T>(work: () => T): T => runAsActor({ id: admin }, work)
+      await asAdmin(() => authorization.assignRole(writer, writerRole.id))
+      await asAdmin(() => authorization.assignRole(closer, writerRole.id))
+      await asAdmin(() => authorization.assignRole(closer, deleterRole.id))
+      const guarded = randomUUID()
+      const closable = randomUUID()
+      await connection.sql.begin(async tx => {
+        for (const [id, title] of [[guarded, 'Guarded'], [closable, 'Closable']] as const) {
+          await tx`INSERT INTO "Entity" ("id", "name", "entity") VALUES (${id}, ${title}, 'GuardedItem')`
+          await tx`INSERT INTO "GuardedItem" ("id", "title", "flag") VALUES (${id}, ${title}, TRUE)`
+        }
+      })
+      const asWriter = <T>(work: () => T): T => runAsActor({ id: writer }, work)
+      const denied = await asWriter(() => server.db.tx(async sql => {
+        await sql.edit('GuardedItem', { id: guarded }, { flag: false })
+        return sql.delete('GuardedItem', { id: guarded })
+      })).catch((error: unknown) => error)
+      expect(denied).toBeInstanceOf(MutationError)
+      expect((denied as MutationError).code).toBe('constraint')
+      expect((denied as Error).message).toContain('requiresFlag')
+      const surviving = await asWriter(() => server.db.query('GuardedItem', {
+        fields: ['flag'],
+        where: { id: guarded },
+      })) as { flag: boolean }[]
+      expect(surviving).toEqual([{ flag: true }])
+
+      const asCloser = <T>(work: () => T): T => runAsActor({ id: closer }, work)
+      expect(await asCloser(() => server.db.tx(async sql => {
+        await sql.edit('GuardedItem', { id: closable }, { flag: false })
+        return sql.delete('GuardedItem', { id: closable })
+      }))).toEqual({ deleted: 1 })
+      const removed = await connection.sql.unsafe<{ id: string }[]>(
+        'SELECT "id" FROM "Entity" WHERE "id" = $1',
+        [closable],
+      )
+      expect(removed).toEqual([])
+    } finally {
+      await connection.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 120_000)
 })
