@@ -3,7 +3,7 @@ import { checksum } from '../../utilities'
 
 /** The category of one physical schema object. */
 export type PhysicalKind =
-  | 'constraint' | 'extension' | 'function' | 'grant' | 'index' | 'policy'
+  | 'check' | 'constraint' | 'extension' | 'function' | 'grant' | 'index' | 'policy'
   | 'role' | 'row-security' | 'schema' | 'table' | 'trigger'
 
 /** One typed physical column. */
@@ -64,8 +64,22 @@ export interface PhysicalConstraint {
   readonly targetColumn?: string,
 }
 
+/** One typed physical check constraint. */
+export interface PhysicalCheck {
+  /** Complete catalog definition, when introspected. */
+  readonly definition?: string,
+  /** Constraint name. */
+  readonly name: string,
+  /** Complete add-constraint SQL, when compiled from the canonical model. */
+  readonly sql?: string,
+  /** Canonical allowed values for a named enum check. */
+  readonly values?: readonly string[],
+}
+
 /** One typed physical table. */
 export interface PhysicalTable {
+  /** Table-level check constraints. */
+  readonly checks?: readonly PhysicalCheck[],
   /** Typed columns. */
   readonly columns: readonly PhysicalColumn[],
   /** Whether RLS is forced for this table. */
@@ -518,6 +532,37 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     primaryByTable.set(name, row.columns)
   }
 
+  const checkRows = await sql<{
+    constraint: string,
+    definition: string,
+    schema: string,
+    table: string,
+  }[]>`
+    SELECT n.nspname AS schema,
+      c.relname AS TABLE,
+      con.conname AS CONSTRAINT,
+      pg_get_constraintdef(con.oid) AS definition
+    FROM pg_constraint con
+    JOIN pg_class c ON c.oid = con.conrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname IN (current_schema(), 'basis') AND con.contype = 'c'
+    ORDER BY n.nspname, c.relname, con.conname
+  `
+  const checksByTable = new Map<string, PhysicalCheck[]>()
+  for (const row of checkRows) {
+    const name = `${row.schema === 'basis' ? 'basis.' : ''}${row.table}`
+    const checks = checksByTable.get(name) ?? []
+    const values = row.constraint.endsWith('_enum_check')
+      ? enumCheckValues(row.definition)
+      : undefined
+    checks.push({
+      definition: row.definition,
+      name: row.constraint,
+      ...(values ? { values } : {}),
+    })
+    checksByTable.set(name, checks)
+  }
+
   const functionRows = await sql<{
     body: string,
     definition: string,
@@ -719,6 +764,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   const tables: PhysicalTable[] = tableRows.map(row => {
     const name = `${row.schema === 'basis' ? 'basis.' : ''}${row.table}`
     return {
+      checks: checksByTable.get(name) ?? [],
       columns: columnsByTable.get(name) ?? [],
       forceRowSecurity: row.force,
       indexes: indexesByTable.get(name) ?? [],
@@ -1311,6 +1357,61 @@ export function plan(options: PlanOptions): SchemaPlan {
         drift.push(`unexpected index: ${table.name}.${index.name}`)
       }
     }
+    const actualChecks = new Map((actual.checks ?? []).map(check => [check.name, check]))
+    const previousChecks = new Map((previousTable?.checks ?? []).map(check => [check.name, check]))
+    for (const check of table.checks ?? []) {
+      const existing = actualChecks.get(check.name)
+      if (!existing) {
+        if (previousChecks.has(check.name)) {
+          drift.push(`missing deployed check: ${table.name}.${check.name}`)
+          continue
+        }
+        operations.push({
+          dependsOn: [`table:${table.name}`],
+          id: `check:${table.name}:${check.name}`,
+          kind: 'check',
+          risk: 'review',
+          sql: check.sql ?? '',
+          target: `${table.name}.${check.name}`,
+        })
+        continue
+      }
+      if (sameCheckValues(check, existing)) continue
+      const previousCheck = previousChecks.get(check.name)
+      if (previousCheck && sameCheckValues(previousCheck, existing)) {
+        const dropId = `check-drop:${table.name}:${check.name}`
+        operations.push({
+          dependsOn: [`table:${table.name}`],
+          id: dropId,
+          kind: 'check',
+          risk: 'review',
+          sql: `ALTER TABLE ${quote(table.name)} DROP CONSTRAINT ${quote(check.name)}`,
+          target: `${table.name}.${check.name}`,
+        })
+        operations.push({
+          dependsOn: [dropId],
+          id: `check:${table.name}:${check.name}`,
+          kind: 'check',
+          risk: 'review',
+          sql: check.sql ?? '',
+          target: `${table.name}.${check.name}`,
+        })
+      } else {
+        drift.push(`check definition changed: ${table.name}.${check.name}`)
+      }
+    }
+    for (const existing of actualChecks.values()) {
+      if ((table.checks ?? []).some(check => check.name === existing.name)) continue
+      if (!previousChecks.has(existing.name)) continue
+      operations.push({
+        dependsOn: [`table:${table.name}`],
+        id: `check-drop:${table.name}:${existing.name}`,
+        kind: 'check',
+        risk: 'review',
+        sql: `ALTER TABLE ${quote(table.name)} DROP CONSTRAINT ${quote(existing.name)}`,
+        target: `${table.name}.${existing.name}`,
+      })
+    }
   }
   for (const table of actualSchema.tables) {
     if (desiredTables.has(table.name) || ambiguities.some(pair => pair.startsWith(`${table.name} ->`))) continue
@@ -1669,11 +1770,21 @@ function stripMigrationLedger(schema: PhysicalSchema): PhysicalSchema {
  */
 export function physicalHash(schema: PhysicalSchema, ignoreLedgerSchema = false): string {
   const stripped = stripMigrationLedger(schema)
-  if (!ignoreLedgerSchema) return checksum(JSON.stringify(stableValue(stripped)))
-  return checksum(JSON.stringify(stableValue({
+  const canonical = {
     ...stripped,
-    grants: (stripped.grants ?? []).filter(grant => grant.table !== 'basis'),
-    schemas: (stripped.schemas ?? []).filter(name => name !== 'basis'),
+    tables: stripped.tables.map(table => ({
+      ...table,
+      checks: (table.checks ?? []).map(check => ({
+        name: check.name,
+        ...(check.values ? { values: check.values } : {}),
+      })),
+    })),
+  }
+  if (!ignoreLedgerSchema) return checksum(JSON.stringify(stableValue(canonical)))
+  return checksum(JSON.stringify(stableValue({
+    ...canonical,
+    grants: (canonical.grants ?? []).filter(grant => grant.table !== 'basis'),
+    schemas: (canonical.schemas ?? []).filter(name => name !== 'basis'),
   })))
 }
 
@@ -2599,6 +2710,32 @@ function defaultKey(value: string | null | undefined): string {
  */
 function sameDefault(left: string | null | undefined, right: string | null | undefined): boolean {
   return defaultKey(left) === defaultKey(right)
+}
+
+/**
+ * Extract the persisted values from one introspected enum check definition.
+ * @param definition - PostgreSQL `pg_get_constraintdef` output.
+ * @returns The allowed values, or undefined when the shape is not an enum check.
+ */
+function enumCheckValues(definition: string): readonly string[] | undefined {
+  const body = /(?:=\s*ANY\s*\(\s*ARRAY\s*\[|IN\s*\()([\s\S]*?)(?:\]\s*\)|\))/iu.exec(definition)?.[1]
+  if (!body) return undefined
+  const values: string[] = []
+  const literal = /'((?:[^']|'')*)'/gu
+  let match: RegExpExecArray | null
+  while ((match = literal.exec(body)) !== null) values.push((match[1] as string).replaceAll("''", "'"))
+  return values.length === 0 ? undefined : values
+}
+
+/**
+ * Whether one desired enum check's allowed values match the live check.
+ * @param desired - Desired check.
+ * @param actual - Live check.
+ * @returns Whether both describe the same allowed values.
+ */
+function sameCheckValues(desired: PhysicalCheck, actual: PhysicalCheck): boolean {
+  if (!desired.values || !actual.values) return true
+  return desired.values.join('\u0000') === actual.values.join('\u0000')
 }
 
 /**

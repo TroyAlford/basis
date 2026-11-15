@@ -1150,7 +1150,7 @@ describe('Authorization RLS', () => {
   test('compiles nested collection and composed reference policy paths against real RLS', async () => {
     const policyGraph = new Graph({
       entities: [
-        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        { fields: [{ field: 'email', type: 'String' }], name: 'User', security: { [Action.Read]: Security.Public } },
         {
           fields: [
             { field: 'title', type: 'String' },
@@ -1164,6 +1164,7 @@ describe('Authorization RLS', () => {
             },
           ],
           name: 'Project',
+          security: { [Action.Read]: Security.Public },
         },
         {
           fields: [
@@ -1201,6 +1202,7 @@ describe('Authorization RLS', () => {
         ],
         fields: [],
         name: 'WorkspaceMembership',
+        security: { [Action.Read]: Security.Public },
       }],
       security: {
         ExternalIdentity: { [Action.Manage]: { role: 'admin' } },
@@ -1250,13 +1252,17 @@ describe('Authorization RLS', () => {
           (${tasks[2]}, 'open', ${projects[2]}),
           (${tasks[3]}, 'open', ${projects[4]})`
         await tx`INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id") VALUES
-          (${workspaces[0]}, ${alice}),
-          (${workspaces[3]}, ${alice})`
+          (${workspaces[0]}, ${alice})`
       })
       const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
       expect(await asActor(alice, () => server.db.query('Workspace', {
         fields: ['id'],
         limit: null,
+      }))).toEqual([{ id: workspaces[0] }])
+      expect(await asActor(alice, () => server.db.query('Workspace', {
+        fields: ['id'],
+        limit: null,
+        where: "projects $contains (title = 'visible' AND tasks $contains (title = 'open'))",
       }))).toEqual([{ id: workspaces[0] }])
       expect(await asActor(null, () => server.db.query('Workspace', {
         fields: ['id'],
@@ -1267,7 +1273,14 @@ describe('Authorization RLS', () => {
         limit: null,
       }))
       expect(taskRows.map((row: { id: string }) => row.id).sort())
-        .toEqual([tasks[0], tasks[3]].sort())
+        .toEqual([tasks[0]].sort())
+      const taskQuery = await asActor(alice, () => server.db.query('Task', {
+        fields: ['id'],
+        limit: null,
+        where: 'project.workspace.members $contains (id = $me)',
+      }))
+      expect(taskQuery.map((row: { id: string }) => row.id).sort())
+        .toEqual([tasks[0]].sort())
       expect(await asActor(null, () => server.db.query('Task', {
         fields: ['id'],
         limit: null,

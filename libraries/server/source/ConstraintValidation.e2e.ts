@@ -88,13 +88,17 @@ const graph = new Graph({
 /**
  * Start one isolated server for a validation graph.
  * @param install - Temporary installation root.
+ * @param applicationGraph - Graph to install; defaults to the module fixture.
  * @returns The started server and its bootstrapped administrator.
  */
-async function start(install: string): Promise<{ readonly admin: string, readonly server: Server }> {
+async function start(
+  install: string,
+  applicationGraph: Graph = graph,
+): Promise<{ readonly admin: string, readonly server: Server }> {
   const previous = process.cwd()
   process.chdir(install)
   const server = new BasisServer()
-    .graph(graph)
+    .graph(applicationGraph)
     .database()
     .root(install)
   server.start({ development: true, hostname: '127.0.0.1', logger: silent, port: 0 })
@@ -105,7 +109,7 @@ async function start(install: string): Promise<{ readonly admin: string, readonl
   }
   const connection = await openAdmin(server.db)
   try {
-    await installSchema(connection.sql, graph, {
+    await installSchema(connection.sql, applicationGraph, {
       appRole: 'basis_app',
       schema: 'public',
       superuser: true,
@@ -291,6 +295,89 @@ describe('Graph validation constraints', () => {
         owner: ownerA,
       })))).toBeDefined()
     } finally {
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 120_000)
+
+  test('validates a written subject that becomes invisible to the writer', async () => {
+    const invisibleGraph = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: 'String' }], name: 'User' },
+        {
+          constraints: [{
+            description: 'A workspace must remain flagged.',
+            name: 'requiresFlag',
+            type: Constraint.Validation,
+            where: 'flag = true',
+          }],
+          fields: [
+            { field: 'title', type: 'String' },
+            { field: 'flag', type: 'Boolean' },
+          ],
+          name: 'Workspace',
+          security: {
+            [Action.Create]: { role: 'admin' },
+            [Action.Read]: { where: '$me != null $and members $contains (id = $me)' },
+            [Action.Update]: { role: 'admin' },
+          },
+        },
+      ],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMember',
+        security: {
+          [Action.Create]: { role: 'admin' },
+          [Action.Delete]: { role: 'admin' },
+          [Action.Read]: { role: 'admin' },
+        },
+      }],
+      security: {
+        ExternalIdentity: { [Action.Manage]: { role: 'admin' } },
+        Role: { [Action.Manage]: { role: 'admin' } },
+        UserRole: { [Action.Manage]: { role: 'admin' } },
+      },
+    })
+    const install = tempDirectory('basis-constraint-invisible-')
+    const { admin, server } = await start(install, invisibleGraph)
+    const connection = await openAdmin(server.db)
+    try {
+      const workspace = randomUUID()
+      await connection.sql.begin(async tx => {
+        await tx`INSERT INTO "Entity" ("id", "name", "entity") VALUES (${workspace}, 'Workspace', 'Workspace')`
+        await tx`INSERT INTO "Workspace" ("id", "title", "flag") VALUES (${workspace}, 'Workspace', TRUE)`
+        await tx`
+          INSERT INTO "WorkspaceMember" ("workspace.id", "user.id", "role")
+          VALUES (${workspace}, ${admin}, 'Owner')
+        `
+      })
+      const asAdmin = <T>(work: () => T): T => runAsActor({ id: admin }, work)
+      const failure = await asAdmin(() => server.db.tx(async sql => {
+        await sql.edit('Workspace', { id: workspace }, { flag: false })
+        await sql`
+          DELETE FROM "WorkspaceMember"
+          WHERE "workspace.id" = ${workspace}
+        `
+      })).catch((error: unknown) => error)
+      expect(failure).toBeInstanceOf(MutationError)
+      expect((failure as MutationError).code).toBe('constraint')
+      expect((failure as Error).message).toContain('requiresFlag')
+      const [state] = await asAdmin(() => server.db.query('Workspace', {
+        fields: ['id', 'flag'],
+        where: { id: workspace },
+      })) as { flag: boolean, id: string }[]
+      expect(state).toEqual({ flag: true, id: workspace })
+      const [membership] = await connection.sql.unsafe<{ id: string }[]>(
+        'SELECT "user.id" AS "id" FROM "WorkspaceMember" WHERE "workspace.id" = $1',
+        [workspace],
+      )
+      expect(membership?.id).toBe(admin)
+    } finally {
+      await connection.close()
       await server.shutdown()
       removeService(install)
     }

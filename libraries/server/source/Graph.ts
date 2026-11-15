@@ -4,6 +4,7 @@ import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefin
 import { EntityDefinitions, FieldType, identityDefinition, isCanonicalUUID } from './EntityDefinitions'
 import type { AuthoredDocument, AuthoredEntity, AuthoredEnumSource, AuthoredRelationship, AuthoredSecurity } from './GraphAuthoring'
 import { Operator } from './Operator'
+import { resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import type { ArrayFilterScope, CollectionFilterScope, Filter } from './Predicate'
 import { ACTOR_FIELD_NAME, Predicate } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
@@ -32,8 +33,6 @@ export const PUBLIC_ROLE_ID = 'public'
 export const ADMIN_ROLE_ID = '00000000-0000-0000-0000-000000000001'
 /** The restricted application role used by managed PostgreSQL. */
 const DEFAULT_APP_ROLE = 'basis_app'
-/** Maximum singular-reference hops inside one policy path. */
-const MAX_POLICY_DEPTH = 8
 
 /** Human-readable role metadata. */
 export interface RoleDetails {
@@ -447,7 +446,7 @@ export class Graph {
       },
       definition: entity,
       expression: field => literal(valueFor(field.name)),
-      field: name => policyField(entity, name),
+      field: name => this.#policyPathField(entity, name),
     }
     const where = SQL.where(this.definitions, entity.name, grant.predicate as Filter, scope)
     return `(${inline(where.sql.replace(/^WHERE\s+/u, ''), where.values)})`
@@ -642,55 +641,29 @@ export class Graph {
    * Resolve a collection navigation for policy normalization.
    * @param entity - Entity whose collection is referenced.
    * @param name - Collection navigation name.
-   * @param depth - Number of nested collection scopes.
    * @returns Collection scope, or undefined when not a collection.
    */
   #collectionFilterScope(
     entity: EntityDefinition,
     name: string,
-    depth = 0,
   ): CollectionFilterScope | undefined {
-    const resolved = this.#resolvePolicyCollection(entity, name, depth)
+    const resolved = resolveCollectionPath(entity, name, {
+      resolve: value => this.#policyEntity(value),
+    })
     if (!resolved) return undefined
+    if ('kind' in resolved) {
+      if (resolved.kind === 'depth') {
+        throw new Error(`Graph: collection path "${name}" exceeds the maximum depth`)
+      }
+      return undefined
+    }
     const target = this.#collectionTarget(resolved.collection)
     return {
       array: nested => this.#policyArrayScope(target, nested),
-      collection: nested => this.#collectionFilterScope(target, nested, depth + 1),
+      collection: nested => this.#collectionFilterScope(target, nested),
       definition: target,
       field: path => this.#collectionField(resolved.collection, target, path),
     }
-  }
-
-  /**
-   * Resolve one collection navigation relative to a policy entity view.
-   * @param entity - Policy entity where the path starts.
-   * @param name - Collection navigation or dotted reference path.
-   * @param depth - Number of reference hops already traversed.
-   * @returns The collection and its owning entity view, or undefined.
-   */
-  #resolvePolicyCollection(
-    entity: EntityDefinition,
-    name: string,
-    depth = 0,
-  ): { readonly collection: DerivedCollectionDefinition, readonly owner: EntityDefinition } | undefined {
-    const direct = entity.collections.find(candidate => candidate.name === name)
-    if (direct) return { collection: direct, owner: entity }
-    const segments = name.split('.')
-    if (segments.some(segment => segment.length === 0)) return undefined
-    let current = entity
-    for (let index = 0; index < segments.length - 1; index += 1) {
-      const field = current.effectiveFields.find(candidate => candidate.name === segments[index])
-      if (!field || field.type !== FieldType.Entity) return undefined
-      if (depth >= MAX_POLICY_DEPTH) {
-        throw new Error(`Graph: collection path "${name}" exceeds the maximum depth of ${MAX_POLICY_DEPTH}`)
-      }
-      const target = field.target === 'Entity' ? identityDefinition() : this.#policyEntity(field.target)
-      if (!target) return undefined
-      current = target
-      depth += 1
-    }
-    const collection = current.collections.find(candidate => candidate.name === segments[segments.length - 1])
-    return collection ? { collection, owner: current } : undefined
   }
 
   /**
@@ -724,28 +697,20 @@ export class Graph {
    */
   #policyPathField(entity: EntityDefinition, name: string): QueryFieldDefinition {
     if (name === ACTOR_FIELD_NAME) return { name: ACTOR_FIELD_NAME, type: FieldType.ID }
-    const segments = name.split('.')
-    if (segments.some(segment => segment.length === 0)) {
-      throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
-    }
-    let current = entity
-    for (let index = 0; index < segments.length - 1; index += 1) {
-      const field = current.effectiveFields.find(candidate => candidate.name === segments[index])
-      if (!field) throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
-      if (field.type !== FieldType.Entity) {
-        throw new Error(`Graph: reference field "${entity.name}.${segments[index]}" is not policy-safe`)
+    const resolved = resolveFieldPath(entity, name, {
+      resolve: value => this.#policyEntity(value),
+    })
+    if ('kind' in resolved) {
+      if (resolved.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
+      if (resolved.kind === 'non-reference') {
+        throw new Error(`Graph: reference field "${entity.name}.${name}" is not policy-safe`)
       }
-      const target = field.target === 'Entity' ? identityDefinition() : this.#policyEntity(field.target)
-      if (!target) throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
-      current = target
+      throw new Error(`Graph: reference path "${name}" exceeds the maximum depth`)
     }
-    const terminal = segments[segments.length - 1] as string
-    const field = current.effectiveFields.find(candidate => candidate.name === terminal)
-    if (!field) throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
-    if (field.type === FieldType.Entity) {
+    if (resolved.identity) {
       return { name: name.endsWith('.id') ? name : `${name}.id`, type: FieldType.ID }
     }
-    return { ...field, name }
+    return resolved.field
   }
 
   /**
@@ -772,26 +737,27 @@ export class Graph {
     target: EntityDefinition,
     path: string,
   ): QueryFieldDefinition {
+    const resolved = resolveCollectionMember(collection, target, path, {
+      resolve: value => this.#policyEntity(value),
+    })
     const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
-    if (collection.kind === 'relationship') {
-      const prefix = `${lowerFirst(collection.relationship.name)}.`
-      if (normalized.startsWith(prefix)) {
-        const propertyName = normalized.slice(prefix.length)
-        const property = collection.relationship.fields.find(candidate => candidate.name === propertyName)
-        if (!property) {
-          throw new Error(
-            `Graph: unknown relationship field "${collection.relationship.name}.${propertyName}"`,
-          )
-        }
-        if (property.type === FieldType.Array || property.type === FieldType.JSON) {
-          throw new Error(
-            `Graph: relationship field "${collection.relationship.name}.${propertyName}" is not policy-safe`,
-          )
-        }
-        return { ...property, name: normalized }
+    const prefix = collection.kind === 'relationship'
+      ? `${lowerFirst(collection.relationship.name)}.`
+      : ''
+    if ('kind' in resolved) {
+      if (collection.kind === 'relationship' && normalized.startsWith(prefix)) {
+        throw new Error(
+          'Graph: unknown relationship field ' +
+          `"${collection.relationship.name}.${normalized.slice(prefix.length)}"`,
+        )
       }
+      throw new Error(`Graph: unknown field "${target.name}.${path}"`)
     }
-    return this.#policyPathField(target, normalized)
+    if (resolved.relationshipProperty && (resolved.field.type === FieldType.Array
+      || resolved.field.type === FieldType.JSON)) {
+      throw new Error(`Graph: relationship field "${normalized}" is not policy-safe`)
+    }
+    return resolved.field
   }
   /**
    * Build one field/path resolver for a policy row.
@@ -818,56 +784,49 @@ export class Graph {
         cache.set(path, actor)
         return actor
       }
-      const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
-      const segments = normalized.split('.')
-      if (segments.some(segment => segment.length === 0)) {
-        throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
+      const resolved = resolveFieldPath(entity, path, {
+        resolve: value => this.#policyEntity(value),
+      })
+      if ('kind' in resolved) {
+        if (resolved.kind === 'unknown') throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
+        if (resolved.kind === 'non-reference') {
+          throw new Error(`Graph: reference field "${entity.name}.${path}" is not policy-safe`)
+        }
+        throw new Error(`Graph: reference path "${path}" exceeds the maximum depth`)
       }
       let current = entity
       let currentBase = baseAlias
       let currentRoot = rootAlias
       let currentParent = parentId
-      for (let index = 0; index < segments.length - 1; index += 1) {
-        const segment = segments[index] as string
-        const field = current.effectiveFields.find(candidate => candidate.name === segment)
-        if (!field) throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
-        if (field.type !== FieldType.Entity) {
-          throw new Error(`Graph: reference field "${entity.name}.${path}" is not policy-safe`)
-        }
+      for (const hop of resolved.hops) {
         const expression = this.#policyFieldExpression(
-          field,
+          hop.field,
           current,
           currentBase,
           currentRoot,
           currentParent,
           allowSubqueries,
         )
-        if (index === segments.length - 2 && segments[segments.length - 1] === 'id') {
-          const identity = { expression, field: { name: path, type: FieldType.ID as const } }
-          cache.set(path, identity)
-          return identity
-        }
-        const target = field.target === 'Entity' ? identityDefinition() : this.#policyEntity(field.target)
+        const target = hop.field.target === 'Entity'
+          ? identityDefinition()
+          : this.#policyEntity(hop.field.target)
         if (!target) throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
         current = target
         currentBase = undefined
         currentRoot = undefined
         currentParent = expression
       }
-      const terminal = segments[segments.length - 1] as string
-      const field = current.effectiveFields.find(candidate => candidate.name === terminal)
-      if (!field) throw new Error(`Graph: unknown field "${entity.name}.${path}"`)
       const expression = this.#policyFieldExpression(
-        field,
+        resolved.terminal,
         current,
         currentBase,
         currentRoot,
         currentParent,
         true,
       )
-      const result = field.type === FieldType.Entity
+      const result = resolved.identity
         ? { expression, field: { name: path, type: FieldType.ID as const } }
-        : { expression, field: { ...field, name: path } }
+        : { expression, field: { ...resolved.terminal, name: path } as QueryFieldDefinition }
       cache.set(path, result)
       return result
     }
@@ -937,15 +896,23 @@ export class Graph {
     allowSubqueries: boolean,
     depth = 0,
   ): CollectionScope | undefined {
-    const resolved = this.#resolvePolicyCollection(entity, name, depth)
+    const resolved = resolveCollectionPath(entity, name, {
+      resolve: value => this.#policyEntity(value),
+    })
     if (!resolved) return undefined
+    if ('kind' in resolved) {
+      if (resolved.kind === 'depth') {
+        throw new Error(`Graph: collection path "${name}" exceeds the maximum depth`)
+      }
+      return undefined
+    }
     const collection = resolved.collection
     const target = this.#collectionTarget(collection)
     const suffix = `${depth}_${name.replace(/[^A-Za-z0-9_]/gu, '_')}`
     const relationshipAlias = `__policy_${suffix}_rel`
     const targetAlias = `__policy_${suffix}_target`
     const rootAliasName = `__policy_${suffix}_root`
-    const prefix = name.split('.').slice(0, -1).join('.')
+    const prefix = resolved.prefix
     const row = this.#policyResolver(entity, baseAlias, rootAlias, allowSubqueries)
     const parentId = prefix === ''
       ? `${parentAlias}.${quoteIdentifier('id')}`
@@ -961,23 +928,26 @@ export class Graph {
     const identities = new Set<string>()
     const resolve = (path: string): QueryFieldDefinition => {
       const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
-      if (relationship !== undefined && sql.relationshipAlias !== undefined) {
-        const propertyPrefix = `${lowerFirst(relationship.name)}.`
-        if (normalized.startsWith(propertyPrefix)) {
-          const propertyName = normalized.slice(propertyPrefix.length)
-          const property = relationship.fields.find(candidate => candidate.name === propertyName)
-          if (!property) {
-            throw new Error(`Graph: unknown relationship field "${relationship.name}.${propertyName}"`)
-          }
-          if (property.type === FieldType.Array || property.type === FieldType.JSON) {
-            throw new Error(
-              `Graph: relationship field "${relationship.name}.${propertyName}" is not policy-safe`,
-            )
-          }
-          const field: QueryFieldDefinition = { ...property, name: normalized }
-          expressions.set(normalized, `${quoteIdentifier(sql.relationshipAlias)}.${quoteIdentifier(property.name)}`)
-          return field
+      const member = resolveCollectionMember(collection, target, normalized, {
+        resolve: value => this.#policyEntity(value),
+      })
+      if ('kind' in member) {
+        if (relationship !== undefined && normalized.startsWith(`${lowerFirst(relationship.name)}.`)) {
+          throw new Error(`Graph: unknown relationship field "${normalized}"`)
         }
+        throw new Error(`Graph: unknown collection field "${target.name}.${normalized}"`)
+      }
+      if (member.relationshipProperty) {
+        const property = normalized.slice(`${lowerFirst(relationship?.name ?? '')}.`.length)
+        if (member.field.type === FieldType.Array || member.field.type === FieldType.JSON) {
+          throw new Error(`Graph: relationship field "${normalized}" is not policy-safe`)
+        }
+        if (!sql.relationshipAlias) throw new Error(`Graph: unresolved relationship "${normalized}"`)
+        expressions.set(
+          normalized,
+          `${quoteIdentifier(sql.relationshipAlias)}.${quoteIdentifier(property)}`,
+        )
+        return member.field
       }
       const result = resolver(normalized)
       expressions.set(result.field.name, result.expression)
@@ -1817,27 +1787,6 @@ function roleIdentity(id: string): string {
  */
 function lowerFirst(value: string): string {
   return value.length === 0 ? value : `${value[0]?.toLowerCase()}${value.slice(1)}`
-}
-
-/**
- * Resolve one policy-safe field.
- * @param entity - Policy entity view.
- * @param name - Logical or dotted reference field name.
- * @returns Scalar, array, or JSON field metadata.
- */
-function policyField(entity: EntityDefinition, name: string): QueryFieldDefinition {
-  if (name === ACTOR_FIELD_NAME) return { name: ACTOR_FIELD_NAME, type: FieldType.ID }
-  const [root, suffix] = name.split('.', 2)
-  const field = entity.effectiveFields.find(candidate => candidate.name === root)
-  if (!field) throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
-  if (field.type === FieldType.Entity) {
-    if (suffix !== undefined && suffix !== 'id') {
-      throw new Error(`Graph: reference field "${entity.name}.${name}" is not policy-safe`)
-    }
-    return { name: field.column, type: FieldType.ID }
-  }
-  if (suffix !== undefined) throw new Error(`Graph: unknown field "${entity.name}.${name}"`)
-  return field
 }
 
 /**

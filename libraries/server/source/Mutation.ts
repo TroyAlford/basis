@@ -10,30 +10,33 @@ import type { Filter } from './Predicate'
 /** Maximum records accepted by one bulk mutation. */
 export const MAX_MUTATION_BATCH = 1_000
 
+/** Final Graph-native subject state inside one native transaction. */
+type SubjectState = 'deleted' | 'written'
 /** Entity ids touched by Graph-native verbs inside one native transaction. */
-const affectedSubjects = new WeakMap<object, Map<string, Set<string>>>()
+const affectedSubjects = new WeakMap<object, Map<string, Map<string, SubjectState>>>()
 
 /**
- * Record one Graph-native subject write for transaction-final validation.
+ * Record one Graph-native subject write or delete for transaction-final validation.
  * @param sql - Transaction-scoped SQL client.
  * @param entity - Concrete entity name.
  * @param id - Written identity.
+ * @param state - Final operation on the identity.
  */
-function recordSubject(sql: object, entity: string, id: string): void {
-  const subjects = affectedSubjects.get(sql) ?? new Map<string, Set<string>>()
-  const ids = subjects.get(entity) ?? new Set<string>()
-  ids.add(id)
+function recordSubject(sql: object, entity: string, id: string, state: SubjectState = 'written'): void {
+  const subjects = affectedSubjects.get(sql) ?? new Map<string, Map<string, SubjectState>>()
+  const ids = subjects.get(entity) ?? new Map<string, SubjectState>()
+  ids.set(id, state)
   subjects.set(entity, ids)
   affectedSubjects.set(sql, subjects)
 }
 
 /**
- * Read the Graph-native subjects written inside one native transaction.
+ * Read the final Graph-native subject states inside one native transaction.
  * @param sql - Transaction-scoped SQL client.
- * @returns Entity names mapped to written identities.
+ * @returns Entity names mapped to identities and their final operation.
  */
-export function writtenSubjects(sql: object): ReadonlyMap<string, ReadonlySet<string>> {
-  return affectedSubjects.get(sql) ?? new Map<string, ReadonlySet<string>>()
+function writtenSubjects(sql: object): ReadonlyMap<string, ReadonlyMap<string, SubjectState>> {
+  return affectedSubjects.get(sql) ?? new Map<string, ReadonlyMap<string, SubjectState>>()
 }
 
 /** Stable mutation failure categories. */
@@ -228,12 +231,15 @@ export function mutationRunner(entities: EntityDefinitions, sql: BunSQL): Mutati
  * in one native transaction.
  *
  * Validation runs after the caller's callback resolves and before commit. A
- * FALSE or UNKNOWN predicate for one existing written subject aborts the whole
- * transaction through the standard mutation error boundary. Deleted subjects
- * and rows no longer visible to the actor are skipped.
+ * FALSE or UNKNOWN predicate for one surviving written subject aborts the whole
+ * transaction through the standard mutation error boundary. Deleted subjects are
+ * skipped by recorded mutation intent, never by probing whether the actor can
+ * still see the row; a row that becomes invisible to the writer is still treated
+ * as surviving, so validation fails closed instead of mistaking invisibility
+ * for deletion.
  * @param entities - Canonical entity definitions.
  * @param sql - Native transaction client.
- * @throws {MutationError} When an existing written subject violates a validation constraint.
+ * @throws {MutationError} When a surviving written subject violates a validation constraint.
  */
 export async function validateTransactionState(
   entities: EntityDefinitions,
@@ -241,17 +247,13 @@ export async function validateTransactionState(
 ): Promise<void> {
   const subjects = writtenSubjects(sql)
   if (subjects.size === 0) return
-  for (const [name, ids] of subjects) {
+  for (const [name, states] of subjects) {
     const constraints = entities.validationConstraints(name)
     if (constraints.length === 0) continue
     const definition = entities.entity(name)
     if (!definition || definition.abstract) continue
-    for (const id of ids) {
-      const [present] = await execute(sql, {
-        sql: 'SELECT 1 AS "present" FROM "Entity" WHERE "id" = $1',
-        values: [id],
-      })
-      if (!present) continue
+    for (const [id, state] of states) {
+      if (state === 'deleted') continue
       for (const constraint of constraints) {
         const where: Filter = {
           filters: [
@@ -362,7 +364,7 @@ async function remove(
   let deleted = 0
   for (const [leaf, identities] of groupByIdentity(matches)) {
     const ids = identities.map(identity => identity.id)
-    for (const id of ids) recordSubject(sql, leaf, id)
+    for (const id of ids) recordSubject(sql, leaf, id, 'deleted')
     const ancestry = entities.ancestry(leaf).slice(1).filter(table => table !== 'Entity')
     deleted += (await deleteChain(sql, leaf, ancestry, ids)).length
   }

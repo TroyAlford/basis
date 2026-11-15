@@ -1,6 +1,7 @@
 import { collectionSqlRelation } from './CollectionSql'
 import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
+import { resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import type { Filter } from './Predicate'
 import { arrayItemField } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
@@ -675,40 +676,39 @@ class QueryProjection {
    * @param context - Occurrence where the path starts.
    * @param name - Collection navigation or dotted reference path.
    * @param sink - Local join sink for reference traversal.
-   * @param depth - Number of reference hops already traversed.
    * @returns The collection and its parent occurrence, or undefined when absent.
    */
   #resolveCollectionPath(
     context: EntityContext,
     name: string,
     sink: FilterJoinScope,
-    depth = 0,
   ): { collection: DerivedCollectionDefinition, context: EntityContext, parentAlias: string } | undefined {
-    const direct = context.collections.get(name)
-    if (direct) return { collection: direct, context, parentAlias: context.baseAlias }
-    const segments = name.split('.')
-    if (segments.some(segment => segment.length === 0)) {
-      throw new Error(`Invalid collection path "${name}"`)
-    }
-    let current = context
-    let index = 0
-    while (index < segments.length - 1) {
-      const segment = segments[index] as string
-      const field = current.effective.get(segment)
-      if (!field) return undefined
-      if (field.type !== FieldType.Entity) return undefined
-      if (depth >= MAX_REFERENCE_DEPTH) {
+    const resolved = resolveCollectionPath(context.definition, name, {
+      resolve: value => this.#entities.entity(value),
+    })
+    if (!resolved) return undefined
+    if ('kind' in resolved) {
+      if (resolved.kind === 'depth') {
         throw new Error(`Collection path "${name}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
       }
-      const sourceAlias = this.#ownerAlias(current, field.owner, false, sink)
-      const childKey = segments.slice(0, index + 1).join('.')
-      current = this.#filterTarget(field, sourceAlias, childKey, sink)
-      index += 1
-      depth += 1
+      return undefined
     }
-    const collection = current.collections.get(segments[index] as string)
-    if (!collection) return undefined
-    return { collection, context: current, parentAlias: current.baseAlias }
+    if (resolved.prefix === '') {
+      return { collection: resolved.collection, context, parentAlias: context.baseAlias }
+    }
+    const prefix = resolveFieldPath(context.definition, resolved.prefix, {
+      resolve: value => this.#entities.entity(value),
+    })
+    if ('kind' in prefix) return undefined
+    let current = context
+    for (const hop of prefix.hops) {
+      const sourceAlias = this.#ownerAlias(current, hop.field.owner, false, sink)
+      current = this.#filterTarget(hop.field, sourceAlias, hop.path, sink)
+    }
+    if (prefix.terminal.type !== FieldType.Entity) return undefined
+    const sourceAlias = this.#ownerAlias(current, prefix.terminal.owner, false, sink)
+    const owner = this.#filterTarget(prefix.terminal, sourceAlias, resolved.prefix, sink)
+    return { collection: resolved.collection, context: owner, parentAlias: owner.baseAlias }
   }
 
   /**

@@ -1,8 +1,9 @@
+import { comparableFieldType, resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilterScope, Filter } from './Predicate'
 import { ACTOR_FIELD, ACTOR_FIELD_NAME, isFieldOperand, Predicate } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
-import type { PhysicalConstraint, PhysicalSchema, PhysicalTable } from './Schema'
+import type { PhysicalCheck, PhysicalConstraint, PhysicalSchema, PhysicalTable } from './Schema'
 
 /** Enable PostgreSQL trigram search for universal names. */
 const IDENTITY_EXTENSION_DDL = 'create extension if not exists pg_trgm with schema public'
@@ -417,6 +418,8 @@ interface TableCheck {
   readonly expression: string,
   /** Constraint name. */
   readonly name: string,
+  /** Canonical allowed values for a named enum check. */
+  readonly values?: readonly string[],
 }
 
 /** One lifecycle function that must exist and match its canonical body. */
@@ -800,6 +803,11 @@ export class EntityDefinitions {
    */
   physicalSchema(): PhysicalSchema {
     const tables: PhysicalTable[] = this.tables.map(table => ({
+      checks: (table.checks ?? []).map(check => ({
+        name: check.name,
+        sql: addCheckSql(table.name, check),
+        ...(check.values ? { values: check.values } : {}),
+      })) satisfies PhysicalCheck[],
       columns: table.columns.map(column => ({
         ...(column.default === undefined ? {} : { default: column.default }),
         name: column.name,
@@ -1238,11 +1246,13 @@ function validateConstraintFilter(
 ): void {
   if ('filters' in filter) {
     if ('field' in filter) {
-      const collection = entity.collections.find(candidate => candidate.name === filter.field)
-      if (!collection) {
+      const collection = resolveCollectionPath(entity, filter.field, {
+        resolve: value => entities.get(value),
+      })
+      if (!collection || 'kind' in collection) {
         throw invalid(`validation collection "${entity.name}.${filter.field}" is not declared`)
       }
-      const target = entities.get(collection.target)
+      const target = entities.get(collection.collection.target)
       if (!target) throw invalid(`validation collection "${filter.field}" has unknown target`)
       for (const child of filter.filters) validateConstraintFilter(target, entities, child)
       return
@@ -1253,21 +1263,12 @@ function validateConstraintFilter(
   const left = constraintField(entity, entities, filter.field)
   if (!isFieldOperand(filter.value)) return
   const right = constraintField(entity, entities, filter.value.$field)
-  if (comparableType(left.type) !== comparableType(right.type)) {
+  if (comparableFieldType(left.type) !== comparableFieldType(right.type)) {
     throw invalid(
       'validation constraint references incompatible fields ' +
       `"${filter.field}" and "${filter.value.$field}"`,
     )
   }
-}
-
-/**
- * Normalize a field type to its comparable value family.
- * @param type - Declared field type.
- * @returns The comparable field type.
- */
-function comparableType(type: FieldType): FieldType {
-  return type === FieldType.Enum ? FieldType.String : type
 }
 
 /**
@@ -1283,29 +1284,20 @@ function constraintField(
   name: string,
 ): QueryFieldDefinition {
   if (name === ACTOR_FIELD_NAME) return ACTOR_FIELD
-  const segments = name.split('.')
-  if (segments.some(segment => segment.length === 0)) {
-    throw invalid(`validation path "${entity.name}.${name}" is not a valid field path`)
-  }
-  let current = entity
-  for (let index = 0; index < segments.length - 1; index += 1) {
-    const segment = segments[index] as string
-    const field = current.effectiveFields.find(candidate => candidate.name === segment)
-    if (!field) throw invalid(`validation path "${entity.name}.${name}" has unknown field "${segment}"`)
-    if (field.type !== FieldType.Entity) {
-      throw invalid(`validation path "${entity.name}.${name}" traverses non-reference field "${segment}"`)
+  const resolved = resolveFieldPath(entity, name, { resolve: value => entities.get(value) })
+  if ('kind' in resolved) {
+    if (resolved.kind === 'unknown') {
+      const segment = name.split('.').pop() ?? name
+      throw invalid(`validation path "${entity.name}.${name}" has unknown field "${segment}"`)
     }
-    const target = entities.get(field.target)
-    if (!target) throw invalid(`validation path "${entity.name}.${name}" targets unknown entity "${field.target}"`)
-    current = target
+    if (resolved.kind === 'non-reference') {
+      throw invalid(
+        `validation path "${entity.name}.${name}" traverses non-reference field "${resolved.segment}"`,
+      )
+    }
+    throw invalid(`validation path "${entity.name}.${name}" exceeds the maximum depth`)
   }
-  const terminal = segments[segments.length - 1] as string
-  const field = current.effectiveFields.find(candidate => candidate.name === terminal)
-  if (!field) throw invalid(`validation path "${entity.name}.${name}" has unknown field "${terminal}"`)
-  if (field.type === FieldType.Entity) {
-    return { name, type: FieldType.ID }
-  }
-  return { ...field, name }
+  return resolved.identity ? { name, type: FieldType.ID } : resolved.field
 }
 
 /**
@@ -1320,15 +1312,18 @@ function constraintCollection(
   entities: ReadonlyMap<string, EntityDefinition>,
   name: string,
 ): CollectionFilterScope | undefined {
-  const collection = entity.collections.find(candidate => candidate.name === name)
-  if (!collection) return undefined
-  const target = entities.get(collection.target)
-  if (!target) throw invalid(`validation collection "${name}" has unknown target "${collection.target}"`)
+  const resolved = resolveCollectionPath(entity, name, { resolve: value => entities.get(value) })
+  if (!resolved) return undefined
+  if ('kind' in resolved) {
+    throw invalid(`validation collection "${entity.name}.${name}" is not a valid collection path`)
+  }
+  const target = entities.get(resolved.collection.target)
+  if (!target) throw invalid(`validation collection "${name}" has unknown target`)
   return {
     array: path => constraintArray(target, path),
     collection: nested => constraintCollection(target, entities, nested),
     definition: target,
-    field: path => constraintCollectionField(collection, target, entities, path),
+    field: path => constraintCollectionField(resolved.collection, target, entities, path),
   }
 }
 
@@ -1346,19 +1341,13 @@ function constraintCollectionField(
   entities: ReadonlyMap<string, EntityDefinition>,
   path: string,
 ): QueryFieldDefinition {
-  const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
-  if (collection.kind === 'relationship') {
-    const prefix = `${collection.relationship.name[0]?.toLowerCase() ?? ''}${collection.relationship.name.slice(1)}.`
-    if (normalized.startsWith(prefix)) {
-      const property = normalized.slice(prefix.length)
-      const field = collection.relationship.fields.find(candidate => candidate.name === property)
-      if (!field) {
-        throw invalid(`validation collection "${collection.name}" has unknown property "${property}"`)
-      }
-      return { ...field, name: normalized }
-    }
+  const resolved = resolveCollectionMember(collection, target, path, {
+    resolve: value => entities.get(value),
+  })
+  if ('kind' in resolved) {
+    throw invalid(`validation collection "${collection.name}" has unknown field "${path}"`)
   }
-  return constraintField(target, entities, normalized)
+  return resolved.field
 }
 
 /**
@@ -2724,6 +2713,7 @@ function enumChecks(
     checks.push({
       expression: `(${column} IS NULL OR ${column} IN (${values}))`,
       name,
+      values: enumeration.values.map(candidate => candidate.value),
     })
   }
   return checks
@@ -2975,6 +2965,17 @@ function identityCheck(column: string, format: IdentityFormat | undefined): stri
   end`
   if (format === 'Snowflake') return snowflake
   return `(${uuid} or ${snowflake})`
+}
+
+/**
+ * Build one reviewable add-check statement for an existing table.
+ * @param table - Owning table name.
+ * @param check - Table-level check.
+ * @returns Complete ALTER TABLE statement.
+ */
+function addCheckSql(table: string, check: TableCheck): string {
+  return `alter table ${quoteIdentifier(table)} add constraint ${quoteIdentifier(check.name)} ` +
+    `check (${check.expression})`
 }
 
 /**

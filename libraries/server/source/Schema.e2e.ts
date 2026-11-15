@@ -162,6 +162,112 @@ describe('DDL schema planning', () => {
     }, { fresh: true })
   })
 
+  test('plans and applies enum value-set changes through reviewed checks', async () => {
+    const model = (values: readonly string[]): EntityDefinitions => EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }],
+        name: 'EnumRecord',
+      }],
+      enums: {
+        AccessLevel: Object.fromEntries(values.map(value => [value, `${value} access.`])),
+      },
+    }))
+    const first = model(['owner', 'editor'])
+    const added = model(['owner', 'editor', 'viewer'])
+    await withIsolatedDatabase('schema-enum-value-add', async database => {
+      await installSchema(database.sql, first)
+      const installed = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual: installed,
+        desired: added,
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      expect(plan.drift).toEqual([])
+      expect(plan.operations.map(operation => operation.id)).toContain(
+        'check:EnumRecord:EnumRecord_access_enum_check',
+      )
+      expect(plan.operations.find(operation => operation.id === 'check-drop:EnumRecord:EnumRecord_access_enum_check'))
+        .toBeDefined()
+      await installSchema(database.sql, added, {
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      const upgraded = await DDL.introspect(database.sql)
+      expect(DDL.plan({
+        actual: upgraded,
+        desired: added,
+        previous: added,
+        previousPhysical: added.physicalSchema(),
+      })).toMatchObject({ drift: [], operations: [] })
+      const id = randomUUID()
+      await database.sql.unsafe(
+        'INSERT INTO "Entity" ("id", "name", "entity") VALUES ($1, $2, $3)',
+        [id, 'Added', 'EnumRecord'],
+      )
+      await database.sql.unsafe(
+        'INSERT INTO "EnumRecord" ("id", "access") VALUES ($1, $2)',
+        [id, 'viewer'],
+      )
+    }, { fresh: true })
+  })
+
+  test('plans enum value removals and reports missing or changed checks as drift', async () => {
+    const model = (values: readonly string[]): EntityDefinitions => EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }],
+        name: 'EnumRecord',
+      }],
+      enums: {
+        AccessLevel: Object.fromEntries(values.map(value => [value, `${value} access.`])),
+      },
+    }))
+    const first = model(['owner', 'editor'])
+    const removed = model(['owner'])
+    await withIsolatedDatabase('schema-enum-value-remove', async database => {
+      await installSchema(database.sql, first)
+      const installed = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual: installed,
+        desired: removed,
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      expect(plan.drift).toEqual([])
+      expect(plan.operations.map(operation => operation.id)).toEqual(expect.arrayContaining([
+        'check-drop:EnumRecord:EnumRecord_access_enum_check',
+        'check:EnumRecord:EnumRecord_access_enum_check',
+      ]))
+      await installSchema(database.sql, removed, {
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      const id = randomUUID()
+      await database.sql.unsafe(
+        'INSERT INTO "Entity" ("id", "name", "entity") VALUES ($1, $2, $3)',
+        [id, 'Removed', 'EnumRecord'],
+      )
+      const invalid = await database.captureError(async () => {
+        await database.sql.unsafe(
+          'INSERT INTO "EnumRecord" ("id", "access") VALUES ($1, $2)',
+          [randomUUID(), 'editor'],
+        )
+      })
+      expect(String(invalid)).toContain('EnumRecord_access_enum_check')
+
+      await database.sql.unsafe(
+        'ALTER TABLE "EnumRecord" DROP CONSTRAINT "EnumRecord_access_enum_check"',
+      )
+      const missing = await DDL.introspect(database.sql)
+      expect(DDL.plan({
+        actual: missing,
+        desired: removed,
+        previous: removed,
+        previousPhysical: removed.physicalSchema(),
+      }).drift.join(' ')).toContain('missing deployed check: EnumRecord.EnumRecord_access_enum_check')
+    }, { fresh: true })
+  })
+
   test('treats enum description edits as metadata-only changes', async () => {
     const model = (owner: string): EntityDefinitions => EntityDefinitions.load(JSON.stringify({
       entities: [{ fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }], name: 'EnumRecord' }],
