@@ -77,6 +77,7 @@ export type {
   QuerySelection,
   ReferenceModels,
   TypedDatabase,
+  TypedDatabaseTransaction,
   TypedQueryOptions,
   UpdateModels,
 } from './types/TypedDatabase'

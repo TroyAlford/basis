@@ -83,7 +83,7 @@ export default emitter({ extension: 'txt', folder: 'custom' }, graph => [{
 
 - Built-in `TypeScriptEmitter` writes `generated/typescript/index.ts`; `JsonSchemaEmitter` writes `generated/json-schema/schemas.json`. Application emitters own their extension, folder, file names, and content.
 - `basis/codegen` also exports the pure content generators `generateTypes(graph)` and `generateJSONSchemas(graph)` for consumers that own their own file emission.
-- The JSON Schema emitter uses the same canonical metadata as mutation validation: create excludes the generated `entity` discriminator, allows an optional supplied `id`, requires non-null writable fields, and rejects unknown fields with `additionalProperties: false`; update excludes generated/readonly fields. Output schemas and TypeScript types include `null` only where canonical nullability allows it. Identity schemas use the entity's canonical UUID/Snowflake pattern, and a Snowflake entity requires `id` on create. Numeric/string bounds and required fields match mutation validation rather than forming a second DTO. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
+- The JSON Schema emitter uses the same canonical metadata as mutation validation: create excludes the generated `entity` discriminator, allows an optional supplied `id`, requires non-null writable fields, and closes object property names against unknown fields; update excludes generated/readonly fields. Output schemas and TypeScript types include `null` only where canonical nullability allows it. Identity schemas use the entity's canonical UUID/Snowflake pattern, and a Snowflake entity requires `id` on create. Numeric/string bounds and required fields match mutation validation rather than forming a second DTO. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
 - `basis/visualization` emits logical and physical Mermaid ERD source. Render it with the existing `Mermaid` component from `basis/react`; visualization never becomes a server runtime dependency.
 
 Emitter modules use the small `emitter({ extension, folder }, generate)` contract. The factory returns an awaitable `(graph, root?) => Promise<void>` and writes each generated file beneath the caller's root; the module owns its extension, folder, file names, and format-specific content. The output root defaults to the process working directory, and declared destinations cannot escape it. The conventional lifecycle invokes application emitters in sorted filename order, so repeated runs overwrite deterministic paths; no stale files are deleted.
@@ -238,7 +238,7 @@ erDiagram
   User ||--o{ Note : owner.id
 ```
 
-The generated outputs are values returned from the API, not committed source files. Write them to your own `generated/` directory when your application chooses to persist them.
+`basis emit` writes the generated outputs beneath `generated/` by convention. They are deterministic for a fixed Graph and are overwritten on regeneration; an application may commit them or ignore them as part of its own repository policy. `basis typecheck` and `basis check` run the lifecycle automatically.
 
 ## Authoring conventions
 

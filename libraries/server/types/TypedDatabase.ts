@@ -1,7 +1,8 @@
 /* eslint-disable @stylistic/jsx/indent, @stylistic/ts/indent */
 import type { PathOf, TypeAt } from 'basis/utilities'
+import type { TransactionSQL } from 'bun'
 import type { Database, QueryOptions } from '../source/Database'
-import type { CreateResult, EditResult, MutationFilter, MutationRecord, UpsertResult } from '../source/Mutation'
+import type { CreateResult, DeleteResult, EditResult, MutationFilter, MutationRecord, UpsertResult } from '../source/Mutation'
 
 /** A generated entity-name to hydrated-interface map. */
 export type EntityModels = object
@@ -31,13 +32,17 @@ type ValidPath<Path extends string> =
     ? Head extends `${number}` ? never : `${Head}.${ValidPath<Tail> & string}`
     : Path extends `${number}` ? never : Path
 
-/** Reference-target paths for one entity, bounded against cyclic models. */
+/**
+ * Reference-target paths for one entity, bounded against cyclic models.
+ * The root PathOf already contributes the first reference hop, so seven
+ * recursive expansions complete the canonical eight-hop query depth.
+ */
 type ReferencePaths<
   Models extends ObjectMap<Models>,
   References extends ObjectMap<References>,
   Name extends keyof Models & string,
   Depth extends readonly unknown[] = [],
-> = Depth['length'] extends 4
+> = Depth['length'] extends 7
   ? never
   : ReferenceFields<References, Name> extends infer Fields extends object
     ? {
@@ -131,16 +136,16 @@ export type TypedQueryOptions<
   readonly fields: Fields,
 }
 
-/** A database facade bound to generated entity and mutation maps. */
-export type TypedDatabase<
+/** Typed mutation and query operations shared by the database and transaction facades. */
+interface TypedOperations<
   Models extends ObjectMap<Models>,
   Creates extends ObjectMap<Creates>,
   Updates extends ObjectMap<Updates>,
   References extends ObjectMap<References>,
-> = Omit<Database, 'create' | 'edit' | 'query' | 'upsert'> & {
+> {
   /**
    * Create one typed entity.
-   * @param entity - Generated entity name.
+   * @param entity - Generated concrete entity name.
    * @param values - Typed create payload.
    * @returns The created count and hydrated record.
    */
@@ -150,7 +155,7 @@ export type TypedDatabase<
   ): Promise<CreateResult<Models[Name] & MutationRecord>>,
   /**
    * Create a typed entity batch.
-   * @param entity - Generated entity name.
+   * @param entity - Generated concrete entity name.
    * @param values - Typed create payload iterable.
    * @returns The created count.
    */
@@ -158,6 +163,16 @@ export type TypedDatabase<
     entity: Name,
     values: Iterable<Creates[Name]>,
   ): Promise<CreateResult>,
+  /**
+   * Delete one typed entity set.
+   * @param entity - Generated entity name.
+   * @param filter - Canonical mutation filter.
+   * @returns The deleted count.
+   */
+  delete<Name extends keyof Models & string>(
+    entity: Name,
+    filter: MutationFilter,
+  ): Promise<DeleteResult>,
   /**
    * Edit one typed entity set.
    * @param entity - Generated entity name.
@@ -184,8 +199,8 @@ export type TypedDatabase<
     options: TypedQueryOptions<Models, References, Name, Fields>,
   ): Promise<readonly QuerySelection<Models, References, Name, Fields>[]>,
   /**
-   * Upsert one typed entity.
-   * @param entity - Generated entity name.
+   * Upsert one typed concrete entity.
+   * @param entity - Generated concrete entity name.
    * @param filter - Canonical mutation filter.
    * @param values - Typed update/create payload.
    * @returns The branch counts and hydrated record.
@@ -196,6 +211,34 @@ export type TypedDatabase<
     values: Creates[Name] | Updates[Name],
   ): Promise<UpsertResult<Models[Name] & MutationRecord>>,
 }
+
+/** A transaction client with typed mutation and query operations. */
+export type TypedDatabaseTransaction<
+  Models extends ObjectMap<Models>,
+  Creates extends ObjectMap<Creates>,
+  Updates extends ObjectMap<Updates>,
+  References extends ObjectMap<References>,
+> = TransactionSQL & TypedOperations<Models, Creates, Updates, References>
+
+/** A database facade bound to generated entity and mutation maps. */
+export type TypedDatabase<
+  Models extends ObjectMap<Models>,
+  Creates extends ObjectMap<Creates>,
+  Updates extends ObjectMap<Updates>,
+  References extends ObjectMap<References>,
+> = Omit<Database, 'create' | 'delete' | 'edit' | 'query' | 'tx' | 'upsert'>
+  & TypedOperations<Models, Creates, Updates, References> & {
+    /**
+     * Run one native Bun transaction with typed mutation/query verbs.
+     * @param callback - Transaction-scoped typed work.
+     * @returns The callback result after commit.
+     */
+    tx<T>(
+      callback: (
+        transaction: TypedDatabaseTransaction<Models, Creates, Updates, References>,
+      ) => T | Promise<T>,
+    ): Promise<Awaited<T>>,
+  }
 
 /**
  * Bind an existing database to generated entity maps.

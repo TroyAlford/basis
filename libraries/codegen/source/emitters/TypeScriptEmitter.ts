@@ -32,7 +32,8 @@ export interface Entity {
 export type EntityRef = Pick<Entity, 'id' | 'name' | 'entity'>`,
   ]
   for (const entity of entities) blocks.push(entityBlock(entity, definitions))
-  blocks.push(mapBlock('CreateMap', entities.map(entity => (
+  const concrete = entities.filter(entity => !entity.abstract)
+  blocks.push(mapBlock('CreateMap', concrete.map(entity => (
     `  readonly ${entity.name}: ${entity.name}Create`
   ))))
   blocks.push(mapBlock('EntityMap', entities.map(entity => (

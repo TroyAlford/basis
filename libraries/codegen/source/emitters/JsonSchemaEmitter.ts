@@ -20,7 +20,7 @@ type SchemaKind = 'create' | 'output' | 'update'
 const GENERATED_FIELDS = new Set(['entity', 'lastUpdatedAt', 'lastUpdatedBy'])
 
 /**
- * Generate deterministic, reusable JSON Schemas for every entity.
+ * Generate deterministic, composition-based JSON Schemas for every entity.
  * @param graph - Canonical application Graph.
  * @returns JSON Schema by entity and operation.
  */
@@ -42,7 +42,7 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
 }
 
 /**
- * Build one entity operation schema with reusable field definitions.
+ * Build one entity operation schema composed from its parent shape.
  * @param entity - Entity definition.
  * @param kind - Operation kind.
  * @param definitions - Canonical definitions.
@@ -59,65 +59,129 @@ function entitySchema(
     defs[key] ??= identityDefinition(target, definitions)
     return `#/$defs/${key}`
   }
-  for (const owner of definitions.ancestry(entity.name)) {
-    if (owner === 'Entity') {
-      defs[nameKey(kind)] = { type: 'string' }
-      if (kind === 'output') {
-        defs[fieldKey('Entity', 'lastUpdatedAt', 'output')] = {
-          anyOf: [{ format: 'date-time', type: 'string' }, { type: 'null' }],
-        }
-        defs[fieldKey('Entity', 'lastUpdatedBy', 'output')] = {
-          anyOf: [{ $ref: reference('User') }, { type: 'null' }],
-        }
-      }
-      continue
-    }
-    const ownerEntity = definitions.entity(owner)
-    if (!ownerEntity) continue
-    for (const field of ownerEntity.fields) {
-      if (field.type === FieldType.Inverse || field.name === 'id') continue
-      if (kind !== 'output' && GENERATED_FIELDS.has(field.name)) continue
-      defs[fieldKey(owner, field.name, kind)] = fieldSchema(field, kind, definitions, reference)
-    }
-  }
+  const shape = registerShape(entity, kind, definitions, defs, reference)
   const properties: Record<string, unknown> = {}
-  const required = requiredFields(entity, kind)
+  const required: string[] = []
   if (kind !== 'update') properties.id = identitySchema(entity.idFormat)
   if (kind === 'output') properties.entity = discriminatorSchema(entity, definitions)
-  properties.name = { $ref: `#/$defs/${nameKey(kind)}` }
-  for (const field of entity.effectiveFields) {
-    if (field.name === 'id' || field.name === 'name' || field.name === 'entity') continue
-    if (kind !== 'output' && GENERATED_FIELDS.has(field.name)) continue
-    properties[field.name] = { $ref: `#/$defs/${fieldKey(field.owner, field.name, kind)}` }
-  }
+  if (kind === 'create' && entity.idFormat === 'Snowflake') required.push('id')
+  if (kind === 'output') required.push('id', 'entity')
   return {
     $defs: defs,
-    additionalProperties: false,
+    allOf: [{ $ref: `#/$defs/${shape}` }],
     properties,
     ...(required.length === 0 ? {} : { required }),
+    propertyNames: { enum: allowedProperties(entity, kind) },
     type: 'object',
   }
 }
 
 /**
- * Render one operation's required properties.
+ * Register one entity's operation shape and its inherited parent shape.
  * @param entity - Entity definition.
  * @param kind - Operation kind.
- * @returns Required property names.
+ * @param definitions - Canonical definitions.
+ * @param defs - Definition sink.
+ * @param reference - Register one identity definition.
+ * @returns The registered shape key.
  */
-function requiredFields(entity: EntityDefinition, kind: SchemaKind): readonly string[] {
-  if (kind === 'update') return []
-  const required = entity.effectiveFields
-    .filter(field => field.name !== 'id' && field.name !== 'entity')
-    .filter(field => field.name !== 'lastUpdatedAt' && field.name !== 'lastUpdatedBy')
-    .filter(field => field.default === undefined && (
-      field.type === FieldType.Entity ? field.nullable === false : field.nullable !== true
-    ))
-    .map(field => field.name)
-  const identity = kind === 'output' ? ['id', 'entity'] : []
-  return kind === 'create' && entity.idFormat === 'Snowflake'
-    ? ['id', ...required]
-    : [...identity, ...required]
+function registerShape(
+  entity: EntityDefinition,
+  kind: SchemaKind,
+  definitions: Graph['definitions'],
+  defs: Record<string, unknown>,
+  reference: (target: string) => string,
+): string {
+  const key = `${entity.name}_${kind}`
+  if (defs[key]) return key
+  let parent: string
+  if (entity.parent === 'Entity') {
+    parent = registerRootShape(kind, defs, reference)
+  } else {
+    parent = registerShape(
+      definitions.entity(entity.parent) as EntityDefinition,
+      kind,
+      definitions,
+      defs,
+      reference,
+    )
+  }
+  const properties: Record<string, unknown> = {}
+  const required: string[] = []
+  for (const field of entity.fields) {
+    if (field.type === FieldType.Inverse || field.name === 'id') continue
+    if (kind !== 'output' && GENERATED_FIELDS.has(field.name)) continue
+    properties[field.name] = fieldSchema(field, kind, definitions, reference)
+    if (kind !== 'update' && isRequired(field)) required.push(field.name)
+  }
+  defs[key] = {
+    allOf: [{ $ref: `#/$defs/${parent}` }],
+    properties,
+    ...(required.length === 0 ? {} : { required }),
+    type: 'object',
+  }
+  return key
+}
+
+/**
+ * Register the canonical root operation shape.
+ * @param kind - Operation kind.
+ * @param defs - Definition sink.
+ * @param reference - Register one identity definition.
+ * @returns The root shape key.
+ */
+function registerRootShape(
+  kind: SchemaKind,
+  defs: Record<string, unknown>,
+  reference: (target: string) => string,
+): string {
+  const key = `Entity_${kind}`
+  if (defs[key]) return key
+  const properties: Record<string, unknown> = { name: { type: 'string' } }
+  const required = kind === 'update' ? [] : ['name']
+  if (kind === 'output') {
+    properties.lastUpdatedAt = {
+      anyOf: [{ format: 'date-time', type: 'string' }, { type: 'null' }],
+    }
+    properties.lastUpdatedBy = {
+      anyOf: [{ $ref: reference('User') }, { type: 'null' }],
+    }
+  }
+  defs[key] = {
+    properties,
+    ...(required.length === 0 ? {} : { required }),
+    type: 'object',
+  }
+  return key
+}
+
+/**
+ * Render the allowed property names for one operation.
+ * @param entity - Entity definition.
+ * @param kind - Operation kind.
+ * @returns Sorted allowed property names.
+ */
+function allowedProperties(entity: EntityDefinition, kind: SchemaKind): readonly string[] {
+  const names = new Set<string>(['name'])
+  if (kind !== 'update') names.add('id')
+  if (kind === 'output') names.add('entity')
+  for (const field of entity.effectiveFields) {
+    if (field.name === 'id' || field.name === 'name' || field.name === 'entity') continue
+    if (kind !== 'output' && GENERATED_FIELDS.has(field.name)) continue
+    names.add(field.name)
+  }
+  return [...names].sort((left, right) => left.localeCompare(right))
+}
+
+/**
+ * Whether one field is required for create/output.
+ * @param field - Authored field.
+ * @returns Whether the field is required.
+ */
+function isRequired(field: FieldDefinition): boolean {
+  if (field.type === FieldType.Inverse) return false
+  if (field.default !== undefined) return false
+  return field.type === FieldType.Entity ? field.nullable === false : field.nullable !== true
 }
 
 /**
@@ -292,26 +356,6 @@ function schemaForScalar(type: ScalarFieldDefinition['type']): Record<string, un
     case FieldType.ID: return { type: 'string' }
     default: return {}
   }
-}
-
-/**
- * Render one field definition key.
- * @param owner - Field owner.
- * @param name - Field name.
- * @param kind - Operation kind.
- * @returns Safe definition key.
- */
-function fieldKey(owner: string, name: string, kind: SchemaKind): string {
-  return `${owner}_${name}_${kind}`
-}
-
-/**
- * Render the root name definition key.
- * @param kind - Operation kind.
- * @returns Definition key.
- */
-function nameKey(kind: SchemaKind): string {
-  return fieldKey('Entity', 'name', kind)
 }
 
 /**

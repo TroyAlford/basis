@@ -64,6 +64,12 @@ async function run() {
     const parentName: string | null = node.parent ? node.parent.parent?.name ?? null : null
     void parentName
   }
+  void await db.query('Node', { fields: ['parent.parent.parent.parent.parent.name'] })
+  void await db.query('Node', {
+    fields: ['parent.parent.parent.parent.parent.parent.parent.parent.name'],
+  })
+  // @ts-expect-error exceeds the canonical eight-reference-hop depth
+  await db.query('Node', { fields: ['parent.parent.parent.parent.parent.parent.parent.parent.parent.name'] })
   const created = await db.create('Note', {
     name: 'Note',
     owner: 'user-id',
@@ -73,9 +79,30 @@ async function run() {
   const createdTitle: string | undefined = created.record?.title
   void createdTitle
   await db.edit('Note', 'id == 1', { title: 'Next' })
+  await db.edit('Base', 'id == 1', { base: 'Next' })
   await db.upsert('Note', 'id == 1', { title: 'Next' })
+  await db.delete('Note', 'id == 1')
+  const transactional = await db.tx(async tx => {
+    const created = await tx.create('Note', {
+      name: 'Note',
+      owner: 'user-id',
+      tags: ['a'],
+      title: 'Transactional',
+    })
+    await tx.delete('Note', 'id == 1')
+    void await tx.query('Note', { fields: ['id', 'title'] })
+    // @ts-expect-error invalid entity inside a typed transaction
+    await tx.create('Missing', { name: 'Missing' })
+    return created
+  })
+  const transactionalTitle: string | undefined = transactional.record?.title
+  void transactionalTitle
   // @ts-expect-error invalid entity name
   await db.query('Missing', { fields: ['id'] })
+  // @ts-expect-error abstract entities are queryable but not constructible
+  await db.create('Base', { base: 'Base', name: 'Base' })
+  // @ts-expect-error invalid entity name in delete
+  await db.delete('Missing', 'id == 1')
   // @ts-expect-error invalid projection field
   await db.query('Note', { fields: ['missing'] })
   // @ts-expect-error array index projections are not supported

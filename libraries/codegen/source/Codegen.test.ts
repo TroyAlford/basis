@@ -37,6 +37,63 @@ function resolve(schema: Record<string, unknown>, value: unknown): Record<string
   return key ? defs?.[key] : undefined
 }
 
+/**
+ * Find a property through the composed parent shape chain.
+ * @param schema - Entity operation schema.
+ * @param entity - Entity name.
+ * @param kind - Operation kind.
+ * @param name - Property name.
+ * @returns The property schema, when present.
+ */
+function property(
+  schema: Record<string, unknown>,
+  entity: string,
+  kind: string,
+  name: string,
+): Record<string, unknown> | undefined {
+  const defs = schema.$defs as Record<string, Record<string, unknown>> | undefined
+  const visit = (key: string | undefined): Record<string, unknown> | undefined => {
+    if (!key) return undefined
+    const def = defs?.[key]
+    if (!def) return undefined
+    const properties = def.properties as Record<string, unknown> | undefined
+    if (properties && Object.hasOwn(properties, name)) return resolve(schema, properties[name])
+    for (const parent of (def.allOf ?? []) as readonly { $ref?: string }[]) {
+      const found = visit(parent.$ref?.split('/').at(-1))
+      if (found) return found
+    }
+    return undefined
+  }
+  return visit(`${entity}_${kind}`)
+}
+
+/**
+ * Collect required property names through the composed parent shape chain.
+ * @param schema - Entity operation schema.
+ * @param entity - Entity name.
+ * @param kind - Operation kind.
+ * @returns Required property names.
+ */
+function requiredNames(
+  schema: Record<string, unknown>,
+  entity: string,
+  kind: string,
+): readonly string[] {
+  const defs = schema.$defs as Record<string, Record<string, unknown>> | undefined
+  const names = new Set<string>()
+  const visit = (key: string | undefined): void => {
+    if (!key) return
+    const def = defs?.[key]
+    if (!def) return
+    for (const name of (def.required ?? []) as readonly string[]) names.add(name)
+    for (const parent of (def.allOf ?? []) as readonly { $ref?: string }[]) {
+      visit(parent.$ref?.split('/').at(-1))
+    }
+  }
+  visit(`${entity}_${kind}`)
+  return [...names].sort((left, right) => left.localeCompare(right))
+}
+
 const document = {
   entities: [
     {
@@ -87,16 +144,12 @@ describe('codegen', () => {
     expect(types).toContain('readonly subject: EntityRef | null')
     expect(types).not.toContain('Projection')
     expect(schemas.Note?.output).toBeDefined()
-    const noteCreate = schemas.Note?.create as Record<string, unknown> & {
-      properties: Record<string, unknown>,
-    }
-    expect(resolve(noteCreate, noteCreate.properties.owner)?.type).toEqual(['string', 'null'])
-    const noteOutput = schemas.Note?.output as Record<string, unknown> & {
-      properties: Record<string, unknown>,
-    }
-    expect(resolve(noteOutput, noteOutput.properties.owner)?.anyOf).toBeDefined()
-    expect(resolve(noteOutput, noteOutput.properties.dueOn)?.format).toBe('date')
-    expect(resolve(noteOutput, noteOutput.properties.createdAt)?.format).toBe('date-time')
+    const noteCreate = schemas.Note?.create as Record<string, unknown>
+    expect(property(noteCreate, 'Note', 'create', 'owner')?.type).toEqual(['string', 'null'])
+    const noteOutput = schemas.Note?.output as Record<string, unknown>
+    expect(property(noteOutput, 'Note', 'output', 'owner')?.anyOf).toBeDefined()
+    expect(property(noteOutput, 'Note', 'output', 'dueOn')?.format).toBe('date')
+    expect(property(noteOutput, 'Note', 'output', 'createdAt')?.format).toBe('date-time')
   })
 
   test('materializes independent TypeScript and JSON Schema emitters', async () => {
@@ -156,19 +209,18 @@ describe('codegen', () => {
     })
     const schemas = generateJSONSchemas(graph)
     const create = schemas.Thing?.create as Record<string, unknown> & {
-      additionalProperties?: boolean,
       properties: Record<string, unknown>,
-      required: string[],
+      propertyNames: { enum: readonly string[] },
     }
-    expect(create.additionalProperties).toBe(false)
-    expect(create.required).toEqual(['name', 'score', 'title'])
+    expect(create.propertyNames.enum).toEqual(expect.arrayContaining(['name', 'score', 'title']))
+    expect(requiredNames(create, 'Thing', 'create')).toEqual(['name', 'score', 'title'])
     expect(create.properties.id).toHaveProperty('anyOf')
     expect(create.properties.entity).toBeUndefined()
-    expect(resolve(create, create.properties.score)?.minimum).toBe(0)
-    expect(resolve(create, create.properties.score)?.maximum).toBe(10)
-    expect(resolve(create, create.properties.title)?.minLength).toBe(2)
-    expect(resolve(create, create.properties.title)?.maxLength).toBe(20)
-    expect(resolve(create, create.properties.nickname)?.readOnly).toBeUndefined()
+    expect(property(create, 'Thing', 'create', 'score')?.minimum).toBe(0)
+    expect(property(create, 'Thing', 'create', 'score')?.maximum).toBe(10)
+    expect(property(create, 'Thing', 'create', 'title')?.minLength).toBe(2)
+    expect(property(create, 'Thing', 'create', 'title')?.maxLength).toBe(20)
+    expect(property(create, 'Thing', 'create', 'nickname')?.readOnly).toBeUndefined()
   })
 
   test('emits nullable output contracts and TypeScript null unions from canonical fields', () => {
@@ -320,10 +372,8 @@ describe('codegen', () => {
       ],
     })
     const schemas = generateJSONSchemas(abstract)
-    const note = schemas.Note?.output as Record<string, unknown> & {
-      properties: Record<string, unknown>,
-    }
-    const ownerField = resolve(note, note.properties.owner)
+    const note = schemas.Note?.output as Record<string, unknown>
+    const ownerField = property(note, 'Note', 'output', 'owner')
     const ownerRef = ownerField?.anyOf as { $ref?: string }[] | undefined
     const ownerIdentity = ownerRef?.[0]?.$ref?.split('/').at(-1)
     const defs = note.$defs as Record<string, { properties?: Record<string, { enum?: string[] }> }>
@@ -333,11 +383,11 @@ describe('codegen', () => {
       properties: Record<string, { enum?: string[] }>,
     }
     expect(user.properties.entity.enum).toContain('AdminUser')
-    const userCreate = schemas.User?.create as {
+    const userCreate = schemas.User?.create as Record<string, unknown> & {
       properties: Record<string, { const?: string, enum?: string[] }>,
     }
     expect(userCreate.properties.entity).toBeUndefined()
-    expect(userCreate.properties.name).toBeDefined()
+    expect(property(userCreate, 'User', 'create', 'name')).toBeDefined()
     const userUpdate = schemas.User?.update as {
       properties: Record<string, { const?: string, enum?: string[] }>,
     }
@@ -381,6 +431,13 @@ describe('codegen', () => {
 
     const schemas = generateJSONSchemas(graph)
     const ajv = new Ajv({ allErrors: true })
+    const childSchema = schemas.Grandchild?.output as {
+      $defs: Record<string, { allOf?: { $ref?: string }[] }>,
+      allOf?: { $ref?: string }[],
+    }
+    expect(childSchema.allOf?.[0]?.$ref).toBe('#/$defs/Grandchild_output')
+    expect(childSchema.$defs.Grandchild_output?.allOf?.[0]?.$ref).toBe('#/$defs/Child_output')
+    expect(childSchema.$defs.Child_output?.allOf?.[0]?.$ref).toBe('#/$defs/Base_output')
     const child = ajv.compile(schemas.Grandchild?.output as object)
     const id = '00000000-0000-4000-8000-000000000001'
     const childRow = {
