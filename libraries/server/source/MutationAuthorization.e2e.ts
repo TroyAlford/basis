@@ -16,8 +16,15 @@ const silent = new Logger({ silent: true })
 /** Numeric limits used by the authorization fixtures. */
 enum Limit {
   Delete = 40,
+  DeleteAction = 90,
   Read = 30,
   Update = 70,
+}
+
+/** Score bounds used by the authorization fixtures. */
+enum Score {
+  Maximum = 10,
+  Minimum = 0,
 }
 
 /** Relationship membership role used by the where-only fixture. */
@@ -43,7 +50,7 @@ const graph = new Graph({
       fields: [
         { field: 'owner', target: 'User', type: 'Entity' },
         { field: 'rank', type: 'Number' },
-        { field: 'score', maximum: 10, minimum: 0, type: 'Number' },
+        { field: 'score', maximum: Score.Maximum, minimum: Score.Minimum, type: 'Number' },
         { field: 'title', type: 'String' },
       ],
       name: 'Article',
@@ -51,7 +58,7 @@ const graph = new Graph({
         [Action.Read]: Security.Public,
         [Action.Create]: [
           { role: 'admin' },
-          { role: 'creator', where: compare('score', Operator.Comparison.GreaterThanOrEqual, 0) },
+          { role: 'creator', where: compare('score', Operator.Comparison.GreaterThanOrEqual, Score.Minimum) },
         ],
         [Action.Update]: [
           { role: 'admin' },
@@ -82,7 +89,7 @@ const readGateGraph = new Graph({
     {
       fields: [
         { field: 'rank', type: 'Number' },
-        { field: 'score', maximum: 10, minimum: 0, type: 'Number' },
+        { field: 'score', maximum: Score.Maximum, minimum: Score.Minimum, type: 'Number' },
         { field: 'title', type: 'String' },
       ],
       name: 'Draft',
@@ -93,7 +100,7 @@ const readGateGraph = new Graph({
         ],
         [Action.Create]: [
           { role: 'admin' },
-          { role: 'creator', where: compare('score', Operator.Comparison.GreaterThanOrEqual, 0) },
+          { role: 'creator', where: compare('score', Operator.Comparison.GreaterThanOrEqual, Score.Minimum) },
         ],
         [Action.Update]: [
           { role: 'admin' },
@@ -101,7 +108,7 @@ const readGateGraph = new Graph({
         ],
         [Action.Delete]: [
           { role: 'admin' },
-          { role: 'deleter', where: compare('rank', Operator.Comparison.LessThan, 90) },
+          { role: 'deleter', where: compare('rank', Operator.Comparison.LessThan, Limit.DeleteAction) },
         ],
       },
     },

@@ -50,6 +50,7 @@ const server = new Server()
   .database()
   .start()
 ```
+
 The application root conventionally exports `graph.ts` as `export default new Graph({...})`. Keep the application graph in one module and pass it to the server. `Graph` composes the application ontology with the system `User`, `Role`, `ExternalIdentity`, and `UserRole` definitions. Application `User` inherits `Entity`'s `id`, `name`, and `entity`; do not redeclare those fields. `Role` is an identified entity with a stable UUID `id`, an inherited mutable `name`, and an optional `description`.
 
 ## Roles and membership
@@ -208,6 +209,7 @@ const graph = new Graph({
   },
 })
 ```
+
 `members` is the inverse collection declared by the authenticated endpoint. `$me` is the verified transaction actor, so this predicate means: the current actor is connected to the Workspace by at least one `WorkspaceMembership`. An anonymous actor has no actor id and does not match. Changing membership rows changes access immediately; no graph rebuild or policy reinstall is required. The read rule is where-only, so membership itself is the complete row qualifier; the update rule combines an editor capability with the resource-specific Owner role.
 
 Relationship-owned scalar properties participate through the lower-cased relationship-name prefix. Keep the identity and role requirements in one member requirement so PostgreSQL evaluates them against the same relationship row:
