@@ -1,10 +1,13 @@
-import { generateJSONSchemas, generateTypes } from 'basis/codegen'
+import { generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from 'basis/codegen'
 import * as serverSurface from 'basis/server'
 import { Graph } from 'basis/server'
 import { withIsolatedDatabase } from 'basis/testing'
 import { checksum } from 'basis/utilities'
 import { generateErd } from 'basis/visualization'
 import { expect, test } from 'bun:test'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const graph = new Graph({
   entities: [{
@@ -28,6 +31,24 @@ test('consumer codegen and visualization surfaces resolve', () => {
   expect(generateTypes(graph)).toContain('export interface ConsumerNote')
   expect(generateJSONSchemas(graph).ConsumerNote?.output).toBeDefined()
   expect(generateErd(graph)).toContain('ConsumerNote')
+})
+
+test('consumer codegen emitters resolve and write independent outputs', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'basis-consumer-codegen-'))
+  try {
+    await Promise.all([
+      TypeScriptEmitter(graph, directory),
+      JsonSchemaEmitter(graph, directory),
+    ])
+    const types = await readFile(join(directory, 'typescript', 'index.ts'), 'utf8')
+    const schemas = JSON.parse(
+      await readFile(join(directory, 'json-schema', 'schemas.json'), 'utf8'),
+    ) as { ConsumerNote?: { output?: unknown } }
+    expect(types).toContain('export interface ConsumerNote')
+    expect(schemas.ConsumerNote?.output).toBeDefined()
+  } finally {
+    await rm(directory, { force: true, recursive: true })
+  }
 })
 
 test('consumer fixture uses provided entities', async () => {

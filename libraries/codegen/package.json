@@ -1,6 +1,6 @@
 {
   "name": "@basis/codegen",
-  "description": "Build-time TypeScript and JSON Schema generation from canonical Basis models.",
+  "description": "Independent build-time emitters for canonical Basis Graph output formats.",
   "exports": {
     ".": "./index.ts"
   },

@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MutationError, mutationRunner } from '../../server/source/Mutation'
-import { generateJSONSchemas, generateTypes } from './Codegen'
+import { emitter, generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from '../index'
 
 /**
  * Validate one value against the JSON Schema keywords emitted by codegen.
@@ -132,6 +132,50 @@ describe('codegen', () => {
     expect((schemas.Note?.output as {
       properties: Record<string, { format?: string }>,
     }).properties.createdAt?.format).toBe('date-time')
+  })
+
+  test('materializes independent TypeScript and JSON Schema emitters', async () => {
+    const graph = new Graph({
+      entities: [{
+        fields: [{ field: 'title', type: FieldType.String }],
+        name: 'EmitterNote',
+      }],
+    })
+    const directory = await mkdtemp(join(tmpdir(), 'basis-emitters-'))
+    try {
+      expect(TypeScriptEmitter.extension).toBe('ts')
+      expect(TypeScriptEmitter.folder).toBe('typescript')
+      expect(JsonSchemaEmitter.extension).toBe('json')
+      expect(JsonSchemaEmitter.folder).toBe('json-schema')
+      await Promise.all([
+        TypeScriptEmitter(graph, directory),
+        JsonSchemaEmitter(graph, directory),
+      ])
+      const types = await Bun.file(join(directory, 'typescript', 'index.ts')).text()
+      const schemas = JSON.parse(
+        await Bun.file(join(directory, 'json-schema', 'schemas.json')).text(),
+      ) as { EmitterNote?: { output?: unknown } }
+      expect(types).toContain('export interface EmitterNote')
+      expect(schemas.EmitterNote?.output).toBeDefined()
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  test('rejects emitter destinations that escape the output root', async () => {
+    expect(() => emitter({ extension: 'ts', folder: '../escape' }, () => []))
+      .toThrow('Unsafe emitter folder')
+    const directory = await mkdtemp(join(tmpdir(), 'basis-emitter-safe-'))
+    try {
+      const unsafe = emitter(
+        { extension: 'ts', folder: 'typescript' },
+        () => [{ content: 'nope', name: '../escape' }],
+      )
+      const graph = new Graph({ entities: [{ fields: [], name: 'SafeThing' }] })
+      await expect(unsafe(graph, directory)).rejects.toThrow('Unsafe emitted file name')
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
   })
 
   test('reflects canonical bounds, required fields, and generated fields', () => {
