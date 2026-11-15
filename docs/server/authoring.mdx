@@ -264,6 +264,6 @@ erDiagram
 - Use `Entity` fields with `target` for stored references and `Inverse` fields for reciprocal navigation.
 - Use `Cardinality.One` or `Cardinality.Many` on inverse declarations.
 - Keep generated files generated. Edit the canonical authoring source, then regenerate.
-- Entity names reserved by generated TypeScript and JSON Schema products (`Reference`, `Entities`, `EntityMap`, `CreateMap`, `UpdateMap`, `ReferenceMap`) are rejected by Graph authoring.
+- Entity names reserved by generated TypeScript and JSON Schema products (`Reference`, `Entities`, `EntityMap`, `CreateMap`, `UpdateMap`, `ReferenceMap`) are rejected by Graph authoring. The TypeScript emitter also rejects any entity name that collides with another entity's generated `Create` or `Update` input type.
 
 See [Schema Inspection & Planning](./schema.mdx) for the physical compiler and migration workflow.

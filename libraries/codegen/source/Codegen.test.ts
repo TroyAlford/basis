@@ -361,6 +361,20 @@ describe('codegen', () => {
 }`)
   })
 
+  test('rejects entity and mutation input name collisions comprehensively', () => {
+    const collides = (entity: string) => () => generateTypes(new Graph({
+      entities: [
+        { fields: [], name: 'Foo' },
+        { fields: [], name: entity },
+      ],
+    }))
+    expect(collides('FooUpdate')).toThrow('Generated TypeScript name "FooUpdate"')
+    expect(collides('FooCreate')).toThrow('Generated TypeScript name "FooCreate"')
+    expect(() => generateTypes(new Graph({
+      entities: [{ fields: [], name: 'Foo' }, { fields: [], name: 'Bar' }],
+    }))).not.toThrow()
+  })
+
   test('compiles mutually referencing generated entity types', async () => {
     const graph = new Graph({
       entities: [

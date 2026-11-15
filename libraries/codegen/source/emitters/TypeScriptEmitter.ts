@@ -11,6 +11,7 @@ import { emitter } from '../emitter'
 export function generateTypes(graph: Graph): string {
   const definitions = graph.definitions
   const entities = [...definitions.entities].sort((left, right) => left.name.localeCompare(right.name))
+  assertGeneratedNames(entities)
   const enumMembers = entities
     .map(entity => `  ${entity.name} = '${entity.name}',`)
     .join('\n')
@@ -55,6 +56,38 @@ export interface Entity extends Reference {
     })
   blocks.push(`export interface ReferenceMap {\n${references.join('\n')}\n}`)
   return `${blocks.join('\n\n')}\n`
+}
+
+/**
+ * Reject collisions among entity names, mutation input names, and helper names.
+ * @param entities - Canonical entities in deterministic order.
+ * @throws {Error} When two generated TypeScript declarations would share a name.
+ */
+function assertGeneratedNames(entities: readonly EntityDefinition[]): void {
+  const owners = new Map<string, string>()
+  const claim = (name: string, owner: string): void => {
+    const existing = owners.get(name)
+    if (existing) {
+      throw new Error(
+        `Generated TypeScript name "${name}" for ${owner} collides with ${existing}`,
+      )
+    }
+    owners.set(name, owner)
+  }
+  for (const name of [
+    'CreateMap',
+    'Entities',
+    'Entity',
+    'EntityMap',
+    'Reference',
+    'ReferenceMap',
+    'UpdateMap',
+  ]) claim(name, 'Basis generated helper')
+  for (const entity of entities) {
+    claim(entity.name, `entity "${entity.name}"`)
+    claim(`${entity.name}Create`, `create input for entity "${entity.name}"`)
+    claim(`${entity.name}Update`, `update input for entity "${entity.name}"`)
+  }
 }
 
 /**
