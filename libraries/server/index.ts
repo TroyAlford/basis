@@ -69,21 +69,6 @@ export type {
   DatabaseTransaction,
   QueryOptions,
 } from './source/Database'
-export { typedDatabase } from './types/TypedDatabase'
-export type {
-  CreateInput,
-  EditInput,
-  EntityModels,
-  MutationContract,
-  MutationCreatableNames,
-  MutationModels,
-  QueryPath,
-  QuerySelection,
-  ReferenceModels,
-  TypedDatabase,
-  TypedDatabaseTransaction,
-  TypedQueryOptions,
-} from './types/TypedDatabase'
 export { MutationError } from './source/Mutation'
 export type {
   CreateResult,

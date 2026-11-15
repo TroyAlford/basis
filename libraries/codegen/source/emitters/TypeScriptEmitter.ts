@@ -4,7 +4,7 @@ import type { EmittedFile } from '../emitter'
 import { emitter } from '../emitter'
 
 /**
- * Generate TypeScript entity types and supporting mutation contracts.
+ * Generate TypeScript entity types.
  * @param graph - Canonical application Graph.
  * @returns Deterministic TypeScript source.
  */
@@ -33,28 +33,6 @@ export interface $BasisEntity extends $BasisReference {
 }`,
   ]
   for (const entity of entities) blocks.push(entityBlock(entity, definitions))
-  blocks.push(mapBlock('$BasisEntityMap', entities.map(entity => (
-    `  readonly ${entity.name}: ${entity.name}`
-  ))))
-  blocks.push(mapBlock('$BasisMutationMap', entities.map(entity => (
-    `  readonly ${entity.name}: {
-    readonly creatable: ${entity.abstract ? 'false' : 'true'},
-    readonly create: ${literalUnion(mutationCreateFields(entity))},
-    readonly required: ${literalUnion(mutationRequiredFields(entity))},
-    readonly writable: ${literalUnion(mutationWritableFields(entity))},
-  },`
-  ))))
-  const references = entities
-    .filter(entity => entity.effectiveFields.some(field => field.type === FieldType.Entity))
-    .map(entity => {
-      const fields = entity.effectiveFields
-        .filter(field => field.type === FieldType.Entity)
-        .sort((left, right) => left.name.localeCompare(right.name))
-        .map(field => `    readonly ${field.name}: '${field.target}',`)
-        .join('\n')
-      return `  readonly ${entity.name}: {\n${fields}\n  },`
-    })
-  blocks.push(`export interface $BasisReferenceMap {\n${references.join('\n')}\n}`)
   return `${blocks.join('\n\n')}\n`
 }
 
@@ -78,71 +56,6 @@ function entityBlock(entity: EntityDefinition, definitions: Graph['definitions']
   return `export interface ${entity.name} extends ${parent} {
 ${members.map(member => member.line).join('\n')}
 }`
-}
-
-/**
- * Render one supporting map interface with a collision-safe namespace.
- * @param name - Interface name.
- * @param entries - Rendered entries.
- * @returns Generated interface block.
- */
-function mapBlock(name: string, entries: readonly string[]): string {
-  const sorted = [...entries]
-    .sort((left, right) => left.localeCompare(right))
-    .map(entry => (entry.endsWith(',') ? entry : `${entry},`))
-  return `export interface ${name} {\n${sorted.join('\n')}\n}`
-}
-
-/**
- * Render one entity's create-writable field names.
- * @param entity - Entity definition.
- * @returns Field names.
- */
-function mutationCreateFields(entity: EntityDefinition): readonly string[] {
-  return [
-    'id',
-    'name',
-    ...entity.effectiveFields
-      .filter(field => field.name !== 'id' && field.name !== 'name')
-      .filter(field => !['entity', 'lastUpdatedAt', 'lastUpdatedBy'].includes(field.name))
-      .map(field => field.name),
-  ].sort((left, right) => left.localeCompare(right))
-}
-
-/**
- * Render one entity's required create field names.
- * @param entity - Entity definition.
- * @returns Required field names.
- */
-function mutationRequiredFields(entity: EntityDefinition): readonly string[] {
-  const required = entity.effectiveFields
-    .filter(field => field.name !== 'id' && field.name !== 'name')
-    .filter(field => !['entity', 'lastUpdatedAt', 'lastUpdatedBy'].includes(field.name))
-    .filter(field => field.default === undefined && (
-      field.type === FieldType.Entity ? field.nullable === false : field.nullable !== true
-    ))
-    .map(field => field.name)
-  if (entity.idFormat === 'Snowflake') required.push('id')
-  required.push('name')
-  return required.sort((left, right) => left.localeCompare(right))
-}
-
-/**
- * Render one entity's edit-writable field names.
- * @param entity - Entity definition.
- * @returns Writable field names.
- */
-function mutationWritableFields(entity: EntityDefinition): readonly string[] {
-  return mutationCreateFields(entity).filter(field => field !== 'id')
-}
-
-/**
- * Render one literal string union.
- * @param values - String values.
- * @returns TypeScript literal union.
- */
-function literalUnion(values: readonly string[]): string {
-  return values.length === 0 ? 'never' : values.map(value => `'${value}'`).join(' | ')
 }
 
 /**

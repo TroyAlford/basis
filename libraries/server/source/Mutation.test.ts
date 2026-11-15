@@ -179,6 +179,23 @@ describe('Mutation', () => {
     const unknown = await failure(() => mutations.create('Ghost', { name: 'Boo' }))
     expect(unknown.code).toBe('operation')
     expect(unknown.message).toContain('Unknown entity')
+    const abstract = await failure(() => mutations.create('User', {
+      email: 'ada@example.com',
+      name: 'Ada',
+    }))
+    expect(abstract.code).toBe('operation')
+    expect(abstract.message).toContain('abstract')
+  })
+
+  test('validates canonical identity formats when an id is supplied', async () => {
+    const mutations = runner(new FakeSQL())
+    const error = await failure(() => mutations.create('Pet', {
+      id: 'not-an-identity',
+      name: 'Toby',
+      species: 'Frog',
+    }))
+    expect(error.code).toBe('validation')
+    expect(error.path).toBe('/values/id')
   })
 
   test('rejects readonly edit fields and reports the changes pointer', async () => {
@@ -186,6 +203,10 @@ describe('Mutation', () => {
     const readonly = await failure(() => mutations.edit('Pet', 'id == 1', { id: '1' }))
     expect(readonly.code).toBe('validation')
     expect(readonly.path).toBe('/changes/id')
+    const entity = await failure(() => mutations.edit('Pet', 'id == 1', { entity: 'User' }))
+    expect(entity.path).toBe('/changes/entity')
+    const tracking = await failure(() => mutations.edit('Pet', 'id == 1', { lastUpdatedAt: null }))
+    expect(tracking.path).toBe('/changes/lastUpdatedAt')
     const unknown = await failure(() => mutations.edit('Pet', 'id == 1', { missing: true }))
     expect(unknown.path).toBe('/changes/missing')
   })

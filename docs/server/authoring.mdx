@@ -92,7 +92,7 @@ Generation is deterministic for a fixed canonical model and must not be maintain
 
 ## Example generated output
 
-For the typed `User`/`Note` declaration above, the TypeScript emitter includes an entity enum, parent-composed interfaces, refs, and typed maps:
+For the typed `User`/`Note` declaration above, the TypeScript emitter includes an entity enum, parent-composed interfaces, and the shared reference identity shape:
 
 ```ts
 /** Generated from the canonical Basis entity definitions. Do not edit by hand. */
@@ -125,56 +125,29 @@ export interface Note extends $BasisEntity {
   readonly tags: readonly string[]
 }
 
-export interface $BasisEntityMap {
-  readonly User: User
-  readonly Note: Note
-}
-
-export interface $BasisMutationMap {
-  readonly User: {
-    readonly creatable: true
-    readonly create: 'id' | 'email' | 'name'
-    readonly required: 'email' | 'name'
-    readonly writable: 'email' | 'name'
-  }
-  readonly Note: {
-    readonly creatable: true
-    readonly create: 'id' | 'name' | 'owner' | 'tags' | 'title'
-    readonly required: 'name' | 'title' | 'tags'
-    readonly writable: 'name' | 'owner' | 'tags' | 'title'
-  }
-}
-
-export interface $BasisReferenceMap {
-  readonly User: { readonly lastUpdatedBy: 'User' }
-  readonly Note: { readonly lastUpdatedBy: 'User'; readonly owner: 'User' }
-}
 ```
 
-Every entity extends `$BasisEntity`, which implements the shared `$BasisReference` shape (`id`, `name`, `entity`). Child entities extend their generated direct parent and declare only locally owned fields, while concrete discriminators narrow the abstract parent union. Singular references use `$BasisReference`; there are no per-entity reference types. `$BasisMutationMap` is a supporting field-contract map for typed create/edit inputs, not another entity-model family.
+Every entity extends `$BasisEntity`, which implements the shared `$BasisReference` shape (`id`, `name`, `entity`). Child entities extend their generated direct parent and declare only locally owned fields, while concrete discriminators narrow the abstract parent union. Singular references use `$BasisReference`; there are no per-entity reference types. Generated TypeScript describes entities only; it does not define mutation payloads or validate operations.
 
-The generated maps connect to typed queries and mutations through the server facade:
+The runtime `Database` API accepts ordinary object payloads and validates them against the canonical Graph:
 
 ```ts
-import { typedDatabase } from 'basis/server'
-import type {
-  $BasisEntityMap,
-  $BasisMutationMap,
-  $BasisReferenceMap,
-} from './generated/typescript'
-
-const db = typedDatabase<$BasisEntityMap, $BasisMutationMap, $BasisReferenceMap>(server.db)
-const notes = await db.query('Note', {
-  fields: ['id', 'title', 'owner.email'],
-})
-const created = await db.create('Note', {
+await server.db.create('Note', {
   name: 'Welcome',
   owner: user.id,
   title: 'Welcome',
 })
+
+await server.db.edit('Note', { field: 'id', operator: Operator.Comparison.Equal, value: noteId }, {
+  title: 'Updated',
+})
+
+const notes = await server.db.query('Note', {
+  fields: ['id', 'title', 'owner.email'],
+})
 ```
 
-Query fields are constrained to supported effective-field and reference paths. Invalid fields, array-index projections, mismatched result types, reference objects in create payloads, and identity changes in edits fail TypeScript compilation.
+Mutation validation, authorization, cardinality, and transaction behavior are runtime concerns backed by the canonical Graph, PostgreSQL RLS, and database constraints. They are enforced for every caller regardless of whether generated TypeScript is used.
 
 The JSON Schema emitter produces one standards-compliant Draft 2020-12 entity document with a `$defs` entry per Graph entity and per identity reference. Inheritance and references use composition:
 
