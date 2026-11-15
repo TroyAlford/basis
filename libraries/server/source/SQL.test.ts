@@ -767,4 +767,42 @@ describe('SQL.where', () => {
     `)
     expect(compiled.values).toEqual([5, 10, 7, 3])
   })
+
+  test('compiles actor-presence and field-reference predicates', () => {
+    const actor = QueryNormalizer.normalize(note, '$me != null')
+    expect(SQL.where(definitions, entity, actor)).toEqual({
+      sql: 'WHERE (NOT COALESCE((nullif(current_setting(\'actor.id\', true), \'\') IS NULL), FALSE))',
+      values: [],
+    })
+    expect(SQL.where(definitions, entity, QueryNormalizer.normalize(note, '$me = null')).sql)
+      .toBe('WHERE nullif(current_setting(\'actor.id\', true), \'\') IS NULL')
+
+    const documents = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', type: 'String' },
+            { field: 'revision', target: 'Revision', type: 'Entity' },
+          ],
+          name: 'Document',
+        },
+        {
+          fields: [
+            { field: 'id', format: 'UUID' },
+            { field: 'owner', type: 'String' },
+          ],
+          name: 'Revision',
+        },
+      ],
+    }))
+    const document = documents.entity('Document')
+    if (!document) throw new Error('missing Document entity')
+    const compiled = compileEntityQuery(documents, 'Document', {
+      fields: ['id'],
+      limit: null,
+      where: QueryNormalizer.normalize(document, 'owner = revision.owner'),
+    })
+    expect(compiled.sql).toContain('t."owner" IS NOT DISTINCT FROM b1."owner"')
+  })
 })

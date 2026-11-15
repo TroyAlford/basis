@@ -410,4 +410,26 @@ describe('QueryParser', () => {
       }],
     })
   })
+
+  test('parses the actor sentinel as a comparison field', () => {
+    const result = QueryParser.parse('$me != null')
+    expect(result.diagnostics).toEqual([])
+    expect(result.expression).toEqual({
+      end: 11,
+      field: '$me',
+      kind: 'comparison',
+      operator: Operator.Comparison.NotEqual,
+      start: 0,
+      values: [{ end: 11, kind: 'null', raw: 'null', start: 7, value: null }],
+    })
+  })
+
+  test('parses a bare field path as a comparison operand', () => {
+    const result = QueryParser.parse('owner = revision.owner')
+    expect(result.diagnostics).toEqual([])
+    expect(result.expression).toMatchObject({
+      field: 'owner',
+      values: [{ kind: 'field', value: 'revision.owner' }],
+    })
+  })
 })

@@ -12,6 +12,7 @@ import { queryEntity, transactionWithMutations } from '../source/Database'
 import { EntityDefinitions } from '../source/EntityDefinitions'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
 import type { CreateResult, DeleteResult, EditResult, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
+import { validateTransactionState } from '../source/Mutation'
 import { ensureSeedImage } from './DatabaseImage'
 import { installSchema } from './Schema'
 
@@ -207,7 +208,9 @@ class FixtureDatabase implements Database {
     return this.#sql.begin(async tx => {
       const actor = currentActor()
       await tx`select set_config('actor.id', ${actor?.id ?? ''}, true)`
-      return callback(transactionWithMutations(this.#entities, tx))
+      const result = await callback(transactionWithMutations(this.#entities, tx))
+      await validateTransactionState(this.#entities, tx)
+      return result
     })
   }
 

@@ -5,7 +5,7 @@ import { currentActor } from './ActorContext'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { ManagedPostgresService } from './ManagedPostgresService'
 import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from './Mutation'
-import { mutationRunner } from './Mutation'
+import { mutationRunner, validateTransactionState } from './Mutation'
 import { compilePolymorphicQuery } from './PolymorphicQuery'
 import type { Filter } from './Predicate'
 export { managedDatabaseIdentity } from './ManagedPostgresService'
@@ -325,7 +325,9 @@ class PostgresDatabase implements Database {
     return this.#sql.begin(async tx => {
       const actor = currentActor()
       await tx`select set_config('actor.id', ${actor?.id ?? ''}, true)`
-      return callback(this.#transaction(tx))
+      const result = await callback(this.#transaction(tx))
+      if (this.#entities) await validateTransactionState(this.#entities, tx)
+      return result
     })
   }
 

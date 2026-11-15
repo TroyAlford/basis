@@ -1,6 +1,6 @@
 import type { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
-import type { QueryOptions } from '../source/Database'
+import type { DatabaseTransaction, QueryOptions } from '../source/Database'
 import { queryEntity } from '../source/Database'
 import type { EntityDefinitions } from '../source/EntityDefinitions'
 import type { MutationDatabase, MutationFilter, MutationValues } from '../source/Mutation'
@@ -137,7 +137,7 @@ export async function withDurableDatabase<T>(
 
   const mutations = <Result>(
     work: (mutation: MutationDatabase) => Promise<Result>,
-  ): Promise<Result> => transaction(tx => work(mutationRunner(fixture.entities, tx)))
+  ): Promise<Result> => transaction(tx => work(tx as DatabaseTransaction))
   const database: DurableDatabase = {
     create: (entity, values) => mutations(mutation => mutation.create(entity, values)),
     delete: (entity, filter) => mutations(mutation => mutation.delete(entity, filter)),

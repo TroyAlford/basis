@@ -1,4 +1,4 @@
-import type { EffectiveFieldDefinition, EntityDefinition, FieldDefinition, Graph, ScalarArrayElementDefinition, ScalarFieldDefinition } from 'basis/server'
+import type { EffectiveFieldDefinition, EntityDefinition, EnumDefinition, FieldDefinition, Graph, ScalarArrayElementDefinition, ScalarFieldDefinition } from 'basis/server'
 import { FieldType, SNOWFLAKE_IDENTITY_PATTERN, UUID_IDENTITY_PATTERN } from 'basis/server'
 import type { EmittedFile } from '../emitter'
 import { emitter } from '../emitter'
@@ -22,10 +22,16 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
   const definitions = graph.definitions
   const entityDefinitions = [...definitions.entities]
     .sort((left, right) => left.name.localeCompare(right.name))
+  const enums = [...definitions.enums]
+    .sort((left, right) => left.name.localeCompare(right.name))
   return {
     $defs: {
       $Entity: rootEntitySchema(definitions),
       $Reference: referenceSchema(definitions),
+      ...Object.fromEntries(enums.map(enumeration => [
+        enumeration.name,
+        enumSchema(enumeration),
+      ])),
       ...Object.fromEntries(entityDefinitions.map(entity => [
         entity.name,
         entitySchema(entity, definitions),
@@ -33,6 +39,23 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
     },
     $ref: '#/$defs/$Entity',
     $schema: 'https://json-schema.org/draft/2020-12/schema',
+  }
+}
+
+/**
+ * Render one named Graph enum as a reusable definition.
+ * @param enumeration - Canonical enum definition.
+ * @returns JSON Schema definition.
+ */
+function enumSchema(enumeration: EnumDefinition): Readonly<Record<string, unknown>> {
+  return {
+    enum: enumeration.values.map(value => value.value),
+    oneOf: enumeration.values.map(value => ({
+      const: value.value,
+      description: value.description,
+      type: 'string',
+    })),
+    type: 'string',
   }
 }
 
@@ -126,6 +149,9 @@ function fieldSchema(
       items: itemSchema(field.items),
       type: 'array',
     }, field)
+  }
+  if (field.type === FieldType.Enum) {
+    return nullableSchema({ $ref: `#/$defs/${field.enum}` }, field)
   }
   if (field.type === FieldType.JSON) {
     return field.nullable === true ? {} : { not: { type: 'null' } }

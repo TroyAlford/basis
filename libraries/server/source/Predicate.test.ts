@@ -476,4 +476,60 @@ describe('Predicate.normalize', () => {
       value: null,
     })).toThrow('not valid for collection navigation')
   })
+
+  test('normalizes actor-presence predicates through the canonical engine', () => {
+    expect(Predicate.normalize(entity, {
+      field: '$me',
+      operator: Operator.Comparison.Equal,
+      value: null,
+    })).toEqual({ field: '$me', operator: Operator.Comparison.Equal, value: null })
+    expect(Predicate.normalize(entity, {
+      field: '$me',
+      operator: Operator.Comparison.NotEqual,
+      value: null,
+    })).toEqual({
+      filters: [{ field: '$me', operator: Operator.Comparison.Equal, value: null }],
+      operator: Operator.Logical.Not,
+    })
+    expect(() => Predicate.normalize(entity, {
+      field: '$me',
+      operator: Operator.Comparison.Equal,
+      value: 'literal',
+    })).toThrow('must compare actor presence with null')
+  })
+
+  test('normalizes canonical field-reference operands', () => {
+    const reference = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { field: 'owner', type: 'String' },
+          { field: 'revision', target: 'Revision', type: 'Entity' },
+        ],
+        name: 'Document',
+      }, {
+        fields: [{ field: 'owner', type: 'String' }],
+        name: 'Revision',
+      }],
+    })).entity('Document')
+    if (!reference) throw new Error('missing Document entity')
+    expect(Predicate.normalize(reference, {
+      field: 'owner',
+      operator: Operator.Comparison.Equal,
+      value: { $field: 'revision.owner' },
+    })).toEqual({
+      field: 'owner',
+      operator: Operator.Comparison.Equal,
+      value: { $field: 'revision.owner' },
+    })
+    expect(() => Predicate.normalize(reference, {
+      field: 'owner',
+      operator: Operator.Comparison.Contains,
+      value: { $field: 'revision.owner' },
+    })).toThrow('does not accept a field reference operand')
+    expect(() => Predicate.normalize(reference, {
+      field: 'owner',
+      operator: Operator.Comparison.Equal,
+      value: { $field: '' },
+    })).toThrow('is not a valid path')
+  })
 })

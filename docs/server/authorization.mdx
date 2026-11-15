@@ -122,6 +122,7 @@ security: {
 
 - Missing action means denied, for reads and writes.
 - Public access is explicit only: `[Action.Read]: Security.Public`; it never implies another action.
+- Actor presence is opt-in and explicit: `{ where: '$me != null' }` authorizes any authenticated actor and denies anonymous requests. `{ where: '$me = null' }` is the complement. There is no Authenticated role, sentinel, implicit grant, or default authenticated read; omitting a security declaration still denies everyone.
 - A `{ role: 'someRole' }` rule requires that Graph role; `{ grant: Capability.X }` requires any role that confers the capability.
 - Rules are positive alternatives. No negative grant or precedence exists.
 - Every `create`, `update`, and `delete` additionally requires `read` for the same row. A create must satisfy read on the proposed resulting row; it cannot be created only to become visible after a later membership insert.

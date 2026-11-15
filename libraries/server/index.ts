@@ -39,6 +39,9 @@ export type {
   AuthoredConstraint,
   AuthoredDocument,
   AuthoredEntity,
+  AuthoredEnum,
+  AuthoredEnumField,
+  AuthoredEnumSource,
   AuthoredField,
   AuthoredIdentityField,
   AuthoredInverseField,
@@ -50,6 +53,7 @@ export type {
   AuthoredSecurity,
   AuthoredSecurityRule,
   AuthoredUniquenessConstraint,
+  AuthoredValidationConstraint,
 } from './source/GraphAuthoring'
 export type {
   GrantCapability,
@@ -101,6 +105,9 @@ export type {
   EntityDefinition,
   EntityDefinitions,
   EntityReferenceFieldDefinition,
+  EnumDefinition,
+  EnumFieldDefinition,
+  EnumValueDefinition,
   FieldDefinition,
   InverseCardinality,
   InverseDerivedCollectionDefinition,
@@ -115,6 +122,7 @@ export type {
   ScalarFieldDefinition,
   ScalarFieldType,
   UniqueConstraintDefinition,
+  ValidationConstraintDefinition,
 } from './source/EntityDefinitions'
 export { OAuth } from './source/OAuth'
 export type { OAuthIdentity, OAuthOptions } from './source/OAuth'

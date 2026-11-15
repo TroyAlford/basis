@@ -1,9 +1,9 @@
-import type { ArrayFieldDefinition, EntityDefinition, EntityDefinitions, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import type { ArrayFieldDefinition, EntityDefinition, EntityDefinitions, EnumFieldDefinition, QueryFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './Predicate'
-import { arrayItemField, Predicate } from './Predicate'
+import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, isFieldOperand, Predicate } from './Predicate'
 import { SortDirection } from './SortDirection'
 
 /** A validated ordering clause. */
@@ -36,8 +36,8 @@ export type OrderBy =
 
 /** A validated root projection. */
 export interface SQLSelection {
-  /** Selected root scalar field definitions, in output order. */
-  readonly fields: readonly ScalarFieldDefinition[],
+  /** Selected root scalar or enum field definitions, in output order. */
+  readonly fields: readonly (EnumFieldDefinition | ScalarFieldDefinition)[],
   /** Quoted PostgreSQL `SELECT` clause. */
   readonly sql: string,
 }
@@ -52,6 +52,10 @@ export interface SQLPredicate {
 
 /** Scoped relation used to evaluate one collection comparison. */
 export interface CollectionScope {
+  /** Nested native-array navigations available to members. */
+  readonly array?: (name: string, parent?: QueryScope) => ArrayScope | undefined,
+  /** Nested collection navigations available to members. */
+  readonly collection?: (name: string, parent?: QueryScope) => CollectionScope | undefined,
   /** Correlated join condition against the root occurrence. */
   readonly condition: string,
   /** Consume finite compiler work for one emitted correlated predicate. */
@@ -95,9 +99,9 @@ export interface ArrayScope {
 /** Optional effective-field scope for polymorphic entity queries. */
 export interface QueryScope {
   /** Resolve a native array navigation for member-predicate compilation. */
-  readonly array?: (name: string) => ArrayScope | undefined,
+  readonly array?: (name: string, parent?: QueryScope) => ArrayScope | undefined,
   /** Resolve a collection navigation for collection comparison compilation. */
-  readonly collection?: (name: string) => CollectionScope | undefined,
+  readonly collection?: (name: string, parent?: QueryScope) => CollectionScope | undefined,
   /** Effective entity metadata used for validation. */
   readonly definition: EntityDefinition,
   /** Render a field expression with physical table qualification. */
@@ -138,6 +142,9 @@ function select(
 /** A validated scalar value bound into a query. */
 type BoundScalar = string | number | boolean | bigint | Date
 
+/** The verified actor identity expression; `NULL` for anonymous requests. */
+const ACTOR_SQL = 'nullif(current_setting(\'actor.id\', true), \'\')'
+
 /** A per-comparison definition used by the closed operator registry. */
 interface ComparisonDefinition {
   /** Field types the operator supports. */
@@ -167,6 +174,7 @@ interface LogicalDefinition {
 const ALL_FIELD_TYPES = new Set<FieldType>([
   FieldType.Boolean,
   FieldType.Date,
+  FieldType.Enum,
   FieldType.ID,
   FieldType.Number,
   FieldType.String,
@@ -300,7 +308,7 @@ function whereClause(
 
   const values: BoundScalar[] = []
   const bind = (value: BoundScalar): string => {
-    if (value === '$me') return 'nullif(current_setting(\'actor.id\', true), \'\')'
+    if (value === ACTOR_FIELD_NAME) return ACTOR_SQL
     values.push(value)
     return `$${values.length}`
   }
@@ -314,8 +322,8 @@ function whereClause(
   let arrayAlias = 0
   const compile = (node: Filter, active: QueryScope): string => {
     if ('field' in node && 'filters' in node) {
-      const collection = active.collection?.(node.field)
-      const arrayScope = active.array?.(node.field)
+      const collection = active.collection?.(node.field, active)
+      const arrayScope = active.array?.(node.field, active)
       if (!collection && !arrayScope) {
         throw new Error(`Unknown collection or array navigation "${node.field}"`)
       }
@@ -377,7 +385,9 @@ function whereClause(
     const comparison = comparisonDefinitions.get(node.operator as Operator.Comparison)
     if (comparison) {
       const comparisonFilter = node as ComparisonFilter
-      const field = (active.filterField ?? active.field)(comparisonFilter.field)
+      const field = comparisonFilter.field === ACTOR_FIELD_NAME
+        ? ACTOR_FIELD
+        : (active.filterField ?? active.field)(comparisonFilter.field)
       const count = active.filterCount?.(comparisonFilter.field)
       if (count && comparisonFilter.operator === Operator.Comparison.Equal && comparisonFilter.value === 0) {
         return count.empty
@@ -400,7 +410,23 @@ function whereClause(
         )
       }
       const operand = comparison.validateOperand(field, comparisonFilter.operator, comparisonFilter.value)
-      return comparison.build(field, active.expression(field), operand, bind)
+      const column = field.name === ACTOR_FIELD_NAME ? ACTOR_SQL : active.expression(field)
+      if (isFieldOperand(operand)) {
+        if (ACTOR_FIELD_NAME === operand.$field) {
+          throw new Error('Query field references cannot target the actor sentinel')
+        }
+        const reference = (active.filterField ?? active.field)(operand.$field)
+        if (comparableType(reference.type) !== comparableType(field.type)) {
+          throw new Error(
+            `Query field reference "${operand.$field}" is not comparable with "${comparisonFilter.field}"`,
+          )
+        }
+        const referenceSql = reference.name === ACTOR_FIELD_NAME
+          ? ACTOR_SQL
+          : active.expression(reference)
+        return comparison.build(field, column, operand, () => referenceSql)
+      }
+      return comparison.build(field, column, operand, bind)
     }
 
     const logical = logicalDefinitions.get(node.operator as Operator.Logical)
@@ -420,6 +446,15 @@ function whereClause(
   }
 
   return { sql: `WHERE ${compile(filter, base)}`, values }
+}
+
+/**
+ * Normalize a field type to its comparable SQL family.
+ * @param type - Declared field type.
+ * @returns The comparable field type.
+ */
+function comparableType(type: FieldType): FieldType {
+  return type === FieldType.Enum ? FieldType.String : type
 }
 
 /**
@@ -530,18 +565,7 @@ export const SQL = { orderBy: orderByClause, paginate, select, where: whereClaus
  * @throws {Error} When the field is unknown or is a navigation/reference.
  */
 function queryField(entity: EntityDefinition, name: string): QueryFieldDefinition {
-  const field = entity.fields.find(candidate => candidate.name === name)
-  if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
-  if (field.type === FieldType.Entity) {
-    return { name: field.column, type: FieldType.ID }
-  }
-  if (field.type === FieldType.Inverse) {
-    throw new Error(
-      `Query field "${entity.name}.${name}" is an inverse navigation; ` +
-      'navigation fields cannot be used in predicates or ordering',
-    )
-  }
-  return field
+  return Predicate.field(entity, name)
 }
 
 /**
@@ -578,7 +602,7 @@ function arrayExpression(
  * @returns The scalar field definition.
  * @throws {Error} When the field is unknown or is an entity reference.
  */
-function scalarField(entity: EntityDefinition, name: string): ScalarFieldDefinition {
+function scalarField(entity: EntityDefinition, name: string): EnumFieldDefinition | ScalarFieldDefinition {
   const field = entity.fields.find(candidate => candidate.name === name)
   if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
   if (field.type === FieldType.Entity) {

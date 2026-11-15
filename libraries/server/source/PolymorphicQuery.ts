@@ -1,4 +1,5 @@
-import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition, ScalarFieldDefinition } from './EntityDefinitions'
+import { collectionSqlRelation } from './CollectionSql'
+import type { AssociationDefinition, DerivedCollectionDefinition, DerivedSingularDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, QueryFieldDefinition, RelationshipDerivedCollectionDefinition, RelationshipFieldDefinition } from './EntityDefinitions'
 import { FieldType, identityDefinition } from './EntityDefinitions'
 import type { Filter } from './Predicate'
 import { arrayItemField } from './Predicate'
@@ -618,38 +619,22 @@ class QueryProjection {
     const rootAlias = this.#nextAlias('cr')
     const relationship = collection.kind === 'relationship' ? collection.relationship : undefined
     const relationshipAlias = relationship ? this.#nextAlias('cj') : undefined
-    let relation: string
-    let condition: string
+    const sql = collectionSqlRelation(collection, `"${parentAlias}".${quote('id')}`, {
+      relationship: relationshipAlias ?? '',
+      root: rootAlias,
+      target: targetAlias ?? '',
+    })
+    const relation = sql.relation
+    const condition = sql.condition
     let parentId: string
     if (collection.kind === 'inverse') {
-      if (targetAlias === undefined) {
-        relation = `"Entity" "${rootAlias}"`
-        condition = `"${rootAlias}".${quote('id')} = "${parentAlias}".${quote('id')}`
-      } else {
-        relation = `"${targetName}" "${targetAlias}" JOIN "Entity" "${rootAlias}" ` +
-          `ON "${rootAlias}".${quote('id')} = "${targetAlias}".${quote('id')}`
-        condition = `"${targetAlias}".${quote(collection.reference.column)} = ` +
-          `"${parentAlias}".${quote('id')}`
-      }
       parentId = targetAlias === undefined
         ? `"${rootAlias}".${quote('id')}`
         : `"${targetAlias}".${quote(collection.reference.column)}`
     } else {
-      const local = relationship.between[collection.endpoint]
-      const remote = relationship.between[collection.endpoint === 0 ? 1 : 0]
-      const remoteColumn = quote(`${remote.field}.id`)
-      if (targetAlias === undefined) {
-        relation = `"${relationship.name}" "${relationshipAlias}" JOIN "Entity" "${rootAlias}" ` +
-          `ON "${rootAlias}".${quote('id')} = "${relationshipAlias}".${remoteColumn}`
-      } else {
-        relation = `"${relationship.name}" "${relationshipAlias}" ` +
-          `JOIN "${targetName}" "${targetAlias}" ` +
-          `ON "${targetAlias}".${quote('id')} = "${relationshipAlias}".${remoteColumn} ` +
-          `JOIN "Entity" "${rootAlias}" ON "${rootAlias}".${quote('id')} = "${targetAlias}".${quote('id')}`
-      }
-      condition = `"${relationshipAlias}".${quote(`${local.field}.id`)} = ` +
-        `"${parentAlias}".${quote('id')}`
-      parentId = `"${relationshipAlias}".${quote(`${local.field}.id`)}`
+      parentId = `"${relationshipAlias as string}".${quote(
+        `${relationship?.between[collection.endpoint].field as string}.id`,
+      )}`
     }
     const plan: CollectionRelationPlan = {
       collection,
@@ -677,23 +662,87 @@ class QueryProjection {
   collectionScope(name: string): CollectionScope | undefined {
     const cached = this.#collectionScopes.get(name)
     if (cached) return cached
-    const collection = this.root.collections.get(name)
+    const resolved = this.#resolveCollectionPath(this.root, name, this.#outerFilterScope())
+    if (!resolved) return undefined
+    const scope = this.#scopeForCollection(resolved, name, true)
+    this.#collectionScopes.set(name, scope)
+    return scope
+  }
+
+  /**
+   * Resolve a collection navigation relative to one occurrence, including
+   * composed singular-reference prefixes.
+   * @param context - Occurrence where the path starts.
+   * @param name - Collection navigation or dotted reference path.
+   * @param sink - Local join sink for reference traversal.
+   * @param depth - Number of reference hops already traversed.
+   * @returns The collection and its parent occurrence, or undefined when absent.
+   */
+  #resolveCollectionPath(
+    context: EntityContext,
+    name: string,
+    sink: FilterJoinScope,
+    depth = 0,
+  ): { collection: DerivedCollectionDefinition, context: EntityContext, parentAlias: string } | undefined {
+    const direct = context.collections.get(name)
+    if (direct) return { collection: direct, context, parentAlias: context.baseAlias }
+    const segments = name.split('.')
+    if (segments.some(segment => segment.length === 0)) {
+      throw new Error(`Invalid collection path "${name}"`)
+    }
+    let current = context
+    let index = 0
+    while (index < segments.length - 1) {
+      const segment = segments[index] as string
+      const field = current.effective.get(segment)
+      if (!field) return undefined
+      if (field.type !== FieldType.Entity) return undefined
+      if (depth >= MAX_REFERENCE_DEPTH) {
+        throw new Error(`Collection path "${name}" exceeds the maximum depth of ${MAX_REFERENCE_DEPTH}`)
+      }
+      const sourceAlias = this.#ownerAlias(current, field.owner, false, sink)
+      const childKey = segments.slice(0, index + 1).join('.')
+      current = this.#filterTarget(field, sourceAlias, childKey, sink)
+      index += 1
+      depth += 1
+    }
+    const collection = current.collections.get(segments[index] as string)
     if (!collection) return undefined
-    const plan = this.#collectionPlan(collection, this.root.baseAlias, name)
+    return { collection, context: current, parentAlias: current.baseAlias }
+  }
+
+  /**
+   * Build the correlated scope used by one resolved collection.
+   * @param resolved - Resolved collection and its parent occurrence.
+   * @param resolved.collection - Collection navigation.
+   * @param resolved.context - Occurrence owning the collection.
+   * @param resolved.parentAlias - Alias of the occurrence owning the collection.
+   * @param name - Stable logical collection path.
+   * @param root - Whether this is a root-level collection.
+   * @returns The collection scope.
+   */
+  #scopeForCollection(
+    resolved: { collection: DerivedCollectionDefinition, context: EntityContext, parentAlias: string },
+    name: string,
+    root: boolean,
+  ): CollectionScope {
+    const plan = this.#collectionPlan(resolved.collection, resolved.parentAlias, name)
     this.#consume(plan.work)
     const relationship = plan.collection.kind === 'relationship' ? plan.collection.relationship : undefined
     const relationshipAlias = plan.relationshipAlias
     const condition = plan.condition
-    this.#countFields.set(
-      `${name}.$count`,
-      this.#collectionCountExpression(plan, `${name}.$count\u0000${this.root.baseAlias}`),
-    )
+    if (root) {
+      this.#countFields.set(
+        `${name}.$count`,
+        this.#collectionCountExpression(plan, `${name}.$count\u0000${resolved.parentAlias}`),
+      )
+    }
     const context: EntityContext = plan.target === undefined
       ? rootContext(this.#entities, plan.rootAlias)
       : targetContext(this.#entities, plan.target, plan.targetAlias as string, plan.rootAlias)
     const expressions = new Map<string, string>()
     const identities = new Set<string>()
-    const resolved = new Map<string, QueryFieldDefinition>()
+    const resolvedFields = new Map<string, QueryFieldDefinition>()
     const joins: string[] = []
     const sink: FilterJoinScope = {
       alias: prefix => this.#nextAlias(prefix),
@@ -703,7 +752,7 @@ class QueryProjection {
     }
     const resolve = (path: string): QueryFieldDefinition => {
       const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
-      const cachedField = resolved.get(normalized)
+      const cachedField = resolvedFields.get(normalized)
       if (cachedField) return cachedField
       path = normalized
       if (relationshipAlias !== undefined && relationship) {
@@ -719,8 +768,8 @@ class QueryProjection {
               `Relationship field "${relationship.name}.${propertyName}" is not a scalar property`,
             )
           }
-          const field: ScalarFieldDefinition = { ...property, name: path }
-          resolved.set(path, field)
+          const field: QueryFieldDefinition = { ...property, name: path }
+          resolvedFields.set(path, field)
           expressions.set(path, `"${relationshipAlias}".${quote(property.name)}`)
           return field
         }
@@ -728,12 +777,17 @@ class QueryProjection {
       const segments = path.split('.')
       if (segments.some(segment => segment.length === 0)) throw new Error(`Invalid filter path "${path}"`)
       const result = this.#resolveFilterPath(context, segments, path, '', 0, sink)
-      resolved.set(path, result.field)
+      resolvedFields.set(path, result.field)
       expressions.set(path, result.expression)
       if (result.identity) identities.add(path)
       return result.field
     }
     const scope: CollectionScope = {
+      array: nested => this.#arrayScopeFor(context, nested, sink),
+      collection: nested => {
+        const inner = this.#resolveCollectionPath(context, nested, sink)
+        return inner ? this.#scopeForCollection(inner, `${name}.${nested}`, false) : undefined
+      },
       condition,
       consume: units => this.#consume(units),
       definition: plan.target ?? identityDefinition(),
@@ -747,7 +801,6 @@ class QueryProjection {
       get relation() { return [plan.relation, ...joins].join(' ') },
       get work() { return plan.work + joins.length },
     }
-    this.#collectionScopes.set(name, scope)
     return scope
   }
 
@@ -792,15 +845,32 @@ class QueryProjection {
    * @returns Array scope, or undefined when the name is not an array.
    */
   arrayScope(name: string): ArrayScope | undefined {
-    if (this.root.collections.has(name)) return undefined
+    return this.#arrayScopeFor(this.root, name, this.#outerFilterScope())
+  }
+
+  /**
+   * Build one native-array member scope relative to an occurrence.
+   * @param context - Occurrence where the path starts.
+   * @param name - Logical array field or dotted reference path.
+   * @param sink - Local join sink for reference traversal.
+   * @returns Array scope, or undefined when the name is not an array.
+   */
+  #arrayScopeFor(
+    context: EntityContext,
+    name: string,
+    sink: FilterJoinScope,
+  ): ArrayScope | undefined {
+    if (context.collections.has(name)) return undefined
     try {
-      const field = this.filterField(name)
-      if (field.type !== FieldType.Array) return undefined
+      const segments = name.split('.')
+      if (segments.some(segment => segment.length === 0)) return undefined
+      const result = this.#resolveFilterPath(context, segments, name, '', 0, sink)
+      if (result.field.type !== FieldType.Array) return undefined
       return {
         consume: units => this.#consume(units),
-        expression: this.expression(field),
-        field,
-        member: arrayItemField(field),
+        expression: result.expression,
+        field: result.field,
+        member: arrayItemField(result.field),
       }
     } catch {
       return undefined
@@ -1825,6 +1895,7 @@ function collectDescendantFields(
  */
 function fieldContract(field: FieldDefinition): string {
   if (field.type === FieldType.JSON) return 'JSON'
+  if (field.type === FieldType.Enum) return `Enum:${field.enum}`
   if (field.type === FieldType.Array) {
     return `Array:${field.items.type}:${field.items.format ?? ''}`
   }

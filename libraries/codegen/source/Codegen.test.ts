@@ -497,6 +497,83 @@ const owner: Note['owner'] = { entity: $BasisEntities.AdminUser, id: '1', name: 
     }
   }, 30_000)
 
+  test('emits named enum contracts in TypeScript and JSON Schema', async () => {
+    const graph = new Graph({
+      entities: [{
+        fields: [
+          { enum: 'AccessLevel', field: 'access', type: FieldType.Enum },
+          { enum: 'AccessLevel', field: 'fallback', nullable: true, type: FieldType.Enum },
+        ],
+        name: 'EnumDocument',
+      }],
+      enums: {
+        AccessLevel: {
+          editor: 'Can edit resources.',
+          owner: 'Can manage resources and membership.',
+          viewer: 'Can view resources.',
+        },
+      },
+    })
+    const types = generateTypes(graph)
+    expect(types).toContain('export enum AccessLevel {')
+    expect(types).toContain('  /** Can manage resources and membership. */\n  Owner = \'owner\',')
+    expect(types).toContain('readonly access: AccessLevel,')
+    expect(types).toContain('readonly fallback: AccessLevel | null,')
+    const schemas = generateJSONSchemas(graph)
+    expect(schemas.$defs.AccessLevel).toEqual({
+      enum: ['editor', 'owner', 'viewer'],
+      oneOf: [
+        { const: 'editor', description: 'Can edit resources.', type: 'string' },
+        { const: 'owner', description: 'Can manage resources and membership.', type: 'string' },
+        { const: 'viewer', description: 'Can view resources.', type: 'string' },
+      ],
+      type: 'string',
+    })
+    const documentSchema = schemas.$defs.EnumDocument as {
+      properties: Record<string, unknown>,
+    }
+    expect(documentSchema.properties.access).toEqual({ $ref: '#/$defs/AccessLevel' })
+    expect(createValidator().validateSchema(schemas)).toBe(true)
+    const validate = compileEntity(schemas, 'EnumDocument')
+    const base = {
+      entity: 'EnumDocument',
+      id: '00000000-0000-4000-8000-000000000001',
+      lastUpdatedAt: null,
+      lastUpdatedBy: null,
+      name: 'Document',
+    }
+    expect(validate({ ...base, access: 'owner', fallback: null })).toBe(true)
+    expect(validate({ ...base, access: 'owner', fallback: 'viewer' })).toBe(true)
+    expect(validate({ ...base, access: 'invalid', fallback: null })).toBe(false)
+
+    const directory = await mkdtemp(join(tmpdir(), 'basis-enum-types-'))
+    try {
+      const file = join(directory, 'types.ts')
+      await writeFile(file, `
+${types}
+const access: EnumDocument['access'] = AccessLevel.Owner
+void access
+      `.trim())
+      const result = Bun.spawnSync({
+        cmd: [
+          process.execPath,
+          './node_modules/@typescript/native/bin/tsc',
+          '--ignoreConfig',
+          '--noEmit',
+          '--skipLibCheck',
+          '--strict',
+          file,
+        ],
+        cwd: process.cwd(),
+        stderr: 'pipe',
+        stdout: 'pipe',
+      })
+      expect(result.exitCode).toBe(0)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  }, 30_000)
+
   test('emits TypeScript that compiles', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'basis-authored-types-'))
     try {

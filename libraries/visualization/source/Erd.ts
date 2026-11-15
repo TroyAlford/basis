@@ -85,6 +85,7 @@ function mermaidField(field: EffectiveFieldDefinition | FieldDefinition): string
   if (field.type === FieldType.Array) return `${mermaidScalar(field.items.type)}[] ${field.name}`
   if (field.type === FieldType.JSON) return `json ${field.name}`
   if (field.type === FieldType.Inverse) return `unknown ${field.name}`
+  if (field.type === FieldType.Enum) return `string ${field.name}`
   return `${mermaidScalar(field.type)} ${field.name}`
 }
 

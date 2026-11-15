@@ -2,12 +2,39 @@ import type { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
 import type { ArrayFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarArrayElementDefinition } from './EntityDefinitions'
 import { FieldType, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
+import { Operator } from './Operator'
 import { compileEntityRecordQuery, compilePolymorphicQuery } from './PolymorphicQuery'
 import { postgresScalarType } from './PostgresTypes'
 import type { Filter } from './Predicate'
 
 /** Maximum records accepted by one bulk mutation. */
 export const MAX_MUTATION_BATCH = 1_000
+
+/** Entity ids touched by Graph-native verbs inside one native transaction. */
+const affectedSubjects = new WeakMap<object, Map<string, Set<string>>>()
+
+/**
+ * Record one Graph-native subject write for transaction-final validation.
+ * @param sql - Transaction-scoped SQL client.
+ * @param entity - Concrete entity name.
+ * @param id - Written identity.
+ */
+function recordSubject(sql: object, entity: string, id: string): void {
+  const subjects = affectedSubjects.get(sql) ?? new Map<string, Set<string>>()
+  const ids = subjects.get(entity) ?? new Set<string>()
+  ids.add(id)
+  subjects.set(entity, ids)
+  affectedSubjects.set(sql, subjects)
+}
+
+/**
+ * Read the Graph-native subjects written inside one native transaction.
+ * @param sql - Transaction-scoped SQL client.
+ * @returns Entity names mapped to written identities.
+ */
+export function writtenSubjects(sql: object): ReadonlyMap<string, ReadonlySet<string>> {
+  return affectedSubjects.get(sql) ?? new Map<string, ReadonlySet<string>>()
+}
 
 /** Stable mutation failure categories. */
 export type MutationErrorCode =
@@ -197,6 +224,60 @@ export function mutationRunner(entities: EntityDefinitions, sql: BunSQL): Mutati
 }
 
 /**
+ * Validate the transaction-final state of every Graph-native subject written
+ * in one native transaction.
+ *
+ * Validation runs after the caller's callback resolves and before commit. A
+ * FALSE or UNKNOWN predicate for one existing written subject aborts the whole
+ * transaction through the standard mutation error boundary. Deleted subjects
+ * and rows no longer visible to the actor are skipped.
+ * @param entities - Canonical entity definitions.
+ * @param sql - Native transaction client.
+ * @throws {MutationError} When an existing written subject violates a validation constraint.
+ */
+export async function validateTransactionState(
+  entities: EntityDefinitions,
+  sql: BunSQL,
+): Promise<void> {
+  const subjects = writtenSubjects(sql)
+  if (subjects.size === 0) return
+  for (const [name, ids] of subjects) {
+    const constraints = entities.validationConstraints(name)
+    if (constraints.length === 0) continue
+    const definition = entities.entity(name)
+    if (!definition || definition.abstract) continue
+    for (const id of ids) {
+      const [present] = await execute(sql, {
+        sql: 'SELECT 1 AS "present" FROM "Entity" WHERE "id" = $1',
+        values: [id],
+      })
+      if (!present) continue
+      for (const constraint of constraints) {
+        const where: Filter = {
+          filters: [
+            constraint.where,
+            { field: 'id', operator: Operator.Comparison.Equal, value: id },
+          ],
+          operator: Operator.Logical.And,
+        }
+        const compiled = compilePolymorphicQuery(entities, definition, {
+          fields: ['id'],
+          limit: 1,
+          where,
+        })
+        const rows = await execute(sql, { sql: compiled.sql, values: compiled.values })
+        if (rows.length === 0) {
+          throw new MutationError(
+            'constraint',
+            `Validation constraint "${constraint.name}" on "${constraint.owner}" failed`,
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
  * Create one entity or a finite synchronous batch atomically.
  * @param options - Canonical definitions and transaction client.
  * @param options.entities - Canonical entity definitions.
@@ -218,7 +299,10 @@ async function create(
     value,
     single ? '/values' : `/values/${index}`,
   ))
-  for (const item of prepared) await insert(entities, sql, definition, item)
+  for (const item of prepared) {
+    await insert(entities, sql, definition, item)
+    recordSubject(sql, entity, item.id)
+  }
   if (!single) return { created: prepared.length }
   const [item] = prepared
   if (!item) return { created: 0 }
@@ -248,6 +332,7 @@ async function edit(
   const normalized = prepareChanges(entities, definition, changes, '/changes')
   const matches = await selectMatches({ entities, sql }, definition, filter)
   const mutable = await applyEdit({ entities, sql }, definition, matches, normalized)
+  for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
   if (mutable.length !== 1) return { edited: mutable.length }
   const [identity] = mutable
   if (!identity) return { edited: 0 }
@@ -277,6 +362,7 @@ async function remove(
   let deleted = 0
   for (const [leaf, identities] of groupByIdentity(matches)) {
     const ids = identities.map(identity => identity.id)
+    for (const id of ids) recordSubject(sql, leaf, id)
     const ancestry = entities.ancestry(leaf).slice(1).filter(table => table !== 'Entity')
     deleted += (await deleteChain(sql, leaf, ancestry, ids)).length
   }
@@ -318,6 +404,7 @@ async function upsert(
   }
   const changes = prepareChanges(entities, definition, values, '/values')
   await applyChanges({ entities, sql }, definition, mutable, changes)
+  for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
   const [identity] = mutable
   if (!identity) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
   return {
@@ -359,6 +446,7 @@ async function createUpsert(
       )
     }
     await execute(sql, { sql: `RELEASE SAVEPOINT ${quote(name)}`, values: [] })
+    recordSubject(sql, definition.name, item.id)
     return {
       created: 1,
       edited: 0,
@@ -621,6 +709,12 @@ function validateValue(
     if (value instanceof Date) return value
     if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
       throw new MutationError('validation', `Field "${field.name}" must be a timestamp`, { path })
+    }
+    return value
+  }
+  if (field.type === FieldType.Enum) {
+    if (typeof value !== 'string') {
+      throw new MutationError('validation', `Field "${field.name}" must be a string enum value`, { path })
     }
     return value
   }

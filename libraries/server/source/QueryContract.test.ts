@@ -63,6 +63,51 @@ if (!note) throw new Error('missing Note entity')
 const pet = definitions.entity('Pet')
 if (!pet) throw new Error('missing Pet entity')
 
+const nestedDefinitions = EntityDefinitions.load(JSON.stringify({
+  entities: [
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'label', type: 'String' },
+        {
+          cardinality: 'Many',
+          field: 'pets',
+          inverse: 'owner',
+          target: 'Pet',
+          type: 'Inverse',
+        },
+      ],
+      name: 'User',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'label', type: 'String' },
+        { field: 'owner', inverse: 'pets', target: 'User', type: 'Entity' },
+        {
+          cardinality: 'Many',
+          field: 'toys',
+          inverse: 'pet',
+          target: 'Toy',
+          type: 'Inverse',
+        },
+      ],
+      name: 'Pet',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'label', type: 'String' },
+        { field: 'pet', inverse: 'toys', target: 'Pet', type: 'Entity' },
+      ],
+      name: 'Toy',
+    },
+  ],
+}))
+
+const nestedPet = nestedDefinitions.entity('Pet')
+if (!nestedPet) throw new Error('missing nested Pet entity')
+
 const relationshipDefinitions = EntityDefinitions.load(JSON.stringify({
   entities: [
     {
@@ -332,7 +377,7 @@ describe('Query contract', () => {
     expect(two.sql).toContain('"favorite.id"')
     expect(two.values).toEqual([identity, second, 25, 0])
 
-    const nestedDefinitions = EntityDefinitions.load(JSON.stringify({
+    const nestedQueryDefinitions = EntityDefinitions.load(JSON.stringify({
       entities: [
         {
           fields: [
@@ -350,7 +395,7 @@ describe('Query contract', () => {
         },
       ],
     }))
-    const nested = compileEntityQuery(nestedDefinitions, 'Pet', {
+    const nested = compileEntityQuery(nestedQueryDefinitions, 'Pet', {
       fields: ['id'],
       where: { 'owner.manager': identity },
     })
@@ -873,7 +918,7 @@ describe('Query contract', () => {
     })).toThrow('Unknown collection or array navigation')
     expect(() => compileEntityQuery(relationshipDefinitions, 'User', {
       fields: ['id'],
-      where: "pets $contains (tags $contains (title = 'Ada'))",
+      where: "pets $contains (missing $contains (title = 'Ada'))",
     })).toThrow('Unknown collection or array navigation')
     expect(() => compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id'],
@@ -1003,5 +1048,39 @@ describe('Query contract', () => {
 
   test('preserves the source diagnostic offset for malformed string input', () => {
     expect(() => QueryNormalizer.normalize(note, "title = 'unterminated")).toThrow('at 8')
+  })
+
+  test('compiles nested collections and composed reference plus collection paths', () => {
+    const nested = compileEntityQuery(nestedDefinitions, 'Pet', {
+      fields: ['id'],
+      limit: null,
+      where: "toys $contains (label = 'ball')",
+    })
+    expect(nested.sql).toMatch(/EXISTS \(SELECT 1 FROM "Toy"/u)
+    expect(nested.sql).toContain('"pet.id"')
+
+    const composed = compileEntityQuery(nestedDefinitions, 'Pet', {
+      fields: ['id'],
+      limit: null,
+      where: "owner.pets $contains (label = 'Rex')",
+    })
+    expect(composed.sql).toContain('"owner.id" = "b1"."id"')
+    expect(composed.sql).toMatch(/EXISTS \(SELECT 1 FROM "Pet"/u)
+
+    const memberNested = compileEntityQuery(nestedDefinitions, 'User', {
+      fields: ['id'],
+      limit: null,
+      where: "pets $contains (toys $contains (label = 'ball'))",
+    })
+    expect(memberNested.sql.match(/EXISTS \(SELECT 1 FROM "Toy"/gu)).toHaveLength(1)
+    expect(memberNested.sql).toContain('"pet.id"')
+
+    const sameMember = compileEntityQuery(nestedDefinitions, 'User', {
+      fields: ['id'],
+      limit: null,
+      where: "pets $contains (label = 'Rex' AND toys $contains (label = 'ball'))",
+    })
+    expect(sameMember.sql.match(/EXISTS \(SELECT 1 FROM "Pet"/gu)).toHaveLength(1)
+    expect(sameMember.sql.match(/EXISTS \(SELECT 1 FROM "Toy"/gu)).toHaveLength(1)
   })
 })
