@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { Logger } from 'basis/logger'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { bunCheckUnsupportedReason } from './bun-version'
@@ -46,12 +47,19 @@ const REQUIRED_EXPORTS = [
   './tsconfig/react.json',
 ]
 
-/**
- * Writes a line to stdout, keeping the CLI free of direct console usage.
- * @param line The text to emit.
- */
-const write = (line: string): void => {
-  process.stdout.write(`${line}\n`)
+/** The Basis CLI's structured logger. */
+const logger = new Logger({ colors: false })
+
+/** The closed CLI command vocabulary. */
+enum Command {
+  Check = 'check',
+  Compliance = 'compliance',
+  Docs = 'docs',
+  Doctor = 'doctor',
+  Emit = 'emit',
+  Format = 'format',
+  Lint = 'lint',
+  Typecheck = 'typecheck',
 }
 
 /**
@@ -198,7 +206,7 @@ const runCompliance = (): number => runBin('eslint', 'eslint', [
 const requireBunCheck = (): boolean => {
   const reason = bunCheckUnsupportedReason()
   if (reason === null) return true
-  process.stderr.write(`${reason}\n`)
+  logger.error(reason)
   return false
 }
 
@@ -226,13 +234,13 @@ const runEmit = async (): Promise<number> => {
   try {
     const result = await emit()
     if (!result) {
-      write('[basis] emit: no graph.ts found; skipped')
+      logger.info('[basis] emit: no graph.ts found; skipped')
       return 0
     }
-    write(`[basis] emit: ${result.emitters.join(', ')} -> ${result.outputRoot}`)
+    logger.info(`[basis] emit: ${result.emitters.join(', ')} -> ${result.outputRoot}`)
     return 0
   } catch (error) {
-    process.stderr.write(`[basis] emit: ${error instanceof Error ? error.message : String(error)}\n`)
+    logger.error(`[basis] emit: ${error instanceof Error ? error.message : String(error)}`)
     return 1
   }
 }
@@ -247,46 +255,46 @@ const doctor = (): number => {
   const installRoot = resolveInstallRoot(root)
   let failures = 0
 
-  write(`[basis] version ${manifest.version ?? 'unknown'}`)
-  write(`[basis] consumer root ${installRoot}`)
+  logger.info(`[basis] version ${manifest.version ?? 'unknown'}`)
+  logger.info(`[basis] consumer root ${installRoot}`)
 
   const unsupportedBun = bunCheckUnsupportedReason()
   if (unsupportedBun === null) {
-    write(`[basis] bun ${Bun.version} typecheck ok`)
+    logger.info(`[basis] bun ${Bun.version} typecheck ok`)
   } else {
     failures += 1
-    write(unsupportedBun)
+    logger.info(unsupportedBun)
   }
 
   for (const subpath of REQUIRED_EXPORTS) {
     const target = manifest.exports?.[subpath]
     const ok = target !== undefined && existsSync(join(root, target))
     if (!ok) failures += 1
-    write(`[basis] export ${subpath} ${ok ? 'ok' : 'missing'}`)
+    logger.info(`[basis] export ${subpath} ${ok ? 'ok' : 'missing'}`)
   }
 
   try {
     const result = applyBasisPatches({ basisDir: root, rootDir: installRoot, write: false })
-    write(`[basis] owned patches ${result.applied.length + result.retired.length + result.skipped.length}`)
+    logger.info(`[basis] owned patches ${result.applied.length + result.retired.length + result.skipped.length}`)
 
-    for (const key of result.skipped) write(`[basis] patch ${key} applied`)
+    for (const key of result.skipped) logger.info(`[basis] patch ${key} applied`)
     for (const key of result.applied) {
       failures += 1
-      write(`[basis] patch ${key} pending (run \`bun install\`)`)
+      logger.info(`[basis] patch ${key} pending (run \`bun install\`)`)
     }
     for (const key of result.retired) {
       failures += 1
-      write(`[basis] patch ${key} retired but still installed (run \`bun install\`)`)
+      logger.info(`[basis] patch ${key} retired but still installed (run \`bun install\`)`)
     }
   } catch (error) {
     failures += 1
-    write(`[basis] patch ${error instanceof Error ? error.message : String(error)}`)
+    logger.info(`[basis] patch ${error instanceof Error ? error.message : String(error)}`)
   }
 
   const consumerManifest = readJson<BasisManifest>(join(installRoot, 'package.json'))
   if (!(consumerManifest.trustedDependencies ?? []).includes('basis')) {
     failures += 1
-    write('[basis] trustedDependencies is missing "basis"; lifecycle hook will not run')
+    logger.info('[basis] trustedDependencies is missing "basis"; lifecycle hook will not run')
   }
 
   const consumerPatches = Object.keys(consumerManifest.patchedDependencies ?? {})
@@ -294,10 +302,10 @@ const doctor = (): number => {
   const copied = consumerPatches.filter(key => ownedPatches.includes(key))
   if (copied.length > 0) {
     failures += 1
-    write(`[basis] legacy copied patches: ${copied.join(', ')}`)
+    logger.info(`[basis] legacy copied patches: ${copied.join(', ')}`)
   }
 
-  write(failures === 0 ? '[basis] doctor: ok' : `[basis] doctor: ${failures} problem(s)`)
+  logger.info(failures === 0 ? '[basis] doctor: ok' : `[basis] doctor: ${failures} problem(s)`)
   return failures === 0 ? 0 : 1
 }
 
@@ -305,7 +313,7 @@ const doctor = (): number => {
  * Prints usage information for the CLI.
  */
 const usage = (): void => {
-  write([
+  logger.info([
     'usage: basis <compliance|docs build [--out <dir>] [--base <path>]',
     '|docs check|doctor|emit|format|lint|typecheck|check>',
   ].join(''))
@@ -315,18 +323,19 @@ const usage = (): void => {
  * Dispatches the requested CLI command.
  */
 const main = async (): Promise<void> => {
-  const [command, ...args] = process.argv.slice(2)
+  const [rawCommand, ...args] = process.argv.slice(2)
+  const command = Object.values(Command).find(candidate => candidate === rawCommand)
 
-  if (command === 'doctor') process.exit(doctor())
-  if (command === 'emit') process.exit(await runEmit())
-  if (command === 'lint') process.exit(runLint(false))
-  if (command === 'format') process.exit(runLint(true))
-  if (command === 'compliance') process.exit(runCompliance())
-  if (command === 'typecheck') {
+  if (command === Command.Doctor) process.exit(doctor())
+  if (command === Command.Emit) process.exit(await runEmit())
+  if (command === Command.Lint) process.exit(runLint(false))
+  if (command === Command.Format) process.exit(runLint(true))
+  if (command === Command.Compliance) process.exit(runCompliance())
+  if (command === Command.Typecheck) {
     const emitCode = await runEmit()
     process.exit(emitCode === 0 ? runTypecheck() : emitCode)
   }
-  if (command === 'check') {
+  if (command === Command.Check) {
     if (!requireBunCheck()) process.exit(1)
     const emitCode = await runEmit()
     if (emitCode !== 0) process.exit(emitCode)
@@ -334,7 +343,7 @@ const main = async (): Promise<void> => {
     process.exit(lintCode === 0 ? spawnBunCheck() : lintCode)
   }
 
-  if (command === 'docs') {
+  if (command === Command.Docs) {
     const [subcommand, ...rest] = args
     if (subcommand === 'build') {
       void runDocsBuild(rest).then(code => process.exit(code))
