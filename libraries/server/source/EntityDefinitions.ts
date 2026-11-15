@@ -394,9 +394,9 @@ interface LifecycleTrigger {
 }
 
 /** Canonical UUID identity pattern. */
-const UUID_IDENTITY_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+export const UUID_IDENTITY_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 /** Canonical signed 64-bit decimal identity pattern. */
-const SNOWFLAKE_IDENTITY_PATTERN = '^(0|-?[1-9][0-9]*)$'
+export const SNOWFLAKE_IDENTITY_PATTERN = '^(0|-?[1-9][0-9]*)$'
 /** Canonical signed 64-bit decimal bounds. */
 const SNOWFLAKE_MIN_TEXT = '-9223372036854775808'
 const SNOWFLAKE_MAX_TEXT = '9223372036854775807'

@@ -805,9 +805,13 @@ function bindValue(
   bindings: unknown[],
 ): string {
   if (field?.type === FieldType.Array) {
+    const type = postgresScalarType(field.items.type)
+    if (value === null) {
+      bindings.push(null)
+      return `$${bindings.length}::${type}[]`
+    }
     const array = value as readonly unknown[]
     if (array.length === 0) {
-      const type = postgresScalarType(field.items.type)
       return `ARRAY[]::${type}[]`
     }
     const elements = array.map(element => {

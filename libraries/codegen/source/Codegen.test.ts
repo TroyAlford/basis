@@ -1,3 +1,4 @@
+import Ajv from 'ajv'
 import { Cardinality, FieldType, Graph } from 'basis/server'
 import type { SQL } from 'bun'
 import { describe, expect, test } from 'bun:test'
@@ -6,69 +7,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MutationError, mutationRunner } from '../../server/source/Mutation'
 import { emitter, generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from '../index'
-
-/**
- * Validate one value against the JSON Schema keywords emitted by codegen.
- * @param schema - Generated JSON Schema fragment.
- * @param value - Candidate value.
- * @returns Whether the value satisfies the schema.
- */
-function validates(schema: Record<string, unknown>, value: unknown): boolean {
-  if (Array.isArray(schema.anyOf)) {
-    return schema.anyOf.some(candidate => validates(candidate as Record<string, unknown>, value))
-  }
-  if (schema.const !== undefined && value !== schema.const) return false
-  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return false
-  const types = Array.isArray(schema.type) ? schema.type : schema.type === undefined ? [] : [schema.type]
-  if (types.length > 0 && !types.some(type => matchesType(type as string, value))) return false
-  if (schema.type === 'object') {
-    if (!isPlainRecord(value)) return false
-    const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>
-    for (const key of (schema.required ?? []) as readonly string[]) {
-      if (!Object.hasOwn(value, key)) return false
-    }
-    for (const [key, entry] of Object.entries(value)) {
-      const property = properties[key]
-      if (!property) {
-        if (schema.additionalProperties === false) return false
-        continue
-      }
-      if (!validates(property, entry)) return false
-    }
-  }
-  if (schema.type === 'number' && typeof value === 'number') {
-    if (typeof schema.minimum === 'number' && value < schema.minimum) return false
-    if (typeof schema.maximum === 'number' && value > schema.maximum) return false
-  }
-  if (schema.type === 'string' && typeof value === 'string') {
-    const length = [...value].length
-    if (typeof schema.minLength === 'number' && length < schema.minLength) return false
-    if (typeof schema.maxLength === 'number' && length > schema.maxLength) return false
-  }
-  return true
-}
-
-/**
- * Whether one JSON Schema type matches a value.
- * @param type - JSON Schema type name.
- * @param value - Candidate value.
- * @returns Whether the type matches.
- */
-function matchesType(type: string, value: unknown): boolean {
-  if (type === 'null') return value === null
-  if (type === 'array') return Array.isArray(value)
-  if (type === 'object') return isPlainRecord(value)
-  return typeof value === type
-}
-
-/**
- * Whether a value is a plain object.
- * @param value - Candidate value.
- * @returns Whether it is a non-array object.
- */
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 const document = {
   entities: [
@@ -204,13 +142,106 @@ describe('codegen', () => {
     }
     expect(create.additionalProperties).toBe(false)
     expect(create.required).toEqual(['name', 'score', 'title'])
-    expect(create.properties.id).toEqual({ type: 'string' })
+    expect(create.properties.id).toHaveProperty('anyOf')
     expect(create.properties.entity).toBeUndefined()
     expect(create.properties.score?.minimum).toBe(0)
     expect(create.properties.score?.maximum).toBe(10)
     expect(create.properties.title?.minLength).toBe(2)
     expect(create.properties.title?.maxLength).toBe(20)
     expect(create.properties.nickname?.readOnly).toBeUndefined()
+  })
+
+  test('emits nullable output contracts and TypeScript null unions from canonical fields', () => {
+    const graph = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: FieldType.String }], name: 'User' },
+        {
+          fields: [
+            { field: 'nullableJSON', nullable: true, type: FieldType.JSON },
+            { field: 'nullableOwner', target: 'User', type: FieldType.Entity },
+            { field: 'nullableTags', items: { type: FieldType.String }, nullable: true, type: FieldType.Array },
+            { field: 'nullableText', nullable: true, type: FieldType.String },
+            { field: 'requiredJSON', type: FieldType.JSON },
+            { field: 'requiredOwner', nullable: false, target: 'User', type: FieldType.Entity },
+            { field: 'requiredTags', items: { type: FieldType.String }, type: FieldType.Array },
+            { field: 'requiredText', type: FieldType.String },
+          ],
+          name: 'Thing',
+        },
+      ],
+    })
+    const types = generateTypes(graph)
+    expect(types).toContain('readonly nullableText: string | null')
+    expect(types).toContain('readonly requiredText: string')
+    expect(types).toContain('readonly nullableTags: readonly string[] | null')
+    expect(types).toContain('readonly requiredTags: readonly string[]')
+    expect(types).toContain('readonly nullableOwner: UserRef | null')
+    expect(types).toContain('readonly requiredOwner: UserRef')
+    expect(types).not.toContain('readonly requiredOwner: UserRef | null')
+    const schemas = generateJSONSchemas(graph)
+    const validate = new Ajv({ allErrors: true }).compile(schemas.Thing?.output as object)
+    const id = '00000000-0000-4000-8000-000000000001'
+    const base = {
+      entity: 'Thing',
+      id,
+      name: 'Thing',
+      nullableJSON: null,
+      nullableOwner: null,
+      nullableTags: null,
+      nullableText: null,
+      requiredJSON: { active: true },
+      requiredOwner: { entity: 'User', id, name: 'Owner' },
+      requiredTags: ['a'],
+      requiredText: 'Text',
+    }
+    expect(validate(base)).toBe(true)
+    expect(validate({ ...base, nullableJSON: { active: true }, nullableTags: ['b'], nullableText: 'Text' }))
+      .toBe(true)
+    expect(validate({ ...base, requiredText: null })).toBe(false)
+    expect(validate({ ...base, requiredTags: null })).toBe(false)
+    expect(validate({ ...base, requiredOwner: null })).toBe(false)
+    expect(validate({ ...base, requiredJSON: null })).toBe(false)
+  })
+
+  test('emits canonical identity formats and Snowflake create requiredness', async () => {
+    const graph = new Graph({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'UuidThing' },
+        { fields: [{ field: 'id', format: 'Snowflake' }], name: 'SnowThing' },
+        { fields: [], name: 'AnyThing' },
+      ],
+    })
+    const schemas = generateJSONSchemas(graph)
+    const ajv = new Ajv({ allErrors: true })
+    const uuidValidate = ajv.compile(schemas.UuidThing?.create as object)
+    const snowValidate = ajv.compile(schemas.SnowThing?.create as object)
+    const anyValidate = ajv.compile(schemas.AnyThing?.create as object)
+    const uuid = '00000000-0000-4000-8000-000000000001'
+    expect(uuidValidate({ name: 'UuidThing' })).toBe(true)
+    expect(uuidValidate({ id: uuid, name: 'UuidThing' })).toBe(true)
+    expect(uuidValidate({ id: 'garbage', name: 'UuidThing' })).toBe(false)
+    expect(uuidValidate({ id: '123', name: 'UuidThing' })).toBe(false)
+    expect(snowValidate({ name: 'SnowThing' })).toBe(false)
+    expect(snowValidate({ id: '123', name: 'SnowThing' })).toBe(true)
+    expect(snowValidate({ id: 'garbage', name: 'SnowThing' })).toBe(false)
+    expect(anyValidate({ name: 'AnyThing' })).toBe(true)
+    expect(anyValidate({ id: uuid, name: 'AnyThing' })).toBe(true)
+    expect(anyValidate({ id: '123', name: 'AnyThing' })).toBe(true)
+    expect(anyValidate({ id: 'garbage', name: 'AnyThing' })).toBe(false)
+    const sql = {
+      async unsafe(): Promise<Record<string, unknown>[]> {
+        return []
+      },
+    } as unknown as SQL
+    const mutations = mutationRunner(graph.definitions, sql)
+    await expect(mutations.create('SnowThing', { name: 'SnowThing' }))
+      .rejects.toBeInstanceOf(MutationError)
+    await expect(mutations.create('SnowThing', { id: 'garbage', name: 'SnowThing' }))
+      .rejects.toBeInstanceOf(MutationError)
+    expect(await mutations.create('SnowThing', { id: '123', name: 'SnowThing' }))
+      .toEqual({ created: 1 })
+    await expect(mutations.create('UuidThing', { id: 'garbage', name: 'UuidThing' }))
+      .rejects.toBeInstanceOf(MutationError)
   })
 
   test('keeps generated create/update schemas aligned with mutation validation', async () => {
@@ -225,12 +256,9 @@ describe('codegen', () => {
       }],
     })
     const schemas = generateJSONSchemas(graph)
-    const validateCreate = (value: unknown): boolean => (
-      validates(schemas.Thing?.create as Record<string, unknown>, value)
-    )
-    const validateUpdate = (value: unknown): boolean => (
-      validates(schemas.Thing?.update as Record<string, unknown>, value)
-    )
+    const ajv = new Ajv({ allErrors: true })
+    const validateCreate = ajv.compile(schemas.Thing?.create as object)
+    const validateUpdate = ajv.compile(schemas.Thing?.update as object)
     const sql = {
       async unsafe(): Promise<Record<string, unknown>[]> {
         return []

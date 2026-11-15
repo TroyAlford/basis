@@ -61,11 +61,17 @@ export default TypeScriptEmitter
  * @returns TypeScript type expression.
  */
 function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
-  if (field.type === FieldType.Entity) return `${field.target}Ref | null`
-  if (field.type === FieldType.Array) return `readonly ${scalarType(field.items.type)}[]`
+  if (field.type === FieldType.Entity) {
+    return field.nullable === false ? `${field.target}Ref` : `${field.target}Ref | null`
+  }
+  if (field.type === FieldType.Array) {
+    const array = `readonly ${scalarType(field.items.type)}[]`
+    return field.nullable === true ? `${array} | null` : array
+  }
   if (field.type === FieldType.JSON) return 'unknown'
   if (field.type === FieldType.Inverse) return 'unknown'
-  return scalarType(field.type)
+  const scalar = scalarType(field.type)
+  return field.nullable === true ? `${scalar} | null` : scalar
 }
 
 /**

@@ -81,7 +81,12 @@ export type {
   UpsertResult,
 } from './source/Mutation'
 export { SortDirection } from './source/SortDirection'
-export { Constraint, FieldType } from './source/EntityDefinitions'
+export {
+  Constraint,
+  FieldType,
+  SNOWFLAKE_IDENTITY_PATTERN,
+  UUID_IDENTITY_PATTERN,
+} from './source/EntityDefinitions'
 export { Operator } from './source/Operator'
 export type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
 export type { ArrayScope, CollectionScope, CountScope, QueryScope } from './source/SQL'

@@ -1,5 +1,5 @@
 import type { EffectiveFieldDefinition, EntityDefinition, Graph, ScalarFieldDefinition } from 'basis/server'
-import { FieldType } from 'basis/server'
+import { FieldType, SNOWFLAKE_IDENTITY_PATTERN, UUID_IDENTITY_PATTERN } from 'basis/server'
 import type { EmittedFile } from '../emitter'
 import { emitter } from '../emitter'
 
@@ -33,6 +33,7 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
     const writableProperties = Object.fromEntries(
       writable.map(field => [field.name, schemaForField(field, 'input', definitions)]),
     )
+    const identity = identitySchema(entity.idFormat)
     const required = writable
       .filter(field => field.default === undefined && (
         field.type === FieldType.Entity ? field.nullable === false : field.nullable !== true
@@ -40,7 +41,7 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
       .map(field => field.name)
     const outputProperties = {
       entity: discriminatorSchema(entity, definitions),
-      id: { type: 'string' },
+      id: identity,
       name: { type: 'string' },
       ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'output', definitions)])),
     }
@@ -48,11 +49,15 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
       create: {
         additionalProperties: false,
         properties: {
-          id: { type: 'string' },
+          id: identity,
           name: { type: 'string' },
           ...writableProperties,
         },
-        required: ['name', ...required],
+        required: [
+          ...(entity.idFormat === 'Snowflake' ? ['id'] : []),
+          'name',
+          ...required,
+        ],
         type: 'object',
       },
       output: {
@@ -114,47 +119,65 @@ function schemaForField(
         ? { type: 'string' }
         : { type: ['string', 'null'] }
     }
-    return {
-      anyOf: [{
-        properties: {
-          entity: discriminatorSchemaForTarget(field.target, definitions),
-          id: { type: 'string' },
-          name: { type: 'string' },
-        },
-        required: ['id', 'name', 'entity'],
-        type: 'object',
-      }, { type: 'null' }],
+    const reference = {
+      properties: {
+        entity: discriminatorSchemaForTarget(field.target, definitions),
+        id: identitySchema(definitions.entity(field.target)?.idFormat),
+        name: { type: 'string' },
+      },
+      required: ['id', 'name', 'entity'],
+      type: 'object',
     }
+    return field.nullable === false ? reference : { anyOf: [reference, { type: 'null' }] }
   }
   if (field.type === FieldType.Array) {
-    return nullableInput({
+    return nullableSchema({
       items: schemaForScalar(field.items.type),
       type: 'array',
-    }, mode, field)
+    }, field)
   }
-  if (field.type === FieldType.JSON) return nullableInput({}, mode, field)
-  const schema = {
+  if (field.type === FieldType.JSON) {
+    return field.nullable === true ? {} : { not: { type: 'null' } }
+  }
+  return nullableSchema({
     ...schemaForScalar(field.type),
     ...boundsFor(field),
-  }
-  return nullableInput(schema, mode, field)
+  }, field)
 }
 
 /**
- * Allow null for a nullable mutation input.
- * @param schema - Non-null input schema.
- * @param mode - Input identifier or hydrated output shape.
+ * Allow null exactly when the canonical field is nullable.
+ * @param schema - Non-null schema.
  * @param field - Effective field.
- * @returns The mutation-input schema.
+ * @returns The field schema with its null union.
  */
-function nullableInput(
+function nullableSchema(
   schema: Record<string, unknown>,
-  mode: 'input' | 'output',
   field: EffectiveFieldDefinition,
 ): Record<string, unknown> {
-  return mode === 'input' && field.nullable === true
+  return field.nullable === true
     ? { anyOf: [schema, { type: 'null' }] }
     : schema
+}
+
+/**
+ * Render the canonical root identity schema for one entity format.
+ * @param format - Effective identity format, when refined.
+ * @returns JSON Schema for the shared root `id` field.
+ */
+function identitySchema(
+  format: 'Snowflake' | 'UUID' | undefined,
+): Record<string, unknown> {
+  if (format === 'UUID') return { pattern: UUID_IDENTITY_PATTERN, type: 'string' }
+  if (format === 'Snowflake') {
+    return { maxLength: 20, pattern: SNOWFLAKE_IDENTITY_PATTERN, type: 'string' }
+  }
+  return {
+    anyOf: [
+      { pattern: UUID_IDENTITY_PATTERN, type: 'string' },
+      { maxLength: 20, pattern: SNOWFLAKE_IDENTITY_PATTERN, type: 'string' },
+    ],
+  }
 }
 
 /**
