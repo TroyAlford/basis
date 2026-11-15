@@ -162,6 +162,13 @@ describe('Graph validation constraints', () => {
         title: 'Valid',
       })))
       expect(valid).toBeDefined()
+      const upserted = await asAdmin(() => server.db.upsert('Document', { title: 'Upsert valid' }, {
+        name: 'Upsert valid',
+        owner: ownerA,
+        revision: null,
+        title: 'Upsert valid',
+      }))
+      expect(upserted.created).toBe(1)
 
       const failure = await asAdmin(() => server.db.create('Document', {
         name: 'Invalid',
@@ -177,7 +184,7 @@ describe('Graph validation constraints', () => {
         fields: ['id'],
         limit: null,
       }))
-      expect(documents).toHaveLength(1)
+      expect(documents).toHaveLength(2)
 
       await expect(asAdmin(() => server.db.tx(async sql => {
         await sql.create('Owner', { label: 'Rolled back', name: 'Rolled back' })
@@ -397,6 +404,17 @@ describe('Graph validation constraints', () => {
         [validWorkspace],
       )
       expect(validMembership).toEqual([])
+      const validator = invisibleGraph.definitions.validationConstraints('Workspace')[0]?.validator
+      if (!validator) throw new Error('validation helper was not compiled')
+      const foreign = await runAsActor({ id: null }, () => server.db.tx(async sql => (
+        sql.unsafe<{ valid: boolean }[]>(`SELECT ${validator}($1) AS "valid"`, [validWorkspace])
+      )))
+      expect(foreign).toEqual([{ valid: false }])
+      const written = await asAdmin(() => server.db.tx(async sql => {
+        await sql.edit('Workspace', { id: workspace }, { title: 'Written edit' })
+        return sql.unsafe<{ valid: boolean }[]>(`SELECT ${validator}($1) AS "valid"`, [workspace])
+      }))
+      expect(written).toEqual([{ valid: true }])
     } finally {
       await connection.close()
       await server.shutdown()

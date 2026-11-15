@@ -1394,8 +1394,10 @@ export class Graph {
    * The helper evaluates the canonical constraint predicate against the final
    * row inside the caller's native transaction, independently of the writer's
    * current READ visibility. It returns only a Boolean and never row content.
-   * Relationship constraints are skipped because no Graph-native edge-write
-   * boundary exists.
+   * The row's system `xmin` must be the current transaction, so ordinary
+   * app-role SQL cannot use the helper as an oracle for rows this transaction
+   * did not write. Relationship constraints are skipped because no Graph-native
+   * edge-write boundary exists.
    * @returns Validation helper functions.
    */
   #validationFunctions(): PhysicalFunction[] {
@@ -1419,6 +1421,10 @@ export class Graph {
             SELECT 1
             FROM ${quoteIdentifier(constraint.owner)} AS "__row"
             WHERE "__row".${quoteIdentifier('id')} = root_id
+              AND (
+                "__row".xmin = pg_current_xact_id()::xid
+                OR pg_xact_status("__row".xmin::text::xid8) = 'in progress'
+              )
               AND ${predicate}
           )
         $$;
