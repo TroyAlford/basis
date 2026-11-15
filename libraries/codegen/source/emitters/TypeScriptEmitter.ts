@@ -21,15 +21,16 @@ export enum Entities {
 ${enumMembers}
 }
 
-export interface Entity {
+export interface Reference {
   readonly entity: Entities,
   readonly id: string,
-  readonly lastUpdatedAt: string | null,
-  readonly lastUpdatedBy: UserRef | null,
   readonly name: string,
 }
 
-export type EntityRef = Pick<Entity, 'id' | 'name' | 'entity'>`,
+export interface Entity extends Reference {
+  readonly lastUpdatedAt: string | null,
+  readonly lastUpdatedBy: Reference | null,
+}`,
   ]
   for (const entity of entities) blocks.push(entityBlock(entity, definitions))
   const concrete = entities.filter(entity => !entity.abstract)
@@ -78,8 +79,6 @@ function entityBlock(entity: EntityDefinition, definitions: Graph['definitions']
   return `export interface ${entity.name} extends ${parent} {
 ${fields}
 }
-
-export type ${entity.name}Ref = Pick<${entity.name}, 'id' | 'name' | 'entity'>
 
 ${create}`
 }
@@ -146,8 +145,7 @@ function discriminatorType(
  */
 function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
   if (field.type === FieldType.Entity) {
-    const reference = `${field.target}Ref`
-    return field.nullable === false ? reference : `${reference} | null`
+    return field.nullable === false ? 'Reference' : 'Reference | null'
   }
   if (field.type === FieldType.Array) {
     const array = `readonly ${scalarType(field.items.type)}[]`

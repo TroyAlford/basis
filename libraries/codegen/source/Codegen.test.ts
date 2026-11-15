@@ -77,9 +77,9 @@ describe('codegen', () => {
     const schemas = generateJSONSchemas(graph)
     expect(types).toContain('export enum Entities')
     expect(types).toContain('export interface Note extends Entity')
-    expect(types).toContain('export type NoteRef')
-    expect(types).toContain('readonly owner: UserRef | null')
-    expect(types).toContain('readonly subject: EntityRef | null')
+    expect(types).toContain('export interface Reference')
+    expect(types).toContain('readonly owner: Reference | null')
+    expect(types).toContain('readonly subject: Reference | null')
     expect(schemas.$schema).toBe('https://json-schema.org/draft/2020-12/schema')
     expect(schemas.$ref).toBe('#/$defs/Entity')
     expect(createValidator().validateSchema(schemas)).toBe(true)
@@ -184,13 +184,13 @@ describe('codegen', () => {
     expect(base.properties?.base).toBeDefined()
     expect(child.allOf?.[0]?.$ref).toBe('#/$defs/Base')
     expect(grandchild.allOf?.[0]?.$ref).toBe('#/$defs/Child')
-    expect(holder.properties?.requiredChild).toEqual({ $ref: '#/$defs/ChildRef' })
+    expect(holder.properties?.requiredChild).toEqual({ $ref: '#/$defs/Reference' })
     expect(holder.properties?.optionalChild).toEqual({
-      anyOf: [{ $ref: '#/$defs/ChildRef' }, { type: 'null' }],
+      anyOf: [{ $ref: '#/$defs/Reference' }, { type: 'null' }],
     })
     expect(schemas.$defs.Node).toBeDefined()
     expect((schemas.$defs.Node as { properties?: Record<string, unknown> }).properties?.parent)
-      .toEqual({ anyOf: [{ $ref: '#/$defs/NodeRef' }, { type: 'null' }] })
+      .toEqual({ anyOf: [{ $ref: '#/$defs/Reference' }, { type: 'null' }] })
 
     const id = '00000000-0000-4000-8000-000000000001'
     const childRepresentation = {
@@ -321,7 +321,7 @@ describe('codegen', () => {
     expect(types).toContain('export interface Child extends Base')
     expect(types).toContain('export interface Grandchild extends Child')
     expect(types).not.toContain('export interface Child extends Entity')
-    expect(types).toContain('readonly owner: UserRef | null')
+    expect(types).toContain('readonly owner: Reference | null')
     expect([...types.matchAll(/readonly base: string/gu)]).toHaveLength(1)
   })
 

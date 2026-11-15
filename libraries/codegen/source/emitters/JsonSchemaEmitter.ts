@@ -24,11 +24,11 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
     .sort((left, right) => left.name.localeCompare(right.name))
   return {
     $defs: {
-      Entity: rootEntitySchema(definitions),
-      EntityRef: identitySchemaDefinition('Entity', definitions),
-      ...Object.fromEntries(entityDefinitions.flatMap(entity => [
-        [entity.name, entitySchema(entity, definitions)],
-        [`${entity.name}Ref`, identitySchemaDefinition(entity.name, definitions)],
+      Entity: rootEntitySchema(),
+      Reference: referenceSchema(definitions),
+      ...Object.fromEntries(entityDefinitions.map(entity => [
+        entity.name,
+        entitySchema(entity, definitions),
       ])),
     },
     $ref: '#/$defs/Entity',
@@ -38,47 +38,36 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
 
 /**
  * Render the universal Entity root definition.
- * @param definitions - Canonical definitions.
  * @returns Entity JSON Schema.
  */
-function rootEntitySchema(
+function rootEntitySchema(): Readonly<Record<string, unknown>> {
+  return {
+    allOf: [{ $ref: '#/$defs/Reference' }],
+    properties: {
+      lastUpdatedAt: {
+        anyOf: [{ format: 'date-time', type: 'string' }, { type: 'null' }],
+      },
+      lastUpdatedBy: {
+        anyOf: [{ $ref: '#/$defs/Reference' }, { type: 'null' }],
+      },
+    },
+    required: ['lastUpdatedAt', 'lastUpdatedBy'],
+    type: 'object',
+  }
+}
+
+/**
+ * Render the canonical Reference identity shape.
+ * @param definitions - Canonical definitions.
+ * @returns Reference JSON Schema.
+ */
+function referenceSchema(
   definitions: Graph['definitions'],
 ): Readonly<Record<string, unknown>> {
   return {
     properties: {
       entity: rootDiscriminatorSchema(definitions),
       id: identitySchema(undefined),
-      lastUpdatedAt: {
-        anyOf: [{ format: 'date-time', type: 'string' }, { type: 'null' }],
-      },
-      lastUpdatedBy: {
-        anyOf: [{ $ref: '#/$defs/UserRef' }, { type: 'null' }],
-      },
-      name: { type: 'string' },
-    },
-    required: ['id', 'name', 'entity', 'lastUpdatedAt', 'lastUpdatedBy'],
-    type: 'object',
-  }
-}
-
-/**
- * Render one canonical identity-reference definition.
- * @param target - Referenced entity name, or `Entity`.
- * @param definitions - Canonical definitions.
- * @returns Identity reference JSON Schema.
- */
-function identitySchemaDefinition(
-  target: string,
-  definitions: Graph['definitions'],
-): Readonly<Record<string, unknown>> {
-  const entity = target === 'Entity' ? undefined : definitions.entity(target)
-  return {
-    additionalProperties: false,
-    properties: {
-      entity: entity === undefined
-        ? rootDiscriminatorSchema(definitions)
-        : discriminatorSchema(entity, definitions),
-      id: identitySchema(entity?.idFormat),
       name: { type: 'string' },
     },
     required: ['id', 'name', 'entity'],
@@ -122,7 +111,7 @@ function entitySchema(
 function fieldSchema(field: FieldDefinition): Record<string, unknown> {
   if (field.type === FieldType.Inverse) return {}
   if (field.type === FieldType.Entity) {
-    const reference = { $ref: `#/$defs/${field.target}Ref` }
+    const reference = { $ref: '#/$defs/Reference' }
     return field.nullable === false ? reference : { anyOf: [reference, { type: 'null' }] }
   }
   if (field.type === FieldType.Array) {

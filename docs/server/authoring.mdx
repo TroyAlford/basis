@@ -102,31 +102,28 @@ export enum Entities {
   Note = 'Note',
 }
 
-export interface Entity {
+export interface Reference {
+  readonly entity: Entities
   readonly id: string
   readonly name: string
-  readonly entity: Entities
-  readonly lastUpdatedBy: UserRef | null
-  readonly lastUpdatedAt: string | null
 }
 
-export type EntityRef = Pick<Entity, 'id' | 'name' | 'entity'>
+export interface Entity extends Reference {
+  readonly lastUpdatedAt: string | null
+  readonly lastUpdatedBy: Reference | null
+}
 
 export interface User extends Entity {
   readonly entity: Entities.User
   readonly email: string
 }
 
-export type UserRef = Pick<User, 'id' | 'name' | 'entity'>
-
 export interface Note extends Entity {
   readonly entity: Entities.Note
   readonly title: string
-  readonly owner: UserRef | null
+  readonly owner: Reference | null
   readonly tags: readonly string[]
 }
-
-export type NoteRef = Pick<Note, 'id' | 'name' | 'entity'>
 
 export interface EntityMap {
   readonly User: User
@@ -144,7 +141,7 @@ export interface UpdateMap {
 }
 ```
 
-Child entities extend their generated direct parent and declare only locally owned fields, while concrete discriminators narrow the abstract parent union. `CreateMap` uses canonical identity strings for references; hydrated entity maps use the corresponding `*Ref` objects.
+Every entity extends `Entity`, which implements the shared `Reference` shape (`id`, `name`, `entity`). Child entities extend their generated direct parent and declare only locally owned fields, while concrete discriminators narrow the abstract parent union. Singular references use `Reference`; there are no per-entity reference types. `CreateMap` uses canonical identity strings for references.
 
 The generated maps connect to typed queries and mutations through the server facade:
 
@@ -172,22 +169,29 @@ The JSON Schema emitter produces one standards-compliant Draft 2020-12 entity do
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$ref": "#/$defs/Entity",
   "$defs": {
-    "Entity": {
+    "Reference": {
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
         "entity": { "enum": ["Note", "User"], "type": "string" },
-        "lastUpdatedAt": { "anyOf": [{ "format": "date-time", "type": "string" }, { "type": "null" }] },
-        "lastUpdatedBy": { "anyOf": [{ "$ref": "#/$defs/UserRef" }, { "type": "null" }] }
+        "id": { "type": "string" },
+        "name": { "type": "string" }
       },
-      "required": ["id", "name", "entity", "lastUpdatedAt", "lastUpdatedBy"],
+      "required": ["id", "name", "entity"],
+      "type": "object"
+    },
+    "Entity": {
+      "allOf": [{ "$ref": "#/$defs/Reference" }],
+      "properties": {
+        "lastUpdatedAt": { "anyOf": [{ "format": "date-time", "type": "string" }, { "type": "null" }] },
+        "lastUpdatedBy": { "anyOf": [{ "$ref": "#/$defs/Reference" }, { "type": "null" }] }
+      },
+      "required": ["lastUpdatedAt", "lastUpdatedBy"],
       "type": "object"
     },
     "Note": {
       "allOf": [{ "$ref": "#/$defs/Entity" }],
       "properties": {
         "entity": { "const": "Note", "type": "string" },
-        "owner": { "anyOf": [{ "$ref": "#/$defs/UserRef" }, { "type": "null" }] },
+        "owner": { "anyOf": [{ "$ref": "#/$defs/Reference" }, { "type": "null" }] },
         "title": { "type": "string" }
       },
       "required": ["entity", "title", "owner"],
