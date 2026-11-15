@@ -213,6 +213,56 @@ describe('Graph mutations', () => {
     })
   }, 120_000)
 
+  test('hydrates full records beyond the public projection path budget', async () => {
+    const wide = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [], name: 'User' },
+        {
+          fields: Array.from({ length: 70 }, (_value, index) => ({
+            field: `field${index}`,
+            nullable: true,
+            type: 'String',
+          })),
+          name: 'WideThing',
+        },
+      ],
+    }))
+    await withIsolatedDatabase('mutation-wide-record', async database => {
+      await database.use(wide)
+      const created = await database.create('WideThing', { name: 'Wide' })
+      expect(created.record).toMatchObject({ entity: 'WideThing', name: 'Wide' })
+      const fields = Object.keys(created.record).filter(name => /^field\d+$/u.test(name))
+      expect(fields).toHaveLength(70)
+      expect(created.record.field69).toBeNull()
+
+      const edited = await database.edit(
+        'WideThing',
+        { field: 'id', operator: '$eq', value: created.record.id },
+        { field0: 'edited' },
+      )
+      expect(edited).toMatchObject({
+        edited: 1,
+        record: { field0: 'edited', id: created.record.id },
+      })
+
+      const upsertCreated = await database.upsert(
+        'WideThing',
+        'name == \'Wide upsert\'',
+        { name: 'Wide upsert' },
+      )
+      expect(upsertCreated.record).toMatchObject({ entity: 'WideThing', name: 'Wide upsert' })
+      expect(upsertCreated.record.field69).toBeNull()
+      const upsertEdited = await database.upsert(
+        'WideThing',
+        'name == \'Wide upsert\'',
+        { field1: 'upserted' },
+      )
+      expect(upsertEdited).toMatchObject({
+        record: { field1: 'upserted', id: upsertCreated.record.id },
+      })
+    })
+  }, 120_000)
+
   test('validates payloads and rolls an entire batch back on a database constraint', async () => {
     await withIsolatedDatabase('mutation-create-rollback', async database => {
       await database.use(definitions)

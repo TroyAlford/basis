@@ -2,7 +2,7 @@ import type { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
 import type { ArrayFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarArrayElementDefinition } from './EntityDefinitions'
 import { FieldType, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
-import { compilePolymorphicQuery } from './PolymorphicQuery'
+import { compileEntityRecordQuery, compilePolymorphicQuery } from './PolymorphicQuery'
 import { postgresScalarType } from './PostgresTypes'
 import type { Filter } from './Predicate'
 
@@ -1099,13 +1099,9 @@ async function readRecord(
   definition: EntityDefinition,
   id: string,
 ): Promise<MutationRecord> {
-  let compiled: ReturnType<typeof compilePolymorphicQuery>
+  let compiled: ReturnType<typeof compileEntityRecordQuery>
   try {
-    compiled = compilePolymorphicQuery(entities, definition, {
-      fields: definition.effectiveFields.map(field => field.name),
-      limit: 1,
-      where: { id },
-    })
+    compiled = compileEntityRecordQuery(entities, definition, id)
   } catch (error) {
     throw filterFailure(error)
   }
