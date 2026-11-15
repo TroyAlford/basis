@@ -57,19 +57,19 @@ export type MutationRecord = Readonly<Record<string, unknown>> & {
 }
 
 /** Result of a create operation. */
-export interface CreateResult {
+export interface CreateResult<RecordShape extends MutationRecord = MutationRecord> {
   /** Number of entities created. */
   readonly created: number,
   /** Hydrated record for a single-object create; absent for batch input. */
-  readonly record?: MutationRecord,
+  readonly record?: RecordShape,
 }
 
 /** Result of an edit operation. */
-export interface EditResult {
+export interface EditResult<RecordShape extends MutationRecord = MutationRecord> {
   /** Number of entities edited. */
   readonly edited: number,
   /** Hydrated record when exactly one authorized row was edited. */
-  readonly record?: MutationRecord,
+  readonly record?: RecordShape,
 }
 
 /** Result of a delete operation. */
@@ -79,13 +79,13 @@ export interface DeleteResult {
 }
 
 /** Result of an upsert operation. */
-export interface UpsertResult {
+export interface UpsertResult<RecordShape extends MutationRecord = MutationRecord> {
   /** `1` when the create branch ran, otherwise `0`. */
   readonly created: number,
   /** `1` when the edit branch ran, otherwise `0`. */
   readonly edited: number,
   /** Hydrated created or edited record. */
-  readonly record: MutationRecord,
+  readonly record: RecordShape,
 }
 
 /** The Graph-native mutation vocabulary. */

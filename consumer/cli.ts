@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { bunCheckUnsupportedReason } from './bun-version'
 import { runDocs, runDocsBuild } from './docs'
+import { emit } from './emit'
 import { applyBasisPatches } from './patches/install'
 import { resolveInstallRoot } from './patches/root'
 
@@ -218,6 +219,25 @@ const spawnBunCheck = (): number => Bun.spawnSync([process.execPath, '--check'],
 const runTypecheck = (): number => (requireBunCheck() ? spawnBunCheck() : 1)
 
 /**
+ * Runs the conventional application emit lifecycle.
+ * @returns Process exit code (`0` when emission succeeds or is not configured).
+ */
+const runEmit = async (): Promise<number> => {
+  try {
+    const result = await emit()
+    if (!result) {
+      write('[basis] emit: no graph.ts found; skipped')
+      return 0
+    }
+    write(`[basis] emit: ${result.emitters.join(', ')} -> ${result.outputRoot}`)
+    return 0
+  } catch (error) {
+    process.stderr.write(`[basis] emit: ${error instanceof Error ? error.message : String(error)}\n`)
+    return 1
+  }
+}
+
+/**
  * Verifies the installed Basis surface and its owned patches.
  * @returns Process exit code (`0` when healthy).
  */
@@ -287,23 +307,29 @@ const doctor = (): number => {
 const usage = (): void => {
   write([
     'usage: basis <compliance|docs build [--out <dir>] [--base <path>]',
-    '|docs check|doctor|format|lint|typecheck|check>',
+    '|docs check|doctor|emit|format|lint|typecheck|check>',
   ].join(''))
 }
 
 /**
  * Dispatches the requested CLI command.
  */
-const main = (): void => {
+const main = async (): Promise<void> => {
   const [command, ...args] = process.argv.slice(2)
 
   if (command === 'doctor') process.exit(doctor())
+  if (command === 'emit') process.exit(await runEmit())
   if (command === 'lint') process.exit(runLint(false))
   if (command === 'format') process.exit(runLint(true))
   if (command === 'compliance') process.exit(runCompliance())
-  if (command === 'typecheck') process.exit(runTypecheck())
+  if (command === 'typecheck') {
+    const emitCode = await runEmit()
+    process.exit(emitCode === 0 ? runTypecheck() : emitCode)
+  }
   if (command === 'check') {
     if (!requireBunCheck()) process.exit(1)
+    const emitCode = await runEmit()
+    if (emitCode !== 0) process.exit(emitCode)
     const lintCode = runLint(false)
     process.exit(lintCode === 0 ? spawnBunCheck() : lintCode)
   }
@@ -321,4 +347,4 @@ const main = (): void => {
   process.exit(1)
 }
 
-if (import.meta.main) main()
+if (import.meta.main) void main()

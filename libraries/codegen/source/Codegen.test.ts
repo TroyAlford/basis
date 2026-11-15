@@ -22,6 +22,21 @@ function fakeSQL(): SQL {
   } as unknown as SQL
 }
 
+/**
+ * Resolve one local JSON Schema reference.
+ * @param schema - Schema containing `$defs`.
+ * @param value - Candidate schema or `$ref`.
+ * @returns The referenced schema, or the original value.
+ */
+function resolve(schema: Record<string, unknown>, value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Record<string, unknown>
+  if (typeof candidate.$ref !== 'string') return candidate
+  const key = candidate.$ref.split('/').at(-1)
+  const defs = schema.$defs as Record<string, Record<string, unknown>> | undefined
+  return key ? defs?.[key] : undefined
+}
+
 const document = {
   entities: [
     {
@@ -72,18 +87,16 @@ describe('codegen', () => {
     expect(types).toContain('readonly subject: EntityRef | null')
     expect(types).not.toContain('Projection')
     expect(schemas.Note?.output).toBeDefined()
-    expect((schemas.Note?.create as {
-      properties: Record<string, { type?: unknown }>,
-    }).properties.owner?.type).toEqual(['string', 'null'])
-    expect((schemas.Note?.output as {
-      properties: Record<string, { anyOf?: unknown }>,
-    }).properties.owner?.anyOf).toBeDefined()
-    expect((schemas.Note?.output as {
-      properties: Record<string, { format?: string }>,
-    }).properties.dueOn?.format).toBe('date')
-    expect((schemas.Note?.output as {
-      properties: Record<string, { format?: string }>,
-    }).properties.createdAt?.format).toBe('date-time')
+    const noteCreate = schemas.Note?.create as Record<string, unknown> & {
+      properties: Record<string, unknown>,
+    }
+    expect(resolve(noteCreate, noteCreate.properties.owner)?.type).toEqual(['string', 'null'])
+    const noteOutput = schemas.Note?.output as Record<string, unknown> & {
+      properties: Record<string, unknown>,
+    }
+    expect(resolve(noteOutput, noteOutput.properties.owner)?.anyOf).toBeDefined()
+    expect(resolve(noteOutput, noteOutput.properties.dueOn)?.format).toBe('date')
+    expect(resolve(noteOutput, noteOutput.properties.createdAt)?.format).toBe('date-time')
   })
 
   test('materializes independent TypeScript and JSON Schema emitters', async () => {
@@ -142,27 +155,20 @@ describe('codegen', () => {
       }],
     })
     const schemas = generateJSONSchemas(graph)
-    const create = schemas.Thing?.create as {
+    const create = schemas.Thing?.create as Record<string, unknown> & {
       additionalProperties?: boolean,
-      properties: Record<string, {
-        maxLength?: number,
-        maximum?: number,
-        minLength?: number,
-        minimum?: number,
-        readOnly?: boolean,
-        type?: string,
-      }>,
+      properties: Record<string, unknown>,
       required: string[],
     }
     expect(create.additionalProperties).toBe(false)
     expect(create.required).toEqual(['name', 'score', 'title'])
     expect(create.properties.id).toHaveProperty('anyOf')
     expect(create.properties.entity).toBeUndefined()
-    expect(create.properties.score?.minimum).toBe(0)
-    expect(create.properties.score?.maximum).toBe(10)
-    expect(create.properties.title?.minLength).toBe(2)
-    expect(create.properties.title?.maxLength).toBe(20)
-    expect(create.properties.nickname?.readOnly).toBeUndefined()
+    expect(resolve(create, create.properties.score)?.minimum).toBe(0)
+    expect(resolve(create, create.properties.score)?.maximum).toBe(10)
+    expect(resolve(create, create.properties.title)?.minLength).toBe(2)
+    expect(resolve(create, create.properties.title)?.maxLength).toBe(20)
+    expect(resolve(create, create.properties.nickname)?.readOnly).toBeUndefined()
   })
 
   test('emits nullable output contracts and TypeScript null unions from canonical fields', () => {
@@ -314,13 +320,15 @@ describe('codegen', () => {
       ],
     })
     const schemas = generateJSONSchemas(abstract)
-    const note = schemas.Note?.output as {
-      properties: Record<string, { anyOf?: { properties?: Record<string, unknown> }[] }>,
+    const note = schemas.Note?.output as Record<string, unknown> & {
+      properties: Record<string, unknown>,
     }
-    const owner = note.properties.owner?.anyOf?.[0]?.properties?.entity as {
-      enum?: string[],
-    } | undefined
-    expect(owner?.enum).toContain('AdminUser')
+    const ownerField = resolve(note, note.properties.owner)
+    const ownerRef = ownerField?.anyOf as { $ref?: string }[] | undefined
+    const ownerIdentity = ownerRef?.[0]?.$ref?.split('/').at(-1)
+    const defs = note.$defs as Record<string, { properties?: Record<string, { enum?: string[] }> }>
+    expect(ownerIdentity).toBe('User_Identity')
+    expect(defs.User_Identity?.properties?.entity?.enum).toContain('AdminUser')
     const user = schemas.User?.output as {
       properties: Record<string, { enum?: string[] }>,
     }
@@ -335,6 +343,158 @@ describe('codegen', () => {
     }
     expect(userUpdate.properties.entity).toBeUndefined()
   })
+
+  test('composes inherited TypeScript and JSON Schema definitions', () => {
+    const graph = new Graph({
+      entities: [
+        { fields: [{ field: 'base', type: FieldType.String }], name: 'Base' },
+        { extends: 'Base', fields: [{ field: 'child', type: FieldType.String }], name: 'Child' },
+        {
+          extends: 'Child',
+          fields: [{ field: 'grandchild', type: FieldType.String }],
+          name: 'Grandchild',
+        },
+        {
+          fields: [
+            { field: 'optionalChild', target: 'Child', type: FieldType.Entity },
+            { field: 'requiredChild', nullable: false, target: 'Child', type: FieldType.Entity },
+          ],
+          name: 'Holder',
+        },
+        {
+          fields: [
+            { field: 'label', type: FieldType.String },
+            { field: 'parent', nullable: true, target: 'Node', type: FieldType.Entity },
+          ],
+          name: 'Node',
+        },
+      ],
+    })
+    const types = generateTypes(graph)
+    expect(types).toContain('export enum Entities')
+    expect(types).toContain("  Child = 'Child',")
+    expect(types).toContain('export interface Child extends Base')
+    expect(types).toContain('export interface Grandchild extends Child')
+    expect(types).not.toContain('export interface Child extends Entity')
+    expect(types).toContain('readonly entity: Entities.Grandchild')
+    expect([...types.matchAll(/readonly base: string/gu)]).toHaveLength(1)
+
+    const schemas = generateJSONSchemas(graph)
+    const ajv = new Ajv({ allErrors: true })
+    const child = ajv.compile(schemas.Grandchild?.output as object)
+    const id = '00000000-0000-4000-8000-000000000001'
+    const childRow = {
+      base: 'base',
+      child: 'child',
+      entity: 'Grandchild',
+      grandchild: 'grandchild',
+      id,
+      name: 'Grandchild',
+    }
+    expect(child(childRow)).toBe(true)
+    expect(child({ ...childRow, unknown: true })).toBe(false)
+    expect(child({ child: 'child', entity: 'Grandchild', grandchild: 'grandchild', id, name: 'Grandchild' }))
+      .toBe(false)
+    const childCreate = ajv.compile(schemas.Grandchild?.create as object)
+    expect(childCreate({ base: 'base', child: 'child', grandchild: 'grandchild', name: 'Grandchild' }))
+      .toBe(true)
+    expect(childCreate({
+      base: 'base',
+      child: 'child',
+      grandchild: 'grandchild',
+      name: 'Grandchild',
+      unknown: true,
+    })).toBe(false)
+
+    const holder = ajv.compile(schemas.Holder?.output as object)
+    const childRef = { entity: 'Grandchild', id, name: 'Grandchild' }
+    const holderRow = { entity: 'Holder', id, name: 'Holder', requiredChild: childRef }
+    expect(holder(holderRow)).toBe(true)
+    expect(holder({ ...holderRow, optionalChild: null })).toBe(true)
+    expect(holder({ ...holderRow, requiredChild: null })).toBe(false)
+    expect(holder({ ...holderRow, optionalChild: childRef })).toBe(true)
+
+    const node = ajv.compile(schemas.Node?.output as object)
+    expect(node({ entity: 'Node', id, label: 'Root', name: 'Node', parent: null })).toBe(true)
+    expect(node({
+      entity: 'Node',
+      id,
+      label: 'Child',
+      name: 'Child',
+      parent: { entity: 'Node', id: '00000000-0000-4000-8000-000000000002', name: 'Root' },
+    })).toBe(true)
+  })
+
+  test('narrows a concrete descendant discriminator from its abstract parent', () => {
+    const graph = new Graph({
+      entities: [
+        { fields: [], name: 'Parent' },
+        { extends: 'Parent', fields: [], name: 'OnlyChild' },
+      ],
+    })
+    const types = generateTypes(graph)
+    expect(types).toContain(`export interface Parent extends Entity {
+  readonly entity: Entities.OnlyChild,
+}`)
+    expect(types).toContain(`export interface OnlyChild extends Parent {
+  readonly entity: Entities.OnlyChild,
+}`)
+  })
+
+  test('compiles mutually referencing generated entity types', async () => {
+    const graph = new Graph({
+      entities: [
+        {
+          fields: [{ field: 'peer', nullable: true, target: 'Bar', type: FieldType.Entity }],
+          name: 'Foo',
+        },
+        {
+          fields: [{ field: 'peer', nullable: true, target: 'Foo', type: FieldType.Entity }],
+          name: 'Bar',
+        },
+      ],
+    })
+    const directory = await mkdtemp(join(tmpdir(), 'basis-mutual-types-'))
+    try {
+      const file = join(directory, 'types.ts')
+      await writeFile(file, `
+${generateTypes(graph)}
+const foo: Foo = {
+  entity: Entities.Foo,
+  id: '1',
+  lastUpdatedAt: null,
+  lastUpdatedBy: null,
+  name: 'Foo',
+  peer: null,
+}
+const bar: Bar = {
+  entity: Entities.Bar,
+  id: '2',
+  lastUpdatedAt: null,
+  lastUpdatedBy: null,
+  name: 'Bar',
+  peer: foo,
+}
+      `.trim())
+      const result = Bun.spawnSync({
+        cmd: [
+          process.execPath,
+          './node_modules/@typescript/native/bin/tsc',
+          '--ignoreConfig',
+          '--noEmit',
+          '--skipLibCheck',
+          '--strict',
+          file,
+        ],
+        cwd: process.cwd(),
+        stderr: 'pipe',
+        stdout: 'pipe',
+      })
+      expect(result.exitCode).toBe(0)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  }, 30_000)
 
   test('emits assignable abstract reference types', async () => {
     const abstract = new Graph({
@@ -352,7 +512,7 @@ describe('codegen', () => {
       const file = join(directory, 'types.ts')
       await writeFile(file, `
 ${generateTypes(abstract)}
-const owner: Note['owner'] = { entity: 'AdminUser', id: '1', name: 'Admin' }
+const owner: Note['owner'] = { entity: Entities.AdminUser, id: '1', name: 'Admin' }
       `.trim())
       const result = Bun.spawnSync({
         cmd: [

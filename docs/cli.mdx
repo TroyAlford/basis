@@ -9,6 +9,7 @@ title: CLI
 ```bash
 bunx basis lint
 bunx basis format
+bunx basis emit
 bunx basis typecheck
 bunx basis check
 bunx basis compliance
@@ -19,6 +20,7 @@ bunx basis docs build
 
 - `lint` reports the full Basis policy.
 - `format` applies every autofix the policy supports.
+- `emit` runs the conventional application emitter lifecycle; it is also run automatically before `typecheck` and `check`.
 - `typecheck` runs Bun's built-in TypeScript checker; it requires Bun 1.4.3 or newer.
 - `check` runs the repository's validation set.
 - `compliance` runs the class-based architecture rule in a focused, report-only configuration.

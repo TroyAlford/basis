@@ -60,90 +60,128 @@ Every entity inherits the update-tracking fields `lastUpdatedBy` and `lastUpdate
 
 ## Generated products
 
-Build-time code generation lives outside the server runtime. Import the independent emitters from their consumer packages and pass the canonical in-memory Graph:
+Build-time code generation lives outside the server runtime. The application root supplies a default-exported `graph.ts`; `basis emit` constructs that Graph once, runs the built-in emitters, and then discovers default-exported modules in `emitters/` by convention:
 
 ```ts
-import graph from './graph'
-import { JsonSchemaEmitter, TypeScriptEmitter } from 'basis/codegen'
-import { generateErd } from 'basis/visualization'
+// graph.ts
+import { FieldType, Graph } from 'basis/server'
 
-await Promise.all([
-  TypeScriptEmitter(graph, './generated'),
-  JsonSchemaEmitter(graph, './generated'),
-])
-const logicalErd = generateErd(graph, 'logical')
-const physicalErd = generateErd(graph, 'physical')
+export default new Graph({ entities: [{ fields: [{ field: 'title', type: FieldType.String }], name: 'Note' }] })
 ```
 
-- Each codegen emitter owns exactly one output format and declares its own extension and folder: `TypeScriptEmitter` writes `typescript/index.ts` and `JsonSchemaEmitter` writes `json-schema/schemas.json` beneath the caller-selected root. A build step can discover and invoke emitter modules without knowing their formats.
-- `basis/codegen` also retains the pure content generators `generateTypes(graph)` and `generateJSONSchemas(graph)` for consumers that own their own file emission.
+```ts
+// emitters/CustomEmitter.ts
+import { emitter } from 'basis/codegen'
+
+export default emitter({ extension: 'txt', folder: 'custom' }, graph => [{
+  content: graph.definitions.entities.map(entity => entity.name).join('\n'),
+  name: 'summary',
+}])
+```
+
+`basis emit` writes beneath `generated/`; `basis typecheck` and `basis check` run the same lifecycle automatically. No configuration lists emitters, and no custom bundle stage is required.
+
+- Built-in `TypeScriptEmitter` writes `generated/typescript/index.ts`; `JsonSchemaEmitter` writes `generated/json-schema/schemas.json`. Application emitters own their extension, folder, file names, and content.
+- `basis/codegen` also exports the pure content generators `generateTypes(graph)` and `generateJSONSchemas(graph)` for consumers that own their own file emission.
 - The JSON Schema emitter uses the same canonical metadata as mutation validation: create excludes the generated `entity` discriminator, allows an optional supplied `id`, requires non-null writable fields, and rejects unknown fields with `additionalProperties: false`; update excludes generated/readonly fields. Output schemas and TypeScript types include `null` only where canonical nullability allows it. Identity schemas use the entity's canonical UUID/Snowflake pattern, and a Snowflake entity requires `id` on create. Numeric/string bounds and required fields match mutation validation rather than forming a second DTO. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
 - `basis/visualization` emits logical and physical Mermaid ERD source. Render it with the existing `Mermaid` component from `basis/react`; visualization never becomes a server runtime dependency.
 
-Emitter modules use the small `emitter({ extension, folder }, generate)` contract. The factory returns an awaitable `(graph, root?) => Promise<void>` and writes each generated file beneath the caller's root; the module owns its extension, folder, file names, and format-specific content. The output root defaults to the process working directory, and declared destinations cannot escape it. A build step can import a directory of emitter modules and invoke each default export without format-specific dispatch.
+Emitter modules use the small `emitter({ extension, folder }, generate)` contract. The factory returns an awaitable `(graph, root?) => Promise<void>` and writes each generated file beneath the caller's root; the module owns its extension, folder, file names, and format-specific content. The output root defaults to the process working directory, and declared destinations cannot escape it. The conventional lifecycle invokes application emitters in sorted filename order, so repeated runs overwrite deterministic paths; no stale files are deleted.
 
 Generation is deterministic for a fixed canonical model and must not be maintained as a second schema definition.
 
 ## Example generated output
 
-For the typed `User`/`Note` declaration above, the TypeScript emitter includes these application interfaces (the system security entities are emitted too):
+For the typed `User`/`Note` declaration above, the TypeScript emitter includes an entity enum, parent-composed interfaces, refs, and typed maps:
 
 ```ts
 /** Generated from the canonical Basis entity definitions. Do not edit by hand. */
 
+export enum Entities {
+  User = 'User',
+  Note = 'Note',
+}
+
 export interface Entity {
   readonly id: string
   readonly name: string
-  readonly entity: string
+  readonly entity: Entities
+  readonly lastUpdatedBy: UserRef | null
+  readonly lastUpdatedAt: string | null
 }
 
 export type EntityRef = Pick<Entity, 'id' | 'name' | 'entity'>
 
 export interface User extends Entity {
-  readonly entity: 'User'
+  readonly entity: Entities.User
   readonly email: string
 }
 
 export type UserRef = Pick<User, 'id' | 'name' | 'entity'>
 
 export interface Note extends Entity {
-  readonly entity: 'Note'
+  readonly entity: Entities.Note
   readonly title: string
   readonly owner: UserRef | null
   readonly tags: readonly string[]
-  readonly lastUpdatedBy: UserRef | null
-  readonly lastUpdatedAt: string | null
 }
 
 export type NoteRef = Pick<Note, 'id' | 'name' | 'entity'>
+
+export interface EntityMap {
+  readonly User: User
+  readonly Note: Note
+}
+
+export interface CreateMap {
+  readonly User: UserCreate
+  readonly Note: NoteCreate
+}
+
+export interface UpdateMap {
+  readonly User: UserUpdate
+  readonly Note: NoteUpdate
+}
 ```
 
-The `Note` output JSON Schema is:
+Child entities extend their generated direct parent and declare only locally owned fields, while concrete discriminators narrow the abstract parent union. `CreateMap` uses canonical identity strings for references; hydrated entity maps use the corresponding `*Ref` objects.
+
+The generated maps connect to typed queries and mutations through the server facade:
+
+```ts
+import { typedDatabase } from 'basis/server'
+import type { CreateMap, EntityMap, ReferenceMap, UpdateMap } from './generated/typescript'
+
+const db = typedDatabase<EntityMap, CreateMap, UpdateMap, ReferenceMap>(server.db)
+const notes = await db.query('Note', {
+  fields: ['id', 'title', 'owner.email'],
+})
+const created = await db.create('Note', {
+  name: 'Welcome',
+  owner: user.id,
+  title: 'Welcome',
+})
+```
+
+Query fields are constrained to supported effective-field and reference paths. Invalid fields, array-index projections, mismatched result types, reference objects in create payloads, and identity changes in edits fail TypeScript compilation.
+
+The JSON Schema emitter produces self-contained `$defs`/`$ref` schemas with shared field definitions and inheritance-aware required/nullability rules. Create, update, and output variants remain distinct and reject unknown properties:
 
 ```json
 {
-  "properties": {
-    "entity": { "const": "Note", "type": "string" },
-    "id": { "type": "string" },
-    "name": { "type": "string" },
-    "title": { "type": "string" },
-    "owner": {
-      "anyOf": [
-        {
-          "properties": {
-            "entity": { "const": "User", "type": "string" },
-            "id": { "type": "string" },
-            "name": { "type": "string" }
-          },
-          "required": ["id", "name", "entity"],
-          "type": "object"
-        },
-        { "type": "null" }
-      ]
-    },
-    "tags": { "items": { "type": "string" }, "type": "array" }
+  "$defs": {
+    "Entity_name_create": { "type": "string" },
+    "Note_title_create": { "type": "string" },
+    "Note_owner_create": { "type": ["string", "null"] }
   },
-  "required": ["id", "entity", "name"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "pattern": "...", "type": "string" },
+    "name": { "$ref": "#/$defs/Entity_name_create" },
+    "title": { "$ref": "#/$defs/Note_title_create" },
+    "owner": { "$ref": "#/$defs/Note_owner_create" }
+  },
+  "required": ["name", "title"],
   "type": "object"
 }
 ```
