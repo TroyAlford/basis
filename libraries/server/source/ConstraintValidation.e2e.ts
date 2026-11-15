@@ -507,4 +507,97 @@ describe('Graph validation constraints', () => {
       removeService(install)
     }
   }, 120_000)
+
+  test('validates inherited and child MTI fields through canonical root write provenance', async () => {
+    const mtiGraph = new Graph({
+      entities: [
+        {
+          constraints: [{
+            description: 'A record must remain ok.',
+            name: 'recordStatus',
+            type: Constraint.Validation,
+            where: "status = 'ok'",
+          }],
+          fields: [
+            { field: 'title', type: 'String' },
+            { field: 'status', type: 'String' },
+          ],
+          name: 'Record',
+          security: {
+            [Action.Create]: { role: 'admin' },
+            [Action.Delete]: { role: 'admin' },
+            [Action.Read]: { role: 'admin' },
+            [Action.Update]: { role: 'admin' },
+          },
+        },
+        {
+          constraints: [{
+            description: 'A document must remain flagged.',
+            name: 'documentFlag',
+            type: Constraint.Validation,
+            where: 'flag = true',
+          }],
+          extends: 'Record',
+          fields: [
+            { field: 'flag', type: 'Boolean' },
+            { field: 'note', type: 'String' },
+          ],
+          name: 'Document',
+        },
+      ],
+      security: {
+        ExternalIdentity: { [Action.Manage]: { role: 'admin' } },
+        Role: { [Action.Manage]: { role: 'admin' } },
+        UserRole: { [Action.Manage]: { role: 'admin' } },
+      },
+    })
+    const install = tempDirectory('basis-constraint-mti-provenance-')
+    const { admin, server } = await start(install, mtiGraph)
+    const connection = await openAdmin(server.db)
+    try {
+      const asAdmin = <T>(work: () => T): T => runAsActor({ id: admin }, work)
+      const first = identify(await asAdmin(() => server.db.create('Document', {
+        flag: true,
+        name: 'First',
+        note: 'note',
+        status: 'ok',
+        title: 'First',
+      })))
+      expect(await asAdmin(() => server.db.edit('Document', { id: first }, { title: 'Inherited edit' })))
+        .toMatchObject({ edited: 1 })
+      expect(await asAdmin(() => server.db.edit('Document', { id: first }, { note: 'Child edit' })))
+        .toMatchObject({ edited: 1 })
+
+      const second = identify(await asAdmin(() => server.db.create('Document', {
+        flag: true,
+        name: 'Second',
+        note: 'note',
+        status: 'ok',
+        title: 'Second',
+      })))
+      await connection.sql.unsafe('UPDATE "Document" SET "flag" = FALSE WHERE "id" = $1', [second])
+      await expect(asAdmin(() => server.db.edit('Document', { id: second }, { title: 'Invalid child' })))
+        .rejects.toThrow('documentFlag')
+
+      const third = identify(await asAdmin(() => server.db.create('Document', {
+        flag: true,
+        name: 'Third',
+        note: 'note',
+        status: 'ok',
+        title: 'Third',
+      })))
+      await connection.sql.unsafe('UPDATE "Record" SET "status" = \'bad\' WHERE "id" = $1', [third])
+      await expect(asAdmin(() => server.db.edit('Document', { id: third }, { note: 'Invalid parent' })))
+        .rejects.toThrow('recordStatus')
+      const [thirdRow] = await connection.sql.unsafe<{ note: string }[]>(
+        'SELECT "note" FROM "Document" WHERE "id" = $1',
+        [third],
+      )
+      expect(thirdRow).toEqual({ note: 'note' })
+    } finally {
+      await connection.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 120_000)
 })

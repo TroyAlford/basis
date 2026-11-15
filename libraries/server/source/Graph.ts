@@ -1394,10 +1394,12 @@ export class Graph {
    * The helper evaluates the canonical constraint predicate against the final
    * row inside the caller's native transaction, independently of the writer's
    * current READ visibility. It returns only a Boolean and never row content.
-   * The row's system `xmin` must be the current transaction, so ordinary
-   * app-role SQL cannot use the helper as an oracle for rows this transaction
-   * did not write. Relationship constraints are skipped because no Graph-native
-   * edge-write boundary exists.
+   * Write provenance is taken from the canonical `Entity` root tuple that every
+   * Graph-native create/edit/upsert touches, so an inherited-field or child-field
+   * edit still validates without manufacturing writes to constraint-owner tables.
+   * Ordinary app-role SQL cannot use the helper as an oracle for rows this
+   * transaction did not write. Relationship constraints are skipped because no
+   * Graph-native edge-write boundary exists.
    * @returns Validation helper functions.
    */
   #validationFunctions(): PhysicalFunction[] {
@@ -1420,10 +1422,12 @@ export class Graph {
           SELECT EXISTS (
             SELECT 1
             FROM ${quoteIdentifier(constraint.owner)} AS "__row"
+            JOIN "Entity" AS "__written"
+              ON "__written".${quoteIdentifier('id')} = "__row".${quoteIdentifier('id')}
             WHERE "__row".${quoteIdentifier('id')} = root_id
               AND (
-                "__row".xmin = pg_current_xact_id()::xid
-                OR pg_xact_status("__row".xmin::text::xid8) = 'in progress'
+                "__written".xmin = pg_current_xact_id()::xid
+                OR pg_xact_status("__written".xmin::text::xid8) = 'in progress'
               )
               AND ${predicate}
           )
