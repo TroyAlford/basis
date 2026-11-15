@@ -29,7 +29,7 @@ test('consumer fixture extends the system User ontology', () => {
 
 test('consumer codegen and visualization surfaces resolve', () => {
   expect(generateTypes(graph)).toContain('export interface ConsumerNote')
-  expect(generateJSONSchemas(graph).ConsumerNote?.output).toBeDefined()
+  expect(generateJSONSchemas(graph).$defs.ConsumerNote).toBeDefined()
   expect(generateErd(graph)).toContain('ConsumerNote')
 })
 
@@ -43,9 +43,9 @@ test('consumer codegen emitters resolve and write independent outputs', async ()
     const types = await readFile(join(directory, 'typescript', 'index.ts'), 'utf8')
     const schemas = JSON.parse(
       await readFile(join(directory, 'json-schema', 'schemas.json'), 'utf8'),
-    ) as { ConsumerNote?: { output?: unknown } }
+    ) as { $defs: { ConsumerNote?: unknown } }
     expect(types).toContain('export interface ConsumerNote')
-    expect(schemas.ConsumerNote?.output).toBeDefined()
+    expect(schemas.$defs.ConsumerNote).toBeDefined()
   } finally {
     await rm(directory, { force: true, recursive: true })
   }

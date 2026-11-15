@@ -62,18 +62,21 @@ describe('Codegen output contracts', () => {
           'title',
           'nullableJSON',
           'nullableNote',
-          'nullableOwner',
+          'nullableOwner.email',
           'nullableTags',
-          'owner',
+          'owner.email',
           'requiredJSON',
-          'requiredOwner',
+          'requiredOwner.email',
         ],
         limit: null,
         orderBy: 'name',
       })
-      const validate = new Ajv({ allErrors: true }).compile(
-        generateJSONSchemas(graph).OutputRow?.output as object,
-      )
+      const schemas = generateJSONSchemas(graph)
+      const validate = new Ajv({ allErrors: true }).compile({
+        $defs: schemas.$defs,
+        $ref: '#/$defs/OutputRow',
+        $schema: schemas.$schema,
+      })
       expect(rows).toHaveLength(2)
       expect(rows[0]?.nullableJSON).toBeNull()
       expect(rows[0]?.nullableTags).toBeNull()

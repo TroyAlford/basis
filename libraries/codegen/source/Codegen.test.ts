@@ -1,98 +1,11 @@
 import Ajv from 'ajv'
 import { Cardinality, FieldType, Graph } from 'basis/server'
-import type { SQL } from 'bun'
 import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MutationError, mutationRunner } from '../../server/source/Mutation'
+import type { GeneratedSchemas } from '../index'
 import { emitter, generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from '../index'
-
-/**
- * Build a fake transaction client that returns one record for read-back queries.
- * @returns The fake SQL capability.
- */
-function fakeSQL(): SQL {
-  return {
-    async unsafe(sql: string): Promise<Record<string, unknown>[]> {
-      return sql.trimStart().startsWith('SELECT')
-        ? [{ entity: 'Entity', id: '00000000-0000-4000-8000-000000000001', name: 'Record' }]
-        : []
-    },
-  } as unknown as SQL
-}
-
-/**
- * Resolve one local JSON Schema reference.
- * @param schema - Schema containing `$defs`.
- * @param value - Candidate schema or `$ref`.
- * @returns The referenced schema, or the original value.
- */
-function resolve(schema: Record<string, unknown>, value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object') return undefined
-  const candidate = value as Record<string, unknown>
-  if (typeof candidate.$ref !== 'string') return candidate
-  const key = candidate.$ref.split('/').at(-1)
-  const defs = schema.$defs as Record<string, Record<string, unknown>> | undefined
-  return key ? defs?.[key] : undefined
-}
-
-/**
- * Find a property through the composed parent shape chain.
- * @param schema - Entity operation schema.
- * @param entity - Entity name.
- * @param kind - Operation kind.
- * @param name - Property name.
- * @returns The property schema, when present.
- */
-function property(
-  schema: Record<string, unknown>,
-  entity: string,
-  kind: string,
-  name: string,
-): Record<string, unknown> | undefined {
-  const defs = schema.$defs as Record<string, Record<string, unknown>> | undefined
-  const visit = (key: string | undefined): Record<string, unknown> | undefined => {
-    if (!key) return undefined
-    const def = defs?.[key]
-    if (!def) return undefined
-    const properties = def.properties as Record<string, unknown> | undefined
-    if (properties && Object.hasOwn(properties, name)) return resolve(schema, properties[name])
-    for (const parent of (def.allOf ?? []) as readonly { $ref?: string }[]) {
-      const found = visit(parent.$ref?.split('/').at(-1))
-      if (found) return found
-    }
-    return undefined
-  }
-  return visit(`${entity}_${kind}`)
-}
-
-/**
- * Collect required property names through the composed parent shape chain.
- * @param schema - Entity operation schema.
- * @param entity - Entity name.
- * @param kind - Operation kind.
- * @returns Required property names.
- */
-function requiredNames(
-  schema: Record<string, unknown>,
-  entity: string,
-  kind: string,
-): readonly string[] {
-  const defs = schema.$defs as Record<string, Record<string, unknown>> | undefined
-  const names = new Set<string>()
-  const visit = (key: string | undefined): void => {
-    if (!key) return
-    const def = defs?.[key]
-    if (!def) return
-    for (const name of (def.required ?? []) as readonly string[]) names.add(name)
-    for (const parent of (def.allOf ?? []) as readonly { $ref?: string }[]) {
-      visit(parent.$ref?.split('/').at(-1))
-    }
-  }
-  visit(`${entity}_${kind}`)
-  return [...names].sort((left, right) => left.localeCompare(right))
-}
 
 const document = {
   entities: [
@@ -132,24 +45,51 @@ const document = {
   }],
 } as const
 
+/**
+ * Compile one entity definition with its shared `$defs`.
+ * @param schemas - Generated JSON Schema document.
+ * @param entity - Entity definition name.
+ * @returns A validating function.
+ */
+function compileEntity(schemas: GeneratedSchemas, entity: string) {
+  return new Ajv({ allErrors: true }).compile({
+    $defs: schemas.$defs,
+    $ref: `#/$defs/${entity}`,
+    $schema: schemas.$schema,
+  })
+}
+
 describe('codegen', () => {
-  test('generates deterministic types and schemas', () => {
+  test('generates entity TypeScript and one interoperable JSON Schema document', () => {
     const graph = new Graph({ entities: document })
     const types = generateTypes(graph)
     const schemas = generateJSONSchemas(graph)
+    expect(types).toContain('export enum Entities')
     expect(types).toContain('export interface Note extends Entity')
-    expect(types).toContain('export type EntityRef')
     expect(types).toContain('export type NoteRef')
     expect(types).toContain('readonly owner: UserRef | null')
     expect(types).toContain('readonly subject: EntityRef | null')
-    expect(types).not.toContain('Projection')
-    expect(schemas.Note?.output).toBeDefined()
-    const noteCreate = schemas.Note?.create as Record<string, unknown>
-    expect(property(noteCreate, 'Note', 'create', 'owner')?.type).toEqual(['string', 'null'])
-    const noteOutput = schemas.Note?.output as Record<string, unknown>
-    expect(property(noteOutput, 'Note', 'output', 'owner')?.anyOf).toBeDefined()
-    expect(property(noteOutput, 'Note', 'output', 'dueOn')?.format).toBe('date')
-    expect(property(noteOutput, 'Note', 'output', 'createdAt')?.format).toBe('date-time')
+    expect(schemas.$schema).toBe('http://json-schema.org/draft-07/schema#')
+    expect(schemas.$ref).toBe('#/$defs/Entity')
+    expect(schemas.$defs.Note).toBeDefined()
+    expect(Object.keys(schemas.$defs.Note as object)).not.toContain('create')
+    expect(Object.keys(schemas.$defs.Note as object)).not.toContain('update')
+    expect(Object.keys(schemas.$defs.Note as object)).not.toContain('output')
+    expect(JSON.stringify(schemas)).not.toContain('Note_create')
+    const validate = compileEntity(schemas, 'Note')
+    const id = '00000000-0000-4000-8000-000000000001'
+    expect(validate({
+      createdAt: '2020-01-01T00:00:00.000Z',
+      dueOn: '2020-01-01',
+      entity: 'Note',
+      id,
+      metadata: { kind: 'note' },
+      name: 'Note',
+      owner: { email: 'owner@example.com', entity: 'User', id, name: 'Owner' },
+      subject: null,
+      tags: ['a'],
+      title: 'Title',
+    })).toBe(true)
   })
 
   test('materializes independent TypeScript and JSON Schema emitters', async () => {
@@ -172,9 +112,9 @@ describe('codegen', () => {
       const types = await Bun.file(join(directory, 'typescript', 'index.ts')).text()
       const schemas = JSON.parse(
         await Bun.file(join(directory, 'json-schema', 'schemas.json')).text(),
-      ) as { EmitterNote?: { output?: unknown } }
+      ) as GeneratedSchemas
       expect(types).toContain('export interface EmitterNote')
-      expect(schemas.EmitterNote?.output).toBeDefined()
+      expect(schemas.$defs.EmitterNote).toBeDefined()
     } finally {
       await rm(directory, { force: true, recursive: true })
     }
@@ -196,205 +136,7 @@ describe('codegen', () => {
     }
   })
 
-  test('reflects canonical bounds, required fields, and generated fields', () => {
-    const graph = new Graph({
-      entities: [{
-        fields: [
-          { field: 'score', maximum: 10, minimum: 0, type: FieldType.Number },
-          { field: 'title', maxLength: 20, minLength: 2, type: FieldType.String },
-          { field: 'nickname', nullable: true, type: FieldType.String },
-        ],
-        name: 'Thing',
-      }],
-    })
-    const schemas = generateJSONSchemas(graph)
-    const create = schemas.Thing?.create as Record<string, unknown> & {
-      properties: Record<string, unknown>,
-      propertyNames: { enum: readonly string[] },
-    }
-    expect(create.propertyNames.enum).toEqual(expect.arrayContaining(['name', 'score', 'title']))
-    expect(requiredNames(create, 'Thing', 'create')).toEqual(['name', 'score', 'title'])
-    expect(create.properties.id).toHaveProperty('anyOf')
-    expect(create.properties.entity).toBeUndefined()
-    expect(property(create, 'Thing', 'create', 'score')?.minimum).toBe(0)
-    expect(property(create, 'Thing', 'create', 'score')?.maximum).toBe(10)
-    expect(property(create, 'Thing', 'create', 'title')?.minLength).toBe(2)
-    expect(property(create, 'Thing', 'create', 'title')?.maxLength).toBe(20)
-    expect(property(create, 'Thing', 'create', 'nickname')?.readOnly).toBeUndefined()
-  })
-
-  test('emits nullable output contracts and TypeScript null unions from canonical fields', () => {
-    const graph = new Graph({
-      entities: [
-        { fields: [{ field: 'email', type: FieldType.String }], name: 'User' },
-        {
-          fields: [
-            { field: 'nullableJSON', nullable: true, type: FieldType.JSON },
-            { field: 'nullableOwner', target: 'User', type: FieldType.Entity },
-            { field: 'nullableTags', items: { type: FieldType.String }, nullable: true, type: FieldType.Array },
-            { field: 'nullableText', nullable: true, type: FieldType.String },
-            { field: 'requiredJSON', type: FieldType.JSON },
-            { field: 'requiredOwner', nullable: false, target: 'User', type: FieldType.Entity },
-            { field: 'requiredTags', items: { type: FieldType.String }, type: FieldType.Array },
-            { field: 'requiredText', type: FieldType.String },
-          ],
-          name: 'Thing',
-        },
-      ],
-    })
-    const types = generateTypes(graph)
-    expect(types).toContain('readonly nullableText: string | null')
-    expect(types).toContain('readonly requiredText: string')
-    expect(types).toContain('readonly nullableTags: readonly string[] | null')
-    expect(types).toContain('readonly requiredTags: readonly string[]')
-    expect(types).toContain('readonly nullableOwner: UserRef | null')
-    expect(types).toContain('readonly requiredOwner: UserRef')
-    expect(types).not.toContain('readonly requiredOwner: UserRef | null')
-    const schemas = generateJSONSchemas(graph)
-    const validate = new Ajv({ allErrors: true }).compile(schemas.Thing?.output as object)
-    const id = '00000000-0000-4000-8000-000000000001'
-    const base = {
-      entity: 'Thing',
-      id,
-      name: 'Thing',
-      nullableJSON: null,
-      nullableOwner: null,
-      nullableTags: null,
-      nullableText: null,
-      requiredJSON: { active: true },
-      requiredOwner: { entity: 'User', id, name: 'Owner' },
-      requiredTags: ['a'],
-      requiredText: 'Text',
-    }
-    expect(validate(base)).toBe(true)
-    expect(validate({ ...base, nullableJSON: { active: true }, nullableTags: ['b'], nullableText: 'Text' }))
-      .toBe(true)
-    expect(validate({ ...base, requiredText: null })).toBe(false)
-    expect(validate({ ...base, requiredTags: null })).toBe(false)
-    expect(validate({ ...base, requiredOwner: null })).toBe(false)
-    expect(validate({ ...base, requiredJSON: null })).toBe(false)
-  })
-
-  test('emits canonical identity formats and Snowflake create requiredness', async () => {
-    const graph = new Graph({
-      entities: [
-        { fields: [{ field: 'id', format: 'UUID' }], name: 'UuidThing' },
-        { fields: [{ field: 'id', format: 'Snowflake' }], name: 'SnowThing' },
-        { fields: [], name: 'AnyThing' },
-      ],
-    })
-    const schemas = generateJSONSchemas(graph)
-    const ajv = new Ajv({ allErrors: true })
-    const uuidValidate = ajv.compile(schemas.UuidThing?.create as object)
-    const snowValidate = ajv.compile(schemas.SnowThing?.create as object)
-    const anyValidate = ajv.compile(schemas.AnyThing?.create as object)
-    const uuid = '00000000-0000-4000-8000-000000000001'
-    expect(uuidValidate({ name: 'UuidThing' })).toBe(true)
-    expect(uuidValidate({ id: uuid, name: 'UuidThing' })).toBe(true)
-    expect(uuidValidate({ id: 'garbage', name: 'UuidThing' })).toBe(false)
-    expect(uuidValidate({ id: '123', name: 'UuidThing' })).toBe(false)
-    expect(snowValidate({ name: 'SnowThing' })).toBe(false)
-    expect(snowValidate({ id: '123', name: 'SnowThing' })).toBe(true)
-    expect(snowValidate({ id: 'garbage', name: 'SnowThing' })).toBe(false)
-    expect(anyValidate({ name: 'AnyThing' })).toBe(true)
-    expect(anyValidate({ id: uuid, name: 'AnyThing' })).toBe(true)
-    expect(anyValidate({ id: '123', name: 'AnyThing' })).toBe(true)
-    expect(anyValidate({ id: 'garbage', name: 'AnyThing' })).toBe(false)
-    const mutations = mutationRunner(graph.definitions, fakeSQL())
-    await expect(mutations.create('SnowThing', { name: 'SnowThing' }))
-      .rejects.toBeInstanceOf(MutationError)
-    await expect(mutations.create('SnowThing', { id: 'garbage', name: 'SnowThing' }))
-      .rejects.toBeInstanceOf(MutationError)
-    expect(await mutations.create('SnowThing', { id: '123', name: 'SnowThing' }))
-      .toMatchObject({ created: 1 })
-    await expect(mutations.create('UuidThing', { id: 'garbage', name: 'UuidThing' }))
-      .rejects.toBeInstanceOf(MutationError)
-  })
-
-  test('keeps generated create/update schemas aligned with mutation validation', async () => {
-    const graph = new Graph({
-      entities: [{
-        fields: [
-          { field: 'score', maximum: 10, minimum: 0, type: FieldType.Number },
-          { field: 'title', maxLength: 20, minLength: 2, type: FieldType.String },
-          { field: 'nickname', nullable: true, type: FieldType.String },
-        ],
-        name: 'Thing',
-      }],
-    })
-    const schemas = generateJSONSchemas(graph)
-    const ajv = new Ajv({ allErrors: true })
-    const validateCreate = ajv.compile(schemas.Thing?.create as object)
-    const validateUpdate = ajv.compile(schemas.Thing?.update as object)
-    const mutations = mutationRunner(graph.definitions, fakeSQL())
-    const valid = { name: 'Valid', score: 5, title: 'Good' }
-    expect(validateCreate(valid)).toBe(true)
-    expect(await mutations.create('Thing', valid)).toMatchObject({ created: 1 })
-    const validNull = { name: 'Null', nickname: null, score: 5, title: 'Good' }
-    expect(validateCreate(validNull)).toBe(true)
-    expect(await mutations.create('Thing', validNull)).toMatchObject({ created: 1 })
-    const invalidCreate = [
-      { name: 'Missing', score: 5 },
-      { extra: true, name: 'Unknown', score: 5, title: 'Good' },
-      { entity: 'Thing', name: 'Generated', score: 5, title: 'Good' },
-      { lastUpdatedAt: '2020-01-01', name: 'Readonly', score: 5, title: 'Good' },
-      { name: 'Bounds', score: 11, title: 'Good' },
-    ]
-    for (const payload of invalidCreate) {
-      expect(validateCreate(payload)).toBe(false)
-      const error = await mutations.create('Thing', payload).catch((failure: unknown) => failure)
-      expect(error).toBeInstanceOf(MutationError)
-    }
-    const invalidUpdate = [
-      { extra: true, name: 'Unknown', score: 5, title: 'Good' },
-      { entity: 'Thing', name: 'Generated', score: 5, title: 'Good' },
-      { id: '00000000-0000-4000-8000-000000000001', name: 'Identity', score: 5, title: 'Good' },
-      { lastUpdatedAt: '2020-01-01', name: 'Readonly', score: 5, title: 'Good' },
-      { name: 'Bounds', score: 11, title: 'Good' },
-    ]
-    for (const payload of invalidUpdate) {
-      expect(validateUpdate(payload)).toBe(false)
-      const error = await mutations.edit('Thing', 'id == 1', payload)
-        .catch((failure: unknown) => failure)
-      expect(error).toBeInstanceOf(MutationError)
-    }
-  })
-
-  test('uses concrete descendants for abstract reference output discriminators', () => {
-    const abstract = new Graph({
-      entities: [
-        { fields: [{ field: 'email', type: FieldType.String }], name: 'User' },
-        { extends: 'User', fields: [], name: 'AdminUser' },
-        {
-          fields: [{ field: 'owner', target: 'User', type: FieldType.Entity }],
-          name: 'Note',
-        },
-      ],
-    })
-    const schemas = generateJSONSchemas(abstract)
-    const note = schemas.Note?.output as Record<string, unknown>
-    const ownerField = property(note, 'Note', 'output', 'owner')
-    const ownerRef = ownerField?.anyOf as { $ref?: string }[] | undefined
-    const ownerIdentity = ownerRef?.[0]?.$ref?.split('/').at(-1)
-    const defs = note.$defs as Record<string, { properties?: Record<string, { enum?: string[] }> }>
-    expect(ownerIdentity).toBe('User_Identity')
-    expect(defs.User_Identity?.properties?.entity?.enum).toContain('AdminUser')
-    const user = schemas.User?.output as {
-      properties: Record<string, { enum?: string[] }>,
-    }
-    expect(user.properties.entity.enum).toContain('AdminUser')
-    const userCreate = schemas.User?.create as Record<string, unknown> & {
-      properties: Record<string, { const?: string, enum?: string[] }>,
-    }
-    expect(userCreate.properties.entity).toBeUndefined()
-    expect(property(userCreate, 'User', 'create', 'name')).toBeDefined()
-    const userUpdate = schemas.User?.update as {
-      properties: Record<string, { const?: string, enum?: string[] }>,
-    }
-    expect(userUpdate.properties.entity).toBeUndefined()
-  })
-
-  test('composes inherited TypeScript and JSON Schema definitions', () => {
+  test('composes parent entities and references through $defs/$ref', () => {
     const graph = new Graph({
       entities: [
         { fields: [{ field: 'base', type: FieldType.String }], name: 'Base' },
@@ -420,27 +162,24 @@ describe('codegen', () => {
         },
       ],
     })
-    const types = generateTypes(graph)
-    expect(types).toContain('export enum Entities')
-    expect(types).toContain("  Child = 'Child',")
-    expect(types).toContain('export interface Child extends Base')
-    expect(types).toContain('export interface Grandchild extends Child')
-    expect(types).not.toContain('export interface Child extends Entity')
-    expect(types).toContain('readonly entity: Entities.Grandchild')
-    expect([...types.matchAll(/readonly base: string/gu)]).toHaveLength(1)
-
     const schemas = generateJSONSchemas(graph)
-    const ajv = new Ajv({ allErrors: true })
-    const childSchema = schemas.Grandchild?.output as {
-      $defs: Record<string, { allOf?: { $ref?: string }[] }>,
-      allOf?: { $ref?: string }[],
-    }
-    expect(childSchema.allOf?.[0]?.$ref).toBe('#/$defs/Grandchild_output')
-    expect(childSchema.$defs.Grandchild_output?.allOf?.[0]?.$ref).toBe('#/$defs/Child_output')
-    expect(childSchema.$defs.Child_output?.allOf?.[0]?.$ref).toBe('#/$defs/Base_output')
-    const child = ajv.compile(schemas.Grandchild?.output as object)
+    const base = schemas.$defs.Base as { properties?: Record<string, unknown> }
+    const child = schemas.$defs.Child as { allOf?: { $ref?: string }[] }
+    const grandchild = schemas.$defs.Grandchild as { allOf?: { $ref?: string }[] }
+    const holder = schemas.$defs.Holder as { properties?: Record<string, unknown> }
+    expect(base.properties?.base).toBeDefined()
+    expect(child.allOf?.[0]?.$ref).toBe('#/$defs/Base')
+    expect(grandchild.allOf?.[0]?.$ref).toBe('#/$defs/Child')
+    expect(holder.properties?.requiredChild).toEqual({ $ref: '#/$defs/Child' })
+    expect(holder.properties?.optionalChild).toEqual({
+      anyOf: [{ $ref: '#/$defs/Child' }, { type: 'null' }],
+    })
+    expect(schemas.$defs.Node).toBeDefined()
+    expect((schemas.$defs.Node as { properties?: Record<string, unknown> }).properties?.parent)
+      .toEqual({ anyOf: [{ $ref: '#/$defs/Node' }, { type: 'null' }] })
+
     const id = '00000000-0000-4000-8000-000000000001'
-    const childRow = {
+    const childRepresentation = {
       base: 'base',
       child: 'child',
       entity: 'Grandchild',
@@ -448,38 +187,95 @@ describe('codegen', () => {
       id,
       name: 'Grandchild',
     }
-    expect(child(childRow)).toBe(true)
-    expect(child({ ...childRow, unknown: true })).toBe(false)
-    expect(child({ child: 'child', entity: 'Grandchild', grandchild: 'grandchild', id, name: 'Grandchild' }))
+    expect(compileEntity(schemas, 'Grandchild')(childRepresentation)).toBe(true)
+    expect(compileEntity(schemas, 'Grandchild')({ child: 'child', entity: 'Grandchild', id, name: 'Grandchild' }))
       .toBe(false)
-    const childCreate = ajv.compile(schemas.Grandchild?.create as object)
-    expect(childCreate({ base: 'base', child: 'child', grandchild: 'grandchild', name: 'Grandchild' }))
-      .toBe(true)
-    expect(childCreate({
-      base: 'base',
-      child: 'child',
-      grandchild: 'grandchild',
-      name: 'Grandchild',
-      unknown: true,
+    expect(compileEntity(schemas, 'Holder')({
+      entity: 'Holder',
+      id,
+      name: 'Holder',
+      optionalChild: null,
+      requiredChild: childRepresentation,
+    })).toBe(true)
+    expect(compileEntity(schemas, 'Holder')({
+      entity: 'Holder',
+      id,
+      name: 'Holder',
+      requiredChild: null,
     })).toBe(false)
-
-    const holder = ajv.compile(schemas.Holder?.output as object)
-    const childRef = { entity: 'Grandchild', id, name: 'Grandchild' }
-    const holderRow = { entity: 'Holder', id, name: 'Holder', requiredChild: childRef }
-    expect(holder(holderRow)).toBe(true)
-    expect(holder({ ...holderRow, optionalChild: null })).toBe(true)
-    expect(holder({ ...holderRow, requiredChild: null })).toBe(false)
-    expect(holder({ ...holderRow, optionalChild: childRef })).toBe(true)
-
-    const node = ajv.compile(schemas.Node?.output as object)
-    expect(node({ entity: 'Node', id, label: 'Root', name: 'Node', parent: null })).toBe(true)
-    expect(node({
+    const nodeSchema = compileEntity(schemas, 'Node')
+    expect(nodeSchema({ entity: 'Node', id, label: 'Root', name: 'Node', parent: null })).toBe(true)
+    expect(nodeSchema({
       entity: 'Node',
       id,
       label: 'Child',
       name: 'Child',
-      parent: { entity: 'Node', id: '00000000-0000-4000-8000-000000000002', name: 'Root' },
+      parent: { entity: 'Node', id, label: 'Root', name: 'Root', parent: null },
     })).toBe(true)
+  })
+
+  test('preserves canonical bounds, nullability, and identity formats', () => {
+    const graph = new Graph({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'UuidThing' },
+        { fields: [{ field: 'id', format: 'Snowflake' }], name: 'SnowThing' },
+        {
+          fields: [
+            { field: 'score', maximum: 10, minimum: 0, type: FieldType.Number },
+            { field: 'title', maxLength: 20, minLength: 2, type: FieldType.String },
+            { field: 'nickname', nullable: true, type: FieldType.String },
+            { field: 'tags', items: { type: FieldType.String }, nullable: true, type: FieldType.Array },
+          ],
+          name: 'Thing',
+        },
+      ],
+    })
+    const schemas = generateJSONSchemas(graph)
+    const things = schemas.$defs.Thing as { properties: Record<string, Record<string, unknown>> }
+    expect(things.properties.score?.minimum).toBe(0)
+    expect(things.properties.score?.maximum).toBe(10)
+    expect(things.properties.title?.minLength).toBe(2)
+    expect(things.properties.title?.maxLength).toBe(20)
+    expect(things.properties.nickname?.anyOf).toEqual([{ type: 'string' }, { type: 'null' }])
+    expect(things.properties.tags?.anyOf).toEqual([
+      { items: { type: 'string' }, type: 'array' },
+      { type: 'null' },
+    ])
+    expect((schemas.$defs.UuidThing as { properties: Record<string, { pattern?: string }> })
+      .properties.id?.pattern).toBe('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+    expect((schemas.$defs.SnowThing as { properties: Record<string, { maxLength?: number }> })
+      .properties.id?.maxLength).toBe(20)
+    const validate = compileEntity(schemas, 'Thing')
+    const id = '00000000-0000-4000-8000-000000000001'
+    expect(validate({ entity: 'Thing', id, name: 'Thing', score: 5, title: 'Good' })).toBe(true)
+    expect(validate({ entity: 'Thing', id, name: 'Thing', score: 11, title: 'Good' })).toBe(false)
+    expect(validate({ entity: 'Thing', id, name: 'Thing', score: 5, title: 'G' })).toBe(false)
+  })
+
+  test('emits composed TypeScript inheritance, enums, and reference links', () => {
+    const graph = new Graph({
+      entities: [
+        { fields: [{ field: 'email', type: FieldType.String }], name: 'User' },
+        { fields: [{ field: 'base', type: FieldType.String }], name: 'Base' },
+        { extends: 'Base', fields: [{ field: 'child', type: FieldType.String }], name: 'Child' },
+        {
+          extends: 'Child',
+          fields: [{ field: 'grandchild', type: FieldType.String }],
+          name: 'Grandchild',
+        },
+        {
+          fields: [{ field: 'owner', target: 'User', type: FieldType.Entity }],
+          name: 'Note',
+        },
+      ],
+    })
+    const types = generateTypes(graph)
+    expect(types).toContain('export enum Entities')
+    expect(types).toContain('export interface Child extends Base')
+    expect(types).toContain('export interface Grandchild extends Child')
+    expect(types).not.toContain('export interface Child extends Entity')
+    expect(types).toContain('readonly owner: UserRef | null')
+    expect([...types.matchAll(/readonly base: string/gu)]).toHaveLength(1)
   })
 
   test('narrows a concrete descendant discriminator from its abstract parent', () => {
