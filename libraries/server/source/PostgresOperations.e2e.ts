@@ -9,7 +9,7 @@ import { removeService } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
-import { Graph } from './Graph'
+import { Action, Graph } from './Graph'
 import { ManagedPostgresService } from './ManagedPostgresService'
 import { ManagedPostgresOperations } from './PostgresOperations'
 import type { MigrationArtifact } from './Schema'
@@ -26,11 +26,8 @@ const graph = new Graph({
         { field: 'owner', target: 'User', type: 'Entity' },
       ],
       name: 'Article',
+      security: { [Action.Read]: { where: 'owner = $me' } },
     },
-  ],
-  grants: [
-    { action: 'manage', role: 'admin', target: '*' },
-    { action: 'read', predicate: 'owner = $me', role: 'public', target: 'Article' },
   ],
 })
 

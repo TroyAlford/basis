@@ -8,7 +8,7 @@ import { removeService } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
-import { Action, ADMIN_ROLE_ID } from './Graph'
+import { Action, ADMIN_ROLE_ID, Security } from './Graph'
 import { Graph } from './Graph'
 import { Server } from './Server'
 
@@ -17,13 +17,41 @@ const silent = new Logger({ silent: true })
 const graph = new Graph({
   entities: [
     { fields: [{ field: 'email', type: 'String' }], name: 'User' },
-    { extends: 'User', fields: [], name: 'ApplicationUser' },
+    {
+      extends: 'User',
+      fields: [],
+      name: 'ApplicationUser',
+      security: {
+        [Action.Read]: [
+          { role: 'admin' },
+          { where: "email = 'application@example.com'" },
+        ],
+        [Action.Create]: { role: 'admin' },
+      },
+    },
     {
       fields: [
         { field: 'title', type: 'String' },
         { field: 'owner', target: 'User', type: 'Entity' },
       ],
       name: 'Article',
+      security: {
+        [Action.Read]: [
+          { role: 'admin' },
+          { role: 'editor' },
+          { role: 'limited' },
+          { where: 'owner = $me' },
+        ],
+        [Action.Create]: [
+          { role: 'admin' },
+          { where: "title = 'Allowed'" },
+        ],
+        [Action.Update]: [
+          { role: 'admin' },
+          { role: 'editor' },
+          { role: 'limited', where: "title = 'Updated'" },
+        ],
+      },
     },
     {
       fields: [
@@ -31,39 +59,32 @@ const graph = new Graph({
         { field: 'owner', target: 'User', type: 'Entity' },
       ],
       name: 'Post',
+      security: {
+        [Action.Read]: Security.Public,
+        [Action.Create]: { role: 'admin' },
+      },
     },
-    { fields: [{ field: 'email', type: 'String' }], name: 'Profile' },
-    { extends: 'Profile', fields: [], name: 'Employee' },
-  ],
-  grants: [
-    { action: 'manage', role: 'admin', target: '*' },
-    { action: 'create', role: 'admin', target: 'Article' },
-    { action: 'create', role: 'admin', target: 'Post' },
-    { action: 'create', role: 'admin', target: 'Profile' },
-    { action: 'create', role: 'admin', target: 'Employee' },
-    { action: 'create', role: 'admin', target: 'User' },
-    { action: 'create', role: 'admin', target: 'ApplicationUser' },
-    { action: 'read', role: 'admin', target: 'Article' },
-    { action: 'read', predicate: 'owner = $me', role: 'public', target: 'Article' },
-    { action: 'read', role: 'public', target: 'Post' },
-    { action: 'create', predicate: "title = 'Allowed'", role: 'public', target: 'Article' },
-    { action: 'read', role: 'admin', target: 'Employee' },
-    { action: 'read', role: 'admin', target: 'ApplicationUser' },
-    { action: 'read', role: 'editor', target: 'Article' },
-    { action: 'update', role: 'editor', target: 'Article' },
-    { action: 'read', role: 'limited', target: 'Article' },
-    { action: 'update', predicate: "title = 'Updated'", role: 'limited', target: 'Article' },
-    { action: 'read', predicate: "email = 'employee@example.com'", role: 'public', target: 'Employee' },
     {
-      action: 'read',
-      predicate: "email = 'application@example.com'",
-      role: 'public',
-      target: 'ApplicationUser',
+      fields: [{ field: 'email', type: 'String' }],
+      name: 'Profile',
+      security: {
+        [Action.Read]: [
+          { role: 'admin' },
+          { where: "email = 'employee@example.com'" },
+        ],
+        [Action.Create]: { role: 'admin' },
+      },
     },
+    { extends: 'Profile', fields: [], name: 'Employee' },
   ],
   roles: {
     editor: { name: 'Editor' },
     limited: { name: 'Limited' },
+  },
+  security: {
+    ExternalIdentity: { [Action.Manage]: { role: 'admin' } },
+    Role: { [Action.Manage]: { role: 'admin' } },
+    UserRole: { [Action.Manage]: { role: 'admin' } },
   },
 })
 
@@ -597,23 +618,18 @@ describe('Authorization RLS', () => {
   test('enforces relationship membership grants through PostgreSQL RLS', async () => {
     const membershipGraph = new Graph({
       entities: [
-        { fields: [{ field: 'title', type: 'String' }], name: 'Workspace' },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Workspace',
+          security: {
+            [Action.Read]: { where: 'members $contains (id = $me)' },
+            [Action.Update]: [
+              { where: "members $contains (id = $me $and workspaceMembership.role = 'Owner')" },
+              { where: "members $contains (id = $me $and workspaceMembership.role = 'Editor')" },
+            ],
+          },
+        },
         { fields: [{ field: 'email', type: 'String' }], name: 'User' },
-      ],
-      grants: [
-        { action: 'read', predicate: 'members $contains (id = $me)', role: 'public', target: 'Workspace' },
-        {
-          action: 'update',
-          predicate: "members $contains (id = $me $and workspaceMembership.role = 'Owner')",
-          role: 'public',
-          target: 'Workspace',
-        },
-        {
-          action: 'update',
-          predicate: "members $contains (id = $me $and workspaceMembership.role = 'Editor')",
-          role: 'public',
-          target: 'Workspace',
-        },
       ],
       relationships: [{
         between: [
@@ -751,16 +767,14 @@ describe('Authorization RLS', () => {
   test('applies membership grants declared on an abstract parent to concrete descendants', async () => {
     const abstractGraph = new Graph({
       entities: [
-        { fields: [{ field: 'title', type: 'String' }], name: 'Resource' },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Resource',
+          security: { [Action.Read]: { where: 'members $contains (id = $me)' } },
+        },
         { extends: 'Resource', fields: [], name: 'Workspace' },
         { fields: [{ field: 'email', type: 'String' }], name: 'User' },
       ],
-      grants: [{
-        action: 'read',
-        predicate: 'members $contains (id = $me)',
-        role: 'public',
-        target: 'Resource',
-      }],
       relationships: [{
         between: [
           { field: 'resource', inverse: 'members', target: 'Resource' },
@@ -946,6 +960,91 @@ describe('Authorization RLS', () => {
       `))
       expect(await remove(bob)).toHaveLength(0)
       expect(await remove(alice)).toHaveLength(1)
+    } finally {
+      await admin.close()
+      await server.shutdown()
+      removeService(install)
+    }
+  }, 120_000)
+
+  test('allows where-only membership rules alongside an administrator capability', async () => {
+    enum Capability {
+      Manage = 'manageWorkspace',
+    }
+    const whereOnlyGraph = new Graph({
+      entities: [{
+        fields: [],
+        name: 'Workspace',
+        security: {
+          [Action.Read]: [
+            { where: 'members $contains (id = $me)' },
+            { grant: Capability.Manage },
+          ],
+        },
+      }, { fields: [{ field: 'email', type: 'String' }], name: 'User' }],
+      grants: {
+        [Capability.Manage]: { description: 'Manage workspaces' },
+      },
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+      }],
+      roles: {
+        administrator: { grants: [Capability.Manage], name: 'Workspace administrator' },
+      },
+    } as never)
+    const install = tempDirectory('basis-authorization-where-only-')
+    const server = await start(install, whereOnlyGraph)
+    const admin = await openAdmin(server.db)
+    try {
+      const authorization = server.auth
+      if (!authorization) throw new Error('authorization did not initialize')
+      const alice = await authorization.enrollIdentity('test', 'alice', { email: 'alice@example.com' })
+      const bob = await authorization.enrollIdentity('test', 'bob', { email: 'bob@example.com' })
+      const charlie = await authorization.enrollIdentity('test', 'charlie', { email: 'charlie@example.com' })
+      if (!alice || !bob || !charlie) throw new Error('users were not enrolled')
+      const administrator = whereOnlyGraph.role('administrator')
+      if (!administrator) throw new Error('administrator role was not loaded')
+      await admin.sql`
+        INSERT INTO "UserRole" ("user.id", "role.id")
+        VALUES (${bob}, ${administrator.id})
+      `
+      const workspace = randomUUID()
+      await admin.sql.begin(async tx => {
+        await tx`
+          INSERT INTO "Entity" ("id", "name", "entity")
+          VALUES (${workspace}, 'Workspace', 'Workspace')
+        `
+        await tx`INSERT INTO "Workspace" ("id") VALUES (${workspace})`
+        await tx`
+          INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
+          VALUES (${workspace}, ${alice}, 'Owner')
+        `
+      })
+      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
+      const read = (actor: string | null) => asActor(actor, () => server.db.query('Workspace', {
+        fields: ['id'],
+      }))
+      expect(await read(alice)).toEqual([{ id: workspace }])
+      expect(await read(bob)).toEqual([{ id: workspace }])
+      expect(await read(charlie)).toEqual([])
+      expect(await read(null)).toEqual([])
+      expect(await asActor(alice, () => authorization.can('read', 'Workspace', { id: workspace })))
+        .toBe(true)
+      expect(await asActor(bob, () => authorization.can('read', 'Workspace', { id: workspace })))
+        .toBe(true)
+      expect(await asActor(charlie, () => authorization.can('read', 'Workspace', { id: workspace })))
+        .toBe(false)
+      expect(await asActor(null, () => authorization.can('read', 'Workspace', { id: workspace })))
+        .toBe(false)
+      expect(await asActor(charlie, () => server.db.tx(async sql => sql<{ id: string }[]>`
+        SELECT "id"
+        FROM "Workspace"
+      `))).toEqual([])
     } finally {
       await admin.close()
       await server.shutdown()

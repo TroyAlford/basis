@@ -102,7 +102,7 @@ roles: {
 }
 ```
 
-Each entity and named relationship owns an action-keyed `security` declaration. An action value is either explicit `Security.Public` or one or more alternative rules combined with OR. Each rule requires one of `grant` or `role`, optionally combined with a canonical row predicate in `where`:
+Each entity and named relationship owns an action-keyed `security` declaration. An action value is either explicit `Security.Public` or one or more alternative rules combined with OR. Each rule may declare exactly one of `grant` or `role` and/or a non-empty `where`. A where-only rule is a public-conditional rule: it authorizes matching rows without an artificial global capability or role. `Security.Public` remains the only unconditional public form.
 
 ```ts
 security: {
@@ -128,9 +128,19 @@ security: {
 
 The closed action vocabulary is `read`, `create`, `update`, `delete`, and `manage`. `manage` is an administration qualifier and cannot carry a row predicate. Predicates use the same `Filter`/`Predicate`/`QueryNormalizer` vocabulary as entity queries. Graph changes require a new graph and schema plan; there is no runtime grant registry duplicating the graph.
 
-Graph predicates are normalized when the graph loads and compiled into PostgreSQL `CREATE POLICY ... USING (...)` and `WITH CHECK (...)` expressions. RLS covers the universal `Entity` root, every MTI ancestor and concrete table, and every named relationship table. Reads deny by returning no rows. Default deny applies to tables without a matching action declaration.
+System-owned administration metadata can be secured through the top-level `security` map keyed by its canonical owner. For example, administration operations require `manage` on `Role`, `UserRole`, and `ExternalIdentity`:
 
-The previous target-bound `grants: [{ role, action, target, predicate }]` form is accepted only as a compatibility adapter and normalizes into the same canonical grant list; new graphs should use capabilities and entity/relationship security.
+```ts
+security: {
+  Role: { [Action.Manage]: { role: 'admin' } },
+  UserRole: { [Action.Manage]: { role: 'admin' } },
+  ExternalIdentity: { [Action.Manage]: { role: 'admin' } },
+}
+```
+
+This uses the same action rules and compiler; it is not a separate authorization authority.
+
+Graph predicates are normalized when the graph loads and compiled into PostgreSQL `CREATE POLICY ... USING (...)` and `WITH CHECK (...)` expressions. RLS covers the universal `Entity` root, every MTI ancestor and concrete table, and every named relationship table. Reads deny by returning no rows. Default deny applies to tables without a matching action declaration.
 
 ## Relationship membership predicates
 
@@ -138,7 +148,6 @@ Graph roles are global role memberships. A resource-specific membership is ordin
 
 ```ts
 enum WorkspaceCapability {
-  View = 'viewWorkspace',
   Edit = 'editWorkspace',
 }
 
@@ -154,7 +163,6 @@ const graph = new Graph({
       fields: [],
       security: {
         [Action.Read]: {
-          grant: WorkspaceCapability.View,
           where: 'members $contains (id = $me)',
         },
         [Action.Update]: {
@@ -188,19 +196,17 @@ const graph = new Graph({
     fields: [{ field: 'role', type: 'String' }],
   }],
   grants: {
-    [WorkspaceCapability.View]: { description: 'View a workspace' },
     [WorkspaceCapability.Edit]: { description: 'Edit a workspace' },
   },
   roles: {
-    member: { grants: [WorkspaceCapability.View], name: 'Workspace member' },
     owner: {
       name: 'Workspace owner',
-      grants: [WorkspaceCapability.View, WorkspaceCapability.Edit],
+      grants: [WorkspaceCapability.Edit],
     },
   },
 })
 ```
-`members` is the inverse collection declared by the authenticated endpoint. `$me` is the verified transaction actor, so this predicate means: the current actor is connected to the Workspace by at least one `WorkspaceMembership`. An anonymous actor has no actor id and does not match. Changing membership rows changes access immediately; no graph rebuild or policy reinstall is required.
+`members` is the inverse collection declared by the authenticated endpoint. `$me` is the verified transaction actor, so this predicate means: the current actor is connected to the Workspace by at least one `WorkspaceMembership`. An anonymous actor has no actor id and does not match. Changing membership rows changes access immediately; no graph rebuild or policy reinstall is required. The read rule is where-only, so membership itself is the complete row qualifier; the update rule combines an editor capability with the resource-specific Owner role.
 
 Relationship-owned scalar properties participate through the lower-cased relationship-name prefix. Keep the identity and role requirements in one member requirement so PostgreSQL evaluates them against the same relationship row:
 

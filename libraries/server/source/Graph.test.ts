@@ -3,20 +3,17 @@ import { Action, ADMIN_ROLE_ID, Graph, PUBLIC_ROLE_ID, Security } from './Graph'
 import { Operator } from './Operator'
 
 const graph = new Graph({
-  entities: [
-    {
-      fields: [
-        { field: 'title', type: 'String' },
-        { field: 'owner', target: 'User', type: 'Entity' },
-      ],
-      name: 'Article',
+  entities: [{
+    fields: [
+      { field: 'title', type: 'String' },
+      { field: 'owner', target: 'User', type: 'Entity' },
+    ],
+    name: 'Article',
+    security: {
+      [Action.Read]: { where: 'owner = $me' },
+      [Action.Update]: { role: 'editor', where: 'owner = $me' },
     },
-  ],
-  grants: [
-    { action: 'read', predicate: 'owner = $me', role: 'public', target: 'Article' },
-    { action: 'update', predicate: 'owner = $me', role: 'editor', target: 'Article' },
-    { action: 'manage', role: 'admin', target: '*' },
-  ],
+  }],
   roles: {
     editor: { name: 'Editor' },
   },
@@ -35,8 +32,11 @@ function enrollSql(model: Graph): string {
 describe('Graph', () => {
   test('round-trips authored options through a JSON snapshot', () => {
     const original = new Graph({
-      entities: [{ fields: [{ field: 'title', type: 'String' }], name: 'SnapshotNote' }],
-      grants: [{ action: 'read', role: 'public', target: 'SnapshotNote' }],
+      entities: [{
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'SnapshotNote',
+        security: { [Action.Read]: Security.Public },
+      }],
       roles: { reader: { name: 'Reader' } },
     })
     const restored = new Graph(JSON.parse(JSON.stringify(original)))
@@ -46,8 +46,11 @@ describe('Graph', () => {
 
   test('compiles root grants from the canonical identity fields', () => {
     const rootGraph = new Graph({
-      entities: [{ fields: [], name: 'Note' }],
-      grants: [{ action: 'read', predicate: 'id = $me', role: 'public', target: 'Entity' }],
+      entities: [{
+        fields: [],
+        name: 'Note',
+        security: { [Action.Read]: { where: 'id = $me' } },
+      }],
     })
     const read = rootGraph.physicalSchema('basis_app', true).policies.find(policy => (
       policy.table === 'Entity' && policy.command === 'SELECT'
@@ -197,15 +200,17 @@ describe('Graph', () => {
   test('normalizes and compiles named-relationship membership policies', () => {
     const membershipGraph = new Graph({
       entities: [
-        { fields: [{ field: 'title', type: 'String' }], name: 'Workspace' },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Workspace',
+          security: {
+            [Action.Read]: {
+              where: "members $contains (id = $me $and workspaceMembership.role = 'Owner')",
+            },
+          },
+        },
         { fields: [], name: 'User' },
       ],
-      grants: [{
-        action: 'read',
-        predicate: "members $contains (id = $me $and workspaceMembership.role = 'Owner')",
-        role: 'public',
-        target: 'Workspace',
-      }],
       relationships: [{
         between: [
           { field: 'workspace', inverse: 'members', target: 'Workspace' },
@@ -246,10 +251,6 @@ describe('Graph', () => {
 
   test('normalizes structured and string membership predicates identically', () => {
     const source = 'members $contains (id = $me)'
-    const entities = [
-      { fields: [{ field: 'title', type: 'String' }], name: 'Workspace' },
-      { fields: [], name: 'User' },
-    ] as const
     const relationships = [{
       between: [
         { field: 'workspace', inverse: 'members', target: 'Workspace' },
@@ -258,23 +259,20 @@ describe('Graph', () => {
       fields: [{ field: 'role', type: 'String' }],
       name: 'WorkspaceMembership',
     }] as const
+    const withSecurity = (where: string | Readonly<Record<string, unknown>>) => [
+      { fields: [{ field: 'title', type: 'String' }], name: 'Workspace', security: { [Action.Read]: { where } } },
+      { fields: [], name: 'User' },
+    ] as const
     const stringGraph = new Graph({
-      entities,
-      grants: [{ action: 'read', predicate: source, role: 'public', target: 'Workspace' }],
+      entities: withSecurity(source),
       relationships,
     })
     const structuredGraph = new Graph({
-      entities,
-      grants: [{
-        action: 'read',
-        predicate: {
-          field: 'members',
-          filters: [{ field: 'id', operator: '$eq', value: '$me' }],
-          operator: '$contains',
-        },
-        role: 'public',
-        target: 'Workspace',
-      }],
+      entities: withSecurity({
+        field: 'members',
+        filters: [{ field: 'id', operator: '$eq', value: '$me' }],
+        operator: '$contains',
+      }),
       relationships,
     })
     expect(structuredGraph.grants).toEqual(stringGraph.grants)
@@ -301,14 +299,9 @@ describe('Graph', () => {
             type: 'Inverse',
           }],
           name: 'User',
+          security: { [Action.Read]: { where: 'articles $contains (id = $me)' } },
         },
       ],
-      grants: [{
-        action: 'read',
-        predicate: 'articles $contains (id = $me)',
-        role: 'public',
-        target: 'User',
-      }],
     })
     const helper = inverseGraph.physicalSchema('basis_app', true).functions
       .find(fn => fn.name.startsWith('basis.policy_'))
@@ -320,10 +313,13 @@ describe('Graph', () => {
   test('rejects unsupported authorization collection predicates', () => {
     const make = (predicate: string, action: 'read' | 'create' = 'read'): Graph => new Graph({
       entities: [
-        { fields: [{ field: 'title', type: 'String' }], name: 'Workspace' },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Workspace',
+          security: { [action]: { where: predicate } },
+        },
         { fields: [], name: 'User' },
       ],
-      grants: [{ action, predicate, role: 'public', target: 'Workspace' }],
       relationships: [{
         between: [
           { field: 'workspace', inverse: 'members', target: 'Workspace' },
@@ -340,7 +336,7 @@ describe('Graph', () => {
       .toThrow('exactly one member requirement')
     expect(() => make('members $all (id = $me)')).toThrow('$all collection policy predicates')
     expect(() => make('members $contains (id = $me)', 'create'))
-      .toThrow('create grants cannot use collection predicates')
+      .toThrow('create security for "Workspace" cannot use collection predicates')
     expect(() => make("members $contains (id = $me) $and members $contains (workspaceMembership.role = 'Owner')"))
       .toThrow('multiple $contains requirements')
   })
@@ -348,15 +344,13 @@ describe('Graph', () => {
   test('supports collection $empty policies', () => {
     const emptyGraph = new Graph({
       entities: [
-        { fields: [{ field: 'title', type: 'String' }], name: 'Workspace' },
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Workspace',
+          security: { [Action.Read]: { where: 'members $empty' } },
+        },
         { fields: [], name: 'User' },
       ],
-      grants: [{
-        action: 'read',
-        predicate: 'members $empty',
-        role: 'public',
-        target: 'Workspace',
-      }],
       relationships: [{
         between: [
           { field: 'workspace', inverse: 'members', target: 'Workspace' },
@@ -374,15 +368,15 @@ describe('Graph', () => {
   test('allows a single membership check combined with $empty', () => {
     const combined = new Graph({
       entities: [
-        { fields: [], name: 'Workspace' },
+        {
+          fields: [],
+          name: 'Workspace',
+          security: {
+            [Action.Read]: { where: 'members $empty $or members $contains (id = $me)' },
+          },
+        },
         { fields: [], name: 'User' },
       ],
-      grants: [{
-        action: 'read',
-        predicate: 'members $empty $or members $contains (id = $me)',
-        role: 'public',
-        target: 'Workspace',
-      }],
       relationships: [{
         between: [
           { field: 'workspace', inverse: 'members', target: 'Workspace' },
@@ -400,12 +394,18 @@ describe('Graph', () => {
     const composed = new Graph({
       entities: [
         { fields: [{ field: 'title', type: 'String' }], name: 'Resource' },
-        { extends: 'Resource', fields: [{ field: 'owner', target: 'User', type: 'Entity' }], name: 'Workspace' },
+        {
+          extends: 'Resource',
+          fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
+          name: 'Workspace',
+          security: {
+            [Action.Read]: [
+              { where: 'owner = $me' },
+              { where: 'members $contains (id = $me)' },
+            ],
+          },
+        },
         { fields: [], name: 'User' },
-      ],
-      grants: [
-        { action: 'read', predicate: 'owner = $me', role: 'public', target: 'Workspace' },
-        { action: 'read', predicate: 'members $contains (id = $me)', role: 'public', target: 'Resource' },
       ],
       relationships: [{
         between: [
@@ -424,11 +424,10 @@ describe('Graph', () => {
     const policy = schema.policies.find(candidate => (
       candidate.table === 'Workspace' && candidate.command === 'SELECT'
     ))
-    expect(policy?.sql).toContain('"Workspace"."owner.id"')
     expect(policy?.sql).toContain(`${helperNames[0]}("Workspace"."id")`)
-    expect(policy?.sql).toContain(' OR ')
+    expect(policy?.sql).toContain('"Workspace"."owner.id"')
     expect(schema.functions.find(fn => fn.name === helperNames[0])?.sql)
-      .toContain('FROM "Resource" AS "__row"')
+      .toContain('"WorkspaceMembership"')
   })
 
   test('compiles named capabilities and entity security into one policy authority', () => {
@@ -603,6 +602,56 @@ describe('Graph', () => {
     expect(siblings.security).toHaveLength(2)
   })
 
+  test('allows where-only membership rules without an artificial capability', () => {
+    enum MembershipRole {
+      Owner = 'Owner',
+    }
+    const whereOnly = new Graph({
+      entities: [{
+        fields: [],
+        name: 'Workspace',
+        security: {
+          [Action.Read]: {
+            where: {
+              field: 'members',
+              filters: [{
+                filters: [
+                  { field: 'id', operator: Operator.Comparison.Equal, value: '$me' },
+                  {
+                    field: 'workspaceMembership.role',
+                    operator: Operator.Comparison.Equal,
+                    value: MembershipRole.Owner,
+                  },
+                ],
+                operator: Operator.Logical.And,
+              }],
+              operator: Operator.Comparison.Contains,
+            },
+          },
+        },
+      }, { fields: [], name: 'User' }],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+      }],
+    } as never)
+    expect(whereOnly.security[0]?.rules).toEqual([{ where: expect.objectContaining({ field: 'members' }) }])
+    expect(whereOnly.grants).toMatchObject([{
+      action: Action.Read,
+      role: PUBLIC_ROLE_ID,
+      target: 'Workspace',
+    }])
+    const read = whereOnly.physicalSchema('basis_app', true).policies.find(policy => (
+      policy.table === 'Workspace' && policy.command === 'SELECT'
+    ))
+    expect(read?.sql).toContain('basis.policy_')
+    expect(read?.sql).not.toContain('FALSE')
+  })
+
   test('applies explicit public security to named relationship tables', () => {
     const relationshipSecurity = new Graph({
       entities: [
@@ -637,8 +686,11 @@ describe('Graph', () => {
     expect(() => make({ read: { grant: 'Missing' } })).toThrow('unknown capability "Missing"')
     expect(() => make({ read: { role: 'Missing' } })).toThrow('unknown role "Missing"')
     expect(() => make({ read: { role: 'public' } })).toThrow('must use Security.Public')
+    expect(() => make({ read: { where: 'members $contains (id = $me)' } }))
+      .toThrow('Unknown collection or array navigation')
     expect(() => make({ invalid: Security.Public })).toThrow('unknown action "invalid"')
-    expect(() => make({ read: {} })).toThrow('exactly one of grant or role')
+    expect(() => make({ read: {} })).toThrow('must declare grant, role, or a non-empty where')
+    expect(() => make({ read: { where: null } })).toThrow('must declare grant, role, or a non-empty where')
   })
 
 })

@@ -53,7 +53,6 @@ export type {
 } from './source/GraphAuthoring'
 export type {
   GrantCapability,
-  GrantDefinition,
   GrantSource,
   GraphGrant,
   GraphOptions,
