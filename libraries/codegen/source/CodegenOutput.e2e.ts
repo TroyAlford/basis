@@ -1,4 +1,5 @@
-import Ajv from 'ajv'
+import Ajv2020 from 'ajv/dist/2020'
+import addFormats from 'ajv-formats'
 import { FieldType, Graph } from 'basis/server'
 import { describe, expect, test } from 'bun:test'
 import { withIsolatedDatabase } from '../../server/testing/DatabaseIsolation'
@@ -62,17 +63,21 @@ describe('Codegen output contracts', () => {
           'title',
           'nullableJSON',
           'nullableNote',
-          'nullableOwner.email',
+          'lastUpdatedAt',
+          'lastUpdatedBy',
+          'nullableOwner',
           'nullableTags',
-          'owner.email',
+          'owner',
           'requiredJSON',
-          'requiredOwner.email',
+          'requiredOwner',
         ],
         limit: null,
         orderBy: 'name',
       })
       const schemas = generateJSONSchemas(graph)
-      const validate = new Ajv({ allErrors: true }).compile({
+      const validator = new Ajv2020({ allErrors: true })
+      addFormats(validator)
+      const validate = validator.compile({
         $defs: schemas.$defs,
         $ref: '#/$defs/OutputRow',
         $schema: schemas.$schema,

@@ -83,7 +83,7 @@ export default emitter({ extension: 'txt', folder: 'custom' }, graph => [{
 
 - Built-in `TypeScriptEmitter` writes `generated/typescript/index.ts`; `JsonSchemaEmitter` writes `generated/json-schema/schemas.json`. Application emitters own their extension, folder, file names, and content.
 - `basis/codegen` also exports the pure content generators `generateTypes(graph)` and `generateJSONSchemas(graph)` for consumers that own their own file emission.
-- The JSON Schema emitter describes canonical entities only: one `$defs` entry per entity with properties, types, nullability, numeric/string bounds, identity formats, and entity references. Inheritance composes through `allOf`/`$ref`. It does not emit mutation-operation variants or express authorization and runtime business rules; Basis mutation validation and PostgreSQL RLS remain the authorities for those decisions. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
+- The JSON Schema emitter describes canonical entities only: one `$defs` entry per entity with properties, types, nullability, numeric/string bounds, identity formats, and identity-only entity references. Every stored field is required in the full-entity representation; `null` is expressed through the property value, not by omitting the property. Inheritance composes through `allOf`/`$ref`. It does not emit mutation-operation variants or express authorization and runtime business rules; Basis mutation validation and PostgreSQL RLS remain the authorities for those decisions. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
 - `basis/visualization` emits logical and physical Mermaid ERD source. Render it with the existing `Mermaid` component from `basis/react`; visualization never becomes a server runtime dependency.
 
 Emitter modules use the small `emitter({ extension, folder }, generate)` contract. The factory returns an awaitable `(graph, root?) => Promise<void>` and writes each generated file beneath the caller's root; the module owns its extension, folder, file names, and format-specific content. The output root defaults to the process working directory, and declared destinations cannot escape it. The conventional lifecycle invokes application emitters in sorted filename order, so repeated runs overwrite deterministic paths; no stale files are deleted.
@@ -165,11 +165,11 @@ const created = await db.create('Note', {
 
 Query fields are constrained to supported effective-field and reference paths. Invalid fields, array-index projections, mismatched result types, reference objects in create payloads, and identity changes in edits fail TypeScript compilation.
 
-The JSON Schema emitter produces one standards-compliant entity document with a `$defs` entry per Graph entity. Inheritance and references use composition:
+The JSON Schema emitter produces one standards-compliant Draft 2020-12 entity document with a `$defs` entry per Graph entity and per identity reference. Inheritance and references use composition:
 
 ```json
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$ref": "#/$defs/Entity",
   "$defs": {
     "Entity": {
@@ -178,19 +178,19 @@ The JSON Schema emitter produces one standards-compliant entity document with a 
         "name": { "type": "string" },
         "entity": { "enum": ["Note", "User"], "type": "string" },
         "lastUpdatedAt": { "anyOf": [{ "format": "date-time", "type": "string" }, { "type": "null" }] },
-        "lastUpdatedBy": { "anyOf": [{ "$ref": "#/$defs/User" }, { "type": "null" }] }
+        "lastUpdatedBy": { "anyOf": [{ "$ref": "#/$defs/UserRef" }, { "type": "null" }] }
       },
-      "required": ["id", "name", "entity"],
+      "required": ["id", "name", "entity", "lastUpdatedAt", "lastUpdatedBy"],
       "type": "object"
     },
     "Note": {
       "allOf": [{ "$ref": "#/$defs/Entity" }],
       "properties": {
         "entity": { "const": "Note", "type": "string" },
-        "owner": { "anyOf": [{ "$ref": "#/$defs/User" }, { "type": "null" }] },
+        "owner": { "anyOf": [{ "$ref": "#/$defs/UserRef" }, { "type": "null" }] },
         "title": { "type": "string" }
       },
-      "required": ["entity", "title"],
+      "required": ["entity", "title", "owner"],
       "type": "object"
     }
   }

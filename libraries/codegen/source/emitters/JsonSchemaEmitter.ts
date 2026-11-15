@@ -25,13 +25,14 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
   return {
     $defs: {
       Entity: rootEntitySchema(definitions),
-      ...Object.fromEntries(entityDefinitions.map(entity => [
-        entity.name,
-        entitySchema(entity, definitions),
+      EntityRef: identitySchemaDefinition('Entity', definitions),
+      ...Object.fromEntries(entityDefinitions.flatMap(entity => [
+        [entity.name, entitySchema(entity, definitions)],
+        [`${entity.name}Ref`, identitySchemaDefinition(entity.name, definitions)],
       ])),
     },
     $ref: '#/$defs/Entity',
-    $schema: 'http://json-schema.org/draft-07/schema#',
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
   }
 }
 
@@ -43,19 +44,41 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
 function rootEntitySchema(
   definitions: Graph['definitions'],
 ): Readonly<Record<string, unknown>> {
-  const leaves = definitions.concreteDescendants('Entity')
-    .map(entity => entity.name)
-    .sort((left, right) => left.localeCompare(right))
   return {
     properties: {
-      entity: leaves.length === 0 ? { type: 'string' } : { enum: leaves, type: 'string' },
+      entity: rootDiscriminatorSchema(definitions),
       id: identitySchema(undefined),
       lastUpdatedAt: {
         anyOf: [{ format: 'date-time', type: 'string' }, { type: 'null' }],
       },
       lastUpdatedBy: {
-        anyOf: [{ $ref: '#/$defs/User' }, { type: 'null' }],
+        anyOf: [{ $ref: '#/$defs/UserRef' }, { type: 'null' }],
       },
+      name: { type: 'string' },
+    },
+    required: ['id', 'name', 'entity', 'lastUpdatedAt', 'lastUpdatedBy'],
+    type: 'object',
+  }
+}
+
+/**
+ * Render one canonical identity-reference definition.
+ * @param target - Referenced entity name, or `Entity`.
+ * @param definitions - Canonical definitions.
+ * @returns Identity reference JSON Schema.
+ */
+function identitySchemaDefinition(
+  target: string,
+  definitions: Graph['definitions'],
+): Readonly<Record<string, unknown>> {
+  const entity = target === 'Entity' ? undefined : definitions.entity(target)
+  return {
+    additionalProperties: false,
+    properties: {
+      entity: entity === undefined
+        ? rootDiscriminatorSchema(definitions)
+        : discriminatorSchema(entity, definitions),
+      id: identitySchema(entity?.idFormat),
       name: { type: 'string' },
     },
     required: ['id', 'name', 'entity'],
@@ -81,7 +104,7 @@ function entitySchema(
   for (const field of entity.fields) {
     if (field.type === FieldType.Inverse || field.name === 'id') continue
     properties[field.name] = fieldSchema(field)
-    if (isRequired(field)) required.push(field.name)
+    required.push(field.name)
   }
   return {
     allOf: [{ $ref: `#/$defs/${entity.parent}` }],
@@ -99,7 +122,7 @@ function entitySchema(
 function fieldSchema(field: FieldDefinition): Record<string, unknown> {
   if (field.type === FieldType.Inverse) return {}
   if (field.type === FieldType.Entity) {
-    const reference = { $ref: `#/$defs/${field.target}` }
+    const reference = { $ref: `#/$defs/${field.target}Ref` }
     return field.nullable === false ? reference : { anyOf: [reference, { type: 'null' }] }
   }
   if (field.type === FieldType.Array) {
@@ -144,17 +167,6 @@ function itemSchema(item: ScalarArrayElementDefinition): Record<string, unknown>
 }
 
 /**
- * Whether one field is required by the entity representation.
- * @param field - Authored field.
- * @returns Whether the field is required.
- */
-function isRequired(field: FieldDefinition): boolean {
-  if (field.type === FieldType.Inverse) return false
-  if (field.default !== undefined) return false
-  return field.type === FieldType.Entity ? field.nullable === false : field.nullable !== true
-}
-
-/**
  * Render the canonical identity schema for one entity format.
  * @param format - Effective identity format, when refined.
  * @returns JSON Schema for an ID value.
@@ -187,6 +199,20 @@ function boundsFor(field: EffectiveFieldDefinition | FieldDefinition): Record<st
     ...(field.type === FieldType.String && field.maxLength !== undefined ? { maxLength: field.maxLength } : {}),
     ...(field.type === FieldType.String && field.minLength !== undefined ? { minLength: field.minLength } : {}),
   }
+}
+
+/**
+ * Render the universal root discriminator union.
+ * @param definitions - Canonical definitions.
+ * @returns JSON Schema for the root discriminator.
+ */
+function rootDiscriminatorSchema(
+  definitions: Graph['definitions'],
+): Record<string, unknown> {
+  const leaves = definitions.concreteDescendants('Entity')
+    .map(entity => entity.name)
+    .sort((left, right) => left.localeCompare(right))
+  return leaves.length === 0 ? { type: 'string' } : { enum: leaves, type: 'string' }
 }
 
 /**

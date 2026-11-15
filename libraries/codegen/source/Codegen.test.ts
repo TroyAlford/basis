@@ -1,4 +1,5 @@
-import Ajv from 'ajv'
+import Ajv2020 from 'ajv/dist/2020'
+import addFormats from 'ajv-formats'
 import { Cardinality, FieldType, Graph } from 'basis/server'
 import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -46,13 +47,23 @@ const document = {
 } as const
 
 /**
+ * Create one standards-compliant Draft 2020-12 validator.
+ * @returns The configured validator.
+ */
+function createValidator(): Ajv2020 {
+  const validator = new Ajv2020({ allErrors: true })
+  addFormats(validator)
+  return validator
+}
+
+/**
  * Compile one entity definition with its shared `$defs`.
  * @param schemas - Generated JSON Schema document.
  * @param entity - Entity definition name.
  * @returns A validating function.
  */
 function compileEntity(schemas: GeneratedSchemas, entity: string) {
-  return new Ajv({ allErrors: true }).compile({
+  return createValidator().compile({
     $defs: schemas.$defs,
     $ref: `#/$defs/${entity}`,
     $schema: schemas.$schema,
@@ -69,8 +80,9 @@ describe('codegen', () => {
     expect(types).toContain('export type NoteRef')
     expect(types).toContain('readonly owner: UserRef | null')
     expect(types).toContain('readonly subject: EntityRef | null')
-    expect(schemas.$schema).toBe('http://json-schema.org/draft-07/schema#')
+    expect(schemas.$schema).toBe('https://json-schema.org/draft/2020-12/schema')
     expect(schemas.$ref).toBe('#/$defs/Entity')
+    expect(createValidator().validateSchema(schemas)).toBe(true)
     expect(schemas.$defs.Note).toBeDefined()
     expect(Object.keys(schemas.$defs.Note as object)).not.toContain('create')
     expect(Object.keys(schemas.$defs.Note as object)).not.toContain('update')
@@ -83,9 +95,11 @@ describe('codegen', () => {
       dueOn: '2020-01-01',
       entity: 'Note',
       id,
+      lastUpdatedAt: null,
+      lastUpdatedBy: null,
       metadata: { kind: 'note' },
       name: 'Note',
-      owner: { email: 'owner@example.com', entity: 'User', id, name: 'Owner' },
+      owner: { entity: 'User', id, name: 'Owner' },
       subject: null,
       tags: ['a'],
       title: 'Title',
@@ -170,13 +184,13 @@ describe('codegen', () => {
     expect(base.properties?.base).toBeDefined()
     expect(child.allOf?.[0]?.$ref).toBe('#/$defs/Base')
     expect(grandchild.allOf?.[0]?.$ref).toBe('#/$defs/Child')
-    expect(holder.properties?.requiredChild).toEqual({ $ref: '#/$defs/Child' })
+    expect(holder.properties?.requiredChild).toEqual({ $ref: '#/$defs/ChildRef' })
     expect(holder.properties?.optionalChild).toEqual({
-      anyOf: [{ $ref: '#/$defs/Child' }, { type: 'null' }],
+      anyOf: [{ $ref: '#/$defs/ChildRef' }, { type: 'null' }],
     })
     expect(schemas.$defs.Node).toBeDefined()
     expect((schemas.$defs.Node as { properties?: Record<string, unknown> }).properties?.parent)
-      .toEqual({ anyOf: [{ $ref: '#/$defs/Node' }, { type: 'null' }] })
+      .toEqual({ anyOf: [{ $ref: '#/$defs/NodeRef' }, { type: 'null' }] })
 
     const id = '00000000-0000-4000-8000-000000000001'
     const childRepresentation = {
@@ -185,32 +199,49 @@ describe('codegen', () => {
       entity: 'Grandchild',
       grandchild: 'grandchild',
       id,
+      lastUpdatedAt: null,
+      lastUpdatedBy: null,
       name: 'Grandchild',
     }
+    const childIdentity = { entity: 'Grandchild', id, name: 'Grandchild' }
     expect(compileEntity(schemas, 'Grandchild')(childRepresentation)).toBe(true)
     expect(compileEntity(schemas, 'Grandchild')({ child: 'child', entity: 'Grandchild', id, name: 'Grandchild' }))
       .toBe(false)
     expect(compileEntity(schemas, 'Holder')({
       entity: 'Holder',
       id,
+      lastUpdatedAt: null,
+      lastUpdatedBy: null,
       name: 'Holder',
       optionalChild: null,
-      requiredChild: childRepresentation,
+      requiredChild: childIdentity,
     })).toBe(true)
     expect(compileEntity(schemas, 'Holder')({
       entity: 'Holder',
       id,
+      lastUpdatedAt: null,
+      lastUpdatedBy: null,
       name: 'Holder',
       requiredChild: null,
     })).toBe(false)
     const nodeSchema = compileEntity(schemas, 'Node')
-    expect(nodeSchema({ entity: 'Node', id, label: 'Root', name: 'Node', parent: null })).toBe(true)
+    expect(nodeSchema({
+      entity: 'Node',
+      id,
+      label: 'Root',
+      lastUpdatedAt: null,
+      lastUpdatedBy: null,
+      name: 'Node',
+      parent: null,
+    })).toBe(true)
     expect(nodeSchema({
       entity: 'Node',
       id,
       label: 'Child',
+      lastUpdatedAt: null,
+      lastUpdatedBy: null,
       name: 'Child',
-      parent: { entity: 'Node', id, label: 'Root', name: 'Root', parent: null },
+      parent: { entity: 'Node', id: '00000000-0000-4000-8000-000000000002', name: 'Root' },
     })).toBe(true)
   })
 
@@ -247,9 +278,25 @@ describe('codegen', () => {
       .properties.id?.maxLength).toBe(20)
     const validate = compileEntity(schemas, 'Thing')
     const id = '00000000-0000-4000-8000-000000000001'
-    expect(validate({ entity: 'Thing', id, name: 'Thing', score: 5, title: 'Good' })).toBe(true)
-    expect(validate({ entity: 'Thing', id, name: 'Thing', score: 11, title: 'Good' })).toBe(false)
-    expect(validate({ entity: 'Thing', id, name: 'Thing', score: 5, title: 'G' })).toBe(false)
+    const thing = {
+      entity: 'Thing',
+      id,
+      lastUpdatedAt: null,
+      lastUpdatedBy: null,
+      name: 'Thing',
+      nickname: null,
+      score: 5,
+      tags: null,
+      title: 'Good',
+    }
+    expect(validate(thing)).toBe(true)
+    expect(validate({ ...thing, score: 11 })).toBe(false)
+    expect(validate({ ...thing, title: 'G' })).toBe(false)
+    expect(validate({ entity: 'Thing', id, name: 'Thing', score: 5, title: 'Good' })).toBe(false)
+    const { nickname, ...withoutNickname } = thing
+    void nickname
+    expect(validate(withoutNickname)).toBe(false)
+    expect(validate({ ...thing, lastUpdatedAt: undefined })).toBe(false)
   })
 
   test('emits composed TypeScript inheritance, enums, and reference links', () => {
