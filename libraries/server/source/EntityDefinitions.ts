@@ -1051,6 +1051,7 @@ function parseEnums(value: unknown): ReadonlyMap<string, EnumDefinition> {
       throw invalid(`enum "${name}" name must be a PascalCase identifier`)
     }
     if (name === 'Entity') throw invalid('enum name "Entity" is reserved for the universal identity root')
+    if (name === 'Reference') throw invalid('enum name "Reference" is reserved for generated contracts')
     if (enums.has(name)) throw invalid(`duplicate enum "${name}"`)
     if (!isRecord(definition)) {
       throw invalid(`enum "${name}" must be an object mapping persisted values to descriptions`)
@@ -1930,6 +1931,9 @@ function parseEntity(
   }
   validatePhysicalIdentifier(value.name, 'entity table')
   if (value.name === 'Entity') throw invalid('entity name "Entity" is reserved for the universal identity root')
+  if (value.name === 'Reference') {
+    throw invalid('entity name "Reference" is reserved for generated contracts')
+  }
   if (
     value.extends !== undefined
     && (typeof value.extends !== 'string' || !/^[A-Z][A-Za-z0-9]*$/.test(value.extends))

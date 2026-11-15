@@ -22,15 +22,15 @@ export enum $BasisEntities {
 ${enumMembers.replaceAll('    ', '  ')}
 }
 
-export interface $BasisReference {
+export interface Reference {
   readonly entity: $BasisEntities,
   readonly id: string,
   readonly name: string,
 }
 
-export interface $BasisEntity extends $BasisReference {
+export interface Entity extends Reference {
   readonly lastUpdatedAt: string | null,
-  readonly lastUpdatedBy: $BasisReference | null,
+  readonly lastUpdatedBy: Reference | null,
 }`,
   ]
   for (const enumeration of enums) blocks.push(enumBlock(enumeration))
@@ -67,7 +67,7 @@ function jsdoc(description: string): string {
  * @returns Generated TypeScript block.
  */
 function entityBlock(entity: EntityDefinition, definitions: Graph['definitions']): string {
-  const parent = entity.parent === 'Entity' ? '$BasisEntity' : entity.parent
+  const parent = entity.parent === 'Entity' ? 'Entity' : entity.parent
   const members = [
     { line: `  readonly entity: ${discriminatorType(entity, definitions)},`, name: 'entity' },
     ...entity.fields
@@ -103,7 +103,7 @@ function discriminatorType(
  */
 function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
   if (field.type === FieldType.Entity) {
-    return field.nullable === false ? '$BasisReference' : '$BasisReference | null'
+    return field.nullable === false ? 'Reference' : 'Reference | null'
   }
   if (field.type === FieldType.Array) {
     const array = `readonly ${scalarType(field.items.type)}[]`

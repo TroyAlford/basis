@@ -76,12 +76,12 @@ describe('codegen', () => {
     const types = generateTypes(graph)
     const schemas = generateJSONSchemas(graph)
     expect(types).toContain('export enum $BasisEntities')
-    expect(types).toContain('export interface Note extends $BasisEntity')
-    expect(types).toContain('export interface $BasisReference')
-    expect(types).toContain('readonly owner: $BasisReference | null')
-    expect(types).toContain('readonly subject: $BasisReference | null')
+    expect(types).toContain('export interface Note extends Entity')
+    expect(types).toContain('export interface Reference')
+    expect(types).toContain('readonly owner: Reference | null')
+    expect(types).toContain('readonly subject: Reference | null')
     expect(schemas.$schema).toBe('https://json-schema.org/draft/2020-12/schema')
-    expect(schemas.$ref).toBe('#/$defs/$Entity')
+    expect(schemas.$ref).toBe('#/$defs/Entity')
     expect(createValidator().validateSchema(schemas)).toBe(true)
     expect(schemas.$defs.Note).toBeDefined()
     expect(Object.keys(schemas.$defs.Note as object)).not.toContain('create')
@@ -200,13 +200,13 @@ describe('codegen', () => {
     expect(grandchild.allOf?.[0]?.$ref).toBe('#/$defs/Child')
     expect((holder.properties?.requiredChild as {
       allOf?: { $ref?: string }[],
-    }).allOf?.[0]?.$ref).toBe('#/$defs/$Reference')
+    }).allOf?.[0]?.$ref).toBe('#/$defs/Reference')
     expect((holder.properties?.requiredChild as {
       allOf?: { properties?: { entity?: { enum?: string[] } } }[],
     }).allOf?.[1]?.properties?.entity?.enum).toEqual(['Grandchild'])
     expect((holder.properties?.optionalChild as {
       anyOf?: { allOf?: { $ref?: string }[] }[],
-    }).anyOf?.[0]?.allOf?.[0]?.$ref).toBe('#/$defs/$Reference')
+    }).anyOf?.[0]?.allOf?.[0]?.$ref).toBe('#/$defs/Reference')
     expect(schemas.$defs.Node).toBeDefined()
     expect(((schemas.$defs.Node as { properties?: Record<string, unknown> }).properties?.parent as {
       anyOf?: { allOf?: { properties?: { entity?: { const?: string } } }[] }[],
@@ -341,7 +341,7 @@ describe('codegen', () => {
     expect(types).toContain('export interface Child extends Base')
     expect(types).toContain('export interface Grandchild extends Child')
     expect(types).not.toContain('export interface Child extends Entity')
-    expect(types).toContain('readonly owner: $BasisReference | null')
+    expect(types).toContain('readonly owner: Reference | null')
     expect([...types.matchAll(/readonly base: string/gu)]).toHaveLength(1)
   })
 
@@ -353,7 +353,7 @@ describe('codegen', () => {
       ],
     })
     const types = generateTypes(graph)
-    expect(types).toContain(`export interface Parent extends $BasisEntity {
+    expect(types).toContain(`export interface Parent extends Entity {
   readonly entity: $BasisEntities.OnlyChild,
 }`)
     expect(types).toContain(`export interface OnlyChild extends Parent {
@@ -367,19 +367,23 @@ describe('codegen', () => {
         { fields: [], name: 'Foo' },
         { fields: [], name: 'FooCreate' },
         { fields: [], name: 'FooUpdate' },
-        { fields: [], name: 'Reference' },
       ],
     })
     const types = generateTypes(graph)
-    expect(types).toContain('export interface Foo extends $BasisEntity')
-    expect(types).toContain('export interface FooCreate extends $BasisEntity')
-    expect(types).toContain('export interface FooUpdate extends $BasisEntity')
-    expect(types).toContain('export interface Reference extends $BasisEntity')
+    expect(types).toContain('export interface Foo extends Entity')
+    expect(types).toContain('export interface FooCreate extends Entity')
+    expect(types).toContain('export interface FooUpdate extends Entity')
+    expect(types).toContain('export interface Reference {')
+    expect(types).toContain('export interface Entity extends Reference')
     expect(types).not.toContain('export type FooCreate =')
     expect(types).not.toContain('export type FooUpdate =')
+    expect(() => new Graph({
+      entities: [{ fields: [], name: 'Reference' }],
+    })).toThrow('reserved for generated contracts')
     const schemas = generateJSONSchemas(graph)
-    expect(schemas.$defs.$Reference).toBeDefined()
     expect(schemas.$defs.Reference).toBeDefined()
+    expect(schemas.$defs.Entity).toBeDefined()
+    expect(schemas.$defs.Foo).toBeDefined()
     const directory = await mkdtemp(join(tmpdir(), 'basis-collision-types-'))
     try {
       const file = join(directory, 'types.ts')

@@ -1448,6 +1448,9 @@ describe('EntityDefinitions', () => {
       entities: [{ fields: [], name: 'Entity' }],
     })).toThrow('reserved for the universal identity root')
     expect(() => load({
+      entities: [{ fields: [], name: 'Reference' }],
+    })).toThrow('reserved for generated contracts')
+    expect(() => load({
       entities: [{ fields: [{ field: 'owner', target: 'Missing', type: 'Entity' }], name: 'Note' }],
     })).toThrow('unknown target entity "Missing"')
     expect(() => load({
@@ -1532,6 +1535,10 @@ describe('EntityDefinitions', () => {
       entities: [{ fields: [], name: 'AccessLevel' }],
       enums: { AccessLevel: { viewer: 'View.' } },
     })).toThrow('conflicts with an entity name')
+    expect(() => load({
+      entities: [{ fields: [], name: 'Document' }],
+      enums: { Reference: { viewer: 'View.' } },
+    })).toThrow('reserved for generated contracts')
     expect(() => load({
       entities: [{
         fields: [{ default: 'owner', enum: 'AccessLevel', field: 'access', type: 'Enum' }],

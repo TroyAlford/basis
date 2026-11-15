@@ -120,32 +120,32 @@ export enum $BasisEntities {
   Note = 'Note',
 }
 
-export interface $BasisReference {
+export interface Reference {
   readonly entity: $BasisEntities
   readonly id: string
   readonly name: string
 }
 
-export interface $BasisEntity extends $BasisReference {
+export interface Entity extends Reference {
   readonly lastUpdatedAt: string | null
-  readonly lastUpdatedBy: $BasisReference | null
+  readonly lastUpdatedBy: Reference | null
 }
 
-export interface User extends $BasisEntity {
+export interface User extends Entity {
   readonly entity: $BasisEntities.User
   readonly email: string
 }
 
-export interface Note extends $BasisEntity {
+export interface Note extends Entity {
   readonly entity: $BasisEntities.Note
   readonly title: string
-  readonly owner: $BasisReference | null
+  readonly owner: Reference | null
   readonly tags: readonly string[]
 }
 
 ```
 
-Every entity extends `$BasisEntity`, which implements the shared `$BasisReference` shape (`id`, `name`, `entity`). Child entities extend their generated direct parent and declare only locally owned fields, while concrete discriminators narrow the abstract parent union. Singular references use `$BasisReference`; there are no per-entity reference types. Generated TypeScript describes entities only; it does not define mutation payloads or validate operations.
+Every entity extends `Entity`, which implements the shared `Reference` shape (`id`, `name`, `entity`). Child entities extend their generated direct parent and declare only locally owned fields, while concrete discriminators narrow the abstract parent union. Singular references use `Reference`; there are no per-entity reference types. Generated TypeScript describes entities only; it does not define mutation payloads or validate operations.
 
 The runtime `Database` API accepts ordinary object payloads and validates them against the canonical Graph:
 
@@ -172,9 +172,9 @@ The JSON Schema emitter produces one standards-compliant Draft 2020-12 entity do
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$ref": "#/$defs/$Entity",
+  "$ref": "#/$defs/Entity",
   "$defs": {
-    "$Reference": {
+    "Reference": {
       "properties": {
         "entity": { "enum": ["Note", "User"], "type": "string" },
         "id": { "type": "string" },
@@ -183,20 +183,20 @@ The JSON Schema emitter produces one standards-compliant Draft 2020-12 entity do
       "required": ["id", "name", "entity"],
       "type": "object"
     },
-    "$Entity": {
-      "allOf": [{ "$ref": "#/$defs/$Reference" }],
+    "Entity": {
+      "allOf": [{ "$ref": "#/$defs/Reference" }],
       "properties": {
         "lastUpdatedAt": { "anyOf": [{ "format": "date-time", "type": "string" }, { "type": "null" }] },
-        "lastUpdatedBy": { "anyOf": [{ "allOf": [{ "$ref": "#/$defs/$Reference" }, { "properties": { "entity": { "const": "User" } }, "type": "object" }] }, { "type": "null" }] }
+        "lastUpdatedBy": { "anyOf": [{ "allOf": [{ "$ref": "#/$defs/Reference" }, { "properties": { "entity": { "const": "User" } }, "type": "object" }] }, { "type": "null" }] }
       },
       "required": ["lastUpdatedAt", "lastUpdatedBy"],
       "type": "object"
     },
     "Note": {
-      "allOf": [{ "$ref": "#/$defs/$Entity" }],
+      "allOf": [{ "$ref": "#/$defs/Entity" }],
       "properties": {
         "entity": { "const": "Note", "type": "string" },
-        "owner": { "anyOf": [{ "allOf": [{ "$ref": "#/$defs/$Reference" }, { "properties": { "entity": { "const": "User" } }, "type": "object" }] }, { "type": "null" }] },
+        "owner": { "anyOf": [{ "allOf": [{ "$ref": "#/$defs/Reference" }, { "properties": { "entity": { "const": "User" } }, "type": "object" }] }, { "type": "null" }] },
         "title": { "type": "string" }
       },
       "required": ["entity", "title", "owner"],
@@ -269,6 +269,6 @@ erDiagram
 - Use `Entity` fields with `target` for stored references and `Inverse` fields for reciprocal navigation.
 - Use `Cardinality.One` or `Cardinality.Many` on inverse declarations.
 - Keep generated files generated. Edit the canonical authoring source, then regenerate.
-- Generated helper names are collision-safe and isolated from authored entity names: TypeScript helpers use `$Basis*`, and JSON Schema helpers use `$Reference` / `$Entity` under `$defs`. Graph authoring does not reserve names for optional output adapters.
+- Generated helper names are collision-safe: TypeScript and JSON Schema share the generated `Reference` and `Entity` names under `$defs`, and those two names are reserved so authored entities or enums cannot collide with them.
 
 See [Schema Inspection & Planning](./schema.mdx) for the physical compiler and migration workflow.
