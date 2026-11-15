@@ -75,13 +75,13 @@ describe('codegen', () => {
     const graph = new Graph({ entities: document })
     const types = generateTypes(graph)
     const schemas = generateJSONSchemas(graph)
-    expect(types).toContain('export enum Entities')
-    expect(types).toContain('export interface Note extends Entity')
-    expect(types).toContain('export interface Reference')
-    expect(types).toContain('readonly owner: Reference | null')
-    expect(types).toContain('readonly subject: Reference | null')
+    expect(types).toContain('export enum $BasisEntities')
+    expect(types).toContain('export interface Note extends $BasisEntity')
+    expect(types).toContain('export interface $BasisReference')
+    expect(types).toContain('readonly owner: $BasisReference | null')
+    expect(types).toContain('readonly subject: $BasisReference | null')
     expect(schemas.$schema).toBe('https://json-schema.org/draft/2020-12/schema')
-    expect(schemas.$ref).toBe('#/$defs/Entity')
+    expect(schemas.$ref).toBe('#/$defs/$Entity')
     expect(createValidator().validateSchema(schemas)).toBe(true)
     expect(schemas.$defs.Note).toBeDefined()
     expect(Object.keys(schemas.$defs.Note as object)).not.toContain('create')
@@ -200,13 +200,13 @@ describe('codegen', () => {
     expect(grandchild.allOf?.[0]?.$ref).toBe('#/$defs/Child')
     expect((holder.properties?.requiredChild as {
       allOf?: { $ref?: string }[],
-    }).allOf?.[0]?.$ref).toBe('#/$defs/Reference')
+    }).allOf?.[0]?.$ref).toBe('#/$defs/$Reference')
     expect((holder.properties?.requiredChild as {
       allOf?: { properties?: { entity?: { enum?: string[] } } }[],
     }).allOf?.[1]?.properties?.entity?.enum).toEqual(['Grandchild'])
     expect((holder.properties?.optionalChild as {
       anyOf?: { allOf?: { $ref?: string }[] }[],
-    }).anyOf?.[0]?.allOf?.[0]?.$ref).toBe('#/$defs/Reference')
+    }).anyOf?.[0]?.allOf?.[0]?.$ref).toBe('#/$defs/$Reference')
     expect(schemas.$defs.Node).toBeDefined()
     expect(((schemas.$defs.Node as { properties?: Record<string, unknown> }).properties?.parent as {
       anyOf?: { allOf?: { properties?: { entity?: { const?: string } } }[] }[],
@@ -337,11 +337,11 @@ describe('codegen', () => {
       ],
     })
     const types = generateTypes(graph)
-    expect(types).toContain('export enum Entities')
+    expect(types).toContain('export enum $BasisEntities')
     expect(types).toContain('export interface Child extends Base')
     expect(types).toContain('export interface Grandchild extends Child')
     expect(types).not.toContain('export interface Child extends Entity')
-    expect(types).toContain('readonly owner: Reference | null')
+    expect(types).toContain('readonly owner: $BasisReference | null')
     expect([...types.matchAll(/readonly base: string/gu)]).toHaveLength(1)
   })
 
@@ -353,27 +353,56 @@ describe('codegen', () => {
       ],
     })
     const types = generateTypes(graph)
-    expect(types).toContain(`export interface Parent extends Entity {
-  readonly entity: Entities.OnlyChild,
+    expect(types).toContain(`export interface Parent extends $BasisEntity {
+  readonly entity: $BasisEntities.OnlyChild,
 }`)
     expect(types).toContain(`export interface OnlyChild extends Parent {
-  readonly entity: Entities.OnlyChild,
+  readonly entity: $BasisEntities.OnlyChild,
 }`)
   })
 
-  test('rejects entity and mutation input name collisions comprehensively', () => {
-    const collides = (entity: string) => () => generateTypes(new Graph({
+  test('keeps legitimate entity names collision-safe in emitted TypeScript', async () => {
+    const graph = new Graph({
       entities: [
         { fields: [], name: 'Foo' },
-        { fields: [], name: entity },
+        { fields: [], name: 'FooCreate' },
+        { fields: [], name: 'FooUpdate' },
+        { fields: [], name: 'Reference' },
       ],
-    }))
-    expect(collides('FooUpdate')).toThrow('Generated TypeScript name "FooUpdate"')
-    expect(collides('FooCreate')).toThrow('Generated TypeScript name "FooCreate"')
-    expect(() => generateTypes(new Graph({
-      entities: [{ fields: [], name: 'Foo' }, { fields: [], name: 'Bar' }],
-    }))).not.toThrow()
-  })
+    })
+    const types = generateTypes(graph)
+    expect(types).toContain('export interface Foo extends $BasisEntity')
+    expect(types).toContain('export interface FooCreate extends $BasisEntity')
+    expect(types).toContain('export interface FooUpdate extends $BasisEntity')
+    expect(types).toContain('export interface Reference extends $BasisEntity')
+    expect(types).not.toContain('export type FooCreate =')
+    expect(types).not.toContain('export type FooUpdate =')
+    const schemas = generateJSONSchemas(graph)
+    expect(schemas.$defs.$Reference).toBeDefined()
+    expect(schemas.$defs.Reference).toBeDefined()
+    const directory = await mkdtemp(join(tmpdir(), 'basis-collision-types-'))
+    try {
+      const file = join(directory, 'types.ts')
+      await writeFile(file, types)
+      const result = Bun.spawnSync({
+        cmd: [
+          process.execPath,
+          './node_modules/@typescript/native/bin/tsc',
+          '--ignoreConfig',
+          '--noEmit',
+          '--skipLibCheck',
+          '--strict',
+          file,
+        ],
+        cwd: process.cwd(),
+        stderr: 'pipe',
+        stdout: 'pipe',
+      })
+      expect(result.exitCode, result.stderr.toString() || result.stdout.toString()).toBe(0)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  }, 30_000)
 
   test('compiles mutually referencing generated entity types', async () => {
     const graph = new Graph({
@@ -394,7 +423,7 @@ describe('codegen', () => {
       await writeFile(file, `
 ${generateTypes(graph)}
 const foo: Foo = {
-  entity: Entities.Foo,
+  entity: $BasisEntities.Foo,
   id: '1',
   lastUpdatedAt: null,
   lastUpdatedBy: null,
@@ -402,7 +431,7 @@ const foo: Foo = {
   peer: null,
 }
 const bar: Bar = {
-  entity: Entities.Bar,
+  entity: $BasisEntities.Bar,
   id: '2',
   lastUpdatedAt: null,
   lastUpdatedBy: null,
@@ -446,7 +475,7 @@ const bar: Bar = {
       const file = join(directory, 'types.ts')
       await writeFile(file, `
 ${generateTypes(abstract)}
-const owner: Note['owner'] = { entity: Entities.AdminUser, id: '1', name: 'Admin' }
+const owner: Note['owner'] = { entity: $BasisEntities.AdminUser, id: '1', name: 'Admin' }
       `.trim())
       const result = Bun.spawnSync({
         cmd: [

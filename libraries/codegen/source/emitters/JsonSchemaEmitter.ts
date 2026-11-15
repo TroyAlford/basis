@@ -24,14 +24,14 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
     .sort((left, right) => left.name.localeCompare(right.name))
   return {
     $defs: {
-      Entity: rootEntitySchema(definitions),
-      Reference: referenceSchema(definitions),
+      $Entity: rootEntitySchema(definitions),
+      $Reference: referenceSchema(definitions),
       ...Object.fromEntries(entityDefinitions.map(entity => [
         entity.name,
         entitySchema(entity, definitions),
       ])),
     },
-    $ref: '#/$defs/Entity',
+    $ref: '#/$defs/$Entity',
     $schema: 'https://json-schema.org/draft/2020-12/schema',
   }
 }
@@ -45,7 +45,7 @@ function rootEntitySchema(
   definitions: Graph['definitions'],
 ): Readonly<Record<string, unknown>> {
   return {
-    allOf: [{ $ref: '#/$defs/Reference' }],
+    allOf: [{ $ref: '#/$defs/$Reference' }],
     properties: {
       lastUpdatedAt: {
         anyOf: [{ format: 'date-time', type: 'string' }, { type: 'null' }],
@@ -99,7 +99,7 @@ function entitySchema(
     required.push(field.name)
   }
   return {
-    allOf: [{ $ref: `#/$defs/${entity.parent}` }],
+    allOf: [{ $ref: `#/$defs/${entity.parent === 'Entity' ? '$Entity' : entity.parent}` }],
     properties,
     required,
     type: 'object',
@@ -148,7 +148,7 @@ function referenceForTarget(
 ): Record<string, unknown> {
   return {
     allOf: [
-      { $ref: '#/$defs/Reference' },
+      { $ref: '#/$defs/$Reference' },
       {
         properties: { entity: targetDiscriminatorSchema(target, definitions) },
         type: 'object',

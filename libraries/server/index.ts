@@ -71,15 +71,18 @@ export type {
 } from './source/Database'
 export { typedDatabase } from './types/TypedDatabase'
 export type {
-  CreateModels,
+  CreateInput,
+  EditInput,
   EntityModels,
+  MutationContract,
+  MutationCreatableNames,
+  MutationModels,
   QueryPath,
   QuerySelection,
   ReferenceModels,
   TypedDatabase,
   TypedDatabaseTransaction,
   TypedQueryOptions,
-  UpdateModels,
 } from './types/TypedDatabase'
 export { MutationError } from './source/Mutation'
 export type {

@@ -143,15 +143,6 @@ const SYSTEM_DOCUMENT: AuthoredDocument = {
 
 /** System names reserved from application declarations. */
 const RESERVED_NAMES = new Set(['Role', 'ExternalIdentity', 'UserRole'])
-/** Names reserved by canonical generated TypeScript and JSON Schema products. */
-const GENERATED_NAMES = new Set([
-  'CreateMap',
-  'Entities',
-  'EntityMap',
-  'Reference',
-  'ReferenceMap',
-  'UpdateMap',
-])
 /** Security entities whose `manage` grant means controlled administration. */
 const MANAGED_ENTITIES = new Set(['Role', 'UserRole', 'ExternalIdentity'])
 /** The built-in administrator role. */
@@ -203,9 +194,6 @@ export class Graph {
       const name = entityName(entity)
       if (RESERVED_NAMES.has(name)) {
         throw new Error(`Entity "${name}" is reserved by Basis authorization`)
-      }
-      if (GENERATED_NAMES.has(name)) {
-        throw new Error(`Entity "${name}" is reserved by Basis generated output`)
       }
     }
     const hasUser = entities.some(entity => entityName(entity) === 'User')

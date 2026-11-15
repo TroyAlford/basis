@@ -35,9 +35,9 @@ describe('Typed database facade', () => {
       await writeFile(join(directory, 'generated.ts'), generateTypes(graph))
       await writeFile(join(directory, 'consumer.ts'), `
 import { typedDatabase } from 'basis/server'
-import type { CreateMap, EntityMap, ReferenceMap, UpdateMap } from './generated'
+import type { $BasisEntityMap, $BasisMutationMap, $BasisReferenceMap } from './generated'
 
-declare const db: ReturnType<typeof typedDatabase<EntityMap, CreateMap, UpdateMap, ReferenceMap>>
+declare const db: ReturnType<typeof typedDatabase<$BasisEntityMap, $BasisMutationMap, $BasisReferenceMap>>
 async function run() {
   const notes = await db.query('Note', {
     fields: ['id', 'title', 'owner.email', 'owner.name'],

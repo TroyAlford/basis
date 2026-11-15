@@ -6,14 +6,58 @@ import type { CreateResult, DeleteResult, EditResult, MutationFilter, MutationRe
 
 /** A generated entity-name to hydrated-interface map. */
 export type EntityModels = object
-/** A generated entity-name to create-input map. */
-export type CreateModels = object
-/** A generated entity-name to update-input map. */
-export type UpdateModels = object
+/** A generated entity-name to mutation-field contract map. */
+export type MutationModels = object
 /** A generated entity-name to reference-target map. */
 export type ReferenceModels = object
 /** Constraint preserving a map's generated keys while requiring object values. */
 type ObjectMap<Map> = { [Key in keyof Map]: object }
+
+/** Constraint preserving mutation-map keys while requiring mutation contracts. */
+type MutationMapConstraint<Map> = { [Key in keyof Map]: MutationContract }
+
+/** One generated mutation field contract for an entity. */
+export interface MutationContract {
+  /** Whether the entity can be created or upserted. */
+  readonly creatable: boolean,
+  /** Fields accepted by create, including optional identity. */
+  readonly create: string,
+  /** Fields required by create. */
+  readonly required: string,
+  /** Fields accepted by edit. */
+  readonly writable: string,
+}
+
+/** Convert one hydrated field type into its mutation input type. */
+type MutationValue<Value> = NonNullable<Value> extends {
+  readonly entity: unknown,
+  readonly id: string,
+  readonly name: string,
+} ? string | (null extends Value ? null : never) : Value
+
+/** Typed create input derived from one hydrated entity and its field contract. */
+export type CreateInput<
+  Model extends object,
+  Contract extends MutationContract,
+> = {
+  readonly [Field in Contract['required'] & keyof Model]: MutationValue<Model[Field]>
+} & {
+  readonly [Field in Exclude<Contract['create'], Contract['required']> & keyof Model]?:
+  MutationValue<Model[Field]>
+}
+
+/** Typed edit input derived from one hydrated entity and its writable fields. */
+export type EditInput<
+  Model extends object,
+  Contract extends MutationContract,
+> = {
+  readonly [Field in Contract['writable'] & keyof Model]?: MutationValue<Model[Field]>
+}
+
+/** Entity names that permit create/upsert. */
+export type MutationCreatableNames<Mutations extends object> = {
+  [Name in keyof Mutations]: Mutations[Name] extends { readonly creatable: true } ? Name : never
+}[keyof Mutations]
 
 /** Reference field map for one entity, when present. */
 type ReferenceFields<References extends object, Name extends PropertyKey> =
@@ -139,8 +183,7 @@ export type TypedQueryOptions<
 /** Typed mutation and query operations shared by the database and transaction facades. */
 interface TypedOperations<
   Models extends ObjectMap<Models>,
-  Creates extends ObjectMap<Creates>,
-  Updates extends ObjectMap<Updates>,
+  Mutations extends MutationMapConstraint<Mutations>,
   References extends ObjectMap<References>,
 > {
   /**
@@ -149,9 +192,9 @@ interface TypedOperations<
    * @param values - Typed create payload.
    * @returns The created count and hydrated record.
    */
-  create<Name extends keyof Models & keyof Creates & string>(
+  create<Name extends keyof Models & MutationCreatableNames<Mutations> & string>(
     entity: Name,
-    values: Creates[Name],
+    values: CreateInput<Models[Name], Mutations[Name]>,
   ): Promise<CreateResult<Models[Name] & MutationRecord>>,
   /**
    * Create a typed entity batch.
@@ -159,9 +202,9 @@ interface TypedOperations<
    * @param values - Typed create payload iterable.
    * @returns The created count.
    */
-  create<Name extends keyof Models & keyof Creates & string>(
+  create<Name extends keyof Models & MutationCreatableNames<Mutations> & string>(
     entity: Name,
-    values: Iterable<Creates[Name]>,
+    values: Iterable<CreateInput<Models[Name], Mutations[Name]>>,
   ): Promise<CreateResult>,
   /**
    * Delete one typed entity set.
@@ -180,10 +223,10 @@ interface TypedOperations<
    * @param changes - Typed update payload.
    * @returns The edited count and an optional hydrated record.
    */
-  edit<Name extends keyof Models & keyof Updates & string>(
+  edit<Name extends keyof Models & keyof Mutations & string>(
     entity: Name,
     filter: MutationFilter,
-    changes: Updates[Name],
+    changes: EditInput<Models[Name], Mutations[Name]>,
   ): Promise<EditResult<Models[Name] & MutationRecord>>,
   /**
    * Query one typed entity with typed projection paths.
@@ -205,29 +248,27 @@ interface TypedOperations<
    * @param values - Typed update/create payload.
    * @returns The branch counts and hydrated record.
    */
-  upsert<Name extends keyof Models & keyof Creates & keyof Updates & string>(
+  upsert<Name extends keyof Models & MutationCreatableNames<Mutations> & string>(
     entity: Name,
     filter: MutationFilter,
-    values: Creates[Name] | Updates[Name],
+    values: CreateInput<Models[Name], Mutations[Name]> | EditInput<Models[Name], Mutations[Name]>,
   ): Promise<UpsertResult<Models[Name] & MutationRecord>>,
 }
 
 /** A transaction client with typed mutation operations. */
 export type TypedDatabaseTransaction<
   Models extends ObjectMap<Models>,
-  Creates extends ObjectMap<Creates>,
-  Updates extends ObjectMap<Updates>,
+  Mutations extends MutationMapConstraint<Mutations>,
   References extends ObjectMap<References>,
-> = TransactionSQL & Omit<TypedOperations<Models, Creates, Updates, References>, 'query'>
+> = TransactionSQL & Omit<TypedOperations<Models, Mutations, References>, 'query'>
 
 /** A database facade bound to generated entity and mutation maps. */
 export type TypedDatabase<
   Models extends ObjectMap<Models>,
-  Creates extends ObjectMap<Creates>,
-  Updates extends ObjectMap<Updates>,
+  Mutations extends MutationMapConstraint<Mutations>,
   References extends ObjectMap<References>,
 > = Omit<Database, 'create' | 'delete' | 'edit' | 'query' | 'tx' | 'upsert'>
-  & TypedOperations<Models, Creates, Updates, References> & {
+  & TypedOperations<Models, Mutations, References> & {
     /**
      * Run one native Bun transaction with typed mutation verbs.
      * @param callback - Transaction-scoped typed work.
@@ -235,7 +276,7 @@ export type TypedDatabase<
      */
     tx<T>(
       callback: (
-        transaction: TypedDatabaseTransaction<Models, Creates, Updates, References>,
+        transaction: TypedDatabaseTransaction<Models, Mutations, References>,
       ) => T | Promise<T>,
     ): Promise<Awaited<T>>,
   }
@@ -247,9 +288,8 @@ export type TypedDatabase<
  */
 export function typedDatabase<
   Models extends ObjectMap<Models>,
-  Creates extends ObjectMap<Creates>,
-  Updates extends ObjectMap<Updates>,
+  Mutations extends MutationMapConstraint<Mutations>,
   References extends ObjectMap<References>,
->(database: Database): TypedDatabase<Models, Creates, Updates, References> {
-  return database as unknown as TypedDatabase<Models, Creates, Updates, References>
+>(database: Database): TypedDatabase<Models, Mutations, References> {
+  return database as unknown as TypedDatabase<Models, Mutations, References>
 }

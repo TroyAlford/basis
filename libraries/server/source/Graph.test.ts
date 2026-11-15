@@ -168,13 +168,6 @@ describe('Graph', () => {
       .toThrow('reserved by Basis authorization')
   })
 
-  test('rejects names reserved by generated TypeScript and JSON Schema products', () => {
-    for (const name of ['CreateMap', 'Entities', 'EntityMap', 'Reference', 'ReferenceMap', 'UpdateMap']) {
-      expect(() => new Graph({ entities: [{ fields: [], name }] }))
-        .toThrow('reserved by Basis generated output')
-    }
-  })
-
   test('normalizes roles and $me into canonical graph data', () => {
     expect(graph.role('public')?.id).toBe(PUBLIC_ROLE_ID)
     expect(graph.role('admin')?.id).toBe(ADMIN_ROLE_ID)

@@ -4,45 +4,45 @@ import type { EmittedFile } from '../emitter'
 import { emitter } from '../emitter'
 
 /**
- * Generate TypeScript entity, mutation, and reference types.
+ * Generate TypeScript entity types and supporting mutation contracts.
  * @param graph - Canonical application Graph.
  * @returns Deterministic TypeScript source.
  */
 export function generateTypes(graph: Graph): string {
   const definitions = graph.definitions
   const entities = [...definitions.entities].sort((left, right) => left.name.localeCompare(right.name))
-  assertGeneratedNames(entities)
   const enumMembers = entities
-    .map(entity => `  ${entity.name} = '${entity.name}',`)
+    .map(entity => `    ${entity.name} = '${entity.name}',`)
     .join('\n')
   const blocks: string[] = [
     `/** Generated from the canonical Basis entity definitions. Do not edit by hand. */
 
-export enum Entities {
-${enumMembers}
+export enum $BasisEntities {
+${enumMembers.replaceAll('    ', '  ')}
 }
 
-export interface Reference {
-  readonly entity: Entities,
+export interface $BasisReference {
+  readonly entity: $BasisEntities,
   readonly id: string,
   readonly name: string,
 }
 
-export interface Entity extends Reference {
+export interface $BasisEntity extends $BasisReference {
   readonly lastUpdatedAt: string | null,
-  readonly lastUpdatedBy: Reference | null,
+  readonly lastUpdatedBy: $BasisReference | null,
 }`,
   ]
   for (const entity of entities) blocks.push(entityBlock(entity, definitions))
-  const concrete = entities.filter(entity => !entity.abstract)
-  blocks.push(mapBlock('CreateMap', concrete.map(entity => (
-    `  readonly ${entity.name}: ${entity.name}Create`
-  ))))
-  blocks.push(mapBlock('EntityMap', entities.map(entity => (
+  blocks.push(mapBlock('$BasisEntityMap', entities.map(entity => (
     `  readonly ${entity.name}: ${entity.name}`
   ))))
-  blocks.push(mapBlock('UpdateMap', entities.map(entity => (
-    `  readonly ${entity.name}: ${entity.name}Update`
+  blocks.push(mapBlock('$BasisMutationMap', entities.map(entity => (
+    `  readonly ${entity.name}: {
+    readonly creatable: ${entity.abstract ? 'false' : 'true'},
+    readonly create: ${literalUnion(mutationCreateFields(entity))},
+    readonly required: ${literalUnion(mutationRequiredFields(entity))},
+    readonly writable: ${literalUnion(mutationWritableFields(entity))},
+  },`
   ))))
   const references = entities
     .filter(entity => entity.effectiveFields.some(field => field.type === FieldType.Entity))
@@ -54,50 +54,18 @@ export interface Entity extends Reference {
         .join('\n')
       return `  readonly ${entity.name}: {\n${fields}\n  },`
     })
-  blocks.push(`export interface ReferenceMap {\n${references.join('\n')}\n}`)
+  blocks.push(`export interface $BasisReferenceMap {\n${references.join('\n')}\n}`)
   return `${blocks.join('\n\n')}\n`
 }
 
 /**
- * Reject collisions among entity names, mutation input names, and helper names.
- * @param entities - Canonical entities in deterministic order.
- * @throws {Error} When two generated TypeScript declarations would share a name.
- */
-function assertGeneratedNames(entities: readonly EntityDefinition[]): void {
-  const owners = new Map<string, string>()
-  const claim = (name: string, owner: string): void => {
-    const existing = owners.get(name)
-    if (existing) {
-      throw new Error(
-        `Generated TypeScript name "${name}" for ${owner} collides with ${existing}`,
-      )
-    }
-    owners.set(name, owner)
-  }
-  for (const name of [
-    'CreateMap',
-    'Entities',
-    'Entity',
-    'EntityMap',
-    'Reference',
-    'ReferenceMap',
-    'UpdateMap',
-  ]) claim(name, 'Basis generated helper')
-  for (const entity of entities) {
-    claim(entity.name, `entity "${entity.name}"`)
-    claim(`${entity.name}Create`, `create input for entity "${entity.name}"`)
-    claim(`${entity.name}Update`, `update input for entity "${entity.name}"`)
-  }
-}
-
-/**
- * Render one entity interface and its mutation inputs.
+ * Render one entity interface.
  * @param entity - Entity definition.
  * @param definitions - Canonical definitions.
  * @returns Generated TypeScript block.
  */
 function entityBlock(entity: EntityDefinition, definitions: Graph['definitions']): string {
-  const parent = entity.parent === 'Entity' ? 'Entity' : entity.parent
+  const parent = entity.parent === 'Entity' ? '$BasisEntity' : entity.parent
   const members = [
     { line: `  readonly entity: ${discriminatorType(entity, definitions)},`, name: 'entity' },
     ...entity.fields
@@ -107,54 +75,74 @@ function entityBlock(entity: EntityDefinition, definitions: Graph['definitions']
         name: field.name,
       })),
   ].sort((left, right) => left.name.localeCompare(right.name))
-  const fields = members.map(member => member.line).join('\n')
-  const create = createBlock(entity)
   return `export interface ${entity.name} extends ${parent} {
-${fields}
-}
-
-${create}`
-}
-
-/**
- * Render one entity's create input type.
- * @param entity - Entity definition.
- * @returns Generated create input block.
- */
-function createBlock(entity: EntityDefinition): string {
-  const id = entity.idFormat === 'Snowflake'
-    ? { line: '  id: string,', name: 'id' }
-    : { line: '  id?: string,', name: 'id' }
-  const fields = entity.effectiveFields
-    .filter(field => !['entity', 'id', 'lastUpdatedAt', 'lastUpdatedBy'].includes(field.name))
-    .map(field => {
-      const optional = field.default !== undefined || (
-        field.type === FieldType.Entity ? field.nullable !== false : field.nullable === true
-      )
-      return {
-        line: `  ${field.name}${optional ? '?' : ''}: ${mutationType(field)},`,
-        name: field.name,
-      }
-    })
-  const members = [id, ...fields].sort((left, right) => left.name.localeCompare(right.name))
-  return `export interface ${entity.name}Create {
 ${members.map(member => member.line).join('\n')}
-}
-
-export type ${entity.name}Update = Partial<Omit<${entity.name}Create, 'id'>>`
+}`
 }
 
 /**
- * Render one name-to-type map interface.
+ * Render one supporting map interface with a collision-safe namespace.
  * @param name - Interface name.
  * @param entries - Rendered entries.
- * @returns Generated map block.
+ * @returns Generated interface block.
  */
 function mapBlock(name: string, entries: readonly string[]): string {
   const sorted = [...entries]
     .sort((left, right) => left.localeCompare(right))
     .map(entry => (entry.endsWith(',') ? entry : `${entry},`))
   return `export interface ${name} {\n${sorted.join('\n')}\n}`
+}
+
+/**
+ * Render one entity's create-writable field names.
+ * @param entity - Entity definition.
+ * @returns Field names.
+ */
+function mutationCreateFields(entity: EntityDefinition): readonly string[] {
+  return [
+    'id',
+    'name',
+    ...entity.effectiveFields
+      .filter(field => field.name !== 'id' && field.name !== 'name')
+      .filter(field => !['entity', 'lastUpdatedAt', 'lastUpdatedBy'].includes(field.name))
+      .map(field => field.name),
+  ].sort((left, right) => left.localeCompare(right))
+}
+
+/**
+ * Render one entity's required create field names.
+ * @param entity - Entity definition.
+ * @returns Required field names.
+ */
+function mutationRequiredFields(entity: EntityDefinition): readonly string[] {
+  const required = entity.effectiveFields
+    .filter(field => field.name !== 'id' && field.name !== 'name')
+    .filter(field => !['entity', 'lastUpdatedAt', 'lastUpdatedBy'].includes(field.name))
+    .filter(field => field.default === undefined && (
+      field.type === FieldType.Entity ? field.nullable === false : field.nullable !== true
+    ))
+    .map(field => field.name)
+  if (entity.idFormat === 'Snowflake') required.push('id')
+  required.push('name')
+  return required.sort((left, right) => left.localeCompare(right))
+}
+
+/**
+ * Render one entity's edit-writable field names.
+ * @param entity - Entity definition.
+ * @returns Writable field names.
+ */
+function mutationWritableFields(entity: EntityDefinition): readonly string[] {
+  return mutationCreateFields(entity).filter(field => field !== 'id')
+}
+
+/**
+ * Render one literal string union.
+ * @param values - String values.
+ * @returns TypeScript literal union.
+ */
+function literalUnion(values: readonly string[]): string {
+  return values.length === 0 ? 'never' : values.map(value => `'${value}'`).join(' | ')
 }
 
 /**
@@ -168,7 +156,7 @@ function discriminatorType(
   definitions: Graph['definitions'],
 ): string {
   const leaves = entity.abstract ? definitions.concreteDescendants(entity.name) : [entity]
-  return leaves.map(leaf => `Entities.${leaf.name}`).join(' | ') || 'Entities'
+  return leaves.map(leaf => `$BasisEntities.${leaf.name}`).join(' | ') || '$BasisEntities'
 }
 
 /**
@@ -178,7 +166,7 @@ function discriminatorType(
  */
 function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
   if (field.type === FieldType.Entity) {
-    return field.nullable === false ? 'Reference' : 'Reference | null'
+    return field.nullable === false ? '$BasisReference' : '$BasisReference | null'
   }
   if (field.type === FieldType.Array) {
     const array = `readonly ${scalarType(field.items.type)}[]`
@@ -188,25 +176,6 @@ function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
   if (field.type === FieldType.Inverse) return 'unknown'
   const scalar = scalarType(field.type)
   return field.nullable === true ? `${scalar} | null` : scalar
-}
-
-/**
- * Render one field's mutation input type.
- * @param field - Effective field.
- * @returns TypeScript input type expression.
- */
-function mutationType(field: EffectiveFieldDefinition): string {
-  const nullable = field.type === FieldType.Entity
-    ? field.nullable !== false
-    : field.nullable === true
-  if (field.type === FieldType.Entity) return nullable ? 'string | null' : 'string'
-  if (field.type === FieldType.Array) {
-    const array = `readonly ${scalarType(field.items.type)}[]`
-    return nullable ? `${array} | null` : array
-  }
-  if (field.type === FieldType.JSON) return nullable ? 'unknown' : 'unknown'
-  const scalar = scalarType(field.type)
-  return nullable ? `${scalar} | null` : scalar
 }
 
 /**
