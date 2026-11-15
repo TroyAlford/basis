@@ -392,7 +392,7 @@ export class Graph {
     action: Action,
     row: Record<string, unknown>,
   ): string | null {
-    const targets = new Set(['*', ...this.#ancestry(target)])
+    const targets = new Set(this.#ancestry(target))
     const conditions: string[] = []
     for (const grant of this.grants) {
       if (!targets.has(grant.target)) continue
