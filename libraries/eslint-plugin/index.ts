@@ -282,6 +282,21 @@ export default pluginTypescript.config(
     },
   }),
   plugin({
+    files: [
+      '**/graph.ts',
+      '**/graph.tsx',
+      '**/graph.js',
+      '**/graph.mjs',
+      '**/emitters/**/*.ts',
+      '**/emitters/**/*.tsx',
+      '**/emitters/**/*.js',
+      '**/emitters/**/*.mjs',
+    ],
+    rules: {
+      '@basis/no-default-export': 'off',
+    },
+  }),
+  plugin({
     files: ['*.test.ts', '*.test.tsx'],
     rules: {
       'dot-notation': 'off',

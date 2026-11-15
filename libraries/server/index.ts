@@ -63,9 +63,31 @@ export type {
   RoleSource,
 } from './source/Graph'
 export { NullDatabase } from './source/Database'
-export type { Database, DatabaseOptions, QueryOptions } from './source/Database'
+export type {
+  Database,
+  DatabaseOptions,
+  DatabaseTransaction,
+  QueryOptions,
+} from './source/Database'
+export { MutationError } from './source/Mutation'
+export type {
+  CreateResult,
+  DeleteResult,
+  EditResult,
+  MutationDatabase,
+  MutationErrorCode,
+  MutationFilter,
+  MutationRecord,
+  MutationValues,
+  UpsertResult,
+} from './source/Mutation'
 export { SortDirection } from './source/SortDirection'
-export { Constraint, FieldType } from './source/EntityDefinitions'
+export {
+  Constraint,
+  FieldType,
+  SNOWFLAKE_IDENTITY_PATTERN,
+  UUID_IDENTITY_PATTERN,
+} from './source/EntityDefinitions'
 export { Operator } from './source/Operator'
 export type { CollectionFilter, ComparisonFilter, Filter, LogicalFilter } from './source/Predicate'
 export type { ArrayScope, CollectionScope, CountScope, QueryScope } from './source/SQL'

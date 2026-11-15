@@ -50,6 +50,7 @@ const server = new Server()
   .database()
   .start()
 ```
+
 The application root conventionally exports `graph.ts` as `export default new Graph({...})`. Keep the application graph in one module and pass it to the server. `Graph` composes the application ontology with the system `User`, `Role`, `ExternalIdentity`, and `UserRole` definitions. Application `User` inherits `Entity`'s `id`, `name`, and `entity`; do not redeclare those fields. `Role` is an identified entity with a stable UUID `id`, an inherited mutable `name`, and an optional `description`.
 
 ## Roles and membership
@@ -142,6 +143,8 @@ This uses the same action rules and compiler; it is not a separate authorization
 
 Graph predicates are normalized when the graph loads and compiled into PostgreSQL `CREATE POLICY ... USING (...)` and `WITH CHECK (...)` expressions. RLS covers the universal `Entity` root, every MTI ancestor and concrete table, and every named relationship table. Reads deny by returning no rows. Default deny applies to tables without a matching action declaration.
 
+The Graph mutation verbs (`db.create`, `db.edit`, `db.delete`, `db.upsert`) run on the same restricted application pool with the request's `actor.id`. The agreed two-gate rule applies: every create, update, and delete additionally requires `read` on the affected or resulting row, while PostgreSQL's action-specific policies determine whether the write itself is allowed. `edit` and `delete` select through the canonical filter compiler, then PostgreSQL re-checks every write and returns only the rows the actor may actually mutate. Counts therefore exclude unauthorized matches without disclosing that they exist. A create denied by the read or create policy fails as an authorization error; uniqueness, reference, check, and inheritance violations fail as constraint errors. Mixed `db.tx` callbacks keep the same actor across native SQL and mutation verbs.
+
 ## Relationship membership predicates
 
 Graph roles are global role memberships. A resource-specific membership is ordinary Graph relationship data, not another global role. Declare the relationship and grant access through its collection navigation:
@@ -206,6 +209,7 @@ const graph = new Graph({
   },
 })
 ```
+
 `members` is the inverse collection declared by the authenticated endpoint. `$me` is the verified transaction actor, so this predicate means: the current actor is connected to the Workspace by at least one `WorkspaceMembership`. An anonymous actor has no actor id and does not match. Changing membership rows changes access immediately; no graph rebuild or policy reinstall is required. The read rule is where-only, so membership itself is the complete row qualifier; the update rule combines an editor capability with the resource-specific Owner role.
 
 Relationship-owned scalar properties participate through the lower-cased relationship-name prefix. Keep the identity and role requirements in one member requirement so PostgreSQL evaluates them against the same relationship row:

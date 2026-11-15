@@ -244,7 +244,73 @@ await server.db.tx(async sql => {
 
 Commit-time constraint triggers reject an incomplete root/leaf chain, a leaf discriminator that does not match, or an incompatible second leaf. The leaf discriminator and leaf identity are immutable after creation. Temporary create/delete and sibling-leaf events are evaluated against surviving final state.
 
-Instance writes use parameterized `db.sql` inside `db.tx`; Basis does not expose an ORM, repository methods, or automatic CRUD routes in this stage. ORM-style writes such as `new Article(...).save()` remain intentionally deferred, not removed: a future write API will use the same canonical metadata. No automatic CRUD routes are generated.
+Instance writes may use parameterized `db.sql` inside `db.tx`, or the Graph-native mutation verbs below. Basis does not expose an ORM, model instances with `.save()`, repository methods, or automatic CRUD routes. ORM-style writes remain intentionally deferred: mutations use the same canonical Graph metadata, query compiler, PostgreSQL transaction, and RLS policies as reads. No automatic CRUD routes are generated.
+
+## Graph mutations
+
+`server.db` exposes four explicit verbs. They validate against the canonical Graph before any write and then let PostgreSQL constraints and row-level security remain the final authority. The Graph read-before-write rule applies: create, edit, delete, and upsert require READ on the affected or proposed row in addition to the specific write action, so a filter never grants write access by itself:
+
+```ts
+enum Entity {
+  Article = 'Article',
+  Job = 'Job',
+  Pet = 'Pet',
+}
+
+enum JobStatus {
+  Pending = 'Pending',
+  TimedOut = 'TimedOut',
+}
+
+const pet = await server.db.create(Entity.Pet, {
+  name: 'Toby',
+  species: 'Frog',
+})
+// pet.record contains the hydrated persisted Pet, including its generated id.
+
+await server.db.create(Entity.Pet, [
+  { name: 'Toby', species: 'Frog' },
+  { name: 'Emily', species: 'Raccoon' },
+])
+// Bulk create returns { created: 2 }; no single record is fabricated.
+
+const edited = await server.db.edit(
+  Entity.Job,
+  { field: 'status', operator: Operator.Comparison.Equal, value: JobStatus.Pending },
+  { status: JobStatus.TimedOut },
+)
+// edited.record is present only when exactly one row was edited.
+
+await server.db.delete(Entity.Article, {
+  field: 'id',
+  operator: Operator.Comparison.Overlaps,
+  value: articleIds,
+})
+```
+
+- `create(entity, values)` accepts one plain object or any finite synchronous iterable. A single-object create returns `{ created: 1, record }` with the hydrated persisted row, including its generated or supplied `id`. An iterable or batch input always returns count only, even when it contains one element. Arrays, sets, and generators are consumed exactly once, validated as one batch, and written atomically. A `Map` is not treated as values; pass `map.values()`. The batch is bounded to 1,000 records.
+- `edit(entity, filter, changes)` patches every actor-authorized entity selected by the existing string, structured, or shorthand filter. Zero matches is a successful `{ edited: 0 }`; exactly one match includes the hydrated `record`; multiple matches keep the accurate count without fabricating a single record. Omitted properties are unchanged; explicit `null` is allowed only by declared nullability.
+- `delete(entity, filter)` deletes every actor-authorized match and preserves foreign keys, MTI inheritance, and relationship integrity. Zero matches is a successful `{ deleted: 0 }`.
+- `upsert(entity, filter, values)` edits exactly one mutable match, creates when there is no mutable match, and rejects more than one mutable match with a cardinality error before changing values. Success returns the count branch plus the hydrated created or edited `record`. The created row must satisfy the same selector; otherwise the create branch is rejected with an `operation` error and leaves no row behind. A conservative transaction-scoped per-entity advisory lock serializes concurrent upserts so equivalent string and structured filters cannot race into duplicate creates.
+
+The filter is not restricted to one target. Selection is frozen inside the operation before fields that participate in the filter are changed. Single-result create/edit/upsert responses are hydrated through the canonical query compiler under the same transaction and actor, so defaults, generated IDs, normalized references, and effective fields reflect stored state. Delete and bulk/set-oriented writes return truthful counts only. A single-result `record` is a canonical hydrated row containing `id`, `name`, `entity`, and the entity's effective fields, with singular references exposed as identity objects.
+
+Mutation values use logical field names. `id` may be supplied on create when it is canonical for the entity format; otherwise an omitted `id` is generated as a UUID (Snowflake entities require an explicit `id`). `entity` and the update-tracking fields are generated/readonly. Unknown fields, missing required fields, invalid references, invalid bounds, readonly fields, and bulk-item failures produce a `MutationError` with a stable `code` and a JSON Pointer path rooted in the submitted payload (`/values/title`, `/values/1/name`, or `/changes/title`). The codes are `validation`, `filter`, `operation`, `cardinality`, `authorization`, `constraint`, and `infrastructure`; database authorization, constraint, and transport faults keep those distinct categories. Validation never uses a separate DTO or schema authority.
+
+Canonical scalar fields may declare JSON-Schema-style bounds: `minimum`/`maximum` on `Number` and `minLength`/`maxLength` on `String`. Bounds are enforced by mutation validation and by generated PostgreSQL `CHECK` constraints.
+
+### Mutations in transactions
+
+The existing `db.tx` callback now receives the same native Bun SQL client with the mutation verbs attached. Existing `sql\`...\`\` callers are unchanged. SQL and mutations share one transaction and one actor setting, so they commit or roll back together:
+
+```ts
+await server.db.tx(async tx => {
+  await tx.edit('Job', filter, { status: 'TimedOut' })
+  await tx.create('AuditEvent', { action: 'expire-old-jobs' })
+})
+```
+
+Throwing from the callback rolls back both the native SQL and every mutation. `server.db.create`, `edit`, `delete`, and `upsert` each open their own transaction when called outside `db.tx`.
 
 ## `db.query`
 

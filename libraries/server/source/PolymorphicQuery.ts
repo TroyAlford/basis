@@ -13,6 +13,20 @@ const MAX_PROJECTION_PATHS = 64
 /** Maximum total path segments and selected collections in one query. */
 const MAX_PROJECTION_WORK = 128
 
+/** Internal projection work limits for one query compilation. */
+export interface ProjectionBudget {
+  /** Maximum requested projection paths. */
+  readonly paths: number,
+  /** Maximum expanded graph work. */
+  readonly work: number,
+}
+
+/** The public query projection budget. */
+const PUBLIC_PROJECTION_BUDGET: ProjectionBudget = {
+  paths: MAX_PROJECTION_PATHS,
+  work: MAX_PROJECTION_WORK,
+}
+
 /** Options accepted by a polymorphic entity query. */
 export interface PolymorphicQueryOptions {
   /** Per-collection preview and pagination overrides. */
@@ -29,6 +43,8 @@ export interface PolymorphicQueryOptions {
   readonly offset?: number,
   /** Explicit effective-field ordering, single or multi-level. */
   readonly orderBy?: OrderBy,
+  /** Internal full-record projection budget; public queries use the standard budget. */
+  readonly projectionBudget?: ProjectionBudget,
   /** Effective-field predicate. */
   readonly where?: Filter | Readonly<Record<string, unknown>> | string,
 }
@@ -235,6 +251,8 @@ class QueryProjection {
   readonly #filterIdentities = new Set<string>()
   /** Graph work consumed while expanding the projection. */
   #work = 0
+  /** Projection limits for this compilation. */
+  readonly #budget: ProjectionBudget
   /** Collection configuration overrides. */
   readonly #collections: Readonly<Record<string, {
     readonly limit?: number,
@@ -253,6 +271,7 @@ class QueryProjection {
    * @param entities - Canonical definitions.
    * @param definition - Root entity being queried.
    * @param collections - Per-collection preview overrides.
+   * @param budget - Projection limits; defaults to the public query budget.
    */
   constructor(
     entities: EntityDefinitions,
@@ -262,9 +281,11 @@ class QueryProjection {
       readonly offset?: number,
       readonly relationshipFields?: readonly string[],
     }>>,
+    budget: ProjectionBudget = PUBLIC_PROJECTION_BUDGET,
   ) {
     this.#entities = entities
     this.#collections = collections
+    this.#budget = budget
     this.root = {
       baseAlias: 't',
       collections: new Map(definition.collections.map(collection => [collection.name, collection])),
@@ -312,9 +333,9 @@ class QueryProjection {
    */
   #validateBudget(fields: readonly string[]): void {
     const collections = Object.keys(this.#collections ?? {})
-    if (fields.length + collections.length > MAX_PROJECTION_PATHS) {
+    if (fields.length + collections.length > this.#budget.paths) {
       throw new Error(
-        `Query projection exceeds the maximum path count of ${MAX_PROJECTION_PATHS}`,
+        `Query projection exceeds the maximum path count of ${this.#budget.paths}`,
       )
     }
     const collectionWork = (this.#collections
@@ -323,9 +344,9 @@ class QueryProjection {
       total + 1 + (config.relationshipFields?.length ?? 0)
     ), 0)
     const work = fields.reduce((total, field) => total + field.split('.').length, collectionWork)
-    if (work > MAX_PROJECTION_WORK) {
+    if (work > this.#budget.work) {
       throw new Error(
-        `Query projection exceeds the maximum graph work budget of ${MAX_PROJECTION_WORK}`,
+        `Query projection exceeds the maximum graph work budget of ${this.#budget.work}`,
       )
     }
   }
@@ -1524,8 +1545,8 @@ class QueryProjection {
    */
   #consume(units = 1): void {
     this.#work += units
-    if (this.#work > MAX_PROJECTION_WORK) {
-      throw new Error(`Query projection exceeds the maximum graph work budget of ${MAX_PROJECTION_WORK}`)
+    if (this.#work > this.#budget.work) {
+      throw new Error(`Query projection exceeds the maximum graph work budget of ${this.#budget.work}`)
     }
   }
 
@@ -1541,6 +1562,33 @@ class QueryProjection {
 }
 
 /**
+ * Compile the full canonical record projection for one persisted identity.
+ *
+ * This internal boundary keeps the public query path/work budget unchanged
+ * while allowing the mutation result to hydrate every canonical effective field.
+ * @param entities - Canonical entity definitions.
+ * @param definition - Concrete entity definition.
+ * @param id - Canonical identity.
+ * @returns The complete SQL, ordered bindings, and row hydrator.
+ */
+export function compileEntityRecordQuery(
+  entities: EntityDefinitions,
+  definition: EntityDefinition,
+  id: string,
+): CompiledPolymorphicQuery {
+  const fields = definition.effectiveFields.map(field => field.name)
+  return compilePolymorphicQuery(entities, definition, {
+    fields,
+    limit: 1,
+    projectionBudget: {
+      paths: fields.length,
+      work: Number.MAX_SAFE_INTEGER,
+    },
+    where: { id },
+  })
+}
+
+/**
  * Compile one entity query, including concrete/abstract effective fields,
  * descendant-only nullable fields, and singular reference projections.
  * @param entities - Canonical entity definitions.
@@ -1553,7 +1601,12 @@ export function compilePolymorphicQuery(
   definition: EntityDefinition,
   options: PolymorphicQueryOptions,
 ): CompiledPolymorphicQuery {
-  const projection = new QueryProjection(entities, definition, options.collections)
+  const projection = new QueryProjection(
+    entities,
+    definition,
+    options.collections,
+    options.projectionBudget,
+  )
   if (definition.abstract) projection.ensureRoot()
   const synthetic: EntityDefinition = { ...definition, fields: definition.effectiveFields }
   const field = (name: string): QueryFieldDefinition => {

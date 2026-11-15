@@ -3,13 +3,15 @@ import { randomUUID } from 'node:crypto'
 import type { QueryOptions } from '../source/Database'
 import { queryEntity } from '../source/Database'
 import type { EntityDefinitions } from '../source/EntityDefinitions'
+import type { MutationDatabase, MutationFilter, MutationValues } from '../source/Mutation'
+import { mutationRunner } from '../source/Mutation'
 import { useDatabaseFixture } from './DatabaseFixture'
 
 /** A connection owned by one isolated database test. */
 type ReservedSQL = Awaited<ReturnType<BunSQL['reserve']>>
 
 /** A transaction-bound database used by an ordinary isolated test. */
-export interface IsolatedDatabase {
+export interface IsolatedDatabase extends MutationDatabase {
   /**
    * Run a callback that is expected to fail, recovering through a savepoint.
    * @param work - Operation expected to throw.
@@ -35,7 +37,7 @@ export interface IsolatedDatabase {
 }
 
 /** A committed, unique schema used by a cross-transaction test. */
-export interface DurableDatabase {
+export interface DurableDatabase extends MutationDatabase {
   /** Shared entity definitions attached to the fixture. */
   readonly entities: EntityDefinitions,
   /**
@@ -133,13 +135,20 @@ export async function withDurableDatabase<T>(
     })
   )
 
+  const mutations = <Result>(
+    work: (mutation: MutationDatabase) => Promise<Result>,
+  ): Promise<Result> => transaction(tx => work(mutationRunner(fixture.entities, tx)))
   const database: DurableDatabase = {
+    create: (entity, values) => mutations(mutation => mutation.create(entity, values)),
+    delete: (entity, filter) => mutations(mutation => mutation.delete(entity, filter)),
+    edit: (entity, filter, changes) => mutations(mutation => mutation.edit(entity, filter, changes)),
     entities: fixture.entities,
     query: async <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
       transaction(tx => queryEntity<Result>(tx, fixture.entities, entity, options))
     ),
     schema,
     tx: transaction,
+    upsert: (entity, filter, values) => mutations(mutation => mutation.upsert(entity, filter, values)),
   }
 
   const cleanup = async (): Promise<void> => {
@@ -228,6 +237,30 @@ class IsolatedDatabaseContext implements IsolatedDatabase {
       this.#schema = schema
     }
     this.#entities = entities
+  }
+
+  create(entity: string, values: MutationValues | Iterable<MutationValues>) {
+    return this.#mutations().create(entity, values)
+  }
+
+  delete(entity: string, filter: MutationFilter) {
+    return this.#mutations().delete(entity, filter)
+  }
+
+  edit(entity: string, filter: MutationFilter, changes: MutationValues) {
+    return this.#mutations().edit(entity, filter, changes)
+  }
+
+  upsert(entity: string, filter: MutationFilter, values: MutationValues) {
+    return this.#mutations().upsert(entity, filter, values)
+  }
+
+  /**
+   * Build the mutation capability for the active definitions and transaction.
+   * @returns The transaction-bound mutation vocabulary.
+   */
+  #mutations(): MutationDatabase {
+    return mutationRunner(this.#entities, this.connection)
   }
 
   /**

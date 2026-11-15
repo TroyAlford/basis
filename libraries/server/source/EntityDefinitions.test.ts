@@ -802,6 +802,49 @@ describe('EntityDefinitions', () => {
     })).toThrow('default must be a valid Boolean value')
   })
 
+  test('compiles canonical numeric and string bounds into table checks', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { field: 'score', maximum: 10, minimum: 0, type: 'Number' },
+          { field: 'title', maxLength: 20, minLength: 2, nullable: true, type: 'String' },
+        ],
+        name: 'Thing',
+      }],
+    })
+    expect(entities.entity('Thing')?.fields).toMatchObject([
+      { name: 'id', type: 'ID' },
+      { maximum: 10, minimum: 0, name: 'score', type: 'Number' },
+      { maxLength: 20, minLength: 2, name: 'title', nullable: true, type: 'String' },
+    ])
+    const ddl = entities.ddl.join('\n')
+    expect(ddl).toContain(
+      'constraint "Thing_score_bounds_check" check (("score" IS NULL OR ("score" >= 0 AND "score" <= 10)))',
+    )
+    expect(ddl).toContain(
+      'constraint "Thing_title_bounds_check" check ' +
+      '(("title" IS NULL OR (char_length("title") >= 2 AND char_length("title") <= 20)))',
+    )
+  })
+
+  test('rejects invalid scalar bounds', () => {
+    const model = (field: Record<string, unknown>) => ({
+      entities: [{ fields: [field], name: 'Thing' }],
+    })
+    expect(() => load(model({ field: 'score', maximum: 5, minimum: 10, type: 'Number' })))
+      .toThrow('minimum must not exceed maximum')
+    expect(() => load(model({ field: 'title', maxLength: 2, minLength: 4, type: 'String' })))
+      .toThrow('minLength must not exceed maxLength')
+    expect(() => load(model({ field: 'score', minimum: 'zero', type: 'Number' })))
+      .toThrow('minimum must be a finite number')
+    expect(() => load(model({ field: 'title', maxLength: 2.5, type: 'String' })))
+      .toThrow('maxLength must be a non-negative integer')
+    expect(() => load(model({ field: 'title', minimum: 1, type: 'String' })))
+      .toThrow('numeric bounds are only valid on Number fields')
+    expect(() => load(model({ field: 'score', minLength: 1, type: 'Number' })))
+      .toThrow('length bounds are only valid on String fields')
+  })
+
   test('adds update tracking fields to every entity', () => {
     const entities = load({ entities: [{ fields: [], name: 'Note' }] })
     const note = entities.entity('Note')

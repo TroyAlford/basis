@@ -7,10 +7,11 @@ import { join, resolve } from 'node:path'
 import { seedImage } from '../../../testing/database/seed/image'
 import { registerRunCleanup } from '../../testing/lifecycle'
 import { currentActor } from '../source/ActorContext'
-import type { Database, QueryOptions } from '../source/Database'
-import { queryEntity } from '../source/Database'
+import type { Database, DatabaseTransaction, QueryOptions } from '../source/Database'
+import { queryEntity, transactionWithMutations } from '../source/Database'
 import { EntityDefinitions } from '../source/EntityDefinitions'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
+import type { CreateResult, DeleteResult, EditResult, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
 import { ensureSeedImage } from './DatabaseImage'
 import { installSchema } from './Schema'
 
@@ -162,11 +163,36 @@ class FixtureDatabase implements Database {
   }
 
   /**
-   * Query one entity through a pooled transaction.
-   * @param entity - Exact canonical entity name.
-   * @param options - Query options.
-   * @returns The selected rows.
+   * Create one entity or a finite batch atomically.
+   * @param entity - Exact concrete entity name.
+   * @param values - One value object or finite iterable.
+   * @returns The created count.
    */
+  create(entity: string, values: MutationValues | Iterable<MutationValues>): Promise<CreateResult> {
+    return this.tx(tx => tx.create(entity, values))
+  }
+
+  /**
+   * Delete every actor-authorized match.
+   * @param entity - Entity or abstract ancestor name.
+   * @param filter - Existing filter form.
+   * @returns The deleted count.
+   */
+  delete(entity: string, filter: MutationFilter): Promise<DeleteResult> {
+    return this.tx(tx => tx.delete(entity, filter))
+  }
+
+  /**
+   * Patch every actor-authorized match.
+   * @param entity - Entity or abstract ancestor name.
+   * @param filter - Existing filter form.
+   * @param changes - Field values to patch.
+   * @returns The edited count.
+   */
+  edit(entity: string, filter: MutationFilter, changes: MutationValues): Promise<EditResult> {
+    return this.tx(tx => tx.edit(entity, filter, changes))
+  }
+
   query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]> {
     return this.tx(tx => queryEntity<T>(tx, this.#entities, entity, options))
   }
@@ -176,13 +202,24 @@ class FixtureDatabase implements Database {
    * @param callback - Transaction-scoped work.
    * @returns The callback result after commit.
    */
-  tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>> {
+  tx<T>(callback: (tx: DatabaseTransaction) => T | Promise<T>): Promise<BunSQL.ContextCallbackResult<T>> {
     if (this.#closed) return Promise.reject(new Error('Database fixture is closed'))
     return this.#sql.begin(async tx => {
       const actor = currentActor()
       await tx`select set_config('actor.id', ${actor?.id ?? ''}, true)`
-      return callback(tx)
+      return callback(transactionWithMutations(this.#entities, tx))
     })
+  }
+
+  /**
+   * Edit exactly one authorized match or create one.
+   * @param entity - Exact concrete entity name.
+   * @param filter - Existing filter form.
+   * @param values - Values used by either branch.
+   * @returns Which branch ran.
+   */
+  upsert(entity: string, filter: MutationFilter, values: MutationValues): Promise<UpsertResult> {
+    return this.tx(tx => tx.upsert(entity, filter, values))
   }
 }
 
