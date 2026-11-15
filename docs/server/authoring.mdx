@@ -73,7 +73,7 @@ const logicalErd = generateErd(graph, 'logical')
 const physicalErd = generateErd(graph, 'physical')
 ```
 
-- `basis/codegen` emits entity interfaces, `*Ref` identity references, and `create`, `output`, and `update` JSON Schemas. The schemas are derived from the same canonical metadata used by mutation validation: required non-null fields, numeric/string bounds, and generated readonly fields appear in the schema rather than in a second DTO. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
+- `basis/codegen` emits entity interfaces, `*Ref` identity references, and `create`, `output`, and `update` JSON Schemas. The schemas are derived from the same canonical metadata used by mutation validation: create excludes the generated `entity` discriminator, allows an optional supplied `id`, requires non-null writable fields, and rejects unknown fields with `additionalProperties: false`; update excludes generated/readonly fields. Numeric/string bounds and required fields match mutation validation rather than forming a second DTO. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
 - `basis/visualization` emits logical and physical Mermaid ERD source. Render it with the existing `Mermaid` component from `basis/react`; visualization never becomes a server runtime dependency.
 
 Generation is deterministic for a fixed canonical model and must not be maintained as a second schema definition.

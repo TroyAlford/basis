@@ -249,6 +249,43 @@ describe('Graph mutations', () => {
     })
   }, 120_000)
 
+  test('requires upsert create values to satisfy the selector and repeat stably', async () => {
+    await withIsolatedDatabase('mutation-upsert-selector', async database => {
+      await database.use(definitions)
+      await database.create('User', { email: 'ada@example.com', name: 'Ada' })
+      const [ada] = await database.query<{ id: string }>('User', { fields: ['id'] })
+      if (!ada) throw new Error('Ada was not created')
+      const mismatch = await mutationFailure(() => database.upsert(
+        'Article',
+        'title == \'Toby\'',
+        { name: 'Emily', owner: ada.id, title: 'Emily' },
+      ))
+      expect(mismatch.code).toBe('operation')
+      expect(await database.query('Article', { fields: ['title'] })).toEqual([])
+      const identity = '00000000-0000-4000-8000-000000000099'
+      const idMismatch = await mutationFailure(() => database.upsert(
+        'Article',
+        `id == '${identity}'`,
+        { name: 'No id', owner: ada.id, title: 'No id' },
+      ))
+      expect(idMismatch.code).toBe('operation')
+      expect(await database.query('Article', { fields: ['title'] })).toEqual([])
+      expect(await database.upsert('Article', 'title == \'Toby\'', {
+        name: 'Toby',
+        owner: ada.id,
+        score: 3,
+        title: 'Toby',
+      })).toEqual({ created: 1, edited: 0 })
+      expect(await database.upsert('Article', {
+        field: 'title',
+        operator: '$eq',
+        value: 'Toby',
+      }, { score: 8 })).toEqual({ created: 0, edited: 1 })
+      expect(await database.query('Article', { fields: ['score', 'title'] }))
+        .toEqual([{ score: 8, title: 'Toby' }])
+    })
+  }, 120_000)
+
   test('serializes concurrent upserts for the same filter', async () => {
     await withDurableDatabase('mutation-upsert-concurrency', async database => {
       await database.tx(async sql => installSchema(sql, definitions))
@@ -262,10 +299,12 @@ describe('Graph mutations', () => {
         WHERE "email" = 'concurrent@example.com'
       `)
       if (!user) throw new Error('Concurrent user was not created')
-      const results = await Promise.all(Array.from({ length: 6 }, () => (
+      const results = await Promise.all(Array.from({ length: 6 }, (_value, index) => (
         database.tx(async sql => transactionWithMutations(definitions, sql).upsert(
           'Article',
-          'title == \'Concurrent\'',
+          index % 2 === 0
+            ? 'title == \'Concurrent\''
+            : { field: 'title', operator: '$eq', value: 'Concurrent' },
           {
             name: 'Concurrent',
             owner: user.id,

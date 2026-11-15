@@ -59,38 +59,47 @@ export function generateJSONSchemas(graph: Graph): GeneratedSchemas {
   for (const entity of definitions.entities) {
     const fields = entity.effectiveFields
       .filter(field => field.name !== 'id' && field.name !== 'name' && field.name !== 'entity')
-    const base = {
-      entity: { ...discriminatorSchema(entity, definitions), readOnly: true },
-      id: { readOnly: true, type: 'string' },
-      name: { type: 'string' },
-    }
-    const input = {
-      ...base,
-      ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'input', definitions)])),
-    }
-    const output = {
-      ...base,
-      entity: discriminatorSchema(entity, definitions),
-      id: { type: 'string' },
-      ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'output', definitions)])),
-    }
-    const required = fields
+    const generated = new Set(['lastUpdatedAt', 'lastUpdatedBy'])
+    const writable = fields.filter(field => !generated.has(field.name))
+    const writableProperties = Object.fromEntries(
+      writable.map(field => [field.name, schemaForField(field, 'input', definitions)]),
+    )
+    const required = writable
       .filter(field => field.default === undefined && (
         field.type === FieldType.Entity ? field.nullable === false : field.nullable !== true
       ))
       .map(field => field.name)
+    const outputProperties = {
+      entity: discriminatorSchema(entity, definitions),
+      id: { type: 'string' },
+      name: { type: 'string' },
+      ...Object.fromEntries(fields.map(field => [field.name, schemaForField(field, 'output', definitions)])),
+    }
     schemas[entity.name] = {
       create: {
-        properties: input,
-        required: ['entity', 'name', ...required],
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          ...writableProperties,
+        },
+        required: ['name', ...required],
         type: 'object',
       },
       output: {
-        properties: output,
+        additionalProperties: false,
+        properties: outputProperties,
         required: ['id', 'entity', 'name', ...required],
         type: 'object',
       },
-      update: { properties: input, type: 'object' },
+      update: {
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' },
+          ...writableProperties,
+        },
+        type: 'object',
+      },
     }
   }
   return schemas
@@ -139,7 +148,11 @@ function schemaForField(
   definitions: Graph['definitions'],
 ): Record<string, unknown> {
   if (field.type === FieldType.Entity) {
-    if (mode === 'input') return { type: ['string', 'null'] }
+    if (mode === 'input') {
+      return field.nullable === false
+        ? { type: 'string' }
+        : { type: ['string', 'null'] }
+    }
     return {
       anyOf: [{
         properties: {
@@ -152,17 +165,34 @@ function schemaForField(
       }, { type: 'null' }],
     }
   }
-  if (field.type === FieldType.Array) return {
-    items: schemaForScalar(field.items.type),
-    type: 'array',
+  if (field.type === FieldType.Array) {
+    return nullableInput({
+      items: schemaForScalar(field.items.type),
+      type: 'array',
+    }, mode, field)
   }
-  if (field.type === FieldType.JSON) return {}
+  if (field.type === FieldType.JSON) return nullableInput({}, mode, field)
   const schema = {
     ...schemaForScalar(field.type),
     ...boundsFor(field),
   }
-  return mode === 'input' && (field.name === 'lastUpdatedBy' || field.name === 'lastUpdatedAt')
-    ? { ...schema, readOnly: true }
+  return nullableInput(schema, mode, field)
+}
+
+/**
+ * Allow null for a nullable mutation input.
+ * @param schema - Non-null input schema.
+ * @param mode - Input identifier or hydrated output shape.
+ * @param field - Effective field.
+ * @returns The mutation-input schema.
+ */
+function nullableInput(
+  schema: Record<string, unknown>,
+  mode: 'input' | 'output',
+  field: EffectiveFieldDefinition,
+): Record<string, unknown> {
+  return mode === 'input' && field.nullable === true
+    ? { anyOf: [schema, { type: 'null' }] }
     : schema
 }
 

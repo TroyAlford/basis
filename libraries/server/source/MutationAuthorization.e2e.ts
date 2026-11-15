@@ -323,10 +323,26 @@ describe('Graph mutation authorization', () => {
         compare('rank', Operator.Comparison.Equal, 50),
         { score: 2 },
       ))).toEqual({ created: 0, edited: 1 })
+      const readOnly = compare('rank', Operator.Comparison.Equal, 80)
+      const nonmatching = await asActor(worker, () => server.db.upsert(
+        'Article',
+        readOnly,
+        { name: 'Read only', rank: 81, score: 2, title: 'Read only' },
+      )).catch((error: unknown) => error)
+      expect(nonmatching).toBeInstanceOf(MutationError)
+      expect((nonmatching as MutationError).code).toBe('operation')
+      expect(await asActor(worker, () => server.db.query<{
+        rank: number,
+        score: number,
+      }>('Article', {
+        fields: ['rank', 'score'],
+        limit: null,
+        where: readOnly,
+      }))).toEqual([{ rank: 80, score: 5 }])
       expect(await asActor(worker, () => server.db.upsert(
         'Article',
-        compare('rank', Operator.Comparison.Equal, 80),
-        { name: 'Read only', rank: 81, score: 2, title: 'Read only' },
+        readOnly,
+        { name: 'Read only', rank: 80, score: 2, title: 'Read only' },
       ))).toEqual({ created: 1, edited: 0 })
       const rows = await asActor(worker, () => server.db.query<{
         rank: number,
@@ -334,9 +350,13 @@ describe('Graph mutation authorization', () => {
       }>('Article', {
         fields: ['rank', 'score'],
         limit: null,
-        where: compare('rank', Operator.Comparison.Equal, 80),
+        orderBy: 'score',
+        where: readOnly,
       }))
-      expect(rows).toEqual([{ rank: 80, score: 5 }])
+      expect(rows).toEqual([
+        { rank: 80, score: 2 },
+        { rank: 80, score: 5 },
+      ])
     } finally {
       await server.shutdown()
       removeService(install)

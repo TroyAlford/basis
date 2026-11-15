@@ -195,8 +195,13 @@ async function create(
   input: MutationValues | Iterable<MutationValues>,
 ): Promise<CreateResult> {
   const definition = requireConcrete(entities, entity)
+  const single = isPlainRecord(input)
   const values = materialize(input)
-  const prepared = values.map((value, index) => prepareCreate(definition, value, index))
+  const prepared = values.map((value, index) => prepareCreate(
+    definition,
+    value,
+    single ? '/values' : `/values/${index}`,
+  ))
   for (const item of prepared) await insert(entities, sql, definition, item)
   return { created: prepared.length }
 }
@@ -266,19 +271,15 @@ async function upsert(
   values: MutationValues,
 ): Promise<UpsertResult> {
   const definition = requireConcrete(entities, entity)
-  await lockFilter(sql, entity, filter)
+  await lockEntity(sql, entity)
   const matches = await selectMatches({ entities, sql }, definition, filter)
   if (matches.length === 0) {
-    const item = prepareCreate(definition, values, 0)
-    await insert(entities, sql, definition, item)
-    return { created: 1, edited: 0 }
+    return createUpsert({ entities, sql }, definition, filter, values)
   }
 
   const mutable = await authorizeEdit({ entities, sql }, definition, matches)
   if (mutable.length === 0) {
-    const item = prepareCreate(definition, values, 0)
-    await insert(entities, sql, definition, item)
-    return { created: 1, edited: 0 }
+    return createUpsert({ entities, sql }, definition, filter, values)
   }
   if (mutable.length > 1) {
     throw new MutationError(
@@ -289,6 +290,46 @@ async function upsert(
   const changes = prepareChanges(entities, definition, values, '/values')
   await applyChanges({ entities, sql }, definition, mutable, changes)
   return { created: 0, edited: 1 }
+}
+
+/**
+ * Create one upsert row and prove it satisfies the same selection filter.
+ *
+ * The savepoint keeps a non-matching create payload from leaving a row behind
+ * when a caller catches the stable mutation error inside an outer transaction.
+ * @param options - Canonical definitions and transaction client.
+ * @param options.entities - Canonical entity definitions.
+ * @param options.sql - Transaction-scoped SQL client.
+ * @param definition - Concrete target entity.
+ * @param filter - Selection filter reused for verification.
+ * @param values - Create branch values.
+ * @returns The created count.
+ */
+async function createUpsert(
+  { entities, sql }: MutationOptions,
+  definition: EntityDefinition,
+  filter: MutationFilter,
+  values: MutationValues,
+): Promise<UpsertResult> {
+  const name = `basis_upsert_${randomUUID().replaceAll('-', '')}`
+  await execute(sql, { sql: `SAVEPOINT ${quote(name)}`, values: [] })
+  try {
+    const item = prepareCreate(definition, values, '/values')
+    await insert(entities, sql, definition, item)
+    const matches = await selectMatches({ entities, sql }, definition, filter)
+    if (!matches.some(match => match.id === item.id)) {
+      throw new MutationError(
+        'operation',
+        'Upsert create values do not satisfy the selection filter',
+      )
+    }
+    await execute(sql, { sql: `RELEASE SAVEPOINT ${quote(name)}`, values: [] })
+    return { created: 1, edited: 0 }
+  } catch (error) {
+    await sql.unsafe(`ROLLBACK TO SAVEPOINT ${quote(name)}`).catch(() => undefined)
+    await sql.unsafe(`RELEASE SAVEPOINT ${quote(name)}`).catch(() => undefined)
+    throw error
+  }
 }
 
 /**
@@ -363,15 +404,14 @@ async function applyChanges(
  * Prepare and validate one create value.
  * @param definition - Concrete target entity.
  * @param input - Submitted value.
- * @param index - Batch index for payload-rooted diagnostics.
+ * @param base - Payload-rooted JSON Pointer for this value.
  * @returns The prepared create value.
  */
 function prepareCreate(
   definition: EntityDefinition,
   input: MutationValues,
-  index: number,
+  base: string,
 ): PreparedCreate {
-  const base = `/values/${index}`
   if (!isPlainRecord(input)) {
     throw new MutationError('validation', 'Create values must be plain objects', { path: base })
   }
@@ -462,7 +502,9 @@ function validateValue(
   path: string,
 ): unknown {
   if (value === null) {
-    if (field.nullable === true || field.type === FieldType.Entity) return null
+    if (field.nullable === true || (field.type === FieldType.Entity && field.nullable !== false)) {
+      return null
+    }
     throw new MutationError('validation', `Field "${field.name}" must not be null`, { path })
   }
   if (field.type === FieldType.Entity) {
@@ -892,40 +934,18 @@ async function selectMatches(
 }
 
 /**
- * Acquire one transaction-scoped advisory lock for a filter's mutation target.
+ * Acquire one transaction-scoped advisory lock for an entity's upserts.
+ *
+ * A conservative per-entity lock guarantees that semantically equivalent
+ * string and structured filters cannot race each other into duplicate creates.
  * @param sql - Transaction-scoped SQL client.
  * @param entity - Target entity.
- * @param filter - Existing filter form.
  */
-async function lockFilter(sql: BunSQL, entity: string, filter: MutationFilter): Promise<void> {
+async function lockEntity(sql: BunSQL, entity: string): Promise<void> {
   await execute(sql, {
     sql: 'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-    values: [`${entity}|${stableFilterKey(filter)}`],
+    values: [entity],
   })
-}
-
-/**
- * Serialize one filter deterministically for advisory locking.
- * @param filter - Existing filter form.
- * @returns A stable text key.
- */
-function stableFilterKey(filter: MutationFilter): string {
-  if (typeof filter === 'string') return filter.trim()
-  return stableValue(filter)
-}
-
-/**
- * Serialize a structured value with sorted object keys.
- * @param value - Structured filter value.
- * @returns Stable JSON text.
- */
-function stableValue(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined'
-  if (Array.isArray(value)) return `[${value.map(stableValue).join(',')}]`
-  return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${stableValue(entry)}`)
-    .join(',')}}`
 }
 
 /**

@@ -116,7 +116,7 @@ describe('Mutation', () => {
     const mutations = runner(new FakeSQL())
     const missing = await failure(() => mutations.create('Pet', { species: 'Frog' }))
     expect(missing.code).toBe('validation')
-    expect(missing.path).toBe('/values/0/name')
+    expect(missing.path).toBe('/values/name')
     const batch = await failure(() => mutations.create('Pet', [
       { name: 'Toby', species: 'Frog' },
       { name: 7, species: 'Raccoon' },
@@ -127,25 +127,25 @@ describe('Mutation', () => {
       species: 'Frog',
       unknown: true,
     }))
-    expect(unknown.path).toBe('/values/0/unknown')
+    expect(unknown.path).toBe('/values/unknown')
     const readonly = await failure(() => mutations.create('Pet', {
       entity: 'User',
       name: 'Toby',
       species: 'Frog',
     }))
-    expect(readonly.path).toBe('/values/0/entity')
+    expect(readonly.path).toBe('/values/entity')
     const nullable = await failure(() => mutations.create('Pet', {
       name: 'Toby',
       nickname: null,
       species: null,
     }))
-    expect(nullable.path).toBe('/values/0/species')
+    expect(nullable.path).toBe('/values/species')
     const bounds = await failure(() => mutations.create('Pet', {
       age: 21,
       name: 'Toby',
       species: 'Frog',
     }))
-    expect(bounds.path).toBe('/values/0/age')
+    expect(bounds.path).toBe('/values/age')
   })
 
   test('materializes finite iterables once and rejects implicit Map pairs', async () => {
