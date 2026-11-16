@@ -358,10 +358,40 @@ describe('Graph', () => {
     expect(() => make("members $contains [(id = $me), (workspaceMembership.role = 'Owner')]"))
       .not.toThrow()
     expect(() => make('members $all (id = $me)')).toThrow('$all collection policy predicates')
-    expect(() => make('members $contains (id = $me)', 'create'))
-      .toThrow('create security for "Workspace" cannot use collection predicates')
+    expect(() => make('members $contains (id = $me)', 'create')).not.toThrow()
     expect(() => make("members $contains (id = $me) $and members $contains (workspaceMembership.role = 'Owner')"))
       .not.toThrow()
+  })
+
+  test('compiles create policies from proposed values and collection membership', () => {
+    const membershipGraph = new Graph({
+      entities: [
+        {
+          fields: [{ field: 'title', type: 'String' }],
+          name: 'Workspace',
+          security: {
+            [Action.Create]: { where: 'members $contains (id = $me)' },
+            [Action.Read]: Security.Public,
+          },
+        },
+        { fields: [], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [],
+        name: 'WorkspaceMembership',
+      }],
+    })
+    const policy = membershipGraph.physicalSchema('basis_app', true).policies.find(candidate => (
+      candidate.table === 'Workspace' && candidate.name === 'basis_Workspace_create'
+    ))
+    expect(policy?.sql).toContain('WITH CHECK')
+    expect(policy?.sql).toContain('WorkspaceMembership')
+    expect(policy?.sql).toContain('current_setting')
+    expect(policy?.sql).not.toContain('basis.policy_')
   })
 
   test('supports collection $empty policies', () => {

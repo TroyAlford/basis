@@ -113,6 +113,7 @@ export const fixtureRows = {
   anonymousNote: '00000000-0000-4000-8000-000000000102',
   article: '00000000-0000-4000-8000-000000000125',
   bob: '00000000-0000-4000-8000-000000000103',
+  editorWorkspace: '00000000-0000-4000-8000-000000000126',
   guardedWorkspace: '00000000-0000-4000-8000-000000000113',
   hiddenWorkspace: '00000000-0000-4000-8000-000000000112',
   invalidChildDocument: '00000000-0000-4000-8000-000000000114',
@@ -133,6 +134,7 @@ export const fixtureRows = {
   secondProject: '00000000-0000-4000-8000-000000000109',
   thirdProject: '00000000-0000-4000-8000-000000000110',
   validDocument: '00000000-0000-4000-8000-000000000121',
+  viewerWorkspace: '00000000-0000-4000-8000-000000000127',
   visibleWorkspace: '00000000-0000-4000-8000-000000000111',
 } as const
 
@@ -305,6 +307,41 @@ const fixtureGraph = new Graph({
         ],
         name: 'Piece',
         security: publicActions,
+      },
+      {
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'workspace', target: 'Workspace', type: 'Entity' },
+        ],
+        name: 'Resource',
+        security: {
+          [Action.Create]: [{
+            where: "workspace.members $contains (id = $me $and workspaceMembership.role = 'Owner')",
+          }, {
+            where: "workspace.members $contains (id = $me $and workspaceMembership.role = 'Editor')",
+          }],
+          [Action.Read]: Security.Public,
+        },
+      },
+      {
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'workspace', target: 'Workspace', type: 'Entity' },
+        ],
+        name: 'CreateRoot',
+        security: {
+          [Action.Create]: [{
+            where: "workspace.members $contains (id = $me $and workspaceMembership.role = 'Owner')",
+          }, {
+            where: "workspace.members $contains (id = $me $and workspaceMembership.role = 'Editor')",
+          }],
+          [Action.Read]: Security.Public,
+        },
+      },
+      {
+        extends: 'CreateRoot',
+        fields: [],
+        name: 'CreateLeaf',
       },
       {
         constraints: [{
@@ -864,6 +901,12 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
       (${row.visibleWorkspace},
       'Visible workspace',
       'Workspace'),
+      (${row.editorWorkspace},
+      'Editor workspace',
+      'Workspace'),
+      (${row.viewerWorkspace},
+      'Viewer workspace',
+      'Workspace'),
       (${row.hiddenWorkspace},
       'Hidden workspace',
       'Workspace'),
@@ -936,7 +979,14 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
   `
   await sql`
     INSERT INTO "Workspace" ("id", "title")
-    VALUES (${row.visibleWorkspace}, 'Visible workspace'), (${row.hiddenWorkspace}, 'Hidden workspace')
+    VALUES (${row.visibleWorkspace},
+      'Visible workspace'),
+      (${row.hiddenWorkspace},
+      'Hidden workspace'),
+      (${row.editorWorkspace},
+      'Editor workspace'),
+      (${row.viewerWorkspace},
+      'Viewer workspace')
   `
   await sql`
     INSERT INTO "Project" ("id", "title", "workspace.id")
@@ -956,7 +1006,15 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
   `
   await sql`
     INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
-    VALUES (${row.visibleWorkspace}, ${row.alice}, 'Owner')
+    VALUES (${row.visibleWorkspace},
+      ${row.alice},
+      'Owner'),
+      (${row.editorWorkspace},
+      ${row.alice},
+      'Editor'),
+      (${row.viewerWorkspace},
+      ${row.alice},
+      'Viewer')
   `
   await sql`
     INSERT INTO "Entity" ("id", "name", "entity")
