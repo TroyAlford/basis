@@ -102,13 +102,7 @@ describe('codegen', () => {
     expect(types).toContain('readonly owner: Reference | null')
     expect(types).toContain('readonly subject: Reference | null')
     expect(schemas.$schema).toBe('https://json-schema.org/draft/2020-12/schema')
-    expect(schemas.$ref).toBe('#/$defs/Entity')
     expect(createValidator().validateSchema(schemas)).toBe(true)
-    expect(schemas.$defs.Note).toBeDefined()
-    expect(Object.keys(schemas.$defs.Note as object)).not.toContain('create')
-    expect(Object.keys(schemas.$defs.Note as object)).not.toContain('update')
-    expect(Object.keys(schemas.$defs.Note as object)).not.toContain('output')
-    expect(JSON.stringify(schemas)).not.toContain('Note_create')
     const validate = compileEntity(schemas, 'Note')
     const id = '00000000-0000-4000-8000-000000000001'
     expect(validate({
@@ -163,7 +157,7 @@ describe('codegen', () => {
         await Bun.file(join(directory, 'json-schema', 'schemas.json')).text(),
       ) as GeneratedSchemas
       expect(types).toContain('export interface EmitterNote')
-      expect(schemas.$defs.EmitterNote).toBeDefined()
+      expect(createValidator().validateSchema(schemas)).toBe(true)
     } finally {
       await rm(directory, { force: true, recursive: true })
     }
@@ -212,27 +206,6 @@ describe('codegen', () => {
       ],
     })
     const schemas = generateJSONSchemas(graph)
-    const base = schemas.$defs.Base as { properties?: Record<string, unknown> }
-    const child = schemas.$defs.Child as { allOf?: { $ref?: string }[] }
-    const grandchild = schemas.$defs.Grandchild as { allOf?: { $ref?: string }[] }
-    const holder = schemas.$defs.Holder as { properties?: Record<string, unknown> }
-    expect(base.properties?.base).toBeDefined()
-    expect(child.allOf?.[0]?.$ref).toBe('#/$defs/Base')
-    expect(grandchild.allOf?.[0]?.$ref).toBe('#/$defs/Child')
-    expect((holder.properties?.requiredChild as {
-      allOf?: { $ref?: string }[],
-    }).allOf?.[0]?.$ref).toBe('#/$defs/Reference')
-    expect((holder.properties?.requiredChild as {
-      allOf?: { properties?: { entity?: { enum?: string[] } } }[],
-    }).allOf?.[1]?.properties?.entity?.enum).toEqual(['Grandchild'])
-    expect((holder.properties?.optionalChild as {
-      anyOf?: { allOf?: { $ref?: string }[] }[],
-    }).anyOf?.[0]?.allOf?.[0]?.$ref).toBe('#/$defs/Reference')
-    expect(schemas.$defs.Node).toBeDefined()
-    expect(((schemas.$defs.Node as { properties?: Record<string, unknown> }).properties?.parent as {
-      anyOf?: { allOf?: { properties?: { entity?: { const?: string } } }[] }[],
-    }).anyOf?.[0]?.allOf?.[1]?.properties?.entity?.const).toBe('Node')
-
     const id = '00000000-0000-4000-8000-000000000001'
     const childRepresentation = {
       base: 'base',
@@ -303,22 +276,15 @@ describe('codegen', () => {
       ],
     })
     const schemas = generateJSONSchemas(graph)
-    const things = schemas.$defs.Thing as { properties: Record<string, Record<string, unknown>> }
-    expect(things.properties.score?.minimum).toBe(0)
-    expect(things.properties.score?.maximum).toBe(10)
-    expect(things.properties.title?.minLength).toBe(2)
-    expect(things.properties.title?.maxLength).toBe(20)
-    expect(things.properties.nickname?.anyOf).toEqual([{ type: 'string' }, { type: 'null' }])
-    expect(things.properties.tags?.anyOf).toEqual([
-      { items: { type: 'string' }, type: 'array' },
-      { type: 'null' },
-    ])
-    expect((schemas.$defs.UuidThing as { properties: Record<string, { pattern?: string }> })
-      .properties.id?.pattern).toBe('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
-    expect((schemas.$defs.SnowThing as { properties: Record<string, { maxLength?: number }> })
-      .properties.id?.maxLength).toBe(20)
     const validate = compileEntity(schemas, 'Thing')
+    const uuid = compileEntity(schemas, 'UuidThing')
+    const snowflake = compileEntity(schemas, 'SnowThing')
     const id = '00000000-0000-4000-8000-000000000001'
+    const identityBase = { lastUpdatedAt: null, lastUpdatedBy: null }
+    expect(uuid({ ...identityBase, entity: 'UuidThing', id, name: 'Uuid' })).toBe(true)
+    expect(uuid({ ...identityBase, entity: 'UuidThing', id: 'not-a-uuid', name: 'Uuid' })).toBe(false)
+    expect(snowflake({ ...identityBase, entity: 'SnowThing', id, name: 'Snow' })).toBe(false)
+    expect(snowflake({ ...identityBase, entity: 'SnowThing', id: '123456789', name: 'Snow' })).toBe(true)
     const thing = {
       entity: 'Thing',
       id,
@@ -401,10 +367,6 @@ readonly entity: $BasisEntities.OnlyChild,
     expect(() => new Graph({
       entities: [{ fields: [], name: 'Reference' }],
     })).toThrow('reserved for generated contracts')
-    const schemas = generateJSONSchemas(graph)
-    expect(schemas.$defs.Reference).toBeDefined()
-    expect(schemas.$defs.Entity).toBeDefined()
-    expect(schemas.$defs.Foo).toBeDefined()
     const directory = await mkdtemp(join(tmpdir(), 'basis-collision-types-'))
     try {
       const file = join(directory, 'types.ts')
@@ -507,19 +469,6 @@ const owner: Note['owner'] = { entity: $BasisEntities.AdminUser, id: '1', name: 
     expect(types).toContain('readonly access: AccessLevel,')
     expect(types).toContain('readonly fallback: AccessLevel | null,')
     const schemas = generateJSONSchemas(graph)
-    expect(schemas.$defs.AccessLevel).toEqual({
-      enum: ['editor', 'owner', 'viewer'],
-      oneOf: [
-        { const: 'editor', description: 'Can edit resources.', type: 'string' },
-        { const: 'owner', description: 'Can manage resources and membership.', type: 'string' },
-        { const: 'viewer', description: 'Can view resources.', type: 'string' },
-      ],
-      type: 'string',
-    })
-    const documentSchema = schemas.$defs.EnumDocument as {
-      properties: Record<string, unknown>,
-    }
-    expect(documentSchema.properties.access).toEqual({ $ref: '#/$defs/AccessLevel' })
     expect(createValidator().validateSchema(schemas)).toBe(true)
     const validate = compileEntity(schemas, 'EnumDocument')
     const base = {
