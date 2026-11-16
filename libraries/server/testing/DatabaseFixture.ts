@@ -344,20 +344,21 @@ const authorizationGraph = new Graph({
   schema: AUTHORIZATION_SCHEMA,
 })
 
-/** Run one authorization test as the restricted app role. */
-export interface AuthorizationDatabase {
+/** The one shared-fixture transaction context. */
+export interface DatabaseContext {
+  /** Run one Graph-native mutation; validation runs before the savepoint releases. */
+  create: Database['create'],
+  /** Delete through the Graph-native mutation vocabulary. */
+  delete: Database['delete'],
+  /** Edit through the Graph-native mutation vocabulary. */
+  edit: Database['edit'],
   /** Query through the canonical entity compiler under RLS. */
   query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
   /** Reserved transaction connection already scoped to the app role. */
   readonly sql: DatabaseTransaction,
-}
-
-/** Run one validation test through the shared app-role transaction. */
-export interface ValidationDatabase extends AuthorizationDatabase {
-  create: Database['create'],
-  delete: Database['delete'],
-  edit: Database['edit'],
+  /** Run one transaction-final validation unit. */
   tx: <T>(work: (transaction: MutationDatabase) => T | Promise<T>) => Promise<T>,
+  /** Upsert through the Graph-native mutation vocabulary. */
   upsert: Database['upsert'],
 }
 
@@ -1049,16 +1050,16 @@ async function seedAuthorization(sql: BunSQL): Promise<void> {
 }
 
 /**
- * Run one authorization test as the restricted app role on the one fixture.
+ * Run one test on the single shared fixture.
  * @param label - Fixture acquisition label.
  * @param actor - Verified actor identity, or null for anonymous.
- * @param callback - Work using the app-role transaction and entity query capability.
+ * @param callback - Work using the app-role transaction.
  * @returns The callback result after rollback.
  */
-export async function withAuthorizationDatabase<T>(
+export async function withDatabase<T>(
   label: string,
   actor: string | null,
-  callback: (database: AuthorizationDatabase) => Promise<T>,
+  callback: (database: DatabaseContext) => Promise<T>,
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
   return runAsActor({ id: actor }, () => fixture.testWith(
@@ -1071,53 +1072,37 @@ export async function withAuthorizationDatabase<T>(
       await sql`
         SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
       `
+      const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
+        const savepoint = sql.savepoint as unknown as <Value>(
+          callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
+        ) => Promise<Value>
+        return savepoint(async savepointSql => {
+          try {
+            const result = await work(savepointSql)
+            await validateTransactionState(
+              authorizationGraph.definitions,
+              transactionClient(savepointSql),
+            )
+            return result
+          } catch (error) {
+            clearWrittenSubjects(transactionClient(savepointSql))
+            throw error
+          }
+        })
+      }
       return callback({
+        create: (entity, values) => tx(savepoint => savepoint.create(entity, values)),
+        delete: (entity, filter) => tx(savepoint => savepoint.delete(entity, filter)),
+        edit: (entity, filter, changes) => tx(savepoint => savepoint.edit(entity, filter, changes)),
         query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
           queryEntity<Result>(sql, authorizationGraph.definitions, entity, options)
         ),
         sql,
+        tx,
+        upsert: (entity, filter, values) => tx(savepoint => savepoint.upsert(entity, filter, values)),
       })
     },
   ))
-}
-
-/**
- * Run one validation test through the shared authorization schema.
- * @param label - Fixture acquisition label.
- * @param actor - Verified actor identity, or null for anonymous.
- * @param callback - Work using the app-role transaction.
- * @returns The callback result after rollback.
- */
-export async function withValidationDatabase<T>(
-  label: string,
-  actor: string | null,
-  callback: (database: ValidationDatabase) => Promise<T>,
-): Promise<T> {
-  return withAuthorizationDatabase(label, actor, async database => {
-    const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
-      const savepoint = database.sql.savepoint as unknown as <Value>(
-        callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
-      ) => Promise<Value>
-      return savepoint(async sql => {
-        try {
-          const result = await work(sql)
-          await validateTransactionState(authorizationGraph.definitions, transactionClient(sql))
-          return result
-        } catch (error) {
-          clearWrittenSubjects(transactionClient(sql))
-          throw error
-        }
-      })
-    }
-    return callback({
-      ...database,
-      create: (entity, values) => tx(sql => sql.create(entity, values)),
-      delete: (entity, filter) => tx(sql => sql.delete(entity, filter)),
-      edit: (entity, filter, changes) => tx(sql => sql.edit(entity, filter, changes)),
-      tx,
-      upsert: (entity, filter, values) => tx(sql => sql.upsert(entity, filter, values)),
-    })
-  })
 }
 
 /**

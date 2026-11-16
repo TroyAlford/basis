@@ -4,7 +4,7 @@ import { HttpVerb } from 'basis/server'
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { authorizationRows, removeService, withAuthorizationDatabase } from '../testing/DatabaseFixture'
+import { authorizationRows, removeService, withDatabase } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
@@ -1053,7 +1053,7 @@ describe('Authorization RLS', () => {
   }, 120_000)
 
   test('enforces explicit actor presence on the shared authorization fixture', async () => {
-    const notesFor = (actor: string | null) => withAuthorizationDatabase(
+    const notesFor = (actor: string | null) => withDatabase(
       'authorization-actor-notes',
       actor,
       database => database.query<{ id: string }>('MemberNote', { fields: ['id'], orderBy: 'id' }),
@@ -1063,19 +1063,19 @@ describe('Authorization RLS', () => {
     expect(await notesFor(authorizationRows.bob)).toEqual(noteRows)
     expect(await notesFor(null)).toEqual([])
 
-    const anonymousNotes = await withAuthorizationDatabase(
+    const anonymousNotes = await withDatabase(
       'authorization-actor-anonymous',
       null,
       database => database.query<{ id: string }>('AnonymousNote', { fields: ['id'] }),
     )
     expect(anonymousNotes).toEqual([{ id: authorizationRows.anonymousNote }])
-    expect(await withAuthorizationDatabase(
+    expect(await withDatabase(
       'authorization-actor-authenticated-anonymous',
       authorizationRows.alice,
       database => database.query<{ id: string }>('AnonymousNote', { fields: ['id'] }),
     )).toEqual([])
 
-    const linksFor = (actor: string | null) => withAuthorizationDatabase(
+    const linksFor = (actor: string | null) => withDatabase(
       'authorization-actor-links',
       actor,
       database => database.sql<{ note: string }[]>`
@@ -1089,22 +1089,22 @@ describe('Authorization RLS', () => {
   }, 120_000)
 
   test('resolves nested and composed policy paths on the shared authorization fixture', async () => {
-    expect(await withAuthorizationDatabase(
+    expect(await withDatabase(
       'authorization-nested-workspace',
       authorizationRows.alice,
       database => database.query<{ id: string }>('Workspace', { fields: ['id'] }),
     )).toEqual([{ id: authorizationRows.visibleWorkspace }])
-    expect(await withAuthorizationDatabase(
+    expect(await withDatabase(
       'authorization-nested-anonymous',
       null,
       database => database.query<{ id: string }>('Workspace', { fields: ['id'] }),
     )).toEqual([])
-    expect(await withAuthorizationDatabase(
+    expect(await withDatabase(
       'authorization-nested-task',
       authorizationRows.alice,
       database => database.query<{ id: string }>('Task', { fields: ['id'] }),
     )).toEqual([{ id: authorizationRows.openTask }])
-    expect(await withAuthorizationDatabase(
+    expect(await withDatabase(
       'authorization-nested-task-anonymous',
       null,
       database => database.query<{ id: string }>('Task', { fields: ['id'] }),

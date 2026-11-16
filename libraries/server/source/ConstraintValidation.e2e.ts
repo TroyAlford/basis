@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { authorizationRows, withValidationDatabase } from '../testing/DatabaseFixture'
+import { authorizationRows, withDatabase } from '../testing/DatabaseFixture'
 import type { DatabaseTransaction } from './Database'
 import { MutationError } from './Mutation'
 
@@ -19,7 +19,7 @@ function identify(result: { readonly record?: { readonly id: string } }): string
 
 describe('Graph validation constraints', () => {
   test('validates transaction-final state and rolls back final invalidity', async () => {
-    await withValidationDatabase('validation-final', null, async database => {
+    await withDatabase('validation-final', null, async database => {
       expect(identify(await database.create('Document', {
         flag: true,
         name: 'Valid',
@@ -65,7 +65,7 @@ describe('Graph validation constraints', () => {
   })
 
   test('allows intermediate repair and skips subjects deleted before commit', async () => {
-    await withValidationDatabase('validation-repair', null, async database => {
+    await withDatabase('validation-repair', null, async database => {
       await database.tx(async sql => {
         const document = await sql.create('Document', {
           flag: true,
@@ -94,7 +94,7 @@ describe('Graph validation constraints', () => {
   })
 
   test('rejects UNKNOWN optional paths and validates multi-hop relational paths', async () => {
-    await withValidationDatabase('validation-relational', null, async database => {
+    await withDatabase('validation-relational', null, async database => {
       await expect(database.create('Document', {
         flag: true,
         name: 'Orphan',
@@ -135,7 +135,7 @@ describe('Graph validation constraints', () => {
 
   test('accepts valid self-revocation and rejects invalid self-revocation', async () => {
     const guard = rows.guardedWorkspace
-    await withValidationDatabase('validation-self-valid', rows.alice, async database => {
+    await withDatabase('validation-self-valid', rows.alice, async database => {
       await database.tx(async sql => {
         await sql.edit('GuardedWorkspace', { id: guard }, { title: 'Valid edit' })
         await database.sql`
@@ -144,7 +144,7 @@ describe('Graph validation constraints', () => {
         `
       })
     })
-    await withValidationDatabase('validation-self-invalid', rows.alice, async database => {
+    await withDatabase('validation-self-invalid', rows.alice, async database => {
       await expect(database.tx(async sql => {
         await sql.edit('GuardedWorkspace', { id: guard }, { flag: false })
         await database.sql`
@@ -156,7 +156,7 @@ describe('Graph validation constraints', () => {
   })
 
   test('keeps validation armed when an attempted delete removes no rows', async () => {
-    await withValidationDatabase('validation-denied-delete', rows.alice, async database => {
+    await withDatabase('validation-denied-delete', rows.alice, async database => {
       let deleted = -1
       const failure = await database.tx(async sql => {
         await sql.edit('GuardedWorkspace', { id: rows.guardedWorkspace }, { flag: false })
@@ -170,7 +170,7 @@ describe('Graph validation constraints', () => {
   })
 
   test('validates inherited and child MTI fields through canonical root provenance', async () => {
-    await withValidationDatabase('validation-mti', null, async database => {
+    await withDatabase('validation-mti', null, async database => {
       expect(await database.edit('Document', { id: rows.validDocument }, { title: 'Inherited edit' }))
         .toMatchObject({ edited: 1 })
       expect(await database.edit('Document', { id: rows.validDocument }, { note: 'Child edit' }))
@@ -183,7 +183,7 @@ describe('Graph validation constraints', () => {
   })
 
   test('exposes rollback, savepoint, and test transaction extensions', async () => {
-    await withValidationDatabase('validation-transaction-controls', null, async database => {
+    await withDatabase('validation-transaction-controls', null, async database => {
       const savepoint = database.sql.savepoint as unknown as <T>(
         work: (sql: DatabaseTransaction) => T | Promise<T>,
       ) => Promise<T>
