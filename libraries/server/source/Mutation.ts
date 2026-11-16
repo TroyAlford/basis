@@ -39,11 +39,24 @@ function writtenSubjects(sql: object): ReadonlyMap<string, ReadonlyMap<string, S
 }
 
 /**
- * Clear recorded subject state for one native transaction.
+ * Snapshot the Graph-native subject state for one native transaction.
+ *
+ * The returned restore function puts the tracker back exactly as it was before
+ * a savepoint. Nested savepoints each hold their own deep snapshot, so an inner
+ * rollback cannot erase or preserve an outer scope's writes.
  * @param sql - Transaction-scoped SQL client.
+ * @returns A restore function for the current tracker state.
  */
-export function clearWrittenSubjects(sql: object): void {
-  affectedSubjects.delete(sql)
+export function snapshotWrittenSubjects(sql: object): () => void {
+  const current = affectedSubjects.get(sql)
+  const snapshot = new Map<string, Map<string, SubjectState>>()
+  if (current) {
+    for (const [entity, ids] of current) snapshot.set(entity, new Map(ids))
+  }
+  return () => {
+    if (snapshot.size === 0) affectedSubjects.delete(sql)
+    else affectedSubjects.set(sql, snapshot)
+  }
 }
 
 /** Stable mutation failure categories. */

@@ -15,7 +15,7 @@ import { Constraint } from '../source/EntityDefinitions'
 import { Action, Graph, Security } from '../source/Graph'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
 import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
-import { clearWrittenSubjects, validateTransactionState } from '../source/Mutation'
+import { validateTransactionState } from '../source/Mutation'
 import { ensureSeedImage } from './DatabaseImage'
 import { installSchema } from './Schema'
 
@@ -1073,17 +1073,12 @@ export async function withDatabase<T>(
           callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
         ) => Promise<Value>
         return savepoint(async savepointSql => {
-          try {
-            const result = await work(savepointSql)
-            await validateTransactionState(
-              fixtureGraph.definitions,
-              transactionClient(savepointSql),
-            )
-            return result
-          } catch (error) {
-            clearWrittenSubjects(transactionClient(savepointSql))
-            throw error
-          }
+          const result = await work(savepointSql)
+          await validateTransactionState(
+            fixtureGraph.definitions,
+            transactionClient(savepointSql),
+          )
+          return result
         })
       }
       return callback({
@@ -1099,6 +1094,49 @@ export async function withDatabase<T>(
       })
     },
   ))
+}
+
+/** A real committed app-role transaction context for commit-boundary proofs. */
+export interface CommittedDatabaseContext extends MutationDatabase {
+  /** Query through the canonical entity compiler under RLS. */
+  query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
+  /** Graph-native transaction connection already scoped to the app role. */
+  readonly sql: DatabaseTransaction,
+}
+
+/**
+ * Run one real committed Graph-native transaction on the shared fixture.
+ * @param label - Fixture acquisition label.
+ * @param actor - Verified actor identity, or null for anonymous.
+ * @param callback - Work using the app-role transaction.
+ * @returns The callback result after commit.
+ */
+export async function withCommittedDatabase<T>(
+  label: string,
+  actor: string | null,
+  callback: (database: CommittedDatabaseContext) => Promise<T>,
+): Promise<T> {
+  const fixture = await useDatabaseFixture(label)
+  await ensureGraphSchema(fixture.database)
+  return runAsActor({ id: actor }, () => fixture.database.tx(async sql => {
+    await sql.unsafe(
+      `set local search_path to ${quoteIdentifier(fixture.fixtureSchema)}, public, basis, pg_temp`,
+    ).simple()
+    await sql.unsafe(`set local role ${quoteIdentifier(FIXTURE_APP_ROLE)}`).simple()
+    await sql`
+      SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+    `
+    return callback({
+      create: (entity, values) => sql.create(entity, values),
+      delete: (entity, filter) => sql.delete(entity, filter),
+      edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
+      query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
+        queryEntity<Result>(sql, fixtureGraph.definitions, entity, options)
+      ),
+      sql,
+      upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
+    })
+  }))
 }
 
 /**

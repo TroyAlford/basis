@@ -5,7 +5,7 @@ import { currentActor } from './ActorContext'
 import type { EntityDefinitions } from './EntityDefinitions'
 import { ManagedPostgresService } from './ManagedPostgresService'
 import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from './Mutation'
-import { mutationRunner, validateTransactionState } from './Mutation'
+import { mutationRunner, snapshotWrittenSubjects, validateTransactionState } from './Mutation'
 import { compilePolymorphicQuery } from './PolymorphicQuery'
 import type { Filter } from './Predicate'
 export { managedDatabaseIdentity } from './ManagedPostgresService'
@@ -432,6 +432,7 @@ export function transactionWithMutations(
       const work = typeof nameOrWork === 'string' ? maybeWork : nameOrWork
       if (!work) throw new Error('Savepoint requires a callback')
       await tx.unsafe(`savepoint ${name}`).simple()
+      const restore = snapshotWrittenSubjects(tx)
       try {
         const result = await work(self)
         await tx.unsafe(`release savepoint ${name}`).simple()
@@ -439,6 +440,7 @@ export function transactionWithMutations(
       } catch (error) {
         await tx.unsafe(`rollback to savepoint ${name}`).simple().catch(() => undefined)
         await tx.unsafe(`release savepoint ${name}`).simple().catch(() => undefined)
+        restore()
         throw error
       }
     },
