@@ -9,7 +9,8 @@ import { registerRunCleanup } from '../../testing/lifecycle'
 import { currentActor, runAsActor } from '../source/ActorContext'
 import type { Database, DatabaseTransaction, QueryOptions } from '../source/Database'
 import { queryEntity, RollbackSignal, transactionClient, transactionWithMutations } from '../source/Database'
-import { Constraint, EntityDefinitions } from '../source/EntityDefinitions'
+import type { EntityDefinitions } from '../source/EntityDefinitions'
+import { Constraint } from '../source/EntityDefinitions'
 import { Action, Graph, Security } from '../source/Graph'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
 import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
@@ -99,27 +100,17 @@ export const articleDefinition = {
   name: 'Article',
 }
 
-/** Entities available from the shared ordinary database fixture. */
-export const sharedEntities = EntityDefinitions.load(JSON.stringify({
-  entities: [
-    noteDefinition,
-    accountDefinition,
-    numberRowDefinition,
-    queryRowDefinition,
-    userDefinition,
-    articleDefinition,
-  ],
-}))
+/** Restricted role used by fixture graph policies. */
+const FIXTURE_APP_ROLE = 'basis_app'
+/** Single schema owned by the one fixture graph. */
+const FIXTURE_SCHEMA = 'basis_fixture'
 
-/** Restricted role used by authorization fixture policies. */
-const AUTHORIZATION_APP_ROLE = 'basis_app'
-/** Single schema owned by the authorization fixture. */
-const AUTHORIZATION_SCHEMA = 'basis_fixture_auth'
-
-/** Deterministic identities and rows seeded into the authorization fixture. */
-export const authorizationRows = {
+/** Deterministic identities and rows seeded into the one fixture graph. */
+export const fixtureRows = {
+  account: '1001',
   alice: '00000000-0000-4000-8000-000000000101',
   anonymousNote: '00000000-0000-4000-8000-000000000102',
+  article: '00000000-0000-4000-8000-000000000125',
   bob: '00000000-0000-4000-8000-000000000103',
   guardedWorkspace: '00000000-0000-4000-8000-000000000113',
   hiddenWorkspace: '00000000-0000-4000-8000-000000000112',
@@ -127,6 +118,8 @@ export const authorizationRows = {
   invalidParentDocument: '00000000-0000-4000-8000-000000000115',
   linkedNote: '00000000-0000-4000-8000-000000000104',
   memberNote: '00000000-0000-4000-8000-000000000105',
+  note: '00000000-0000-4000-8000-000000000122',
+  numberRow: '00000000-0000-4000-8000-000000000123',
   openTask: '00000000-0000-4000-8000-000000000106',
   orphanDocument: '00000000-0000-4000-8000-000000000116',
   orphanRevision: '00000000-0000-4000-8000-000000000117',
@@ -134,6 +127,7 @@ export const authorizationRows = {
   ownerA: '00000000-0000-4000-8000-000000000118',
   ownerB: '00000000-0000-4000-8000-000000000119',
   project: '00000000-0000-4000-8000-000000000108',
+  queryRow: '00000000-0000-4000-8000-000000000124',
   revisionA: '00000000-0000-4000-8000-000000000120',
   secondProject: '00000000-0000-4000-8000-000000000109',
   thirdProject: '00000000-0000-4000-8000-000000000110',
@@ -150,199 +144,222 @@ const publicActions = {
 } as const
 
 /**
- * Canonical authorization fixture graph.
+ * The one canonical fixture graph.
  *
- * The one ordinary database fixture installs this model and its seed rows once;
- * authorization tests reserve a transaction and run as the restricted app role.
+ * One seeded fixture installs this model once; graph tests reserve a transaction
+ * and run as the restricted app role.
  */
-const authorizationGraph = new Graph({
-  entities: [{
-    fields: [{ field: 'email', type: 'String' }],
-    name: 'User',
-    security: { [Action.Read]: Security.Public },
-  },
-  {
-    fields: [{ field: 'title', type: 'String' }],
-    name: 'AnonymousNote',
-    security: { [Action.Read]: { where: '$me = null' } },
-  },
-  {
-    fields: [{ field: 'title', type: 'String' }],
-    name: 'MemberNote',
-    security: { [Action.Read]: { where: '$me != null' } },
-  },
-  {
-    fields: [
-      { field: 'title', type: 'String' },
-      { field: 'workspace', inverse: 'projects', target: 'Workspace', type: 'Entity' },
+const fixtureGraph = new Graph({
+  entities: JSON.stringify({
+    entities: [
+      noteDefinition,
+      accountDefinition,
+      numberRowDefinition,
+      queryRowDefinition,
       {
-        cardinality: 'Many',
-        field: 'tasks',
-        inverse: 'project',
-        target: 'Task',
-        type: 'Inverse',
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+          { field: 'email', type: 'String' },
+        ],
+        name: 'User',
+        security: { [Action.Read]: Security.Public },
       },
-    ],
-    name: 'Project',
-    security: { [Action.Read]: Security.Public },
-  },
-  {
-    fields: [
-      { field: 'title', type: 'String' },
-      { field: 'project', inverse: 'tasks', target: 'Project', type: 'Entity' },
-    ],
-    name: 'Task',
-    security: { [Action.Read]: { where: 'project.workspace.members $contains (id = $me)' } },
-  },
-  {
-    fields: [
-      { field: 'title', type: 'String' },
       {
-        cardinality: 'Many',
-        field: 'projects',
-        inverse: 'workspace',
-        target: 'Project',
-        type: 'Inverse',
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'title', type: 'String' },
+          { field: 'owner', target: 'User', type: 'Entity' },
+        ],
+        name: 'Article',
+      },
+      {
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'AnonymousNote',
+        security: { [Action.Read]: { where: '$me = null' } },
+      },
+      {
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'MemberNote',
+        security: { [Action.Read]: { where: '$me != null' } },
+      },
+      {
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'workspace', inverse: 'projects', target: 'Workspace', type: 'Entity' },
+          {
+            cardinality: 'Many',
+            field: 'tasks',
+            inverse: 'project',
+            target: 'Task',
+            type: 'Inverse',
+          },
+        ],
+        name: 'Project',
+        security: { [Action.Read]: Security.Public },
+      },
+      {
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'project', inverse: 'tasks', target: 'Project', type: 'Entity' },
+        ],
+        name: 'Task',
+        security: { [Action.Read]: { where: 'project.workspace.members $contains (id = $me)' } },
+      },
+      {
+        fields: [
+          { field: 'title', type: 'String' },
+          {
+            cardinality: 'Many',
+            field: 'projects',
+            inverse: 'workspace',
+            target: 'Project',
+            type: 'Inverse',
+          },
+        ],
+        name: 'Workspace',
+        security: {
+          [Action.Read]: {
+            where: "$me != null $and projects $contains (title = 'visible' AND tasks $contains (title = 'open'))",
+          },
+        },
+      },
+      {
+        fields: [{ field: 'label', type: 'String' }],
+        name: 'Owner',
+        security: publicActions,
+      },
+      {
+        fields: [{ field: 'owner', nullable: true, target: 'Owner', type: 'Entity' }],
+        name: 'Revision',
+        security: publicActions,
+      },
+      {
+        constraints: [{
+          description: 'A record must remain ok.',
+          name: 'recordStatus',
+          type: Constraint.Validation,
+          where: "status = 'ok'",
+        }],
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'status', type: 'String' },
+        ],
+        name: 'Record',
+        security: publicActions,
+      },
+      {
+        constraints: [{
+          description: 'A document must stay flagged.',
+          name: 'documentFlag',
+          type: Constraint.Validation,
+          where: 'flag = true',
+        }, {
+          description: 'An optional revision belongs to the document owner.',
+          name: 'consistentRevisionOwner',
+          type: Constraint.Validation,
+          where: 'revision = null OR owner = revision.owner',
+        }],
+        extends: 'Record',
+        fields: [
+          { field: 'flag', type: 'Boolean' },
+          { field: 'note', type: 'String' },
+          { field: 'owner', target: 'Owner', type: 'Entity' },
+          { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
+        ],
+        name: 'Document',
+      },
+      {
+        fields: [
+          { field: 'document', nullable: true, target: 'Document', type: 'Entity' },
+          { field: 'title', type: 'String' },
+        ],
+        name: 'Section',
+        security: publicActions,
+      },
+      {
+        constraints: [{
+          description: 'A section document belongs to the asset owner.',
+          name: 'consistentSectionOwner',
+          type: Constraint.Validation,
+          where: 'section = null OR section.document.owner = owner',
+        }],
+        fields: [
+          { field: 'owner', target: 'Owner', type: 'Entity' },
+          { field: 'section', nullable: true, target: 'Section', type: 'Entity' },
+        ],
+        name: 'Asset',
+        security: publicActions,
+      },
+      {
+        constraints: [{
+          description: 'An optional asset belongs to the piece owner.',
+          name: 'consistentAssetOwner',
+          type: Constraint.Validation,
+          where: 'asset = null OR asset.owner = owner',
+        }],
+        fields: [
+          { field: 'asset', nullable: true, target: 'Asset', type: 'Entity' },
+          { field: 'owner', target: 'Owner', type: 'Entity' },
+        ],
+        name: 'Piece',
+        security: publicActions,
+      },
+      {
+        constraints: [{
+          description: 'A guarded workspace must remain flagged.',
+          name: 'guardedFlag',
+          type: Constraint.Validation,
+          where: 'flag = true',
+        }],
+        fields: [
+          { field: 'flag', type: 'Boolean' },
+          { field: 'title', type: 'String' },
+        ],
+        name: 'GuardedWorkspace',
+        security: {
+          [Action.Create]: { where: '$me != null' },
+          [Action.Delete]: { where: '$me = null' },
+          [Action.Read]: { where: '$me != null $and members $contains (id = $me)' },
+          [Action.Update]: { where: '$me != null' },
+        },
       },
     ],
-    name: 'Workspace',
-    security: {
-      [Action.Read]: {
-        where: "$me != null $and projects $contains (title = 'visible' AND tasks $contains (title = 'open'))",
+    relationships: [
+      {
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'GuardedWorkspace' },
+          { field: 'user', inverse: 'guardedWorkspaces', target: 'User' },
+        ],
+        fields: [],
+        name: 'GuardedMembership',
+        security: publicActions,
       },
-    },
-  },
-  {
-    fields: [{ field: 'label', type: 'String' }],
-    name: 'Owner',
-    security: publicActions,
-  },
-  {
-    fields: [{ field: 'owner', nullable: true, target: 'Owner', type: 'Entity' }],
-    name: 'Revision',
-    security: publicActions,
-  },
-  {
-    constraints: [{
-      description: 'A record must remain ok.',
-      name: 'recordStatus',
-      type: Constraint.Validation,
-      where: "status = 'ok'",
-    }],
-    fields: [
-      { field: 'title', type: 'String' },
-      { field: 'status', type: 'String' },
+      {
+        between: [
+          { field: 'note', inverse: 'links', target: 'MemberNote' },
+          { field: 'related', inverse: 'relatedLinks', target: 'MemberNote' },
+        ],
+        fields: [],
+        name: 'ActorLink',
+        security: { [Action.Read]: { where: '$me != null' } },
+      },
+      {
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+        security: { [Action.Read]: Security.Public },
+      },
     ],
-    name: 'Record',
-    security: publicActions,
-  },
-  {
-    constraints: [{
-      description: 'A document must stay flagged.',
-      name: 'documentFlag',
-      type: Constraint.Validation,
-      where: 'flag = true',
-    }, {
-      description: 'An optional revision belongs to the document owner.',
-      name: 'consistentRevisionOwner',
-      type: Constraint.Validation,
-      where: 'revision = null OR owner = revision.owner',
-    }],
-    extends: 'Record',
-    fields: [
-      { field: 'flag', type: 'Boolean' },
-      { field: 'note', type: 'String' },
-      { field: 'owner', target: 'Owner', type: 'Entity' },
-      { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
-    ],
-    name: 'Document',
-  },
-  {
-    fields: [
-      { field: 'document', nullable: true, target: 'Document', type: 'Entity' },
-      { field: 'title', type: 'String' },
-    ],
-    name: 'Section',
-    security: publicActions,
-  },
-  {
-    constraints: [{
-      description: 'A section document belongs to the asset owner.',
-      name: 'consistentSectionOwner',
-      type: Constraint.Validation,
-      where: 'section = null OR section.document.owner = owner',
-    }],
-    fields: [
-      { field: 'owner', target: 'Owner', type: 'Entity' },
-      { field: 'section', nullable: true, target: 'Section', type: 'Entity' },
-    ],
-    name: 'Asset',
-    security: publicActions,
-  },
-  {
-    constraints: [{
-      description: 'An optional asset belongs to the piece owner.',
-      name: 'consistentAssetOwner',
-      type: Constraint.Validation,
-      where: 'asset = null OR asset.owner = owner',
-    }],
-    fields: [
-      { field: 'asset', nullable: true, target: 'Asset', type: 'Entity' },
-      { field: 'owner', target: 'Owner', type: 'Entity' },
-    ],
-    name: 'Piece',
-    security: publicActions,
-  },
-  {
-    constraints: [{
-      description: 'A guarded workspace must remain flagged.',
-      name: 'guardedFlag',
-      type: Constraint.Validation,
-      where: 'flag = true',
-    }],
-    fields: [
-      { field: 'flag', type: 'Boolean' },
-      { field: 'title', type: 'String' },
-    ],
-    name: 'GuardedWorkspace',
-    security: {
-      [Action.Create]: { where: '$me != null' },
-      [Action.Delete]: { where: '$me = null' },
-      [Action.Read]: { where: '$me != null $and members $contains (id = $me)' },
-      [Action.Update]: { where: '$me != null' },
-    },
-  }],
-  relationships: [
-    {
-      between: [
-        { field: 'workspace', inverse: 'members', target: 'GuardedWorkspace' },
-        { field: 'user', inverse: 'guardedWorkspaces', target: 'User' },
-      ],
-      fields: [],
-      name: 'GuardedMembership',
-      security: publicActions,
-    },
-    {
-      between: [
-        { field: 'note', inverse: 'links', target: 'MemberNote' },
-        { field: 'related', inverse: 'relatedLinks', target: 'MemberNote' },
-      ],
-      fields: [],
-      name: 'ActorLink',
-      security: { [Action.Read]: { where: '$me != null' } },
-    },
-    {
-      between: [
-        { field: 'workspace', inverse: 'members', target: 'Workspace' },
-        { field: 'user', inverse: 'workspaces', target: 'User' },
-      ],
-      fields: [{ field: 'role', type: 'String' }],
-      name: 'WorkspaceMembership',
-      security: { [Action.Read]: Security.Public },
-    },
-  ],
-  schema: AUTHORIZATION_SCHEMA,
+  }),
+  schema: FIXTURE_SCHEMA,
 })
+
+/** The one canonical fixture model. */
+export const sharedEntities = fixtureGraph.definitions
 
 /** The one shared-fixture transaction context. */
 export interface DatabaseContext {
@@ -504,12 +521,12 @@ class FixtureDatabase implements Database {
 
 /** A started in-process database fixture. */
 export interface DatabaseFixture {
-  /** Authorization schema installed once by this fixture. */
-  readonly authorizationSchema: string,
   /** The pooled test database connected to the one seeded container. */
   readonly database: Database,
   /** Entity definitions attached to the shared database. */
   readonly entities: EntityDefinitions,
+  /** Fixture schema installed once by this fixture. */
+  readonly fixtureSchema: string,
   /** Installation whose seeded service is shared. */
   readonly install: string,
   /** Resolve or create the schema for one exact entity definition set. */
@@ -661,20 +678,18 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
     }
 
     const fixture: DatabaseFixture = {
-      authorizationSchema: '',
       database,
       entities: sharedEntities,
+      fixtureSchema: FIXTURE_SCHEMA,
       install,
       schemaFor,
       service,
       testWith: (entities, work) => database.testWith(entities, work),
     }
     await fixture.schemaFor(sharedEntities)
-    const authorizationSchema = await ensureAuthorizationSchema(database)
-    const resolved: DatabaseFixture = { ...fixture, authorizationSchema }
     record(`${existing ? 'attach' : 'start'} ${service} ${install} ${process.pid}`)
     if (!existing) record(`canonical ${service} ${install} ${process.pid}`)
-    return resolved
+    return fixture
   } catch (error) {
     await database?.close()
     if (Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
@@ -823,67 +838,30 @@ function fixtureSchemaName(entities: EntityDefinitions): string {
 }
 
 /**
- * Install and seed the single authorization schema for this fixture.
+ * Ensure the restricted role used by the fixture graph exists.
  * @param database - Connected fixture pool.
- * @returns The authorization schema name.
  */
-async function ensureAuthorizationSchema(database: FixtureDatabase): Promise<string> {
-  const schema = AUTHORIZATION_SCHEMA
-  const version = `fixture-auth:${createHash('sha256')
-    .update(authorizationGraph.definitions.ddl.join('\n'))
-    .digest('hex')
-    .slice(0, 16)}:${randomUUID()}`
+async function ensureApplicationRole(database: Database): Promise<void> {
   await database.sql.unsafe(`
     DO $$
     BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${AUTHORIZATION_APP_ROLE}') THEN
-        CREATE ROLE "${AUTHORIZATION_APP_ROLE}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${FIXTURE_APP_ROLE}') THEN
+        CREATE ROLE "${FIXTURE_APP_ROLE}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
           NOINHERIT NOBYPASSRLS;
       ELSE
-        ALTER ROLE "${AUTHORIZATION_APP_ROLE}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+        ALTER ROLE "${FIXTURE_APP_ROLE}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
           NOINHERIT NOBYPASSRLS;
       END IF;
     END $$;
   `).simple()
-  await database.tx(async sql => {
-    await sql`
-      SELECT pg_advisory_xact_lock(hashtext(${schema}))
-    `
-    const present = await sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
-    `
-    if (present[0]?.present) {
-      await sql.unsafe(`drop schema ${quoteIdentifier(schema)} cascade`).simple()
-    }
-    await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
-    await sql.unsafe(
-      `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
-    ).simple()
-    await installSchema(sql, authorizationGraph, {
-      appRole: AUTHORIZATION_APP_ROLE,
-      schema,
-      superuser: true,
-      version,
-    })
-    await sql.unsafe(
-      `grant usage on schema ${quoteIdentifier(schema)} to ${quoteIdentifier(AUTHORIZATION_APP_ROLE)}`,
-    ).simple()
-    await sql.unsafe(
-      `grant select, insert, update, delete on all tables in schema ${quoteIdentifier(schema)} ` +
-      `to ${quoteIdentifier(AUTHORIZATION_APP_ROLE)}`,
-    ).simple()
-    await seedAuthorization(sql)
-    record(`authorization schema ${schema}`)
-  })
-  return schema
 }
 
 /**
- * Seed the deterministic authorization rows once.
- * @param sql - Fixture owner transaction scoped to the authorization schema.
+ * Seed the deterministic fixture rows once.
+ * @param sql - Fixture owner transaction scoped to the fixture schema.
  */
-async function seedAuthorization(sql: BunSQL): Promise<void> {
-  const row = authorizationRows
+async function seedFixtureRows(sql: BunSQL): Promise<void> {
+  const row = fixtureRows
   await sql`
     INSERT INTO "Entity" ("id", "name", "entity")
     VALUES (${row.alice},
@@ -921,11 +899,46 @@ async function seedAuthorization(sql: BunSQL): Promise<void> {
       'Task'),
       (${row.otherTask},
       'Other task',
-      'Task')
+      'Task'),
+      (${row.note},
+      'Fixture note',
+      'Note'),
+      (${row.account},
+      'Fixture account',
+      'Account'),
+      (${row.numberRow},
+      'Fixture number row',
+      'NumberRow'),
+      (${row.queryRow},
+      'Fixture query row',
+      'QueryRow'),
+      (${row.article},
+      'Fixture article',
+      'Article')
   `
   await sql`
-    INSERT INTO "User" ("id", "email")
-    VALUES (${row.alice}, 'alice@example.com'), (${row.bob}, 'bob@example.com')
+    INSERT INTO "User" ("id", "label", "email")
+    VALUES (${row.alice}, 'Alice', 'alice@example.com'), (${row.bob}, 'Bob', 'bob@example.com')
+  `
+  await sql`
+    INSERT INTO "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
+    VALUES (${row.note}, 'Fixture note', TRUE, 3, '2030-01-01', '2020-01-01T00:00:00Z')
+  `
+  await sql`
+    INSERT INTO "Account" ("id", "label")
+    VALUES (${row.account}, 'Fixture account')
+  `
+  await sql`
+    INSERT INTO "NumberRow" ("id", "value")
+    VALUES (${row.numberRow}, 7)
+  `
+  await sql`
+    INSERT INTO "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
+    VALUES (${row.queryRow}, TRUE, 1, 2, 3, 'Fixture query row')
+  `
+  await sql`
+    INSERT INTO "Article" ("id", "title", "owner.id")
+    VALUES (${row.article}, 'Fixture article', ${row.alice})
   `
   await sql`
     INSERT INTO "MemberNote" ("id", "title")
@@ -1062,13 +1075,14 @@ export async function withDatabase<T>(
   callback: (database: DatabaseContext) => Promise<T>,
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
+  await ensureGraphSchema(fixture.database)
   return runAsActor({ id: actor }, () => fixture.testWith(
-    authorizationGraph.definitions,
+    fixtureGraph.definitions,
     async sql => {
       await sql.unsafe(
-        `set local search_path to ${quoteIdentifier(fixture.authorizationSchema)}, public, basis, pg_temp`,
+        `set local search_path to ${quoteIdentifier(fixture.fixtureSchema)}, public, basis, pg_temp`,
       ).simple()
-      await sql.unsafe(`set local role ${quoteIdentifier(AUTHORIZATION_APP_ROLE)}`).simple()
+      await sql.unsafe(`set local role ${quoteIdentifier(FIXTURE_APP_ROLE)}`).simple()
       await sql`
         SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
       `
@@ -1080,7 +1094,7 @@ export async function withDatabase<T>(
           try {
             const result = await work(savepointSql)
             await validateTransactionState(
-              authorizationGraph.definitions,
+              fixtureGraph.definitions,
               transactionClient(savepointSql),
             )
             return result
@@ -1095,7 +1109,7 @@ export async function withDatabase<T>(
         delete: (entity, filter) => tx(savepoint => savepoint.delete(entity, filter)),
         edit: (entity, filter, changes) => tx(savepoint => savepoint.edit(entity, filter, changes)),
         query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
-          queryEntity<Result>(sql, authorizationGraph.definitions, entity, options)
+          queryEntity<Result>(sql, fixtureGraph.definitions, entity, options)
         ),
         sql,
         tx,
@@ -1127,9 +1141,71 @@ async function ensureSchema(
     if (present[0]?.present) return
 
     await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
-    await sql.unsafe(`set local search_path to ${quoteIdentifier(schema)}`).simple()
+    await sql.unsafe(`set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`).simple()
     await installSchema(sql, entities, { version: `fixture:${schema}` })
     record(`schema ${schema}`)
+  })
+  return schema
+}
+
+/**
+ * Install and seed the one fixture graph in its dedicated schema.
+ * @param database - Connected fixture pool.
+ * @returns The fixture graph schema name.
+ */
+async function ensureGraphSchema(database: Database): Promise<string> {
+  const schema = FIXTURE_SCHEMA
+  await ensureApplicationRole(database)
+  await database.tx(async sql => {
+    await sql`
+      SELECT pg_advisory_xact_lock(hashtext(${schema}))
+    `
+    const present = await sql<{ present: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
+    `
+    let complete = Boolean(present[0]?.present)
+    if (complete) {
+      for (const entity of fixtureGraph.definitions.entities) {
+        const [table] = await sql<{ table_name: string }[]>`
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_schema = ${schema} AND table_name = ${entity.name}
+        `
+        if (!table?.table_name) {
+          complete = false
+          break
+        }
+      }
+    }
+    if (complete) {
+      const [seeded] = await sql<{ seeded: boolean }[]>`
+        SELECT EXISTS (SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" = ${fixtureRows.alice} ) AS
+          seeded
+      `
+      complete = Boolean(seeded?.seeded)
+    }
+    if (complete) return
+
+    await sql.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`).simple()
+    await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
+    await sql.unsafe(
+      `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
+    ).simple()
+    await installSchema(sql, fixtureGraph, {
+      appRole: FIXTURE_APP_ROLE,
+      schema,
+      superuser: true,
+      version: `fixture-graph:${schema}:${randomUUID()}`,
+    })
+    await sql.unsafe(
+      `grant usage on schema ${quoteIdentifier(schema)} to ${quoteIdentifier(FIXTURE_APP_ROLE)}`,
+    ).simple()
+    await sql.unsafe(
+      `grant select, insert, update, delete on all tables in schema ${quoteIdentifier(schema)} ` +
+      `to ${quoteIdentifier(FIXTURE_APP_ROLE)}`,
+    ).simple()
+    await seedFixtureRows(sql)
+    record(`fixture graph schema ${schema}`)
   })
   return schema
 }

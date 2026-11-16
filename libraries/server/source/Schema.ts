@@ -913,6 +913,15 @@ export function plan(options: PlanOptions): SchemaPlan {
   }
 
   const actualGrants = new Map((actualSchema.grants ?? []).map(grant => [grant.name, grant]))
+  /*
+   * A model with no compiled authorization predicates does not own the graph
+   * helpers that may already live in the shared `basis` schema.
+   */
+  const managesBasisFunctions = desired.functions.some(fn => (
+    fn.name.startsWith('basis.policy_') || fn.name.startsWith('basis.validate_')
+  )) || [...previousFunctions].some(name => (
+    name.startsWith('basis.policy_') || name.startsWith('basis.validate_')
+  ))
   const desiredGrants = new Set((desired.grants ?? []).map(grant => grant.name))
   const desiredRevokes = new Set((desired.grants ?? [])
     .filter(grant => grant.kind === 'revoke')
@@ -953,6 +962,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   }
   for (const grant of actualGrants.values()) {
     if (desiredGrants.has(grant.name) || desiredRevokes.has(grant.name)) continue
+    if (!managesBasisFunctions && grant.function?.startsWith('basis.')) continue
     if (grant.table && removedTables.has(grant.table)) continue
     if (grant.function && removedFunctionNames.has(grant.function)) continue
     if (grant.grantee && desiredGrantees.has(grant.grantee)) {
@@ -1464,6 +1474,9 @@ export function plan(options: PlanOptions): SchemaPlan {
 
   const actualFunctionMap = new Map(actualSchema.functions.map(fn => [fn.name, fn]))
   for (const fn of desired.functions) {
+    if (!managesBasisFunctions && fn.name.startsWith('basis.') && actualFunctionMap.has(fn.name)) {
+      continue
+    }
     if (!fn.required.every(name => actualFunctions.has(name))) {
       if (fn.required.some(name => previousFunctions.has(name))) {
         for (const name of fn.required) {
@@ -1522,6 +1535,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   const desiredFunctionNames = new Set(desired.functions.flatMap(fn => fn.required))
   for (const name of actualFunctions) {
     if (desiredFunctionNames.has(name)) continue
+    if (!managesBasisFunctions && name.startsWith('basis.')) continue
     if (previousFunctions.has(name)) {
       operations.push({
         dependsOn: [],

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { authorizationRows, withDatabase } from '../testing/DatabaseFixture'
+import { fixtureRows, withDatabase } from '../testing/DatabaseFixture'
 import type { DatabaseTransaction } from './Database'
 import { MutationError } from './Mutation'
 
-const rows = authorizationRows
+const rows = fixtureRows
 
 /**
  * Require a hydrated identity from one mutation result.

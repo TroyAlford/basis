@@ -4,7 +4,7 @@ import { HttpVerb } from 'basis/server'
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { authorizationRows, removeService, withDatabase } from '../testing/DatabaseFixture'
+import { fixtureRows, removeService, withDatabase } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
@@ -1058,9 +1058,9 @@ describe('Authorization RLS', () => {
       actor,
       database => database.query<{ id: string }>('MemberNote', { fields: ['id'], orderBy: 'id' }),
     )
-    const noteRows = [{ id: authorizationRows.linkedNote }, { id: authorizationRows.memberNote }]
-    expect(await notesFor(authorizationRows.alice)).toEqual(noteRows)
-    expect(await notesFor(authorizationRows.bob)).toEqual(noteRows)
+    const noteRows = [{ id: fixtureRows.linkedNote }, { id: fixtureRows.memberNote }]
+    expect(await notesFor(fixtureRows.alice)).toEqual(noteRows)
+    expect(await notesFor(fixtureRows.bob)).toEqual(noteRows)
     expect(await notesFor(null)).toEqual([])
 
     const anonymousNotes = await withDatabase(
@@ -1068,10 +1068,10 @@ describe('Authorization RLS', () => {
       null,
       database => database.query<{ id: string }>('AnonymousNote', { fields: ['id'] }),
     )
-    expect(anonymousNotes).toEqual([{ id: authorizationRows.anonymousNote }])
+    expect(anonymousNotes).toEqual([{ id: fixtureRows.anonymousNote }])
     expect(await withDatabase(
       'authorization-actor-authenticated-anonymous',
-      authorizationRows.alice,
+      fixtureRows.alice,
       database => database.query<{ id: string }>('AnonymousNote', { fields: ['id'] }),
     )).toEqual([])
 
@@ -1083,17 +1083,17 @@ describe('Authorization RLS', () => {
         FROM "ActorLink"
       `,
     )
-    expect(await linksFor(authorizationRows.alice)).toEqual([{ note: authorizationRows.memberNote }])
-    expect(await linksFor(authorizationRows.bob)).toEqual([{ note: authorizationRows.memberNote }])
+    expect(await linksFor(fixtureRows.alice)).toEqual([{ note: fixtureRows.memberNote }])
+    expect(await linksFor(fixtureRows.bob)).toEqual([{ note: fixtureRows.memberNote }])
     expect(await linksFor(null)).toEqual([])
   }, 120_000)
 
   test('resolves nested and composed policy paths on the shared authorization fixture', async () => {
     expect(await withDatabase(
       'authorization-nested-workspace',
-      authorizationRows.alice,
+      fixtureRows.alice,
       database => database.query<{ id: string }>('Workspace', { fields: ['id'] }),
-    )).toEqual([{ id: authorizationRows.visibleWorkspace }])
+    )).toEqual([{ id: fixtureRows.visibleWorkspace }])
     expect(await withDatabase(
       'authorization-nested-anonymous',
       null,
@@ -1101,9 +1101,9 @@ describe('Authorization RLS', () => {
     )).toEqual([])
     expect(await withDatabase(
       'authorization-nested-task',
-      authorizationRows.alice,
+      fixtureRows.alice,
       database => database.query<{ id: string }>('Task', { fields: ['id'] }),
-    )).toEqual([{ id: authorizationRows.openTask }])
+    )).toEqual([{ id: fixtureRows.openTask }])
     expect(await withDatabase(
       'authorization-nested-task-anonymous',
       null,
