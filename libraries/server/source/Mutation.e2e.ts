@@ -121,7 +121,7 @@ describe('Graph mutations', () => {
         { payload: null, score: 0, tags: null, title: 'Second' },
       ])
     })
-  }, 120_000)
+  })
 
   test('returns hydrated records for single mutations and counts only for sets', async () => {
     await withIsolatedDatabase('mutation-records', async database => {
@@ -211,7 +211,7 @@ describe('Graph mutations', () => {
         record: { id: upsertCreate.record.id, score: 7, title: 'Upsert' },
       })
     })
-  }, 120_000)
+  })
 
   test('hydrates full records beyond the public projection path budget', async () => {
     const wide = EntityDefinitions.load(JSON.stringify({
@@ -261,7 +261,7 @@ describe('Graph mutations', () => {
         record: { field1: 'upserted', id: upsertCreated.record.id },
       })
     })
-  }, 120_000)
+  })
 
   test('validates payloads and rolls an entire batch back on a database constraint', async () => {
     await withIsolatedDatabase('mutation-create-rollback', async database => {
@@ -296,7 +296,7 @@ describe('Graph mutations', () => {
       expect(await database.query('Article', { fields: ['title'], orderBy: 'title' }))
         .toEqual([{ title: 'Duplicate' }])
     })
-  }, 120_000)
+  })
 
   test('edits zero-to-many frozen sets with string and structured filters', async () => {
     await withIsolatedDatabase('mutation-edit', async database => {
@@ -337,7 +337,7 @@ describe('Graph mutations', () => {
       expect(await database.edit('Article', 'title == \'Keep\'', { payload: null }))
         .toMatchObject({ edited: 1, record: { payload: null, title: 'Keep' } })
     })
-  }, 120_000)
+  })
 
   test('deletes filtered sets and preserves references and inheritance integrity', async () => {
     await withIsolatedDatabase('mutation-delete', async database => {
@@ -362,7 +362,7 @@ describe('Graph mutations', () => {
       expect(await database.delete('Article', 'title == \'A\'')).toEqual({ deleted: 1 })
       expect(await database.delete('Article', 'title == \'A\'')).toEqual({ deleted: 0 })
     })
-  }, 120_000)
+  })
 
   test('upserts with zero, one, and ambiguous authorized matches', async () => {
     await withIsolatedDatabase('mutation-upsert', async database => {
@@ -407,7 +407,7 @@ describe('Graph mutations', () => {
         { score: 0, title: 'Two' },
       ])
     })
-  }, 120_000)
+  })
 
   test('requires upsert create values to satisfy the selector and repeat stably', async () => {
     await withIsolatedDatabase('mutation-upsert-selector', async database => {
@@ -449,7 +449,7 @@ describe('Graph mutations', () => {
       expect(await database.query('Article', { fields: ['score', 'title'] }))
         .toEqual([{ score: 8, title: 'Toby' }])
     })
-  }, 120_000)
+  })
 
   test('serializes concurrent upserts for the same filter', async () => {
     await withDurableDatabase('mutation-upsert-concurrency', async database => {
@@ -487,7 +487,7 @@ describe('Graph mutations', () => {
       `)
       expect(count?.count).toBe(1)
     })
-  }, 120_000)
+  })
 
   test('shares one native transaction between SQL and mutation verbs', async () => {
     await withDurableDatabase('mutation-transaction', async database => {
@@ -536,5 +536,5 @@ describe('Graph mutations', () => {
       `)
       expect(rolledBack[0]?.count).toBe(0)
     })
-  }, 120_000)
+  })
 })

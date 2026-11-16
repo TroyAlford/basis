@@ -265,7 +265,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('reuses one persistent development server across runs', async () => {
     const target = fixture({ 'a.test.ts': bootSuite('persistent') })
@@ -302,7 +302,7 @@ describe('useApplication lifecycle', () => {
     } finally {
       if (isAlive(pid)) process.kill(pid, 'SIGKILL')
     }
-  }, 30_000)
+  })
 
   test('keeps environment and persistence identities distinct', async () => {
     const target = fixture({
@@ -322,7 +322,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(2)
     expect(activity.stops).toBe(2)
-  }, 30_000)
+  })
 
   test('serializes concurrent first attach during a slow build', async () => {
     const target = fixture({
@@ -351,7 +351,7 @@ describe('useApplication lifecycle', () => {
     } finally {
       if (isAlive(pid)) process.kill(pid, 'SIGKILL')
     }
-  }, 30_000)
+  })
 
   test('does not steal a live slower owner lock', async () => {
     const timed = suite(
@@ -401,7 +401,7 @@ describe('useApplication lifecycle', () => {
       await output
       await errors
     }
-  }, 30_000)
+  })
 
   test('allows two genuinely different entries to boot separately', async () => {
     const target = fixture({
@@ -420,7 +420,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(2)
     expect(activity.stops).toBe(2)
-  }, 30_000)
+  })
 
   test('shares one boot across concurrent callers', async () => {
     const target = fixture({
@@ -438,7 +438,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('tears down exactly once after a failing assertion', async () => {
     const target = fixture({
@@ -453,7 +453,7 @@ describe('useApplication lifecycle', () => {
     expect(code).not.toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('tears down exactly once after a thrown error', async () => {
     const target = fixture({
@@ -468,7 +468,7 @@ describe('useApplication lifecycle', () => {
     expect(code).not.toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('boots once and tears down once for a filtered single-file run', async () => {
     const target = fixture({
@@ -479,7 +479,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('tears down exactly once and leaves nothing alive on SIGINT', async () => {
     const target = fixture({
@@ -496,7 +496,7 @@ describe('useApplication lifecycle', () => {
     expect(activity.stops).toBe(1)
     expect(activity.pid).not.toBeNull()
     if (activity.pid !== null) expect(isAlive(activity.pid)).toBe(false)
-  }, 30_000)
+  })
 
   test('tears down exactly once and leaves nothing alive on SIGTERM', async () => {
     const target = fixture({
@@ -513,7 +513,7 @@ describe('useApplication lifecycle', () => {
     expect(activity.stops).toBe(1)
     expect(activity.pid).not.toBeNull()
     if (activity.pid !== null) expect(isAlive(activity.pid)).toBe(false)
-  }, 30_000)
+  })
 
   test('tears down at most once when stop is called repeatedly', async () => {
     const target = fixture({
@@ -529,7 +529,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('boots eagerly from a preload and reuses that boot lazily', async () => {
     const eager = 'eager-preload.ts'
@@ -549,7 +549,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('fails the run at startup when an eager preload cannot boot', async () => {
     const eager = 'eager-preload.ts'
@@ -568,7 +568,7 @@ describe('useApplication lifecycle', () => {
     expect(code).not.toBe(0)
     expect(activity.boot).toBe(0)
     expect(output).not.toContain('the suite should never run')
-  }, 30_000)
+  })
 
   test('treats equivalent cwd/entry spellings as one application', async () => {
     const target = fixture({
@@ -588,7 +588,7 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 
   test('rejects useApplication after teardown instead of leaking a server', async () => {
     const target = fixture({
@@ -604,5 +604,5 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(1)
     expect(activity.stops).toBe(1)
-  }, 30_000)
+  })
 })

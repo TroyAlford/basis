@@ -634,5 +634,5 @@ describe('Query parity gate', () => {
       })
       expect(ordered.map(row => row.id)).toEqual([linus, grace, ada])
     })
-  }, 120_000)
+  })
 })

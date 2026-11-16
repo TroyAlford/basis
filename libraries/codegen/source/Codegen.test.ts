@@ -376,7 +376,7 @@ readonly entity: $BasisEntities.OnlyChild,
     } finally {
       await rm(directory, { force: true, recursive: true })
     }
-  }, 30_000)
+  })
 
   test('compiles mutually referencing generated entity types', async () => {
     const graph = new Graph({
@@ -418,7 +418,7 @@ const bar: Bar = {
     } finally {
       await rm(directory, { force: true, recursive: true })
     }
-  }, 30_000)
+  })
 
   test('emits assignable abstract reference types', async () => {
     const abstract = new Graph({
@@ -443,7 +443,7 @@ const owner: Note['owner'] = { entity: $BasisEntities.AdminUser, id: '1', name: 
     } finally {
       await rm(directory, { force: true, recursive: true })
     }
-  }, 30_000)
+  })
 
   test('emits named enum contracts in TypeScript and JSON Schema', async () => {
     const graph = new Graph({
@@ -495,7 +495,7 @@ void access
     } finally {
       await rm(directory, { force: true, recursive: true })
     }
-  }, 30_000)
+  })
 
   test('emits TypeScript that compiles', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'basis-authored-types-'))
@@ -507,5 +507,5 @@ void access
     } finally {
       await rm(directory, { force: true, recursive: true })
     }
-  }, 30_000)
+  })
 })

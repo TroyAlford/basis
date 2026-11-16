@@ -219,4 +219,4 @@ test('supports independent installs, durable restart, and same-install reconnect
     const removed = [removeService(installA), removeService(installB)]
     expect(removed).toEqual([true, true])
   }
-}, 180_000)
+})

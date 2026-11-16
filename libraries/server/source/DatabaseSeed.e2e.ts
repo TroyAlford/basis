@@ -81,4 +81,4 @@ test('queries prebuilt polymorphic descendants with indexed names', async () => 
     expect(plan.map(row => Object.values(row).join('\n')).join('\n'))
       .toContain('Entity_name_trgm_idx')
   })
-}, 300_000)
+})

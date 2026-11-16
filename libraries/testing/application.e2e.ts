@@ -18,13 +18,13 @@ describe('testing/application', () => {
 
   beforeAll(async () => {
     app = await useApplication(options)
-  }, 60_000)
+  })
 
   test('serves the application under test', async () => {
     await app.visit('/', async page => {
       expect(await page.locator('h1').textContent()).toBe('Application')
     })
-  }, 30_000)
+  })
 
   test('shares one persistent application across concurrent callers', async () => {
     const [first, second] = await Promise.all([
@@ -42,11 +42,11 @@ describe('testing/application', () => {
     }, async page => {
       expect(await page.evaluate(() => localStorage.getItem('basis:probe'))).toBe('seeded')
     })
-  }, 30_000)
+  })
 
   test('captures a deterministic element from the page', async () => {
     await app.visit('/', async page => {
       await matchScreenshot(page.locator('[data-testid="swatch"]'))
     })
-  }, 30_000)
+  })
 })

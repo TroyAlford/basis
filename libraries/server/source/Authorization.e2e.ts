@@ -413,7 +413,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
 
   test('declines ambiguous targets and missing required User fields', async () => {
     const ambiguousInstall = tempDirectory('basis-authorization-ambiguous-')
@@ -495,7 +495,7 @@ describe('Authorization RLS', () => {
       await requiredServer.shutdown()
       removeService(requiredInstall)
     }
-  }, 120_000)
+  })
 
   test('enrolls a complete MTI chain and rolls back incomplete creation', async () => {
     const tieredInstall = tempDirectory('basis-authorization-tiered-')
@@ -568,7 +568,7 @@ describe('Authorization RLS', () => {
       await requiredChainServer.shutdown()
       removeService(requiredChainInstall)
     }
-  }, 120_000)
+  })
 
   test('passes the verified OAuth profile through the Server owner', async () => {
     const install = tempDirectory('basis-authorization-oauth-profile-')
@@ -614,7 +614,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
   test('enforces relationship membership grants through PostgreSQL RLS', async () => {
     const membershipGraph = new Graph({
       entities: [
@@ -762,7 +762,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
 
   test('applies membership grants declared on an abstract parent to concrete descendants', async () => {
     const abstractGraph = new Graph({
@@ -833,7 +833,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
 
   test('requires read for writes on the real PostgreSQL path', async () => {
     enum Capability {
@@ -965,7 +965,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
 
   test('allows where-only membership rules alongside an administrator capability', async () => {
     enum Capability {
@@ -1050,7 +1050,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
 
   test('enforces explicit actor presence on the shared authorization fixture', async () => {
     const noteRows = [{ id: fixtureRows.linkedNote }, { id: fixtureRows.memberNote }]
@@ -1088,7 +1088,7 @@ describe('Authorization RLS', () => {
       links: [],
       notes: [],
     })
-  }, 120_000)
+  })
 
   test('resolves nested and composed policy paths on the shared authorization fixture', async () => {
     const verify = (actor: string | null, label: string, expected: {
@@ -1113,5 +1113,5 @@ describe('Authorization RLS', () => {
       tasks: [],
       workspaces: [],
     })
-  }, 120_000)
+  })
 })

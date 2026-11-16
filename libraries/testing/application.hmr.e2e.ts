@@ -62,7 +62,7 @@ test('serves the current source', async () => {
     await page.waitForSelector('h1')
     expect(await page.textContent('h1')).toBe(process.env.EXPECTED)
   })
-}, 120_000)
+})
   `.trim())
   return directory
 }
@@ -118,7 +118,7 @@ test('persists a server across invocations and serves edited source', async () =
   } finally {
     writeFileSync(applicationFile, source)
   }
-}, 120_000)
+})
 
 test('serves updated browser source through native HMR without restarting', async () => {
   const directory = fixture()
@@ -156,4 +156,4 @@ test('serves updated browser source through native HMR without restarting', asyn
   } finally {
     await app.stop()
   }
-}, 120_000)
+})

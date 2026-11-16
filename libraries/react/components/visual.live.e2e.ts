@@ -37,4 +37,4 @@ test('captures mounted components', async () => {
       await matchScreenshot(page.locator('#stage'), name, TOLERANCE)
     })
   }
-}, 120_000)
+})

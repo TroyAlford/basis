@@ -53,13 +53,13 @@ test(${JSON.stringify(`${label} captures`)}, async () => {
   for (let index = 0; index < ${count}; index += 1) {
     await matchScreenshot(<Button>Button {index}</Button>, \`base-\${index}\`)
   }
-}, 60_000)
+})
 
 test(${JSON.stringify(`${label} repeats`)}, async () => {
   for (let index = 0; index < ${REPEATS}; index += 1) {
     await matchScreenshot(<Button>Same</Button>, \`repeat-\${index}\`)
   }
-}, 60_000)
+})
   `.trim()
 }
 
@@ -85,7 +85,7 @@ test('captures application visits', async () => {
       await matchScreenshot(page.locator('[data-testid="swatch"]'), path.replace(/[^a-z0-9]+/gi, '-'))
     })
   }
-}, 120_000)
+})
   `.trim()
 }
 
@@ -206,5 +206,5 @@ describe('snapshot runtime lifecycle', () => {
     expect(activity.teardowns).toBe(1)
     // A run that reached for a browser per capture would blow far past this.
     expect(durationMs).toBeLessThan(60_000)
-  }, 120_000)
+  })
 })

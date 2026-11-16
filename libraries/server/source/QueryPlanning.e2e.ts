@@ -321,7 +321,7 @@ describe('Query planning', () => {
       expect(projected.every(row => row.pets.total >= 2)).toBe(true)
       expect(projected.every(row => row.pets.items.length <= 1)).toBe(true)
     })
-  }, 120_000)
+  })
 
   test.serial('measures count strategies at a larger parent/child scale', async () => {
     await withIsolatedDatabase('query-planning-scale', async database => {
@@ -351,7 +351,7 @@ describe('Query planning', () => {
       expect(metrics).toHaveLength(3)
       process.stdout.write(`query-plan-evidence-scale ${JSON.stringify(metrics)}\n`)
     })
-  }, 120_000)
+  })
 
   test('keeps sibling descendant reference plans on their own parent alias', async () => {
     const variantDefinitions = EntityDefinitions.load(JSON.stringify({
@@ -491,5 +491,5 @@ describe('Query planning', () => {
       expect(previews.map(row => row.favorite.pets.total)).toEqual([2, 1])
       expect(previews.map(row => row.favorite.pets.items.length)).toEqual([1, 1])
     })
-  }, 120_000)
+  })
 })

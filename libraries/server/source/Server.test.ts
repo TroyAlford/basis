@@ -330,7 +330,7 @@ setTimeout(() => process.exit(0), 8000)
     } finally {
       await rm(dir, { force: true, recursive: true })
     }
-  }, 20_000)
+  })
 })
 
 describe('Server SSE idle streams', () => {
@@ -393,7 +393,7 @@ describe('Server SSE idle streams', () => {
 
     await reader?.cancel()
     expect(await server.stop()).toBe(0)
-  }, 15_000)
+  })
 })
 
 describe('Server readiness', () => {
@@ -504,7 +504,7 @@ describe('Builder file watching', () => {
     } finally {
       await rm(dir, { force: true, recursive: true })
     }
-  }, 20_000)
+  })
 })
 
 /**

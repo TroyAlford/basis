@@ -328,5 +328,5 @@ describe('Managed PostgreSQL operations', () => {
       await source.shutdown()
       removeService(installRoot)
     }
-  }, 300_000)
+  })
 })

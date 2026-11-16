@@ -227,7 +227,7 @@ describe('Server database lifecycle', () => {
     expect(await database.query<{ score: number, title: string }>('Note', {
       fields: ['title', 'score'],
     })).toEqual([{ score: 1.5, title: 'kept' }])
-  }, 120_000)
+  })
 
   durableTest('enforces Entity and User reference eligibility', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -322,7 +322,7 @@ describe('Server database lifecycle', () => {
       WHERE "id" = ${userId}
     `).catch((error: unknown) => error)
     expect(invalidManager).toMatchObject({ errno: '23503' })
-  }, 120_000)
+  })
 
   durableTest('projects descendant fields and singular reference paths', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -755,7 +755,7 @@ describe('Server database lifecycle', () => {
     await database.tx(async sql => queryEntity(sql, entities, 'Article', {
       fields: ['owner.manager.manager.name'],
     }))
-  }, 120_000)
+  })
 
   durableTest('blocks partial fresh-schema initialization inside db.tx', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -772,7 +772,7 @@ describe('Server database lifecycle', () => {
     expect(await database.tx(async sql => sql<{ entity: boolean, good: boolean }[]>`
       SELECT to_regclass('"Entity"') IS NOT NULL AS entity, to_regclass('"Good"') IS NOT NULL AS good
     `)).toEqual([{ entity: false, good: false }])
-  }, 120_000)
+  })
 
   isolatedTest('creates and indexes the universal identity root', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({ entities: [noteDefinition] }))
@@ -821,7 +821,7 @@ describe('Server database lifecycle', () => {
         VALUES ('42', 'Abstract', 'User')
       `
     })).toMatchObject({ errno: '23514' })
-  }, 120_000)
+  })
 
   isolatedTest('uses the entity model selected by use for queries', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -850,7 +850,7 @@ describe('Server database lifecycle', () => {
     })).toEqual([{ id, label: 'Selected' }])
     await expect(database.query('Note', { fields: ['id'] }))
       .rejects.toThrow('Unknown entity "Note"')
-  }, 120_000)
+  })
 
   isolatedTest('stores and queries named relationships and inverse references', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -1128,7 +1128,7 @@ describe('Server database lifecycle', () => {
     })
     expect(multipleRoots.map(row => row.id)).toEqual([ada, grace, linus])
     expect(multipleRoots).toHaveLength(3)
-  }, 120_000)
+  })
 
   isolatedTest('inherits relationship and inverse navigations on MTI descendants', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -1227,7 +1227,7 @@ describe('Server database lifecycle', () => {
       },
       id: userId,
     }])
-  }, 120_000)
+  })
 
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -1409,7 +1409,7 @@ describe('Server database lifecycle', () => {
         },
       },
     }])
-  }, 120_000)
+  })
 
   isolatedTest('evaluates collection contains, universal, and empty semantics on real edges', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -1637,7 +1637,7 @@ describe('Server database lifecycle', () => {
     )
     expect(projected.map(row => row.id)).toEqual([ada, grace])
     expect(projected[0]?.pets.total).toBe(2)
-  }, 120_000)
+  })
 
   isolatedTest('evaluates descendant fields and references inside collection predicates', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -1785,7 +1785,7 @@ describe('Server database lifecycle', () => {
       fields: ['id'],
       where: `pets $contains (mentor.${nineHops}.title = 'x')`,
     })).toThrow('maximum depth')
-  }, 120_000)
+  })
 
   isolatedTest('evaluates native Array and opaque JSON predicates', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -1913,7 +1913,7 @@ describe('Server database lifecycle', () => {
       fields: ['id'],
       where: 'payload $eq {}',
     })).toThrow('not valid')
-  }, 120_000)
+  })
 
   isolatedTest('rejects unsafe JSON numeric literals without matching neighbors', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -1980,7 +1980,7 @@ describe('Server database lifecycle', () => {
         value: { account: 9007199254740992 },
       },
     })).toThrow('safe integer range')
-  }, 120_000)
+  })
 
   freshIsolatedTest('rejects index name collisions on fresh tables', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -2012,7 +2012,7 @@ describe('Server database lifecycle', () => {
     `
     await expect(installSchema(database.sql, entities))
       .rejects.toThrow('Migration plan has blocking drift')
-  }, 120_000)
+  })
 
   freshIsolatedTest('rejects nonindex relation names reserved for canonical indexes', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -2041,7 +2041,7 @@ describe('Server database lifecycle', () => {
     `
     await expect(installSchema(database.sql, entities))
       .rejects.toThrow('unexpected table: Pet_owner_fk_idx')
-  }, 120_000)
+  })
 
   isolatedTest('projects inverse navigations for inherited and multiple roots', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -2123,7 +2123,7 @@ describe('Server database lifecycle', () => {
         visits: { items: [], remaining: 0, total: 0 },
       },
     ])
-  }, 120_000)
+  })
 
   durableTest('enforces MTI final-state integrity for direct SQL', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -2356,7 +2356,7 @@ describe('Server database lifecycle', () => {
     })
     expect(await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error))
       .toHaveProperty('message', expect.stringContaining('function definition changed: Entity_leaf_immutable'))
-  }, 120_000)
+  })
 
   isolatedTest('filters numeric values with each comparison operator', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -2402,7 +2402,7 @@ describe('Server database lifecycle', () => {
       ],
       operator: Operator.Logical.And,
     })).toEqual([{ value: 3 }, { value: 4 }, { value: 5 }, { value: 6 }])
-  }, 120_000)
+  })
 
   isolatedTest('creates and enforces many-to-one foreign keys', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -2481,7 +2481,7 @@ describe('Server database lifecycle', () => {
       SELECT count(*)::int AS count
       FROM "Post"
     `).toEqual([{ count: 1 }])
-  }, 120_000)
+  })
 
   durableTest('creates cyclic foreign keys and validates deferred references', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -2629,7 +2629,7 @@ describe('Server database lifecycle', () => {
       FROM pg_constraint
       WHERE conrelid = '"CycleUser"'::regclass AND conname = 'CycleUser_car_fkey'
     `)).toEqual([{ count: 1 }])
-  }, 120_000)
+  })
 
   durableTest('enforces self-referential foreign keys', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
@@ -2678,7 +2678,7 @@ describe('Server database lifecycle', () => {
       `
     }).catch((error: unknown) => error)
     expect(invalid).toMatchObject({ errno: '23503' })
-  }, 120_000)
+  })
 
   isolatedTest('rejects physical reference columns and invalid graph paths', async database => {
     await expect(database.query('Article', { fields: ['ownerId'] }))
@@ -2715,7 +2715,7 @@ describe('Server database lifecycle', () => {
       fields: ['id'],
       orderBy: 'owner',
     })).rejects.toThrow('references cannot be used in predicates or ordering')
-  }, 120_000)
+  })
 
   freshIsolatedTest('matches string and structured predicates with two-valued null semantics', async database => {
     // Raw nullable DDL exercises NULL semantics while the canonical entity drives query validation.
@@ -2894,7 +2894,7 @@ describe('Server database lifecycle', () => {
       fields: ['rank'],
       where: 'title = "unterminated',
     })).rejects.toThrow('Invalid where query at 8: Unterminated string literal')
-  }, 120_000)
+  })
 
   test('rolls back successful isolated tests and shares the transaction with db.query', async () => {
     let schema = ''
@@ -2917,7 +2917,7 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ present: boolean }[]>`
       SELECT to_regclass(${`"${schema}"."NumberRow"`}) IS NOT NULL AS present
     `).toEqual([{ present: false }])
-  }, 120_000)
+  })
 
   test('rolls back failed isolated tests', async () => {
     let schema = ''
@@ -2933,7 +2933,7 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ present: boolean }[]>`
       SELECT to_regclass(${`"${schema}"."FailureProbe"`}) IS NOT NULL AS present
     `).toEqual([{ present: false }])
-  }, 120_000)
+  })
 
   test('runs concurrent isolated tests in independent schemas', async () => {
     const schemas = await Promise.all([
@@ -2974,7 +2974,7 @@ describe('Server database lifecycle', () => {
       FROM pg_catalog.pg_namespace
       WHERE nspname IN (${schemas[0]}, ${schemas[1]})
     `).toEqual([{ count: 0 }])
-  }, 120_000)
+  })
 
   test('cleans committed durable schemas after failures', async () => {
     let schema = ''
@@ -2992,7 +2992,7 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ present: boolean }[]>`
       SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema} ) AS present
     `).toEqual([{ present: false }])
-  }, 120_000)
+  })
 
   test.serial('leaves no isolated database schemas behind', async () => {
     const { database } = await useDatabaseFixture('schema-leak-check')
@@ -3001,7 +3001,7 @@ describe('Server database lifecycle', () => {
       FROM pg_catalog.pg_namespace
       WHERE nspname like 'basis_test_%'
     `).toEqual([{ count: 0 }])
-  }, 30_000)
+  })
 
   test('rejects external PostgreSQL configuration', () => {
     expect(() => new Server().database({
@@ -3021,7 +3021,7 @@ describe('Server database lifecycle', () => {
     }
 
     expect(server.db.closed).toBe(true)
-  }, 30_000)
+  })
 
   test('reports unhealthy when a managed database needs Docker but Docker is unavailable', async () => {
     const script = `
@@ -3056,5 +3056,5 @@ describe('Server database lifecycle', () => {
     const result = JSON.parse(child.lines.at(-1) ?? '{}') as { error?: string, status?: string }
     expect(result.status).toBe('error')
     expect(result.error).toContain('requires Docker')
-  }, 60_000)
+  })
 })
