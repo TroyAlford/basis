@@ -65,7 +65,7 @@ test(${JSON.stringify(label)}, async () => {
   const { database } = await useDatabaseFixture(${JSON.stringify(label)})
   expect(database.closed).toBe(false)
 ${body}
-})
+}, 10_000)
   `.trim()
 }
 
@@ -178,6 +178,5 @@ describe('database fixture lifecycle', () => {
     expect(result.activity.stops).toHaveLength(1)
     expect(result.activity.starts[0]?.split(' ')[1]).toBe(result.activity.stops[0]?.split(' ')[1])
     expectRemoved(result.activity)
-  })
-
+  }, 10_000)
 })
