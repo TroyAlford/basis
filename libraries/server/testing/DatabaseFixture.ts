@@ -9,11 +9,11 @@ import { registerRunCleanup } from '../../testing/lifecycle'
 import { currentActor } from '../source/ActorContext'
 import type { Database, DatabaseTransaction, QueryOptions } from '../source/Database'
 import { queryEntity, transactionWithMutations } from '../source/Database'
-import { EntityDefinitions } from '../source/EntityDefinitions'
+import { Constraint, EntityDefinitions } from '../source/EntityDefinitions'
 import { Action, Graph, Security } from '../source/Graph'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
-import type { CreateResult, DeleteResult, EditResult, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
-import { validateTransactionState } from '../source/Mutation'
+import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
+import { clearWrittenSubjects, validateTransactionState } from '../source/Mutation'
 import { ensureSeedImage } from './DatabaseImage'
 import { installSchema } from './Schema'
 
@@ -121,15 +121,32 @@ export const authorizationRows = {
   alice: '00000000-0000-4000-8000-000000000101',
   anonymousNote: '00000000-0000-4000-8000-000000000102',
   bob: '00000000-0000-4000-8000-000000000103',
+  guardedWorkspace: '00000000-0000-4000-8000-000000000113',
   hiddenWorkspace: '00000000-0000-4000-8000-000000000112',
+  invalidChildDocument: '00000000-0000-4000-8000-000000000114',
+  invalidParentDocument: '00000000-0000-4000-8000-000000000115',
   linkedNote: '00000000-0000-4000-8000-000000000104',
   memberNote: '00000000-0000-4000-8000-000000000105',
   openTask: '00000000-0000-4000-8000-000000000106',
+  orphanDocument: '00000000-0000-4000-8000-000000000116',
+  orphanRevision: '00000000-0000-4000-8000-000000000117',
   otherTask: '00000000-0000-4000-8000-000000000107',
+  ownerA: '00000000-0000-4000-8000-000000000118',
+  ownerB: '00000000-0000-4000-8000-000000000119',
   project: '00000000-0000-4000-8000-000000000108',
+  revisionA: '00000000-0000-4000-8000-000000000120',
   secondProject: '00000000-0000-4000-8000-000000000109',
   thirdProject: '00000000-0000-4000-8000-000000000110',
+  validDocument: '00000000-0000-4000-8000-000000000121',
   visibleWorkspace: '00000000-0000-4000-8000-000000000111',
+} as const
+
+/** Explicit public access for validation fixture entities. */
+const publicActions = {
+  [Action.Create]: Security.Public,
+  [Action.Delete]: Security.Public,
+  [Action.Read]: Security.Public,
+  [Action.Update]: Security.Public,
 } as const
 
 /**
@@ -194,8 +211,117 @@ export const authorizationGraph = new Graph({
         where: "$me != null $and projects $contains (title = 'visible' AND tasks $contains (title = 'open'))",
       },
     },
+  },
+  {
+    fields: [{ field: 'label', type: 'String' }],
+    name: 'Owner',
+    security: publicActions,
+  },
+  {
+    fields: [{ field: 'owner', nullable: true, target: 'Owner', type: 'Entity' }],
+    name: 'Revision',
+    security: publicActions,
+  },
+  {
+    constraints: [{
+      description: 'A record must remain ok.',
+      name: 'recordStatus',
+      type: Constraint.Validation,
+      where: "status = 'ok'",
+    }],
+    fields: [
+      { field: 'title', type: 'String' },
+      { field: 'status', type: 'String' },
+    ],
+    name: 'Record',
+    security: publicActions,
+  },
+  {
+    constraints: [{
+      description: 'A document must stay flagged.',
+      name: 'documentFlag',
+      type: Constraint.Validation,
+      where: 'flag = true',
+    }, {
+      description: 'An optional revision belongs to the document owner.',
+      name: 'consistentRevisionOwner',
+      type: Constraint.Validation,
+      where: 'revision = null OR owner = revision.owner',
+    }],
+    extends: 'Record',
+    fields: [
+      { field: 'flag', type: 'Boolean' },
+      { field: 'note', type: 'String' },
+      { field: 'owner', target: 'Owner', type: 'Entity' },
+      { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
+    ],
+    name: 'Document',
+  },
+  {
+    fields: [
+      { field: 'document', nullable: true, target: 'Document', type: 'Entity' },
+      { field: 'title', type: 'String' },
+    ],
+    name: 'Section',
+    security: publicActions,
+  },
+  {
+    constraints: [{
+      description: 'A section document belongs to the asset owner.',
+      name: 'consistentSectionOwner',
+      type: Constraint.Validation,
+      where: 'section = null OR section.document.owner = owner',
+    }],
+    fields: [
+      { field: 'owner', target: 'Owner', type: 'Entity' },
+      { field: 'section', nullable: true, target: 'Section', type: 'Entity' },
+    ],
+    name: 'Asset',
+    security: publicActions,
+  },
+  {
+    constraints: [{
+      description: 'An optional asset belongs to the piece owner.',
+      name: 'consistentAssetOwner',
+      type: Constraint.Validation,
+      where: 'asset = null OR asset.owner = owner',
+    }],
+    fields: [
+      { field: 'asset', nullable: true, target: 'Asset', type: 'Entity' },
+      { field: 'owner', target: 'Owner', type: 'Entity' },
+    ],
+    name: 'Piece',
+    security: publicActions,
+  },
+  {
+    constraints: [{
+      description: 'A guarded workspace must remain flagged.',
+      name: 'guardedFlag',
+      type: Constraint.Validation,
+      where: 'flag = true',
+    }],
+    fields: [
+      { field: 'flag', type: 'Boolean' },
+      { field: 'title', type: 'String' },
+    ],
+    name: 'GuardedWorkspace',
+    security: {
+      [Action.Create]: { where: '$me != null' },
+      [Action.Delete]: { where: '$me = null' },
+      [Action.Read]: { where: '$me != null $and members $contains (id = $me)' },
+      [Action.Update]: { where: '$me != null' },
+    },
   }],
   relationships: [
+    {
+      between: [
+        { field: 'workspace', inverse: 'members', target: 'GuardedWorkspace' },
+        { field: 'user', inverse: 'guardedWorkspaces', target: 'User' },
+      ],
+      fields: [],
+      name: 'GuardedMembership',
+      security: publicActions,
+    },
     {
       between: [
         { field: 'note', inverse: 'links', target: 'MemberNote' },
@@ -224,6 +350,15 @@ export interface AuthorizationDatabase {
   query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
   /** Reserved transaction connection already scoped to the app role. */
   readonly sql: BunSQL,
+}
+
+/** Run one validation test through the shared app-role transaction. */
+export interface ValidationDatabase extends AuthorizationDatabase {
+  create: Database['create'],
+  delete: Database['delete'],
+  edit: Database['edit'],
+  tx: <T>(work: (transaction: MutationDatabase) => T | Promise<T>) => Promise<T>,
+  upsert: Database['upsert'],
 }
 
 /** The test-owned pool connected to the one seeded database container. */
@@ -666,6 +801,10 @@ function fixtureSchemaName(entities: EntityDefinitions): string {
  */
 async function ensureAuthorizationSchema(database: FixtureDatabase): Promise<string> {
   const schema = AUTHORIZATION_SCHEMA
+  const version = `fixture-auth:${createHash('sha256')
+    .update(authorizationGraph.definitions.ddl.join('\n'))
+    .digest('hex')
+    .slice(0, 16)}`
   await database.sql.unsafe(`
     DO $$
     BEGIN
@@ -686,10 +825,11 @@ async function ensureAuthorizationSchema(database: FixtureDatabase): Promise<str
       SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
     `
     if (present[0]?.present) {
-      const [complete] = await sql<{ complete: boolean }[]>`
-        SELECT to_regclass(${`${quoteIdentifier(schema)}."UserRole"`}) IS NOT NULL AS complete
+      const [recorded] = await sql<{ applied: boolean }[]>`
+        SELECT to_regclass('basis.schema_migration') IS NOT NULL AND EXISTS (SELECT 1 FROM
+          basis.schema_migration WHERE version = ${version}) AS applied
       `
-      if (complete?.complete) return
+      if (recorded?.applied) return
       await sql.unsafe(`drop schema ${quoteIdentifier(schema)} cascade`).simple()
     }
     await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
@@ -700,7 +840,7 @@ async function ensureAuthorizationSchema(database: FixtureDatabase): Promise<str
       appRole: AUTHORIZATION_APP_ROLE,
       schema,
       superuser: true,
-      version: `fixture-auth:${schema}`,
+      version,
     })
     await sql.unsafe(
       `grant usage on schema ${quoteIdentifier(schema)} to ${quoteIdentifier(AUTHORIZATION_APP_ROLE)}`,
@@ -800,6 +940,90 @@ async function seedAuthorization(sql: BunSQL): Promise<void> {
     INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
     VALUES (${row.visibleWorkspace}, ${row.alice}, 'Owner')
   `
+  await sql`
+    INSERT INTO "Entity" ("id", "name", "entity")
+    VALUES (${row.ownerA},
+      'Owner A',
+      'Owner'),
+      (${row.ownerB},
+      'Owner B',
+      'Owner'),
+      (${row.revisionA},
+      'Revision A',
+      'Revision'),
+      (${row.orphanRevision},
+      'Orphan revision',
+      'Revision'),
+      (${row.validDocument},
+      'Valid document',
+      'Document'),
+      (${row.invalidChildDocument},
+      'Invalid child document',
+      'Document'),
+      (${row.invalidParentDocument},
+      'Invalid parent document',
+      'Document'),
+      (${row.orphanDocument},
+      'Orphan document',
+      'Document'),
+      (${row.guardedWorkspace},
+      'Guarded workspace',
+      'GuardedWorkspace')
+  `
+  await sql`
+    INSERT INTO "Owner" ("id", "label")
+    VALUES (${row.ownerA}, 'A'), (${row.ownerB}, 'B')
+  `
+  await sql`
+    INSERT INTO "Revision" ("id", "owner.id")
+    VALUES (${row.revisionA}, ${row.ownerA}), (${row.orphanRevision}, ${null})
+  `
+  await sql`
+    INSERT INTO "Record" ("id", "title", "status")
+    VALUES (${row.validDocument},
+      'Valid',
+      'ok'),
+      (${row.invalidChildDocument},
+      'Invalid child',
+      'ok'),
+      (${row.invalidParentDocument},
+      'Invalid parent',
+      'bad'),
+      (${row.orphanDocument},
+      'Orphan',
+      'ok')
+  `
+  await sql`
+    INSERT INTO "Document" ("id", "flag", "note", "owner.id", "revision.id")
+    VALUES (${row.validDocument},
+      TRUE,
+      'note',
+      ${row.ownerA},
+      ${row.revisionA}),
+      (${row.invalidChildDocument},
+      FALSE,
+      'note',
+      ${row.ownerA},
+      ${row.revisionA}),
+      (${row.invalidParentDocument},
+      TRUE,
+      'note',
+      ${row.ownerA},
+      ${row.revisionA}),
+      (${row.orphanDocument},
+      TRUE,
+      'note',
+      ${row.ownerA},
+      ${row.orphanRevision})
+  `
+  await sql`
+    INSERT INTO "GuardedWorkspace" ("id", "flag", "title")
+    VALUES (${row.guardedWorkspace}, TRUE, 'Guarded workspace')
+  `
+  await sql`
+    INSERT INTO "GuardedMembership" ("workspace.id", "user.id")
+    VALUES (${row.guardedWorkspace}, ${row.alice})
+  `
 }
 
 /**
@@ -833,6 +1057,51 @@ export async function withAuthorizationDatabase<T>(
     await reserved.unsafe('rollback').simple()
     reserved.release()
   }
+}
+
+/**
+ * Run one validation test through the shared authorization schema.
+ * @param label - Fixture acquisition label.
+ * @param actor - Verified actor identity, or null for anonymous.
+ * @param callback - Work using the app-role transaction.
+ * @returns The callback result after rollback.
+ */
+export async function withValidationDatabase<T>(
+  label: string,
+  actor: string | null,
+  callback: (database: ValidationDatabase) => Promise<T>,
+): Promise<T> {
+  return withAuthorizationDatabase(label, actor, async database => {
+    const mutations = transactionWithMutations(
+      authorizationGraph.definitions,
+      database.sql as unknown as Parameters<typeof transactionWithMutations>[1],
+    )
+    let savepoints = 0
+    const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
+      const savepoint = `basis_validation_${savepoints}`
+      savepoints += 1
+      await database.sql.unsafe(`savepoint ${savepoint}`).simple()
+      try {
+        const result = await work(mutations)
+        await validateTransactionState(authorizationGraph.definitions, database.sql)
+        await database.sql.unsafe(`release savepoint ${savepoint}`).simple()
+        return result
+      } catch (error) {
+        await database.sql.unsafe(`rollback to savepoint ${savepoint}`).simple()
+        await database.sql.unsafe(`release savepoint ${savepoint}`).simple()
+        clearWrittenSubjects(database.sql)
+        throw error
+      }
+    }
+    return callback({
+      ...database,
+      create: (entity, values) => tx(sql => sql.create(entity, values)),
+      delete: (entity, filter) => tx(sql => sql.delete(entity, filter)),
+      edit: (entity, filter, changes) => tx(sql => sql.edit(entity, filter, changes)),
+      tx,
+      upsert: (entity, filter, values) => tx(sql => sql.upsert(entity, filter, values)),
+    })
+  })
 }
 
 /**

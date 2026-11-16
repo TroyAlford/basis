@@ -38,6 +38,14 @@ function writtenSubjects(sql: object): ReadonlyMap<string, ReadonlyMap<string, S
   return affectedSubjects.get(sql) ?? new Map<string, ReadonlyMap<string, SubjectState>>()
 }
 
+/**
+ * Clear recorded subject state for one native transaction.
+ * @param sql - Transaction-scoped SQL client.
+ */
+export function clearWrittenSubjects(sql: object): void {
+  affectedSubjects.delete(sql)
+}
+
 /** Stable mutation failure categories. */
 export type MutationErrorCode =
   | 'authorization'
