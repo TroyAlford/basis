@@ -1,6 +1,6 @@
 {
   "appRole": "basis_app",
-  "checksum": "4ecbbe44c457dba656a9db1115948a1777de2364761be669c60425fd4842d83d",
+  "checksum": "4b628e85a19f9b2e2efb24ced07284a1afe85439787862aadd264e7d05830a6f",
   "expected": {
     "constraints": [
       {
@@ -1111,6 +1111,6 @@
   "schema": "public",
   "sourceHash": "ad832655340e0a2b71725b80dd4841cbe122a62b94e928c88dbf42bf92ab560e",
   "superuser": true,
-  "targetHash": "c3d5fb9ff6476cc9b18ce76d8ea3b1a8c9b8aca3419bc714447e049c9d728731",
+  "targetHash": "393f4520b4f055cf2f90680bb3becfc819ecaea32160858979ffb12ead26a398",
   "version": "0002-release"
 }
