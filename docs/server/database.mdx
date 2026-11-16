@@ -529,42 +529,21 @@ try {
 
 A thrown error or failed query that escapes the callback rolls back and rejects. Await every query inside the callback; the transaction-scoped client must not be used after it completes. Queries through `server.db.sql` do not automatically join the transaction; use the callback's `sql`.
 
-### Savepoints
-
-`sql.savepoint(callback)` provides partial rollback inside the outer transaction. Catching the savepoint failure leaves the outer transaction usable:
-
-```ts
-await server.db.tx(async sql => {
-  await sql`insert into notes (title) values (${title})`
-  try {
-    await sql.savepoint(async savepoint => {
-      await savepoint`insert into audit (action) values ('discarded')`
-      throw new Error('discard only this savepoint')
-    })
-  } catch {
-    // Only the savepoint rolled back.
-  }
-  await sql`insert into audit (action) values ('committed')`
-})
-```
-
 ### Query cancellation
 
-`query.cancel()` cancels one executing query. A cancellation that reaches the PostgreSQL server aborts the current transaction; catching the error alone does not make that transaction usable. Recover with a rollback or a savepoint, or let the error escape `db.tx()` so the transaction rolls back.
+`query.cancel()` cancels one executing query. A cancellation that reaches the PostgreSQL server aborts the current transaction; catching the error alone does not make that transaction usable. Recover by rolling back or letting the error escape `db.tx()` so the transaction rolls back.
 
 ```ts
-await server.db.tx(async sql => {
-  try {
-    await sql.savepoint(async savepoint => {
-      const query = savepoint`select pg_sleep(30)`.execute()
-      setTimeout(() => query.cancel(), 100)
-      await query
-    })
-  } catch {
-    // The savepoint rolled back; the outer transaction continues.
-  }
-  await sql`insert into audit (action) values ('continued')`
-})
+try {
+  await server.db.tx(async sql => {
+    const query = sql`select pg_sleep(30)`.execute()
+    setTimeout(() => query.cancel(), 100)
+    await query
+    await sql`insert into audit (action) values ('continued')`
+  })
+} catch {
+  // The cancelled transaction rolled back.
+}
 ```
 
 ## Lifecycle and ownership
