@@ -283,7 +283,7 @@ server.api([HttpVerb.Get], 'articles', async (_params, context) => {
 })
 ```
 
-Every ordinary application transaction runs through the native Bun `db.tx` path. Before caller SQL, `db.tx` sets the transaction-local `actor.id` setting with `set_config('actor.id', ..., true)`, including an explicit empty value for anonymous or non-request work. `db.query` uses the same transaction path. Rollback, concurrent requests, and pooled connection reuse cannot carry the setting beyond the transaction.
+Every ordinary application transaction runs through the native Bun `db.tx` path. Before caller SQL, `db.tx` sets the transaction-local `actor.id` setting with `set_config('actor.id', ..., true)`, including an explicit empty value for anonymous or non-request work. `db.query` uses the same transaction path. Nested savepoints, rollback, concurrent requests, and pooled connection reuse cannot carry the setting beyond the transaction.
 
 `actor.id` is a context setting, not a cryptographically unforgeable principal. The accepted trust boundary is the application transaction/SQL-emission layer: it must use parameterized SQL and must not expose arbitrary untrusted SQL execution. RLS protects ordinary application queries and mistakes in filtering; it does not claim to defend against malicious application-role SQL deliberately overwriting `actor.id`.
 

@@ -12,7 +12,46 @@ export { managedDatabaseIdentity } from './ManagedPostgresService'
 import type { OrderBy } from './SQL'
 
 /** A transaction-scoped SQL client with the Graph mutation vocabulary. */
-export type DatabaseTransaction = TransactionSQL & MutationDatabase
+export interface DatabaseTransactionExtensions {
+  /** Abort the transaction and resolve its `db.tx`/`test` wrapper without committing. */
+  rollback(): never,
+  /** Run work inside one savepoint, rolling it back and rethrowing on failure. */
+  readonly savepoint: {
+    <T>(work: (tx: DatabaseTransaction) => T | Promise<T>): Promise<T>,
+    <T>(name: string, work: (tx: DatabaseTransaction) => T | Promise<T>): Promise<T>,
+  },
+  /** Run work and always roll back the enclosing transaction, returning its result. */
+  test: <T>(work: (tx: DatabaseTransaction) => T | Promise<T>) => Promise<T>,
+}
+
+/** A transaction-scoped SQL client with the Graph mutation vocabulary. */
+export type DatabaseTransaction = TransactionSQL & MutationDatabase & DatabaseTransactionExtensions
+
+/** Raw transaction clients keyed by their mutation proxy. */
+const rawTransactions = new WeakMap<object, TransactionSQL>()
+
+/**
+ * Read the underlying Bun client for one Graph transaction proxy.
+ * @param transaction - Graph transaction proxy.
+ * @returns The raw Bun transaction client.
+ */
+export function transactionClient(transaction: DatabaseTransaction): TransactionSQL {
+  return rawTransactions.get(transaction) ?? transaction
+}
+
+/** Internal signal used to roll back and return a caller result. */
+export class RollbackSignal {
+  /** Result to resolve the enclosing transaction wrapper with. */
+  readonly value: unknown
+
+  /**
+   * Create one rollback signal.
+   * @param value - Caller-visible result.
+   */
+  constructor(value?: unknown) {
+    this.value = value
+  }
+}
 
 /** The pool defaults used by the managed PostgreSQL connection. */
 const POOL_DEFAULTS = {
@@ -328,6 +367,9 @@ class PostgresDatabase implements Database {
       const result = await callback(this.#transaction(tx))
       if (this.#entities) await validateTransactionState(this.#entities, tx)
       return result
+    }).catch((error: unknown) => {
+      if (error instanceof RollbackSignal) return error.value as SQL.ContextCallbackResult<T>
+      throw error
     })
   }
 
@@ -372,6 +414,39 @@ export function transactionWithMutations(
   tx: TransactionSQL,
 ): DatabaseTransaction {
   const mutations = entities ? mutationRunner(entities, tx) : undefined
+  let savepointIndex = 0
+  // Assigned after the proxy exists because savepoint/test callbacks re-enter it.
+  // eslint-disable-next-line prefer-const
+  let self: DatabaseTransaction
+  const control: DatabaseTransactionExtensions = {
+    rollback: () => {
+      throw new RollbackSignal()
+    },
+    savepoint: async <T>(
+      nameOrWork: string | ((transaction: DatabaseTransaction) => T | Promise<T>),
+      maybeWork?: (transaction: DatabaseTransaction) => T | Promise<T>,
+    ) => {
+      const name = typeof nameOrWork === 'string'
+        ? nameOrWork
+        : `basis_savepoint_${savepointIndex++}`
+      const work = typeof nameOrWork === 'string' ? maybeWork : nameOrWork
+      if (!work) throw new Error('Savepoint requires a callback')
+      await tx.unsafe(`savepoint ${name}`).simple()
+      try {
+        const result = await work(self)
+        await tx.unsafe(`release savepoint ${name}`).simple()
+        return result
+      } catch (error) {
+        await tx.unsafe(`rollback to savepoint ${name}`).simple().catch(() => undefined)
+        await tx.unsafe(`release savepoint ${name}`).simple().catch(() => undefined)
+        throw error
+      }
+    },
+    test: async <T>(work: (transaction: DatabaseTransaction) => T | Promise<T>) => {
+      const result = await work(self)
+      throw new RollbackSignal(result)
+    },
+  }
   const proxy = new Proxy(tx, {
     apply: (target, _thisArg, args) => Reflect.apply(target, target, args),
     get: (target, property, receiver) => {
@@ -395,9 +470,14 @@ export function transactionWithMutations(
           new Error('No entity definitions are configured for this database'),
         ))
       }
+      if (property === 'rollback' || property === 'savepoint' || property === 'test') {
+        return control[property]
+      }
       return boundTransactionMember(target, property, receiver)
     },
   }) as DatabaseTransaction
+  rawTransactions.set(proxy, tx)
+  self = proxy
   return proxy
 }
 

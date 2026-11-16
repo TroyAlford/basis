@@ -9,13 +9,13 @@ import { reapDeadTestContainers, testContainerLabels } from '../../testing/conta
 import { registerRunCleanup } from '../../testing/lifecycle'
 import { currentActor, runAsActor } from '../source/ActorContext'
 import type { Database, DatabaseTransaction, QueryOptions } from '../source/Database'
-import { queryEntity, transactionWithMutations } from '../source/Database'
+import { queryEntity, RollbackSignal, transactionClient, transactionWithMutations } from '../source/Database'
 import type { EntityDefinitions } from '../source/EntityDefinitions'
 import { Constraint } from '../source/EntityDefinitions'
 import { Action, Graph, Security } from '../source/Graph'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
 import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
-import { validateTransactionState } from '../source/Mutation'
+import { clearWrittenSubjects, validateTransactionState } from '../source/Mutation'
 import { ensureSeedImage } from './DatabaseImage'
 import { installSchema } from './Schema'
 
@@ -362,20 +362,22 @@ const fixtureGraph = new Graph({
 /** The one canonical fixture model. */
 export const sharedEntities = fixtureGraph.definitions
 
-/** The one shared-fixture query context used by rollback-isolated tests. */
+/** The one shared-fixture transaction context. */
 export interface DatabaseContext {
+  /** Run one Graph-native mutation; validation runs before the savepoint releases. */
+  create: Database['create'],
+  /** Delete through the Graph-native mutation vocabulary. */
+  delete: Database['delete'],
+  /** Edit through the Graph-native mutation vocabulary. */
+  edit: Database['edit'],
   /** Query through the canonical entity compiler under RLS. */
   query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
   /** Reserved transaction connection already scoped to the app role. */
-  readonly sql: BunSQL,
-}
-
-/** The one real committed transaction context used by final-state proofs. */
-export interface CommittedDatabaseContext extends MutationDatabase {
-  /** Query through the canonical entity compiler under RLS. */
-  query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
-  /** Graph-native transaction connection already scoped to the app role. */
   readonly sql: DatabaseTransaction,
+  /** Run one transaction-final validation unit. */
+  tx: <T>(work: (transaction: MutationDatabase) => T | Promise<T>) => Promise<T>,
+  /** Upsert through the Graph-native mutation vocabulary. */
+  upsert: Database['upsert'],
 }
 
 /** The test-owned pool connected to the one seeded database container. */
@@ -479,6 +481,30 @@ class FixtureDatabase implements Database {
       const result = await callback(transactionWithMutations(this.#entities, tx))
       await validateTransactionState(this.#entities, tx)
       return result
+    }).catch((error: unknown) => {
+      if (error instanceof RollbackSignal) return error.value as BunSQL.ContextCallbackResult<T>
+      throw error
+    })
+  }
+
+  /**
+   * Run work with explicit definitions and always roll back.
+   * @param entities - Definitions exposed to the transaction.
+   * @param work - Transaction-scoped work.
+   * @returns The work result after rollback.
+   */
+  testWith<T>(
+    entities: EntityDefinitions,
+    work: (tx: DatabaseTransaction) => T | Promise<T>,
+  ): Promise<T> {
+    return this.#sql.begin(async tx => {
+      const actor = currentActor()
+      await tx`select set_config('actor.id', ${actor?.id ?? ''}, true)`
+      const transaction = transactionWithMutations(entities, tx)
+      return transaction.test(work)
+    }).catch((error: unknown) => {
+      if (error instanceof RollbackSignal) return error.value as T
+      throw error
     })
   }
 
@@ -508,6 +534,8 @@ export interface DatabaseFixture {
   readonly schemaFor: (entities: EntityDefinitions) => Promise<string>,
   /** Fixture service name used for cleanup and activity evidence. */
   readonly service: string,
+  /** Run explicit definitions in one rolled-back transaction. */
+  readonly testWith: <T>(entities: EntityDefinitions, work: (tx: DatabaseTransaction) => T | Promise<T>) => Promise<T>,
 }
 
 /** The process-wide fixture registry. */
@@ -640,6 +668,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
       install,
       schemaFor,
       service,
+      testWith: (entities, work) => database.testWith(entities, work),
     }
     await fixture.schemaFor(sharedEntities)
     record(`start ${service} ${install} ${process.pid}`)
@@ -1016,36 +1045,7 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
 }
 
 /**
- * Create one uniquely named guarded workspace and membership for one actor.
- * @param actor - Verified actor identity that receives membership.
- * @returns The created workspace identity.
- */
-export async function seedGuardedWorkspace(actor: string): Promise<string> {
-  const fixture = await useDatabaseFixture('validation-guarded-workspace')
-  await ensureGraphSchema(fixture.database)
-  const id = randomUUID()
-  await fixture.database.tx(async sql => {
-    await sql.unsafe(
-      `set local search_path to ${quoteIdentifier(fixture.fixtureSchema)}, public, basis, pg_temp`,
-    ).simple()
-    await sql`
-      INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${id}, ${`Guarded ${id}`}, 'GuardedWorkspace')
-    `
-    await sql`
-      INSERT INTO "GuardedWorkspace" ("id", "flag", "title")
-      VALUES (${id}, TRUE, ${`Guarded ${id}`})
-    `
-    await sql`
-      INSERT INTO "GuardedMembership" ("workspace.id", "user.id")
-      VALUES (${id}, ${actor})
-    `
-  })
-  return id
-}
-
-/**
- * Run one rollback-isolated query test on the single shared fixture.
+ * Run one test on the single shared fixture.
  * @param label - Fixture acquisition label.
  * @param actor - Verified actor identity, or null for anonymous.
  * @param callback - Work using the app-role transaction.
@@ -1058,61 +1058,47 @@ export async function withDatabase<T>(
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
   await ensureGraphSchema(fixture.database)
-  return runAsActor({ id: actor }, async () => {
-    const reserved = await fixture.database.sql.reserve()
-    try {
-      await reserved.unsafe('begin').simple()
-      await reserved.unsafe(
+  return runAsActor({ id: actor }, () => fixture.testWith(
+    fixtureGraph.definitions,
+    async sql => {
+      await sql.unsafe(
         `set local search_path to ${quoteIdentifier(fixture.fixtureSchema)}, public, basis, pg_temp`,
       ).simple()
-      await reserved.unsafe(`set local role ${quoteIdentifier(FIXTURE_APP_ROLE)}`).simple()
-      await reserved`SELECT set_config('actor.id', ${actor ?? ''}, TRUE)`
-      return await callback({
+      await sql.unsafe(`set local role ${quoteIdentifier(FIXTURE_APP_ROLE)}`).simple()
+      await sql`
+        SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+      `
+      const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
+        const savepoint = sql.savepoint as unknown as <Value>(
+          callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
+        ) => Promise<Value>
+        return savepoint(async savepointSql => {
+          try {
+            const result = await work(savepointSql)
+            await validateTransactionState(
+              fixtureGraph.definitions,
+              transactionClient(savepointSql),
+            )
+            return result
+          } catch (error) {
+            clearWrittenSubjects(transactionClient(savepointSql))
+            throw error
+          }
+        })
+      }
+      return callback({
+        create: (entity, values) => tx(savepoint => savepoint.create(entity, values)),
+        delete: (entity, filter) => tx(savepoint => savepoint.delete(entity, filter)),
+        edit: (entity, filter, changes) => tx(savepoint => savepoint.edit(entity, filter, changes)),
         query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
-          queryEntity<Result>(reserved, fixtureGraph.definitions, entity, options)
+          queryEntity<Result>(sql, fixtureGraph.definitions, entity, options)
         ),
-        sql: reserved,
+        sql,
+        tx,
+        upsert: (entity, filter, values) => tx(savepoint => savepoint.upsert(entity, filter, values)),
       })
-    } finally {
-      await reserved.unsafe('rollback').simple().catch(() => undefined)
-      reserved.release()
-    }
-  })
-}
-
-/**
- * Run one real committed Graph-native transaction on the shared fixture.
- * @param label - Fixture acquisition label.
- * @param actor - Verified actor identity, or null for anonymous.
- * @param callback - Work using the app-role transaction.
- * @returns The callback result after commit.
- */
-export async function withCommittedDatabase<T>(
-  label: string,
-  actor: string | null,
-  callback: (database: CommittedDatabaseContext) => Promise<T>,
-): Promise<T> {
-  const fixture = await useDatabaseFixture(label)
-  await ensureGraphSchema(fixture.database)
-  return runAsActor({ id: actor }, () => fixture.database.tx(async sql => {
-    await sql.unsafe(
-      `set local search_path to ${quoteIdentifier(fixture.fixtureSchema)}, public, basis, pg_temp`,
-    ).simple()
-    await sql.unsafe(`set local role ${quoteIdentifier(FIXTURE_APP_ROLE)}`).simple()
-    await sql`
-      SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
-    `
-    return callback({
-      create: (entity, values) => sql.create(entity, values),
-      delete: (entity, filter) => sql.delete(entity, filter),
-      edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
-      query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
-        queryEntity<Result>(sql, fixtureGraph.definitions, entity, options)
-      ),
-      sql,
-      upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
-    })
-  }))
+    },
+  ))
 }
 
 /**
