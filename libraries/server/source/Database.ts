@@ -1,4 +1,4 @@
-import { runAsync } from 'basis/configuration'
+import { runAsync } from 'basis/utilities'
 import type { TransactionSQL } from 'bun'
 import { SQL } from 'bun'
 import { currentActor } from './ActorContext'

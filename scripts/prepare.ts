@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { run } from 'basis/configuration'
+import { run } from 'basis/utilities'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 

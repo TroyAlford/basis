@@ -1,5 +1,5 @@
 /* eslint-disable camelcase -- GitHub's check-run API uses snake_case keys. */
-import { run } from 'basis/configuration'
+import { run } from 'basis/utilities'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'

@@ -1,4 +1,4 @@
-import { run } from 'basis/configuration'
+import { run } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

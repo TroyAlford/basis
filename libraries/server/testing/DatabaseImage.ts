@@ -1,4 +1,4 @@
-import { runAsync } from 'basis/configuration'
+import { runAsync } from 'basis/utilities'
 import { join } from 'node:path'
 import { SEED_DIRECTORY, seedImage } from '../../../testing/database/seed/image'
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /* eslint-disable no-console -- this is an operator-facing CLI and GitHub Action entrypoint. */
-import { run } from 'basis/configuration'
 import { Logger } from 'basis/logger'
+import { run } from 'basis/utilities'
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, extname, join, relative, resolve, sep } from 'node:path'

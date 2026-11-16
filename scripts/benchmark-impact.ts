@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /* eslint-disable no-console -- this is an operator-facing benchmark command. */
-import { run } from 'basis/configuration'
+import { run } from 'basis/utilities'
 import { join } from 'node:path'
 
 /*

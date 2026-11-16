@@ -1,5 +1,5 @@
-import { run as runProcess } from 'basis/configuration'
 import { tempDirectory } from 'basis/testing'
+import { run as runProcess } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
 import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'

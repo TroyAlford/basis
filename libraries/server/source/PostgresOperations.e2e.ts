@@ -1,6 +1,6 @@
-import { run } from 'basis/configuration'
 import { Logger } from 'basis/logger'
 import { tempDirectory } from 'basis/testing'
+import { run } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { copyFile, readFile, rm, stat, writeFile } from 'node:fs/promises'

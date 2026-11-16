@@ -1,4 +1,4 @@
-import { run } from 'basis/configuration'
+import { run } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

@@ -1,4 +1,4 @@
-import { run as runProcess } from 'basis/configuration'
+import { run as runProcess } from 'basis/utilities'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'

@@ -1,4 +1,4 @@
-import { run } from 'basis/configuration'
+import { run } from 'basis/utilities'
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 /**

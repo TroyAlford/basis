@@ -1,4 +1,4 @@
-import { run } from 'basis/configuration'
+import { run } from 'basis/utilities'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'

@@ -1,4 +1,4 @@
-import { run as runCommand } from 'basis/configuration'
+import { run as runCommand } from 'basis/utilities'
 import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'

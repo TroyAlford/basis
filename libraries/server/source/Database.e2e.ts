@@ -1,5 +1,5 @@
-import { runAsync } from 'basis/configuration'
 import { Logger } from 'basis/logger'
+import { runAsync } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'

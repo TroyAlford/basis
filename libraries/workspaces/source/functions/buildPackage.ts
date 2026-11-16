@@ -1,5 +1,5 @@
 /* eslint-disable consistent-return, no-console */
-import { runAsync } from 'basis/configuration'
+import { runAsync } from 'basis/utilities'
 import type { BuildConfig as BunBuildConfig } from 'bun'
 import chalk from 'chalk'
 import fs from 'fs'

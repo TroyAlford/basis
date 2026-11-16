@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /* eslint-disable no-console -- this is an operator-facing verification command. */
-import { run as runProcess } from 'basis/configuration'
+import { run as runProcess } from 'basis/utilities'
 import { join } from 'node:path'
 
 /*

@@ -45,25 +45,12 @@ describe('basis/configuration public surface', () => {
   test('exposes only the supported primitives', () => {
     expect(Object.keys(configuration).sort()).toEqual([
       'Environment',
-      'run',
-      'runAsync',
       'secret',
     ])
   })
 })
 
 describe('import side effects', () => {
-  test('importing and using run alone does not load dotenv files', () => {
-    const directory = dotenvFixture()
-    const script = [
-      `import { run } from ${ENTRY}`,
-      "run('true', [], { logger: { error() {}, info() {} } })",
-      `process.stdout.write(process.env.${SENTINEL} ?? 'unset')`,
-    ].join('; ')
-
-    expect(runScript(directory, script)).toBe('unset')
-  })
-
   test('importing secret alone does not load dotenv files', () => {
     const directory = dotenvFixture()
     const script = [

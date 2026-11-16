@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { run } from 'basis/configuration'
 import { Logger } from 'basis/logger'
+import { run } from 'basis/utilities'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { bunCheckUnsupportedReason } from './bun-version'

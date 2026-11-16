@@ -29,7 +29,7 @@ titleCase('model-first database') // 'Model First Database'
 
 ## Subprocesses
 
-`run` and `runAsync` are the shared bounded subprocess runners: explicit argv (never a shell string), optional `cwd`, environment overrides, `timeoutMs`, and a Basis `Logger`. Both capture the child's output and return the full `{ exitCode, stdout, stderr, lines }` response, where `lines` is normalized stdout (empty output is `[]`). They remain available through `basis/configuration` for existing configuration and install code.
+`run` and `runAsync` are the shared bounded subprocess runners: explicit argv (never a shell string), optional `cwd`, environment overrides, `timeoutMs`, and a Basis `Logger`. Both capture the child's output and return the full `{ exitCode, stdout, stderr, lines }` response, where `lines` is normalized stdout (empty output is `[]`).
 
 ## State directories
 

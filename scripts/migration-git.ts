@@ -1,4 +1,4 @@
-import { run } from 'basis/configuration'
+import { run } from 'basis/utilities'
 
 /**
  * Resolve one Git revision to an immutable commit id.
