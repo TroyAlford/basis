@@ -1053,61 +1053,65 @@ describe('Authorization RLS', () => {
   }, 120_000)
 
   test('enforces explicit actor presence on the shared authorization fixture', async () => {
-    const notesFor = (actor: string | null) => withDatabase(
-      'authorization-actor-notes',
-      actor,
-      database => database.query<{ id: string }>('MemberNote', { fields: ['id'], orderBy: 'id' }),
-    )
     const noteRows = [{ id: fixtureRows.linkedNote }, { id: fixtureRows.memberNote }]
-    expect(await notesFor(fixtureRows.alice)).toEqual(noteRows)
-    expect(await notesFor(fixtureRows.bob)).toEqual(noteRows)
-    expect(await notesFor(null)).toEqual([])
-
-    const anonymousNotes = await withDatabase(
-      'authorization-actor-anonymous',
-      null,
-      database => database.query<{ id: string }>('AnonymousNote', { fields: ['id'] }),
-    )
-    expect(anonymousNotes).toEqual([{ id: fixtureRows.anonymousNote }])
-    expect(await withDatabase(
-      'authorization-actor-authenticated-anonymous',
-      fixtureRows.alice,
-      database => database.query<{ id: string }>('AnonymousNote', { fields: ['id'] }),
-    )).toEqual([])
-
-    const linksFor = (actor: string | null) => withDatabase(
-      'authorization-actor-links',
-      actor,
-      database => database.sql<{ note: string }[]>`
+    const verify = async (actor: string | null, label: string, expected: {
+      anonymousNotes: { id: string }[],
+      links: { note: string }[],
+      notes: { id: string }[],
+    }) => withDatabase(label, actor, async database => {
+      expect(await database.query<{ id: string }>(
+        'MemberNote',
+        { fields: ['id'], orderBy: 'id' },
+      )).toEqual(expected.notes)
+      expect(await database.query<{ id: string }>(
+        'AnonymousNote',
+        { fields: ['id'] },
+      )).toEqual(expected.anonymousNotes)
+      expect(await database.sql<{ note: string }[]>`
         SELECT "note.id" AS "note"
         FROM "ActorLink"
-      `,
-    )
-    expect(await linksFor(fixtureRows.alice)).toEqual([{ note: fixtureRows.memberNote }])
-    expect(await linksFor(fixtureRows.bob)).toEqual([{ note: fixtureRows.memberNote }])
-    expect(await linksFor(null)).toEqual([])
+      `).toEqual(expected.links)
+    })
+
+    await verify(fixtureRows.alice, 'authorization-actor-alice', {
+      anonymousNotes: [],
+      links: [{ note: fixtureRows.memberNote }],
+      notes: noteRows,
+    })
+    await verify(fixtureRows.bob, 'authorization-actor-bob', {
+      anonymousNotes: [],
+      links: [{ note: fixtureRows.memberNote }],
+      notes: noteRows,
+    })
+    await verify(null, 'authorization-actor-anonymous', {
+      anonymousNotes: [{ id: fixtureRows.anonymousNote }],
+      links: [],
+      notes: [],
+    })
   }, 120_000)
 
   test('resolves nested and composed policy paths on the shared authorization fixture', async () => {
-    expect(await withDatabase(
-      'authorization-nested-workspace',
-      fixtureRows.alice,
-      database => database.query<{ id: string }>('Workspace', { fields: ['id'] }),
-    )).toEqual([{ id: fixtureRows.visibleWorkspace }])
-    expect(await withDatabase(
-      'authorization-nested-anonymous',
-      null,
-      database => database.query<{ id: string }>('Workspace', { fields: ['id'] }),
-    )).toEqual([])
-    expect(await withDatabase(
-      'authorization-nested-task',
-      fixtureRows.alice,
-      database => database.query<{ id: string }>('Task', { fields: ['id'] }),
-    )).toEqual([{ id: fixtureRows.openTask }])
-    expect(await withDatabase(
-      'authorization-nested-task-anonymous',
-      null,
-      database => database.query<{ id: string }>('Task', { fields: ['id'] }),
-    )).toEqual([])
+    const verify = (actor: string | null, label: string, expected: {
+      tasks: { id: string }[],
+      workspaces: { id: string }[],
+    }) => withDatabase(label, actor, async database => {
+      expect(await database.query<{ id: string }>(
+        'Workspace',
+        { fields: ['id'] },
+      )).toEqual(expected.workspaces)
+      expect(await database.query<{ id: string }>(
+        'Task',
+        { fields: ['id'] },
+      )).toEqual(expected.tasks)
+    })
+
+    await verify(fixtureRows.alice, 'authorization-nested-alice', {
+      tasks: [{ id: fixtureRows.openTask }],
+      workspaces: [{ id: fixtureRows.visibleWorkspace }],
+    })
+    await verify(null, 'authorization-nested-anonymous', {
+      tasks: [],
+      workspaces: [],
+    })
   }, 120_000)
 })
