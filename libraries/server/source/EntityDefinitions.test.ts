@@ -903,7 +903,7 @@ describe('EntityDefinitions', () => {
             description: 'Each user may only have one Membership per Campaign.',
             fields: ['userId', 'campaignId'],
             name: 'One Membership Per Campaign',
-            type: 'Uniqueness',
+            type: 'Structural',
           }],
           fields: [
             { field: 'id', format: 'UUID' },
@@ -918,13 +918,13 @@ describe('EntityDefinitions', () => {
     expect(entities.entity('User')?.constraints).toMatchObject([{
       fields: ['email'],
       name: 'User email must be unique',
-      type: 'Uniqueness',
+      type: 'Structural',
     }])
     expect(entities.entity('Membership')?.constraints).toMatchObject([{
       description: 'Each user may only have one Membership per Campaign.',
       fields: ['userId', 'campaignId'],
       name: 'One Membership Per Campaign',
-      type: 'Uniqueness',
+      type: 'Structural',
     }])
     expect(entities.constraints).toHaveLength(2)
     const ddl = entities.ddl.join('\n')
@@ -948,7 +948,7 @@ describe('EntityDefinitions', () => {
           description: 'Each user may join a campaign once.',
           fields: ['user', 'campaign'],
           name: 'Unique Membership',
-          type: 'Uniqueness',
+          type: 'Structural',
         }],
         fields: [],
         name: 'Membership',
@@ -957,7 +957,7 @@ describe('EntityDefinitions', () => {
     expect(entities.relationship('Membership')?.constraints).toMatchObject([{
       fields: ['user', 'campaign'],
       name: 'Unique Membership',
-      type: 'Uniqueness',
+      type: 'Structural',
     }])
     expect(entities.ddl.join('\n')).toContain(
       'create unique index if not exists "Membership_unique_membership" on "Membership" ("user.id", "campaign.id")',
@@ -1085,20 +1085,20 @@ describe('EntityDefinitions', () => {
       description: 'One title',
       fields: ['missing'],
       name: 'Missing Field',
-      type: 'Uniqueness',
+      type: 'Structural',
     }]))).toThrow('unknown physical field "missing"')
     expect(() => load(model([{ field: 'title', type: 'String' }], [{
       description: 'Duplicate fields',
       fields: ['title', 'title'],
       name: 'Duplicate Fields',
-      type: 'Uniqueness',
+      type: 'Structural',
     }]))).toThrow('fields must be distinct')
     expect(() => load(model([{ field: 'title', type: 'String' }], [{
       description: 'Wrong type',
       fields: ['title'],
       name: 'Wrong Type',
       type: 'Other',
-    }]))).toThrow('type must be Uniqueness')
+    }]))).toThrow('type must be Structural')
   })
 
   test('accepts native scalar arrays and opaque JSON values', () => {

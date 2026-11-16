@@ -52,14 +52,14 @@ describe('Graph authoring types', () => {
           description: 'One label per account.',
           fields: ['label'],
           name: 'One Label Per Account',
-          type: Constraint.Uniqueness,
+          type: Constraint.Structural,
         }],
         fields: [{ field: 'label', type: FieldType.String, unique: true }],
         name: 'Account',
       }],
     })
     expect(graph.definitions.constraints).toHaveLength(2)
-    expect(graph.definitions.constraints.every(constraint => constraint.type === Constraint.Uniqueness))
+    expect(graph.definitions.constraints.every(constraint => constraint.type === Constraint.Structural))
       .toBe(true)
   })
 

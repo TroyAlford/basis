@@ -55,7 +55,7 @@ export default new Graph({
         description: 'Each user may only have one Membership per Campaign.',
         fields: ['userId', 'campaignId'],
         name: 'One Membership Per Campaign',
-        type: Constraint.Uniqueness,
+        type: Constraint.Structural,
       }],
       fields: [
         { field: 'userId', target: 'User', type: FieldType.Entity },
@@ -68,7 +68,7 @@ export default new Graph({
 })
 ```
 
-The typed declaration accepts the same entity, relationship, enum, array, JSON, reference, inverse, MTI, identity-format, nullable, default, and uniqueness shapes as canonical JSON. There is no decorator syntax, second registry, or alternative validator. Omitting `nullable` preserves the non-null default for scalar, array, and JSON fields; reference fields remain nullable by default unless `nullable: false` is declared. An optional `default` supplies the column default and must match the declared field type. `unique: true` and named `Constraint.Uniqueness` declarations normalize into PostgreSQL unique indexes through the same Graph/DDL path. `Number` fields may declare inclusive `minimum`/`maximum`; `String` fields may declare `minLength`/`maxLength`. These bounds are canonical Graph metadata, validation constraints for mutations, and PostgreSQL `CHECK` constraints, not a mutation-only schema. JSON remains an alternate input syntax for tools that load a parsed document; it feeds the same `Graph` construction path. A `Graph` is passed directly to `Server.graph(graph)`.
+The typed declaration accepts the same entity, relationship, enum, array, JSON, reference, inverse, MTI, identity-format, nullable, default, and uniqueness shapes as canonical JSON. There is no decorator syntax, second registry, or alternative validator. Omitting `nullable` preserves the non-null default for scalar, array, and JSON fields; reference fields remain nullable by default unless `nullable: false` is declared. An optional `default` supplies the column default and must match the declared field type. `unique: true` and named `Constraint.Structural` declarations normalize into PostgreSQL unique indexes through the same Graph/DDL path. `Number` fields may declare inclusive `minimum`/`maximum`; `String` fields may declare `minLength`/`maxLength`. These bounds are canonical Graph metadata, validation constraints for mutations, and PostgreSQL `CHECK` constraints, not a mutation-only schema. JSON remains an alternate input syntax for tools that load a parsed document; it feeds the same `Graph` construction path. A `Graph` is passed directly to `Server.graph(graph)`.
 
 The Graph-root `enums` dictionary maps each persisted string value directly to its description. An `Enum` field names one enum and persists as text with a named allowed-value `CHECK`; TypeScript emits a real `enum` with JSDoc per value, and JSON Schema emits one reusable `$defs` entry referenced by every consuming field. Editing only a description changes generated contracts without a database migration.
 

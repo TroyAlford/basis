@@ -44,8 +44,8 @@ export enum FieldType {
 
 /** Supported declarative constraint kinds. */
 export enum Constraint {
-  /** A unique index over one or more physical fields. */
-  Uniqueness = 'Uniqueness',
+  /** A deterministic structural index over one or more physical fields. */
+  Structural = 'Structural',
   /** A positive valid-state predicate over Graph-native transaction state. */
   Validation = 'Validation',
 }
@@ -308,8 +308,8 @@ export type EffectiveFieldDefinition =
     readonly owner: string,
   }
 
-/** One normalized declarative uniqueness constraint. */
-export interface UniqueConstraintDefinition {
+/** One normalized declarative structural constraint. */
+export interface StructuralConstraintDefinition {
   /** Human-readable diagnostic description. */
   readonly description: string,
   /** Canonical logical fields covered by the constraint. */
@@ -321,7 +321,7 @@ export interface UniqueConstraintDefinition {
   /** Owning entity or relationship name. */
   readonly owner: string,
   /** Constraint discriminator. */
-  readonly type: Constraint.Uniqueness,
+  readonly type: Constraint.Structural,
 }
 
 /** One normalized declarative validation constraint. */
@@ -341,7 +341,7 @@ export interface ValidationConstraintDefinition {
 }
 
 /** One normalized declarative constraint. */
-export type ConstraintDefinition = UniqueConstraintDefinition | ValidationConstraintDefinition
+export type ConstraintDefinition = StructuralConstraintDefinition | ValidationConstraintDefinition
 
 /** One entity definition. */
 export interface EntityDefinition {
@@ -1568,7 +1568,7 @@ function validateConstraintNames(
       throw invalid(`duplicate constraint name "${constraint.name}"`)
     }
     names.add(constraint.name)
-    if (constraint.type !== Constraint.Uniqueness) continue
+    if (constraint.type !== Constraint.Structural) continue
     if (indexes.has(constraint.index)) {
       throw invalid(`duplicate constraint index "${constraint.index}"`)
     }
@@ -2228,8 +2228,8 @@ function parseConstraints(
       }
     }
     assertKnownKeys(candidate, ['description', 'fields', 'name', 'type'], 'constraint')
-    if (candidate.type !== Constraint.Uniqueness) {
-      throw invalid(`constraint "${candidate.name}" type must be Uniqueness or Validation`)
+    if (candidate.type !== Constraint.Structural) {
+      throw invalid(`constraint "${candidate.name}" type must be Structural or Validation`)
     }
     if (!Array.isArray(candidate.fields) || candidate.fields.length === 0) {
       throw invalid(`constraint "${candidate.name}" must have a non-empty fields array`)
@@ -2252,7 +2252,7 @@ function parseConstraints(
       index: uniqueIndexName(owner, candidate.name),
       name: candidate.name,
       owner,
-      type: Constraint.Uniqueness,
+      type: Constraint.Structural,
     }
   })
 }
@@ -2278,7 +2278,7 @@ function fieldConstraints(
         index: uniqueIndexName(owner, `${fieldName} unique`),
         name,
         owner,
-        type: Constraint.Uniqueness,
+        type: Constraint.Structural,
       }
     })
 }
@@ -2831,8 +2831,8 @@ function uniqueIndexes(
   columns: ReadonlyMap<string, string>,
 ): readonly TableIndex[] {
   return constraints
-    .filter((constraint): constraint is UniqueConstraintDefinition => (
-      constraint.type === Constraint.Uniqueness
+    .filter((constraint): constraint is StructuralConstraintDefinition => (
+      constraint.type === Constraint.Structural
     ))
     .map(constraint => ({
       columns: constraint.fields.map(field => {

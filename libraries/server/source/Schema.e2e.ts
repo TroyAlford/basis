@@ -585,7 +585,7 @@ describe('DDL schema planning', () => {
             description: 'Each user may only have one Membership per Campaign.',
             fields: ['userId', 'campaignId'],
             name: 'One Membership Per Campaign',
-            type: 'Uniqueness',
+            type: 'Structural',
           }],
           fields: [
             { field: 'id', format: 'UUID' },

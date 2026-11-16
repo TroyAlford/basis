@@ -149,8 +149,8 @@ export type AuthoredField =
   | AuthoredReferenceField
   | AuthoredScalarField
 
-/** One authored uniqueness constraint. */
-export interface AuthoredUniquenessConstraint {
+/** One authored structural constraint. */
+export interface StructuralConstraint {
   /** Human-readable diagnostic description. */
   readonly description: string,
   /** Canonical logical fields covered by the constraint. */
@@ -158,11 +158,11 @@ export interface AuthoredUniquenessConstraint {
   /** Human-readable constraint name. */
   readonly name: string,
   /** Constraint discriminator. */
-  readonly type: Constraint.Uniqueness,
+  readonly type: Constraint.Structural,
 }
 
 /** One authored positive valid-state constraint. */
-export interface AuthoredValidationConstraint {
+export interface ValidationConstraint {
   /** Human-readable diagnostic description. */
   readonly description: string,
   /** Human-readable constraint name. */
@@ -170,11 +170,11 @@ export interface AuthoredValidationConstraint {
   /** Constraint discriminator. */
   readonly type: Constraint.Validation,
   /** Positive valid-state predicate normalized by the canonical predicate engine. */
-  readonly where: Filter | Readonly<Record<string, unknown>> | string,
+  readonly where: Filter | string,
 }
 
 /** One authored declarative constraint. */
-export type AuthoredConstraint = AuthoredUniquenessConstraint | AuthoredValidationConstraint
+export type GraphConstraint = StructuralConstraint | ValidationConstraint
 
 /** One authored entity security rule. */
 export interface AuthoredSecurityRule {
@@ -195,7 +195,7 @@ export type AuthoredSecurity = Partial<Record<
 /** One authored entity. */
 export interface AuthoredEntity {
   /** Declarative constraints owned by this entity. */
-  readonly constraints?: readonly AuthoredConstraint[],
+  readonly constraints?: readonly GraphConstraint[],
   /** Parent entity, when using MTI. */
   readonly extends?: string,
   /** Declared local fields. */
@@ -221,7 +221,7 @@ export interface AuthoredRelationship {
   /** The two relationship endpoints. */
   readonly between: readonly [AuthoredRelationshipEndpoint, AuthoredRelationshipEndpoint],
   /** Declarative constraints owned by this relationship. */
-  readonly constraints?: readonly AuthoredConstraint[],
+  readonly constraints?: readonly GraphConstraint[],
   /** Relationship-owned fields. */
   readonly fields: readonly (AuthoredArrayField | AuthoredEnumField | AuthoredJSONField | AuthoredScalarField)[],
   /** Relationship name. */

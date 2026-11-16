@@ -36,7 +36,7 @@ export type {
 export type { AuthorizationOptions, BootstrapResult, EffectiveGrant } from './source/Authorization'
 export type {
   AuthoredArrayField,
-  AuthoredConstraint,
+  GraphConstraint,
   AuthoredDocument,
   AuthoredEntity,
   AuthoredEnum,
@@ -52,8 +52,8 @@ export type {
   AuthoredScalarField,
   AuthoredSecurity,
   AuthoredSecurityRule,
-  AuthoredUniquenessConstraint,
-  AuthoredValidationConstraint,
+  StructuralConstraint,
+  ValidationConstraint,
 } from './source/GraphAuthoring'
 export type {
   GrantCapability,
@@ -121,7 +121,7 @@ export type {
   ScalarArrayElementDefinition,
   ScalarFieldDefinition,
   ScalarFieldType,
-  UniqueConstraintDefinition,
+  StructuralConstraintDefinition,
   ValidationConstraintDefinition,
 } from './source/EntityDefinitions'
 export { OAuth } from './source/OAuth'
