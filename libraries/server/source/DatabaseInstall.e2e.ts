@@ -1,6 +1,6 @@
-import { run } from 'basis/configuration'
 import { Logger } from 'basis/logger'
 import { tempDirectory } from 'basis/testing'
+import { run } from 'basis/utilities'
 import { expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
@@ -219,4 +219,4 @@ test('supports independent installs, durable restart, and same-install reconnect
     const removed = [removeService(installA), removeService(installB)]
     expect(removed).toEqual([true, true])
   }
-}, 180_000)
+})

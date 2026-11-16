@@ -90,5 +90,5 @@ describe('Codegen output contracts', () => {
       expect(validate({ ...rows[0], requiredJSON: null })).toBe(false)
       expect(validate({ ...rows[0], requiredOwner: null })).toBe(false)
     })
-  }, 120_000)
+  })
 })

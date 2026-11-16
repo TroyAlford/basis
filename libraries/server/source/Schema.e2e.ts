@@ -114,6 +114,271 @@ describe('DDL schema planning', () => {
     }, { fresh: true })
   })
 
+  test('enforces named enum allowed values through real PostgreSQL checks', async () => {
+    const model = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { enum: 'AccessLevel', field: 'access', type: 'Enum' },
+          { enum: 'AccessLevel', field: 'fallback', nullable: true, type: 'Enum' },
+        ],
+        name: 'EnumRecord',
+      }],
+      enums: {
+        AccessLevel: {
+          editor: 'Can edit resources.',
+          owner: 'Can manage resources and membership.',
+          viewer: 'Can view resources.',
+        },
+      },
+    }))
+    await withIsolatedDatabase('schema-enum-check', async database => {
+      await installSchema(database.sql, model)
+      const id = randomUUID()
+      await database.sql.unsafe(
+        'INSERT INTO "Entity" ("id", "name", "entity") VALUES ($1, $2, $3)',
+        [id, 'Record', 'EnumRecord'],
+      )
+      await database.sql.unsafe(
+        'INSERT INTO "EnumRecord" ("id", "access", "fallback") VALUES ($1, $2, $3)',
+        [id, 'owner', null],
+      )
+      const rows = await database.sql.unsafe(
+        'SELECT "access", "fallback" FROM "EnumRecord" WHERE "id" = $1',
+        [id],
+      )
+      expect(rows).toEqual([{ access: 'owner', fallback: null }])
+
+      const invalid = await database.captureError(async () => {
+        await database.sql.unsafe(
+          'INSERT INTO "Entity" ("id", "name", "entity") VALUES ($1, $2, $3)',
+          [randomUUID(), 'Invalid', 'EnumRecord'],
+        )
+        await database.sql.unsafe(
+          'INSERT INTO "EnumRecord" ("id", "access") VALUES ($1, $2)',
+          [randomUUID(), 'not-a-level'],
+        )
+      })
+      expect(String(invalid)).toContain('EnumRecord_access_enum_check')
+    }, { fresh: true })
+  })
+
+  test('plans and applies enum value-set changes through reviewed checks', async () => {
+    const model = (values: readonly string[]): EntityDefinitions => EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }],
+        name: 'EnumRecord',
+      }],
+      enums: {
+        AccessLevel: Object.fromEntries(values.map(value => [value, `${value} access.`])),
+      },
+    }))
+    const first = model(['owner', 'editor'])
+    const added = model(['owner', 'editor', 'viewer'])
+    await withIsolatedDatabase('schema-enum-value-add', async database => {
+      await installSchema(database.sql, first)
+      const installed = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual: installed,
+        desired: added,
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      expect(plan.drift).toEqual([])
+      expect(plan.operations.map(operation => operation.id)).toContain(
+        'check:EnumRecord:EnumRecord_access_enum_check',
+      )
+      expect(plan.operations.find(operation => operation.id === 'check-drop:EnumRecord:EnumRecord_access_enum_check'))
+        .toBeDefined()
+      await installSchema(database.sql, added, {
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      const upgraded = await DDL.introspect(database.sql)
+      expect(DDL.plan({
+        actual: upgraded,
+        desired: added,
+        previous: added,
+        previousPhysical: added.physicalSchema(),
+      })).toMatchObject({ drift: [], operations: [] })
+      const id = randomUUID()
+      await database.sql.unsafe(
+        'INSERT INTO "Entity" ("id", "name", "entity") VALUES ($1, $2, $3)',
+        [id, 'Added', 'EnumRecord'],
+      )
+      await database.sql.unsafe(
+        'INSERT INTO "EnumRecord" ("id", "access") VALUES ($1, $2)',
+        [id, 'viewer'],
+      )
+    }, { fresh: true })
+  })
+
+  test('plans enum value removals and reports missing or changed checks as drift', async () => {
+    const model = (values: readonly string[]): EntityDefinitions => EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }],
+        name: 'EnumRecord',
+      }],
+      enums: {
+        AccessLevel: Object.fromEntries(values.map(value => [value, `${value} access.`])),
+      },
+    }))
+    const first = model(['owner', 'editor'])
+    const removed = model(['owner'])
+    await withIsolatedDatabase('schema-enum-value-remove', async database => {
+      await installSchema(database.sql, first)
+      const installed = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual: installed,
+        desired: removed,
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      expect(plan.drift).toEqual([])
+      expect(plan.operations.map(operation => operation.id)).toEqual(expect.arrayContaining([
+        'check-drop:EnumRecord:EnumRecord_access_enum_check',
+        'check:EnumRecord:EnumRecord_access_enum_check',
+      ]))
+      await installSchema(database.sql, removed, {
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      const id = randomUUID()
+      await database.sql.unsafe(
+        'INSERT INTO "Entity" ("id", "name", "entity") VALUES ($1, $2, $3)',
+        [id, 'Removed', 'EnumRecord'],
+      )
+      const invalid = await database.captureError(async () => {
+        await database.sql.unsafe(
+          'INSERT INTO "EnumRecord" ("id", "access") VALUES ($1, $2)',
+          [randomUUID(), 'editor'],
+        )
+      })
+      expect(String(invalid)).toContain('EnumRecord_access_enum_check')
+
+      await database.sql.unsafe(
+        'ALTER TABLE "EnumRecord" DROP CONSTRAINT "EnumRecord_access_enum_check"',
+      )
+      const missing = await DDL.introspect(database.sql)
+      expect(DDL.plan({
+        actual: missing,
+        desired: removed,
+        previous: removed,
+        previousPhysical: removed.physicalSchema(),
+      }).drift.join(' ')).toContain('missing deployed check: EnumRecord.EnumRecord_access_enum_check')
+    }, { fresh: true })
+  })
+
+  test('treats a weakened live enum check as drift', async () => {
+    const model = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }],
+        name: 'EnumRecord',
+      }],
+      enums: { AccessLevel: { editor: 'Editor access.', owner: 'Owner access.' } },
+    }))
+    await withIsolatedDatabase('schema-enum-tamper', async database => {
+      await installSchema(database.sql, model)
+      await database.sql
+        .unsafe('ALTER TABLE "EnumRecord" DROP CONSTRAINT "EnumRecord_access_enum_check"')
+        .simple()
+      await database.sql
+        .unsafe('ALTER TABLE "EnumRecord" ADD CONSTRAINT "EnumRecord_access_enum_check" CHECK ("access" IS NOT NULL)')
+        .simple()
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual,
+        desired: model,
+        previous: model,
+        previousPhysical: model.physicalSchema(),
+      })
+      expect(plan.drift.join(' ')).toContain(
+        'check definition changed: EnumRecord.EnumRecord_access_enum_check',
+      )
+      expect(plan.blocked).toBe(true)
+
+      await database.sql
+        .unsafe('ALTER TABLE "EnumRecord" DROP CONSTRAINT "EnumRecord_access_enum_check"')
+        .simple()
+      await database.sql.unsafe(
+        'ALTER TABLE "EnumRecord" ADD CONSTRAINT "EnumRecord_access_enum_check" ' +
+        'CHECK ("access" IN (\'editor\', \'owner\') OR TRUE)',
+      ).simple()
+      const weakenedValues = await DDL.introspect(database.sql)
+      const weakenedPlan = DDL.plan({
+        actual: weakenedValues,
+        desired: model,
+        previous: model,
+        previousPhysical: model.physicalSchema(),
+      })
+      expect(weakenedPlan.drift.join(' ')).toContain(
+        'check definition changed: EnumRecord.EnumRecord_access_enum_check',
+      )
+      expect(weakenedPlan.blocked).toBe(true)
+    }, { fresh: true })
+  })
+
+  test('treats enum description edits as metadata-only changes', async () => {
+    const model = (owner: string): EntityDefinitions => EntityDefinitions.load(JSON.stringify({
+      entities: [{ fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }], name: 'EnumRecord' }],
+      enums: { AccessLevel: { owner, viewer: 'Can view resources.' } },
+    }))
+    const first = model('Can manage resources.')
+    const second = model('Can administer resources.')
+    expect(first.ddl).toEqual(second.ddl)
+    await withIsolatedDatabase('schema-enum-description', async database => {
+      await installSchema(database.sql, first)
+      const actual = await DDL.introspect(database.sql)
+      const plan = DDL.plan({
+        actual,
+        desired: second,
+        previous: first,
+        previousPhysical: first.physicalSchema(),
+      })
+      expect(plan.drift).toEqual([])
+      expect(plan.operations).toEqual([])
+    }, { fresh: true })
+  })
+
+  test('applies typed empty array defaults to omitted columns', async () => {
+    const model = EntityDefinitions.load(JSON.stringify({
+      entities: [{
+        fields: [
+          { default: [], field: 'strings', items: { type: 'String' }, type: 'Array' },
+          { default: [], field: 'numbers', items: { type: 'Number' }, type: 'Array' },
+          { default: [], field: 'booleans', items: { type: 'Boolean' }, type: 'Array' },
+          { default: [], field: 'dates', items: { type: 'Date' }, type: 'Array' },
+          { default: [], field: 'timestamps', items: { type: 'Timestamp' }, type: 'Array' },
+          { default: [], field: 'identities', items: { type: 'ID' }, type: 'Array' },
+        ],
+        name: 'ArrayDefaults',
+      }],
+    }))
+    await withIsolatedDatabase('schema-empty-array-defaults', async database => {
+      await installSchema(database.sql, model)
+      const id = randomUUID()
+      await database.sql.unsafe(
+        'INSERT INTO "Entity" ("id", "name", "entity") VALUES ($1, $2, $3)',
+        [id, 'Defaults', 'ArrayDefaults'],
+      )
+      await database.sql.unsafe('INSERT INTO "ArrayDefaults" ("id") VALUES ($1)', [id])
+      const [row] = await database.sql.unsafe(
+        'SELECT cardinality("strings") AS strings, cardinality("numbers") AS numbers, ' +
+        'cardinality("booleans") AS booleans, cardinality("dates") AS dates, ' +
+        'cardinality("timestamps") AS timestamps, cardinality("identities") AS identities ' +
+        'FROM "ArrayDefaults" WHERE "id" = $1',
+        [id],
+      )
+      expect(row).toEqual({
+        booleans: 0,
+        dates: 0,
+        identities: 0,
+        numbers: 0,
+        strings: 0,
+        timestamps: 0,
+      })
+    }, { fresh: true })
+  })
+
   test('evolves declared defaults without false drift', async () => {
     const model = (value?: string): EntityDefinitions => EntityDefinitions.load(JSON.stringify({
       entities: [{
@@ -320,7 +585,7 @@ describe('DDL schema planning', () => {
             description: 'Each user may only have one Membership per Campaign.',
             fields: ['userId', 'campaignId'],
             name: 'One Membership Per Campaign',
-            type: 'Uniqueness',
+            type: 'Structural',
           }],
           fields: [
             { field: 'id', format: 'UUID' },

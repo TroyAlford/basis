@@ -42,8 +42,23 @@ const definitions = EntityDefinitions.load(JSON.stringify({
         { field: 'age', type: 'Number' },
         { field: 'vaccinated', type: 'Boolean' },
         { field: 'owner', inverse: 'pets', target: 'Person', type: 'Entity' },
+        {
+          cardinality: 'Many',
+          field: 'toys',
+          inverse: 'pet',
+          target: 'Toy',
+          type: 'Inverse',
+        },
       ],
       name: 'Pet',
+    },
+    {
+      fields: [
+        { field: 'id', format: 'UUID' },
+        { field: 'title', type: 'String' },
+        { field: 'pet', inverse: 'toys', target: 'Pet', type: 'Entity' },
+      ],
+      name: 'Toy',
     },
     {
       fields: [
@@ -92,6 +107,8 @@ const petThree = '00000000-0000-4000-8000-000000000013'
 const campaignOne = '00000000-0000-4000-8000-000000000021'
 const campaignTwo = '00000000-0000-4000-8000-000000000022'
 const campaignThree = '00000000-0000-4000-8000-000000000023'
+const toyOne = '00000000-0000-4000-8000-000000000031'
+const toyTwo = '00000000-0000-4000-8000-000000000032'
 
 /**
  * Seed the parity fixture.
@@ -119,6 +136,12 @@ async function seed(database: IsolatedDatabase): Promise<void> {
       (${petThree},
       'Pet Three',
       'Pet'),
+      (${toyOne},
+      'Ball',
+      'Toy'),
+      (${toyTwo},
+      'Bone',
+      'Toy'),
       (${campaignOne},
       'Campaign One',
       'Campaign'),
@@ -175,6 +198,10 @@ async function seed(database: IsolatedDatabase): Promise<void> {
       12,
       FALSE,
       ${grace})
+  `
+  await database.sql`
+    INSERT INTO "Toy" ("id", "title", "pet.id")
+    VALUES (${toyOne}, 'ball', ${petOne}), (${toyTwo}, 'bone', ${petTwo})
   `
   await database.sql`
     INSERT INTO "Campaign" ("id", "title")
@@ -466,6 +493,84 @@ const cases: readonly ParityCase[] = [
       value: { meta: { active: true } },
     },
   },
+  {
+    entity: 'Person',
+    expected: [ada],
+    source: "pets $contains (toys $contains (title = 'ball'))",
+    structured: {
+      field: 'pets',
+      filters: [{
+        field: 'toys',
+        filters: [{ field: 'title', operator: Operator.Comparison.Equal, value: 'ball' }],
+        operator: Operator.Comparison.Contains,
+      }],
+      operator: Operator.Comparison.Contains,
+    },
+  },
+  {
+    entity: 'Pet',
+    expected: [petThree],
+    source: 'owner.pets $contains (age > 10)',
+    structured: {
+      field: 'owner.pets',
+      filters: [{ field: 'age', operator: Operator.Comparison.GreaterThan, value: 10 }],
+      operator: Operator.Comparison.Contains,
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada],
+    source: `pets $contains (id = '${petOne}' AND toys $contains (title = 'ball'))`,
+    structured: {
+      field: 'pets',
+      filters: [{
+        filters: [
+          { field: 'id', operator: Operator.Comparison.Equal, value: petOne },
+          {
+            field: 'toys',
+            filters: [{ field: 'title', operator: Operator.Comparison.Equal, value: 'ball' }],
+            operator: Operator.Comparison.Contains,
+          },
+        ],
+        operator: Operator.Logical.And,
+      }],
+      operator: Operator.Comparison.Contains,
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [],
+    source: `pets $contains (id = '${petTwo}' AND toys $contains (title = 'ball'))`,
+    structured: {
+      field: 'pets',
+      filters: [{
+        filters: [
+          { field: 'id', operator: Operator.Comparison.Equal, value: petTwo },
+          {
+            field: 'toys',
+            filters: [{ field: 'title', operator: Operator.Comparison.Equal, value: 'ball' }],
+            operator: Operator.Comparison.Contains,
+          },
+        ],
+        operator: Operator.Logical.And,
+      }],
+      operator: Operator.Comparison.Contains,
+    },
+  },
+  {
+    entity: 'Person',
+    expected: [ada, grace, linus],
+    source: "campaigns $contains (members $contains (title = 'Grace'))",
+    structured: {
+      field: 'campaigns',
+      filters: [{
+        field: 'members',
+        filters: [{ field: 'title', operator: Operator.Comparison.Equal, value: 'Grace' }],
+        operator: Operator.Comparison.Contains,
+      }],
+      operator: Operator.Comparison.Contains,
+    },
+  },
 ]
 
 describe('Query parity gate', () => {
@@ -529,5 +634,5 @@ describe('Query parity gate', () => {
       })
       expect(ordered.map(row => row.id)).toEqual([linus, grace, ada])
     })
-  }, 120_000)
+  })
 })

@@ -4,7 +4,7 @@ import { HttpVerb } from 'basis/server'
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { removeService } from '../testing/DatabaseFixture'
+import { fixtureRows, removeService, withDatabase } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
@@ -413,7 +413,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
 
   test('declines ambiguous targets and missing required User fields', async () => {
     const ambiguousInstall = tempDirectory('basis-authorization-ambiguous-')
@@ -495,7 +495,7 @@ describe('Authorization RLS', () => {
       await requiredServer.shutdown()
       removeService(requiredInstall)
     }
-  }, 120_000)
+  })
 
   test('enrolls a complete MTI chain and rolls back incomplete creation', async () => {
     const tieredInstall = tempDirectory('basis-authorization-tiered-')
@@ -568,7 +568,7 @@ describe('Authorization RLS', () => {
       await requiredChainServer.shutdown()
       removeService(requiredChainInstall)
     }
-  }, 120_000)
+  })
 
   test('passes the verified OAuth profile through the Server owner', async () => {
     const install = tempDirectory('basis-authorization-oauth-profile-')
@@ -614,7 +614,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
   test('enforces relationship membership grants through PostgreSQL RLS', async () => {
     const membershipGraph = new Graph({
       entities: [
@@ -762,7 +762,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
 
   test('applies membership grants declared on an abstract parent to concrete descendants', async () => {
     const abstractGraph = new Graph({
@@ -833,7 +833,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
 
   test('requires read for writes on the real PostgreSQL path', async () => {
     enum Capability {
@@ -965,7 +965,7 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
 
   test('allows where-only membership rules alongside an administrator capability', async () => {
     enum Capability {
@@ -1050,6 +1050,68 @@ describe('Authorization RLS', () => {
       await server.shutdown()
       removeService(install)
     }
-  }, 120_000)
+  })
 
+  test('enforces explicit actor presence on the shared authorization fixture', async () => {
+    const noteRows = [{ id: fixtureRows.linkedNote }, { id: fixtureRows.memberNote }]
+    const verify = async (actor: string | null, label: string, expected: {
+      anonymousNotes: { id: string }[],
+      links: { note: string }[],
+      notes: { id: string }[],
+    }) => withDatabase(label, actor, async database => {
+      expect(await database.query<{ id: string }>(
+        'MemberNote',
+        { fields: ['id'], orderBy: 'id' },
+      )).toEqual(expected.notes)
+      expect(await database.query<{ id: string }>(
+        'AnonymousNote',
+        { fields: ['id'] },
+      )).toEqual(expected.anonymousNotes)
+      expect(await database.sql<{ note: string }[]>`
+        SELECT "note.id" AS "note"
+        FROM "ActorLink"
+      `).toEqual(expected.links)
+    })
+
+    await verify(fixtureRows.alice, 'authorization-actor-alice', {
+      anonymousNotes: [],
+      links: [{ note: fixtureRows.memberNote }],
+      notes: noteRows,
+    })
+    await verify(fixtureRows.bob, 'authorization-actor-bob', {
+      anonymousNotes: [],
+      links: [{ note: fixtureRows.memberNote }],
+      notes: noteRows,
+    })
+    await verify(null, 'authorization-actor-anonymous', {
+      anonymousNotes: [{ id: fixtureRows.anonymousNote }],
+      links: [],
+      notes: [],
+    })
+  })
+
+  test('resolves nested and composed policy paths on the shared authorization fixture', async () => {
+    const verify = (actor: string | null, label: string, expected: {
+      tasks: { id: string }[],
+      workspaces: { id: string }[],
+    }) => withDatabase(label, actor, async database => {
+      expect(await database.query<{ id: string }>(
+        'Workspace',
+        { fields: ['id'] },
+      )).toEqual(expected.workspaces)
+      expect(await database.query<{ id: string }>(
+        'Task',
+        { fields: ['id'] },
+      )).toEqual(expected.tasks)
+    })
+
+    await verify(fixtureRows.alice, 'authorization-nested-alice', {
+      tasks: [{ id: fixtureRows.openTask }],
+      workspaces: [{ id: fixtureRows.visibleWorkspace }],
+    })
+    await verify(null, 'authorization-nested-anonymous', {
+      tasks: [],
+      workspaces: [],
+    })
+  })
 })

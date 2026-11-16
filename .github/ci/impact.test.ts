@@ -1,3 +1,4 @@
+import { run } from 'basis/utilities'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -89,10 +90,8 @@ function needed(decision: ImpactDecision): string[] {
  * @param args Arguments after `git`.
  */
 function git(cwd: string, args: string[]): void {
-  const result = Bun.spawnSync(['git', ...args], { cwd, stderr: 'pipe', stdout: 'pipe' })
-  if (result.exitCode !== 0) {
-    throw new Error(new TextDecoder().decode(result.stderr))
-  }
+  const result = run('git', args, { cwd })
+  if (result.exitCode !== 0) throw new Error(result.stderr)
 }
 
 /**
@@ -102,11 +101,9 @@ function git(cwd: string, args: string[]): void {
  * @returns Trimmed standard output.
  */
 function gitOutput(cwd: string, args: string[]): string {
-  const result = Bun.spawnSync(['git', ...args], { cwd, stderr: 'pipe', stdout: 'pipe' })
-  if (result.exitCode !== 0) {
-    throw new Error(new TextDecoder().decode(result.stderr))
-  }
-  return new TextDecoder().decode(result.stdout).trim()
+  const result = run('git', args, { cwd })
+  if (result.exitCode !== 0) throw new Error(result.stderr)
+  return result.stdout.trim()
 }
 
 /**
@@ -150,20 +147,13 @@ function cli(cwd: string, args: string[] = [], env: Record<string, string> = {})
   decision: ImpactDecision | null,
   output: string,
 } {
-  const result = Bun.spawnSync(
-    ['bun', MAIN, '--cwd', cwd, '--config-path', CONFIG_PATH, ...args],
-    {
-      env: { ...(process.env as Record<string, string>), ...env },
-      stderr: 'pipe',
-      stdout: 'pipe',
-    },
-  )
-  const output = new TextDecoder().decode(result.stdout)
-  const error = new TextDecoder().decode(result.stderr)
+  const result = run('bun', [MAIN, '--cwd', cwd, '--config-path', CONFIG_PATH, ...args], {
+    env,
+  })
   return {
-    code: result.exitCode ?? -1,
-    decision: result.exitCode === 0 ? JSON.parse(output) as ImpactDecision : null,
-    output: `${output}${error}`,
+    code: result.exitCode,
+    decision: result.exitCode === 0 ? JSON.parse(result.stdout) as ImpactDecision : null,
+    output: `${result.stdout}${result.stderr}`,
   }
 }
 

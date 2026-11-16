@@ -1,4 +1,5 @@
 /* eslint-disable consistent-return, no-console */
+import { runAsync } from 'basis/utilities'
 import type { BuildConfig as BunBuildConfig } from 'bun'
 import chalk from 'chalk'
 import fs from 'fs'
@@ -65,14 +66,14 @@ export async function buildPackage(options: BuildOptions) {
     }
 
     console.log(`Using package build script for ${name}...`)
-    const process = Bun.spawn(['bun', 'run', 'build'], {
+    const build = await runAsync('bun', ['run', 'build'], {
       cwd: packagePath,
       env: { ...Bun.env, VERSION: version },
-      stderr: 'inherit',
-      stdout: 'inherit',
     })
+    if (build.stdout !== '') process.stdout.write(build.stdout)
+    if (build.stderr !== '') process.stderr.write(build.stderr)
 
-    const success = await process.exited === 0
+    const success = build.exitCode === 0
     if (!success) {
       throw new Error(`Package build script failed for ${name}`)
     }
@@ -178,13 +179,13 @@ export async function buildPackage(options: BuildOptions) {
 
     // Generate types with temporary config
     console.log('Generating TypeScript declarations...')
-    const tsc = Bun.spawn(['tsc', '--project', tempTsConfigPath], {
+    const tsc = await runAsync('tsc', ['--project', tempTsConfigPath], {
       cwd: packagePath,
-      stderr: 'inherit',
-      stdout: 'inherit',
     })
+    if (tsc.stdout !== '') process.stdout.write(tsc.stdout)
+    if (tsc.stderr !== '') process.stderr.write(tsc.stderr)
 
-    const typesSuccess = await tsc.exited === 0
+    const typesSuccess = tsc.exitCode === 0
 
     // Clean up temporary config
     await Bun.write(tempTsConfigPath, '')

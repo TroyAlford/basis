@@ -31,7 +31,7 @@ No input form gets its own executor or database path. A query is either compiled
 - There is no separate identity field such as `ownerId`; identity is the reference's canonical target `id`.
 - Unknown, incompatible, navigation-only, and physical storage names are rejected before SQL execution.
 
-Current predicates resolve root/effective/descendant scalar fields, model-validated singular reference paths, collection comparisons over inverse and named N:M navigations, and native Array/opaque JSON operations.
+Current predicates resolve root/effective/descendant scalar fields, model-validated singular reference paths, nested and composed collection comparisons over inverse and named N:M navigations, native Array/opaque JSON operations, the `$me` actor sentinel, and field-to-field comparison operands.
 
 ## Input forms
 
@@ -60,7 +60,39 @@ The source form expresses the same predicate tree with `$` operators or their sy
 where: "score >= 5 $and score < 10 $and title != 'Draft'"
 ```
 
-`$and` and `$or` require a non-empty `filters` array. `$not` is unary and requires exactly one child. String source supports `!` and `$not` as compositional negation, grouping parentheses, and the symbolic aliases `=`, `>`, `>=`, `<`, `<=`, `!=`, `<>`, and `~=` (the exact alias of `$contains`). Empty or whitespace-only source is equivalent to an empty structured object: it adds no predicate.
+`$and` and `$or` require a non-empty `filters` array. `$not` is unary and requires exactly one child. String source supports `!` and `$not` as compositional negation, grouping parentheses, and the symbolic aliases `=`, `>`, `>=`, `<`, `<=`, `!=`, `<>`, and `~=` (the exact alias of `$contains`). The case-insensitive keywords `AND`, `OR`, and `NOT` are accepted as the same logical operators. Empty or whitespace-only source is equivalent to an empty structured object: it adds no predicate.
+
+## Actor presence and field operands
+
+`$me` is the verified actor identity, or `NULL` for anonymous requests. It is normally a right-hand operand (`owner = $me`). The same predicate engine also accepts it as a presence check on the left:
+
+```ts
+where: '$me != null'            // any authenticated actor
+where: { field: '$me', operator: '$ne', value: null }
+```
+
+`$me = null` is the anonymous complement. These are explicit predicates, not a security role; omitting authorization still denies every request.
+
+A comparison may reference another field or path on the right, either as a bare path in source or as a `$field` operand:
+
+```ts
+where: 'revision = null OR owner = revision.owner'
+where: { field: 'owner', operator: '$eq', value: { $field: 'revision.owner' } }
+```
+
+Both sides must resolve to comparable value families, and unknown or non-reference intermediate paths fail closed. Field operands are not accepted by string `$contains`, array set operators, or `$empty`.
+
+## Nested and composed collections
+
+Collection predicates resolve relative to the occurrence being compared, so a member may itself contain a collection comparison, and a singular reference may precede a collection:
+
+```ts
+'pets $contains (toys $contains (title = "ball"))'
+'owner.pets $contains (age > 10)'
+'section.document.organization.members $contains (id = $me)'
+```
+
+Grouping inside one `$contains` ties every conjunct to the same member occurrence: `members $contains (id = $me AND membership.role = "Owner")` must find one member satisfying both. Separate `$contains` clauses are independent existential requirements and may match different members. Depth and work remain bounded by the canonical compiler.
 
 Source errors retain lexer/parser offsets. Current normalizer errors throw the first diagnostic with its source offset; the accepted end-state remains fail-closed for every diagnostic and never executes a partially normalized query.
 

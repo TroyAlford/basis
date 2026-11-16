@@ -100,5 +100,5 @@ describe('interrupted database cutover recovery', () => {
       expect(clean).toBe(true)
       await expect(stat(install)).rejects.toMatchObject({ code: 'ENOENT' })
     }
-  }, 240_000)
+  }, 15_000)
 })

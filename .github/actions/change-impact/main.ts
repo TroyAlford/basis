@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 /* eslint-disable no-console -- this is an operator-facing CLI and GitHub Action entrypoint. */
+import { Logger } from 'basis/logger'
+import { run } from 'basis/utilities'
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, extname, join, relative, resolve, sep } from 'node:path'
@@ -114,6 +116,8 @@ export interface AnalyzeOptions {
 }
 
 const JS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'])
+/** Internal git plumbing must not pollute the CLI's JSON output. */
+const silent = new Logger({ silent: true })
 const LOADERS: Record<string, 'ts' | 'tsx' | 'js' | 'jsx'> = {
   '.cjs': 'js',
   '.js': 'js',
@@ -176,12 +180,12 @@ function policyFromBase(cwd: string, mergeBase: string, configPath: string): str
  * @returns Standard output.
  */
 function git(args: string[], cwd: string): string {
-  const result = Bun.spawnSync(['git', ...args], { cwd, stderr: 'pipe', stdout: 'pipe' })
+  const result = run('git', args, { cwd, logger: silent })
   if (result.exitCode !== 0) {
-    const detail = new TextDecoder().decode(result.stderr).trim()
+    const detail = result.stderr.trim()
     throw new Error(`git ${args.join(' ')} failed${detail ? `: ${detail}` : ''}`)
   }
-  return new TextDecoder().decode(result.stdout)
+  return result.stdout
 }
 
 /**

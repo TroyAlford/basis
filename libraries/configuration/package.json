@@ -1,6 +1,6 @@
 {
   "name": "@basis/configuration",
-  "description": "Typed configuration, secret reads, peer-dependency checks, and subprocess execution for first-party applications.",
+  "description": "Typed configuration, secret reads, and peer-dependency checks for first-party applications.",
   "exports": {
     ".": "./index.ts"
   },

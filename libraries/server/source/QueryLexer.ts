@@ -184,6 +184,12 @@ export const QueryLexer = {
       }
 
       if (IDENTIFIER_START.test(character)) {
+        const keyword = keywordOperatorToken(source, index)
+        if (keyword) {
+          tokens.push(keyword)
+          index = keyword.end
+          continue
+        }
         const token = fieldToken(source, index, diagnostics)
         tokens.push(token)
         index = token.end
@@ -267,6 +273,25 @@ function escape(character: string): string {
     case 't': return '\t'
     default: return character
   }
+}
+
+/**
+ * Read a case-insensitive logical keyword operator.
+ * @param source - Query source.
+ * @param start - Identifier offset.
+ * @returns The operator token, or undefined when the identifier is not a logical keyword.
+ */
+function keywordOperatorToken(source: string, start: number): Token | undefined {
+  let end = start
+  while (end < source.length && IDENTIFIER_PART.test(source[end] as string)) end += 1
+  const raw = source.slice(start, end)
+  const operator = match(raw.toLowerCase())
+    .when('and').then(QueryOperator.Logical.And)
+    .when('or').then(QueryOperator.Logical.Or)
+    .when('not').then(QueryOperator.Logical.Not)
+    .else(undefined)
+  if (operator === undefined) return undefined
+  return { end, operator, raw, start, type: TokenType.Operator, value: raw }
 }
 
 /**

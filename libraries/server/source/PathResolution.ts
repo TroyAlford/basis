@@ -1,0 +1,197 @@
+import type { DerivedCollectionDefinition, EffectiveFieldDefinition, EntityDefinition, EntityReferenceFieldDefinition, QueryFieldDefinition } from './EntityDefinitions'
+import { FieldType, identityDefinition } from './EntityDefinitions'
+
+/** Maximum singular-reference hops in one Graph path. */
+export const MAX_GRAPH_PATH_DEPTH = 8
+
+/** One canonical path-resolution failure. */
+export type PathFailure =
+  | { readonly entity: string, readonly kind: 'unknown', readonly path: string }
+  | { readonly entity: string, readonly kind: 'non-reference', readonly path: string, readonly segment: string }
+  | { readonly kind: 'depth', readonly path: string }
+
+/** Entity lookup used while resolving a path. */
+export interface PathResolutionOptions {
+  /** Resolve one entity by name. */
+  readonly resolve: (name: string) => EntityDefinition | undefined,
+}
+
+/** One traversed singular reference. */
+export interface FieldPathHop {
+  /** Reference field that was traversed. */
+  readonly field: EntityReferenceFieldDefinition & { readonly owner: string },
+  /** Logical path to the reference. */
+  readonly path: string,
+}
+
+/** One resolved field or reference path. */
+export interface FieldPathResolution {
+  /** The terminal value field exposed to predicates. */
+  readonly field: QueryFieldDefinition,
+  /** Singular references traversed before the terminal field. */
+  readonly hops: readonly FieldPathHop[],
+  /** Whether the terminal is a reference identity. */
+  readonly identity: boolean,
+  /** Normalized path segments. */
+  readonly segments: readonly string[],
+  /** The terminal effective field, including a reference whose identity was selected. */
+  readonly terminal: EffectiveFieldDefinition,
+}
+
+/** One resolved collection path. */
+export interface CollectionPathResolution {
+  /** Collection navigation. */
+  readonly collection: DerivedCollectionDefinition,
+  /** Entity exposing the collection. */
+  readonly owner: EntityDefinition,
+  /** Singular-reference prefix before the collection, or an empty string. */
+  readonly prefix: string,
+}
+
+/** One resolved collection member field. */
+export interface CollectionMemberResolution {
+  /** Member field exposed to the collection predicate. */
+  readonly field: QueryFieldDefinition,
+  /** Whether the member is a named-relationship-owned property. */
+  readonly relationshipProperty: boolean,
+}
+
+/**
+ * Resolve one field or dotted reference path through the canonical Graph model.
+ * @param entity - Entity where the path starts.
+ * @param path - Logical field or dotted reference path.
+ * @param options - Entity lookup.
+ * @returns The resolved terminal field, or a failure.
+ */
+export function resolveFieldPath(
+  entity: EntityDefinition,
+  path: string,
+  options: PathResolutionOptions,
+): FieldPathResolution | PathFailure {
+  const segments = path.split('.')
+  if (segments.some(segment => segment.length === 0)) {
+    return { entity: entity.name, kind: 'unknown', path }
+  }
+  const hops: FieldPathHop[] = []
+  let current = entity
+  let logical = ''
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index] as string
+    logical = logical === '' ? segment : `${logical}.${segment}`
+    const field = current.effectiveFields.find(candidate => candidate.name === segment)
+    if (!field) return { entity: current.name, kind: 'unknown', path }
+    if (field.type !== FieldType.Entity) {
+      return { entity: current.name, kind: 'non-reference', path, segment }
+    }
+    if (index === segments.length - 2 && segments[segments.length - 1] === 'id') {
+      return {
+        field: { name: path, type: FieldType.ID },
+        hops,
+        identity: true,
+        segments,
+        terminal: field,
+      }
+    }
+    if (hops.length >= MAX_GRAPH_PATH_DEPTH) return { kind: 'depth', path }
+    hops.push({ field, path: logical })
+    const target = field.target === 'Entity' ? identityDefinition() : options.resolve(field.target)
+    if (!target) return { entity: current.name, kind: 'unknown', path }
+    current = target
+  }
+  const terminalName = segments[segments.length - 1] as string
+  const terminal = current.effectiveFields.find(candidate => candidate.name === terminalName)
+  if (!terminal) return { entity: current.name, kind: 'unknown', path }
+  if (terminal.type === FieldType.Entity) {
+    return {
+      field: { name: path, type: FieldType.ID },
+      hops,
+      identity: true,
+      segments,
+      terminal,
+    }
+  }
+  return {
+    field: { ...terminal, name: path },
+    hops,
+    identity: false,
+    segments,
+    terminal,
+  }
+}
+
+/**
+ * Resolve one collection navigation, including composed reference prefixes.
+ * @param entity - Entity where the path starts.
+ * @param path - Collection name or dotted reference path.
+ * @param options - Entity lookup.
+ * @returns The resolved collection, or a failure.
+ */
+export function resolveCollectionPath(
+  entity: EntityDefinition,
+  path: string,
+  options: PathResolutionOptions,
+): CollectionPathResolution | PathFailure | undefined {
+  const direct = entity.collections.find(collection => collection.name === path)
+  if (direct) return { collection: direct, owner: entity, prefix: '' }
+  const segments = path.split('.')
+  if (segments.some(segment => segment.length === 0)) {
+    return { entity: entity.name, kind: 'unknown', path }
+  }
+  const prefix = segments.slice(0, -1).join('.')
+  const resolved = resolveFieldPath(entity, prefix, options)
+  if ('kind' in resolved) return resolved
+  if (resolved.terminal.type !== FieldType.Entity) return undefined
+  const owner = resolved.terminal.target === 'Entity'
+    ? identityDefinition()
+    : options.resolve(resolved.terminal.target)
+  if (!owner) return { entity: entity.name, kind: 'unknown', path }
+  const collection = owner.collections.find(candidate => candidate.name === segments[segments.length - 1])
+  return collection ? { collection, owner, prefix } : undefined
+}
+
+/**
+ * Resolve one member field inside a collection predicate.
+ * @param collection - Collection navigation.
+ * @param target - Collection target entity view.
+ * @param path - Member path or relationship-owned property.
+ * @param options - Entity lookup.
+ * @returns The resolved member field, or a failure.
+ */
+export function resolveCollectionMember(
+  collection: DerivedCollectionDefinition,
+  target: EntityDefinition,
+  path: string,
+  options: PathResolutionOptions,
+): CollectionMemberResolution | PathFailure {
+  const normalized = path === '@' ? 'id' : path.startsWith('@.') ? path.slice(2) : path
+  if (collection.kind === 'relationship') {
+    const prefix = `${lowerFirst(collection.relationship.name)}.`
+    if (normalized.startsWith(prefix)) {
+      const property = normalized.slice(prefix.length)
+      const field = collection.relationship.fields.find(candidate => candidate.name === property)
+      if (!field) return { entity: collection.relationship.name, kind: 'unknown', path: normalized }
+      return { field: { ...field, name: normalized }, relationshipProperty: true }
+    }
+  }
+  const resolved = resolveFieldPath(target, normalized, options)
+  if ('kind' in resolved) return resolved
+  return { field: resolved.field, relationshipProperty: false }
+}
+
+/**
+ * Normalize a field type to its comparable value family.
+ * @param type - Declared field type.
+ * @returns The comparable field type.
+ */
+export function comparableFieldType(type: FieldType): FieldType {
+  return type === FieldType.Enum ? FieldType.String : type
+}
+
+/**
+ * Lower the first character of a name.
+ * @param value - Name to lower.
+ * @returns The lower-cased name.
+ */
+function lowerFirst(value: string): string {
+  return value.length === 0 ? value : `${value[0]?.toLowerCase()}${value.slice(1)}`
+}

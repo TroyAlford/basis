@@ -1,5 +1,5 @@
-import { run as runCommand } from 'basis/configuration'
 import { tempDirectory } from 'basis/testing'
+import { run as runCommand } from 'basis/utilities'
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -65,7 +65,7 @@ test(${JSON.stringify(label)}, async () => {
   const { database } = await useDatabaseFixture(${JSON.stringify(label)})
   expect(database.closed).toBe(false)
 ${body}
-}, 120_000)
+}, 20_000)
   `.trim()
 }
 
@@ -130,7 +130,6 @@ async function run(
     env: {
       ...process.env,
       BASIS_DATABASE_ACTIVITY_LOG: target.activity,
-      BASIS_DATABASE_FIXTURE_EPHEMERAL: '1',
       ...env,
     },
     stderr: 'pipe',
@@ -178,6 +177,5 @@ describe('database fixture lifecycle', () => {
     expect(result.activity.stops).toHaveLength(1)
     expect(result.activity.starts[0]?.split(' ')[1]).toBe(result.activity.stops[0]?.split(' ')[1])
     expectRemoved(result.activity)
-  }, 120_000)
-
+  }, 20_000)
 })

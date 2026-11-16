@@ -99,6 +99,7 @@ async function main(): Promise<number> {
       }).apply()
     }
     const head = new DatabaseRelease({
+      allowSourceDrift: true,
       graph: headGraph,
       migrations: join(root, MIGRATIONS),
     })

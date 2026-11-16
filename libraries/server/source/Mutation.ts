@@ -9,6 +9,56 @@ import type { Filter } from './Predicate'
 /** Maximum records accepted by one bulk mutation. */
 export const MAX_MUTATION_BATCH = 1_000
 
+/** Final Graph-native subject state inside one native transaction. */
+type SubjectState = 'deleted' | 'written'
+/** Entity ids touched by Graph-native verbs inside one native transaction. */
+const affectedSubjects = new WeakMap<object, Map<string, Map<string, SubjectState>>>()
+
+/**
+ * Record one Graph-native subject write or delete for transaction-final validation.
+ * @param sql - Transaction-scoped SQL client.
+ * @param entity - Concrete entity name.
+ * @param id - Written identity.
+ * @param state - Final operation on the identity.
+ */
+function recordSubject(sql: object, entity: string, id: string, state: SubjectState = 'written'): void {
+  const subjects = affectedSubjects.get(sql) ?? new Map<string, Map<string, SubjectState>>()
+  const ids = subjects.get(entity) ?? new Map<string, SubjectState>()
+  ids.set(id, state)
+  subjects.set(entity, ids)
+  affectedSubjects.set(sql, subjects)
+}
+
+/**
+ * Read the final Graph-native subject states inside one native transaction.
+ * @param sql - Transaction-scoped SQL client.
+ * @returns Entity names mapped to identities and their final operation.
+ */
+function writtenSubjects(sql: object): ReadonlyMap<string, ReadonlyMap<string, SubjectState>> {
+  return affectedSubjects.get(sql) ?? new Map<string, ReadonlyMap<string, SubjectState>>()
+}
+
+/**
+ * Snapshot the Graph-native subject state for one native transaction.
+ *
+ * The returned restore function puts the tracker back exactly as it was before
+ * a savepoint. Nested savepoints each hold their own deep snapshot, so an inner
+ * rollback cannot erase or preserve an outer scope's writes.
+ * @param sql - Transaction-scoped SQL client.
+ * @returns A restore function for the current tracker state.
+ */
+export function snapshotWrittenSubjects(sql: object): () => void {
+  const current = affectedSubjects.get(sql)
+  const snapshot = new Map<string, Map<string, SubjectState>>()
+  if (current) {
+    for (const [entity, ids] of current) snapshot.set(entity, new Map(ids))
+  }
+  return () => {
+    if (snapshot.size === 0) affectedSubjects.delete(sql)
+    else affectedSubjects.set(sql, snapshot)
+  }
+}
+
 /** Stable mutation failure categories. */
 export type MutationErrorCode =
   | 'authorization'
@@ -197,6 +247,56 @@ export function mutationRunner(entities: EntityDefinitions, sql: BunSQL): Mutati
 }
 
 /**
+ * Validate the transaction-final state of every Graph-native subject written
+ * in one native transaction.
+ *
+ * Validation runs after the caller's callback resolves and before commit. A
+ * FALSE or UNKNOWN predicate for one surviving written subject aborts the whole
+ * transaction through the standard mutation error boundary. Deleted subjects are
+ * skipped by recorded mutation intent, never by probing visibility. Surviving
+ * subjects are evaluated through their Graph-managed SECURITY DEFINER Boolean
+ * helper, which reads the transaction-final row regardless of the writer's final
+ * READ permission and returns only a Boolean.
+ * @param entities - Canonical entity definitions.
+ * @param sql - Native transaction client.
+ * @throws {MutationError} When a surviving written subject violates a validation constraint.
+ */
+export async function validateTransactionState(
+  entities: EntityDefinitions,
+  sql: BunSQL,
+): Promise<void> {
+  const subjects = writtenSubjects(sql)
+  if (subjects.size === 0) return
+  for (const [name, states] of subjects) {
+    const constraints = entities.validationConstraints(name)
+    if (constraints.length === 0) continue
+    const definition = entities.entity(name)
+    if (!definition || definition.abstract) continue
+    for (const [id, state] of states) {
+      if (state === 'deleted') continue
+      for (const constraint of constraints) {
+        if (!constraint.validator) {
+          throw new MutationError(
+            'infrastructure',
+            `Validation constraint "${constraint.name}" has no Graph-managed validator`,
+          )
+        }
+        const [result] = await execute(sql, {
+          sql: `SELECT ${constraint.validator}($1) AS "valid"`,
+          values: [id],
+        })
+        if (result?.valid !== true) {
+          throw new MutationError(
+            'constraint',
+            `Validation constraint "${constraint.name}" on "${constraint.owner}" failed`,
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
  * Create one entity or a finite synchronous batch atomically.
  * @param options - Canonical definitions and transaction client.
  * @param options.entities - Canonical entity definitions.
@@ -218,7 +318,10 @@ async function create(
     value,
     single ? '/values' : `/values/${index}`,
   ))
-  for (const item of prepared) await insert(entities, sql, definition, item)
+  for (const item of prepared) {
+    await insert(entities, sql, definition, item)
+    recordSubject(sql, entity, item.id)
+  }
   if (!single) return { created: prepared.length }
   const [item] = prepared
   if (!item) return { created: 0 }
@@ -248,6 +351,7 @@ async function edit(
   const normalized = prepareChanges(entities, definition, changes, '/changes')
   const matches = await selectMatches({ entities, sql }, definition, filter)
   const mutable = await applyEdit({ entities, sql }, definition, matches, normalized)
+  for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
   if (mutable.length !== 1) return { edited: mutable.length }
   const [identity] = mutable
   if (!identity) return { edited: 0 }
@@ -278,7 +382,9 @@ async function remove(
   for (const [leaf, identities] of groupByIdentity(matches)) {
     const ids = identities.map(identity => identity.id)
     const ancestry = entities.ancestry(leaf).slice(1).filter(table => table !== 'Entity')
-    deleted += (await deleteChain(sql, leaf, ancestry, ids)).length
+    const deletedIds = await deleteChain(sql, leaf, ancestry, ids)
+    for (const id of deletedIds) recordSubject(sql, leaf, id, 'deleted')
+    deleted += deletedIds.length
   }
   return { deleted }
 }
@@ -318,6 +424,7 @@ async function upsert(
   }
   const changes = prepareChanges(entities, definition, values, '/values')
   await applyChanges({ entities, sql }, definition, mutable, changes)
+  for (const identity of mutable) recordSubject(sql, identity.entity, identity.id)
   const [identity] = mutable
   if (!identity) throw new MutationError('infrastructure', 'Upsert edit lost its mutable row')
   return {
@@ -359,6 +466,7 @@ async function createUpsert(
       )
     }
     await execute(sql, { sql: `RELEASE SAVEPOINT ${quote(name)}`, values: [] })
+    recordSubject(sql, definition.name, item.id)
     return {
       created: 1,
       edited: 0,
@@ -621,6 +729,12 @@ function validateValue(
     if (value instanceof Date) return value
     if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
       throw new MutationError('validation', `Field "${field.name}" must be a timestamp`, { path })
+    }
+    return value
+  }
+  if (field.type === FieldType.Enum) {
+    if (typeof value !== 'string') {
+      throw new MutationError('validation', `Field "${field.name}" must be a string enum value`, { path })
     }
     return value
   }

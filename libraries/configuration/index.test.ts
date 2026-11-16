@@ -2,6 +2,7 @@ import { tempDirectory } from 'basis/testing'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { run } from '../utilities'
 import * as configuration from './index'
 
 /** Marker variable the import-side-effect fixtures write into `.env`. */
@@ -31,13 +32,9 @@ function dotenvFixture(): string {
  * @returns The child's trimmed standard output.
  */
 function runScript(cwd: string, script: string): string {
-  const result = Bun.spawnSync([process.execPath, '--no-env-file', '-e', script], {
-    cwd,
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
-  if (result.exitCode !== 0) throw new Error(`script failed: ${result.stderr.toString()}`)
-  return result.stdout.toString().trim()
+  const result = run(process.execPath, ['--no-env-file', '-e', script], { cwd })
+  if (result.exitCode !== 0) throw new Error(`script failed: ${result.stderr}`)
+  return result.stdout.trim()
 }
 
 afterEach(() => {
@@ -48,25 +45,12 @@ describe('basis/configuration public surface', () => {
   test('exposes only the supported primitives', () => {
     expect(Object.keys(configuration).sort()).toEqual([
       'Environment',
-      'run',
-      'runAsync',
       'secret',
     ])
   })
 })
 
 describe('import side effects', () => {
-  test('importing and using run alone does not load dotenv files', () => {
-    const directory = dotenvFixture()
-    const script = [
-      `import { run } from ${ENTRY}`,
-      "run('true', [], { logger: { error() {}, info() {} } })",
-      `process.stdout.write(process.env.${SENTINEL} ?? 'unset')`,
-    ].join('; ')
-
-    expect(runScript(directory, script)).toBe('unset')
-  })
-
   test('importing secret alone does not load dotenv files', () => {
     const directory = dotenvFixture()
     const script = [

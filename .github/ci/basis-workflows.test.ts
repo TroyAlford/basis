@@ -1,3 +1,4 @@
+import { run } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -58,9 +59,8 @@ function runGate(
   code: number,
   output: string,
 } {
-  const process = Bun.spawnSync(['bash', '-c', script], {
+  const process = run('bash', ['-c', script], {
     env: {
-      ...Bun.env,
       DECISION: '{"decision":true}',
       DECISION_HASH: 'hash',
       LANES: JSON.stringify({
@@ -73,13 +73,11 @@ function runGate(
       NEEDS: JSON.stringify(needs),
       ...extra,
     },
-    stderr: 'pipe',
-    stdout: 'pipe',
   })
 
   return {
-    code: process.exitCode ?? -1,
-    output: `${new TextDecoder().decode(process.stdout)}${new TextDecoder().decode(process.stderr)}`,
+    code: process.exitCode,
+    output: `${process.stdout}${process.stderr}`,
   }
 }
 
@@ -96,16 +94,13 @@ function runLaneStep(decision: unknown): { code: number, output: string } {
   try {
     writeFileSync(join(directory, 'impact-decision.json'), JSON.stringify(decision))
     writeFileSync(outputFile, '')
-    const process = Bun.spawnSync(['bash', '-c', step.run], {
+    const process = run('bash', ['-c', step.run], {
       cwd: directory,
-      env: { ...Bun.env, GITHUB_OUTPUT: outputFile, POLICY_PRESENT: 'true' },
-      stderr: 'pipe',
-      stdout: 'pipe',
+      env: { GITHUB_OUTPUT: outputFile, POLICY_PRESENT: 'true' },
     })
     return {
-      code: process.exitCode ?? -1,
-      output: `${new TextDecoder().decode(process.stdout)}${new TextDecoder().decode(process.stderr)}` +
-        readFileSync(outputFile, 'utf8'),
+      code: process.exitCode,
+      output: `${process.stdout}${process.stderr}` + readFileSync(outputFile, 'utf8'),
     }
   } finally {
     rmSync(directory, { force: true, recursive: true })

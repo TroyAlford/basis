@@ -10,6 +10,13 @@ title: Typed Authoring & Generated Products
 import { Cardinality, Constraint, FieldType, Graph } from 'basis/server'
 
 export default new Graph({
+  enums: {
+    AccessLevel: {
+      editor: 'Can edit resources.',
+      owner: 'Can manage resources and membership.',
+      viewer: 'Can view resources.',
+    },
+  },
   entities: [
     {
       fields: [
@@ -25,9 +32,16 @@ export default new Graph({
       name: 'User',
     },
     {
+      constraints: [{
+        description: 'A retired note is never active.',
+        name: 'retiredNotesAreInactive',
+        type: Constraint.Validation,
+        where: 'retiredAt = null OR active = false',
+      }],
       fields: [
         { field: 'title', type: FieldType.String },
         { default: false, field: 'active', type: FieldType.Boolean },
+        { field: 'access', type: FieldType.Enum, enum: 'AccessLevel' },
         { field: 'email', type: FieldType.String, unique: true },
         { field: 'retiredAt', nullable: true, type: FieldType.Timestamp },
         { field: 'owner', inverse: 'notes', target: 'User', type: FieldType.Entity },
@@ -41,7 +55,7 @@ export default new Graph({
         description: 'Each user may only have one Membership per Campaign.',
         fields: ['userId', 'campaignId'],
         name: 'One Membership Per Campaign',
-        type: Constraint.Uniqueness,
+        type: Constraint.Structural,
       }],
       fields: [
         { field: 'userId', target: 'User', type: FieldType.Entity },
@@ -54,7 +68,11 @@ export default new Graph({
 })
 ```
 
-The typed declaration accepts the same entity, relationship, array, JSON, reference, inverse, MTI, identity-format, nullable, default, and uniqueness shapes as canonical JSON. There is no decorator syntax, second registry, or alternative validator. Omitting `nullable` preserves the non-null default for scalar, array, and JSON fields; reference fields remain nullable by default unless `nullable: false` is declared. An optional `default` supplies the column default and must match the declared field type. `unique: true` and named `Constraint.Uniqueness` declarations normalize into PostgreSQL unique indexes through the same Graph/DDL path. `Number` fields may declare inclusive `minimum`/`maximum`; `String` fields may declare `minLength`/`maxLength`. These bounds are canonical Graph metadata, validation constraints for mutations, and PostgreSQL `CHECK` constraints, not a mutation-only schema. JSON remains an alternate input syntax for tools that load a parsed document; it feeds the same `Graph` construction path. A `Graph` is passed directly to `Server.graph(graph)`.
+The typed declaration accepts the same entity, relationship, enum, array, JSON, reference, inverse, MTI, identity-format, nullable, default, and uniqueness shapes as canonical JSON. There is no decorator syntax, second registry, or alternative validator. Omitting `nullable` preserves the non-null default for scalar, array, and JSON fields; reference fields remain nullable by default unless `nullable: false` is declared. An optional `default` supplies the column default and must match the declared field type. `unique: true` and named `Constraint.Structural` declarations normalize into PostgreSQL unique indexes through the same Graph/DDL path. `Number` fields may declare inclusive `minimum`/`maximum`; `String` fields may declare `minLength`/`maxLength`. These bounds are canonical Graph metadata, validation constraints for mutations, and PostgreSQL `CHECK` constraints, not a mutation-only schema. JSON remains an alternate input syntax for tools that load a parsed document; it feeds the same `Graph` construction path. A `Graph` is passed directly to `Server.graph(graph)`.
+
+The Graph-root `enums` dictionary maps each persisted string value directly to its description. An `Enum` field names one enum and persists as text with a named allowed-value `CHECK`; TypeScript emits a real `enum` with JSDoc per value, and JSON Schema emits one reusable `$defs` entry referenced by every consuming field. Editing only a description changes generated contracts without a database migration.
+
+`Constraint.Validation` adds one named, described positive valid-state predicate. Its `where` uses the canonical predicate grammar, including field-to-field paths such as `revision.owner`, and is evaluated against the transaction-final state of Graph-native `create`/`edit`/`upsert`/`delete` writes before `db.tx` commits. `TRUE` passes; `FALSE` or `UNKNOWN` fails and rolls back the whole transaction. This is application-authored Graph validation, not a generated trigger, database-side predicate runtime, or a second transaction manager. Entity constraints apply to affected Graph-native records and their descendants; relationship constraints use the same paths but have no Graph-native edge-write boundary to enforce today.
 
 Every entity inherits the update-tracking fields `lastUpdatedBy` and `lastUpdatedAt` in addition to the universal `id`, `name`, and `entity` fields. The constructed `graph.definitions` is the canonical model. Its narrow ontology queries are intentionally public: `ancestry(name)` returns the entity through its ancestors to `Entity`, `isA(name, ancestor)` includes identity, and `concreteDescendants(name)` returns concrete leaves in declaration order. A concrete entity is its own concrete descendant; abstract names are never returned as leaves; `Entity` covers every concrete leaf. Consumers use these queries instead of walking parent links themselves.
 
@@ -83,7 +101,7 @@ export default emitter({ extension: 'txt', folder: 'custom' }, graph => [{
 
 - Built-in `TypeScriptEmitter` writes `generated/typescript/index.ts`; `JsonSchemaEmitter` writes `generated/json-schema/schemas.json`. Application emitters own their extension, folder, file names, and content.
 - `basis/codegen` also exports the pure content generators `generateTypes(graph)` and `generateJSONSchemas(graph)` for consumers that own their own file emission.
-- The JSON Schema emitter describes canonical entities only: one `$defs` entry per entity with properties, types, nullability, numeric/string bounds, identity formats, and identity-only entity references. Every stored field is required in the full-entity representation; `null` is expressed through the property value, not by omitting the property. Inheritance composes through `allOf`/`$ref`. It does not emit mutation-operation variants or express authorization and runtime business rules; Basis mutation validation and PostgreSQL RLS remain the authorities for those decisions. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
+- The JSON Schema emitter describes canonical entities only: one `$defs` entry per entity with properties, types, nullability, numeric/string bounds, identity formats, identity-only entity references, and one reusable `$defs` entry per named Graph enum with its persisted values and per-value descriptions. Every stored field is required in the full-entity representation; `null` is expressed through the property value, not by omitting the property. Inheritance composes through `allOf`/`$ref`. It does not emit mutation-operation variants or express authorization and runtime business rules; Basis mutation validation and PostgreSQL RLS remain the authorities for those decisions. Consumers can use `Partial<T>`, `Pick<T, ...>`, or an application-owned projection type.
 - `basis/visualization` emits logical and physical Mermaid ERD source. Render it with the existing `Mermaid` component from `basis/react`; visualization never becomes a server runtime dependency.
 
 Emitter modules use the small `emitter({ extension, folder }, generate)` contract. The factory returns an awaitable `(graph, root?) => Promise<void>` and writes each generated file beneath the caller's root; the module owns its extension, folder, file names, and format-specific content. The output root defaults to the process working directory, and declared destinations cannot escape it. The conventional lifecycle invokes application emitters in sorted filename order, so repeated runs overwrite deterministic paths; no stale files are deleted.
@@ -102,32 +120,32 @@ export enum $BasisEntities {
   Note = 'Note',
 }
 
-export interface $BasisReference {
+export interface Reference {
   readonly entity: $BasisEntities
   readonly id: string
   readonly name: string
 }
 
-export interface $BasisEntity extends $BasisReference {
+export interface Entity extends Reference {
   readonly lastUpdatedAt: string | null
-  readonly lastUpdatedBy: $BasisReference | null
+  readonly lastUpdatedBy: Reference | null
 }
 
-export interface User extends $BasisEntity {
+export interface User extends Entity {
   readonly entity: $BasisEntities.User
   readonly email: string
 }
 
-export interface Note extends $BasisEntity {
+export interface Note extends Entity {
   readonly entity: $BasisEntities.Note
   readonly title: string
-  readonly owner: $BasisReference | null
+  readonly owner: Reference | null
   readonly tags: readonly string[]
 }
 
 ```
 
-Every entity extends `$BasisEntity`, which implements the shared `$BasisReference` shape (`id`, `name`, `entity`). Child entities extend their generated direct parent and declare only locally owned fields, while concrete discriminators narrow the abstract parent union. Singular references use `$BasisReference`; there are no per-entity reference types. Generated TypeScript describes entities only; it does not define mutation payloads or validate operations.
+Every entity extends `Entity`, which implements the shared `Reference` shape (`id`, `name`, `entity`). Child entities extend their generated direct parent and declare only locally owned fields, while concrete discriminators narrow the abstract parent union. Singular references use `Reference`; there are no per-entity reference types. Generated TypeScript describes entities only; it does not define mutation payloads or validate operations.
 
 The runtime `Database` API accepts ordinary object payloads and validates them against the canonical Graph:
 
@@ -154,9 +172,9 @@ The JSON Schema emitter produces one standards-compliant Draft 2020-12 entity do
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$ref": "#/$defs/$Entity",
+  "$ref": "#/$defs/Entity",
   "$defs": {
-    "$Reference": {
+    "Reference": {
       "properties": {
         "entity": { "enum": ["Note", "User"], "type": "string" },
         "id": { "type": "string" },
@@ -165,20 +183,20 @@ The JSON Schema emitter produces one standards-compliant Draft 2020-12 entity do
       "required": ["id", "name", "entity"],
       "type": "object"
     },
-    "$Entity": {
-      "allOf": [{ "$ref": "#/$defs/$Reference" }],
+    "Entity": {
+      "allOf": [{ "$ref": "#/$defs/Reference" }],
       "properties": {
         "lastUpdatedAt": { "anyOf": [{ "format": "date-time", "type": "string" }, { "type": "null" }] },
-        "lastUpdatedBy": { "anyOf": [{ "allOf": [{ "$ref": "#/$defs/$Reference" }, { "properties": { "entity": { "const": "User" } }, "type": "object" }] }, { "type": "null" }] }
+        "lastUpdatedBy": { "anyOf": [{ "allOf": [{ "$ref": "#/$defs/Reference" }, { "properties": { "entity": { "const": "User" } }, "type": "object" }] }, { "type": "null" }] }
       },
       "required": ["lastUpdatedAt", "lastUpdatedBy"],
       "type": "object"
     },
     "Note": {
-      "allOf": [{ "$ref": "#/$defs/$Entity" }],
+      "allOf": [{ "$ref": "#/$defs/Entity" }],
       "properties": {
         "entity": { "const": "Note", "type": "string" },
-        "owner": { "anyOf": [{ "allOf": [{ "$ref": "#/$defs/$Reference" }, { "properties": { "entity": { "const": "User" } }, "type": "object" }] }, { "type": "null" }] },
+        "owner": { "anyOf": [{ "allOf": [{ "$ref": "#/$defs/Reference" }, { "properties": { "entity": { "const": "User" } }, "type": "object" }] }, { "type": "null" }] },
         "title": { "type": "string" }
       },
       "required": ["entity", "title", "owner"],
@@ -251,6 +269,6 @@ erDiagram
 - Use `Entity` fields with `target` for stored references and `Inverse` fields for reciprocal navigation.
 - Use `Cardinality.One` or `Cardinality.Many` on inverse declarations.
 - Keep generated files generated. Edit the canonical authoring source, then regenerate.
-- Generated helper names are collision-safe and isolated from authored entity names: TypeScript helpers use `$Basis*`, and JSON Schema helpers use `$Reference` / `$Entity` under `$defs`. Graph authoring does not reserve names for optional output adapters.
+- Generated helper names are collision-safe: TypeScript and JSON Schema share the generated `Reference` and `Entity` names under `$defs`, and those two names are reserved so authored entities or enums cannot collide with them.
 
 See [Schema Inspection & Planning](./schema.mdx) for the physical compiler and migration workflow.

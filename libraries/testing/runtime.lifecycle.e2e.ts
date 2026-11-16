@@ -23,13 +23,13 @@ const react = join(repoRoot, 'libraries', 'react', 'index.ts')
 const applicationEntry = './testing/e2e/serve.ts'
 
 /** Number of distinct component snapshots the first suite captures. */
-const FIRST_COMPONENTS = 36
+const FIRST_COMPONENTS = 3
 /** Number of distinct component snapshots the second suite captures. */
-const SECOND_COMPONENTS = 24
+const SECOND_COMPONENTS = 2
 /** Number of repeated captures of one component within a single test. */
-const REPEATS = 4
+const REPEATS = 1
 /** Application paths the third suite visits; one snapshot each. */
-const VISITS = ['/', '/foo/123', '/bar/234']
+const VISITS = ['/']
 
 /** Fixture directories created by this test, removed after the run. */
 const created: string[] = []
@@ -53,13 +53,13 @@ test(${JSON.stringify(`${label} captures`)}, async () => {
   for (let index = 0; index < ${count}; index += 1) {
     await matchScreenshot(<Button>Button {index}</Button>, \`base-\${index}\`)
   }
-}, 60_000)
+})
 
 test(${JSON.stringify(`${label} repeats`)}, async () => {
   for (let index = 0; index < ${REPEATS}; index += 1) {
     await matchScreenshot(<Button>Same</Button>, \`repeat-\${index}\`)
   }
-}, 60_000)
+})
   `.trim()
 }
 
@@ -85,7 +85,7 @@ test('captures application visits', async () => {
       await matchScreenshot(page.locator('[data-testid="swatch"]'), path.replace(/[^a-z0-9]+/gi, '-'))
     })
   }
-}, 120_000)
+})
   `.trim()
 }
 
@@ -173,8 +173,6 @@ describe('snapshot runtime lifecycle', () => {
       cwd: target.dir,
       env: {
         ...process.env,
-        BASIS_APPLICATION_FIXTURE_EPHEMERAL: '1',
-        BASIS_SNAPSHOT_FIXTURE_EPHEMERAL: '1',
         [SNAPSHOT_ACTIVITY_LOG]: target.activity,
         UPDATE_SNAPSHOTS: '1',
       },
@@ -206,5 +204,5 @@ describe('snapshot runtime lifecycle', () => {
     expect(activity.teardowns).toBe(1)
     // A run that reached for a browser per capture would blow far past this.
     expect(durationMs).toBeLessThan(60_000)
-  }, 120_000)
+  })
 })

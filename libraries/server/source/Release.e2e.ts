@@ -278,7 +278,7 @@ describe('versioned database releases', () => {
     await writeFile(lock, `${process.pid}\n`, { mode: 0o600 })
     await expect(release.apply()).rejects.toThrow('already locked')
     await unlink(lock)
-  }, 240_000)
+  })
 
   test('a failed candidate leaves the previous release live', async () => {
     const install = tempDirectory('basis-release-failure-')
@@ -411,7 +411,7 @@ describe('versioned database releases', () => {
     expect(correctedResult.changed).toBe(true)
     expect(correctedResult.applied).toEqual([corrected.version])
     expect(await sourceReady(install, graphC, corrected)).toBe(true)
-  }, 240_000)
+  })
 
   test('retries a transient candidate failure without quarantining the release', async () => {
     const install = tempDirectory('basis-release-transient-')
@@ -488,5 +488,5 @@ describe('versioned database releases', () => {
       .filter(name => name.endsWith('.dump'))
       .length).toBe(backupsAfterFailure)
     expect(await sourceReady(install, graphB, artifactB)).toBe(true)
-  }, 240_000)
+  })
 })

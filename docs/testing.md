@@ -40,18 +40,18 @@ Visual snapshots assert appearance; mounted component tests assert behavior; end
 
 A test-lane run is fast and deterministic because the expensive part — the browser — is paid for once and reused:
 
-- one version-and-runtime-named Docker container serves Chromium for the run and is reused by later runs;
+- one run-scoped Docker container serves Chromium for the run and is removed at teardown;
 - exactly **one browser connection** serves every capture;
 - component/JSX snapshots and `app.visit` snapshots share that one browser;
 - the runtime starts on the first capture, never per file, test, assertion, visit, or component;
-- the testing preload closes the browser and contexts once when the run ends; the container is removed only in explicit ephemeral mode.
+- the testing preload closes the browser and contexts once when the run ends and removes the container.
 
 ## Lifecycle
 
 ```mermaid
 flowchart TD
     Run["One test-lane run"] --> First["First capture"]
-    First --> Runtime["Process runtime + persistent Docker"]
+    First --> Runtime["Process runtime + run-scoped Docker"]
     Runtime --> Container["One Docker container<br/>pinned Playwright image"]
     Container --> Server["playwright run-server<br/>published localhost port"]
     Server --> Browser["One browser<br/>chromium.connect(ws)"]
@@ -59,7 +59,7 @@ flowchart TD
     Browser --> Visit["Application captures<br/>app.visit opens a fresh context per visit"]
     Component --> Compare["Compare with the committed PNG<br/>or write it when missing or updating"]
     Visit --> Compare
-    Compare --> Teardown["Preload afterAll<br/>close browser; remove container only when ephemeral"]
+    Compare --> Teardown["Preload afterAll<br/>close browser; remove container"]
 ```
 
 The runtime is memoised on `globalThis`, so every test file in the process resolves the same instance. There is no per-file, per-test, or per-capture browser startup; a run that never captures a screenshot never starts Docker at all.
@@ -72,7 +72,7 @@ Components whose meaningful state only exists after mount — the resolved `Awai
 
 ## Application captures
 
-`useApplication({ entry })` attaches to one detached development server per application identity, starts it on a free loopback port when necessary, waits for readiness, and reuses it across runs with HMR enabled. `app.visit(path, options?, fn)` opens a fresh browser context on the shared browser, applies the deterministic network policy, navigates, and runs the callback. Contexts are cheap: they keep server and browser state from leaking between visits without paying for a new browser. Set `BASIS_APPLICATION_FIXTURE_EPHEMERAL=1` for a run-scoped server that the preload stops; `BASIS_APPLICATION_FIXTURE_ROOT` overrides the persistent fixture directory.
+`useApplication({ entry })` starts one development server per application identity on a free loopback port, waits for readiness, and shares it across the run. The preload stops it at teardown. `app.visit(path, options?, fn)` opens a fresh browser context on the shared browser, applies the deterministic network policy, navigates, and runs the callback. Contexts are cheap: they keep server and browser state from leaking between visits without paying for a new browser.
 
 ```tsx
 // Deck.e2e.ts
@@ -122,7 +122,7 @@ await withIsolatedDatabase('consumer', async database => {
 `bun run test:database` is the ordinary shared-database lane. It starts **one** PostgreSQL container per runner/suite execution, from the immutable seeded test image, and runs every database test file under one Bun invocation:
 
 ```sh
-BASIS_E2E_FAST=1 BASIS_DATABASE_FIXTURE_EPHEMERAL=1 \
+BASIS_E2E_FAST=1 \
   bun test --concurrent --max-concurrency=8 \
   ./libraries/server/source/Database.e2e.ts \
   ./libraries/server/source/DatabaseSeed.e2e.ts \
@@ -132,11 +132,11 @@ BASIS_E2E_FAST=1 BASIS_DATABASE_FIXTURE_EPHEMERAL=1 \
   ./libraries/server/source/Schema.e2e.ts
 ```
 
-The image already contains the 500,000-row seeded dataset in its own data directory. It is pulled once per checksum and rebuilt only when the committed fixture inputs change. The ordinary fixture runs that image without a mounted data volume, then attaches to the same container on later runs. The seeded proof therefore reads the same database instance as every ordinary test instead of starting a second container.
+The image already contains the 500,000-row seeded dataset in its own data directory. It is pulled once per checksum and rebuilt only when the committed fixture inputs change. The ordinary fixture runs that image without a mounted data volume and removes the container at run teardown. The seeded proof therefore reads the same database instance as every ordinary test instead of starting a second container.
 
 The concurrency bound is eight tests against a ten-connection pool, leaving headroom for the fixture's own schema and cleanup work. `--concurrent` overlaps async tests inside a file; files share the same process-wide fixture, so the database is never restarted between files. The suite does not use `--parallel`.
 
-The first run installs the canonical shared schema once and caches one migrated schema per exact entity-definition set. CI sets `BASIS_DATABASE_FIXTURE_EPHEMERAL=1`, so the run makes exactly one cleanup decision and removes the container at the end; no test volume exists. Ordinary tests run inside one reserved transaction, set the cached schema transaction-locally, use savepoints for expected failures, and roll everything back whether the test succeeds or fails. DDL, data, `db.sql`, and entity-rooted `db.query` share that transaction. Cross-transaction tests use an explicitly committed unique schema and drop it in cleanup instead of pretending commit behavior can roll back. Reserved connections used outside a transaction reset `search_path` before they return to the pool. `BASIS_TEST_FIXTURE_ROOT` overrides the persistent fixture directory.
+The first run installs the canonical shared schema once and caches one migrated schema per exact entity-definition set. It also installs the single authorization schema and its deterministic seed rows; authorization tests reserve one transaction, switch to the restricted app role, and roll back, so no test starts a second server or database. Runs are run-scoped by default: the fixture makes exactly one cleanup decision and removes the container and its anonymous volume at the end; no test volume exists. Ordinary tests run inside one reserved transaction, set the cached schema transaction-locally, use savepoints for expected failures, and roll everything back whether the test succeeds or fails. DDL, data, `db.sql`, and entity-rooted `db.query` share that transaction. Cross-transaction tests use an explicitly committed unique schema and drop it in cleanup instead of pretending commit behavior can roll back. Reserved connections used outside a transaction reset `search_path` before they return to the pool. `BASIS_TEST_FIXTURE_ROOT` overrides the fixture directory.
 
 ### Database execution inventory
 
@@ -170,11 +170,11 @@ The matcher normalizes only insignificant whitespace outside quoted text; quotin
 
 Capture always runs in the pinned `mcr.microsoft.com/playwright:v<installed playwright>-noble` image, matching the installed Playwright version, so local development and CI render in the same browser. No host Chromium or operating-system libraries are needed — only a working Docker daemon. The runtime publishes the container's `run-server` to a random localhost port and connects once with `chromium.connect`, exposing the client's loopback so the containerised browser can reach the application server; the container is named from the installed Playwright version and the mounted Playwright runtime identity, and uses no host-network assumption.
 
-The container is named from the installed Playwright version. A normal development run reconnects to that healthy named run-server; an explicit ephemeral run uses a process-unique name and removes it at teardown. Browser contexts remain isolated per visit, and the component capture page remains reused within the process.
+The container is run-scoped: it uses a process-unique name and is removed at teardown. Browser contexts remain isolated per visit, and the component capture page remains reused within the process.
 
 ## Proving the contract
 
-`libraries/testing/runtime.lifecycle.e2e.ts` is the benchmark. It generates several test files — dozens of component snapshots, repeated captures within one test, and multiple `app.visit` snapshots — and runs them in one real child `bun test` process with `BASIS_SNAPSHOT_FIXTURE_EPHEMERAL=1`. The runtime records its lifecycle events to `BASIS_SNAPSHOT_ACTIVITY_LOG`, and the test asserts **one ephemeral container start, one browser connection, and one teardown** for the run, reporting the measured runtime. Normal visual runs attach to the version-named persistent container instead of launching again.
+`libraries/testing/runtime.lifecycle.e2e.ts` is the benchmark. It generates several test files — dozens of component snapshots, repeated captures within one test, and multiple `app.visit` snapshots — and runs them in one real child `bun test` process. The runtime records its lifecycle events to `BASIS_SNAPSHOT_ACTIVITY_LOG`, and the test asserts **one ephemeral container start, one browser connection, and one teardown** for the run, reporting the measured runtime. Visual runs start and remove one run-scoped container.
 
 ## Temp directories
 

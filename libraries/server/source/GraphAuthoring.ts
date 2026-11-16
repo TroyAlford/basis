@@ -20,6 +20,28 @@ export enum Cardinality {
   One = 'One',
 }
 
+/** One authored named enum mapping persisted values to descriptions. */
+export type AuthoredEnum = Readonly<Record<string, string>>
+
+/** Authored named enums keyed by exact enum name. */
+export type AuthoredEnumSource = Readonly<Record<string, AuthoredEnum>>
+
+/** One authored named enum field. */
+export interface AuthoredEnumField {
+  /** Default persisted value. */
+  readonly default?: string,
+  /** Referenced Graph enum name. */
+  readonly enum: string,
+  /** Field name, in camelCase. */
+  readonly field: string,
+  /** Whether the field accepts NULL; omitted means NOT NULL. */
+  readonly nullable?: boolean,
+  /** Enum field type. */
+  readonly type: Authored<FieldType.Enum>,
+  /** Whether the field requires uniqueness. */
+  readonly unique?: true,
+}
+
 /** One authored scalar field. */
 export interface AuthoredScalarField {
   /** Default value for the field. */
@@ -120,14 +142,15 @@ export interface AuthoredInverseField {
 /** Any authored entity field. */
 export type AuthoredField =
   | AuthoredArrayField
+  | AuthoredEnumField
   | AuthoredIdentityField
   | AuthoredInverseField
   | AuthoredJSONField
   | AuthoredReferenceField
   | AuthoredScalarField
 
-/** One authored uniqueness constraint. */
-export interface AuthoredUniquenessConstraint {
+/** One authored structural constraint. */
+export interface StructuralConstraint {
   /** Human-readable diagnostic description. */
   readonly description: string,
   /** Canonical logical fields covered by the constraint. */
@@ -135,11 +158,23 @@ export interface AuthoredUniquenessConstraint {
   /** Human-readable constraint name. */
   readonly name: string,
   /** Constraint discriminator. */
-  readonly type: Constraint.Uniqueness,
+  readonly type: Constraint.Structural,
+}
+
+/** One authored positive valid-state constraint. */
+export interface ValidationConstraint {
+  /** Human-readable diagnostic description. */
+  readonly description: string,
+  /** Human-readable constraint name. */
+  readonly name: string,
+  /** Constraint discriminator. */
+  readonly type: Constraint.Validation,
+  /** Positive valid-state predicate normalized by the canonical predicate engine. */
+  readonly where: Filter | string,
 }
 
 /** One authored declarative constraint. */
-export type AuthoredConstraint = AuthoredUniquenessConstraint
+export type GraphConstraint = StructuralConstraint | ValidationConstraint
 
 /** One authored entity security rule. */
 export interface AuthoredSecurityRule {
@@ -160,7 +195,7 @@ export type AuthoredSecurity = Partial<Record<
 /** One authored entity. */
 export interface AuthoredEntity {
   /** Declarative constraints owned by this entity. */
-  readonly constraints?: readonly AuthoredConstraint[],
+  readonly constraints?: readonly GraphConstraint[],
   /** Parent entity, when using MTI. */
   readonly extends?: string,
   /** Declared local fields. */
@@ -186,9 +221,9 @@ export interface AuthoredRelationship {
   /** The two relationship endpoints. */
   readonly between: readonly [AuthoredRelationshipEndpoint, AuthoredRelationshipEndpoint],
   /** Declarative constraints owned by this relationship. */
-  readonly constraints?: readonly AuthoredConstraint[],
+  readonly constraints?: readonly GraphConstraint[],
   /** Relationship-owned fields. */
-  readonly fields: readonly (AuthoredArrayField | AuthoredJSONField | AuthoredScalarField)[],
+  readonly fields: readonly (AuthoredArrayField | AuthoredEnumField | AuthoredJSONField | AuthoredScalarField)[],
   /** Relationship name. */
   readonly name: string,
   /** Action-keyed security declaration owned by this relationship. */
@@ -199,6 +234,8 @@ export interface AuthoredRelationship {
 export interface AuthoredDocument {
   /** Entity declarations. */
   readonly entities: readonly AuthoredEntity[],
+  /** Named reusable enum declarations keyed by exact name. */
+  readonly enums?: AuthoredEnumSource,
   /** Named relationship declarations. */
   readonly relationships?: readonly AuthoredRelationship[],
 }

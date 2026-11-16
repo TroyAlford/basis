@@ -52,15 +52,71 @@ describe('Graph authoring types', () => {
           description: 'One label per account.',
           fields: ['label'],
           name: 'One Label Per Account',
-          type: Constraint.Uniqueness,
+          type: Constraint.Structural,
         }],
         fields: [{ field: 'label', type: FieldType.String, unique: true }],
         name: 'Account',
       }],
     })
     expect(graph.definitions.constraints).toHaveLength(2)
-    expect(graph.definitions.constraints.every(constraint => constraint.type === Constraint.Uniqueness))
+    expect(graph.definitions.constraints.every(constraint => constraint.type === Constraint.Structural))
       .toBe(true)
+  })
+
+  test('accepts relationship-owned fields in validation member predicates', () => {
+    const graph = new Graph({
+      entities: [{
+        fields: [{ field: 'label', type: FieldType.String }],
+        name: 'User',
+      }, {
+        constraints: [{
+          description: 'Only owners may remain visible.',
+          name: 'RelationshipLiteral',
+          type: Constraint.Validation,
+          where: "members $contains (workspaceMembership.role = 'Owner')",
+        }, {
+          description: 'Relationship role must match the member label.',
+          name: 'RelationshipOperand',
+          type: Constraint.Validation,
+          where: 'members $contains (workspaceMembership.role = label)',
+        }, {
+          description: 'Member label must match the relationship role.',
+          name: 'RelationshipOperandRight',
+          type: Constraint.Validation,
+          where: 'members $contains (label = workspaceMembership.role)',
+        }],
+        fields: [{ field: 'title', type: FieldType.String }],
+        name: 'Workspace',
+      }],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: FieldType.String }],
+        name: 'WorkspaceMembership',
+      }],
+    })
+    expect(graph.definitions.validationConstraints('Workspace')).toHaveLength(3)
+  })
+
+  test('accepts native-array member predicates in validation constraints', () => {
+    const graph = new Graph({
+      entities: [{
+        constraints: [{
+          description: 'Every score must be at least two.',
+          name: 'ScoresAtLeastTwo',
+          type: Constraint.Validation,
+          where: 'scores $contains (@ >= 2)',
+        }],
+        fields: [{ field: 'scores', items: { type: FieldType.Number }, type: FieldType.Array }],
+        name: 'Person',
+      }],
+    })
+    expect(graph.definitions.validationConstraints('Person')).toHaveLength(1)
+    expect(graph.physicalSchema('basis_app', false).functions.some(fn => (
+      fn.name.startsWith('basis.validate_')
+    ))).toBe(true)
   })
 
   test('accepts typed capabilities and entity security', () => {

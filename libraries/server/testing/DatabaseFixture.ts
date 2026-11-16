@@ -1,17 +1,21 @@
-import { run, runAsync } from 'basis/configuration'
+import { run, runAsync } from 'basis/utilities'
 import { SQL as BunSQL } from 'bun'
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { seedImage } from '../../../testing/database/seed/image'
+import { reapDeadTestContainers, testContainerLabels } from '../../testing/containers'
 import { registerRunCleanup } from '../../testing/lifecycle'
-import { currentActor } from '../source/ActorContext'
+import { currentActor, runAsActor } from '../source/ActorContext'
 import type { Database, DatabaseTransaction, QueryOptions } from '../source/Database'
-import { queryEntity, transactionWithMutations } from '../source/Database'
-import { EntityDefinitions } from '../source/EntityDefinitions'
+import { queryEntity, RollbackSignal, transactionClient, transactionWithMutations } from '../source/Database'
+import type { EntityDefinitions } from '../source/EntityDefinitions'
+import { Constraint } from '../source/EntityDefinitions'
+import { Action, Graph, Security } from '../source/Graph'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
-import type { CreateResult, DeleteResult, EditResult, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
+import type { CreateResult, DeleteResult, EditResult, MutationDatabase, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
+import { validateTransactionState } from '../source/Mutation'
 import { ensureSeedImage } from './DatabaseImage'
 import { installSchema } from './Schema'
 
@@ -97,17 +101,284 @@ export const articleDefinition = {
   name: 'Article',
 }
 
-/** Entities available from the shared ordinary database fixture. */
-export const sharedEntities = EntityDefinitions.load(JSON.stringify({
-  entities: [
-    noteDefinition,
-    accountDefinition,
-    numberRowDefinition,
-    queryRowDefinition,
-    userDefinition,
-    articleDefinition,
-  ],
-}))
+/** Restricted role used by fixture graph policies. */
+const FIXTURE_APP_ROLE = 'basis_app'
+/** Single schema owned by the one fixture graph. */
+const FIXTURE_SCHEMA = 'basis_fixture'
+
+/** Deterministic identities and rows seeded into the one fixture graph. */
+export const fixtureRows = {
+  account: '1001',
+  alice: '00000000-0000-4000-8000-000000000101',
+  anonymousNote: '00000000-0000-4000-8000-000000000102',
+  article: '00000000-0000-4000-8000-000000000125',
+  bob: '00000000-0000-4000-8000-000000000103',
+  guardedWorkspace: '00000000-0000-4000-8000-000000000113',
+  hiddenWorkspace: '00000000-0000-4000-8000-000000000112',
+  invalidChildDocument: '00000000-0000-4000-8000-000000000114',
+  invalidParentDocument: '00000000-0000-4000-8000-000000000115',
+  linkedNote: '00000000-0000-4000-8000-000000000104',
+  memberNote: '00000000-0000-4000-8000-000000000105',
+  note: '00000000-0000-4000-8000-000000000122',
+  numberRow: '00000000-0000-4000-8000-000000000123',
+  openTask: '00000000-0000-4000-8000-000000000106',
+  orphanDocument: '00000000-0000-4000-8000-000000000116',
+  orphanRevision: '00000000-0000-4000-8000-000000000117',
+  otherTask: '00000000-0000-4000-8000-000000000107',
+  ownerA: '00000000-0000-4000-8000-000000000118',
+  ownerB: '00000000-0000-4000-8000-000000000119',
+  project: '00000000-0000-4000-8000-000000000108',
+  queryRow: '00000000-0000-4000-8000-000000000124',
+  revisionA: '00000000-0000-4000-8000-000000000120',
+  secondProject: '00000000-0000-4000-8000-000000000109',
+  thirdProject: '00000000-0000-4000-8000-000000000110',
+  validDocument: '00000000-0000-4000-8000-000000000121',
+  visibleWorkspace: '00000000-0000-4000-8000-000000000111',
+} as const
+
+/** Explicit public access for validation fixture entities. */
+const publicActions = {
+  [Action.Create]: Security.Public,
+  [Action.Delete]: Security.Public,
+  [Action.Read]: Security.Public,
+  [Action.Update]: Security.Public,
+} as const
+
+/**
+ * The one canonical fixture graph.
+ *
+ * One seeded fixture installs this model once; graph tests reserve a transaction
+ * and run as the restricted app role.
+ */
+const fixtureGraph = new Graph({
+  entities: JSON.stringify({
+    entities: [
+      noteDefinition,
+      accountDefinition,
+      numberRowDefinition,
+      queryRowDefinition,
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'label', type: 'String' },
+          { field: 'email', type: 'String' },
+        ],
+        name: 'User',
+        security: { [Action.Read]: Security.Public },
+      },
+      {
+        fields: [
+          { field: 'id', format: 'UUID' },
+          { field: 'title', type: 'String' },
+          { field: 'owner', target: 'User', type: 'Entity' },
+        ],
+        name: 'Article',
+      },
+      {
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'AnonymousNote',
+        security: { [Action.Read]: { where: '$me = null' } },
+      },
+      {
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'MemberNote',
+        security: { [Action.Read]: { where: '$me != null' } },
+      },
+      {
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'workspace', inverse: 'projects', target: 'Workspace', type: 'Entity' },
+          {
+            cardinality: 'Many',
+            field: 'tasks',
+            inverse: 'project',
+            target: 'Task',
+            type: 'Inverse',
+          },
+        ],
+        name: 'Project',
+        security: { [Action.Read]: Security.Public },
+      },
+      {
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'project', inverse: 'tasks', target: 'Project', type: 'Entity' },
+        ],
+        name: 'Task',
+        security: { [Action.Read]: { where: 'project.workspace.members $contains (id = $me)' } },
+      },
+      {
+        fields: [
+          { field: 'title', type: 'String' },
+          {
+            cardinality: 'Many',
+            field: 'projects',
+            inverse: 'workspace',
+            target: 'Project',
+            type: 'Inverse',
+          },
+        ],
+        name: 'Workspace',
+        security: {
+          [Action.Read]: {
+            where: "$me != null $and projects $contains (title = 'visible' AND tasks $contains (title = 'open'))",
+          },
+        },
+      },
+      {
+        fields: [{ field: 'label', type: 'String' }],
+        name: 'Owner',
+        security: publicActions,
+      },
+      {
+        fields: [{ field: 'owner', nullable: true, target: 'Owner', type: 'Entity' }],
+        name: 'Revision',
+        security: publicActions,
+      },
+      {
+        constraints: [{
+          description: 'A record must remain ok.',
+          name: 'recordStatus',
+          type: Constraint.Validation,
+          where: "status = 'ok'",
+        }],
+        fields: [
+          { field: 'title', type: 'String' },
+          { field: 'status', type: 'String' },
+        ],
+        name: 'Record',
+        security: publicActions,
+      },
+      {
+        constraints: [{
+          description: 'A document must stay flagged.',
+          name: 'documentFlag',
+          type: Constraint.Validation,
+          where: 'flag = true',
+        }, {
+          description: 'An optional revision belongs to the document owner.',
+          name: 'consistentRevisionOwner',
+          type: Constraint.Validation,
+          where: 'revision = null OR owner = revision.owner',
+        }],
+        extends: 'Record',
+        fields: [
+          { field: 'flag', type: 'Boolean' },
+          { field: 'note', type: 'String' },
+          { field: 'owner', target: 'Owner', type: 'Entity' },
+          { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
+        ],
+        name: 'Document',
+      },
+      {
+        fields: [
+          { field: 'document', nullable: true, target: 'Document', type: 'Entity' },
+          { field: 'title', type: 'String' },
+        ],
+        name: 'Section',
+        security: publicActions,
+      },
+      {
+        constraints: [{
+          description: 'A section document belongs to the asset owner.',
+          name: 'consistentSectionOwner',
+          type: Constraint.Validation,
+          where: 'section = null OR section.document.owner = owner',
+        }],
+        fields: [
+          { field: 'owner', target: 'Owner', type: 'Entity' },
+          { field: 'section', nullable: true, target: 'Section', type: 'Entity' },
+        ],
+        name: 'Asset',
+        security: publicActions,
+      },
+      {
+        constraints: [{
+          description: 'An optional asset belongs to the piece owner.',
+          name: 'consistentAssetOwner',
+          type: Constraint.Validation,
+          where: 'asset = null OR asset.owner = owner',
+        }],
+        fields: [
+          { field: 'asset', nullable: true, target: 'Asset', type: 'Entity' },
+          { field: 'owner', target: 'Owner', type: 'Entity' },
+        ],
+        name: 'Piece',
+        security: publicActions,
+      },
+      {
+        constraints: [{
+          description: 'A guarded workspace must remain flagged.',
+          name: 'guardedFlag',
+          type: Constraint.Validation,
+          where: 'flag = true',
+        }],
+        fields: [
+          { field: 'flag', type: 'Boolean' },
+          { field: 'title', type: 'String' },
+        ],
+        name: 'GuardedWorkspace',
+        security: {
+          [Action.Create]: { where: '$me != null' },
+          [Action.Delete]: { where: '$me = null' },
+          [Action.Read]: { where: '$me != null $and members $contains (id = $me)' },
+          [Action.Update]: { where: '$me != null' },
+        },
+      },
+    ],
+    relationships: [
+      {
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'GuardedWorkspace' },
+          { field: 'user', inverse: 'guardedWorkspaces', target: 'User' },
+        ],
+        fields: [],
+        name: 'GuardedMembership',
+        security: publicActions,
+      },
+      {
+        between: [
+          { field: 'note', inverse: 'links', target: 'MemberNote' },
+          { field: 'related', inverse: 'relatedLinks', target: 'MemberNote' },
+        ],
+        fields: [],
+        name: 'ActorLink',
+        security: { [Action.Read]: { where: '$me != null' } },
+      },
+      {
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'WorkspaceMembership',
+        security: { [Action.Read]: Security.Public },
+      },
+    ],
+  }),
+  schema: FIXTURE_SCHEMA,
+})
+
+/** The one canonical fixture model. */
+export const sharedEntities = fixtureGraph.definitions
+
+/** The one shared-fixture transaction context. */
+export interface DatabaseContext {
+  /** Run one Graph-native mutation; validation runs before the savepoint releases. */
+  create: Database['create'],
+  /** Delete through the Graph-native mutation vocabulary. */
+  delete: Database['delete'],
+  /** Edit through the Graph-native mutation vocabulary. */
+  edit: Database['edit'],
+  /** Query through the canonical entity compiler under RLS. */
+  query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
+  /** Reserved transaction connection already scoped to the app role. */
+  readonly sql: DatabaseTransaction,
+  /** Run one transaction-final validation unit. */
+  tx: <T>(work: (transaction: MutationDatabase) => T | Promise<T>) => Promise<T>,
+  /** Upsert through the Graph-native mutation vocabulary. */
+  upsert: Database['upsert'],
+}
 
 /** The test-owned pool connected to the one seeded database container. */
 class FixtureDatabase implements Database {
@@ -207,7 +478,33 @@ class FixtureDatabase implements Database {
     return this.#sql.begin(async tx => {
       const actor = currentActor()
       await tx`select set_config('actor.id', ${actor?.id ?? ''}, true)`
-      return callback(transactionWithMutations(this.#entities, tx))
+      const result = await callback(transactionWithMutations(this.#entities, tx))
+      await validateTransactionState(this.#entities, tx)
+      return result
+    }).catch((error: unknown) => {
+      if (error instanceof RollbackSignal) return error.value as BunSQL.ContextCallbackResult<T>
+      throw error
+    })
+  }
+
+  /**
+   * Run work with explicit definitions and always roll back.
+   * @param entities - Definitions exposed to the transaction.
+   * @param work - Transaction-scoped work.
+   * @returns The work result after rollback.
+   */
+  testWith<T>(
+    entities: EntityDefinitions,
+    work: (tx: DatabaseTransaction) => T | Promise<T>,
+  ): Promise<T> {
+    return this.#sql.begin(async tx => {
+      const actor = currentActor()
+      await tx`select set_config('actor.id', ${actor?.id ?? ''}, true)`
+      const transaction = transactionWithMutations(entities, tx)
+      return transaction.test(work)
+    }).catch((error: unknown) => {
+      if (error instanceof RollbackSignal) return error.value as T
+      throw error
     })
   }
 
@@ -229,12 +526,16 @@ export interface DatabaseFixture {
   readonly database: Database,
   /** Entity definitions attached to the shared database. */
   readonly entities: EntityDefinitions,
+  /** Fixture schema installed once by this fixture. */
+  readonly fixtureSchema: string,
   /** Installation whose seeded service is shared. */
   readonly install: string,
   /** Resolve or create the schema for one exact entity definition set. */
   readonly schemaFor: (entities: EntityDefinitions) => Promise<string>,
   /** Fixture service name used for cleanup and activity evidence. */
   readonly service: string,
+  /** Run explicit definitions in one rolled-back transaction. */
+  readonly testWith: <T>(entities: EntityDefinitions, work: (tx: DatabaseTransaction) => T | Promise<T>) => Promise<T>,
 }
 
 /** The process-wide fixture registry. */
@@ -300,8 +601,7 @@ function record(event: string): void {
  * The first caller starts one seeded PostgreSQL container. Later callers,
  * including callers in other test files and subprocesses, await the same
  * process-wide promise or attach to the same stable container. The pool closes
- * at run cleanup; the container stays available for the next run unless the
- * fixture is explicitly configured as ephemeral.
+ * at run cleanup; the container never outlives the run.
  * @param label - Short caller label recorded in the optional activity log.
  * @returns The shared running fixture.
  * @throws {Error} When called after run cleanup has started.
@@ -336,29 +636,13 @@ export async function useDatabaseFixture(label: string): Promise<DatabaseFixture
 async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFixture> {
   const service = `basis-database-fixture-${randomUUID()}`
   const install = fixtureInstall()
-  let existing = containers(install).length > 0
-  if (existing && Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
-    removeService(install)
-    existing = false
-  }
-  if (existing) {
-    const [container] = containers(install)
-    const image = container
-      ? run`docker inspect --format {{.Config.Image}} ${container}`.stdout.trim()
-      : ''
-    if (image !== seedImage()) {
-      removeService(install)
-      existing = false
-    }
-  }
+  if (containers(install).length > 0) removeService(install)
 
   scope.pending = { install, service }
   let database: FixtureDatabase | null = null
   try {
-    if (!existing) {
-      await ensureSeedImage()
-      await startContainer(install)
-    }
+    await ensureSeedImage()
+    await startContainer(install)
     const [container] = containers(install)
     if (!container) throw new Error('The shared database fixture did not start a container')
     const port = await publishedPort(container)
@@ -380,25 +664,24 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
     const fixture: DatabaseFixture = {
       database,
       entities: sharedEntities,
+      fixtureSchema: FIXTURE_SCHEMA,
       install,
       schemaFor,
       service,
+      testWith: (entities, work) => database.testWith(entities, work),
     }
     await fixture.schemaFor(sharedEntities)
-    record(`${existing ? 'attach' : 'start'} ${service} ${install} ${process.pid}`)
-    if (!existing) record(`canonical ${service} ${install} ${process.pid}`)
+    record(`start ${service} ${install} ${process.pid}`)
     return fixture
   } catch (error) {
     await database?.close()
-    if (Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
-      scope.serviceRemoved = removeService(install)
-    }
+    scope.serviceRemoved = removeService(install)
     throw error
   }
 }
 
 /**
- * Close the fixture pool; remove the seeded container only for ephemeral runs.
+ * Close the fixture pool; remove the seeded container for run-scoped fixtures.
  * @param scope - The process-wide fixture registry.
  */
 async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
@@ -409,7 +692,7 @@ async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
   if (fixture) await fixture.database.close()
 
   const service = fixture ?? scope.pending
-  if (service && Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
+  if (service) {
     removeManagedService(scope, service)
   }
 }
@@ -424,7 +707,6 @@ async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
  * @param scope - The process-wide fixture registry.
  */
 function cleanupOnExit(scope: DatabaseFixtureRegistry): void {
-  if (Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL !== '1') return
   const service = scope.value ?? scope.pending
   if (service) removeManagedService(scope, service)
 }
@@ -454,6 +736,7 @@ function removeManagedService(
  * @param install - Fixture installation root.
  */
 async function startContainer(install: string): Promise<void> {
+  reapDeadTestContainers()
   const identity = managedDatabaseIdentity(install)
   const name = `basis-database-fixture-${identity}`
   const started = await runAsync('docker', [
@@ -463,6 +746,7 @@ async function startContainer(install: string): Promise<void> {
     '--name', name,
     '--label', `basis.database=${identity}`,
     '--label', `basis.install=${install}`,
+    ...testContainerLabels(),
     '-p', `127.0.0.1::${DATABASE_PORT}`,
     seedImage(),
   ])
@@ -504,7 +788,7 @@ async function publishedPort(id: string): Promise<number> {
 }
 
 /**
- * Resolve the persistent fixture installation for this checkout.
+ * Resolve the fixture installation for this checkout.
  * @returns The stable installation directory.
  */
 function fixtureInstall(): string {
@@ -536,6 +820,326 @@ function fixtureSchemaName(entities: EntityDefinitions): string {
 }
 
 /**
+ * Ensure the restricted role used by the fixture graph exists.
+ * @param database - Connected fixture pool.
+ */
+async function ensureApplicationRole(database: Database): Promise<void> {
+  await database.sql.unsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${FIXTURE_APP_ROLE}') THEN
+        CREATE ROLE "${FIXTURE_APP_ROLE}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+          NOINHERIT NOBYPASSRLS;
+      ELSE
+        ALTER ROLE "${FIXTURE_APP_ROLE}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+          NOINHERIT NOBYPASSRLS;
+      END IF;
+    END $$;
+  `).simple()
+}
+
+/**
+ * Seed the deterministic fixture rows once.
+ * @param sql - Fixture owner transaction scoped to the fixture schema.
+ */
+async function seedFixtureRows(sql: BunSQL): Promise<void> {
+  const row = fixtureRows
+  await sql`
+    INSERT INTO "Entity" ("id", "name", "entity")
+    VALUES (${row.alice},
+      'Alice',
+      'User'),
+      (${row.bob},
+      'Bob',
+      'User'),
+      (${row.memberNote},
+      'Member note',
+      'MemberNote'),
+      (${row.linkedNote},
+      'Linked note',
+      'MemberNote'),
+      (${row.anonymousNote},
+      'Anonymous note',
+      'AnonymousNote'),
+      (${row.visibleWorkspace},
+      'Visible workspace',
+      'Workspace'),
+      (${row.hiddenWorkspace},
+      'Hidden workspace',
+      'Workspace'),
+      (${row.project},
+      'Project',
+      'Project'),
+      (${row.secondProject},
+      'Second project',
+      'Project'),
+      (${row.thirdProject},
+      'Third project',
+      'Project'),
+      (${row.openTask},
+      'Open task',
+      'Task'),
+      (${row.otherTask},
+      'Other task',
+      'Task'),
+      (${row.note},
+      'Fixture note',
+      'Note'),
+      (${row.account},
+      'Fixture account',
+      'Account'),
+      (${row.numberRow},
+      'Fixture number row',
+      'NumberRow'),
+      (${row.queryRow},
+      'Fixture query row',
+      'QueryRow'),
+      (${row.article},
+      'Fixture article',
+      'Article')
+  `
+  await sql`
+    INSERT INTO "User" ("id", "label", "email")
+    VALUES (${row.alice}, 'Alice', 'alice@example.com'), (${row.bob}, 'Bob', 'bob@example.com')
+  `
+  await sql`
+    INSERT INTO "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
+    VALUES (${row.note}, 'Fixture note', TRUE, 3, '2030-01-01', '2020-01-01T00:00:00Z')
+  `
+  await sql`
+    INSERT INTO "Account" ("id", "label")
+    VALUES (${row.account}, 'Fixture account')
+  `
+  await sql`
+    INSERT INTO "NumberRow" ("id", "value")
+    VALUES (${row.numberRow}, 7)
+  `
+  await sql`
+    INSERT INTO "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
+    VALUES (${row.queryRow}, TRUE, 1, 2, 3, 'Fixture query row')
+  `
+  await sql`
+    INSERT INTO "Article" ("id", "title", "owner.id")
+    VALUES (${row.article}, 'Fixture article', ${row.alice})
+  `
+  await sql`
+    INSERT INTO "MemberNote" ("id", "title")
+    VALUES (${row.memberNote}, 'Member note'), (${row.linkedNote}, 'Linked note')
+  `
+  await sql`
+    INSERT INTO "AnonymousNote" ("id", "title")
+    VALUES (${row.anonymousNote}, 'Anonymous note')
+  `
+  await sql`
+    INSERT INTO "ActorLink" ("note.id", "related.id")
+    VALUES (${row.memberNote}, ${row.linkedNote})
+  `
+  await sql`
+    INSERT INTO "Workspace" ("id", "title")
+    VALUES (${row.visibleWorkspace}, 'Visible workspace'), (${row.hiddenWorkspace}, 'Hidden workspace')
+  `
+  await sql`
+    INSERT INTO "Project" ("id", "title", "workspace.id")
+    VALUES (${row.project},
+      'visible',
+      ${row.visibleWorkspace}),
+      (${row.secondProject},
+      'visible',
+      ${row.hiddenWorkspace}),
+      (${row.thirdProject},
+      'other',
+      ${row.hiddenWorkspace})
+  `
+  await sql`
+    INSERT INTO "Task" ("id", "title", "project.id")
+    VALUES (${row.openTask}, 'open', ${row.project}), (${row.otherTask}, 'open', ${row.thirdProject})
+  `
+  await sql`
+    INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
+    VALUES (${row.visibleWorkspace}, ${row.alice}, 'Owner')
+  `
+  await sql`
+    INSERT INTO "Entity" ("id", "name", "entity")
+    VALUES (${row.ownerA},
+      'Owner A',
+      'Owner'),
+      (${row.ownerB},
+      'Owner B',
+      'Owner'),
+      (${row.revisionA},
+      'Revision A',
+      'Revision'),
+      (${row.orphanRevision},
+      'Orphan revision',
+      'Revision'),
+      (${row.validDocument},
+      'Valid document',
+      'Document'),
+      (${row.invalidChildDocument},
+      'Invalid child document',
+      'Document'),
+      (${row.invalidParentDocument},
+      'Invalid parent document',
+      'Document'),
+      (${row.orphanDocument},
+      'Orphan document',
+      'Document'),
+      (${row.guardedWorkspace},
+      'Guarded workspace',
+      'GuardedWorkspace')
+  `
+  await sql`
+    INSERT INTO "Owner" ("id", "label")
+    VALUES (${row.ownerA}, 'A'), (${row.ownerB}, 'B')
+  `
+  await sql`
+    INSERT INTO "Revision" ("id", "owner.id")
+    VALUES (${row.revisionA}, ${row.ownerA}), (${row.orphanRevision}, ${null})
+  `
+  await sql`
+    INSERT INTO "Record" ("id", "title", "status")
+    VALUES (${row.validDocument},
+      'Valid',
+      'ok'),
+      (${row.invalidChildDocument},
+      'Invalid child',
+      'ok'),
+      (${row.invalidParentDocument},
+      'Invalid parent',
+      'bad'),
+      (${row.orphanDocument},
+      'Orphan',
+      'ok')
+  `
+  await sql`
+    INSERT INTO "Document" ("id", "flag", "note", "owner.id", "revision.id")
+    VALUES (${row.validDocument},
+      TRUE,
+      'note',
+      ${row.ownerA},
+      ${row.revisionA}),
+      (${row.invalidChildDocument},
+      FALSE,
+      'note',
+      ${row.ownerA},
+      ${row.revisionA}),
+      (${row.invalidParentDocument},
+      TRUE,
+      'note',
+      ${row.ownerA},
+      ${row.revisionA}),
+      (${row.orphanDocument},
+      TRUE,
+      'note',
+      ${row.ownerA},
+      ${row.orphanRevision})
+  `
+  await sql`
+    INSERT INTO "GuardedWorkspace" ("id", "flag", "title")
+    VALUES (${row.guardedWorkspace}, TRUE, 'Guarded workspace')
+  `
+  await sql`
+    INSERT INTO "GuardedMembership" ("workspace.id", "user.id")
+    VALUES (${row.guardedWorkspace}, ${row.alice})
+  `
+}
+
+/**
+ * Run one test on the single shared fixture.
+ * @param label - Fixture acquisition label.
+ * @param actor - Verified actor identity, or null for anonymous.
+ * @param callback - Work using the app-role transaction.
+ * @returns The callback result after rollback.
+ */
+export async function withDatabase<T>(
+  label: string,
+  actor: string | null,
+  callback: (database: DatabaseContext) => Promise<T>,
+): Promise<T> {
+  const fixture = await useDatabaseFixture(label)
+  await ensureGraphSchema(fixture.database)
+  return runAsActor({ id: actor }, () => fixture.testWith(
+    fixtureGraph.definitions,
+    async sql => {
+      await sql.unsafe(
+        `set local search_path to ${quoteIdentifier(fixture.fixtureSchema)}, public, basis, pg_temp`,
+      ).simple()
+      await sql.unsafe(`set local role ${quoteIdentifier(FIXTURE_APP_ROLE)}`).simple()
+      await sql`
+        SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+      `
+      const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
+        const savepoint = sql.savepoint as unknown as <Value>(
+          callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
+        ) => Promise<Value>
+        return savepoint(async savepointSql => {
+          const result = await work(savepointSql)
+          await validateTransactionState(
+            fixtureGraph.definitions,
+            transactionClient(savepointSql),
+          )
+          return result
+        })
+      }
+      return callback({
+        create: (entity, values) => tx(savepoint => savepoint.create(entity, values)),
+        delete: (entity, filter) => tx(savepoint => savepoint.delete(entity, filter)),
+        edit: (entity, filter, changes) => tx(savepoint => savepoint.edit(entity, filter, changes)),
+        query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
+          queryEntity<Result>(sql, fixtureGraph.definitions, entity, options)
+        ),
+        sql,
+        tx,
+        upsert: (entity, filter, values) => tx(savepoint => savepoint.upsert(entity, filter, values)),
+      })
+    },
+  ))
+}
+
+/** A real committed app-role transaction context for commit-boundary proofs. */
+export interface CommittedDatabaseContext extends MutationDatabase {
+  /** Query through the canonical entity compiler under RLS. */
+  query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
+  /** Graph-native transaction connection already scoped to the app role. */
+  readonly sql: DatabaseTransaction,
+}
+
+/**
+ * Run one real committed Graph-native transaction on the shared fixture.
+ * @param label - Fixture acquisition label.
+ * @param actor - Verified actor identity, or null for anonymous.
+ * @param callback - Work using the app-role transaction.
+ * @returns The callback result after commit.
+ */
+export async function withCommittedDatabase<T>(
+  label: string,
+  actor: string | null,
+  callback: (database: CommittedDatabaseContext) => Promise<T>,
+): Promise<T> {
+  const fixture = await useDatabaseFixture(label)
+  await ensureGraphSchema(fixture.database)
+  return runAsActor({ id: actor }, () => fixture.database.tx(async sql => {
+    await sql.unsafe(
+      `set local search_path to ${quoteIdentifier(fixture.fixtureSchema)}, public, basis, pg_temp`,
+    ).simple()
+    await sql.unsafe(`set local role ${quoteIdentifier(FIXTURE_APP_ROLE)}`).simple()
+    await sql`
+      SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+    `
+    return callback({
+      create: (entity, values) => sql.create(entity, values),
+      delete: (entity, filter) => sql.delete(entity, filter),
+      edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
+      query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
+        queryEntity<Result>(sql, fixtureGraph.definitions, entity, options)
+      ),
+      sql,
+      upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
+    })
+  }))
+}
+
+/**
  * Ensure the cached schema exists and contains the requested definitions.
  * @param database - Connected fixture pool.
  * @param schema - Stable schema name.
@@ -557,9 +1161,71 @@ async function ensureSchema(
     if (present[0]?.present) return
 
     await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
-    await sql.unsafe(`set local search_path to ${quoteIdentifier(schema)}`).simple()
+    await sql.unsafe(`set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`).simple()
     await installSchema(sql, entities, { version: `fixture:${schema}` })
     record(`schema ${schema}`)
+  })
+  return schema
+}
+
+/**
+ * Install and seed the one fixture graph in its dedicated schema.
+ * @param database - Connected fixture pool.
+ * @returns The fixture graph schema name.
+ */
+async function ensureGraphSchema(database: Database): Promise<string> {
+  const schema = FIXTURE_SCHEMA
+  await ensureApplicationRole(database)
+  await database.tx(async sql => {
+    await sql`
+      SELECT pg_advisory_xact_lock(hashtext(${schema}))
+    `
+    const present = await sql<{ present: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
+    `
+    let complete = Boolean(present[0]?.present)
+    if (complete) {
+      for (const entity of fixtureGraph.definitions.entities) {
+        const [table] = await sql<{ table_name: string }[]>`
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_schema = ${schema} AND table_name = ${entity.name}
+        `
+        if (!table?.table_name) {
+          complete = false
+          break
+        }
+      }
+    }
+    if (complete) {
+      const [seeded] = await sql<{ seeded: boolean }[]>`
+        SELECT EXISTS (SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" = ${fixtureRows.alice} ) AS
+          seeded
+      `
+      complete = Boolean(seeded?.seeded)
+    }
+    if (complete) return
+
+    await sql.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`).simple()
+    await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
+    await sql.unsafe(
+      `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
+    ).simple()
+    await installSchema(sql, fixtureGraph, {
+      appRole: FIXTURE_APP_ROLE,
+      schema,
+      superuser: true,
+      version: `fixture-graph:${schema}:${randomUUID()}`,
+    })
+    await sql.unsafe(
+      `grant usage on schema ${quoteIdentifier(schema)} to ${quoteIdentifier(FIXTURE_APP_ROLE)}`,
+    ).simple()
+    await sql.unsafe(
+      `grant select, insert, update, delete on all tables in schema ${quoteIdentifier(schema)} ` +
+      `to ${quoteIdentifier(FIXTURE_APP_ROLE)}`,
+    ).simple()
+    await seedFixtureRows(sql)
+    record(`fixture graph schema ${schema}`)
   })
   return schema
 }
@@ -594,7 +1260,7 @@ export function removeService(install: string): boolean {
   const containerList = run`docker ps -aq --filter ${`label=basis.install=${install}`}`
   if (containerList.exitCode !== 0) succeeded = false
   for (const id of containerList.lines) {
-    if (run`docker rm -f ${id}`.exitCode !== 0) succeeded = false
+    if (run`docker rm -f -v ${id}`.exitCode !== 0) succeeded = false
   }
 
   const volumeList = run`docker volume ls -q --filter ${`label=basis.install=${install}`}`

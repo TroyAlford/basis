@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { basename } from 'node:path'
+import { runAsync } from './run'
 
 /** Options for deterministic checksum calculation. */
 export interface ChecksumOptions {
@@ -34,16 +35,13 @@ async function fileChecksum(file: Blob): Promise<string> {
   const args = process.platform === 'darwin'
     ? ['-a', '256', '--', path]
     : ['--', path]
-  const child = Bun.spawn([command, ...args], { stderr: 'pipe', stdout: 'pipe' })
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ])
-  if (code !== 0) {
-    throw new Error(`${command} failed for ${basename(path)}: ${stderr.trim() || `exit ${code}`}`)
+  const result = await runAsync(command, args)
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `${command} failed for ${basename(path)}: ${result.stderr.trim() || `exit ${result.exitCode}`}`,
+    )
   }
-  const digest = stdout.trim().split(/\s+/u, 1)[0] ?? ''
+  const digest = result.stdout.trim().split(/\s+/u, 1)[0] ?? ''
   if (!/^[0-9a-f]{64}$/u.test(digest)) {
     throw new Error(`${command} returned an invalid SHA-256 digest for ${basename(path)}`)
   }

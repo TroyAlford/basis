@@ -1,4 +1,4 @@
-import type { EffectiveFieldDefinition, EntityDefinition, FieldDefinition, Graph, ScalarFieldDefinition } from 'basis/server'
+import type { EffectiveFieldDefinition, EntityDefinition, EnumDefinition, FieldDefinition, Graph, ScalarFieldDefinition } from 'basis/server'
 import { FieldType } from 'basis/server'
 import type { EmittedFile } from '../emitter'
 import { emitter } from '../emitter'
@@ -11,29 +11,53 @@ import { emitter } from '../emitter'
 export function generateTypes(graph: Graph): string {
   const definitions = graph.definitions
   const entities = [...definitions.entities].sort((left, right) => left.name.localeCompare(right.name))
+  const enums = [...definitions.enums].sort((left, right) => left.name.localeCompare(right.name))
   const enumMembers = entities
-    .map(entity => `    ${entity.name} = '${entity.name}',`)
+    .map(entity => `${entity.name} = '${entity.name}',`)
     .join('\n')
   const blocks: string[] = [
     `/** Generated from the canonical Basis entity definitions. Do not edit by hand. */
 
 export enum $BasisEntities {
-${enumMembers.replaceAll('    ', '  ')}
+${enumMembers}
 }
 
-export interface $BasisReference {
-  readonly entity: $BasisEntities,
-  readonly id: string,
-  readonly name: string,
+export interface Reference {
+readonly entity: $BasisEntities,
+readonly id: string,
+readonly name: string,
 }
 
-export interface $BasisEntity extends $BasisReference {
-  readonly lastUpdatedAt: string | null,
-  readonly lastUpdatedBy: $BasisReference | null,
+export interface Entity extends Reference {
+readonly lastUpdatedAt: string | null,
+readonly lastUpdatedBy: Reference | null,
 }`,
   ]
+  for (const enumeration of enums) blocks.push(enumBlock(enumeration))
   for (const entity of entities) blocks.push(entityBlock(entity, definitions))
   return `${blocks.join('\n\n')}\n`
+}
+
+/**
+ * Render one named Graph enum.
+ * @param enumeration - Canonical enum definition.
+ * @returns Generated TypeScript block.
+ */
+function enumBlock(enumeration: EnumDefinition): string {
+  const members = enumeration.values.map(value => (
+    `/** ${jsdoc(value.description)} */\n` +
+    `${value.member} = '${value.value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}',`
+  )).join('\n')
+  return `export enum ${enumeration.name} {\n${members}\n}`
+}
+
+/**
+ * Make one description safe inside a single-line JSDoc comment.
+ * @param description - Authored description.
+ * @returns Escaped description.
+ */
+function jsdoc(description: string): string {
+  return description.replaceAll('*/', '*\\/').replaceAll(/\s+/gu, ' ').trim()
 }
 
 /**
@@ -43,13 +67,13 @@ export interface $BasisEntity extends $BasisReference {
  * @returns Generated TypeScript block.
  */
 function entityBlock(entity: EntityDefinition, definitions: Graph['definitions']): string {
-  const parent = entity.parent === 'Entity' ? '$BasisEntity' : entity.parent
+  const parent = entity.parent === 'Entity' ? 'Entity' : entity.parent
   const members = [
-    { line: `  readonly entity: ${discriminatorType(entity, definitions)},`, name: 'entity' },
+    { line: `readonly entity: ${discriminatorType(entity, definitions)},`, name: 'entity' },
     ...entity.fields
       .filter(field => field.name !== 'id' && field.type !== FieldType.Inverse)
       .map(field => ({
-        line: `  readonly ${field.name}: ${fieldType(field)},`,
+        line: `readonly ${field.name}: ${fieldType(field)},`,
         name: field.name,
       })),
   ].sort((left, right) => left.name.localeCompare(right.name))
@@ -79,7 +103,7 @@ function discriminatorType(
  */
 function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
   if (field.type === FieldType.Entity) {
-    return field.nullable === false ? '$BasisReference' : '$BasisReference | null'
+    return field.nullable === false ? 'Reference' : 'Reference | null'
   }
   if (field.type === FieldType.Array) {
     const array = `readonly ${scalarType(field.items.type)}[]`
@@ -87,6 +111,9 @@ function fieldType(field: EffectiveFieldDefinition | FieldDefinition): string {
   }
   if (field.type === FieldType.JSON) return 'unknown'
   if (field.type === FieldType.Inverse) return 'unknown'
+  if (field.type === FieldType.Enum) {
+    return field.nullable === true ? `${field.enum} | null` : field.enum
+  }
   const scalar = scalarType(field.type)
   return field.nullable === true ? `${scalar} | null` : scalar
 }

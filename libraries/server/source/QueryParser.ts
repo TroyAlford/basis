@@ -16,8 +16,8 @@ interface QueryLiteralBase {
 /** A primitive syntax literal. */
 interface QueryScalarLiteral extends QueryLiteralBase {
   /** Literal category. */
-  readonly kind: 'boolean' | 'null' | 'number' | 'string',
-  /** Decoded scalar value, or raw source spelling for numbers. */
+  readonly kind: 'boolean' | 'field' | 'null' | 'number' | 'string',
+  /** Decoded scalar value, or raw source spelling for numbers; a field path for field references. */
   readonly value: string | boolean | null,
 }
 
@@ -254,7 +254,9 @@ class Parser {
    * @returns The parsed expression, or null on failure.
    */
   #parseField(): QueryExpression | null {
-    const field = this.#expect(TokenType.Field, 'Expected a field name')
+    const field = this.#peek().type === TokenType.Actor
+      ? this.#advance()
+      : this.#expect(TokenType.Field, 'Expected a field name')
     if (!field) return null
 
     let negations = 0
@@ -297,6 +299,16 @@ class Parser {
     } else if (operator === Operator.Comparison.Empty) {
       end = token.end
       values = []
+    } else if (this.#peek().type === TokenType.Field) {
+      const reference = this.#advance()
+      end = reference.end
+      values = [{
+        end: reference.end,
+        kind: 'field',
+        raw: reference.raw,
+        start: reference.start,
+        value: reference.value as string,
+      }]
     } else {
       const value = this.#parseLiteral()
       if (!value) return null
@@ -535,6 +547,16 @@ class Parser {
    */
   #peek(): Token {
     return this.tokens[this.#index] as Token
+  }
+
+  /**
+   * Consume the current token.
+   * @returns The consumed token.
+   */
+  #advance(): Token {
+    const token = this.#peek()
+    this.#index += 1
+    return token
   }
 
   /**

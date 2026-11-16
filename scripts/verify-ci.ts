@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 /* eslint-disable no-console -- this is an operator-facing verification command. */
+import { run as runProcess } from 'basis/utilities'
 import { join } from 'node:path'
 
 /*
@@ -22,12 +23,12 @@ const root = join(import.meta.dir, '..')
  */
 function run(command: string[], label: string): number {
   console.log(`\n==> ${label}`)
-  const result = Bun.spawnSync(command, {
-    cwd: root,
-    stderr: 'inherit',
-    stdout: 'inherit',
-  })
-  return result.exitCode ?? 1
+  const [executable, ...args] = command
+  if (!executable) throw new Error('command must include an executable')
+  const result = runProcess(executable, args, { cwd: root })
+  if (result.stdout !== '') process.stdout.write(result.stdout)
+  if (result.stderr !== '') process.stderr.write(result.stderr)
+  return result.exitCode
 }
 
 const contract = run([process.execPath, 'test', './.github/ci'], 'Static workflow contract tests')

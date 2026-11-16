@@ -136,5 +136,5 @@ describe('Graph-backed production readiness', () => {
       process.chdir(previous)
       removeService(install)
     }
-  }, 240_000)
+  })
 })

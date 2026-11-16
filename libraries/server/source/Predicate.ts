@@ -36,6 +36,10 @@ export interface CollectionFilter {
 
 /** Entity-shaped context used to normalize a collection's inner predicates. */
 export interface CollectionFilterScope {
+  /** Nested native-array navigations available to members. */
+  readonly array?: ArrayResolver,
+  /** Nested collection navigations available to members. */
+  readonly collection?: CollectionResolver,
   /** Related item entity type. */
   readonly definition: EntityDefinition,
   /** Resolve one inner value field or path. */
@@ -56,8 +60,43 @@ export interface ArrayFilterScope {
 /** Resolve a native array for filter normalization. */
 export type ArrayResolver = (name: string) => ArrayFilterScope | undefined
 
+/** Canonical field name for the authenticated-actor sentinel. */
+export const ACTOR_FIELD_NAME = '$me'
+
+/** The synthetic identity field used by actor-presence predicates. */
+export const ACTOR_FIELD: ScalarFieldDefinition = Object.freeze({
+  name: ACTOR_FIELD_NAME,
+  type: 'ID' as FieldType.ID,
+})
+
+/** A canonical right-hand field reference inside a comparison. */
+export interface FieldOperand {
+  /** Canonical logical path to the referenced field. */
+  readonly $field: string,
+}
+
 /** A canonical serializable where filter. */
 export type Filter = CollectionFilter | ComparisonFilter | LogicalFilter
+
+/**
+ * Whether an operand is a canonical field reference.
+ * @param value - Candidate operand.
+ * @returns `true` for a field-reference operand.
+ */
+export function isFieldOperand(value: unknown): value is FieldOperand {
+  return isPlainRecord(value)
+    && Object.keys(value).length === 1
+    && typeof value.$field === 'string'
+}
+
+/**
+ * Whether an operand is the canonical actor sentinel.
+ * @param value - Candidate operand.
+ * @returns `true` for `$me`.
+ */
+export function isActorOperand(value: unknown): boolean {
+  return value === ACTOR_FIELD_NAME
+}
 
 /** Maximum number of elements accepted in one array operand. */
 const MAX_ARRAY_OPERAND = 128
@@ -131,6 +170,7 @@ export const Predicate = {
    * @throws {Error} When the field is unknown or is an entity reference.
    */
   field(entity: EntityDefinition, name: string): QueryFieldDefinition {
+    if (name === ACTOR_FIELD_NAME) return ACTOR_FIELD
     const field = entity.fields.find(candidate => candidate.name === name)
     if (!field) throw new Error(`Unknown field "${entity.name}.${name}"`)
     if (field.type === FieldType.Entity) {
@@ -227,7 +267,25 @@ export const Predicate = {
       throw new Error(`Query operator "${operator}" is not valid for scalar field "${field.name}"`)
     }
     if (raw === undefined) throw new Error(`Query operand for "${field.name}" must not be undefined`)
+    if (field.name === ACTOR_FIELD_NAME) {
+      if (raw === null && (operator === Operator.Comparison.Equal || operator === Operator.Comparison.NotEqual)) {
+        return null
+      }
+      throw new Error('Query operand for "$me" must compare actor presence with null')
+    }
+    if (isFieldOperand(raw)) {
+      if (operator === Operator.Comparison.Contains
+        || operator === Operator.Comparison.Empty) {
+        throw new Error(`Query operator "${operator}" does not accept a field reference operand`)
+      }
+      assertFieldPath(raw.$field)
+      return { $field: raw.$field }
+    }
     if (field.type === FieldType.ID && operator === Operator.Comparison.Contains) return raw
+    if (field.type === FieldType.Enum) {
+      if (typeof raw !== 'string') invalidOperand(field)
+      return raw
+    }
     if (raw === '$me') {
       if (field.type === FieldType.ID) return raw
       throw new Error('Query operand "$me" is only valid for identity fields')
@@ -323,7 +381,14 @@ function explicit(
         throw new Error(`Query ${operator} requires a non-empty filters array`)
       }
       const filters = input.filters.map(filter => (
-        child(collectionScope.definition, operator, filter, collectionScope.field)
+        child(
+          collectionScope.definition,
+          operator,
+          filter,
+          collectionScope.field,
+          collectionScope.collection,
+          collectionScope.array,
+        )
       ))
       if (operator === Operator.Collection.All) return Predicate.universal(input.field as string, filters)
       return {
@@ -457,6 +522,7 @@ function requireField(
   resolve: (name: string) => QueryFieldDefinition,
 ): QueryFieldDefinition {
   if (typeof input.field !== 'string') throw new Error('Query comparison field must be a string')
+  if (input.field === ACTOR_FIELD_NAME) return ACTOR_FIELD
   return resolve(input.field)
 }
 
@@ -606,10 +672,23 @@ function normalizeJSON(value: unknown, seen = new Set<object>()): unknown {
 /**
  * Throw the standard operand error.
  * @param field - Field whose operand is invalid.
+ * @param field.name - Field name used in the diagnostic.
+ * @param field.type - Field type used in the diagnostic.
  * @throws {Error} Always, naming the invalid operand.
  */
-function invalidOperand(field: ScalarFieldDefinition): never {
+function invalidOperand(field: { readonly name: string, readonly type: string }): never {
   throw new Error(`Query operand for "${field.name}" is not a valid ${field.type.toLowerCase()} value`)
+}
+
+/**
+ * Require a syntactically valid field-reference path.
+ * @param path - Candidate logical path.
+ * @throws {Error} When the path is empty or has an empty segment.
+ */
+function assertFieldPath(path: string): void {
+  if (path.split('.').some(segment => segment.length === 0)) {
+    throw new Error(`Query field reference "${path}" is not a valid path`)
+  }
 }
 
 /**

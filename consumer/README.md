@@ -15,7 +15,8 @@ The documentation site built from [`docs/`](../docs/index.mdx) is the authoritat
 ```ts
 import { Button, Theme } from 'basis/react'
 import { Server } from 'basis/server'
-import { Environment, run, runAsync } from 'basis/configuration'
+import { Environment } from 'basis/configuration'
+import { run, runAsync } from 'basis/utilities'
 import { Logger } from 'basis/logger'
 import { Identity } from 'basis/oauth'
 import { matchScreenshot, test, useApplication } from 'basis/testing'

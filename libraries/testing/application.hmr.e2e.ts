@@ -56,13 +56,13 @@ import { useApplication } from ${JSON.stringify(join(import.meta.dir, 'applicati
 test('serves the current source', async () => {
   const app = await useApplication({
     cwd: import.meta.dir, entry: './serve.ts',
-    persistent: true, timeoutMs: 120_000,
+    development: true, timeoutMs: 120_000,
   })
   await app.visit('/', async page => {
     await page.waitForSelector('h1')
     expect(await page.textContent('h1')).toBe(process.env.EXPECTED)
   })
-}, 120_000)
+})
   `.trim())
   return directory
 }
@@ -78,10 +78,7 @@ async function runChild(directory: string, expected: string): Promise<{ code: nu
     cwd: directory,
     env: {
       ...process.env,
-      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '0',
-      BASIS_APPLICATION_FIXTURE_ROOT: join(directory, 'fixture'),
       BASIS_APP_ACTIVITY: join(directory, 'activity.log'),
-      BASIS_SNAPSHOT_FIXTURE_EPHEMERAL: '1',
       EXPECTED: expected,
     },
     stderr: 'pipe',
@@ -118,7 +115,7 @@ test('persists a server across invocations and serves edited source', async () =
   } finally {
     writeFileSync(applicationFile, source)
   }
-}, 120_000)
+})
 
 test('serves updated browser source through native HMR without restarting', async () => {
   const directory = fixture()
@@ -126,7 +123,6 @@ test('serves updated browser source through native HMR without restarting', asyn
     cwd: directory,
     development: true,
     entry: './serve.ts',
-    persistent: false,
     timeoutMs: 120_000,
   })
 
@@ -141,7 +137,6 @@ test('serves updated browser source through native HMR without restarting', asyn
         undefined,
         { timeout: 30_000 },
       )
-      await page.waitForTimeout(1_000)
       writeFileSync(
         join(directory, 'Application.tsx'),
         source.replace('Application</h1>', 'Application Recovered</h1>'),
@@ -156,4 +151,4 @@ test('serves updated browser source through native HMR without restarting', asyn
   } finally {
     await app.stop()
   }
-}, 120_000)
+})

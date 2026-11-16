@@ -4,7 +4,7 @@ title: Configuration
 
 # Configuration
 
-`basis/configuration` owns three primitives: typed environment reads, 1Password secret reads, and the shared bounded subprocess runners. Consumers own their configuration policy.
+`basis/configuration` owns two primitives: typed environment reads and 1Password secret reads. Consumers own their configuration policy. Subprocess execution lives in `basis/utilities`.
 
 ## Environment
 
@@ -34,15 +34,3 @@ import { secret } from 'basis/configuration'
 const token = secret('op://Vault/item/field')
 const settings = JSON.parse(secret('op://Vault/item/settings'))
 ```
-
-## Subprocesses
-
-`run(command, args, options)` is synchronous; `runAsync` is its non-blocking counterpart. Both use explicit argv, support `cwd`, environment overlays, `timeoutMs`, and a Basis `Logger`, and return `{ exitCode, stdout, stderr, lines }`. `lines` is normalized stdout with no trailing empty line.
-
-Both also accept a whitespace-tokenized tagged template. Interpolated values become discrete arguments, never shell text:
-
-```ts
-const services = await runAsync`docker ps --filter ${`label=basis.install=${install}`}`
-```
-
-Use `run` for synchronous configuration or install work and `runAsync` when a server must keep its event loop free.

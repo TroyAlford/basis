@@ -44,6 +44,29 @@ describe('Graph', () => {
       .toEqual(original.physicalSchema('basis_app', true))
   })
 
+  test('round-trips authored enum declarations through a JSON snapshot', () => {
+    const original = new Graph({
+      entities: [{
+        fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }],
+        name: 'SnapshotDocument',
+      }],
+      enums: {
+        AccessLevel: {
+          editor: 'Can edit resources.',
+          viewer: 'Can view resources.',
+        },
+      },
+    })
+    const snapshot = JSON.parse(JSON.stringify(original))
+    expect(snapshot.enums).toEqual({
+      AccessLevel: { editor: 'Can edit resources.', viewer: 'Can view resources.' },
+    })
+    const restored = new Graph(snapshot)
+    expect(restored.definitions.enums).toEqual(original.definitions.enums)
+    expect(restored.physicalSchema('basis_app', true))
+      .toEqual(original.physicalSchema('basis_app', true))
+  })
+
   test('compiles root grants from the canonical identity fields', () => {
     const rootGraph = new Graph({
       entities: [{
@@ -235,9 +258,9 @@ describe('Graph', () => {
     const helper = schema.functions.find(fn => fn.name.startsWith('basis.policy_'))
     expect(helper?.securityDefiner).toBe(true)
     expect(helper?.searchPath).toBe('public, basis, pg_temp')
-    expect(helper?.sql).toContain('FROM "WorkspaceMembership" AS')
-    expect(helper?.sql).toContain('"__policy_members_rel"."workspace.id" = "__row"."id"')
-    expect(helper?.sql).toContain('"__policy_members_rel"."role"')
+    expect(helper?.sql).toContain('FROM "WorkspaceMembership"')
+    expect(helper?.sql).toContain('"__policy_0_members_rel"."workspace.id" = __row."id"')
+    expect(helper?.sql).toContain('"__policy_0_members_rel"."role"')
     expect(helper?.sql).toContain("current_setting('actor.id', true)")
     const policy = schema.policies.find(candidate => (
       candidate.table === 'Workspace' && candidate.command === 'SELECT'
@@ -305,7 +328,7 @@ describe('Graph', () => {
     })
     const helper = inverseGraph.physicalSchema('basis_app', true).functions
       .find(fn => fn.name.startsWith('basis.policy_'))
-    expect(helper?.sql).toContain('FROM "Article" AS')
+    expect(helper?.sql).toContain('FROM "Article"')
     expect(helper?.sql).toContain('"owner.id"')
     expect(helper?.sql).toContain('current_setting(\'actor.id\', true)')
   })
@@ -333,12 +356,12 @@ describe('Graph', () => {
     expect(() => make("members $contains (workspaceMembership.missing = 'Owner')"))
       .toThrow('unknown relationship field')
     expect(() => make("members $contains [(id = $me), (workspaceMembership.role = 'Owner')]"))
-      .toThrow('exactly one member requirement')
+      .not.toThrow()
     expect(() => make('members $all (id = $me)')).toThrow('$all collection policy predicates')
     expect(() => make('members $contains (id = $me)', 'create'))
       .toThrow('create security for "Workspace" cannot use collection predicates')
     expect(() => make("members $contains (id = $me) $and members $contains (workspaceMembership.role = 'Owner')"))
-      .toThrow('multiple $contains requirements')
+      .not.toThrow()
   })
 
   test('supports collection $empty policies', () => {
@@ -362,7 +385,7 @@ describe('Graph', () => {
     })
     const helper = emptyGraph.physicalSchema('basis_app', true).functions
       .find(fn => fn.name.startsWith('basis.policy_'))
-    expect(helper?.sql).toContain('NOT EXISTS (SELECT 1 FROM "WorkspaceMembership" AS')
+    expect(helper?.sql).toContain('NOT EXISTS (SELECT 1 FROM "WorkspaceMembership"')
   })
 
   test('allows a single membership check combined with $empty', () => {
@@ -600,6 +623,92 @@ describe('Graph', () => {
       ],
     } as never)
     expect(siblings.security).toHaveLength(2)
+  })
+
+  test('compiles explicit actor-presence policies without implicit grants', () => {
+    const authenticated = new Graph({
+      entities: [{
+        fields: [],
+        name: 'Note',
+        security: { [Action.Read]: { where: '$me != null' } },
+      }],
+    })
+    const read = authenticated.physicalSchema('basis_app', true).policies.find(policy => (
+      policy.table === 'Note' && policy.command === 'SELECT'
+    ))
+    expect(read?.sql).toContain('current_setting(\'actor.id\', true)')
+    expect(read?.sql).toContain('NOT COALESCE')
+    const anonymous = new Graph({
+      entities: [{ fields: [], name: 'Note' }],
+    })
+    expect(anonymous.physicalSchema('basis_app', true).policies
+      .filter(policy => !['Entity', 'User', 'Role', 'ExternalIdentity', 'UserRole'].includes(policy.table))
+      .every(policy => policy.sql.includes('FALSE'))).toBe(true)
+  })
+
+  test('compiles nested collection and composed reference policy predicates', () => {
+    const nested = new Graph({
+      entities: [
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            {
+              cardinality: 'Many',
+              field: 'projects',
+              inverse: 'workspace',
+              target: 'Project',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Workspace',
+          security: {
+            [Action.Read]: {
+              where: "$me != null $and projects $contains (title = 'visible' AND tasks $contains (title = 'open'))",
+            },
+          },
+        },
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            { field: 'workspace', inverse: 'projects', target: 'Workspace', type: 'Entity' },
+            {
+              cardinality: 'Many',
+              field: 'tasks',
+              inverse: 'project',
+              target: 'Task',
+              type: 'Inverse',
+            },
+          ],
+          name: 'Project',
+        },
+        {
+          fields: [
+            { field: 'title', type: 'String' },
+            { field: 'project', inverse: 'tasks', target: 'Project', type: 'Entity' },
+          ],
+          name: 'Task',
+          security: { [Action.Read]: { where: 'project.workspace.members $contains (id = $me)' } },
+        },
+        { fields: [], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [],
+        name: 'WorkspaceMembership',
+      }],
+    })
+    const helpers = nested.physicalSchema('basis_app', true).functions
+      .filter(fn => fn.name.startsWith('basis.policy_'))
+      .map(fn => fn.sql)
+      .join('\n')
+    expect(helpers.match(/EXISTS \(SELECT 1 FROM "Project"/gu)).toHaveLength(1)
+    expect(helpers.match(/EXISTS \(SELECT 1 FROM "Task"/gu)).toHaveLength(1)
+    expect(helpers).toContain('"project.id" = ')
+    expect(helpers).toContain('"workspace.id" = ')
+    expect(helpers).toContain('current_setting(\'actor.id\', true)')
   })
 
   test('allows where-only membership rules without an artificial capability', () => {

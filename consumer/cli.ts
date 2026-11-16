@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { Logger } from 'basis/logger'
+import { run } from 'basis/utilities'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { bunCheckUnsupportedReason } from './bun-version'
@@ -92,20 +93,31 @@ const resolveBin = (packageName: string, binName: string): string => {
 }
 
 /**
+ * Write one captured subprocess response to the caller's streams.
+ * @param result - Captured command result.
+ * @param result.exitCode - Child exit code.
+ * @param result.stderr - Captured standard error.
+ * @param result.stdout - Captured standard output.
+ * @returns The child exit code.
+ */
+const writeResult = (
+  result: { readonly exitCode: number, readonly stderr: string, readonly stdout: string },
+): number => {
+  if (result.stdout !== '') process.stdout.write(result.stdout)
+  if (result.stderr !== '') process.stderr.write(result.stderr)
+  return result.exitCode
+}
+
+/**
  * Runs a dependency binary through Bun itself, so no Node shebang is required.
  * @param packageName The dependency package name.
  * @param binName The binary name to run.
  * @param args Arguments for the binary.
  * @returns The child process exit code.
  */
-const runBin = (packageName: string, binName: string, args: string[]): number => {
-  const result = Bun.spawnSync([process.execPath, resolveBin(packageName, binName), ...args], {
-    stderr: 'inherit',
-    stdin: 'inherit',
-    stdout: 'inherit',
-  })
-  return result.exitCode
-}
+const runBin = (packageName: string, binName: string, args: string[]): number => writeResult(
+  run(process.execPath, [resolveBin(packageName, binName), ...args]),
+)
 
 /** Flat ESLint config filenames ESLint discovers automatically. */
 const ESLINT_CONFIG_FILES = [
@@ -130,11 +142,12 @@ const hasEslintConfig = (): boolean => ESLINT_CONFIG_FILES.some(name => existsSy
  * A repository's own `eslint.config.*` wins when present; otherwise Basis
  * supplies its own config, so `basis lint` / `basis format` need no setup.
  * @param fix Whether to let ESLint apply the fixes it supports.
+ * @param target Path to lint; defaults to the working directory.
  * @returns The child process exit code.
  */
-const runEslint = (fix: boolean): number => {
+const runEslint = (fix: boolean, target = '.'): number => {
   const config = hasEslintConfig() ? [] : ['--config', join(basisDir(), 'eslint.config.mjs')]
-  return runBin('eslint', 'eslint', ['.', ...config, ...(fix ? ['--fix'] : [])])
+  return runBin('eslint', 'eslint', [target, ...config, ...(fix ? ['--fix'] : [])])
 }
 
 /**
@@ -155,18 +168,10 @@ const runStylelint = (fix: boolean): number => runBin('stylelint', 'stylelint', 
  * @param fix Whether to rewrite documents with the fixes the policy supports.
  * @returns The child process exit code.
  */
-const runMarkdown = (fix: boolean): number => {
-  const result = Bun.spawnSync([
-    process.execPath,
-    join(basisDir(), 'libraries', 'markdown-plugin', 'bin.ts'),
-    ...(fix ? ['--fix'] : []),
-  ], {
-    stderr: 'inherit',
-    stdin: 'inherit',
-    stdout: 'inherit',
-  })
-  return result.exitCode
-}
+const runMarkdown = (fix: boolean): number => writeResult(run(
+  process.execPath,
+  [join(basisDir(), 'libraries', 'markdown-plugin', 'bin.ts'), ...(fix ? ['--fix'] : [])],
+))
 
 /**
  * Runs every Basis lint surface with the same engine, so `lint` reports and
@@ -214,11 +219,10 @@ const requireBunCheck = (): boolean => {
  * Runs Bun's built-in TypeScript checker for the current project.
  * @returns The child process exit code.
  */
-const spawnBunCheck = (): number => Bun.spawnSync([process.execPath, '--check'], {
-  stderr: 'inherit',
-  stdin: 'inherit',
-  stdout: 'inherit',
-}).exitCode
+const spawnBunCheck = (): number => writeResult(run(
+  process.execPath,
+  ['--check'],
+))
 
 /**
  * Runs the TypeScript checker after validating the runtime.
@@ -237,6 +241,8 @@ const runEmit = async (): Promise<number> => {
       logger.info('[basis] emit: no graph.ts found; skipped')
       return 0
     }
+    const formatCode = runEslint(true, 'generated')
+    if (formatCode !== 0) return formatCode
     logger.info(`[basis] emit: ${result.emitters.join(', ')} -> ${result.outputRoot}`)
     return 0
   } catch (error) {

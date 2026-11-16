@@ -5,8 +5,8 @@
  *
  * - `Environment` — typed reads over the process environment.
  * - `secret` — 1Password secret reads.
- * - `run` / `runAsync` — the shared bounded subprocess runners
- *   (`RunOptions`, `CommandResult`).
+ *
+ * Subprocess execution belongs to `basis/utilities`.
  *
  * Everything else in the workspace is internal implementation and is
  * deliberately not re-exported: the loading seam (`loadDotenv`), the secret
@@ -16,6 +16,4 @@
  */
 
 export { Environment } from './environment'
-export { run, runAsync } from './run'
-export type { CommandResult, RunOptions } from './run'
 export { secret } from './secret'

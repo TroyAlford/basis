@@ -1,6 +1,6 @@
 import { afterAll } from 'bun:test'
 import { stopApplications } from './application'
-import { closeRuntime } from './browser'
+import { closeRuntime, getBrowser } from './browser'
 import { pruneSnapshots } from './cleanup'
 import { cleanupRun } from './lifecycle'
 import { cleanupTempDirectories, isolateTempDirectories } from './temp'
@@ -14,6 +14,9 @@ import '../react/testing/bun/register'
  * removed when the run ends.
  */
 isolateTempDirectories()
+
+/* Warm the run-scoped browser during preload when an integration lane opts in. */
+if (Bun.env.BASIS_SNAPSHOT_PRELOAD === '1') void getBrowser().catch(() => undefined)
 
 afterAll(() => { pruneSnapshots() })
 afterAll(cleanupRun)

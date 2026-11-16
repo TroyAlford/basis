@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { toMatchSQL } from '../testing/toMatchSQL'
-import { EntityDefinitions, FieldType, identityDefinition } from './EntityDefinitions'
+import { Constraint, EntityDefinitions, FieldType, identityDefinition } from './EntityDefinitions'
+import { Operator } from './Operator'
 
 expect.extend({ toMatchSQL })
 
@@ -239,6 +240,7 @@ describe('EntityDefinitions', () => {
       'Boolean',
       'Date',
       'Entity',
+      'Enum',
       'ID',
       'Inverse',
       'JSON',
@@ -425,7 +427,7 @@ describe('EntityDefinitions', () => {
         ...base.relationships[0],
         fields: [{ field: 'owner', target: 'User', type: 'Entity' }],
       }],
-    })).toThrow('must be a scalar, array or JSON field')
+    })).toThrow('must be a scalar, enum, array or JSON field')
     expect(() => load({
       ...base,
       relationships: [{
@@ -793,6 +795,29 @@ describe('EntityDefinitions', () => {
     expect(ddl).toContain('"payload" jsonb not null default \'{"active":true}\'::jsonb')
   })
 
+  test('casts empty array defaults to their declared element type', () => {
+    const entities = load({
+      entities: [{
+        fields: [
+          { default: [], field: 'strings', items: { type: 'String' }, type: 'Array' },
+          { default: [], field: 'numbers', items: { type: 'Number' }, type: 'Array' },
+          { default: [], field: 'booleans', items: { type: 'Boolean' }, type: 'Array' },
+          { default: [], field: 'dates', items: { type: 'Date' }, type: 'Array' },
+          { default: [], field: 'timestamps', items: { type: 'Timestamp' }, type: 'Array' },
+          { default: [], field: 'identities', items: { type: 'ID' }, type: 'Array' },
+        ],
+        name: 'Thing',
+      }],
+    })
+    const ddl = entities.ddl.join('\n')
+    expect(ddl).toContain('"strings" text[] not null default ARRAY[]::text[]')
+    expect(ddl).toContain('"numbers" double precision[] not null default ARRAY[]::double precision[]')
+    expect(ddl).toContain('"booleans" boolean[] not null default ARRAY[]::boolean[]')
+    expect(ddl).toContain('"dates" date[] not null default ARRAY[]::date[]')
+    expect(ddl).toContain('"timestamps" timestamptz[] not null default ARRAY[]::timestamptz[]')
+    expect(ddl).toContain('"identities" text[] not null default ARRAY[]::text[]')
+  })
+
   test('rejects defaults that do not match the field type', () => {
     expect(() => load({
       entities: [{
@@ -878,7 +903,7 @@ describe('EntityDefinitions', () => {
             description: 'Each user may only have one Membership per Campaign.',
             fields: ['userId', 'campaignId'],
             name: 'One Membership Per Campaign',
-            type: 'Uniqueness',
+            type: 'Structural',
           }],
           fields: [
             { field: 'id', format: 'UUID' },
@@ -893,13 +918,13 @@ describe('EntityDefinitions', () => {
     expect(entities.entity('User')?.constraints).toMatchObject([{
       fields: ['email'],
       name: 'User email must be unique',
-      type: 'Uniqueness',
+      type: 'Structural',
     }])
     expect(entities.entity('Membership')?.constraints).toMatchObject([{
       description: 'Each user may only have one Membership per Campaign.',
       fields: ['userId', 'campaignId'],
       name: 'One Membership Per Campaign',
-      type: 'Uniqueness',
+      type: 'Structural',
     }])
     expect(entities.constraints).toHaveLength(2)
     const ddl = entities.ddl.join('\n')
@@ -923,7 +948,7 @@ describe('EntityDefinitions', () => {
           description: 'Each user may join a campaign once.',
           fields: ['user', 'campaign'],
           name: 'Unique Membership',
-          type: 'Uniqueness',
+          type: 'Structural',
         }],
         fields: [],
         name: 'Membership',
@@ -932,11 +957,118 @@ describe('EntityDefinitions', () => {
     expect(entities.relationship('Membership')?.constraints).toMatchObject([{
       fields: ['user', 'campaign'],
       name: 'Unique Membership',
-      type: 'Uniqueness',
+      type: 'Structural',
     }])
     expect(entities.ddl.join('\n')).toContain(
       'create unique index if not exists "Membership_unique_membership" on "Membership" ("user.id", "campaign.id")',
     )
+  })
+
+  test('normalizes validation constraints over transaction-final Graph state', () => {
+    const definitions = load({
+      entities: [{
+        constraints: [{
+          description: 'An optional revision belongs to the document owner.',
+          name: 'consistentOwner',
+          type: 'Validation',
+          where: 'revision = null OR owner = revision.owner',
+        }],
+        fields: [
+          { field: 'owner', target: 'Owner', type: 'Entity' },
+          { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
+          { field: 'title', type: 'String' },
+        ],
+        name: 'Document',
+      }, {
+        fields: [{ field: 'owner', target: 'Owner', type: 'Entity' }],
+        name: 'Revision',
+      }, { fields: [], name: 'Owner' }],
+    })
+    const constraints = definitions.validationConstraints('Document')
+    expect(constraints).toHaveLength(1)
+    expect(constraints[0]).toMatchObject({
+      name: 'consistentOwner',
+      owner: 'Document',
+      type: Constraint.Validation,
+    })
+    expect(constraints[0]?.where).toEqual({
+      filters: [
+        { field: 'revision', operator: Operator.Comparison.Equal, value: null },
+        {
+          field: 'owner',
+          operator: Operator.Comparison.Equal,
+          value: { $field: 'revision.owner' },
+        },
+      ],
+      operator: Operator.Logical.Or,
+    })
+    expect(() => load({
+      entities: [{
+        constraints: [{ description: 'Missing.', name: 'missing', type: 'Validation' }],
+        fields: [],
+        name: 'Document',
+      }],
+    })).toThrow('must declare a non-empty where')
+    expect(() => load({
+      entities: [{
+        constraints: [{
+          description: 'Unknown.',
+          name: 'unknown',
+          type: 'Validation',
+          where: 'missing = null',
+        }],
+        fields: [],
+        name: 'Document',
+      }],
+    })).toThrow('has unknown field "missing"')
+    expect(() => load({
+      entities: [{
+        constraints: [{
+          description: 'Unknown reference.',
+          name: 'unknownReference',
+          type: 'Validation',
+          where: 'owner = revision.missing',
+        }],
+        fields: [
+          { field: 'owner', target: 'Owner', type: 'Entity' },
+          { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
+        ],
+        name: 'Document',
+      }, {
+        fields: [{ field: 'owner', target: 'Owner', type: 'Entity' }],
+        name: 'Revision',
+      }, { fields: [], name: 'Owner' }],
+    })).toThrow('unknown field "missing"')
+    expect(() => load({
+      entities: [{
+        constraints: [{
+          description: 'Incompatible.',
+          name: 'incompatible',
+          type: 'Validation',
+          where: 'revision.owner = title',
+        }],
+        fields: [
+          { field: 'revision', nullable: true, target: 'Revision', type: 'Entity' },
+          { field: 'title', type: 'String' },
+        ],
+        name: 'Document',
+      }, {
+        fields: [{ field: 'owner', target: 'Owner', type: 'Entity' }],
+        name: 'Revision',
+      }, { fields: [], name: 'Owner' }],
+    })).toThrow('incompatible fields')
+    expect(() => load({
+      entities: [{
+        constraints: [{
+          description: 'Unknown.',
+          name: 'duplicate',
+          type: 'Validation',
+          where: 'title = null',
+        }],
+        fields: [{ field: 'title', type: 'String' }],
+        name: 'Document',
+      }],
+    })).not.toThrow()
   })
 
   test('rejects invalid uniqueness declarations', () => {
@@ -953,20 +1085,20 @@ describe('EntityDefinitions', () => {
       description: 'One title',
       fields: ['missing'],
       name: 'Missing Field',
-      type: 'Uniqueness',
+      type: 'Structural',
     }]))).toThrow('unknown physical field "missing"')
     expect(() => load(model([{ field: 'title', type: 'String' }], [{
       description: 'Duplicate fields',
       fields: ['title', 'title'],
       name: 'Duplicate Fields',
-      type: 'Uniqueness',
+      type: 'Structural',
     }]))).toThrow('fields must be distinct')
     expect(() => load(model([{ field: 'title', type: 'String' }], [{
       description: 'Wrong type',
       fields: ['title'],
       name: 'Wrong Type',
       type: 'Other',
-    }]))).toThrow('type must be Uniqueness')
+    }]))).toThrow('type must be Structural')
   })
 
   test('accepts native scalar arrays and opaque JSON values', () => {
@@ -1316,10 +1448,110 @@ describe('EntityDefinitions', () => {
       entities: [{ fields: [], name: 'Entity' }],
     })).toThrow('reserved for the universal identity root')
     expect(() => load({
+      entities: [{ fields: [], name: 'Reference' }],
+    })).toThrow('reserved for generated contracts')
+    expect(() => load({
       entities: [{ fields: [{ field: 'owner', target: 'Missing', type: 'Entity' }], name: 'Note' }],
     })).toThrow('unknown target entity "Missing"')
     expect(() => load({
       entities: [{ fields: [{ field: 'owner', target: 'Note', type: 'Entity' }], name: 'Note' }],
     })).not.toThrow()
+  })
+
+  test('normalizes named enum fields, descriptions, and typed physical checks', () => {
+    const definitions = load({
+      entities: [
+        {
+          fields: [
+            { enum: 'AccessLevel', field: 'access', type: 'Enum' },
+            { default: 'viewer', enum: 'AccessLevel', field: 'defaultAccess', nullable: true, type: 'Enum' },
+          ],
+          name: 'Document',
+        },
+        {
+          fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }],
+          name: 'Folder',
+        },
+      ],
+      enums: {
+        AccessLevel: {
+          editor: 'Can edit resources.',
+          owner: 'Can manage resources and membership.',
+          viewer: 'Can view resources.',
+        },
+      },
+    })
+    const enumeration = definitions.enum('AccessLevel')
+    expect(enumeration?.values).toEqual([
+      { description: 'Can edit resources.', member: 'Editor', value: 'editor' },
+      { description: 'Can manage resources and membership.', member: 'Owner', value: 'owner' },
+      { description: 'Can view resources.', member: 'Viewer', value: 'viewer' },
+    ])
+    const access = definitions.entity('Document')?.fields.find(field => field.name === 'access')
+    expect(access).toMatchObject({ enum: 'AccessLevel', name: 'access', type: FieldType.Enum })
+    const ddl = definitions.ddl.join('\n')
+    expect(ddl).toContain('"access" text not null')
+    expect(ddl).toContain('"defaultAccess" text default \'viewer\'')
+    expect(ddl).toContain(
+      'constraint "Document_access_enum_check" check ' +
+      '(("access" IS NULL OR "access" IN (\'editor\', \'owner\', \'viewer\')))',
+    )
+    expect(ddl).toContain(
+      'constraint "Folder_access_enum_check" check ' +
+      '(("access" IS NULL OR "access" IN (\'editor\', \'owner\', \'viewer\')))',
+    )
+  })
+
+  test('keeps enum description edits out of physical DDL', () => {
+    const build = (description: string) => load({
+      entities: [{ fields: [{ enum: 'AccessLevel', field: 'access', type: 'Enum' }], name: 'Document' }],
+      enums: { AccessLevel: { viewer: description } },
+    })
+    expect(build('Can view resources.').ddl).toEqual(build('Can read resources.').ddl)
+  })
+
+  test('rejects malformed enum declarations and references', () => {
+    expect(() => load({
+      entities: [{ fields: [], name: 'Document' }],
+      enums: { AccessLevel: {} },
+    })).toThrow('must declare at least one value')
+    expect(() => load({
+      entities: [{ fields: [], name: 'Document' }],
+      enums: { AccessLevel: { viewer: '' } },
+    })).toThrow('must have a non-empty description')
+    expect(() => load({
+      entities: [{ fields: [], name: 'Document' }],
+      enums: { AccessLevel: { Viewer: 'Also view.', viewer: 'View.' } },
+    })).toThrow('ambiguous member name')
+    expect(() => load({
+      entities: [{ fields: [], name: 'Document' }],
+      enums: { accessLevel: { viewer: 'View.' } },
+    })).toThrow('PascalCase')
+    expect(() => load({
+      entities: [{ fields: [{ enum: 'Missing', field: 'access', type: 'Enum' }], name: 'Document' }],
+      enums: { AccessLevel: { viewer: 'View.' } },
+    })).toThrow('references unknown enum "Missing"')
+    expect(() => load({
+      entities: [{ fields: [], name: 'AccessLevel' }],
+      enums: { AccessLevel: { viewer: 'View.' } },
+    })).toThrow('conflicts with an entity name')
+    expect(() => load({
+      entities: [{ fields: [], name: 'Document' }],
+      enums: { Reference: { viewer: 'View.' } },
+    })).toThrow('reserved for generated contracts')
+    expect(() => load({
+      entities: [{
+        fields: [{ default: 'owner', enum: 'AccessLevel', field: 'access', type: 'Enum' }],
+        name: 'Document',
+      }],
+      enums: { AccessLevel: { viewer: 'View.' } },
+    })).toThrow('is not a value of enum "AccessLevel"')
+    expect(() => load({
+      entities: [{
+        fields: [{ default: 'View.', enum: 'AccessLevel', field: 'access', type: 'Enum' }],
+        name: 'Document',
+      }],
+      enums: { AccessLevel: { viewer: 'View.' } },
+    })).toThrow('default "View." is not a value of enum "AccessLevel"')
   })
 })

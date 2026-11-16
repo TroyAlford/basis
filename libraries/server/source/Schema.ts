@@ -3,7 +3,7 @@ import { checksum } from '../../utilities'
 
 /** The category of one physical schema object. */
 export type PhysicalKind =
-  | 'constraint' | 'extension' | 'function' | 'grant' | 'index' | 'policy'
+  | 'check' | 'constraint' | 'extension' | 'function' | 'grant' | 'index' | 'policy'
   | 'role' | 'row-security' | 'schema' | 'table' | 'trigger'
 
 /** One typed physical column. */
@@ -64,8 +64,24 @@ export interface PhysicalConstraint {
   readonly targetColumn?: string,
 }
 
+/** One typed physical check constraint. */
+export interface PhysicalCheck {
+  /** Checked column for a named enum check. */
+  readonly column?: string,
+  /** Complete catalog definition, when introspected. */
+  readonly definition?: string,
+  /** Constraint name. */
+  readonly name: string,
+  /** Complete add-constraint SQL, when compiled from the canonical model. */
+  readonly sql?: string,
+  /** Canonical allowed values for a named enum check. */
+  readonly values?: readonly string[],
+}
+
 /** One typed physical table. */
 export interface PhysicalTable {
+  /** Table-level check constraints. */
+  readonly checks?: readonly PhysicalCheck[],
   /** Typed columns. */
   readonly columns: readonly PhysicalColumn[],
   /** Whether RLS is forced for this table. */
@@ -518,6 +534,37 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     primaryByTable.set(name, row.columns)
   }
 
+  const checkRows = await sql<{
+    constraint: string,
+    definition: string,
+    schema: string,
+    table: string,
+  }[]>`
+    SELECT n.nspname AS schema,
+      c.relname AS TABLE,
+      con.conname AS CONSTRAINT,
+      pg_get_constraintdef(con.oid) AS definition
+    FROM pg_constraint con
+    JOIN pg_class c ON c.oid = con.conrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname IN (current_schema(), 'basis') AND con.contype = 'c'
+    ORDER BY n.nspname, c.relname, con.conname
+  `
+  const checksByTable = new Map<string, PhysicalCheck[]>()
+  for (const row of checkRows) {
+    const name = `${row.schema === 'basis' ? 'basis.' : ''}${row.table}`
+    const checks = checksByTable.get(name) ?? []
+    const enumCheck = row.constraint.endsWith('_enum_check')
+      ? enumCheckDefinition(row.definition)
+      : undefined
+    checks.push({
+      definition: row.definition,
+      name: row.constraint,
+      ...(enumCheck ?? {}),
+    })
+    checksByTable.set(name, checks)
+  }
+
   const functionRows = await sql<{
     body: string,
     definition: string,
@@ -719,6 +766,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   const tables: PhysicalTable[] = tableRows.map(row => {
     const name = `${row.schema === 'basis' ? 'basis.' : ''}${row.table}`
     return {
+      checks: checksByTable.get(name) ?? [],
       columns: columnsByTable.get(name) ?? [],
       forceRowSecurity: row.force,
       indexes: indexesByTable.get(name) ?? [],
@@ -865,6 +913,15 @@ export function plan(options: PlanOptions): SchemaPlan {
   }
 
   const actualGrants = new Map((actualSchema.grants ?? []).map(grant => [grant.name, grant]))
+  /*
+   * A model with no compiled authorization predicates does not own the graph
+   * helpers that may already live in the shared `basis` schema.
+   */
+  const managesBasisFunctions = desired.functions.some(fn => (
+    fn.name.startsWith('basis.policy_') || fn.name.startsWith('basis.validate_')
+  )) || [...previousFunctions].some(name => (
+    name.startsWith('basis.policy_') || name.startsWith('basis.validate_')
+  ))
   const desiredGrants = new Set((desired.grants ?? []).map(grant => grant.name))
   const desiredRevokes = new Set((desired.grants ?? [])
     .filter(grant => grant.kind === 'revoke')
@@ -905,6 +962,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   }
   for (const grant of actualGrants.values()) {
     if (desiredGrants.has(grant.name) || desiredRevokes.has(grant.name)) continue
+    if (!managesBasisFunctions && grant.function?.startsWith('basis.')) continue
     if (grant.table && removedTables.has(grant.table)) continue
     if (grant.function && removedFunctionNames.has(grant.function)) continue
     if (grant.grantee && desiredGrantees.has(grant.grantee)) {
@@ -1311,6 +1369,61 @@ export function plan(options: PlanOptions): SchemaPlan {
         drift.push(`unexpected index: ${table.name}.${index.name}`)
       }
     }
+    const actualChecks = new Map((actual.checks ?? []).map(check => [check.name, check]))
+    const previousChecks = new Map((previousTable?.checks ?? []).map(check => [check.name, check]))
+    for (const check of table.checks ?? []) {
+      const existing = actualChecks.get(check.name)
+      if (!existing) {
+        if (previousChecks.has(check.name)) {
+          drift.push(`missing deployed check: ${table.name}.${check.name}`)
+          continue
+        }
+        operations.push({
+          dependsOn: [`table:${table.name}`],
+          id: `check:${table.name}:${check.name}`,
+          kind: 'check',
+          risk: 'review',
+          sql: check.sql ?? '',
+          target: `${table.name}.${check.name}`,
+        })
+        continue
+      }
+      if (sameCheckValues(check, existing)) continue
+      const previousCheck = previousChecks.get(check.name)
+      if (previousCheck && sameCheckValues(previousCheck, existing)) {
+        const dropId = `check-drop:${table.name}:${check.name}`
+        operations.push({
+          dependsOn: [`table:${table.name}`],
+          id: dropId,
+          kind: 'check',
+          risk: 'review',
+          sql: `ALTER TABLE ${quote(table.name)} DROP CONSTRAINT ${quote(check.name)}`,
+          target: `${table.name}.${check.name}`,
+        })
+        operations.push({
+          dependsOn: [dropId],
+          id: `check:${table.name}:${check.name}`,
+          kind: 'check',
+          risk: 'review',
+          sql: check.sql ?? '',
+          target: `${table.name}.${check.name}`,
+        })
+      } else {
+        drift.push(`check definition changed: ${table.name}.${check.name}`)
+      }
+    }
+    for (const existing of actualChecks.values()) {
+      if ((table.checks ?? []).some(check => check.name === existing.name)) continue
+      if (!previousChecks.has(existing.name)) continue
+      operations.push({
+        dependsOn: [`table:${table.name}`],
+        id: `check-drop:${table.name}:${existing.name}`,
+        kind: 'check',
+        risk: 'review',
+        sql: `ALTER TABLE ${quote(table.name)} DROP CONSTRAINT ${quote(existing.name)}`,
+        target: `${table.name}.${existing.name}`,
+      })
+    }
   }
   for (const table of actualSchema.tables) {
     if (desiredTables.has(table.name) || ambiguities.some(pair => pair.startsWith(`${table.name} ->`))) continue
@@ -1361,6 +1474,9 @@ export function plan(options: PlanOptions): SchemaPlan {
 
   const actualFunctionMap = new Map(actualSchema.functions.map(fn => [fn.name, fn]))
   for (const fn of desired.functions) {
+    if (!managesBasisFunctions && fn.name.startsWith('basis.') && actualFunctionMap.has(fn.name)) {
+      continue
+    }
     if (!fn.required.every(name => actualFunctions.has(name))) {
       if (fn.required.some(name => previousFunctions.has(name))) {
         for (const name of fn.required) {
@@ -1419,6 +1535,7 @@ export function plan(options: PlanOptions): SchemaPlan {
   const desiredFunctionNames = new Set(desired.functions.flatMap(fn => fn.required))
   for (const name of actualFunctions) {
     if (desiredFunctionNames.has(name)) continue
+    if (!managesBasisFunctions && name.startsWith('basis.')) continue
     if (previousFunctions.has(name)) {
       operations.push({
         dependsOn: [],
@@ -1669,11 +1786,12 @@ function stripMigrationLedger(schema: PhysicalSchema): PhysicalSchema {
  */
 export function physicalHash(schema: PhysicalSchema, ignoreLedgerSchema = false): string {
   const stripped = stripMigrationLedger(schema)
-  if (!ignoreLedgerSchema) return checksum(JSON.stringify(stableValue(stripped)))
+  const canonical = stripped
+  if (!ignoreLedgerSchema) return checksum(JSON.stringify(stableValue(canonical)))
   return checksum(JSON.stringify(stableValue({
-    ...stripped,
-    grants: (stripped.grants ?? []).filter(grant => grant.table !== 'basis'),
-    schemas: (stripped.schemas ?? []).filter(name => name !== 'basis'),
+    ...canonical,
+    grants: (canonical.grants ?? []).filter(grant => grant.table !== 'basis'),
+    schemas: (canonical.schemas ?? []).filter(name => name !== 'basis'),
   })))
 }
 
@@ -2599,6 +2717,105 @@ function defaultKey(value: string | null | undefined): string {
  */
 function sameDefault(left: string | null | undefined, right: string | null | undefined): boolean {
   return defaultKey(left) === defaultKey(right)
+}
+
+/**
+ * Extract the strict semantics of one introspected enum check definition.
+ *
+ * The accepted shape is exactly a nullable guard plus one allowed-value
+ * condition on the same column: `col IS NULL OR col IN (...)`,
+ * `col = ANY (ARRAY[...])`, or the single-value `col = 'value'` form. Any extra
+ * clause, wrong column, changed null guard, or unrecognized shape is rejected.
+ * @param definition - PostgreSQL `pg_get_constraintdef` output.
+ * @returns The checked column and allowed values, or undefined for any other shape.
+ */
+function enumCheckDefinition(
+  definition: string,
+): { readonly column: string, readonly values: readonly string[] } | undefined {
+  const expression = stripOuterParens(definition.trim().replace(/^CHECK\s+/iu, ''))
+  // Long anchored shape patterns stay single-line so the exact accepted grammar is auditable.
+
+  const guard = /^\(?\s*"?([A-Za-z0-9_.]+)"?\s+IS\s+NULL\s*\)?\s+OR\s+\(?\s*"?([A-Za-z0-9_.]+)"?\s*/iu.exec(expression)
+  if (!guard) return undefined
+  const column = guard[1] as string
+  if (guard[2] !== column) return undefined
+  // eslint-disable-next-line @stylistic/max-len
+  const value = /^(?:=\s*ANY\s*\(\s*ARRAY\s*\[([\s\S]+?)\]\s*\)|IN\s*\(([\s\S]+?)\)|=\s*'((?:[^']|'')*)'(?:\s*::[A-Za-z0-9_ ."]+)?)\s*\)?$/iu
+    .exec(expression.slice(guard[0].length))
+  if (!value) return undefined
+  const valuesPart = value[1] ?? value[2] ?? (value[3] === undefined ? undefined : `'${value[3]}'`)
+  if (!valuesPart) return undefined
+  const values = enumLiterals(valuesPart)
+  return values.length === 0 ? undefined : { column, values }
+}
+
+/**
+ * Parse one comma-separated list of enum literals with only optional casts.
+ * @param source - Literal list without surrounding brackets.
+ * @returns The decoded values, or an empty array when extra tokens are present.
+ */
+function enumLiterals(source: string): readonly string[] {
+  const values: string[] = []
+  let remainder = source
+  const literal = /'((?:[^']|'')*)'/gu
+  let match: RegExpExecArray | null
+  while ((match = literal.exec(source)) !== null) {
+    values.push((match[1] as string).replaceAll("''", "'"))
+    remainder = remainder.replace(match[0], '')
+  }
+  const residual = remainder
+    .replace(/::[A-Za-z0-9_ ."]+/gu, '')
+    .replaceAll(',', '')
+    .trim()
+  return residual === '' ? values : []
+}
+
+/**
+ * Remove balanced parentheses that wrap the entire expression.
+ * @param value - SQL expression.
+ * @returns The unwrapped expression.
+ */
+function stripOuterParens(value: string): string {
+  let result = value
+  while (result.startsWith('(') && result.endsWith(')') && wrapsWholeExpression(result)) {
+    result = result.slice(1, -1).trim()
+  }
+  return result
+}
+
+/**
+ * Whether the first parenthesis closes at the final character.
+ * @param value - SQL expression beginning and ending with parentheses.
+ * @returns Whether the outer pair encloses the whole expression.
+ */
+function wrapsWholeExpression(value: string): boolean {
+  let depth = 0
+  let quoted = false
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] as string
+    if (character === "'") quoted = !quoted
+    if (quoted) continue
+    if (character === '(') depth += 1
+    if (character === ')') {
+      depth -= 1
+      if (depth === 0) return index === value.length - 1
+    }
+  }
+  return false
+}
+
+/**
+ * Whether one desired enum check's semantics match the live check.
+ * @param desired - Desired check.
+ * @param actual - Live check.
+ * @returns Whether both describe the same checked column and allowed-value set.
+ */
+function sameCheckValues(desired: PhysicalCheck, actual: PhysicalCheck): boolean {
+  if (!desired.values) return true
+  if (!actual.values || !desired.column || actual.column !== desired.column) return false
+  const wanted = [...desired.values].sort().join('\u0000')
+  const found = [...actual.values].sort().join('\u0000')
+  return wanted === found
 }
 
 /**

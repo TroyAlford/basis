@@ -98,7 +98,7 @@ describe('Reviewed schema evolution', () => {
       expect(drifted.ready).toBe(false)
       expect(drifted.discrepancies.length).toBeGreaterThan(0)
     }, { fresh: true })
-  }, 120_000)
+  })
 
   test('requires an explicit approved resolution for a rename ambiguity', async () => {
     const previous = EntityDefinitions.load(JSON.stringify({
@@ -138,7 +138,7 @@ describe('Reviewed schema evolution', () => {
       expect(artifact.operations.some(operation => operation.id === 'rename:OldNote -> NewNote'))
         .toBe(true)
     }, { fresh: true })
-  }, 120_000)
+  })
 
   test('applies an additive transition from a reviewed previous artifact', async () => {
     const previous = model('Note')
@@ -166,7 +166,7 @@ describe('Reviewed schema evolution', () => {
       await DDL.apply(database.sql, second)
       expect((await DDL.readiness(database.sql, second)).ready).toBe(true)
     }, { fresh: true })
-  }, 120_000)
+  })
 
   test('applies and verifies a Graph security schema', async () => {
     await withIsolatedDatabase('migration-graph', async database => {
@@ -199,7 +199,7 @@ describe('Reviewed schema evolution', () => {
       expect(readiness.ready).toBe(true)
       expect(readiness.discrepancies).toEqual([])
     }, { fresh: true })
-  }, 120_000)
+  })
 
   test('applies and verifies an MTI transition', async () => {
     const desired = EntityDefinitions.load(JSON.stringify({
@@ -219,7 +219,7 @@ describe('Reviewed schema evolution', () => {
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       expect((await DDL.readiness(database.sql, artifact)).ready).toBe(true)
     }, { fresh: true })
-  }, 120_000)
+  })
 
   test('requires an explicit approved SQL resolution for a data operation', async () => {
     const previous = EntityDefinitions.load(JSON.stringify({
@@ -265,7 +265,7 @@ describe('Reviewed schema evolution', () => {
       await database.sql.unsafe(`SET search_path TO "${database.schema}"`).simple()
       expect((await DDL.readiness(database.sql, artifact)).ready).toBe(true)
     }, { fresh: true })
-  }, 120_000)
+  })
 
   test('rolls back an interrupted migration before writing the ledger', async () => {
     const desired = model('Note')
@@ -306,7 +306,7 @@ describe('Reviewed schema evolution', () => {
       `
       expect(table?.present).toBe(false)
     }, { fresh: true })
-  }, 120_000)
+  })
 
   test('applies a CONCURRENTLY operation through a reserved pooled session', async () => {
     const fixture = await useDatabaseFixture('migration-concurrent')
@@ -342,7 +342,7 @@ describe('Reviewed schema evolution', () => {
     } finally {
       await admin.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).simple()
     }
-  }, 120_000)
+  })
 
   test('records a failed nontransactional migration without claiming readiness', async () => {
     const fixture = await useDatabaseFixture('migration-concurrent-failure')
@@ -380,7 +380,7 @@ describe('Reviewed schema evolution', () => {
     } finally {
       await admin.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).simple()
     }
-  }, 120_000)
+  })
 
   test('rejects application when the live source drifted from the approved plan', async () => {
     const desired = model('Note')
@@ -394,5 +394,5 @@ describe('Reviewed schema evolution', () => {
       await database.sql.unsafe('CREATE TABLE "Unapproved" ("id" text PRIMARY KEY)').simple()
       await expect(DDL.apply(database.sql, artifact)).rejects.toThrow('drifted')
     }, { fresh: true })
-  }, 120_000)
+  })
 })

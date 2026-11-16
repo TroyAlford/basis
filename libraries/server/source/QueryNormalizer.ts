@@ -2,7 +2,7 @@ import type { EntityDefinition, QueryFieldDefinition, ScalarFieldDefinition } fr
 import { FieldType } from './EntityDefinitions'
 import { Operator } from './Operator'
 import type { ArrayResolver, CollectionResolver, Filter } from './Predicate'
-import { arrayItemField, arrayMemberEntity, arrayMemberField, arrayMemberResolver, Predicate } from './Predicate'
+import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayItemField, arrayMemberEntity, arrayMemberField, arrayMemberResolver, Predicate } from './Predicate'
 import type { QueryComparison, QueryExpression, QueryLiteral } from './QueryParser'
 import { QueryParser } from './QueryParser'
 
@@ -66,7 +66,9 @@ function expression(
   if (node.kind === 'collection') {
     const scope = collection?.(node.field)
     if (scope) {
-      const filters = node.filters.map(filter => expression(scope.definition, filter, scope.field))
+      const filters = node.filters.map(filter => (
+        expression(scope.definition, filter, scope.field, scope.collection, scope.array)
+      ))
       if (node.operator === Operator.Collection.All) return Predicate.universal(node.field, filters)
       return { field: node.field, filters, operator: node.operator }
     }
@@ -111,7 +113,7 @@ function comparison(
     throw new Error('Collection $contains requires parenthesized requirements')
   }
 
-  const field = resolve(node.field)
+  const field = node.field === ACTOR_FIELD_NAME ? ACTOR_FIELD : resolve(node.field)
 
   if (node.operator === Operator.Comparison.Empty) return Predicate.empty(entity, field)
 
@@ -157,6 +159,7 @@ function assertValues(node: QueryComparison, count: number): void {
  * @returns The typed canonical operand.
  */
 function literal(field: QueryFieldDefinition, node: QueryLiteral): unknown {
+  if (node.kind === 'field') return { $field: node.value as string }
   if (node.kind === 'array') {
     if (field.type === FieldType.Array) {
       const item = arrayItemField(field)
@@ -171,6 +174,12 @@ function literal(field: QueryFieldDefinition, node: QueryLiteral): unknown {
   }
   if (field.type === FieldType.Array) return scalarLiteral(arrayItemField(field), node)
   if (field.type === FieldType.JSON) return jsonLiteral(node)
+  if (field.type === FieldType.Enum) {
+    if (node.kind !== 'string') {
+      throw new Error(`Query operand for "${field.name}" is not a valid enum value`)
+    }
+    return node.value
+  }
   return scalarLiteral(field, node)
 }
 
@@ -181,7 +190,7 @@ function literal(field: QueryFieldDefinition, node: QueryLiteral): unknown {
  * @returns The typed scalar value.
  */
 function scalarLiteral(field: ScalarFieldDefinition, node: QueryLiteral): unknown {
-  if (node.kind === 'array' || node.kind === 'object') {
+  if (node.kind === 'array' || node.kind === 'object' || node.kind === 'field') {
     throw new Error(`Query operand for "${field.name}" must be a scalar literal`)
   }
   if (node.kind === 'null') return null
@@ -262,6 +271,7 @@ function canonicalDecimal(value: string): string {
  * @returns A JSON-compatible value.
  */
 function jsonLiteral(node: QueryLiteral): unknown {
+  if (node.kind === 'field') throw new Error('JSON operands cannot contain field references')
   if (node.kind === 'array') return node.value.map(jsonLiteral)
   if (node.kind === 'object') {
     return Object.fromEntries(

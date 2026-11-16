@@ -27,6 +27,10 @@ titleCase('model-first database') // 'Model First Database'
 
 `AbortablePromise` provides cancellation-aware waiting. `hash` and `randomHash` create deterministic or random identifiers. `checksum` provides SHA-256 integrity for structured values, raw bytes, and Bun files; structured values use stable key ordering unless `{ stable: false }` preserves a legacy byte layout. `checksum(Bun.file(path))` delegates to the platform's native `sha256sum`/`shasum` command and resolves without loading the file into application memory. `noop` is the shared no-op.
 
+## Subprocesses
+
+`run` and `runAsync` are the shared bounded subprocess runners: explicit argv (never a shell string), optional `cwd`, environment overrides, `timeoutMs`, and a Basis `Logger`. Both capture the child's output and return the full `{ exitCode, stdout, stderr, lines }` response, where `lines` is normalized stdout (empty output is `[]`).
+
 ## State directories
 
 `directories(folderName)` returns a lazy handle under `process.cwd()/.basis/<folderName>`. Its `json(filename)` form reads parsed JSON or returns `null` only when the file is absent; `json(filename, content, options)` writes atomically and returns the content. Directory paths reject absolute and traversal segments. `path` is available for binary files, and `file(filename)` ensures the directory before returning a file path.
@@ -45,4 +49,4 @@ await database.json('cutover.json', { phase: 'prepared' }, { mode: 0o600 })
 
 ## Types
 
-The index exports `BasisRuntime`, `FrontMatterParts`, `ILogger`, `LoggerContext`, `LoggerOptions`, `PathOf`, `Primitive`, `TypeAt`, and `URI`. `Logger` and its types are also available through the supported `basis/logger` surface.
+The index exports `BasisRuntime`, `CommandResult`, `FrontMatterParts`, `ILogger`, `LoggerContext`, `LoggerOptions`, `PathOf`, `Primitive`, `RunOptions`, `TypeAt`, and `URI`. `Logger` and its types are also available through the supported `basis/logger` surface.

@@ -44,7 +44,7 @@ describe('testing/docs', () => {
       entry: './testing/docs/serve.ts',
       timeoutMs: 120_000,
     })
-  }, 120_000)
+  })
 
   test('captures the Button examples', async () => {
     await app.visit('/components/button', { ...NETWORK }, async page => {
@@ -65,7 +65,7 @@ describe('testing/docs', () => {
       expect(await entries.evaluate(el => el.scrollTop)).toBeGreaterThan(beforeScroll)
       expect((await header.boundingBox())?.y).toBe(before?.y)
     })
-  }, 60_000)
+  })
 
   test('follows the system color scheme and toggles the theme page presets', async () => {
     await app.visit('/components/theme', {
@@ -128,7 +128,7 @@ describe('testing/docs', () => {
         getComputedStyle(document.body).getPropertyValue('--basis-color-background').trim()
       ))).toBe('#080a0dff')
     })
-  }, 60_000)
+  })
 
   test('highlights Markdown code fences and navigates away cleanly', async () => {
     const pageErrors: string[] = []
@@ -146,7 +146,7 @@ describe('testing/docs', () => {
       await page.waitForFunction(() => document.querySelector('main h1')?.textContent === 'Icons')
     })
     expect(pageErrors).toEqual([])
-  }, 60_000)
+  })
 
   test('keeps the docs title fixed above a scrolling navigation and shows its icon', async () => {
     await app.visit('/components/button', { ...NETWORK }, async page => {
@@ -167,7 +167,7 @@ describe('testing/docs', () => {
       expect(afterScroll).toBeGreaterThan(beforeScroll)
       expect(after?.y).toBe(before?.y)
     })
-  }, 60_000)
+  })
 
   test('captures table pinned columns and header actions at a narrow width', async () => {
     await app.visit('/components/table', { ...NETWORK }, async page => {
@@ -217,7 +217,7 @@ describe('testing/docs', () => {
       })
 
     })
-  }, 90_000)
+  })
 
   test('captures the icon grid', async () => {
     await app.visit('/icons', { ...NETWORK }, async page => {
@@ -242,7 +242,7 @@ describe('testing/docs', () => {
         maxDiffPixelRatio: 0.02,
       })
     })
-  }, 90_000)
+  })
 
   /*
    * The Popup boundary example anchors the same tooltip in two panes: one clips
@@ -256,7 +256,7 @@ describe('testing/docs', () => {
         maxDiffPixelRatio: 0.02,
       })
     })
-  }, 60_000)
+  })
 
   /*
    * Each Tooltip boundary scenario anchors an always-visible tooltip near a
@@ -280,7 +280,7 @@ describe('testing/docs', () => {
         })
       }
     })
-  }, 90_000)
+  })
 
   /*
    * The AutoComplete dropdown is promoted to the browser top layer, so these
@@ -402,7 +402,7 @@ describe('testing/docs', () => {
       await page.waitForFunction(() => document.querySelector('.auto-complete [role="listbox"]') === null)
       expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('INPUT')
     })
-  }, 60_000)
+  })
 
   /**
    * Release the fixed documentation shell so a full-page capture is the whole
@@ -468,6 +468,6 @@ describe('testing/docs', () => {
         )
       }
     })
-  }, 120_000)
+  })
 
 })
