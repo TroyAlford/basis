@@ -40,6 +40,35 @@ describe('resource-scoped create authorization', () => {
     })
   })
 
+  test('keeps membership lookup privileged while membership READ is denied', async () => {
+    await withDatabase('create-hidden-membership', rows.alice, async database => {
+      expect(await database.sql<{ role: string }[]>`
+        SELECT "role"
+        FROM "WorkspaceMembership"
+      `).toEqual([])
+      expect(await database.create('Resource', resource(rows.visibleWorkspace, 'Hidden membership')))
+        .toMatchObject({ created: 1 })
+    })
+  })
+
+  test('denies descendant-only inserts through an unrestricted parent row', async () => {
+    await expect(withDatabase('direct-descendant', rows.alice, async database => {
+      const id = randomUUID()
+      await database.sql`
+        INSERT INTO "Entity" ("id", "name", "entity")
+        VALUES (${id}, ${`Create root ${id}`}, 'CreateLeaf')
+      `
+      await database.sql`
+        INSERT INTO "CreateRoot" ("id", "title", "workspace.id")
+        VALUES (${id}, ${`Create root ${id}`}, ${rows.hiddenWorkspace})
+      `
+      await database.sql`
+        INSERT INTO "CreateLeaf" ("id")
+        VALUES (${id})
+      `
+    })).rejects.toThrow(/row-level security policy/)
+  })
+
   test('enforces create rules across an MTI insert chain', async () => {
     await withDatabase('create-mti-owner', rows.alice, async database => {
       expect(await database.create('CreateLeaf', {

@@ -389,9 +389,10 @@ describe('Graph', () => {
       candidate.table === 'Workspace' && candidate.name === 'basis_Workspace_create'
     ))
     expect(policy?.sql).toContain('WITH CHECK')
-    expect(policy?.sql).toContain('WorkspaceMembership')
-    expect(policy?.sql).toContain('current_setting')
-    expect(policy?.sql).not.toContain('basis.policy_')
+    const helper = membershipGraph.physicalSchema('basis_app', true).functions
+      .find(candidate => policy?.sql.includes(candidate.name))
+    expect(helper?.sql).toContain('WorkspaceMembership')
+    expect(helper?.sql).toContain('current_setting')
   })
 
   test('supports collection $empty policies', () => {

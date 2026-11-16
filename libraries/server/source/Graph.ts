@@ -5,6 +5,7 @@ import { Constraint, EntityDefinitions, FieldType, identityDefinition, isCanonic
 import type { AuthoredDocument, AuthoredEntity, AuthoredEnumSource, AuthoredRelationship, AuthoredSecurity } from './GraphAuthoring'
 import { Operator } from './Operator'
 import { resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
+import { postgresScalarType } from './PostgresTypes'
 import type { ArrayFilterScope, CollectionFilterScope, Filter } from './Predicate'
 import { ACTOR_FIELD_NAME, Predicate } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
@@ -308,6 +309,7 @@ export class Graph {
         hasRole,
         ...this.#policyFunctions(),
         ...this.#validationFunctions(),
+        ...this.#createHelperFunctions(),
         ...this.#identityFunctions(),
       ],
       grants: this.#grants(appRole),
@@ -991,6 +993,101 @@ export class Graph {
     }
   }
 
+  #createHelperFunctions(): PhysicalFunction[] {
+    const helpers: PhysicalFunction[] = []
+    for (const leaf of this.definitions.concreteDescendants('Entity')) {
+      const helper = this.#createHelper(leaf.name)
+      if (helper) helpers.push(helper)
+    }
+    return helpers
+  }
+
+  #createHelper(leaf: string): PhysicalFunction | null {
+    const entity = this.#policyEntity(leaf)
+    if (!entity) return null
+    const virtual = this.#virtualEntity(entity)
+    const create = this.#createConditions(leaf, virtual, Action.Create)
+    const read = this.#createConditions(leaf, virtual, Action.Read)
+    if (create.length === 0 || read.length === 0) return null
+    const name = this.#createHelperName(leaf)
+    const fields = entity.effectiveFields.map(field => {
+      const column = field.type === FieldType.Entity ? field.column : field.name
+      const key = literal(column)
+      const type = this.#policyType(field)
+      const value = field.owner === leaf
+        ? `CASE WHEN proposed ? ${key} THEN (proposed->>${key})::${type} ELSE NULL END`
+        : `(SELECT ${quoteIdentifier(column)} FROM ${quoteIdentifier(field.owner)} ` +
+          `WHERE ${quoteIdentifier('id')} = root_id)`
+      return `${value} AS ${quoteIdentifier(column)}`
+    })
+    const body = `
+      SELECT EXISTS (
+        SELECT 1
+        FROM (
+          SELECT
+            ${fields.join(', ')}
+        ) "__row"
+        WHERE ((${read.join(' OR ')}) AND (${create.join(' OR ')}))
+      )
+    `
+    return {
+      body: body.trim(),
+      lifecycle: false,
+      name,
+      required: [name],
+      searchPath: this.#searchPath(),
+      securityDefiner: true,
+      signature: 'root_id text, proposed jsonb',
+      sql: `
+        CREATE OR REPLACE FUNCTION ${name}(root_id text, proposed jsonb)
+        RETURNS boolean
+        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ${this.#searchPath()} AS $$
+          ${body}
+        $$;
+      `,
+    }
+  }
+
+  #createPolicyExpression(leaf: string, alias: string): string | null {
+    if (!this.#createHelper(leaf)) return null
+    return `${this.#createHelperName(leaf)}(${alias}.${quoteIdentifier('id')}, to_jsonb(${alias}.*))`
+  }
+
+  #createHelperName(leaf: string): string {
+    return `basis.policy_create_${createHash('sha256').update(leaf).digest('hex').slice(0, 16)}`
+  }
+
+  #virtualEntity(entity: EntityDefinition): EntityDefinition {
+    return {
+      ...entity,
+      effectiveFields: entity.effectiveFields.map(field => ({ ...field, owner: entity.name })),
+    }
+  }
+
+  #createConditions(leaf: string, virtual: EntityDefinition, action: Action): string[] {
+    const targets = new Set(this.#ancestry(leaf))
+    const conditions: string[] = []
+    for (const grant of this.grants) {
+      if (!targets.has(grant.target)) continue
+      const actionMatches = grant.action === action
+        || (MANAGED_ENTITIES.has(leaf) && grant.action === Action.Manage)
+      if (!actionMatches) continue
+      const predicate = grant.predicate
+        ? this.#compileDirectPredicate(grant, '__row', leaf, true, virtual)
+        : 'TRUE'
+      conditions.push(`(${roleCondition(grant.role)} AND ${predicate})`)
+    }
+    return conditions
+  }
+
+  #policyType(field: EffectiveFieldDefinition): string {
+    if (field.type === FieldType.Entity) return 'text'
+    if (field.type === FieldType.Array) return `${postgresScalarType(field.items.type)}[]`
+    if (field.type === FieldType.JSON) return 'jsonb'
+    if (field.type === FieldType.Enum) return 'text'
+    return postgresScalarType(field.type)
+  }
+
   #policies(appRole: string): PhysicalPolicy[] {
     const role = quoteIdentifier(appRole)
     const policies: PhysicalPolicy[] = []
@@ -1038,7 +1135,7 @@ export class Graph {
       const row = quoteIdentifier('Entity')
       const alias = `__root_${conditions.length}`
       const expression = action === Action.Create
-        ? this.#grantExpression(leaf, action, row, false, 'Entity')
+        ? this.#grantExpression(leaf, action, row, true, 'Entity')
         : this.#leafExpression(leaf, action, alias, false)
       if (!expression) continue
       const body = action === Action.Create
@@ -1057,13 +1154,15 @@ export class Graph {
     const conditions: string[] = []
     for (const leaf of leaves) {
       if (leaf === table && this.definitions.entity(table)?.abstract === false) {
-        const expression = this.#leafExpression(leaf, action, alias, false)
+        const expression = action === Action.Create
+          ? this.#createPolicyExpression(leaf, alias)
+          : this.#leafExpression(leaf, action, alias, false)
         if (expression) conditions.push(expression)
         continue
       }
       const childAlias = `__leaf_${conditions.length}`
       const predicate = action === Action.Create
-        ? this.#grantExpression(leaf, action, alias, false, table)
+        ? this.#grantExpression(leaf, action, alias, true, table)
         : this.#leafExpression(leaf, action, childAlias, false)
       if (!predicate) continue
       if (action === Action.Create) {
@@ -1187,8 +1286,10 @@ export class Graph {
     alias: string,
     table: string,
     allowSubqueries: boolean,
+    entityOverride?: EntityDefinition,
   ): string {
-    const entity = grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target)
+    const entity = entityOverride ??
+      (grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target))
     if (!entity) throw new Error(`Graph: unknown predicate target "${grant.target}"`)
     const rootAlias = entity.name === 'Entity' ? alias : undefined
     const resolver = this.#policyResolver(entity, alias, rootAlias, allowSubqueries)
@@ -1589,7 +1690,11 @@ export class Graph {
       privilege: 'EXECUTE',
       sql: 'REVOKE ALL ON FUNCTION basis.has_role(text) FROM PUBLIC',
     })
-    for (const fn of [...this.#policyFunctions(), ...this.#validationFunctions()]) {
+    for (const fn of [
+      ...this.#policyFunctions(),
+      ...this.#validationFunctions(),
+      ...this.#createHelperFunctions(),
+    ]) {
       const helperGrant = `grant:${appRole}:function:${fn.name}:EXECUTE`
       grants.push({
         function: fn.name,

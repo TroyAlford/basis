@@ -389,7 +389,7 @@ const fixtureGraph = new Graph({
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'WorkspaceMembership',
-        security: { [Action.Read]: Security.Public },
+        security: { [Action.Read]: { role: 'admin' } },
       },
     ],
   }),
