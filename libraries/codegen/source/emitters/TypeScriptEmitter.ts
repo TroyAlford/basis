@@ -13,13 +13,13 @@ export function generateTypes(graph: Graph): string {
   const entities = [...definitions.entities].sort((left, right) => left.name.localeCompare(right.name))
   const enums = [...definitions.enums].sort((left, right) => left.name.localeCompare(right.name))
   const enumMembers = entities
-    .map(entity => `    ${entity.name} = '${entity.name}',`)
+    .map(entity => `${entity.name} = '${entity.name}',`)
     .join('\n')
   const blocks: string[] = [
     `/** Generated from the canonical Basis entity definitions. Do not edit by hand. */
 
 export enum $BasisEntities {
-${enumMembers.replaceAll('    ', '  ')}
+${indent(enumMembers)}
 }
 
 export interface Reference {
@@ -45,10 +45,10 @@ export interface Entity extends Reference {
  */
 function enumBlock(enumeration: EnumDefinition): string {
   const members = enumeration.values.map(value => (
-    `  /** ${jsdoc(value.description)} */\n` +
-    `  ${value.member} = '${value.value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}',`
+    `/** ${jsdoc(value.description)} */\n` +
+    `${value.member} = '${value.value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}',`
   )).join('\n')
-  return `export enum ${enumeration.name} {\n${members}\n}`
+  return `export enum ${enumeration.name} {\n${indent(members)}\n}`
 }
 
 /**
@@ -69,17 +69,26 @@ function jsdoc(description: string): string {
 function entityBlock(entity: EntityDefinition, definitions: Graph['definitions']): string {
   const parent = entity.parent === 'Entity' ? 'Entity' : entity.parent
   const members = [
-    { line: `  readonly entity: ${discriminatorType(entity, definitions)},`, name: 'entity' },
+    { line: `readonly entity: ${discriminatorType(entity, definitions)},`, name: 'entity' },
     ...entity.fields
       .filter(field => field.name !== 'id' && field.type !== FieldType.Inverse)
       .map(field => ({
-        line: `  readonly ${field.name}: ${fieldType(field)},`,
+        line: `readonly ${field.name}: ${fieldType(field)},`,
         name: field.name,
       })),
   ].sort((left, right) => left.name.localeCompare(right.name))
   return `export interface ${entity.name} extends ${parent} {
-${members.map(member => member.line).join('\n')}
+${indent(members.map(member => member.line).join('\n'))}
 }`
+}
+
+/**
+ * Indent one generated block by one level.
+ * @param value - Unindented generated lines.
+ * @returns The same lines indented two spaces.
+ */
+function indent(value: string): string {
+  return value.split('\n').map(line => `  ${line}`).join('\n')
 }
 
 /**
