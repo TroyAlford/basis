@@ -256,7 +256,10 @@ function applicationIdentity(
   cwd: string,
   entry: string,
 ): ApplicationIdentity {
-  const persistent = options.persistent ?? Bun.env.BASIS_APPLICATION_FIXTURE_EPHEMERAL !== '1'
+  const configured = Bun.env.BASIS_APPLICATION_FIXTURE_EPHEMERAL
+  const persistent = options.persistent ?? (
+    configured === '0' || Bun.env.BASIS_APPLICATION_FIXTURE_PERSISTENT === '1'
+  )
   return {
     cwd,
     development: options.development ?? persistent,

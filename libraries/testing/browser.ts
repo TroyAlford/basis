@@ -140,6 +140,18 @@ const RUN_SERVER_PORT = 3000
 
 /** Environment variable used by lifecycle proofs to request disposable browser state. */
 const SNAPSHOT_EPHEMERAL = 'BASIS_SNAPSHOT_FIXTURE_EPHEMERAL'
+/** Explicit opt-in to a browser container that outlives the run. */
+const SNAPSHOT_PERSISTENT = 'BASIS_SNAPSHOT_FIXTURE_PERSISTENT'
+
+/**
+ * Whether this run owns and removes its browser container.
+ * @returns `true` for the default run-scoped container.
+ */
+function snapshotEphemeral(): boolean {
+  const configured = process.env[SNAPSHOT_EPHEMERAL]
+  return configured === '1'
+    || (configured !== '0' && process.env[SNAPSHOT_PERSISTENT] !== '1')
+}
 
 /**
  * Resolve the stable container name for one mounted Playwright runtime.
@@ -153,7 +165,7 @@ function containerName(mount: PlaywrightMount): string {
     .digest('hex')
     .slice(0, 12)
   const base = `basis-playwright-${version}-${identity}`
-  return process.env[SNAPSHOT_EPHEMERAL] === '1' ? `${base}-${process.pid}` : base
+  return snapshotEphemeral() ? `${base}-${process.pid}` : base
 }
 
 /**
@@ -341,7 +353,7 @@ async function startRuntime(): Promise<SnapshotRuntime> {
       timeout: CONNECT_TIMEOUT_MS,
     })
   } catch (error) {
-    if (process.env[SNAPSHOT_EPHEMERAL] === '1') docker(['rm', '-f', id])
+    if (snapshotEphemeral()) docker(['rm', '-f', id])
     throw dockerUnavailableError(error)
   }
 
@@ -407,7 +419,7 @@ export async function closeRuntime(): Promise<void> {
 
   await runtime.captureContext?.close().catch(() => undefined)
   await runtime.browser.close().catch(() => undefined)
-  if (process.env[SNAPSHOT_EPHEMERAL] === '1') {
+  if (snapshotEphemeral()) {
     docker(['rm', '-f', runtime.containerId])
   }
   record('teardown')

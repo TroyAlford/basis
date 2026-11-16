@@ -21,6 +21,18 @@ import { installSchema } from './Schema'
 /** Activity-log environment variable used by the lifecycle proof. */
 const ACTIVITY_LOG = 'BASIS_DATABASE_ACTIVITY_LOG'
 
+/**
+ * Whether this run owns and removes its seeded database container.
+ * Test runs are run-scoped by default; explicit `0` or the persistent opt-in
+ * keeps the container available to later invocations.
+ * @returns `true` when the fixture must remove its service.
+ */
+function fixtureEphemeral(): boolean {
+  const configured = Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL
+  return configured === '1'
+    || (configured !== '0' && Bun.env.BASIS_DATABASE_FIXTURE_PERSISTENT !== '1')
+}
+
 /** The pool defaults shared with the server database capability. */
 const POOL_DEFAULTS = {
   connectionTimeout: 10,
@@ -600,8 +612,8 @@ function record(event: string): void {
  * The first caller starts one seeded PostgreSQL container. Later callers,
  * including callers in other test files and subprocesses, await the same
  * process-wide promise or attach to the same stable container. The pool closes
- * at run cleanup; the container stays available for the next run unless the
- * fixture is explicitly configured as ephemeral.
+ * at run cleanup; the container is run-scoped unless persistent reuse is
+ * explicitly configured.
  * @param label - Short caller label recorded in the optional activity log.
  * @returns The shared running fixture.
  * @throws {Error} When called after run cleanup has started.
@@ -637,7 +649,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
   const service = `basis-database-fixture-${randomUUID()}`
   const install = fixtureInstall()
   let existing = containers(install).length > 0
-  if (existing && Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
+  if (existing && fixtureEphemeral()) {
     removeService(install)
     existing = false
   }
@@ -692,7 +704,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
     return fixture
   } catch (error) {
     await database?.close()
-    if (Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
+    if (fixtureEphemeral()) {
       scope.serviceRemoved = removeService(install)
     }
     throw error
@@ -700,7 +712,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
 }
 
 /**
- * Close the fixture pool; remove the seeded container only for ephemeral runs.
+ * Close the fixture pool; remove the seeded container for run-scoped fixtures.
  * @param scope - The process-wide fixture registry.
  */
 async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
@@ -711,7 +723,7 @@ async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
   if (fixture) await fixture.database.close()
 
   const service = fixture ?? scope.pending
-  if (service && Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
+  if (service && fixtureEphemeral()) {
     removeManagedService(scope, service)
   }
 }
@@ -726,7 +738,7 @@ async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
  * @param scope - The process-wide fixture registry.
  */
 function cleanupOnExit(scope: DatabaseFixtureRegistry): void {
-  if (Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL !== '1') return
+  if (!fixtureEphemeral()) return
   const service = scope.value ?? scope.pending
   if (service) removeManagedService(scope, service)
 }
@@ -806,7 +818,7 @@ async function publishedPort(id: string): Promise<number> {
 }
 
 /**
- * Resolve the persistent fixture installation for this checkout.
+ * Resolve the fixture installation for this checkout.
  * @returns The stable installation directory.
  */
 function fixtureInstall(): string {
