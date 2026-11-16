@@ -130,7 +130,6 @@ async function run(
     env: {
       ...process.env,
       BASIS_DATABASE_ACTIVITY_LOG: target.activity,
-      BASIS_DATABASE_FIXTURE_EPHEMERAL: '1',
       ...env,
     },
     stderr: 'pipe',

@@ -26,7 +26,7 @@ describe('testing/application', () => {
     })
   })
 
-  test('shares one persistent application across concurrent callers', async () => {
+  test('shares one application across concurrent callers', async () => {
     const [first, second] = await Promise.all([
       useApplication(options),
       useApplication(options),

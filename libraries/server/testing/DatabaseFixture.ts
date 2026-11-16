@@ -5,6 +5,7 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { seedImage } from '../../../testing/database/seed/image'
+import { reapDeadTestContainers, testContainerLabels } from '../../testing/containers'
 import { registerRunCleanup } from '../../testing/lifecycle'
 import { currentActor, runAsActor } from '../source/ActorContext'
 import type { Database, DatabaseTransaction, QueryOptions } from '../source/Database'
@@ -20,18 +21,6 @@ import { installSchema } from './Schema'
 
 /** Activity-log environment variable used by the lifecycle proof. */
 const ACTIVITY_LOG = 'BASIS_DATABASE_ACTIVITY_LOG'
-
-/**
- * Whether this run owns and removes its seeded database container.
- * Test runs are run-scoped by default; explicit `0` or the persistent opt-in
- * keeps the container available to later invocations.
- * @returns `true` when the fixture must remove its service.
- */
-function fixtureEphemeral(): boolean {
-  const configured = Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL
-  return configured === '1'
-    || (configured !== '0' && Bun.env.BASIS_DATABASE_FIXTURE_PERSISTENT !== '1')
-}
 
 /** The pool defaults shared with the server database capability. */
 const POOL_DEFAULTS = {
@@ -612,8 +601,7 @@ function record(event: string): void {
  * The first caller starts one seeded PostgreSQL container. Later callers,
  * including callers in other test files and subprocesses, await the same
  * process-wide promise or attach to the same stable container. The pool closes
- * at run cleanup; the container is run-scoped unless persistent reuse is
- * explicitly configured.
+ * at run cleanup; the container never outlives the run.
  * @param label - Short caller label recorded in the optional activity log.
  * @returns The shared running fixture.
  * @throws {Error} When called after run cleanup has started.
@@ -648,29 +636,13 @@ export async function useDatabaseFixture(label: string): Promise<DatabaseFixture
 async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFixture> {
   const service = `basis-database-fixture-${randomUUID()}`
   const install = fixtureInstall()
-  let existing = containers(install).length > 0
-  if (existing && fixtureEphemeral()) {
-    removeService(install)
-    existing = false
-  }
-  if (existing) {
-    const [container] = containers(install)
-    const image = container
-      ? run`docker inspect --format {{.Config.Image}} ${container}`.stdout.trim()
-      : ''
-    if (image !== seedImage()) {
-      removeService(install)
-      existing = false
-    }
-  }
+  if (containers(install).length > 0) removeService(install)
 
   scope.pending = { install, service }
   let database: FixtureDatabase | null = null
   try {
-    if (!existing) {
-      await ensureSeedImage()
-      await startContainer(install)
-    }
+    await ensureSeedImage()
+    await startContainer(install)
     const [container] = containers(install)
     if (!container) throw new Error('The shared database fixture did not start a container')
     const port = await publishedPort(container)
@@ -699,14 +671,11 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
       testWith: (entities, work) => database.testWith(entities, work),
     }
     await fixture.schemaFor(sharedEntities)
-    record(`${existing ? 'attach' : 'start'} ${service} ${install} ${process.pid}`)
-    if (!existing) record(`canonical ${service} ${install} ${process.pid}`)
+    record(`start ${service} ${install} ${process.pid}`)
     return fixture
   } catch (error) {
     await database?.close()
-    if (fixtureEphemeral()) {
-      scope.serviceRemoved = removeService(install)
-    }
+    scope.serviceRemoved = removeService(install)
     throw error
   }
 }
@@ -723,7 +692,7 @@ async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
   if (fixture) await fixture.database.close()
 
   const service = fixture ?? scope.pending
-  if (service && fixtureEphemeral()) {
+  if (service) {
     removeManagedService(scope, service)
   }
 }
@@ -738,7 +707,6 @@ async function cleanupFixture(scope: DatabaseFixtureRegistry): Promise<void> {
  * @param scope - The process-wide fixture registry.
  */
 function cleanupOnExit(scope: DatabaseFixtureRegistry): void {
-  if (!fixtureEphemeral()) return
   const service = scope.value ?? scope.pending
   if (service) removeManagedService(scope, service)
 }
@@ -768,6 +736,7 @@ function removeManagedService(
  * @param install - Fixture installation root.
  */
 async function startContainer(install: string): Promise<void> {
+  reapDeadTestContainers()
   const identity = managedDatabaseIdentity(install)
   const name = `basis-database-fixture-${identity}`
   const started = await runAsync('docker', [
@@ -777,6 +746,7 @@ async function startContainer(install: string): Promise<void> {
     '--name', name,
     '--label', `basis.database=${identity}`,
     '--label', `basis.install=${install}`,
+    ...testContainerLabels(),
     '-p', `127.0.0.1::${DATABASE_PORT}`,
     seedImage(),
   ])

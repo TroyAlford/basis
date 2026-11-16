@@ -43,9 +43,6 @@ process.on('SIGTERM', stop)
 process.on('SIGINT', stop)
 `.trim()
 
-/** A fixture server that holds the lease open while its initial build completes. */
-const SLOW_APP_SOURCE = APP_SOURCE.replace("record('boot')", "record('boot')\nawait Bun.sleep(500)")
-
 /**
  * A test file that imports the fixture helpers.
  * @param body - The test declarations to include.
@@ -201,7 +198,6 @@ async function run(
     env: {
       ...process.env,
       ACTIVITY_LOG: target.activity,
-      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '1',
       ...env,
     },
     stderr: 'pipe',
@@ -224,37 +220,6 @@ async function run(
   }
 }
 
-/**
- * Start two child test processes at once against one persistent fixture.
- * @param target - Fixture to run.
- * @param env - Extra child-process environment.
- * @returns The child exit codes and combined output.
- */
-async function runConcurrent(
-  target: Fixture,
-  env: Record<string, string>,
-): Promise<{ code: number, output: string }[]> {
-  const spawn = () => Bun.spawn([process.execPath, 'test'], {
-    cwd: target.dir,
-    env: {
-      ...process.env,
-      ACTIVITY_LOG: target.activity,
-      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '1',
-      ...env,
-    },
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
-  const first = spawn()
-  const second = spawn()
-  const outputs = [new Response(first.stdout).text(), new Response(second.stdout).text()]
-  const [firstCode, secondCode] = await Promise.all([first.exited, second.exited])
-  return [
-    { code: firstCode, output: await outputs[0] },
-    { code: secondCode, output: await outputs[1] },
-  ]
-}
-
 describe('useApplication lifecycle', () => {
   test('boots once and stops once across several files sharing an entry', async () => {
     const target = fixture({
@@ -267,51 +232,14 @@ describe('useApplication lifecycle', () => {
     expect(activity.stops).toBe(1)
   })
 
-  test('reuses one persistent development server across runs', async () => {
-    const target = fixture({ 'a.test.ts': bootSuite('persistent') })
-    const root = tempDirectory('basis-application-persistent-')
-    created.push(root)
-    const env = {
-      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '0',
-      BASIS_APPLICATION_FIXTURE_ROOT: join(root, 'fixture'),
-    }
-
-    const first = await run(target, [], undefined, env)
-    expect(first.code).toBe(0)
-    expect(first.activity.boot).toBe(1)
-    expect(first.activity.stops).toBe(0)
-
-    const second = await run(target, [], undefined, env)
-    expect(second.code).toBe(0)
-    expect(second.activity.boot).toBe(1)
-    expect(second.activity.stops).toBe(0)
-    const pid = second.activity.pid
-    if (pid === null) throw new Error('persistent application has no pid')
-    expect(isAlive(pid)).toBe(true)
-    const temporary = readFileSync(target.activity, 'utf8')
-      .split('\n')
-      .filter(line => line.startsWith('temp '))
-      .map(line => line.slice(5).split(' ')[0] ?? '')
-    expect(temporary[0]).toContain(join(root, 'fixture'))
-    expect(existsSync(temporary[0] ?? '')).toBe(true)
-    expect(temporary[0]).not.toBe(process.env.TMPDIR)
-
-    try {
-      process.kill(pid, 'SIGTERM')
-      await waitFor(() => readActivity(target.activity).stops > 0)
-    } finally {
-      if (isAlive(pid)) process.kill(pid, 'SIGKILL')
-    }
-  })
-
   test('keeps environment and persistence identities distinct', async () => {
     const target = fixture({
       'a.test.ts': suite(
         "test('identities', async () => {\n" +
         '  const [first, second, third] = await Promise.all([\n' +
-        "    useApplication({ entry: './app.ts', env: { MODE: 'a' }, persistent: false }),\n" +
-        "    useApplication({ entry: './app.ts', env: { MODE: 'b' }, persistent: false }),\n" +
-        "    useApplication({ entry: './app.ts', env: { MODE: 'a' }, persistent: false }),\n" +
+        "    useApplication({ entry: './app.ts', env: { MODE: 'a' } }),\n" +
+        "    useApplication({ entry: './app.ts', env: { MODE: 'b' } }),\n" +
+        "    useApplication({ entry: './app.ts', env: { MODE: 'a' } }),\n" +
         '  ])\n' +
         '  expect(first).not.toBe(second)\n' +
         '  expect(first).toBe(third)\n' +
@@ -322,85 +250,6 @@ describe('useApplication lifecycle', () => {
     expect(code).toBe(0)
     expect(activity.boot).toBe(2)
     expect(activity.stops).toBe(2)
-  })
-
-  test('serializes concurrent first attach during a slow build', async () => {
-    const target = fixture({
-      'a.test.ts': bootSuite('concurrent-a'),
-      'app.ts': SLOW_APP_SOURCE,
-      'b.test.ts': bootSuite('concurrent-b'),
-    })
-    const root = tempDirectory('basis-application-concurrent-')
-    created.push(root)
-    const env = {
-      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '0',
-      BASIS_APPLICATION_FIXTURE_ROOT: join(root, 'fixture'),
-    }
-
-    const results = await runConcurrent(target, env)
-    expect(results.map(result => result.code)).toEqual([0, 0])
-    const activity = readActivity(target.activity)
-    expect(activity.boot).toBe(1)
-    expect(activity.stops).toBe(0)
-    const pid = activity.pid
-    if (pid === null) throw new Error('persistent application has no pid')
-    try {
-      expect(isAlive(pid)).toBe(true)
-      process.kill(pid, 'SIGTERM')
-      await waitFor(() => readActivity(target.activity).stops > 0)
-    } finally {
-      if (isAlive(pid)) process.kill(pid, 'SIGKILL')
-    }
-  })
-
-  test('does not steal a live slower owner lock', async () => {
-    const timed = suite(
-      "test('timed', async () => {\n" +
-      "  await useApplication({ entry: './app.ts', timeoutMs: Number(process.env.TIMEOUT) })\n" +
-      '})',
-    )
-    const target = fixture({
-      'a.test.ts': timed,
-      'app.ts': SLOW_APP_SOURCE,
-    })
-    const root = tempDirectory('basis-application-mixed-timeout-')
-    created.push(root)
-    const env = {
-      BASIS_APPLICATION_FIXTURE_EPHEMERAL: '0',
-      BASIS_APPLICATION_FIXTURE_ROOT: join(root, 'fixture'),
-    }
-    const owner = Bun.spawn([process.execPath, 'test', 'a.test.ts'], {
-      cwd: target.dir,
-      env: {
-        ...process.env,
-        ACTIVITY_LOG: target.activity,
-        BASIS_APPLICATION_FIXTURE_EPHEMERAL: '0',
-        BASIS_APPLICATION_FIXTURE_ROOT: join(root, 'fixture'),
-        TIMEOUT: '120000',
-      },
-      stderr: 'pipe',
-      stdout: 'pipe',
-    })
-    const output = new Response(owner.stdout).text()
-    const errors = new Response(owner.stderr).text()
-    try {
-      await waitFor(() => readActivity(target.activity).boot > 0, 5_000)
-      const waiter = await run(target, [], undefined, { ...env, TIMEOUT: '50' })
-      expect(waiter.code).not.toBe(0)
-      expect(await owner.exited).toBe(0)
-      expect(readActivity(target.activity).boot).toBe(1)
-    } finally {
-      const pid = readActivity(target.activity).pid
-      if (pid !== null) {
-        try {
-          process.kill(pid, 'SIGTERM')
-        } catch {
-          // The detached process may already be gone.
-        }
-      }
-      await output
-      await errors
-    }
   })
 
   test('allows two genuinely different entries to boot separately', async () => {

@@ -4,6 +4,7 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright'
+import { reapDeadTestContainers, testContainerLabels } from './containers'
 
 /*
  * Run-scoped snapshot runtime.
@@ -138,21 +139,6 @@ function docker(args: string[]): DockerResult {
 /** The run-server port inside the container; published to a random host port. */
 const RUN_SERVER_PORT = 3000
 
-/** Environment variable used by lifecycle proofs to request disposable browser state. */
-const SNAPSHOT_EPHEMERAL = 'BASIS_SNAPSHOT_FIXTURE_EPHEMERAL'
-/** Explicit opt-in to a browser container that outlives the run. */
-const SNAPSHOT_PERSISTENT = 'BASIS_SNAPSHOT_FIXTURE_PERSISTENT'
-
-/**
- * Whether this run owns and removes its browser container.
- * @returns `true` for the default run-scoped container.
- */
-function snapshotEphemeral(): boolean {
-  const configured = process.env[SNAPSHOT_EPHEMERAL]
-  return configured === '1'
-    || (configured !== '0' && process.env[SNAPSHOT_PERSISTENT] !== '1')
-}
-
 /**
  * Resolve the stable container name for one mounted Playwright runtime.
  * @param mount - Mounted Playwright package identity.
@@ -165,7 +151,7 @@ function containerName(mount: PlaywrightMount): string {
     .digest('hex')
     .slice(0, 12)
   const base = `basis-playwright-${version}-${identity}`
-  return snapshotEphemeral() ? `${base}-${process.pid}` : base
+  return `${base}-${process.pid}`
 }
 
 /**
@@ -241,6 +227,7 @@ async function attachContainer(name: string, state: string): Promise<{ endpoint:
  * @returns The container id and its browser endpoint.
  */
 async function startContainer(): Promise<{ endpoint: string, id: string }> {
+  reapDeadTestContainers()
   const mount = playwrightMount()
   const image = playwrightImage(mount.version)
   const name = containerName(mount)
@@ -251,6 +238,7 @@ async function startContainer(): Promise<{ endpoint: string, id: string }> {
   const args = [
     'run', '-d', '--pull', 'missing', '--ipc=host',
     '--name', name,
+    ...testContainerLabels(),
     '-p', `127.0.0.1::${RUN_SERVER_PORT}`,
     '-e', 'PLAYWRIGHT_BROWSERS_PATH=/ms-playwright',
     '-v', `${mount.dir}:/opt/pw/node_modules/playwright:ro`,
@@ -353,7 +341,7 @@ async function startRuntime(): Promise<SnapshotRuntime> {
       timeout: CONNECT_TIMEOUT_MS,
     })
   } catch (error) {
-    if (snapshotEphemeral()) docker(['rm', '-f', id])
+    docker(['rm', '-f', id])
     throw dockerUnavailableError(error)
   }
 
@@ -419,9 +407,7 @@ export async function closeRuntime(): Promise<void> {
 
   await runtime.captureContext?.close().catch(() => undefined)
   await runtime.browser.close().catch(() => undefined)
-  if (snapshotEphemeral()) {
-    docker(['rm', '-f', runtime.containerId])
-  }
+  docker(['rm', '-f', runtime.containerId])
   record('teardown')
 }
 
