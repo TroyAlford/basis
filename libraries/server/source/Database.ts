@@ -13,18 +13,31 @@ import type { OrderBy } from './SQL'
 
 /** A transaction-scoped SQL client with the Graph mutation vocabulary. */
 export interface DatabaseTransactionExtensions {
-  /** Underlying Bun transaction client used by framework validation. */
-  readonly raw: TransactionSQL,
   /** Abort the transaction and resolve its `db.tx`/`test` wrapper without committing. */
   rollback(): never,
   /** Run work inside one savepoint, rolling it back and rethrowing on failure. */
-  savepoint: <T>(work: (tx: DatabaseTransaction) => T | Promise<T>) => Promise<T>,
+  readonly savepoint: {
+    <T>(work: (tx: DatabaseTransaction) => T | Promise<T>): Promise<T>,
+    <T>(name: string, work: (tx: DatabaseTransaction) => T | Promise<T>): Promise<T>,
+  },
   /** Run work and always roll back the enclosing transaction, returning its result. */
   test: <T>(work: (tx: DatabaseTransaction) => T | Promise<T>) => Promise<T>,
 }
 
 /** A transaction-scoped SQL client with the Graph mutation vocabulary. */
 export type DatabaseTransaction = TransactionSQL & MutationDatabase & DatabaseTransactionExtensions
+
+/** Raw transaction clients keyed by their mutation proxy. */
+const rawTransactions = new WeakMap<object, TransactionSQL>()
+
+/**
+ * Read the underlying Bun client for one Graph transaction proxy.
+ * @param transaction - Graph transaction proxy.
+ * @returns The raw Bun transaction client.
+ */
+export function transactionClient(transaction: DatabaseTransaction): TransactionSQL {
+  return rawTransactions.get(transaction) ?? transaction
+}
 
 /** Internal signal used to roll back and return a caller result. */
 export class RollbackSignal {
@@ -222,12 +235,6 @@ export interface Database extends MutationDatabase {
   /** The pooled Bun SQL tagged-template API. */
   readonly sql: SQL,
   /**
-   * Runs work in one transaction and always rolls it back.
-   * @param work - Transaction-scoped work.
-   * @returns The work result after rollback.
-   */
-  test<T>(work: (tx: DatabaseTransaction) => T | Promise<T>): Promise<T>,
-  /**
    * Runs a callback inside one pooled Bun transaction.
    * @param callback - Transaction-scoped work with native SQL and mutation verbs.
    * @returns The callback result after commit.
@@ -367,15 +374,6 @@ class PostgresDatabase implements Database {
   }
 
   /**
-   * Run work and always roll it back.
-   * @param work - Transaction-scoped work.
-   * @returns The work result after rollback.
-   */
-  test<T>(work: (tx: DatabaseTransaction) => T | Promise<T>): Promise<T> {
-    return this.tx(tx => tx.test(work)) as Promise<T>
-  }
-
-  /**
    * Edit exactly one authorized match or create one.
    * @param entity - Exact concrete entity name.
    * @param filter - Existing filter form.
@@ -421,13 +419,18 @@ export function transactionWithMutations(
   // eslint-disable-next-line prefer-const
   let self: DatabaseTransaction
   const control: DatabaseTransactionExtensions = {
-    raw: tx,
     rollback: () => {
       throw new RollbackSignal()
     },
-    savepoint: async <T>(work: (transaction: DatabaseTransaction) => T | Promise<T>) => {
-      const name = `basis_savepoint_${savepointIndex}`
-      savepointIndex += 1
+    savepoint: async <T>(
+      nameOrWork: string | ((transaction: DatabaseTransaction) => T | Promise<T>),
+      maybeWork?: (transaction: DatabaseTransaction) => T | Promise<T>,
+    ) => {
+      const name = typeof nameOrWork === 'string'
+        ? nameOrWork
+        : `basis_savepoint_${savepointIndex++}`
+      const work = typeof nameOrWork === 'string' ? maybeWork : nameOrWork
+      if (!work) throw new Error('Savepoint requires a callback')
       await tx.unsafe(`savepoint ${name}`).simple()
       try {
         const result = await work(self)
@@ -467,12 +470,13 @@ export function transactionWithMutations(
           new Error('No entity definitions are configured for this database'),
         ))
       }
-      if (property === 'rollback' || property === 'savepoint' || property === 'test' || property === 'raw') {
+      if (property === 'rollback' || property === 'savepoint' || property === 'test') {
         return control[property]
       }
       return boundTransactionMember(target, property, receiver)
     },
   }) as DatabaseTransaction
+  rawTransactions.set(proxy, tx)
   self = proxy
   return proxy
 }
@@ -587,16 +591,6 @@ export class NullDatabase implements Database {
    */
   tx<T>(callback: (tx: DatabaseTransaction) => T | Promise<T>): Promise<SQL.ContextCallbackResult<T>> {
     void callback
-    return Promise.reject(new Error('No database is configured for this server'))
-  }
-
-  /**
-   * Rejects because no database is configured.
-   * @param work - Transaction-scoped work; unused without a database.
-   * @returns A rejected promise naming the missing configuration.
-   */
-  test<T>(work: (tx: DatabaseTransaction) => T | Promise<T>): Promise<T> {
-    void work
     return Promise.reject(new Error('No database is configured for this server'))
   }
 
@@ -720,16 +714,6 @@ class ManagedDatabase implements Database {
   tx<T>(callback: (tx: DatabaseTransaction) => T | Promise<T>): Promise<SQL.ContextCallbackResult<T>> {
     if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
     return this.#database.tx(callback)
-  }
-
-  /**
-   * Run work and always roll it back.
-   * @param work - Transaction-scoped work.
-   * @returns The work result after rollback.
-   */
-  test<T>(work: (tx: DatabaseTransaction) => T | Promise<T>): Promise<T> {
-    if (!this.#database) return Promise.reject(new Error('Managed database is not connected'))
-    return this.#database.test(work)
   }
 
   /**

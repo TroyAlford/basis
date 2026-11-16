@@ -8,7 +8,7 @@ import { seedImage } from '../../../testing/database/seed/image'
 import { registerRunCleanup } from '../../testing/lifecycle'
 import { currentActor, runAsActor } from '../source/ActorContext'
 import type { Database, DatabaseTransaction, QueryOptions } from '../source/Database'
-import { queryEntity, RollbackSignal, transactionWithMutations } from '../source/Database'
+import { queryEntity, RollbackSignal, transactionClient, transactionWithMutations } from '../source/Database'
 import { Constraint, EntityDefinitions } from '../source/EntityDefinitions'
 import { Action, Graph, Security } from '../source/Graph'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
@@ -112,9 +112,9 @@ export const sharedEntities = EntityDefinitions.load(JSON.stringify({
 }))
 
 /** Restricted role used by authorization fixture policies. */
-export const AUTHORIZATION_APP_ROLE = 'basis_app'
+const AUTHORIZATION_APP_ROLE = 'basis_app'
 /** Single schema owned by the authorization fixture. */
-export const AUTHORIZATION_SCHEMA = 'basis_fixture_auth'
+const AUTHORIZATION_SCHEMA = 'basis_fixture_auth'
 
 /** Deterministic identities and rows seeded into the authorization fixture. */
 export const authorizationRows = {
@@ -155,7 +155,7 @@ const publicActions = {
  * The one ordinary database fixture installs this model and its seed rows once;
  * authorization tests reserve a transaction and run as the restricted app role.
  */
-export const authorizationGraph = new Graph({
+const authorizationGraph = new Graph({
   entities: [{
     fields: [{ field: 'email', type: 'String' }],
     name: 'User',
@@ -466,15 +466,6 @@ class FixtureDatabase implements Database {
       if (error instanceof RollbackSignal) return error.value as BunSQL.ContextCallbackResult<T>
       throw error
     })
-  }
-
-  /**
-   * Run work and always roll it back.
-   * @param work - Transaction-scoped work.
-   * @returns The work result after rollback.
-   */
-  test<T>(work: (tx: DatabaseTransaction) => T | Promise<T>): Promise<T> {
-    return this.tx(tx => tx.test(work)) as Promise<T>
   }
 
   /**
@@ -1110,10 +1101,10 @@ export async function withValidationDatabase<T>(
       return savepoint(async sql => {
         try {
           const result = await work(sql)
-          await validateTransactionState(authorizationGraph.definitions, sql.raw)
+          await validateTransactionState(authorizationGraph.definitions, transactionClient(sql))
           return result
         } catch (error) {
-          clearWrittenSubjects(sql.raw)
+          clearWrittenSubjects(transactionClient(sql))
           throw error
         }
       })
