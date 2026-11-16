@@ -48,10 +48,13 @@ export function collectionSqlRelation(
         rootAlias: aliases.root,
       }
     }
+    const targetSource = `${quote(targetName)} ${quote(aliases.target)}`
+    const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
+    const targetId = `${quote(aliases.target)}.${quote('id')}`
+    const rootId = `${quote(aliases.root)}.${quote('id')}`
     return {
       condition: `${quote(aliases.target)}.${quote(collection.reference.column)} = ${parentId}`,
-      relation: `${quote(targetName)} ${quote(aliases.target)} JOIN ${quote('Entity')} ${quote(aliases.root)} ` +
-        `ON ${quote(aliases.root)}.${quote('id')} = ${quote(aliases.target)}.${quote('id')}`,
+      relation: `${targetSource} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
       rootAlias: aliases.root,
       targetAlias: aliases.target,
     }
@@ -61,23 +64,24 @@ export function collectionSqlRelation(
   const remote = relationship.between[collection.endpoint === 0 ? 1 : 0]
   const remoteColumn = quote(`${remote.field}.id`)
   const condition = `${quote(aliases.relationship)}.${quote(`${local.field}.id`)} = ${parentId}`
+  const relationshipSource = `${quote(relationship.name)} ${quote(aliases.relationship)}`
+  const rootSource = `${quote('Entity')} ${quote(aliases.root)}`
+  const rootId = `${quote(aliases.root)}.${quote('id')}`
+  const remoteId = `${quote(aliases.relationship)}.${remoteColumn}`
   if (targetName === 'Entity') {
     return {
       condition,
-      relation: `${quote(relationship.name)} ${quote(aliases.relationship)} ` +
-        `JOIN ${quote('Entity')} ${quote(aliases.root)} ` +
-        `ON ${quote(aliases.root)}.${quote('id')} = ${quote(aliases.relationship)}.${remoteColumn}`,
+      relation: `${relationshipSource} JOIN ${rootSource} ON ${rootId} = ${remoteId}`,
       relationshipAlias: aliases.relationship,
       rootAlias: aliases.root,
     }
   }
+  const targetSource = `${quote(targetName)} ${quote(aliases.target)}`
+  const targetId = `${quote(aliases.target)}.${quote('id')}`
+  const targetJoin = `${relationshipSource} JOIN ${targetSource} ON ${targetId} = ${remoteId}`
   return {
     condition,
-    relation: `${quote(relationship.name)} ${quote(aliases.relationship)} ` +
-      `JOIN ${quote(targetName)} ${quote(aliases.target)} ` +
-      `ON ${quote(aliases.target)}.${quote('id')} = ${quote(aliases.relationship)}.${remoteColumn} ` +
-      `JOIN ${quote('Entity')} ${quote(aliases.root)} ` +
-      `ON ${quote(aliases.root)}.${quote('id')} = ${quote(aliases.target)}.${quote('id')}`,
+    relation: `${targetJoin} JOIN ${rootSource} ON ${rootId} = ${targetId}`,
     relationshipAlias: aliases.relationship,
     rootAlias: aliases.root,
     targetAlias: aliases.target,
