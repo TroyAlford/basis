@@ -14,4 +14,8 @@ RUN set -eux; \
     gosu postgres pg_ctl -D "$PGDATA" -m fast -w stop
 
 FROM postgres:17-alpine
-COPY --from=seed --chown=postgres:postgres /seed /var/lib/postgresql/data
+# Keep the prepared cluster outside the inherited PostgreSQL VOLUME. Docker
+# copies the full volume contents into a fresh anonymous volume on every
+# container create, turning a 1.3 GB seed image into ~12 seconds of startup.
+COPY --from=seed --chown=postgres:postgres /seed /seed
+ENV PGDATA=/seed
