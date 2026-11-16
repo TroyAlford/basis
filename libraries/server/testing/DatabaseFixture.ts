@@ -1240,7 +1240,7 @@ export function removeService(install: string): boolean {
   const containerList = run`docker ps -aq --filter ${`label=basis.install=${install}`}`
   if (containerList.exitCode !== 0) succeeded = false
   for (const id of containerList.lines) {
-    if (run`docker rm -f ${id}`.exitCode !== 0) succeeded = false
+    if (run`docker rm -f -v ${id}`.exitCode !== 0) succeeded = false
   }
 
   const volumeList = run`docker volume ls -q --filter ${`label=basis.install=${install}`}`
