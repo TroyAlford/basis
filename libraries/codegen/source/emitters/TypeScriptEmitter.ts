@@ -19,18 +19,18 @@ export function generateTypes(graph: Graph): string {
     `/** Generated from the canonical Basis entity definitions. Do not edit by hand. */
 
 export enum $BasisEntities {
-${indent(enumMembers)}
+${enumMembers}
 }
 
 export interface Reference {
-  readonly entity: $BasisEntities,
-  readonly id: string,
-  readonly name: string,
+readonly entity: $BasisEntities,
+readonly id: string,
+readonly name: string,
 }
 
 export interface Entity extends Reference {
-  readonly lastUpdatedAt: string | null,
-  readonly lastUpdatedBy: Reference | null,
+readonly lastUpdatedAt: string | null,
+readonly lastUpdatedBy: Reference | null,
 }`,
   ]
   for (const enumeration of enums) blocks.push(enumBlock(enumeration))
@@ -48,7 +48,7 @@ function enumBlock(enumeration: EnumDefinition): string {
     `/** ${jsdoc(value.description)} */\n` +
     `${value.member} = '${value.value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}',`
   )).join('\n')
-  return `export enum ${enumeration.name} {\n${indent(members)}\n}`
+  return `export enum ${enumeration.name} {\n${members}\n}`
 }
 
 /**
@@ -78,17 +78,8 @@ function entityBlock(entity: EntityDefinition, definitions: Graph['definitions']
       })),
   ].sort((left, right) => left.name.localeCompare(right.name))
   return `export interface ${entity.name} extends ${parent} {
-${indent(members.map(member => member.line).join('\n'))}
+${members.map(member => member.line).join('\n')}
 }`
-}
-
-/**
- * Indent one generated block by one level.
- * @param value - Unindented generated lines.
- * @returns The same lines indented two spaces.
- */
-function indent(value: string): string {
-  return value.split('\n').map(line => `  ${line}`).join('\n')
 }
 
 /**

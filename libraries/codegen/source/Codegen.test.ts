@@ -375,10 +375,10 @@ describe('codegen', () => {
     })
     const types = generateTypes(graph)
     expect(types).toContain(`export interface Parent extends Entity {
-  readonly entity: $BasisEntities.OnlyChild,
+readonly entity: $BasisEntities.OnlyChild,
 }`)
     expect(types).toContain(`export interface OnlyChild extends Parent {
-  readonly entity: $BasisEntities.OnlyChild,
+readonly entity: $BasisEntities.OnlyChild,
 }`)
   })
 
