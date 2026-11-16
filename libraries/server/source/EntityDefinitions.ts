@@ -1259,32 +1259,41 @@ function validationFunctionName(owner: string, name: string, where: Filter): str
  * @param entity - Occurrence where the predicate is evaluated.
  * @param entities - Resolved entities keyed by name, including `Entity`.
  * @param filter - Normalized predicate.
+ * @param member - Collection member scope, when the predicate is nested.
  * @throws {Error} When a referenced path is unknown or type-incompatible.
  */
 function validateConstraintFilter(
   entity: EntityDefinition,
   entities: ReadonlyMap<string, EntityDefinition>,
   filter: Filter,
+  member?: CollectionFilterScope,
 ): void {
   if ('filters' in filter) {
     if ('field' in filter) {
-      const collection = resolveCollectionPath(entity, filter.field, {
-        resolve: value => entities.get(value),
-      })
-      if (!collection || 'kind' in collection) {
+      const collection = member
+        ? member.collection?.(filter.field)
+        : constraintCollection(entity, entities, filter.field)
+      if (!collection) {
         throw invalid(`validation collection "${entity.name}.${filter.field}" is not declared`)
       }
-      const target = entities.get(collection.collection.target)
-      if (!target) throw invalid(`validation collection "${filter.field}" has unknown target`)
-      for (const child of filter.filters) validateConstraintFilter(target, entities, child)
+      for (const child of filter.filters) {
+        validateConstraintFilter(collection.definition, entities, child, collection)
+      }
       return
     }
-    for (const child of filter.filters) validateConstraintFilter(entity, entities, child)
+    for (const child of filter.filters) {
+      validateConstraintFilter(entity, entities, child, member)
+    }
     return
   }
-  const left = constraintField(entity, entities, filter.field)
+  const resolve = (name: string): QueryFieldDefinition => {
+    if (name === ACTOR_FIELD_NAME) return ACTOR_FIELD
+    if (member) return member.field(name)
+    return constraintField(entity, entities, name)
+  }
+  const left = resolve(filter.field)
   if (!isFieldOperand(filter.value)) return
-  const right = constraintField(entity, entities, filter.value.$field)
+  const right = resolve(filter.value.$field)
   if (comparableFieldType(left.type) !== comparableFieldType(right.type)) {
     throw invalid(
       'validation constraint references incompatible fields ' +

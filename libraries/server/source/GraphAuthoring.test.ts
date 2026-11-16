@@ -63,6 +63,38 @@ describe('Graph authoring types', () => {
       .toBe(true)
   })
 
+  test('accepts relationship-owned fields in validation member predicates', () => {
+    const graph = new Graph({
+      entities: [{
+        fields: [{ field: 'label', type: FieldType.String }],
+        name: 'User',
+      }, {
+        constraints: [{
+          description: 'Only owners may remain visible.',
+          name: 'RelationshipLiteral',
+          type: Constraint.Validation,
+          where: "members $contains (workspaceMembership.role = 'Owner')",
+        }, {
+          description: 'Relationship role must match the member name.',
+          name: 'RelationshipOperand',
+          type: Constraint.Validation,
+          where: 'members $contains (workspaceMembership.role = label)',
+        }],
+        fields: [{ field: 'title', type: FieldType.String }],
+        name: 'Workspace',
+      }],
+      relationships: [{
+        between: [
+          { field: 'workspace', inverse: 'members', target: 'Workspace' },
+          { field: 'user', inverse: 'workspaces', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: FieldType.String }],
+        name: 'WorkspaceMembership',
+      }],
+    })
+    expect(graph.definitions.validationConstraints('Workspace')).toHaveLength(2)
+  })
+
   test('accepts typed capabilities and entity security', () => {
     enum Capability {
       View = 'viewAccount',
