@@ -324,6 +324,14 @@ const fixtureGraph = new Graph({
         },
       },
       {
+        fields: [{ field: 'scores', items: { type: 'Number' }, type: 'Array' }],
+        name: 'ArrayResource',
+        security: {
+          [Action.Create]: { where: 'scores $contains (@ >= 2)' },
+          [Action.Read]: Security.Public,
+        },
+      },
+      {
         fields: [
           { field: 'title', type: 'String' },
           { field: 'workspace', target: 'Workspace', type: 'Entity' },
@@ -342,6 +350,11 @@ const fixtureGraph = new Graph({
         extends: 'CreateRoot',
         fields: [],
         name: 'CreateLeaf',
+      },
+      {
+        extends: 'CreateRoot',
+        fields: [],
+        name: 'CreateSibling',
       },
       {
         constraints: [{

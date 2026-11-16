@@ -1014,10 +1014,21 @@ export class Graph {
       const column = field.type === FieldType.Entity ? field.column : field.name
       const key = literal(column)
       const type = this.#policyType(field)
-      const value = field.owner === leaf
-        ? `CASE WHEN proposed ? ${key} THEN (proposed->>${key})::${type} ELSE NULL END`
-        : `(SELECT ${quoteIdentifier(column)} FROM ${quoteIdentifier(field.owner)} ` +
+      let value: string
+      if (field.owner !== leaf) {
+        value = `(SELECT ${quoteIdentifier(column)} FROM ${quoteIdentifier(field.owner)} ` +
           `WHERE ${quoteIdentifier('id')} = root_id)`
+      } else if (field.type === FieldType.Array) {
+        const element = postgresScalarType(field.items.type)
+        value = `CASE WHEN proposed ? ${key} THEN ` +
+          `CASE WHEN jsonb_typeof(proposed->${key}) = 'null' THEN NULL ELSE ` +
+          `ARRAY(SELECT jsonb_array_elements_text(proposed->${key})::${element}) END ` +
+          'ELSE NULL END'
+      } else if (field.type === FieldType.JSON) {
+        value = `CASE WHEN proposed ? ${key} THEN (proposed->${key})::jsonb ELSE NULL END`
+      } else {
+        value = `CASE WHEN proposed ? ${key} THEN (proposed->>${key})::${type} ELSE NULL END`
+      }
       return `${value} AS ${quoteIdentifier(column)}`
     })
     const body = `

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseContext } from '../testing/DatabaseFixture'
-import { fixtureRows, withDatabase } from '../testing/DatabaseFixture'
+import { fixtureRows, withCommittedDatabase, withDatabase } from '../testing/DatabaseFixture'
 import { MutationError } from './Mutation'
 
 const rows = fixtureRows
@@ -51,22 +51,39 @@ describe('resource-scoped create authorization', () => {
     })
   })
 
-  test('denies descendant-only inserts through an unrestricted parent row', async () => {
-    await expect(withDatabase('direct-descendant', rows.alice, async database => {
-      const id = randomUUID()
-      await database.sql`
-        INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${id}, ${`Create root ${id}`}, 'CreateLeaf')
+  test('denies a separate restricted actor from attaching a descendant-only row', async () => {
+    const parent = await withCommittedDatabase('create-valid-parent', rows.alice, async database => {
+      const created = await database.create('CreateLeaf', {
+        name: 'Valid parent chain',
+        title: 'Valid parent chain',
+        workspace: rows.visibleWorkspace,
+      })
+      return created.record?.id
+    })
+    expect(parent).toBeDefined()
+    await expect(withDatabase('create-descendant-bob', rows.bob, database => (
+      database.sql`
+        INSERT INTO "CreateSibling" ("id")
+        VALUES (${parent})
       `
-      await database.sql`
-        INSERT INTO "CreateRoot" ("id", "title", "workspace.id")
-        VALUES (${id}, ${`Create root ${id}`}, ${rows.hiddenWorkspace})
-      `
-      await database.sql`
-        INSERT INTO "CreateLeaf" ("id")
-        VALUES (${id})
-      `
-    })).rejects.toThrow(/row-level security policy/)
+    ))).rejects.toThrow(/row-level security policy/)
+  })
+
+  test('evaluates array-valued create predicates from proposed values', async () => {
+    await withDatabase('create-array-valid', rows.alice, async database => {
+      expect(await database.create('ArrayResource', {
+        name: 'Valid array',
+        scores: [2, 3],
+      })).toMatchObject({ created: 1 })
+    })
+    await withDatabase('create-array-invalid', rows.alice, async database => {
+      const failure = await database.create('ArrayResource', {
+        name: 'Invalid array',
+        scores: [1],
+      }).catch((error: unknown) => error)
+      expect(failure).toBeInstanceOf(MutationError)
+      expect((failure as MutationError).code).toBe('authorization')
+    })
   })
 
   test('enforces create rules across an MTI insert chain', async () => {
