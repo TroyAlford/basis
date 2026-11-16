@@ -16,6 +16,6 @@
  */
 
 export { Environment } from './environment'
-export { run, runAsync } from './run'
-export type { CommandResult, RunOptions } from './run'
+export { run, runAsync } from '../utilities/functions/run'
+export type { CommandResult, RunOptions } from '../utilities/functions/run'
 export { secret } from './secret'

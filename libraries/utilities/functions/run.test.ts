@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { Logger } from '../utilities'
+import { Logger } from './Logger'
 import { run, runAsync } from './run'
 
 /** A logger that stays quiet in tests. */

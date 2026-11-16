@@ -25,7 +25,9 @@ function run(command: string[], label: string): number {
   console.log(`\n==> ${label}`)
   const [executable, ...args] = command
   if (!executable) throw new Error('command must include an executable')
-  const result = runProcess(executable, args, { cwd: root, stdio: 'inherit' })
+  const result = runProcess(executable, args, { cwd: root })
+  if (result.stdout !== '') process.stdout.write(result.stdout)
+  if (result.stderr !== '') process.stderr.write(result.stderr)
   return result.exitCode
 }
 

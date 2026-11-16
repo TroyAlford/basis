@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { CommandResult, RunOptions } from './run'
+import type { CommandResult, RunOptions } from '../utilities/functions/run'
 import { createSecretReader, secret, SecretReadError } from './secret'
 
 const TOKEN = 'ops_preview_token_value'

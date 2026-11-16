@@ -93,14 +93,30 @@ const resolveBin = (packageName: string, binName: string): string => {
 }
 
 /**
+ * Write one captured subprocess response to the caller's streams.
+ * @param result - Captured command result.
+ * @param result.exitCode - Child exit code.
+ * @param result.stderr - Captured standard error.
+ * @param result.stdout - Captured standard output.
+ * @returns The child exit code.
+ */
+const writeResult = (
+  result: { readonly exitCode: number, readonly stderr: string, readonly stdout: string },
+): number => {
+  if (result.stdout !== '') process.stdout.write(result.stdout)
+  if (result.stderr !== '') process.stderr.write(result.stderr)
+  return result.exitCode
+}
+
+/**
  * Runs a dependency binary through Bun itself, so no Node shebang is required.
  * @param packageName The dependency package name.
  * @param binName The binary name to run.
  * @param args Arguments for the binary.
  * @returns The child process exit code.
  */
-const runBin = (packageName: string, binName: string, args: string[]): number => (
-  run(process.execPath, [resolveBin(packageName, binName), ...args], { stdio: 'inherit' }).exitCode
+const runBin = (packageName: string, binName: string, args: string[]): number => writeResult(
+  run(process.execPath, [resolveBin(packageName, binName), ...args]),
 )
 
 /** Flat ESLint config filenames ESLint discovers automatically. */
@@ -152,11 +168,10 @@ const runStylelint = (fix: boolean): number => runBin('stylelint', 'stylelint', 
  * @param fix Whether to rewrite documents with the fixes the policy supports.
  * @returns The child process exit code.
  */
-const runMarkdown = (fix: boolean): number => run(
+const runMarkdown = (fix: boolean): number => writeResult(run(
   process.execPath,
   [join(basisDir(), 'libraries', 'markdown-plugin', 'bin.ts'), ...(fix ? ['--fix'] : [])],
-  { stdio: 'inherit' },
-).exitCode
+))
 
 /**
  * Runs every Basis lint surface with the same engine, so `lint` reports and
@@ -204,11 +219,10 @@ const requireBunCheck = (): boolean => {
  * Runs Bun's built-in TypeScript checker for the current project.
  * @returns The child process exit code.
  */
-const spawnBunCheck = (): number => run(
+const spawnBunCheck = (): number => writeResult(run(
   process.execPath,
   ['--check'],
-  { stdio: 'inherit' },
-).exitCode
+))
 
 /**
  * Runs the TypeScript checker after validating the runtime.

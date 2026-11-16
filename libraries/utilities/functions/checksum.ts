@@ -1,6 +1,6 @@
-import { runAsync } from 'basis/configuration'
 import { createHash } from 'node:crypto'
 import { basename } from 'node:path'
+import { runAsync } from './run'
 
 /** Options for deterministic checksum calculation. */
 export interface ChecksumOptions {

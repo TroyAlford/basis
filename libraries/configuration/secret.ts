@@ -16,8 +16,8 @@
  * value is ever logged or echoed.
  */
 
-import type { CommandResult, RunOptions } from './run'
-import { run as defaultRun } from './run'
+import type { CommandResult, RunOptions } from '../utilities/functions/run'
+import { run as defaultRun } from '../utilities/functions/run'
 
 /** The `op` executable, resolved by name on `PATH`. */
 const OP_EXECUTABLE = 'op'

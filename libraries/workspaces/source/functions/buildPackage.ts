@@ -69,8 +69,9 @@ export async function buildPackage(options: BuildOptions) {
     const build = await runAsync('bun', ['run', 'build'], {
       cwd: packagePath,
       env: { ...Bun.env, VERSION: version },
-      stdio: 'inherit',
     })
+    if (build.stdout !== '') process.stdout.write(build.stdout)
+    if (build.stderr !== '') process.stderr.write(build.stderr)
 
     const success = build.exitCode === 0
     if (!success) {
@@ -180,8 +181,9 @@ export async function buildPackage(options: BuildOptions) {
     console.log('Generating TypeScript declarations...')
     const tsc = await runAsync('tsc', ['--project', tempTsConfigPath], {
       cwd: packagePath,
-      stdio: 'inherit',
     })
+    if (tsc.stdout !== '') process.stdout.write(tsc.stdout)
+    if (tsc.stderr !== '') process.stderr.write(tsc.stderr)
 
     const typesSuccess = tsc.exitCode === 0
 

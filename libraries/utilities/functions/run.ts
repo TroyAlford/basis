@@ -9,8 +9,8 @@
  * reimplementing it.
  */
 
-import type { ILogger } from '../utilities/functions/Logger'
-import { Logger } from '../utilities/functions/Logger'
+import type { ILogger } from './Logger'
+import { Logger } from './Logger'
 
 /** Logger used when a caller does not supply one. */
 const defaultLogger: ILogger = new Logger({ prefix: 'run' })
@@ -35,16 +35,6 @@ export interface RunOptions {
   readonly env?: Readonly<Record<string, string>>,
   /** Logger for the command line and any failure. Defaults to a `run`-prefixed logger. */
   readonly logger?: ILogger,
-  /**
-   * Standard input handling. Defaults to the `stdio` setting; use `'ignore'`
-   * for non-interactive tools that must not consume caller input.
-   */
-  readonly stdin?: 'ignore' | 'inherit' | 'pipe',
-  /**
-   * Whether to capture output or inherit the caller's standard streams.
-   * Defaults to `'pipe'`; `'inherit'` is for interactive CLI commands.
-   */
-  readonly stdio?: 'inherit' | 'pipe',
   /**
    * Kill the process after this many milliseconds. Omitted leaves the default
    * (no explicit bound). Used for bounded presence probes such as `--version`.
@@ -77,13 +67,11 @@ export function run(commandOrTemplate: string | TemplateStringsArray, ...rest: u
 
   logger.info(`$ ${commandLine}`)
 
-  const stdio = options.stdio ?? 'pipe'
   const result = Bun.spawnSync([command, ...args], {
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     env: options.env === undefined ? Bun.env : { ...Bun.env, ...options.env },
-    stderr: stdio,
-    stdin: options.stdin ?? stdio,
-    stdout: stdio,
+    stderr: 'pipe',
+    stdout: 'pipe',
     ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
   })
 
@@ -134,13 +122,11 @@ export async function runAsync(
 
   logger.info(`$ ${commandLine}`)
 
-  const stdio = options.stdio ?? 'pipe'
   const child = Bun.spawn([command, ...args], {
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     env: options.env === undefined ? Bun.env : { ...Bun.env, ...options.env },
-    stderr: stdio,
-    stdin: options.stdin ?? stdio,
-    stdout: stdio,
+    stderr: 'pipe',
+    stdout: 'pipe',
   })
   const timer = options.timeoutMs === undefined
     ? null
@@ -149,17 +135,11 @@ export async function runAsync(
   let stderr: string
   let stdout: string
   try {
-    if (stdio === 'inherit') {
-      exitCode = await child.exited
-      stdout = ''
-      stderr = ''
-    } else {
-      [stdout, stderr, exitCode] = await Promise.all([
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-        child.exited,
-      ])
-    }
+    [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
   } finally {
     if (timer !== null) clearTimeout(timer)
   }

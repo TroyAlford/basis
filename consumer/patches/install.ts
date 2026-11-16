@@ -161,7 +161,6 @@ const gitApply = (packageDir: string, args: string[], patchPath: string): GitApp
      * exit 0 — silently reporting the patch as applied when it was not.
      */
     env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(packageDir) } as Record<string, string>,
-    stdin: 'ignore',
   })
 
   return { code: result.exitCode, stderr: result.stderr }

@@ -2,8 +2,8 @@ import { tempDirectory } from 'basis/testing'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { run } from '../utilities'
 import * as configuration from './index'
-import { run } from './run'
 
 /** Marker variable the import-side-effect fixtures write into `.env`. */
 const SENTINEL = 'BASIS_CONFIG_DOTENV_SENTINEL'

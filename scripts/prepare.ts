@@ -14,11 +14,9 @@ const prepare = (): void => {
 
   if (!existsSync(join(root, '.git')) || !existsSync(husky)) return
 
-  const result = run(process.execPath, [husky], {
-    cwd: root,
-    stdio: 'inherit',
-  })
-
+  const result = run(process.execPath, [husky], { cwd: root })
+  if (result.stdout !== '') process.stdout.write(result.stdout)
+  if (result.stderr !== '') process.stderr.write(result.stderr)
   if (result.exitCode !== 0) process.exit(result.exitCode)
 }
 
