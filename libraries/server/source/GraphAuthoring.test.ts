@@ -100,6 +100,25 @@ describe('Graph authoring types', () => {
     expect(graph.definitions.validationConstraints('Workspace')).toHaveLength(3)
   })
 
+  test('accepts native-array member predicates in validation constraints', () => {
+    const graph = new Graph({
+      entities: [{
+        constraints: [{
+          description: 'Every score must be at least two.',
+          name: 'ScoresAtLeastTwo',
+          type: Constraint.Validation,
+          where: 'scores $contains (@ >= 2)',
+        }],
+        fields: [{ field: 'scores', items: { type: FieldType.Number }, type: FieldType.Array }],
+        name: 'Person',
+      }],
+    })
+    expect(graph.definitions.validationConstraints('Person')).toHaveLength(1)
+    expect(graph.physicalSchema('basis_app', false).functions.some(fn => (
+      fn.name.startsWith('basis.validate_')
+    ))).toBe(true)
+  })
+
   test('accepts typed capabilities and entity security', () => {
     enum Capability {
       View = 'viewAccount',

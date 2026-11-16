@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { comparableFieldType, resolveCollectionMember, resolveCollectionPath, resolveFieldPath } from './PathResolution'
 import { postgresScalarType } from './PostgresTypes'
 import type { CollectionFilterScope, Filter } from './Predicate'
-import { ACTOR_FIELD, ACTOR_FIELD_NAME, isFieldOperand, Predicate } from './Predicate'
+import { ACTOR_FIELD, ACTOR_FIELD_NAME, arrayMemberEntity, arrayMemberField, arrayMemberResolver, isFieldOperand, Predicate } from './Predicate'
 import { QueryNormalizer } from './QueryNormalizer'
 import type { PhysicalCheck, PhysicalConstraint, PhysicalSchema, PhysicalTable } from './Schema'
 
@@ -1273,11 +1273,26 @@ function validateConstraintFilter(
       const collection = member
         ? member.collection?.(filter.field)
         : constraintCollection(entity, entities, filter.field)
-      if (!collection) {
-        throw invalid(`validation collection "${entity.name}.${filter.field}" is not declared`)
+      if (collection) {
+        for (const child of filter.filters) {
+          validateConstraintFilter(collection.definition, entities, child, collection)
+        }
+        return
+      }
+      const array = member
+        ? member.array?.(filter.field)
+        : constraintArray(entity, filter.field)
+      if (!array) {
+        throw invalid(`validation collection or array "${entity.name}.${filter.field}" is not declared`)
+      }
+      const arrayMember = arrayMemberField(array.member)
+      const arrayEntity = arrayMemberEntity(array.field, arrayMember)
+      const scope: CollectionFilterScope = {
+        definition: arrayEntity,
+        field: name => arrayMemberResolver(name, arrayMember),
       }
       for (const child of filter.filters) {
-        validateConstraintFilter(collection.definition, entities, child, collection)
+        validateConstraintFilter(arrayEntity, entities, child, scope)
       }
       return
     }
@@ -1343,6 +1358,9 @@ function constraintCollection(
   entities: ReadonlyMap<string, EntityDefinition>,
   name: string,
 ): CollectionFilterScope | undefined {
+  if (entity.effectiveFields.some(field => field.name === name && field.type === FieldType.Array)) {
+    return undefined
+  }
   const resolved = resolveCollectionPath(entity, name, { resolve: value => entities.get(value) })
   if (!resolved) return undefined
   if ('kind' in resolved) {
