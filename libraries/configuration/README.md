@@ -59,7 +59,7 @@ const settings = JSON.parse(secret('op://Vault/item/settings'))
 
 ## Subprocesses
 
-`run(command, args, options)` and `runAsync(command, args, options)` are the bounded runners the ecosystem shares: shell-free explicit argv, with `cwd`, environment overrides, `timeoutMs`, and a Basis `Logger`. Both return `{ exitCode, stdout, stderr, lines }`, where `lines` is normalized stdout (empty output is `[]`, with no trailing empty line), and both log the command line and any failure. Use `run` for synchronous configuration/install work and `runAsync` where a long-running server must not block its event loop, such as managed database provisioning.
+`run(command, args, options)` and `runAsync(command, args, options)` are the bounded runners the ecosystem shares: shell-free explicit argv, with `cwd`, environment overrides, `timeoutMs`, `stdio: 'inherit'` for interactive CLI commands, and a Basis `Logger`. Both return `{ exitCode, stdout, stderr, lines }`, where `lines` is normalized stdout (empty output is `[]`, with no trailing empty line), and both log the command line and any failure. Use `run` for synchronous configuration/install work and `runAsync` where a long-running server must not block its event loop, such as managed database provisioning.
 
 Both runners also accept a whitespace-tokenized tagged template. Interpolated values become discrete arguments, never shell text:
 

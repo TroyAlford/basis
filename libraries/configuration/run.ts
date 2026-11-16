@@ -36,6 +36,11 @@ export interface RunOptions {
   /** Logger for the command line and any failure. Defaults to a `run`-prefixed logger. */
   readonly logger?: ILogger,
   /**
+   * Whether to capture output or inherit the caller's standard streams.
+   * Defaults to `'pipe'`; `'inherit'` is for interactive CLI commands.
+   */
+  readonly stdio?: 'inherit' | 'pipe',
+  /**
    * Kill the process after this many milliseconds. Omitted leaves the default
    * (no explicit bound). Used for bounded presence probes such as `--version`.
    */
@@ -67,11 +72,13 @@ export function run(commandOrTemplate: string | TemplateStringsArray, ...rest: u
 
   logger.info(`$ ${commandLine}`)
 
+  const stdio = options.stdio ?? 'pipe'
   const result = Bun.spawnSync([command, ...args], {
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     env: options.env === undefined ? Bun.env : { ...Bun.env, ...options.env },
-    stderr: 'pipe',
-    stdout: 'pipe',
+    stderr: stdio,
+    stdin: stdio,
+    stdout: stdio,
     ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
   })
 
@@ -122,11 +129,13 @@ export async function runAsync(
 
   logger.info(`$ ${commandLine}`)
 
+  const stdio = options.stdio ?? 'pipe'
   const child = Bun.spawn([command, ...args], {
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     env: options.env === undefined ? Bun.env : { ...Bun.env, ...options.env },
-    stderr: 'pipe',
-    stdout: 'pipe',
+    stderr: stdio,
+    stdin: stdio,
+    stdout: stdio,
   })
   const timer = options.timeoutMs === undefined
     ? null
@@ -135,11 +144,17 @@ export async function runAsync(
   let stderr: string
   let stdout: string
   try {
-    [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ])
+    if (stdio === 'inherit') {
+      exitCode = await child.exited
+      stdout = ''
+      stderr = ''
+    } else {
+      [stdout, stderr, exitCode] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ])
+    }
   } finally {
     if (timer !== null) clearTimeout(timer)
   }

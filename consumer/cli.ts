@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { run } from 'basis/configuration'
 import { Logger } from 'basis/logger'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -98,14 +99,9 @@ const resolveBin = (packageName: string, binName: string): string => {
  * @param args Arguments for the binary.
  * @returns The child process exit code.
  */
-const runBin = (packageName: string, binName: string, args: string[]): number => {
-  const result = Bun.spawnSync([process.execPath, resolveBin(packageName, binName), ...args], {
-    stderr: 'inherit',
-    stdin: 'inherit',
-    stdout: 'inherit',
-  })
-  return result.exitCode
-}
+const runBin = (packageName: string, binName: string, args: string[]): number => (
+  run(process.execPath, [resolveBin(packageName, binName), ...args], { stdio: 'inherit' }).exitCode
+)
 
 /** Flat ESLint config filenames ESLint discovers automatically. */
 const ESLINT_CONFIG_FILES = [
@@ -156,18 +152,11 @@ const runStylelint = (fix: boolean): number => runBin('stylelint', 'stylelint', 
  * @param fix Whether to rewrite documents with the fixes the policy supports.
  * @returns The child process exit code.
  */
-const runMarkdown = (fix: boolean): number => {
-  const result = Bun.spawnSync([
-    process.execPath,
-    join(basisDir(), 'libraries', 'markdown-plugin', 'bin.ts'),
-    ...(fix ? ['--fix'] : []),
-  ], {
-    stderr: 'inherit',
-    stdin: 'inherit',
-    stdout: 'inherit',
-  })
-  return result.exitCode
-}
+const runMarkdown = (fix: boolean): number => run(
+  process.execPath,
+  [join(basisDir(), 'libraries', 'markdown-plugin', 'bin.ts'), ...(fix ? ['--fix'] : [])],
+  { stdio: 'inherit' },
+).exitCode
 
 /**
  * Runs every Basis lint surface with the same engine, so `lint` reports and
@@ -215,11 +204,11 @@ const requireBunCheck = (): boolean => {
  * Runs Bun's built-in TypeScript checker for the current project.
  * @returns The child process exit code.
  */
-const spawnBunCheck = (): number => Bun.spawnSync([process.execPath, '--check'], {
-  stderr: 'inherit',
-  stdin: 'inherit',
-  stdout: 'inherit',
-}).exitCode
+const spawnBunCheck = (): number => run(
+  process.execPath,
+  ['--check'],
+  { stdio: 'inherit' },
+).exitCode
 
 /**
  * Runs the TypeScript checker after validating the runtime.
