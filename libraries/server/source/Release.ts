@@ -401,6 +401,8 @@ export async function loadRelease(directory: string, graph: PhysicalModel): Prom
   if (physicalHash(expected) !== target.targetHash) {
     throw new Error(
       'Release migrations do not reach the configured Graph; ' +
+      `expected=${physicalHash(expected)} actual=${target.targetHash} ` +
+      `tables=${expected.tables.length} checks=${expected.functions.length}; ` +
       'review a migration for the complete proposed model',
     )
   }
