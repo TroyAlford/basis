@@ -10,6 +10,7 @@ import { currentActor } from '../source/ActorContext'
 import type { Database, DatabaseTransaction, QueryOptions } from '../source/Database'
 import { queryEntity, transactionWithMutations } from '../source/Database'
 import { EntityDefinitions } from '../source/EntityDefinitions'
+import { Action, Graph, Security } from '../source/Graph'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
 import type { CreateResult, DeleteResult, EditResult, MutationFilter, MutationValues, UpsertResult } from '../source/Mutation'
 import { validateTransactionState } from '../source/Mutation'
@@ -109,6 +110,121 @@ export const sharedEntities = EntityDefinitions.load(JSON.stringify({
     articleDefinition,
   ],
 }))
+
+/** Restricted role used by authorization fixture policies. */
+export const AUTHORIZATION_APP_ROLE = 'basis_app'
+/** Single schema owned by the authorization fixture. */
+export const AUTHORIZATION_SCHEMA = 'basis_fixture_auth'
+
+/** Deterministic identities and rows seeded into the authorization fixture. */
+export const authorizationRows = {
+  alice: '00000000-0000-4000-8000-000000000101',
+  anonymousNote: '00000000-0000-4000-8000-000000000102',
+  bob: '00000000-0000-4000-8000-000000000103',
+  hiddenWorkspace: '00000000-0000-4000-8000-000000000112',
+  linkedNote: '00000000-0000-4000-8000-000000000104',
+  memberNote: '00000000-0000-4000-8000-000000000105',
+  openTask: '00000000-0000-4000-8000-000000000106',
+  otherTask: '00000000-0000-4000-8000-000000000107',
+  project: '00000000-0000-4000-8000-000000000108',
+  secondProject: '00000000-0000-4000-8000-000000000109',
+  thirdProject: '00000000-0000-4000-8000-000000000110',
+  visibleWorkspace: '00000000-0000-4000-8000-000000000111',
+} as const
+
+/**
+ * Canonical authorization fixture graph.
+ *
+ * The one ordinary database fixture installs this model and its seed rows once;
+ * authorization tests reserve a transaction and run as the restricted app role.
+ */
+export const authorizationGraph = new Graph({
+  entities: [{
+    fields: [{ field: 'email', type: 'String' }],
+    name: 'User',
+    security: { [Action.Read]: Security.Public },
+  },
+  {
+    fields: [{ field: 'title', type: 'String' }],
+    name: 'AnonymousNote',
+    security: { [Action.Read]: { where: '$me = null' } },
+  },
+  {
+    fields: [{ field: 'title', type: 'String' }],
+    name: 'MemberNote',
+    security: { [Action.Read]: { where: '$me != null' } },
+  },
+  {
+    fields: [
+      { field: 'title', type: 'String' },
+      { field: 'workspace', inverse: 'projects', target: 'Workspace', type: 'Entity' },
+      {
+        cardinality: 'Many',
+        field: 'tasks',
+        inverse: 'project',
+        target: 'Task',
+        type: 'Inverse',
+      },
+    ],
+    name: 'Project',
+    security: { [Action.Read]: Security.Public },
+  },
+  {
+    fields: [
+      { field: 'title', type: 'String' },
+      { field: 'project', inverse: 'tasks', target: 'Project', type: 'Entity' },
+    ],
+    name: 'Task',
+    security: { [Action.Read]: { where: 'project.workspace.members $contains (id = $me)' } },
+  },
+  {
+    fields: [
+      { field: 'title', type: 'String' },
+      {
+        cardinality: 'Many',
+        field: 'projects',
+        inverse: 'workspace',
+        target: 'Project',
+        type: 'Inverse',
+      },
+    ],
+    name: 'Workspace',
+    security: {
+      [Action.Read]: {
+        where: "$me != null $and projects $contains (title = 'visible' AND tasks $contains (title = 'open'))",
+      },
+    },
+  }],
+  relationships: [
+    {
+      between: [
+        { field: 'note', inverse: 'links', target: 'MemberNote' },
+        { field: 'related', inverse: 'relatedLinks', target: 'MemberNote' },
+      ],
+      fields: [],
+      name: 'ActorLink',
+      security: { [Action.Read]: { where: '$me != null' } },
+    },
+    {
+      between: [
+        { field: 'workspace', inverse: 'members', target: 'Workspace' },
+        { field: 'user', inverse: 'workspaces', target: 'User' },
+      ],
+      fields: [{ field: 'role', type: 'String' }],
+      name: 'WorkspaceMembership',
+      security: { [Action.Read]: Security.Public },
+    },
+  ],
+  schema: AUTHORIZATION_SCHEMA,
+})
+
+/** Run one authorization test as the restricted app role. */
+export interface AuthorizationDatabase {
+  /** Query through the canonical entity compiler under RLS. */
+  query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
+  /** Reserved transaction connection already scoped to the app role. */
+  readonly sql: BunSQL,
+}
 
 /** The test-owned pool connected to the one seeded database container. */
 class FixtureDatabase implements Database {
@@ -228,6 +344,8 @@ class FixtureDatabase implements Database {
 
 /** A started in-process database fixture. */
 export interface DatabaseFixture {
+  /** Authorization schema installed once by this fixture. */
+  readonly authorizationSchema: string,
   /** The pooled test database connected to the one seeded container. */
   readonly database: Database,
   /** Entity definitions attached to the shared database. */
@@ -381,6 +499,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
     }
 
     const fixture: DatabaseFixture = {
+      authorizationSchema: '',
       database,
       entities: sharedEntities,
       install,
@@ -388,9 +507,11 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
       service,
     }
     await fixture.schemaFor(sharedEntities)
+    const authorizationSchema = await ensureAuthorizationSchema(database)
+    const resolved: DatabaseFixture = { ...fixture, authorizationSchema }
     record(`${existing ? 'attach' : 'start'} ${service} ${install} ${process.pid}`)
     if (!existing) record(`canonical ${service} ${install} ${process.pid}`)
-    return fixture
+    return resolved
   } catch (error) {
     await database?.close()
     if (Bun.env.BASIS_DATABASE_FIXTURE_EPHEMERAL === '1') {
@@ -536,6 +657,182 @@ function fixtureSchemaName(entities: EntityDefinitions): string {
     .digest('hex')
     .slice(0, 16)
   return `basis_fixture_${hash}`
+}
+
+/**
+ * Install and seed the single authorization schema for this fixture.
+ * @param database - Connected fixture pool.
+ * @returns The authorization schema name.
+ */
+async function ensureAuthorizationSchema(database: FixtureDatabase): Promise<string> {
+  const schema = AUTHORIZATION_SCHEMA
+  await database.sql.unsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${AUTHORIZATION_APP_ROLE}') THEN
+        CREATE ROLE "${AUTHORIZATION_APP_ROLE}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+          NOINHERIT NOBYPASSRLS;
+      ELSE
+        ALTER ROLE "${AUTHORIZATION_APP_ROLE}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+          NOINHERIT NOBYPASSRLS;
+      END IF;
+    END $$;
+  `).simple()
+  await database.tx(async sql => {
+    await sql`
+      SELECT pg_advisory_xact_lock(hashtext(${schema}))
+    `
+    const present = await sql<{ present: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
+    `
+    if (present[0]?.present) {
+      const [complete] = await sql<{ complete: boolean }[]>`
+        SELECT to_regclass(${`${quoteIdentifier(schema)}."UserRole"`}) IS NOT NULL AS complete
+      `
+      if (complete?.complete) return
+      await sql.unsafe(`drop schema ${quoteIdentifier(schema)} cascade`).simple()
+    }
+    await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
+    await sql.unsafe(
+      `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
+    ).simple()
+    await installSchema(sql, authorizationGraph, {
+      appRole: AUTHORIZATION_APP_ROLE,
+      schema,
+      superuser: true,
+      version: `fixture-auth:${schema}`,
+    })
+    await sql.unsafe(
+      `grant usage on schema ${quoteIdentifier(schema)} to ${quoteIdentifier(AUTHORIZATION_APP_ROLE)}`,
+    ).simple()
+    await sql.unsafe(
+      `grant select, insert, update, delete on all tables in schema ${quoteIdentifier(schema)} ` +
+      `to ${quoteIdentifier(AUTHORIZATION_APP_ROLE)}`,
+    ).simple()
+    await seedAuthorization(sql)
+    record(`authorization schema ${schema}`)
+  })
+  return schema
+}
+
+/**
+ * Seed the deterministic authorization rows once.
+ * @param sql - Fixture owner transaction scoped to the authorization schema.
+ */
+async function seedAuthorization(sql: BunSQL): Promise<void> {
+  const row = authorizationRows
+  await sql`
+    INSERT INTO "Entity" ("id", "name", "entity")
+    VALUES (${row.alice},
+      'Alice',
+      'User'),
+      (${row.bob},
+      'Bob',
+      'User'),
+      (${row.memberNote},
+      'Member note',
+      'MemberNote'),
+      (${row.linkedNote},
+      'Linked note',
+      'MemberNote'),
+      (${row.anonymousNote},
+      'Anonymous note',
+      'AnonymousNote'),
+      (${row.visibleWorkspace},
+      'Visible workspace',
+      'Workspace'),
+      (${row.hiddenWorkspace},
+      'Hidden workspace',
+      'Workspace'),
+      (${row.project},
+      'Project',
+      'Project'),
+      (${row.secondProject},
+      'Second project',
+      'Project'),
+      (${row.thirdProject},
+      'Third project',
+      'Project'),
+      (${row.openTask},
+      'Open task',
+      'Task'),
+      (${row.otherTask},
+      'Other task',
+      'Task')
+  `
+  await sql`
+    INSERT INTO "User" ("id", "email")
+    VALUES (${row.alice}, 'alice@example.com'), (${row.bob}, 'bob@example.com')
+  `
+  await sql`
+    INSERT INTO "MemberNote" ("id", "title")
+    VALUES (${row.memberNote}, 'Member note'), (${row.linkedNote}, 'Linked note')
+  `
+  await sql`
+    INSERT INTO "AnonymousNote" ("id", "title")
+    VALUES (${row.anonymousNote}, 'Anonymous note')
+  `
+  await sql`
+    INSERT INTO "ActorLink" ("note.id", "related.id")
+    VALUES (${row.memberNote}, ${row.linkedNote})
+  `
+  await sql`
+    INSERT INTO "Workspace" ("id", "title")
+    VALUES (${row.visibleWorkspace}, 'Visible workspace'), (${row.hiddenWorkspace}, 'Hidden workspace')
+  `
+  await sql`
+    INSERT INTO "Project" ("id", "title", "workspace.id")
+    VALUES (${row.project},
+      'visible',
+      ${row.visibleWorkspace}),
+      (${row.secondProject},
+      'visible',
+      ${row.hiddenWorkspace}),
+      (${row.thirdProject},
+      'other',
+      ${row.hiddenWorkspace})
+  `
+  await sql`
+    INSERT INTO "Task" ("id", "title", "project.id")
+    VALUES (${row.openTask}, 'open', ${row.project}), (${row.otherTask}, 'open', ${row.thirdProject})
+  `
+  await sql`
+    INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
+    VALUES (${row.visibleWorkspace}, ${row.alice}, 'Owner')
+  `
+}
+
+/**
+ * Run one authorization test as the restricted app role on the one fixture.
+ * @param label - Fixture acquisition label.
+ * @param actor - Verified actor identity, or null for anonymous.
+ * @param callback - Work using the app-role transaction and entity query capability.
+ * @returns The callback result after rollback.
+ */
+export async function withAuthorizationDatabase<T>(
+  label: string,
+  actor: string | null,
+  callback: (database: AuthorizationDatabase) => Promise<T>,
+): Promise<T> {
+  const fixture = await useDatabaseFixture(label)
+  const reserved = await fixture.database.sql.reserve()
+  try {
+    await reserved.unsafe('begin').simple()
+    await reserved.unsafe(
+      `set local search_path to ${quoteIdentifier(fixture.authorizationSchema)}, public, basis, pg_temp`,
+    ).simple()
+    await reserved.unsafe(`set local role ${quoteIdentifier(AUTHORIZATION_APP_ROLE)}`).simple()
+    await reserved`select set_config('actor.id', ${actor ?? ''}, true)`
+    return await callback({
+      query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
+        queryEntity<Result>(reserved, authorizationGraph.definitions, entity, options)
+      ),
+      sql: reserved,
+    })
+  } finally {
+    await reserved.unsafe('rollback').simple()
+    reserved.release()
+  }
 }
 
 /**

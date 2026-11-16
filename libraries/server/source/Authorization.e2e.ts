@@ -4,7 +4,7 @@ import { HttpVerb } from 'basis/server'
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { removeService } from '../testing/DatabaseFixture'
+import { authorizationRows, removeService, withAuthorizationDatabase } from '../testing/DatabaseFixture'
 import { installSchema } from '../testing/Schema'
 import { runAsActor } from './ActorContext'
 import { openAdmin } from './Database'
@@ -1052,244 +1052,62 @@ describe('Authorization RLS', () => {
     }
   }, 120_000)
 
-  test('supports explicit actor-presence predicates without implicit authentication', async () => {
-    const actorGraph = new Graph({
-      entities: [{
-        fields: [{ field: 'title', type: 'String' }],
-        name: 'MemberNote',
-        security: {
-          [Action.Read]: { where: '$me != null' },
-          [Action.Update]: { where: '$me != null' },
-        },
-      }, {
-        fields: [{ field: 'title', type: 'String' }],
-        name: 'AnonymousNote',
-        security: { [Action.Read]: { where: '$me = null' } },
-      }],
-      relationships: [{
-        between: [
-          { field: 'note', inverse: 'links', target: 'MemberNote' },
-          { field: 'related', inverse: 'relatedLinks', target: 'MemberNote' },
-        ],
-        fields: [],
-        name: 'ActorLink',
-        security: { [Action.Read]: { where: '$me != null' } },
-      }],
-    })
-    const install = tempDirectory('basis-authorization-actor-presence-')
-    const server = await start(install, actorGraph)
-    const admin = await openAdmin(server.db)
-    try {
-      const authorization = server.auth
-      if (!authorization) throw new Error('authorization did not initialize')
-      const alice = await authorization.enrollIdentity('test', 'alice', { email: 'alice@example.com' })
-      const bob = await authorization.enrollIdentity('test', 'bob', { email: 'bob@example.com' })
-      if (!alice || !bob) throw new Error('users were not enrolled')
-      const note = randomUUID()
-      const linked = randomUUID()
-      const anonymousNote = randomUUID()
-      await admin.sql.begin(async tx => {
-        for (const [id, title] of [[note, 'Member'], [linked, 'Linked']] as const) {
-          await tx`INSERT INTO "Entity" ("id", "name", "entity") VALUES (${id}, ${title}, 'MemberNote')`
-          await tx`INSERT INTO "MemberNote" ("id", "title") VALUES (${id}, ${title})`
-        }
-        await tx`INSERT INTO "Entity" ("id", "name", "entity") VALUES (${anonymousNote}, 'Anonymous', 'AnonymousNote')`
-        await tx`INSERT INTO "AnonymousNote" ("id", "title") VALUES (${anonymousNote}, 'Anonymous')`
-        await tx`
-          INSERT INTO "ActorLink" ("note.id", "related.id")
-          VALUES (${note}, ${linked})
-        `
-      })
-      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
-      const read = (actor: string | null) => asActor(actor, () => server.db.query('MemberNote', {
-        fields: ['id'],
-        orderBy: 'id',
-      }))
-      const expected = [linked, note].sort().map(id => ({ id }))
-      expect(await read(alice)).toEqual(expected)
-      expect(await read(bob)).toEqual(expected)
-      expect(await read(null)).toEqual([])
-      expect(await asActor(alice, () => server.db.query('MemberNote', {
-        fields: ['id'],
-        orderBy: 'id',
-        where: { field: '$me', operator: '$ne', value: null },
-      }))).toEqual(expected)
-      const anonymousRead = (actor: string | null) => asActor(actor, () => server.db.query('AnonymousNote', {
-        fields: ['id'],
-      }))
-      expect(await anonymousRead(null)).toEqual([{ id: anonymousNote }])
-      expect(await anonymousRead(alice)).toEqual([])
-      const links = (actor: string | null) => asActor(actor, () => server.db.tx(async sql => (
-        sql<{ note: string }[]>`
-          SELECT "note.id" AS "note"
-          FROM "ActorLink"
-        `
-      )))
-      expect(await links(alice)).toEqual([{ note }])
-      expect(await links(bob)).toEqual([{ note }])
-      expect(await links(null)).toEqual([])
-      expect(await asActor(alice, () => authorization.can('read', 'MemberNote', { id: note })))
-        .toBe(true)
-      expect(await asActor(null, () => authorization.can('read', 'MemberNote', { id: note })))
-        .toBe(false)
-      expect(await asActor(alice, () => authorization.can('update', 'MemberNote', { id: note })))
-        .toBe(true)
-      expect(await asActor(alice, () => authorization.can('create', 'MemberNote')))
-        .toBe(false)
-      expect(await asActor(alice, () => authorization.can('read', 'AnonymousNote', { id: anonymousNote })))
-        .toBe(false)
-      expect(await asActor(null, () => authorization.can('read', 'AnonymousNote', { id: anonymousNote })))
-        .toBe(true)
-    } finally {
-      await admin.close()
-      await server.shutdown()
-      removeService(install)
-    }
+  test('enforces explicit actor presence on the shared authorization fixture', async () => {
+    const notesFor = (actor: string | null) => withAuthorizationDatabase(
+      'authorization-actor-notes',
+      actor,
+      database => database.query<{ id: string }>('MemberNote', { fields: ['id'], orderBy: 'id' }),
+    )
+    const noteRows = [{ id: authorizationRows.linkedNote }, { id: authorizationRows.memberNote }]
+    expect(await notesFor(authorizationRows.alice)).toEqual(noteRows)
+    expect(await notesFor(authorizationRows.bob)).toEqual(noteRows)
+    expect(await notesFor(null)).toEqual([])
+
+    const anonymousNotes = await withAuthorizationDatabase(
+      'authorization-actor-anonymous',
+      null,
+      database => database.query<{ id: string }>('AnonymousNote', { fields: ['id'] }),
+    )
+    expect(anonymousNotes).toEqual([{ id: authorizationRows.anonymousNote }])
+    expect(await withAuthorizationDatabase(
+      'authorization-actor-authenticated-anonymous',
+      authorizationRows.alice,
+      database => database.query<{ id: string }>('AnonymousNote', { fields: ['id'] }),
+    )).toEqual([])
+
+    const linksFor = (actor: string | null) => withAuthorizationDatabase(
+      'authorization-actor-links',
+      actor,
+      database => database.sql<{ note: string }[]>`
+        SELECT "note.id" AS "note"
+        FROM "ActorLink"
+      `,
+    )
+    expect(await linksFor(authorizationRows.alice)).toEqual([{ note: authorizationRows.memberNote }])
+    expect(await linksFor(authorizationRows.bob)).toEqual([{ note: authorizationRows.memberNote }])
+    expect(await linksFor(null)).toEqual([])
   }, 120_000)
 
-  test('compiles nested collection and composed reference policy paths against real RLS', async () => {
-    const policyGraph = new Graph({
-      entities: [
-        { fields: [{ field: 'email', type: 'String' }], name: 'User', security: { [Action.Read]: Security.Public } },
-        {
-          fields: [
-            { field: 'title', type: 'String' },
-            { field: 'workspace', inverse: 'projects', target: 'Workspace', type: 'Entity' },
-            {
-              cardinality: 'Many',
-              field: 'tasks',
-              inverse: 'project',
-              target: 'Task',
-              type: 'Inverse',
-            },
-          ],
-          name: 'Project',
-          security: { [Action.Read]: Security.Public },
-        },
-        {
-          fields: [
-            { field: 'title', type: 'String' },
-            { field: 'project', inverse: 'tasks', target: 'Project', type: 'Entity' },
-          ],
-          name: 'Task',
-          security: {
-            [Action.Read]: { where: 'project.workspace.members $contains (id = $me)' },
-          },
-        },
-        {
-          fields: [
-            { field: 'title', type: 'String' },
-            {
-              cardinality: 'Many',
-              field: 'projects',
-              inverse: 'workspace',
-              target: 'Project',
-              type: 'Inverse',
-            },
-          ],
-          name: 'Workspace',
-          security: {
-            [Action.Read]: {
-              where: "$me != null $and projects $contains (title = 'visible' AND tasks $contains (title = 'open'))",
-            },
-          },
-        },
-      ],
-      relationships: [{
-        between: [
-          { field: 'workspace', inverse: 'members', target: 'Workspace' },
-          { field: 'user', inverse: 'workspaces', target: 'User' },
-        ],
-        fields: [],
-        name: 'WorkspaceMembership',
-        security: { [Action.Read]: Security.Public },
-      }],
-      security: {
-        ExternalIdentity: { [Action.Manage]: { role: 'admin' } },
-        Role: { [Action.Manage]: { role: 'admin' } },
-        UserRole: { [Action.Manage]: { role: 'admin' } },
-      },
-    })
-    const install = tempDirectory('basis-authorization-nested-policy-')
-    const server = await start(install, policyGraph)
-    const admin = await openAdmin(server.db)
-    try {
-      const authorization = server.auth
-      if (!authorization) throw new Error('authorization did not initialize')
-      const bootstrapped = await authorization.bootstrap({
-        displayName: 'Admin',
-        email: 'admin@example.com',
-        provider: 'test',
-        subject: 'admin',
-      })
-      if (!bootstrapped.userId) throw new Error('bootstrap did not create an administrator')
-      const alice = await authorization.enrollIdentity('test', 'alice', { email: 'alice@example.com' })
-      if (!alice) throw new Error('alice was not enrolled')
-      const workspaces = [randomUUID(), randomUUID(), randomUUID(), randomUUID()]
-      const projects = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()]
-      const tasks = [randomUUID(), randomUUID(), randomUUID(), randomUUID()]
-      await admin.sql.begin(async tx => {
-        for (const [index, workspace] of workspaces.entries()) {
-          await tx`INSERT INTO "Entity" ("id", "name", "entity")
-            VALUES (${workspace}, ${`Workspace ${index}`}, 'Workspace')`
-          await tx`INSERT INTO "Workspace" ("id", "title") VALUES (${workspace}, ${`Workspace ${index}`})`
-        }
-        for (const [index, project] of projects.entries()) {
-          await tx`INSERT INTO "Entity" ("id", "name", "entity") VALUES (${project}, ${`Project ${index}`}, 'Project')`
-        }
-        await tx`INSERT INTO "Project" ("id", "title", "workspace.id") VALUES
-          (${projects[0]}, 'visible', ${workspaces[0]}),
-          (${projects[1]}, 'visible', ${workspaces[1]}),
-          (${projects[2]}, 'other', ${workspaces[2]}),
-          (${projects[3]}, 'visible', ${workspaces[3]}),
-          (${projects[4]}, 'other', ${workspaces[3]})`
-        for (const [index, task] of tasks.entries()) {
-          await tx`INSERT INTO "Entity" ("id", "name", "entity") VALUES (${task}, ${`Task ${index}`}, 'Task')`
-        }
-        await tx`INSERT INTO "Task" ("id", "title", "project.id") VALUES
-          (${tasks[0]}, 'open', ${projects[0]}),
-          (${tasks[1]}, 'closed', ${projects[1]}),
-          (${tasks[2]}, 'open', ${projects[2]}),
-          (${tasks[3]}, 'open', ${projects[4]})`
-        await tx`INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id") VALUES
-          (${workspaces[0]}, ${alice})`
-      })
-      const asActor = <T>(actor: string | null, work: () => T): T => runAsActor({ id: actor }, work)
-      expect(await asActor(alice, () => server.db.query('Workspace', {
-        fields: ['id'],
-        limit: null,
-      }))).toEqual([{ id: workspaces[0] }])
-      expect(await asActor(alice, () => server.db.query('Workspace', {
-        fields: ['id'],
-        limit: null,
-        where: "projects $contains (title = 'visible' AND tasks $contains (title = 'open'))",
-      }))).toEqual([{ id: workspaces[0] }])
-      expect(await asActor(null, () => server.db.query('Workspace', {
-        fields: ['id'],
-        limit: null,
-      }))).toEqual([])
-      const taskRows = await asActor(alice, () => server.db.query('Task', {
-        fields: ['id'],
-        limit: null,
-      }))
-      expect(taskRows.map((row: { id: string }) => row.id).sort())
-        .toEqual([tasks[0]].sort())
-      const taskQuery = await asActor(alice, () => server.db.query('Task', {
-        fields: ['id'],
-        limit: null,
-        where: 'project.workspace.members $contains (id = $me)',
-      }))
-      expect(taskQuery.map((row: { id: string }) => row.id).sort())
-        .toEqual([tasks[0]].sort())
-      expect(await asActor(null, () => server.db.query('Task', {
-        fields: ['id'],
-        limit: null,
-      }))).toEqual([])
-    } finally {
-      await admin.close()
-      await server.shutdown()
-      removeService(install)
-    }
+  test('resolves nested and composed policy paths on the shared authorization fixture', async () => {
+    expect(await withAuthorizationDatabase(
+      'authorization-nested-workspace',
+      authorizationRows.alice,
+      database => database.query<{ id: string }>('Workspace', { fields: ['id'] }),
+    )).toEqual([{ id: authorizationRows.visibleWorkspace }])
+    expect(await withAuthorizationDatabase(
+      'authorization-nested-anonymous',
+      null,
+      database => database.query<{ id: string }>('Workspace', { fields: ['id'] }),
+    )).toEqual([])
+    expect(await withAuthorizationDatabase(
+      'authorization-nested-task',
+      authorizationRows.alice,
+      database => database.query<{ id: string }>('Task', { fields: ['id'] }),
+    )).toEqual([{ id: authorizationRows.openTask }])
+    expect(await withAuthorizationDatabase(
+      'authorization-nested-task-anonymous',
+      null,
+      database => database.query<{ id: string }>('Task', { fields: ['id'] }),
+    )).toEqual([])
   }, 120_000)
-
 })
