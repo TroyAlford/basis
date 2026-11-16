@@ -12,7 +12,10 @@
 import type { ILogger } from './Logger'
 import { Logger } from './Logger'
 
-/** Build the logger used when a caller does not supply one. */
+/**
+ * Build the logger used when a caller does not supply one.
+ * @returns A `run`-prefixed logger.
+ */
 function defaultLogger(): ILogger {
   return new Logger({ prefix: 'run' })
 }
