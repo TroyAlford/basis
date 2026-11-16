@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { authorizationRows, withValidationDatabase } from '../testing/DatabaseFixture'
+import type { DatabaseTransaction } from './Database'
 import { MutationError } from './Mutation'
 
 const rows = authorizationRows
@@ -178,6 +179,25 @@ describe('Graph validation constraints', () => {
         .rejects.toThrow('documentFlag')
       await expect(database.edit('Document', { id: rows.invalidParentDocument }, { note: 'Invalid parent' }))
         .rejects.toThrow('recordStatus')
+    })
+  })
+
+  test('exposes rollback, savepoint, and test transaction extensions', async () => {
+    await withValidationDatabase('validation-transaction-controls', null, async database => {
+      const savepoint = database.sql.savepoint as unknown as <T>(
+        work: (sql: DatabaseTransaction) => T | Promise<T>,
+      ) => Promise<T>
+      expect(await savepoint(async sql => {
+        await sql.create('Owner', { label: 'Savepoint', name: 'Savepoint' })
+        return 'savepoint'
+      })).toBe('savepoint')
+      await expect(savepoint(async () => {
+        throw new Error('savepoint rollback')
+      })).rejects.toThrow('savepoint rollback')
+      expect(await database.sql.test(async sql => {
+        await sql.create('Owner', { label: 'Test', name: 'Test' })
+        return 'test'
+      })).toBe('test')
     })
   })
 })

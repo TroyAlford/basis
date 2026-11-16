@@ -6,9 +6,9 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { seedImage } from '../../../testing/database/seed/image'
 import { registerRunCleanup } from '../../testing/lifecycle'
-import { currentActor } from '../source/ActorContext'
+import { currentActor, runAsActor } from '../source/ActorContext'
 import type { Database, DatabaseTransaction, QueryOptions } from '../source/Database'
-import { queryEntity, transactionWithMutations } from '../source/Database'
+import { queryEntity, RollbackSignal, transactionWithMutations } from '../source/Database'
 import { Constraint, EntityDefinitions } from '../source/EntityDefinitions'
 import { Action, Graph, Security } from '../source/Graph'
 import { managedDatabaseIdentity } from '../source/ManagedPostgresService'
@@ -349,7 +349,7 @@ export interface AuthorizationDatabase {
   /** Query through the canonical entity compiler under RLS. */
   query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
   /** Reserved transaction connection already scoped to the app role. */
-  readonly sql: BunSQL,
+  readonly sql: DatabaseTransaction,
 }
 
 /** Run one validation test through the shared app-role transaction. */
@@ -462,6 +462,39 @@ class FixtureDatabase implements Database {
       const result = await callback(transactionWithMutations(this.#entities, tx))
       await validateTransactionState(this.#entities, tx)
       return result
+    }).catch((error: unknown) => {
+      if (error instanceof RollbackSignal) return error.value as BunSQL.ContextCallbackResult<T>
+      throw error
+    })
+  }
+
+  /**
+   * Run work and always roll it back.
+   * @param work - Transaction-scoped work.
+   * @returns The work result after rollback.
+   */
+  test<T>(work: (tx: DatabaseTransaction) => T | Promise<T>): Promise<T> {
+    return this.tx(tx => tx.test(work)) as Promise<T>
+  }
+
+  /**
+   * Run work with explicit definitions and always roll back.
+   * @param entities - Definitions exposed to the transaction.
+   * @param work - Transaction-scoped work.
+   * @returns The work result after rollback.
+   */
+  testWith<T>(
+    entities: EntityDefinitions,
+    work: (tx: DatabaseTransaction) => T | Promise<T>,
+  ): Promise<T> {
+    return this.#sql.begin(async tx => {
+      const actor = currentActor()
+      await tx`select set_config('actor.id', ${actor?.id ?? ''}, true)`
+      const transaction = transactionWithMutations(entities, tx)
+      return transaction.test(work)
+    }).catch((error: unknown) => {
+      if (error instanceof RollbackSignal) return error.value as T
+      throw error
     })
   }
 
@@ -491,6 +524,8 @@ export interface DatabaseFixture {
   readonly schemaFor: (entities: EntityDefinitions) => Promise<string>,
   /** Fixture service name used for cleanup and activity evidence. */
   readonly service: string,
+  /** Run explicit definitions in one rolled-back transaction. */
+  readonly testWith: <T>(entities: EntityDefinitions, work: (tx: DatabaseTransaction) => T | Promise<T>) => Promise<T>,
 }
 
 /** The process-wide fixture registry. */
@@ -640,6 +675,7 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
       install,
       schemaFor,
       service,
+      testWith: (entities, work) => database.testWith(entities, work),
     }
     await fixture.schemaFor(sharedEntities)
     const authorizationSchema = await ensureAuthorizationSchema(database)
@@ -804,7 +840,7 @@ async function ensureAuthorizationSchema(database: FixtureDatabase): Promise<str
   const version = `fixture-auth:${createHash('sha256')
     .update(authorizationGraph.definitions.ddl.join('\n'))
     .digest('hex')
-    .slice(0, 16)}`
+    .slice(0, 16)}:${randomUUID()}`
   await database.sql.unsafe(`
     DO $$
     BEGIN
@@ -825,11 +861,6 @@ async function ensureAuthorizationSchema(database: FixtureDatabase): Promise<str
       SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
     `
     if (present[0]?.present) {
-      const [recorded] = await sql<{ applied: boolean }[]>`
-        SELECT to_regclass('basis.schema_migration') IS NOT NULL AND EXISTS (SELECT 1 FROM
-          basis.schema_migration WHERE version = ${version}) AS applied
-      `
-      if (recorded?.applied) return
       await sql.unsafe(`drop schema ${quoteIdentifier(schema)} cascade`).simple()
     }
     await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
@@ -1039,24 +1070,24 @@ export async function withAuthorizationDatabase<T>(
   callback: (database: AuthorizationDatabase) => Promise<T>,
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
-  const reserved = await fixture.database.sql.reserve()
-  try {
-    await reserved.unsafe('begin').simple()
-    await reserved.unsafe(
-      `set local search_path to ${quoteIdentifier(fixture.authorizationSchema)}, public, basis, pg_temp`,
-    ).simple()
-    await reserved.unsafe(`set local role ${quoteIdentifier(AUTHORIZATION_APP_ROLE)}`).simple()
-    await reserved`select set_config('actor.id', ${actor ?? ''}, true)`
-    return await callback({
-      query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
-        queryEntity<Result>(reserved, authorizationGraph.definitions, entity, options)
-      ),
-      sql: reserved,
-    })
-  } finally {
-    await reserved.unsafe('rollback').simple()
-    reserved.release()
-  }
+  return runAsActor({ id: actor }, () => fixture.testWith(
+    authorizationGraph.definitions,
+    async sql => {
+      await sql.unsafe(
+        `set local search_path to ${quoteIdentifier(fixture.authorizationSchema)}, public, basis, pg_temp`,
+      ).simple()
+      await sql.unsafe(`set local role ${quoteIdentifier(AUTHORIZATION_APP_ROLE)}`).simple()
+      await sql`
+        SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+      `
+      return callback({
+        query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
+          queryEntity<Result>(sql, authorizationGraph.definitions, entity, options)
+        ),
+        sql,
+      })
+    },
+  ))
 }
 
 /**
@@ -1072,26 +1103,20 @@ export async function withValidationDatabase<T>(
   callback: (database: ValidationDatabase) => Promise<T>,
 ): Promise<T> {
   return withAuthorizationDatabase(label, actor, async database => {
-    const mutations = transactionWithMutations(
-      authorizationGraph.definitions,
-      database.sql as unknown as Parameters<typeof transactionWithMutations>[1],
-    )
-    let savepoints = 0
     const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
-      const savepoint = `basis_validation_${savepoints}`
-      savepoints += 1
-      await database.sql.unsafe(`savepoint ${savepoint}`).simple()
-      try {
-        const result = await work(mutations)
-        await validateTransactionState(authorizationGraph.definitions, database.sql)
-        await database.sql.unsafe(`release savepoint ${savepoint}`).simple()
-        return result
-      } catch (error) {
-        await database.sql.unsafe(`rollback to savepoint ${savepoint}`).simple()
-        await database.sql.unsafe(`release savepoint ${savepoint}`).simple()
-        clearWrittenSubjects(database.sql)
-        throw error
-      }
+      const savepoint = database.sql.savepoint as unknown as <Value>(
+        callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
+      ) => Promise<Value>
+      return savepoint(async sql => {
+        try {
+          const result = await work(sql)
+          await validateTransactionState(authorizationGraph.definitions, sql.raw)
+          return result
+        } catch (error) {
+          clearWrittenSubjects(sql.raw)
+          throw error
+        }
+      })
     }
     return callback({
       ...database,
