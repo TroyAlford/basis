@@ -12,8 +12,10 @@
 import type { ILogger } from './Logger'
 import { Logger } from './Logger'
 
-/** Logger used when a caller does not supply one. */
-const defaultLogger: ILogger = new Logger({ prefix: 'run' })
+/** Build the logger used when a caller does not supply one. */
+function defaultLogger(): ILogger {
+  return new Logger({ prefix: 'run' })
+}
 
 /** Captured result of a subprocess. */
 export interface CommandResult {
@@ -62,7 +64,7 @@ export function run(command: string, args?: readonly string[], options?: RunOpti
 export function run(strings: TemplateStringsArray, ...values: unknown[]): CommandResult
 export function run(commandOrTemplate: string | TemplateStringsArray, ...rest: unknown[]): CommandResult {
   const { args, command, options } = invocation(commandOrTemplate, rest)
-  const logger = options.logger ?? defaultLogger
+  const logger = options.logger ?? defaultLogger()
   const commandLine = [command, ...args].join(' ')
 
   logger.info(`$ ${commandLine}`)
@@ -117,7 +119,7 @@ export async function runAsync(
   ...rest: unknown[]
 ): Promise<CommandResult> {
   const { args, command, options } = invocation(commandOrTemplate, rest)
-  const logger = options.logger ?? defaultLogger
+  const logger = options.logger ?? defaultLogger()
   const commandLine = [command, ...args].join(' ')
 
   logger.info(`$ ${commandLine}`)
