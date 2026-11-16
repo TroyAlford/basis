@@ -1,5 +1,7 @@
 import Ajv2020 from 'ajv/dist/2020'
 import addFormats from 'ajv-formats'
+import { runAsync } from 'basis/configuration'
+import { Logger } from 'basis/logger'
 import { Cardinality, FieldType, Graph } from 'basis/server'
 import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -7,6 +9,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { GeneratedSchemas } from '../index'
 import { emitter, generateJSONSchemas, generateTypes, JsonSchemaEmitter, TypeScriptEmitter } from '../index'
+
+const silent = new Logger({ silent: true })
 
 const document = {
   entities: [
@@ -68,6 +72,23 @@ function compileEntity(schemas: GeneratedSchemas, entity: string) {
     $ref: `#/$defs/${entity}`,
     $schema: schemas.$schema,
   })
+}
+
+/**
+ * Type-check one generated TypeScript file without blocking the test runner.
+ * @param file - Generated file path.
+ * @returns The process exit code and captured diagnostics.
+ */
+async function typecheck(file: string): Promise<{ readonly exitCode: number, readonly output: string }> {
+  const result = await runAsync(process.execPath, [
+    './node_modules/@typescript/native/bin/tsc',
+    '--ignoreConfig',
+    '--noEmit',
+    '--skipLibCheck',
+    '--strict',
+    file,
+  ], { cwd: process.cwd(), logger: silent })
+  return { exitCode: result.exitCode, output: result.stderr || result.stdout }
 }
 
 describe('codegen', () => {
@@ -388,21 +409,8 @@ describe('codegen', () => {
     try {
       const file = join(directory, 'types.ts')
       await writeFile(file, types)
-      const result = Bun.spawnSync({
-        cmd: [
-          process.execPath,
-          './node_modules/@typescript/native/bin/tsc',
-          '--ignoreConfig',
-          '--noEmit',
-          '--skipLibCheck',
-          '--strict',
-          file,
-        ],
-        cwd: process.cwd(),
-        stderr: 'pipe',
-        stdout: 'pipe',
-      })
-      expect(result.exitCode, result.stderr.toString() || result.stdout.toString()).toBe(0)
+      const result = await typecheck(file)
+      expect(result.exitCode, result.output).toBe(0)
     } finally {
       await rm(directory, { force: true, recursive: true })
     }
@@ -443,20 +451,7 @@ const bar: Bar = {
   peer: foo,
 }
       `.trim())
-      const result = Bun.spawnSync({
-        cmd: [
-          process.execPath,
-          './node_modules/@typescript/native/bin/tsc',
-          '--ignoreConfig',
-          '--noEmit',
-          '--skipLibCheck',
-          '--strict',
-          file,
-        ],
-        cwd: process.cwd(),
-        stderr: 'pipe',
-        stdout: 'pipe',
-      })
+      const result = await typecheck(file)
       expect(result.exitCode).toBe(0)
     } finally {
       await rm(directory, { force: true, recursive: true })
@@ -481,20 +476,7 @@ const bar: Bar = {
 ${generateTypes(abstract)}
 const owner: Note['owner'] = { entity: $BasisEntities.AdminUser, id: '1', name: 'Admin' }
       `.trim())
-      const result = Bun.spawnSync({
-        cmd: [
-          process.execPath,
-          './node_modules/@typescript/native/bin/tsc',
-          '--ignoreConfig',
-          '--noEmit',
-          '--skipLibCheck',
-          '--strict',
-          file,
-        ],
-        cwd: process.cwd(),
-        stderr: 'pipe',
-        stdout: 'pipe',
-      })
+      const result = await typecheck(file)
       expect(result.exitCode).toBe(0)
     } finally {
       await rm(directory, { force: true, recursive: true })
@@ -559,20 +541,7 @@ ${types}
 const access: EnumDocument['access'] = AccessLevel.Owner
 void access
       `.trim())
-      const result = Bun.spawnSync({
-        cmd: [
-          process.execPath,
-          './node_modules/@typescript/native/bin/tsc',
-          '--ignoreConfig',
-          '--noEmit',
-          '--skipLibCheck',
-          '--strict',
-          file,
-        ],
-        cwd: process.cwd(),
-        stderr: 'pipe',
-        stdout: 'pipe',
-      })
+      const result = await typecheck(file)
       expect(result.exitCode).toBe(0)
     } finally {
       await rm(directory, { force: true, recursive: true })
@@ -584,20 +553,7 @@ void access
     try {
       const file = join(directory, 'types.ts')
       await writeFile(file, generateTypes(new Graph({ entities: document })))
-      const result = Bun.spawnSync({
-        cmd: [
-          process.execPath,
-          './node_modules/@typescript/native/bin/tsc',
-          '--ignoreConfig',
-          '--noEmit',
-          '--skipLibCheck',
-          '--strict',
-          file,
-        ],
-        cwd: process.cwd(),
-        stderr: 'pipe',
-        stdout: 'pipe',
-      })
+      const result = await typecheck(file)
       expect(result.exitCode).toBe(0)
     } finally {
       await rm(directory, { force: true, recursive: true })
