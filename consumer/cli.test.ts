@@ -1,3 +1,4 @@
+import { run as runProcess } from 'basis/configuration'
 import { tempDirectory } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -143,15 +144,9 @@ const makeComponentFixture = (options: { config?: string } = {}): string => {
  * @param cwd Working directory for the CLI.
  * @returns The process exit code.
  */
-const run = (args: string[], cwd: string): number => {
-  const result = Bun.spawnSync({
-    cmd: [process.execPath, CLI, ...args],
-    cwd,
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
-  return result.exitCode
-}
+const run = (args: string[], cwd: string): number => (
+  runProcess(process.execPath, [CLI, ...args], { cwd }).exitCode
+)
 
 /** CLI fixtures install a plugin stack, so their lint passes exceed Bun's default test timeout. */
 const CLI_TIMEOUT = 15_000

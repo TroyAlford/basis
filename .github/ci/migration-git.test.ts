@@ -1,3 +1,4 @@
+import { run } from 'basis/configuration'
 import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -13,12 +14,12 @@ async function withRepository(work: (root: string) => Promise<void>): Promise<vo
   const root = await mkdtemp(join(tmpdir(), 'basis-migration-git-'))
   process.chdir(root)
   try {
-    Bun.spawnSync(['git', 'init', '-q'])
-    Bun.spawnSync(['git', 'config', 'user.email', 'test@example.com'])
-    Bun.spawnSync(['git', 'config', 'user.name', 'Basis Test'])
+    run('git', ['init', '-q'])
+    run('git', ['config', 'user.email', 'test@example.com'])
+    run('git', ['config', 'user.name', 'Basis Test'])
     await writeFile(join(root, 'graph.json'), '{}\n')
-    Bun.spawnSync(['git', 'add', 'graph.json'])
-    Bun.spawnSync(['git', 'commit', '-qm', 'initial'])
+    run('git', ['add', 'graph.json'])
+    run('git', ['commit', '-qm', 'initial'])
     await work(root)
   } finally {
     process.chdir(previous)
@@ -45,12 +46,10 @@ describe('migration Git snapshots', () => {
 
   test('the CI entrypoint fails before release work for an invalid base', () => {
     const root = join(import.meta.dir, '..', '..')
-    const result = Bun.spawnSync([process.execPath, 'scripts/check-migrations.ts', '--base', 'does-not-exist'], {
+    const result = run(process.execPath, ['scripts/check-migrations.ts', '--base', 'does-not-exist'], {
       cwd: root,
-      stderr: 'pipe',
-      stdout: 'pipe',
     })
     expect(result.exitCode).not.toBe(0)
-    expect(result.stderr.toString()).toContain('Invalid migration base revision')
+    expect(result.stderr).toContain('Invalid migration base revision')
   })
 })

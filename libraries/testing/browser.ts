@@ -1,3 +1,4 @@
+import { run as runCommand } from 'basis/configuration'
 import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -126,12 +127,11 @@ interface DockerResult {
  * @returns The exit code and captured output.
  */
 function docker(args: string[]): DockerResult {
-  const proc = Bun.spawnSync(['docker', ...args], { stderr: 'pipe', stdout: 'pipe' })
-  const decoder = new TextDecoder()
+  const proc = runCommand('docker', args)
   return {
-    code: proc.exitCode ?? -1,
-    stderr: decoder.decode(proc.stderr),
-    stdout: decoder.decode(proc.stdout),
+    code: proc.exitCode,
+    stderr: proc.stderr,
+    stdout: proc.stdout,
   }
 }
 

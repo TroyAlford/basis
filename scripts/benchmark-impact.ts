@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 /* eslint-disable no-console -- this is an operator-facing benchmark command. */
+import { run } from 'basis/configuration'
 import { join } from 'node:path'
 
 /*
@@ -14,8 +15,7 @@ import { join } from 'node:path'
 const root = join(import.meta.dir, '..')
 const baseRef = process.argv[2] ?? 'upstream/main'
 const start = performance.now()
-const result = Bun.spawnSync([
-  process.execPath,
+const result = run(process.execPath, [
   join(root, '.github/actions/change-impact/main.ts'),
   '--cwd',
   root,
@@ -27,19 +27,15 @@ const result = Bun.spawnSync([
   'docs/examples/ci-impact.json',
   '--config-source',
   'head',
-], {
-  cwd: root,
-  stderr: 'pipe',
-  stdout: 'pipe',
-})
+], { cwd: root })
 
 const elapsed = performance.now() - start
 if (result.exitCode !== 0) {
-  console.error(new TextDecoder().decode(result.stderr).trim())
-  process.exit(result.exitCode ?? 1)
+  console.error(result.stderr.trim())
+  process.exit(result.exitCode)
 }
 
-const decision = JSON.parse(new TextDecoder().decode(result.stdout)) as {
+const decision = JSON.parse(result.stdout) as {
   changedFiles: unknown[],
   docsOnly: boolean,
   suites: Record<string, { needed: boolean, reason: string, selectedTests: string[] }>,

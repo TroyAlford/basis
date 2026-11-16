@@ -1,3 +1,4 @@
+import { run as runProcess } from 'basis/configuration'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -183,21 +184,17 @@ export const makeToolPath = (workspace: string): { binDir: string, path: string 
  * @returns Captured standard output.
  */
 export const run = (command: string[], cwd: string, env: Record<string, string> = {}): string => {
-  const result = Bun.spawnSync({
-    cmd: command,
-    cwd,
-    env: { ...process.env, ...env },
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
+  const [executable, ...args] = command
+  if (!executable) throw new Error('command must include an executable')
+  const result = runProcess(executable, args, { cwd, env })
 
-  const stdout = result.stdout.toString()
-  const stderr = result.stderr.toString()
-  if (!result.success) {
-    throw new Error(`command failed (${result.exitCode}): ${command.join(' ')}\n${stdout}\n${stderr}`)
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `command failed (${result.exitCode}): ${command.join(' ')}\n${result.stdout}\n${result.stderr}`,
+    )
   }
 
-  return stdout
+  return result.stdout
 }
 
 /**
@@ -212,18 +209,14 @@ export const runAllowFailure = (
   cwd: string,
   env: Record<string, string> = {},
 ): { exitCode: number, stderr: string, stdout: string } => {
-  const result = Bun.spawnSync({
-    cmd: command,
-    cwd,
-    env: { ...process.env, ...env },
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
+  const [executable, ...args] = command
+  if (!executable) throw new Error('command must include an executable')
+  const result = runProcess(executable, args, { cwd, env })
 
   return {
-    exitCode: result.exitCode ?? 1,
-    stderr: result.stderr.toString(),
-    stdout: result.stdout.toString(),
+    exitCode: result.exitCode,
+    stderr: result.stderr,
+    stdout: result.stdout,
   }
 }
 

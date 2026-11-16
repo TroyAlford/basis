@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { run } from 'basis/configuration'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -13,13 +14,12 @@ const prepare = (): void => {
 
   if (!existsSync(join(root, '.git')) || !existsSync(husky)) return
 
-  const result = Bun.spawnSync([process.execPath, husky], {
+  const result = run(process.execPath, [husky], {
     cwd: root,
-    stderr: 'inherit',
-    stdout: 'inherit',
+    stdio: 'inherit',
   })
 
-  if (!result.success) process.exit(result.exitCode)
+  if (result.exitCode !== 0) process.exit(result.exitCode)
 }
 
 prepare()

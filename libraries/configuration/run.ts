@@ -9,8 +9,8 @@
  * reimplementing it.
  */
 
-import type { ILogger } from '../utilities'
-import { Logger } from '../utilities'
+import type { ILogger } from '../utilities/functions/Logger'
+import { Logger } from '../utilities/functions/Logger'
 
 /** Logger used when a caller does not supply one. */
 const defaultLogger: ILogger = new Logger({ prefix: 'run' })
@@ -35,6 +35,11 @@ export interface RunOptions {
   readonly env?: Readonly<Record<string, string>>,
   /** Logger for the command line and any failure. Defaults to a `run`-prefixed logger. */
   readonly logger?: ILogger,
+  /**
+   * Standard input handling. Defaults to the `stdio` setting; use `'ignore'`
+   * for non-interactive tools that must not consume caller input.
+   */
+  readonly stdin?: 'ignore' | 'inherit' | 'pipe',
   /**
    * Whether to capture output or inherit the caller's standard streams.
    * Defaults to `'pipe'`; `'inherit'` is for interactive CLI commands.
@@ -77,7 +82,7 @@ export function run(commandOrTemplate: string | TemplateStringsArray, ...rest: u
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     env: options.env === undefined ? Bun.env : { ...Bun.env, ...options.env },
     stderr: stdio,
-    stdin: stdio,
+    stdin: options.stdin ?? stdio,
     stdout: stdio,
     ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
   })
@@ -134,7 +139,7 @@ export async function runAsync(
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     env: options.env === undefined ? Bun.env : { ...Bun.env, ...options.env },
     stderr: stdio,
-    stdin: stdio,
+    stdin: options.stdin ?? stdio,
     stdout: stdio,
   })
   const timer = options.timeoutMs === undefined

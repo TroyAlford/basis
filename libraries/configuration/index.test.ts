@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as configuration from './index'
+import { run } from './run'
 
 /** Marker variable the import-side-effect fixtures write into `.env`. */
 const SENTINEL = 'BASIS_CONFIG_DOTENV_SENTINEL'
@@ -31,13 +32,9 @@ function dotenvFixture(): string {
  * @returns The child's trimmed standard output.
  */
 function runScript(cwd: string, script: string): string {
-  const result = Bun.spawnSync([process.execPath, '--no-env-file', '-e', script], {
-    cwd,
-    stderr: 'pipe',
-    stdout: 'pipe',
-  })
-  if (result.exitCode !== 0) throw new Error(`script failed: ${result.stderr.toString()}`)
-  return result.stdout.toString().trim()
+  const result = run(process.execPath, ['--no-env-file', '-e', script], { cwd })
+  if (result.exitCode !== 0) throw new Error(`script failed: ${result.stderr}`)
+  return result.stdout.trim()
 }
 
 afterEach(() => {

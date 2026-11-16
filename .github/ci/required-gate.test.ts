@@ -1,4 +1,5 @@
 /* eslint-disable camelcase -- GitHub's check-run API uses snake_case keys. */
+import { run } from 'basis/configuration'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -163,13 +164,12 @@ async function runGate(options: GateOptions): Promise<GateResult> {
     env.FAKE_SEQUENCE = sequence
   }
 
-  const child = Bun.spawnSync(['bash', GATE], { env, stderr: 'pipe', stdout: 'pipe' })
-  const decoder = new TextDecoder()
+  const child = run('bash', [GATE], { env })
   return {
     calls: existsSync(calls) ? await readFile(calls, 'utf8') : '',
-    exitCode: child.exitCode ?? -1,
-    stderr: decoder.decode(child.stderr),
-    stdout: decoder.decode(child.stdout),
+    exitCode: child.exitCode,
+    stderr: child.stderr,
+    stdout: child.stdout,
   }
 }
 

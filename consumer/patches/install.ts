@@ -1,3 +1,4 @@
+import { run } from 'basis/configuration'
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 /**
@@ -147,7 +148,7 @@ const hashPatch = (contents: string): string => new Bun.CryptoHasher('sha256').u
  * @returns The exit code and captured standard error.
  */
 const gitApply = (packageDir: string, args: string[], patchPath: string): GitApplyResult => {
-  const result = Bun.spawnSync([gitBinary(), 'apply', '-p1', ...args, patchPath], {
+  const result = run(gitBinary(), ['apply', '-p1', ...args, patchPath], {
     cwd: packageDir,
     /*
      * Force `git apply` to treat the package directory as the working tree even
@@ -159,13 +160,11 @@ const gitApply = (packageDir: string, args: string[], patchPath: string): GitApp
      * root, skip the package-relative paths ("Skipped patch ..."), and still
      * exit 0 — silently reporting the patch as applied when it was not.
      */
-    env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(packageDir) },
-    stderr: 'pipe',
+    env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(packageDir) } as Record<string, string>,
     stdin: 'ignore',
-    stdout: 'pipe',
   })
 
-  return { code: result.exitCode, stderr: result.stderr.toString() }
+  return { code: result.exitCode, stderr: result.stderr }
 }
 
 /**

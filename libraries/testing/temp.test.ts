@@ -1,3 +1,4 @@
+import { run } from 'basis/configuration'
 import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -43,8 +44,8 @@ describe('isolated temp directory', () => {
         rootGone: !existsSync(root),
       }))
     `
-    const result = Bun.spawnSync(['bun', '-e', script], { env: process.env })
-    const line = result.stdout.toString().trim().split('\n').pop() ?? ''
+    const result = run('bun', ['-e', script], { env: process.env as Record<string, string> })
+    const line = result.stdout.trim().split('\n').pop() ?? ''
 
     expect(JSON.parse(line)).toEqual({ nested: true, restored: true, rootGone: true })
   })
