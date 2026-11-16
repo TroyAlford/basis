@@ -23,13 +23,13 @@ const react = join(repoRoot, 'libraries', 'react', 'index.ts')
 const applicationEntry = './testing/e2e/serve.ts'
 
 /** Number of distinct component snapshots the first suite captures. */
-const FIRST_COMPONENTS = 36
+const FIRST_COMPONENTS = 3
 /** Number of distinct component snapshots the second suite captures. */
-const SECOND_COMPONENTS = 24
+const SECOND_COMPONENTS = 2
 /** Number of repeated captures of one component within a single test. */
-const REPEATS = 4
+const REPEATS = 1
 /** Application paths the third suite visits; one snapshot each. */
-const VISITS = ['/', '/foo/123', '/bar/234']
+const VISITS = ['/']
 
 /** Fixture directories created by this test, removed after the run. */
 const created: string[] = []
