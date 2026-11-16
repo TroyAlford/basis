@@ -75,10 +75,15 @@ describe('Graph authoring types', () => {
           type: Constraint.Validation,
           where: "members $contains (workspaceMembership.role = 'Owner')",
         }, {
-          description: 'Relationship role must match the member name.',
+          description: 'Relationship role must match the member label.',
           name: 'RelationshipOperand',
           type: Constraint.Validation,
           where: 'members $contains (workspaceMembership.role = label)',
+        }, {
+          description: 'Member label must match the relationship role.',
+          name: 'RelationshipOperandRight',
+          type: Constraint.Validation,
+          where: 'members $contains (label = workspaceMembership.role)',
         }],
         fields: [{ field: 'title', type: FieldType.String }],
         name: 'Workspace',
@@ -92,7 +97,7 @@ describe('Graph authoring types', () => {
         name: 'WorkspaceMembership',
       }],
     })
-    expect(graph.definitions.validationConstraints('Workspace')).toHaveLength(2)
+    expect(graph.definitions.validationConstraints('Workspace')).toHaveLength(3)
   })
 
   test('accepts typed capabilities and entity security', () => {
