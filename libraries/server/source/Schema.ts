@@ -1786,17 +1786,7 @@ function stripMigrationLedger(schema: PhysicalSchema): PhysicalSchema {
  */
 export function physicalHash(schema: PhysicalSchema, ignoreLedgerSchema = false): string {
   const stripped = stripMigrationLedger(schema)
-  const canonical = {
-    ...stripped,
-    tables: stripped.tables.map(table => ({
-      ...table,
-      checks: (table.checks ?? []).map(check => ({
-        ...(check.column ? { column: check.column } : {}),
-        name: check.name,
-        ...(check.values ? { values: check.values } : {}),
-      })),
-    })),
-  }
+  const canonical = stripped
   if (!ignoreLedgerSchema) return checksum(JSON.stringify(stableValue(canonical)))
   return checksum(JSON.stringify(stableValue({
     ...canonical,
