@@ -119,7 +119,7 @@ await withIsolatedDatabase('consumer', async database => {
 
 ## Actor-aware custom Graph fixtures
 
-Use `withDatabase` or `withCommittedDatabase` when a consumer Graph needs its own RLS policies and a selected actor. Pass the canonical `Graph` and, when the policies should run as the restricted role, its `appRole`. The owner-run `setup` callback executes before the role is selected, so it can seed canonical users, Workspaces and membership rows without weakening the policies:
+Use `withDatabase` when a consumer Graph needs its own RLS policies and a selected actor. Pass the canonical `Graph`; Basis installs it under its fixed restricted fixture role. The owner-run `setup` callback executes before the role is selected, so it can seed canonical users, Workspaces and membership rows without weakening the policies:
 
 ```ts
 import { withDatabase } from 'basis/testing'
@@ -130,7 +130,6 @@ await withDatabase('consumer-owner', ownerId, async database => {
     workspace: workspaceId,
   })
 }, {
-  appRole: 'basis_app',
   graph,
   setup: async sql => {
     await sql`INSERT INTO "Entity" ...`
@@ -139,7 +138,7 @@ await withDatabase('consumer-owner', ownerId, async database => {
 })
 ```
 
-The custom Graph is installed in a cached disposable schema with its policies and grants. `withDatabase` rolls every test back; `withCommittedDatabase` provides a committed app-role transaction for cross-transaction proofs. `withIsolatedDatabase` remains the lighter option when a test needs a custom schema and Graph mutations but not actor-scoped RLS.
+The custom Graph is installed in a cached disposable schema with its policies and grants. `withDatabase` rolls every test back. `withIsolatedDatabase` remains the lighter option when a test needs a custom schema and Graph mutations but not actor-scoped RLS.
 
 ## Database isolation
 

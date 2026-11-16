@@ -425,14 +425,10 @@ export type DatabaseFixtureSetup = (sql: BunSQL) => Promise<void>
 
 /** Options for a custom-Graph actor-aware database fixture. */
 export interface DatabaseTestOptions {
-  /** Optional restricted application role; defaults to the fixture role. */
-  readonly appRole?: string,
-  /** Canonical definitions to install; defaults to the fixture Graph definitions. */
-  readonly entities?: EntityDefinitions,
-  /** Canonical Graph used to install security policies for custom fixtures. */
+  /** Consumer Graph to install with Basis's restricted fixture role. */
   readonly graph?: Graph,
   /** Seed or prepare data as the trusted owner before entering the app role. */
-  readonly setup?: DatabaseFixtureSetup,
+  readonly setup?: (sql: BunSQL) => Promise<void>,
 }
 
 /** The one shared-fixture transaction context. */
@@ -1166,9 +1162,9 @@ export async function withDatabase<T>(
   options: DatabaseTestOptions = {},
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
-  const custom = options.graph !== undefined || options.entities !== undefined
-  const entities = options.graph?.definitions ?? options.entities ?? fixtureGraph.definitions
-  const appRole = options.appRole ?? FIXTURE_APP_ROLE
+  const custom = options.graph !== undefined
+  const entities = options.graph?.definitions ?? fixtureGraph.definitions
+  const appRole = FIXTURE_APP_ROLE
   if (!custom) await ensureGraphSchema(fixture.database)
   const schema = custom
     ? await fixture.schemaFor(entities, { appRole, graph: options.graph })
@@ -1232,9 +1228,9 @@ export async function withCommittedDatabase<T>(
   options: DatabaseTestOptions = {},
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
-  const custom = options.graph !== undefined || options.entities !== undefined
-  const entities = options.graph?.definitions ?? options.entities ?? fixtureGraph.definitions
-  const appRole = options.appRole ?? FIXTURE_APP_ROLE
+  const custom = options.graph !== undefined
+  const entities = options.graph?.definitions ?? fixtureGraph.definitions
+  const appRole = FIXTURE_APP_ROLE
   if (!custom) await ensureGraphSchema(fixture.database)
   const schema = custom
     ? await fixture.schemaFor(entities, { appRole, graph: options.graph })

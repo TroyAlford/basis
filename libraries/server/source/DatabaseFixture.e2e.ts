@@ -29,7 +29,6 @@ const graph = new Graph({
 })
 
 const options = {
-  appRole: 'basis_app',
   graph,
   setup: async (sql: Bun.SQL) => {
     await sql`
