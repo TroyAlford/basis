@@ -105,7 +105,7 @@ export interface QueryScope {
   /** Effective entity metadata used for validation. */
   readonly definition: EntityDefinition,
   /** Render a field expression with physical table qualification. */
-  readonly expression: (field: QueryFieldDefinition) => string,
+  readonly expression: (field: QueryFieldDefinition, bind?: (value: BoundScalar) => string) => string,
   /** Resolve a root ordering field by name. */
   readonly field: (name: string) => QueryFieldDefinition,
   /** Optional count expression metadata for canonical zero/existence forms. */
@@ -140,7 +140,7 @@ function select(
 }
 
 /** A validated scalar value bound into a query. */
-type BoundScalar = string | number | boolean | bigint | Date
+export type BoundScalar = string | number | boolean | bigint | Date
 
 /** The verified actor identity expression; `NULL` for anonymous requests. */
 const ACTOR_SQL = 'nullif(current_setting(\'actor.id\', true), \'\')'
@@ -410,7 +410,7 @@ function whereClause(
         )
       }
       const operand = comparison.validateOperand(field, comparisonFilter.operator, comparisonFilter.value)
-      const column = field.name === ACTOR_FIELD_NAME ? ACTOR_SQL : active.expression(field)
+      const column = field.name === ACTOR_FIELD_NAME ? ACTOR_SQL : active.expression(field, bind)
       if (isFieldOperand(operand)) {
         if (ACTOR_FIELD_NAME === operand.$field) {
           throw new Error('Query field references cannot target the actor sentinel')
@@ -423,7 +423,7 @@ function whereClause(
         }
         const referenceSql = reference.name === ACTOR_FIELD_NAME
           ? ACTOR_SQL
-          : active.expression(reference)
+          : active.expression(reference, bind)
         return comparison.build(field, column, operand, () => referenceSql)
       }
       return comparison.build(field, column, operand, bind)
@@ -499,8 +499,19 @@ function orderByClause(
   if (entries.length === 0) return { sql: '' }
 
   const clauses = entries.map(entry => {
-    const name = typeof entry === 'string' ? entry : entry.field
-    const direction = typeof entry === 'string' ? SortDirection.Ascending : entry.direction ?? SortDirection.Ascending
+    const shorthand = typeof entry === 'string' && entry.startsWith('-')
+    const name = typeof entry === 'string'
+      ? shorthand ? entry.slice(1) : entry
+      : entry.field
+    if (typeof entry === 'string' && shorthand && name === '') {
+      throw new Error('Query orderBy shorthand must name a field after "-"')
+    }
+    if (typeof entry === 'string' && entry.startsWith('--')) {
+      throw new Error('Query orderBy shorthand must use one leading "-"')
+    }
+    const direction = typeof entry === 'string'
+      ? shorthand ? SortDirection.Descending : SortDirection.Ascending
+      : entry.direction ?? SortDirection.Ascending
     const field = scope ? (scope.orderField ?? scope.field)(name) : scalarField(entity, name)
     if (field.type === FieldType.Array || field.type === FieldType.JSON) {
       throw new Error(`Query field "${entity.name}.${name}" cannot be used in ordering`)

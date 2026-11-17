@@ -198,12 +198,38 @@ describe('QueryLexer', () => {
   })
 
   test('tokenizes scoped member and collection count fields', () => {
-    assertLex('@ @.age @.owner.name pets.$count scores.$count', [
+    assertLex('@ @.age @.owner.name pets.$total scores.$total', [
       field('@'),
       field('@.age'),
       field('@.owner.name'),
-      field('pets.$count'),
-      field('scores.$count'),
+      field('pets.$total'),
+      field('scores.$total'),
+    ])
+    assertLex(
+      "pets[age > 1].$matched pets.$matched members[role = 'GM'].$total",
+      [
+        field('pets[age > 1].$matched'),
+        field('pets.$matched'),
+        field("members[role = 'GM'].$total"),
+      ],
+    )
+  })
+
+  test('does not absorb array operands into collection count fields', () => {
+    assertLex('tags=[1, 2]', [
+      field('tags'),
+      operator('=', Operator.Comparison.Equal),
+      leftBracket(),
+      number('1'),
+      comma(),
+      number('2'),
+      rightBracket(),
+    ])
+  })
+
+  test('reports unterminated collection filters', () => {
+    assertLex('pets[age > 1.$matched', [field('pets[age > 1.$matched')], [
+      { message: 'Unterminated collection filter', raw: '[age > 1.$matched', start: 4 },
     ])
   })
 
