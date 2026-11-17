@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from 'bun:test'
 import * as React from 'react'
 import { NavigateEvent } from '../../events/NavigateEvent'
 import { render } from '../../testing/render'
+import { waitFor } from '../../testing/waitFor'
 import { Link } from './Link'
 import { Router } from './Router'
 
@@ -29,8 +30,8 @@ describe('Link', () => {
     const navigateEvent = new NavigateEvent('/current')
     window.dispatchEvent(navigateEvent)
 
-    // Wait for the event to be processed
-    await new Promise(resolve => setTimeout(resolve, 0))
+    // Wait for the navigation event to be processed under scheduler load.
+    await waitFor(() => node.getAttribute('data-active') === 'true')
 
     // Should now be active
     expect(node.getAttribute('data-active')).toBe('true')

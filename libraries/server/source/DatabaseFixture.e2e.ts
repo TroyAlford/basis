@@ -3,6 +3,7 @@ import type { WithDatabaseOptions } from 'basis/testing'
 import { withDatabase } from 'basis/testing'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
+import { withDatabase as withInternalDatabase } from '../testing/DatabaseFixture'
 import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
 import { installBasis } from './Schema'
 
@@ -59,7 +60,7 @@ test('custom Graph fixtures install app-role RLS and select an actor', async () 
 })
 
 test('asOwner swaps role and exposes the same fixture context', async () => {
-  await withDatabase('custom-graph-owner-api', owner, async database => {
+  await withInternalDatabase('custom-graph-owner-api', owner, async database => {
     const appRole = await database.sql<{ role: string }[]>`
       SELECT current_role AS role
     `
@@ -101,6 +102,58 @@ describe('Public database fixture isolation', () => {
     accept({ fresh: true })
     // @ts-expect-error entities is an internal proof option.
     accept({ entities: {} })
+  })
+
+  test('runs both public overloads as the restricted application role', async () => {
+    await withDatabase('public-overload-callback', async database => {
+      const [role] = await database.sql<{ role: string }[]>`
+        SELECT current_role AS role
+      `
+      expect(role?.role).toBe('basis_app')
+    })
+    await withDatabase('public-overload-actor', null, async database => {
+      const [role] = await database.sql<{ role: string }[]>`
+        SELECT current_role AS role
+      `
+      expect(role?.role).toBe('basis_app')
+    })
+  })
+
+  test('rolls back writes from the callback-only overload', async () => {
+    const label = `public-inline-rollback-${randomUUID()}`
+    await withDatabase('public-inline-rollback-write', async database => {
+      await database.create('Owner', { label, name: label })
+      expect(await database.query('Owner', { fields: ['id'], where: { label } }))
+        .toHaveLength(1)
+    })
+    await withDatabase('public-inline-rollback-read', null, async database => {
+      expect(await database.query('Owner', { fields: ['id'], where: { label } }))
+        .toHaveLength(0)
+    })
+  })
+
+  test('does not expose privileged owner switching', async () => {
+    await withDatabase('public-owner-context', null, async database => {
+      expect('asOwner' in database).toBe(false)
+      // @ts-expect-error asOwner is reserved for internal owner proofs.
+      expect(database.asOwner).toBeUndefined()
+    })
+  })
+
+  test('rolls back owner setup before the next consumer test', async () => {
+    const label = `public-owner-setup-${randomUUID()}`
+    await withDatabase('public-owner-setup-write', null, async database => {
+      expect(await database.query('Owner', { fields: ['id'], where: { label } }))
+        .toHaveLength(1)
+    }, {
+      setup: async ownerDatabase => {
+        await ownerDatabase.create('Owner', { label, name: label })
+      },
+    })
+    await withDatabase('public-owner-setup-read', null, async database => {
+      expect(await database.query('Owner', { fields: ['id'], where: { label } }))
+        .toHaveLength(0)
+    })
   })
 
   test('always rolls back a consumer withDatabase transaction', async () => {
