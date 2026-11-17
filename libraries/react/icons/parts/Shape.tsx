@@ -24,12 +24,15 @@ export abstract class Shape<P extends Props = Props> extends Component<P, SVGEle
     }
   }
 
-  /** `color`/`fill`/`mask`/`stroke` are Shape semantics, not native attributes. */
-  static ownedNativeProps = ['color', 'fill', 'mask', 'stroke']
-
   get attributes() {
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.color
+    delete attributes.fill
+    delete attributes.mask
+    delete attributes.stroke
+
     return {
-      ...super.attributes,
+      ...attributes,
       fill: this.props.fill ? this.props.color : 'transparent',
       fillRule: this.props.fillRule,
       mask: this.props.mask,

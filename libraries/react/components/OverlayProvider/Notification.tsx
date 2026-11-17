@@ -53,9 +53,6 @@ interface Props extends INotification {
 export class Notification extends Component<Props, HTMLElement> {
   static displayName = 'Notification'
 
-  /** `title`/`content` are Notification semantics, not native root attributes. */
-  static ownedNativeProps = ['content', 'title']
-
   static readonly Intent = Intent
 
   /**
@@ -70,8 +67,12 @@ export class Notification extends Component<Props, HTMLElement> {
 
   get attributes() {
     const { intent } = this.props
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.content
+    delete attributes.title
+
     return {
-      ...super.attributes,
+      ...attributes,
       'data-intent': intent ?? Notification.Intent.Default,
     }
   }

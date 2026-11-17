@@ -44,8 +44,11 @@ export class Column<TRow, TField extends PathOf<TRow> = PathOf<TRow>>
   extends Component<ColumnProps<TRow, TField>> {
   static displayName = 'Table.Column'
 
-  /** `title` is the column heading, not a native `title` tooltip. */
-  static ownedNativeProps = ['title']
+  override get attributes() {
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.title
+    return attributes
+  }
 
   static get defaultProps() {
     return {
