@@ -1240,222 +1240,152 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
   const row = fixtureRows
   await sql`
     INSERT INTO "Entity" ("id", "name", "entity")
-    VALUES (${row.alice},
-      'Alice',
-      'User'),
-      (${row.bob},
-      'Bob',
-      'User'),
-      (${row.memberNote},
-      'Member note',
-      'MemberNote'),
-      (${row.linkedNote},
-      'Linked note',
-      'MemberNote'),
-      (${row.anonymousNote},
-      'Anonymous note',
-      'AnonymousNote'),
-      (${row.visibleWorkspace},
-      'Visible workspace',
-      'Workspace'),
-      (${row.editorWorkspace},
-      'Editor workspace',
-      'Workspace'),
-      (${row.viewerWorkspace},
-      'Viewer workspace',
-      'Workspace'),
-      (${row.hiddenWorkspace},
-      'Hidden workspace',
-      'Workspace'),
-      (${row.project},
-      'Project',
-      'Project'),
-      (${row.secondProject},
-      'Second project',
-      'Project'),
-      (${row.thirdProject},
-      'Third project',
-      'Project'),
-      (${row.openTask},
-      'Open task',
-      'Task'),
-      (${row.otherTask},
-      'Other task',
-      'Task'),
-      (${row.note},
-      'Fixture note',
-      'Note'),
-      (${row.account},
-      'Fixture account',
-      'Account'),
-      (${row.numberRow},
-      'Fixture number row',
-      'NumberRow'),
-      (${row.queryRow},
-      'Fixture query row',
-      'QueryRow'),
-      (${row.article},
-      'Fixture article',
-      'Article')
+    VALUES
+      (${row.alice}, 'Alice', 'User'),
+      (${row.bob}, 'Bob', 'User'),
+      (${row.memberNote}, 'Member note', 'MemberNote'),
+      (${row.linkedNote}, 'Linked note', 'MemberNote'),
+      (${row.anonymousNote}, 'Anonymous note', 'AnonymousNote'),
+      (${row.visibleWorkspace}, 'Visible workspace', 'Workspace'),
+      (${row.editorWorkspace}, 'Editor workspace', 'Workspace'),
+      (${row.viewerWorkspace}, 'Viewer workspace', 'Workspace'),
+      (${row.hiddenWorkspace}, 'Hidden workspace', 'Workspace'),
+      (${row.project}, 'Project', 'Project'),
+      (${row.secondProject}, 'Second project', 'Project'),
+      (${row.thirdProject}, 'Third project', 'Project'),
+      (${row.openTask}, 'Open task', 'Task'),
+      (${row.otherTask}, 'Other task', 'Task'),
+      (${row.note}, 'Fixture note', 'Note'),
+      (${row.account}, 'Fixture account', 'Account'),
+      (${row.numberRow}, 'Fixture number row', 'NumberRow'),
+      (${row.queryRow}, 'Fixture query row', 'QueryRow'),
+      (${row.article}, 'Fixture article', 'Article')
   `
   await sql`
     INSERT INTO "User" ("id", "label", "email")
-    VALUES (${row.alice}, 'Alice', 'alice@example.com'), (${row.bob}, 'Bob', 'bob@example.com')
+    VALUES
+      (${row.alice}, 'Alice', 'alice@example.com'),
+      (${row.bob}, 'Bob', 'bob@example.com')
   `
   await sql`
     INSERT INTO "Note" ("id", "title", "active", "score", "dueOn", "createdAt")
-    VALUES (${row.note}, 'Fixture note', TRUE, 3, '2030-01-01', '2020-01-01T00:00:00Z')
+    VALUES
+      (${row.note}, 'Fixture note', TRUE, 3, '2030-01-01', '2020-01-01T00:00:00Z')
   `
   await sql`
     INSERT INTO "Account" ("id", "label")
-    VALUES (${row.account}, 'Fixture account')
+    VALUES
+      (${row.account}, 'Fixture account')
   `
   await sql`
     INSERT INTO "NumberRow" ("id", "value")
-    VALUES (${row.numberRow}, 7)
+    VALUES
+      (${row.numberRow}, 7)
   `
   await sql`
     INSERT INTO "QueryRow" ("id", "active", "externalId", "rank", "score", "title")
-    VALUES (${row.queryRow}, TRUE, 1, 2, 3, 'Fixture query row')
+    VALUES
+      (${row.queryRow}, TRUE, 1, 2, 3, 'Fixture query row')
   `
   await sql`
     INSERT INTO "Article" ("id", "title", "owner.id")
-    VALUES (${row.article}, 'Fixture article', ${row.alice})
+    VALUES
+      (${row.article}, 'Fixture article', ${row.alice})
   `
   await sql`
     INSERT INTO "MemberNote" ("id", "title")
-    VALUES (${row.memberNote}, 'Member note'), (${row.linkedNote}, 'Linked note')
+    VALUES
+      (${row.memberNote}, 'Member note'),
+      (${row.linkedNote}, 'Linked note')
   `
   await sql`
     INSERT INTO "AnonymousNote" ("id", "title")
-    VALUES (${row.anonymousNote}, 'Anonymous note')
+    VALUES
+      (${row.anonymousNote}, 'Anonymous note')
   `
   await sql`
     INSERT INTO "ActorLink" ("note.id", "related.id")
-    VALUES (${row.memberNote}, ${row.linkedNote})
+    VALUES
+      (${row.memberNote}, ${row.linkedNote})
   `
   await sql`
     INSERT INTO "Workspace" ("id", "title")
-    VALUES (${row.visibleWorkspace},
-      'Visible workspace'),
-      (${row.hiddenWorkspace},
-      'Hidden workspace'),
-      (${row.editorWorkspace},
-      'Editor workspace'),
-      (${row.viewerWorkspace},
-      'Viewer workspace')
+    VALUES
+      (${row.visibleWorkspace}, 'Visible workspace'),
+      (${row.hiddenWorkspace}, 'Hidden workspace'),
+      (${row.editorWorkspace}, 'Editor workspace'),
+      (${row.viewerWorkspace}, 'Viewer workspace')
   `
   await sql`
     INSERT INTO "Project" ("id", "title", "workspace.id")
-    VALUES (${row.project},
-      'visible',
-      ${row.visibleWorkspace}),
-      (${row.secondProject},
-      'visible',
-      ${row.hiddenWorkspace}),
-      (${row.thirdProject},
-      'other',
-      ${row.hiddenWorkspace})
+    VALUES
+      (${row.project}, 'visible', ${row.visibleWorkspace}),
+      (${row.secondProject}, 'visible', ${row.hiddenWorkspace}),
+      (${row.thirdProject}, 'other', ${row.hiddenWorkspace})
   `
   await sql`
     INSERT INTO "Task" ("id", "title", "project.id")
-    VALUES (${row.openTask}, 'open', ${row.project}), (${row.otherTask}, 'open', ${row.thirdProject})
+    VALUES
+      (${row.openTask}, 'open', ${row.project}),
+      (${row.otherTask}, 'open', ${row.thirdProject})
   `
   await sql`
     INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
-    VALUES (${row.visibleWorkspace},
-      ${row.alice},
-      'Owner'),
-      (${row.editorWorkspace},
-      ${row.alice},
-      'Editor'),
-      (${row.viewerWorkspace},
-      ${row.alice},
-      'Viewer')
+    VALUES
+      (${row.visibleWorkspace}, ${row.alice}, 'Owner'),
+      (${row.editorWorkspace}, ${row.alice}, 'Editor'),
+      (${row.viewerWorkspace}, ${row.alice}, 'Viewer')
   `
   await sql`
     INSERT INTO "Entity" ("id", "name", "entity")
-    VALUES (${row.ownerA},
-      'Owner A',
-      'Owner'),
-      (${row.ownerB},
-      'Owner B',
-      'Owner'),
-      (${row.revisionA},
-      'Revision A',
-      'Revision'),
-      (${row.orphanRevision},
-      'Orphan revision',
-      'Revision'),
-      (${row.validDocument},
-      'Valid document',
-      'Document'),
-      (${row.invalidChildDocument},
-      'Invalid child document',
-      'Document'),
-      (${row.invalidParentDocument},
-      'Invalid parent document',
-      'Document'),
-      (${row.orphanDocument},
-      'Orphan document',
-      'Document'),
-      (${row.guardedWorkspace},
-      'Guarded workspace',
-      'GuardedWorkspace')
+    VALUES
+      (${row.ownerA}, 'Owner A', 'Owner'),
+      (${row.ownerB}, 'Owner B', 'Owner'),
+      (${row.revisionA}, 'Revision A', 'Revision'),
+      (${row.orphanRevision}, 'Orphan revision', 'Revision'),
+      (${row.validDocument}, 'Valid document', 'Document'),
+      (${row.invalidChildDocument}, 'Invalid child document', 'Document'),
+      (${row.invalidParentDocument}, 'Invalid parent document', 'Document'),
+      (${row.orphanDocument}, 'Orphan document', 'Document'),
+      (${row.guardedWorkspace}, 'Guarded workspace', 'GuardedWorkspace')
   `
   await sql`
     INSERT INTO "Owner" ("id", "label")
-    VALUES (${row.ownerA}, 'A'), (${row.ownerB}, 'B')
+    VALUES
+      (${row.ownerA}, 'A'),
+      (${row.ownerB}, 'B')
   `
   await sql`
     INSERT INTO "Revision" ("id", "owner.id")
-    VALUES (${row.revisionA}, ${row.ownerA}), (${row.orphanRevision}, ${null})
+    VALUES
+      (${row.revisionA}, ${row.ownerA}),
+      (${row.orphanRevision}, ${null})
   `
   await sql`
     INSERT INTO "Record" ("id", "title", "status")
-    VALUES (${row.validDocument},
-      'Valid',
-      'ok'),
-      (${row.invalidChildDocument},
-      'Invalid child',
-      'ok'),
-      (${row.invalidParentDocument},
-      'Invalid parent',
-      'bad'),
-      (${row.orphanDocument},
-      'Orphan',
-      'ok')
+    VALUES
+      (${row.validDocument}, 'Valid', 'ok'),
+      (${row.invalidChildDocument}, 'Invalid child', 'ok'),
+      (${row.invalidParentDocument}, 'Invalid parent', 'bad'),
+      (${row.orphanDocument}, 'Orphan', 'ok')
   `
   await sql`
     INSERT INTO "Document" ("id", "flag", "note", "owner.id", "revision.id")
-    VALUES (${row.validDocument},
-      TRUE,
-      'note',
-      ${row.ownerA},
-      ${row.revisionA}),
-      (${row.invalidChildDocument},
-      FALSE,
-      'note',
-      ${row.ownerA},
-      ${row.revisionA}),
-      (${row.invalidParentDocument},
-      TRUE,
-      'note',
-      ${row.ownerA},
-      ${row.revisionA}),
-      (${row.orphanDocument},
-      TRUE,
-      'note',
-      ${row.ownerA},
-      ${row.orphanRevision})
+    VALUES
+      (${row.validDocument}, TRUE, 'note', ${row.ownerA}, ${row.revisionA}),
+      (${row.invalidChildDocument}, FALSE, 'note', ${row.ownerA}, ${row.revisionA}),
+      (${row.invalidParentDocument}, TRUE, 'note', ${row.ownerA}, ${row.revisionA}),
+      (${row.orphanDocument}, TRUE, 'note', ${row.ownerA}, ${row.orphanRevision})
   `
   await sql`
     INSERT INTO "GuardedWorkspace" ("id", "flag", "title")
-    VALUES (${row.guardedWorkspace}, TRUE, 'Guarded workspace')
+    VALUES
+      (${row.guardedWorkspace}, TRUE, 'Guarded workspace')
   `
   await sql`
     INSERT INTO "GuardedMembership" ("workspace.id", "user.id")
-    VALUES (${row.guardedWorkspace}, ${row.alice})
+    VALUES
+      (${row.guardedWorkspace}, ${row.alice})
   `
 }
 
@@ -1593,7 +1523,7 @@ export async function withDatabase<T>(
       await options.setup?.(context())
       await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
       await sql`
-        SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+        SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
       `
       return callback(context())
     },
@@ -1679,10 +1609,10 @@ async function ensureSchema(
   if (appRole !== undefined) await ensureApplicationRole(database, appRole)
   await database.tx(async sql => {
     await sql`
-      SELECT pg_advisory_xact_lock(hashtext(${schema}))
+      SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema} ) AS present
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
     `
     if (present[0]?.present) return
 
@@ -1720,7 +1650,7 @@ async function ensureGraphSchema(database: Database): Promise<string> {
   const schema = FIXTURE_SCHEMA
   await database.tx(async sql => {
     await sql`
-      SELECT pg_advisory_xact_lock(hashtext(${schema}))
+      SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
       SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
@@ -1731,7 +1661,8 @@ async function ensureGraphSchema(database: Database): Promise<string> {
         const [table] = await sql<{ table_name: string }[]>`
           SELECT table_name
           FROM information_schema.tables
-          WHERE table_schema = ${schema} AND table_name = ${entity.name}
+          WHERE table_schema = ${schema}
+            AND table_name = ${entity.name}
         `
         if (!table?.table_name) {
           complete = false
@@ -1742,9 +1673,11 @@ async function ensureGraphSchema(database: Database): Promise<string> {
     if (complete) {
       for (const trigger of fixtureGraph.physicalSchema(FIXTURE_APP_ROLE, true).triggers) {
         const [found] = await sql<{ present: boolean }[]>`
-          SELECT EXISTS (SELECT 1 FROM pg_trigger trigger JOIN pg_class relation ON relation.oid =
-            trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE
-            namespace.nspname = ${schema} AND trigger.tgname = ${trigger.name} ) AS present
+          SELECT EXISTS(
+  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
+    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
+    ${schema} AND TRIGGER.tgname = ${trigger.name}
+) AS present
         `
         if (!found?.present) {
           complete = false
@@ -1754,17 +1687,19 @@ async function ensureGraphSchema(database: Database): Promise<string> {
     }
     if (complete) {
       const [legacy] = await sql<{ present: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM pg_trigger trigger JOIN pg_class relation ON relation.oid =
-          trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE
-          namespace.nspname = ${schema} AND (trigger.tgname ILIKE '%enroll%' OR pg_get_triggerdef(trigger.oid)
-          ILIKE '%enroll_identity%' ) ) AS present
+        SELECT EXISTS(
+  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
+    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
+    ${schema} AND(TRIGGER.tgname ILIKE '%enroll%' OR pg_get_triggerdef(TRIGGER.oid) ILIKE
+    '%enroll_identity%')
+) AS present
       `
       if (legacy?.present) complete = false
     }
     if (complete) {
       const [seeded] = await sql<{ seeded: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" = ${fixtureRows.alice} ) AS
-          seeded
+        SELECT EXISTS (SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" =
+          ${fixtureRows.alice}) AS seeded
       `
       complete = Boolean(seeded?.seeded)
     }
