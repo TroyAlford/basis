@@ -137,6 +137,26 @@ interface ProjectedCollectionSpec {
   orderBy?: OrderBy,
 }
 
+/** Shared source-specific inputs for one projected-collection envelope. */
+interface ProjectedCollectionRows {
+  /** Aggregate order expression over the child row alias. */
+  readonly aggregateOrder: string,
+  /** Correlated child query including its ordering but no page. */
+  readonly child: CompiledPolymorphicQuery,
+  /** Edge-field JSON expression, or `NULL`. */
+  readonly edgeObject: string,
+  /** Hydrate one child row without its projected edge. */
+  readonly hydrateRow: (row: Record<string, unknown>) => Record<string, unknown>,
+  /** Order-only child fields omitted from the final item. */
+  readonly orderOnlyFields: ReadonlySet<string>,
+  /** SQL page suffix. */
+  readonly page: string,
+  /** Unfiltered child query used for `$total`. */
+  readonly totalChild?: CompiledPolymorphicQuery,
+  /** Work units charged by this collection. */
+  readonly work: number,
+}
+
 /** One nested singular reference. */
 interface ReferenceProjection {
   /** Canonical association for each target node. */
@@ -1549,11 +1569,6 @@ class QueryProjection {
     return orderings
   }
 
-  /**
-   * Add one explicit relationship-record collection as a correlated child query.
-   * @param node - Projection occurrence owning the collection.
-   * @param spec - Relationship-record collection request.
-   */
   #addProjectedExplicitRecords(node: ProjectionNode, spec: ProjectedCollectionSpec): void {
     if (spec.collection.kind !== 'explicit' || spec.collection.targetEndpoint !== undefined) {
       throw new Error('Explicit record projection requires a relationship-record collection')
@@ -1562,23 +1577,24 @@ class QueryProjection {
     const relationship = collection.relationship
     const target = this.#entities.relationshipRecord(relationship.name)
     if (!target) throw new Error(`Unknown relationship "${relationship.name}"`)
-    const limit = spec.limit === undefined
-      ? collection.viaLimit === undefined ? 3 : collection.viaLimit
-      : spec.limit
-    const offset = spec.offset ?? collection.viaOffset ?? 0
+    const key = collectionKey(node.path, collection.name)
     const endpoint = collection.ownerEndpoint
     const childAlias = this.#nextAlias('cr')
     const orderings = this.#recordOrderings(
       relationship,
       spec.orderBy === undefined ? collection.viaOrderBy : spec.orderBy,
     )
+    const fields = [...new Set([
+      ...relationship.between.map(item => item.field),
+      ...relationship.fields.map(field => field.name),
+      ...spec.fields,
+    ])]
+    const filter = spec.filters.size === 0
+      ? undefined
+      : [...spec.filters].map(value => `(${value})`).join(' $and ')
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
-      fields: [...new Set([
-        ...relationship.between.map(item => item.field),
-        ...relationship.fields.map(field => field.name),
-        ...spec.fields,
-      ])],
+      fields,
       limit: null,
       offset: 0,
       rawOrder: orderings.map(order => (
@@ -1588,26 +1604,15 @@ class QueryProjection {
         `${quote(childAlias)}.${quote(`${endpoint.field}.id`)} = ` +
         `${quote(node.context.baseAlias)}.${quote('id')}`,
       rootAlias: childAlias,
-      ...(spec.filters.size === 0
-        ? {}
-        : { where: [...spec.filters].map(value => `(${value})`).join(' $and ') }),
+      ...(filter === undefined ? {} : { where: filter }),
       ...(collection.viaFilter === undefined ? {} : { additionalWhere: [collection.viaFilter] }),
     })
-    const base = this.#valueStart + this.values.length
-    const childSql = child.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
-      `$${base + Number(value) - 1}`
-    ))
-    this.values.push(...child.values)
-    let totalSql: string | undefined
-    if (spec.filters.size > 0) {
+    let totalChild: CompiledPolymorphicQuery | undefined
+    if (filter !== undefined) {
       const totalChildAlias = this.#nextAlias('ct')
-      const totalChild = compilePolymorphicQuery(this.#entities, target, {
+      totalChild = compilePolymorphicQuery(this.#entities, target, {
         aliasPrefix: `${totalChildAlias}_`,
-        fields: [...new Set([
-          ...relationship.between.map(item => item.field),
-          ...relationship.fields.map(field => field.name),
-          ...spec.fields,
-        ])],
+        fields,
         limit: null,
         offset: 0,
         rawOrder: orderings.map(order => (
@@ -1619,73 +1624,34 @@ class QueryProjection {
         rootAlias: totalChildAlias,
         ...(collection.viaFilter === undefined ? {} : { additionalWhere: [collection.viaFilter] }),
       })
-      const totalBase = this.#valueStart + this.values.length
-      totalSql = totalChild.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
-        `$${totalBase + Number(value) - 1}`
-      ))
-      this.values.push(...totalChild.values)
     }
-    const alias = columnAlias(node.path, collection.name)
-    const matchedAlias = `${alias}__matched`
-    const totalAlias = totalSql === undefined ? matchedAlias : `${alias}__total`
-    const lateralAlias = this.#nextAlias('pr')
-    const page = [
-      ...(limit === null ? [] : [`LIMIT ${limit}`]),
-      ...(limit === null && offset === 0 ? [] : [`OFFSET ${offset}`]),
-    ].join(' ')
-    const counts = totalSql === undefined
-      ? `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__matched"`
-      : `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__matched", ` +
-        `(SELECT count(*) FROM (${totalSql}) AS "__total") AS "__total"`
+    const page = this.#collectionPage(
+      spec,
+      key,
+      collection.viaLimit === undefined ? 3 : collection.viaLimit,
+      collection.viaOffset ?? 0,
+    )
     const aggregateOrder = orderings.map(order => (
       order.endpoint
         ? `${quote('__item')}.${quote(`${order.field}__id`)} ${order.direction}`
         : `${quote('__item')}.${quote(order.field)} ${order.direction}`
     )).join(', ')
-    this.joins.push(
-      'LEFT JOIN LATERAL (SELECT ' +
-      `COALESCE((SELECT json_agg(row_to_json("__item") ORDER BY ${aggregateOrder}) ` +
-      `FROM (${childSql}${page === '' ? '' : ` ${page}`}) AS "__item"), '[]'::json) AS "__items", ` +
-      counts +
-      `) AS ${quote(lateralAlias)} ON TRUE`,
-    )
-    this.columns.push(
-      `${quote(lateralAlias)}.${quote('__items')} AS ${quote(alias)}`,
-      `${quote(lateralAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`,
-      ...(totalSql === undefined ? [] : [`${quote(lateralAlias)}.${quote('__total')} AS ${quote(totalAlias)}`]),
-    )
-    node.projectedCollections.push({
-      alias,
-      hydrate: row => {
-        const raw = row[alias]
-        const entries = Array.isArray(raw)
-          ? raw
-          : typeof raw === 'string'
-            ? JSON.parse(raw) as unknown[]
-            : []
-        return {
-          $matched: Number(row[matchedAlias] ?? 0),
-          $total: totalSql === undefined
-            ? Number(row[matchedAlias] ?? 0)
-            : Number(row[totalAlias] ?? 0),
-          items: entries.map(entry => child.hydrate(entry as Record<string, unknown>)),
-        }
-      },
-      matchedAlias,
-      name: collection.name,
-      totalAlias,
+    this.#addProjectedCollectionEnvelope(node, spec, {
+      aggregateOrder,
+      child,
+      edgeObject: 'NULL',
+      hydrateRow: row => child.hydrate(row),
+      orderOnlyFields: new Set(),
+      page,
+      ...(totalChild === undefined ? {} : { totalChild }),
+      work: 1,
     })
   }
 
   /**
    * Add one root collection envelope projection.
    * @param node - Projection occurrence.
-   * @param collection - Derived collection navigation.
-   */
-  /**
-   * Add one projected collection as a correlated child query.
-   * @param node - Projection occurrence owning the collection.
-   * @param spec - Requested target and edge fields.
+   * @param spec - Projected collection request.
    */
   #addProjectedCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): void {
     if (spec.collection.kind === 'explicit' && spec.collection.targetEndpoint === undefined) {
@@ -1694,19 +1660,11 @@ class QueryProjection {
     }
     const key = collectionKey(node.path, spec.collection.name)
     const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
-    this.#consume(plan.work)
     const target = spec.collection.target === 'Entity'
       ? identityDefinition()
       : this.#entities.entity(spec.collection.target)
     if (!target) throw new Error(`Unknown target entity "${spec.collection.target}"`)
-    const limit = spec.limit === undefined ? 3 : spec.limit
-    if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
-      throw new Error(`Collection "${key}" $limit must be a non-negative integer or null`)
-    }
-    const offset = spec.offset ?? 0
-    if (!Number.isInteger(offset) || offset < 0) {
-      throw new Error(`Collection "${key}" $offset must be a non-negative integer`)
-    }
+    const page = this.#collectionPage(spec, key, 3, 0)
     const requestedOrder = spec.orderBy === undefined
       ? ['id']
       : Array.isArray(spec.orderBy) ? [...spec.orderBy] : [spec.orderBy]
@@ -1755,16 +1713,10 @@ class QueryProjection {
         ? { additionalWhere: [spec.collection.viaFilter] }
         : {}),
     })
-    const base = this.#valueStart + this.values.length
-    const childSql = child.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
-      `$${base + Number(value) - 1}`
-    ))
-    this.values.push(...child.values)
-
-    let totalSql: string | undefined
+    let totalChild: CompiledPolymorphicQuery | undefined
     if (filter !== undefined) {
       const availableAlias = this.#nextAlias('ca')
-      const availableChild = compilePolymorphicQuery(this.#entities, target, {
+      totalChild = compilePolymorphicQuery(this.#entities, target, {
         aliasPrefix: `${availableAlias}_`,
         fields: ['id'],
         limit: null,
@@ -1775,13 +1727,7 @@ class QueryProjection {
           ? { additionalWhere: [spec.collection.viaFilter] }
           : {}),
       })
-      const totalBase = this.#valueStart + this.values.length
-      totalSql = availableChild.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
-        `$${totalBase + Number(value) - 1}`
-      ))
-      this.values.push(...availableChild.values)
     }
-
     const edgeFields = [...spec.edgeFields]
     const edgeObject = edgeFields.length === 0
       ? 'NULL'
@@ -1790,26 +1736,87 @@ class QueryProjection {
       )).join(', ')}) ` +
       `FROM ${plan.relation} WHERE ${plan.condition} ` +
       `AND ${quote(plan.rootAlias)}.${quote('id')} = "__item".${quote('id')})`
+    const aggregateOrder = orderings
+      .map(order => `${quote('__item')}.${quote(order.name)} ${order.direction}`)
+      .join(', ')
+    this.#addProjectedCollectionEnvelope(node, spec, {
+      aggregateOrder,
+      child,
+      edgeObject,
+      hydrateRow: row => child.hydrate(row),
+      orderOnlyFields,
+      page,
+      ...(totalChild === undefined ? {} : { totalChild }),
+      work: plan.work,
+    })
+  }
+
+  /**
+   * Build one projected collection page clause.
+   * @param spec - Projected collection request.
+   * @param key - Collection path for diagnostics.
+   * @param defaultLimit - Default page size from the collection source.
+   * @param defaultOffset - Default page offset from the collection source.
+   * @returns SQL LIMIT/OFFSET clause.
+   */
+  #collectionPage(
+    spec: ProjectedCollectionSpec,
+    key: string,
+    defaultLimit: number | null,
+    defaultOffset: number,
+  ): string {
+    const limit = spec.limit === undefined ? defaultLimit : spec.limit
+    if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
+      throw new Error(`Collection "${key}" $limit must be a non-negative integer or null`)
+    }
+    const offset = spec.offset ?? defaultOffset
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error(`Collection "${key}" $offset must be a non-negative integer`)
+    }
+    return [
+      ...(limit === null ? [] : [`LIMIT ${limit}`]),
+      ...(limit === null && offset === 0 ? [] : [`OFFSET ${offset}`]),
+    ].join(' ')
+  }
+
+  /**
+   * Add the shared projected collection envelope, counts, page, and hydration.
+   * @param node - Projection occurrence owning the collection.
+   * @param spec - Requested collection projection.
+   * @param rows - Source-specific child queries and ordering metadata.
+   */
+  #addProjectedCollectionEnvelope(
+    node: ProjectionNode,
+    spec: ProjectedCollectionSpec,
+    rows: ProjectedCollectionRows,
+  ): void {
+    this.#consume(rows.work)
+    const base = this.#valueStart + this.values.length
+    const childSql = rows.child.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+      `$${base + Number(value) - 1}`
+    ))
+    this.values.push(...rows.child.values)
+    let totalSql: string | undefined
+    if (rows.totalChild !== undefined) {
+      const totalBase = this.#valueStart + this.values.length
+      totalSql = rows.totalChild.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+        `$${totalBase + Number(value) - 1}`
+      ))
+      this.values.push(...rows.totalChild.values)
+    }
     const alias = columnAlias(node.path, spec.collection.name)
     const matchedAlias = `${alias}__matched`
     const totalAlias = totalSql === undefined ? matchedAlias : `${alias}__total`
     const lateralAlias = this.#nextAlias('pc')
-    const page = [
-      ...(limit === null ? [] : [`LIMIT ${limit}`]),
-      ...(limit === null && offset === 0 ? [] : [`OFFSET ${offset}`]),
-    ].join(' ')
-    const aggregateOrder = orderings
-      .map(order => `${quote('__item')}.${quote(order.name)} ${order.direction}`)
-      .join(', ')
     const counts = totalSql === undefined
-      ? `(SELECT count(*) FROM (${childSql}) AS "__matched") AS "__matched"`
-      : `(SELECT count(*) FROM (${childSql}) AS "__matched") AS "__matched", ` +
+      ? `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__matched"`
+      : `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__matched", ` +
         `(SELECT count(*) FROM (${totalSql}) AS "__total") AS "__total"`
     this.joins.push(
       'LEFT JOIN LATERAL (SELECT ' +
       'COALESCE((SELECT json_agg(json_build_object(\'item\', row_to_json("__item"), ' +
-      `'edge', ${edgeObject}) ORDER BY ${aggregateOrder}) ` +
-      `FROM (${childSql}${page === '' ? '' : ` ${page}`}) AS "__item"), ` +
+      `'edge', ${rows.edgeObject}) ORDER BY ${rows.aggregateOrder}) ` +
+      `FROM (${childSql}${rows.page === '' ? '' : ` ${rows.page}`}) AS "__item"), ` +
       '\'[]\'::json) AS "__items", ' +
       counts +
       `) AS ${quote(lateralAlias)} ON TRUE`,
@@ -1839,12 +1846,12 @@ class QueryProjection {
               readonly edge?: Record<string, unknown> | null,
               readonly item: Record<string, unknown>,
             }
-            const hydrated = child.hydrate(record.item)
+            const hydrated = rows.hydrateRow(record.item)
             const merged = record.edge === undefined || record.edge === null
               ? hydrated
               : { ...hydrated, ...record.edge }
             return Object.fromEntries(
-              Object.entries(merged).filter(([field]) => !orderOnlyFields.has(field)),
+              Object.entries(merged).filter(([field]) => !rows.orderOnlyFields.has(field)),
             )
           }),
         }

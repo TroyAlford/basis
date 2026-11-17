@@ -2018,6 +2018,43 @@ describe('Server database lifecycle', () => {
         quantity: 3,
       }),
     ])
+    const entityPage = await queryEntity<{
+      cards: { $matched: number, $total: number, items: { entity: string, id: string, name: string }[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'cards{$orderBy:-name,$limit:1}'],
+      where: { id: deckA },
+    })
+    const recordPage = await queryEntity<{
+      entries: { $matched: number, $total: number, items: Record<string, unknown>[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'entries{$orderBy:-quantity,$limit:1}'],
+      where: { id: deckA },
+    })
+    expect(entityPage[0]?.cards).toMatchObject({ $matched: 2, $total: 2 })
+    expect(entityPage[0]?.cards.items).toEqual([
+      expect.objectContaining({ entity: 'Card', id: cardB, name: 'Card B' }),
+    ])
+    expect(recordPage[0]?.entries).toMatchObject({ $matched: 2, $total: 2 })
+    expect(recordPage[0]?.entries.items).toEqual([
+      expect.objectContaining({ quantity: 3 }),
+    ])
+    expect(recordPage[0]?.entries.items[0]).not.toHaveProperty('id')
+    expect(recordPage[0]?.entries.items[0]).not.toHaveProperty('entity')
+    const emptyEntity = await queryEntity<{
+      cards: { $matched: number, $total: number, items: unknown[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'cards'],
+      where: { id: deckB },
+    })
+    const emptyRecord = await queryEntity<{
+      entries: { $matched: number, $total: number, items: unknown[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'entries'],
+      where: { id: deckB },
+    })
+    expect(emptyEntity[0]?.cards).toEqual({ $matched: 0, $total: 0, items: [] })
+    expect(emptyRecord[0]?.entries).toEqual({ $matched: 0, $total: 0, items: [] })
+
     expect(entities.ddl.join('\n')).toContain('primary key ("deck.id", "card.id", "printing.id")')
     expect(await database.captureError(async db => {
       await db.sql`
