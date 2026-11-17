@@ -124,6 +124,87 @@ const ALIAS_STOP_WORDS = new Set([
 class LibpgPrinter {
   #usedComments = new Set<number>()
 
+  #warned = new Set<string>()
+
+  /*
+   * Node printers keyed by the raw PostgreSQL node tag. A node type without a
+   * printer is emitted from source and reported instead of being dropped.
+   */
+  private readonly statementPrinters = new Map<string, (body: any, indent: string) => string[]>([
+    ['SelectStmt', (body, indent) => this.select(body, indent)],
+    ['InsertStmt', (body, indent) => this.insert(body, indent)],
+    ['ViewStmt', (body, indent) => this.view(body, indent)],
+    ['CreateStmt', (body, indent) => this.createTable(body, indent)],
+    ['CreateFunctionStmt', (body, indent) => this.createFunction(body, indent)],
+    ['DoStmt', (body, indent) => this.doBlock(body, indent)],
+    ['UpdateStmt', (body, indent) => this.update(body, indent)],
+    ['DeleteStmt', (body, indent) => this.delete(body, indent)],
+    ['VariableSetStmt', (body, indent) => this.variableSet(body, indent)],
+    ['ConstraintsSetStmt', (body, indent) => [
+      `${indent}SET CONSTRAINTS ALL ${body.deferred ? 'DEFERRED' : 'IMMEDIATE'}`,
+    ]],
+    ['DropStmt', (body, indent) => this.drop(body, indent)],
+    ['IndexStmt', (body, indent) => this.index(body, indent)],
+    ['VacuumStmt', (body, indent) => this.vacuum(body, indent)],
+    ['CreateSeqStmt', (body, indent) => this.createSequence(body, indent)],
+    ['AlterTableStmt', (body, indent) => this.alterTable(body, indent)],
+    ['CreateSchemaStmt', (body, indent) => this.createSchema(body, indent)],
+    ['CreateTrigStmt', (body, indent) => this.createTrigger(body, indent)],
+  ])
+
+  /* Expression printers keyed by the raw PostgreSQL node tag. */
+  private readonly expressionPrinters = new Map<string, (body: any) => string>([
+    ['ColumnRef', body => this.columnRef(body)],
+    ['A_Const', body => this.literal(body)],
+    ['ParamRef', body => this.paramRef(body)],
+    ['A_Expr', body => this.aExpr(body)],
+    ['BoolExpr', body => {
+      if (body.boolop === 'NOT_EXPR') return `NOT (${this.expr(body.args?.[0])})`
+      const operator = body.boolop === 'AND_EXPR' ? 'AND' : 'OR'
+      return `(${(body.args ?? []).map((arg: any) => this.expr(arg)).join(` ${operator} `)})`
+    }],
+    ['NullTest', body => `${this.group(body.arg)} IS ${body.nulltesttype === 'IS_NOT_NULL' ? 'NOT ' : ''}NULL`],
+    ['BooleanTest', body => {
+      const negated = body.booltesttype === 'IS_NOT_TRUE' || body.booltesttype === 'IS_NOT_FALSE'
+      const expected = body.booltesttype?.includes('FALSE') ? 'FALSE' : 'TRUE'
+      return `${this.group(body.arg)} IS ${negated ? 'NOT ' : ''}${expected}`
+    }],
+    ['TypeCast', body => {
+      const typeName = this.tag(body.typeName)?.[1] ?? body.typeName
+      const cast = typeName?.location >= 0 ? this.readTypeName(typeName.location) : this.typeNameText(body.typeName)
+      return `${this.group(body.arg)}::${cast}`
+    }],
+    ['FuncCall', body => this.funcCall(body)],
+    ['CoalesceExpr', body => `COALESCE(${(body.args ?? []).map((arg: any) => this.expr(arg)).join(', ')})`],
+    ['SubLink', body => {
+      const subselect = body.subselect?.SelectStmt
+      if (!subselect) return this.unsupportedExpression('SubLink', body)
+      const inner = this.select(subselect, '  ')
+      const inline = inner.map((line: string) => line.trim()).join(' ')
+      const prefix = body.subLinkType === 'EXISTS_SUBLINK'
+        ? 'EXISTS '
+        : body.subLinkType === 'ARRAY_SUBLINK' ? 'ARRAY' : ''
+      if (inline.length + prefix.length + 2 <= 80) return `${prefix}(${inline})`
+      if (body.subLinkType === 'EXISTS_SUBLINK') return `EXISTS (\n${inner.join('\n')}\n)`
+      if (body.subLinkType === 'EXPR_SUBLINK') return `(\n${inner.join('\n')}\n)`
+      if (body.subLinkType === 'ARRAY_SUBLINK') return `ARRAY(\n${inner.join('\n')}\n)`
+      return this.unsupportedExpression('SubLink', body)
+    }],
+    ['CaseExpr', body => this.caseInline(body)],
+    ['SQLValueFunction', body => this.sqlValueFunction(body)],
+    ['A_Star', () => '*'],
+    ['A_ArrayExpr', body => `ARRAY [${(body.elements ?? []).map((item: any) => this.expr(item)).join(', ')}]`],
+    ['RowExpr', body => `ROW(${(body.args ?? []).map((item: any) => this.expr(item)).join(', ')})`],
+    ['A_Indirection', body => this.indirection(body)],
+    ['CollateClause', body => `${this.expr(body.arg)} COLLATE ${this.qualifiedName(body.collname)}`],
+    ['MinMaxExpr', body => `${body.op === 'IS_GREATEST' ? 'GREATEST' : 'LEAST'}` +
+      `(${(body.args ?? []).map((item: any) => this.expr(item)).join(', ')})`],
+    ['NamedArgExpr', body => `${this.quoteIdentifier(body.name)} => ${this.expr(body.arg)}`],
+    ['GroupingFunc', body => `GROUPING(${(body.args ?? []).map((item: any) => this.expr(item)).join(', ')})`],
+    ['SetToDefault', () => 'DEFAULT'],
+    ['String', body => body.sval ?? ''],
+  ])
+
   constructor(
     private readonly source: string,
     private readonly end: number,
@@ -143,6 +224,76 @@ class LibpgPrinter {
       .flatMap(line => line.split('\n'))
       .map(line => `${indent}${line}`)
       .join('\n')
+  }
+
+  /**
+   * Report an unhandled node and return its source text.
+   * @param type - Raw node tag.
+   * @param node - Raw node body.
+   * @param limit - End of the source range.
+   * @returns Source text for the node.
+   */
+  unsupported(type: string, node: any, limit = this.end): string {
+    const start = this.startLocation(node)
+    const key = `${type}:${start}`
+    if (!this.#warned.has(key)) {
+      this.#warned.add(key)
+      process.emitWarning(`SQL formatter: unsupported AST node "${type}" at ${start >= 0 ? start : 'unknown location'}`)
+    }
+    if (start < 0) return JSON.stringify(node)
+    let end = start
+    let depth = 0
+    let quote: string | null = null
+    while (end < limit) {
+      const character = this.source[end] ?? ''
+      if (quote) {
+        if (character === quote && this.source[end + 1] === quote) end += 1
+        else if (character === quote) quote = null
+      } else if (character === "'" || character === '"') {
+        quote = character
+      } else if (character === '(' || character === '[') {
+        depth += 1
+      } else if (character === ')' || character === ']') {
+        if (depth === 0) break
+        depth -= 1
+      } else if (depth === 0 && (character === ',' || character === ';')) {
+        break
+      }
+      end += 1
+    }
+    const text = this.source.slice(start, Math.min(end, limit)).trim()
+    return text || JSON.stringify(node)
+  }
+
+  /**
+   * Report an unhandled expression node.
+   * @param type - Raw node tag.
+   * @param node - Raw node body.
+   * @returns Source text for the node.
+   */
+  unsupportedExpression(type: string, node: any): string {
+    return this.unsupported(type, node)
+  }
+
+  /**
+   * Print an unhandled statement node from source.
+   * @param node - Raw statement node.
+   * @param indent - Prefix for this block.
+   * @returns Unformatted statement lines.
+   */
+  unsupportedStatement(node: any, indent: string): string[] {
+    const tagged = this.tag(node)
+    const type = tagged?.[0] ?? 'unknown'
+    const location = this.startLocation(node)
+    const key = `${type}:${location}`
+    if (!this.#warned.has(key)) {
+      this.#warned.add(key)
+      const where = location >= 0 ? location : 'unknown location'
+      process.emitWarning(`SQL formatter: unsupported AST statement "${type}" at ${where}`)
+    }
+    const start = this.start
+    const text = this.source.slice(start, this.end).trim() || JSON.stringify(node)
+    return text.split('\n').map(line => `${indent}${line}`)
   }
 
   /**
@@ -178,22 +329,22 @@ class LibpgPrinter {
    * @returns Location, or -1.
    */
   startLocation(node: any): number {
-    if (!node) return -1
-    if (Array.isArray(node)) return this.startLocation(node[0])
-    const tagged = this.tag(node)
-    if (!tagged) return -1
-    const [type, body] = tagged
-    if (typeof body.location === 'number' && body.location >= 0) return body.location
-    switch (type) {
-      case 'JoinExpr': return this.startLocation(body.larg)
-      case 'SortBy': return this.startLocation(body.node)
-      case 'TypeCast': return this.startLocation(body.arg)
-      case 'A_Expr': return this.startLocation(body.lexpr)
-      case 'BoolExpr': return this.startLocation(body.args?.[0])
-      case 'NullTest': return this.startLocation(body.arg)
-      case 'BooleanTest': return this.startLocation(body.arg)
-      default: return -1
+    if (!node || typeof node !== 'object') return -1
+    if (Array.isArray(node)) {
+      const locations = node.map((item: any) => this.startLocation(item)).filter((location: number) => location >= 0)
+      return locations.length > 0 ? Math.min(...locations) : -1
     }
+    if (typeof node.location === 'number' && node.location >= 0) return node.location
+    const tagged = this.tag(node)
+    if (tagged && typeof tagged[1].location === 'number' && tagged[1].location >= 0) {
+      return tagged[1].location
+    }
+    const body = tagged?.[1] ?? node
+    const locations = Object.entries(body)
+      .filter(([key]) => key !== 'location')
+      .map(([, value]) => this.startLocation(value))
+      .filter((location: number) => location >= 0)
+    return locations.length > 0 ? Math.min(...locations) : -1
   }
 
   /**
@@ -224,6 +375,18 @@ class LibpgPrinter {
     cursor += 1
     while (/[A-Za-z0-9_$]/u.test(this.source[cursor] ?? '')) cursor += 1
     return { end: cursor, text: this.source.slice(index, cursor) }
+  }
+
+  /**
+   * Format an identifier from source spelling.
+   * @param text - Identifier text.
+   * @returns Quoted identifier preserving its SQL meaning.
+   */
+  identifier(text: string): string {
+    if (!text) return ''
+    if (text.startsWith('"')) return text
+    if (/^[A-Z][A-Z0-9_]*$/u.test(text)) return this.quoteIdentifier(text.toLowerCase())
+    return this.quoteIdentifier(text)
   }
 
   /**
@@ -454,7 +617,7 @@ class LibpgPrinter {
     }
     const asIndex = top.findIndex(candidate => candidate.text.toLowerCase() === 'as')
     const candidate = asIndex >= 0 ? top[asIndex + 1] : top[top.length - 1]
-    return candidate ? ` AS ${this.quoteIdentifier(candidate.text)}` : ` AS ${this.quoteIdentifier(body.name)}`
+    return candidate ? ` AS ${this.identifier(candidate.text)}` : ` AS ${this.identifier(body.name)}`
   }
 
   /**
@@ -569,29 +732,8 @@ class LibpgPrinter {
   lines(node: any, indent: string): string[] {
     const tagged = this.tag(node)
     if (!tagged) return []
-    switch (tagged[0]) {
-      case 'SelectStmt': return this.select(tagged[1], indent)
-      case 'InsertStmt': return this.insert(tagged[1], indent)
-      case 'ViewStmt': return this.view(tagged[1], indent)
-      case 'CreateStmt': return this.createTable(tagged[1], indent)
-      case 'CreateFunctionStmt': return this.createFunction(tagged[1], indent)
-      case 'DoStmt': return this.doBlock(tagged[1], indent)
-      case 'UpdateStmt': return this.update(tagged[1], indent)
-      case 'DeleteStmt': return this.delete(tagged[1], indent)
-      case 'VariableSetStmt': return this.variableSet(tagged[1], indent)
-      case 'ConstraintsSetStmt': {
-        const timing = tagged[1].deferred ? 'DEFERRED' : 'IMMEDIATE'
-        return [`${indent}SET CONSTRAINTS ALL ${timing}`]
-      }
-      case 'DropStmt': return this.drop(tagged[1], indent)
-      case 'IndexStmt': return this.index(tagged[1], indent)
-      case 'VacuumStmt': return this.vacuum(tagged[1], indent)
-      case 'CreateSeqStmt': return this.createSequence(tagged[1], indent)
-      case 'AlterTableStmt': return this.alterTable(tagged[1], indent)
-      case 'CreateSchemaStmt': return this.createSchema(tagged[1], indent)
-      case 'CreateTrigStmt': return this.createTrigger(tagged[1], indent)
-      default: throw new Error(`Unsupported SQL statement: ${tagged[0]}`)
-    }
+    const printer = this.statementPrinters.get(tagged[0])
+    return printer ? printer(tagged[1], indent) : this.unsupportedStatement(node, indent)
   }
 
   /**
@@ -601,11 +743,6 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   select(body: any, indent: string): string[] {
-    const distinctOn = body.distinctClause?.some((item: any) => item?.ResTarget?.name || item?.ResTarget?.val)
-    if (distinctOn) throw new Error('Unsupported SELECT DISTINCT ON')
-    if (body.intoClause || body.windowClause?.length || body.lockingClause?.length || body.sampleClause) {
-      throw new Error('Unsupported SELECT clause')
-    }
     if (body.withClause) return this.withSelect(body, indent)
     if (body.op && body.op !== 'SETOP_NONE') return this.setOperation(body, indent)
     if (body.valuesLists) return this.values(body.valuesLists, indent)
@@ -614,7 +751,10 @@ class LibpgPrinter {
       this.target(target, this.targetLimit(body, nodes, index))
     ))
     const targetText = targets.map((target: string[]) => target.join(' ')).join(', ')
-    const distinct = body.distinctClause?.length ? 'DISTINCT ' : ''
+    const distinctTargets = (body.distinctClause ?? []).filter((item: any) => item && Object.keys(item).length > 0)
+    const distinct = distinctTargets.length > 0
+      ? `DISTINCT ON (${distinctTargets.map((item: any) => this.expr(item)).join(', ')}) `
+      : body.distinctClause?.length ? 'DISTINCT ' : ''
     const multiline = targets.some((target: string[]) => target.length > 1)
       || targets.some((target: string[]) => target.some(line => line.includes('--')))
       || (`${indent}SELECT ${targetText}`.length > 100)
@@ -650,9 +790,54 @@ class LibpgPrinter {
     if (body.sortClause?.length) {
       lines.push(`${indent}ORDER BY ${body.sortClause.map((item: any) => this.sort(item)).join(', ')}`)
     }
+    if (body.windowClause?.length) {
+      const windows = body.windowClause
+        .map((node: any) => this.namedWindow(this.tag(node)?.[1] ?? node)).join(', ')
+      lines.push(`${indent}WINDOW ${windows}`)
+    }
     if (body.limitCount) lines.push(`${indent}LIMIT ${this.expr(body.limitCount)}`)
     if (body.limitOffset) lines.push(`${indent}OFFSET ${this.expr(body.limitOffset)}`)
+    if (body.lockingClause?.length) {
+      for (const node of body.lockingClause) {
+        const lock = this.tag(node)?.[1]
+        const strength: Record<string, string> = {
+          LCS_FORKEYSHARE: 'FOR KEY SHARE',
+          LCS_FORNOKEYUPDATE: 'FOR NO KEY UPDATE',
+          LCS_FORSHARE: 'FOR SHARE',
+          LCS_FORUPDATE: 'FOR UPDATE',
+        }
+        const wait = lock?.waitPolicy === 'LockWaitSkip'
+          ? ' SKIP LOCKED'
+          : lock?.waitPolicy === 'LockWaitError' ? ' NOWAIT' : ''
+        lines.push(`${indent}${strength[lock?.strength] ?? this.unsupported('LockingClause', lock)}${wait}`)
+      }
+    }
     return lines
+  }
+
+  /**
+   * Format a named window definition.
+   * @param body - WindowDef body.
+   * @returns Window definition.
+   */
+  windowDef(body: any): string {
+    const partition = body.partitionClause?.length
+      ? `PARTITION BY ${body.partitionClause.map((node: any) => this.expr(node)).join(', ')}`
+      : ''
+    const order = body.orderClause?.length
+      ? `ORDER BY ${body.orderClause.map((node: any) => this.sort(node)).join(', ')}`
+      : ''
+    return [partition, order].filter(Boolean).join(' ')
+  }
+
+  /**
+   * Format a named window declaration.
+   * @param body - WindowDef body.
+   * @returns Named window declaration.
+   */
+  namedWindow(body: any): string {
+    const definition = this.windowDef(body)
+    return `${this.quoteIdentifier(body.name ?? '')} AS (${definition})`
   }
 
   /**
@@ -775,23 +960,25 @@ class LibpgPrinter {
     const tagged = this.tag(node)
     if (tagged?.[0] === 'JoinExpr') {
       const body = tagged[1]
-      if (body.usingClause?.length || body.isNatural || body.alias) throw new Error('Unsupported JOIN')
       const cross = !body.quals && !body.usingClause?.length && !body.isNatural
-      const join = cross ? 'CROSS JOIN' : this.joinName(body.jointype)
+      const join = `${body.isNatural ? 'NATURAL ' : ''}${cross ? 'CROSS JOIN' : this.joinName(body.jointype)}`
       const left = this.fromItem(body.larg)
       const right = this.fromItem(body.rarg)
       const on = body.quals
         ? this.tag(body.quals)?.[0] === 'BoolExpr'
           ? `\n${this.condition(body.quals, '  ', 'ON').join('\n')}`
           : ` ON ${this.expr(body.quals)}`
+        : body.usingClause?.length ? ` USING (${this.identifierList(body.usingClause)})` : ''
+      const alias = body.alias
+        ? ` ${this.formatAlias(body.alias)}`
         : ''
 
-      return `${left}\n${join} ${right}${on}`
+      return `${left}\n${join} ${right}${on}${alias}`
     }
     if (tagged?.[0] === 'RangeVar') return this.rangeVar(tagged[1])
     if (tagged?.[0] === 'RangeFunction') return this.rangeFunction(tagged[1])
     if (node?.relname) return this.rangeVar(node)
-    throw new Error(`Unsupported FROM item: ${tagged?.[0] ?? 'unknown'}`)
+    return this.unsupported(tagged?.[0] ?? 'FROM item', node)
   }
 
   /**
@@ -828,6 +1015,16 @@ class LibpgPrinter {
   }
 
   /**
+   * Format a table alias.
+   * @param body - Alias body.
+   * @returns Alias text.
+   */
+  formatAlias(body: any): string {
+    const columns = body.colnames?.length ? ` (${this.identifierList(body.colnames)})` : ''
+    return `AS ${this.identifier(body.aliasname)}${columns}`
+  }
+
+  /**
    * Print a relation name and alias.
    * @param body - RangeVar body.
    * @returns Relation text.
@@ -859,8 +1056,8 @@ class LibpgPrinter {
     }
     const asIndex = tokens.findIndex(candidate => candidate.text.toLowerCase() === 'as')
     const candidate = asIndex >= 0 ? tokens[asIndex + 1] : tokens[tokens.length - 1]
-    if (!candidate) return `${relation.text} ${this.quoteIdentifier(body.alias.aliasname)}`
-    return `${relation.text}${asIndex >= 0 ? ' AS' : ''} ${this.quoteIdentifier(candidate.text)}`
+    if (!candidate) return `${relation.text} ${this.identifier(body.alias.aliasname)}`
+    return `${relation.text}${asIndex >= 0 ? ' AS' : ''} ${this.identifier(candidate.text)}`
   }
 
   /**
@@ -926,11 +1123,22 @@ class LibpgPrinter {
     const view = this.tag(body.view)?.[1] ?? body.view
     const relation = this.relationName(view)
     const replace = body.replace ? 'OR REPLACE ' : ''
-    return [
-      `${indent}CREATE ${replace}VIEW ${relation} AS (`,
+    const aliases = body.aliases?.length ? ` (${this.identifierList(body.aliases)})` : ''
+    const options = body.options?.length
+      ? ` WITH (${body.options.map((node: any) => this.defElem(node)).join(', ')})`
+      : ''
+    const lines = [
+      `${indent}CREATE ${replace}VIEW ${relation}${aliases}${options} AS (`,
       ...this.lines(body.query, `${indent}  `),
       `${indent})`,
     ]
+    const check: Record<string, string> = {
+      CASCADED_CHECK_OPTION: ' WITH CASCADED CHECK OPTION',
+      LOCAL_CHECK_OPTION: ' WITH LOCAL CHECK OPTION',
+      NO_CHECK_OPTION: '',
+    }
+    lines[lines.length - 1] = `${lines[lines.length - 1]}${check[body.withCheckOption] ?? ''}`
+    return lines
   }
 
   /**
@@ -969,17 +1177,71 @@ class LibpgPrinter {
    */
   createTable(body: any, indent: string): string[] {
     const relation = this.relationName(body.relation)
+    const persistence = body.relation?.relpersistence === 't' ? 'TEMPORARY ' : ''
+    const partitionParent = body.partbound && body.inhRelations?.length
+      ? this.relationName(this.tag(body.inhRelations[0])?.[1] ?? body.inhRelations[0])
+      : null
     const elements = body.tableElts ?? []
-    const lines = [`${indent}CREATE TABLE ${body.if_not_exists ? 'IF NOT EXISTS ' : ''}${relation} (`]
-    elements.forEach((node: any, index: number) => {
-      const tagged = this.tag(node)
-      const text = tagged?.[0] === 'ColumnDef'
-        ? this.columnDef(tagged[1])
-        : tagged?.[0] === 'Constraint' ? this.tableConstraint(tagged[1]) : ''
-      if (text) lines.push(`${indent}  ${text}${index < elements.length - 1 ? ',' : ''}`)
-    })
-    lines.push(`${indent})`)
+    const header = `${indent}CREATE ${persistence}TABLE ${body.if_not_exists ? 'IF NOT EXISTS ' : ''}${relation}` +
+      (partitionParent ? ` PARTITION OF ${partitionParent}` : '')
+    const lines: string[] = []
+    if (elements.length > 0 || !partitionParent) {
+      lines.push(`${header} (`)
+      elements.forEach((node: any, index: number) => {
+        const tagged = this.tag(node)
+        const text = this.tableElement(node, tagged)
+        lines.push(`${indent}  ${text}${index < elements.length - 1 ? ',' : ''}`)
+      })
+      lines.push(`${indent})`)
+    } else {
+      lines.push(header)
+    }
+    const tail = lines[lines.length - 1] as string
+    if (body.inhRelations?.length && !partitionParent) {
+      const parents = body.inhRelations.map((node: any) => this.relationName(this.tag(node)?.[1] ?? node))
+      lines[lines.length - 1] = `${tail} INHERITS (${parents.join(', ')})`
+    }
+    if (body.partspec) {
+      const strategy = this.partitionStrategy(body.partspec.strategy)
+      lines.push(`${indent}PARTITION BY ${strategy} (${this.partitionElems(body.partspec.partParams)})`)
+    }
+    if (body.partbound) lines.push(`${indent}FOR VALUES ${this.partitionBound(body.partbound)}`)
+    if (body.accessMethod) lines.push(`${indent}USING ${body.accessMethod}`)
+    if (body.options?.length) {
+      lines.push(`${indent}WITH (${body.options.map((node: any) => this.defElem(node)).join(', ')})`)
+    }
+    if (body.tablespacename) lines.push(`${indent}TABLESPACE ${this.quoteIdentifier(body.tablespacename)}`)
+    const onCommit: Record<string, string> = {
+      ONCOMMIT_DELETE_ROWS: 'ON COMMIT DELETE ROWS',
+      ONCOMMIT_DROP: 'ON COMMIT DROP',
+      ONCOMMIT_PRESERVE_ROWS: 'ON COMMIT PRESERVE ROWS',
+    }
+    if (onCommit[body.oncommit]) lines.push(`${indent}${onCommit[body.oncommit]}`)
     return lines
+  }
+
+  /**
+   * Format one CREATE TABLE element.
+   * @param node - Raw table element.
+   * @param tagged - Tagged element.
+   * @returns Element text.
+   */
+  tableElement(node: any, tagged: [string, any] | null): string {
+    if (tagged?.[0] === 'ColumnDef') return this.columnDef(tagged[1])
+    if (tagged?.[0] === 'Constraint') return this.tableConstraint(tagged[1])
+    return this.unsupported(tagged?.[0] ?? 'unknown', node)
+  }
+
+  /**
+   * Format a foreign-key action.
+   * @param keyword - UPDATE or DELETE.
+   * @param action - Raw action code.
+   * @param actions - Action names.
+   * @returns Action clause, or empty.
+   */
+  foreignAction(keyword: string, action: string, actions: Record<string, string>): string {
+    if (!action || action === 'a') return ''
+    return ` ON ${keyword} ${actions[action] ?? action}`
   }
 
   /**
@@ -992,12 +1254,13 @@ class LibpgPrinter {
       ? this.quoteIdentifier(this.readName(body.location).text)
       : this.quoteIdentifier(body.colname)
     const type = this.formatTypeName(body.typeName)
+    const collate = body.collClause ? `COLLATE ${this.qualifiedName(body.collClause.collname)}` : ''
     const constraints = (body.constraints ?? [])
       .map((node: any) => this.tag(node)?.[1])
       .filter(Boolean)
       .map((constraint: any) => this.columnConstraint(constraint))
       .filter(Boolean)
-    return [name, type, ...constraints].join(' ')
+    return [name, type, collate, ...constraints].filter(Boolean).join(' ')
   }
 
   /**
@@ -1021,24 +1284,149 @@ class LibpgPrinter {
   }
 
   /**
+   * Format a qualified node name.
+   * @param nodes - String nodes.
+   * @returns Quoted qualified name.
+   */
+  qualifiedName(nodes: readonly any[]): string {
+    return (nodes ?? []).map(node => this.quoteIdentifier(this.tag(node)?.[1]?.sval ?? '')).join('.')
+  }
+
+  /**
+   * Format a partitioning strategy.
+   * @param strategy - Raw partition strategy.
+   * @returns SQL strategy keyword.
+   */
+  partitionStrategy(strategy: string): string {
+    return strategy === 'PARTITION_STRATEGY_LIST' ? 'LIST'
+      : strategy === 'PARTITION_STRATEGY_HASH' ? 'HASH' : 'RANGE'
+  }
+
+  /**
+   * Format partition key expressions.
+   * @param nodes - PartitionElem nodes.
+   * @returns Comma-separated partition keys.
+   */
+  partitionElems(nodes: readonly any[]): string {
+    return (nodes ?? []).map((node: any) => {
+      const body = this.tag(node)?.[1]
+      if (!body) return this.expr(node)
+      const value = body.name ? this.quoteIdentifier(body.name) : this.expr(body.expr)
+      const collate = body.collation ? ` COLLATE ${this.identifierList(body.collation)}` : ''
+      const opclass = body.opclass ? ` ${body.opclass}` : ''
+      return `${value}${collate}${opclass}`
+    }).join(', ')
+  }
+
+  /**
+   * Format a partition bound.
+   * @param body - PartitionBoundSpec body.
+   * @returns Bound expression without the FOR VALUES prefix.
+   */
+  partitionBound(body: any): string {
+    if (body.is_default) return 'DEFAULT'
+    const values = (nodes: readonly any[]) => (nodes ?? []).map((node: any) => this.expr(node)).join(', ')
+    if (body.strategy === 'h') return `WITH (modulus ${body.modulus}, remainder ${body.remainder ?? 0})`
+    if (body.strategy === 'l') return `IN (${values(body.listdatums)})`
+    return `FROM (${values(body.lowerdatums)}) TO (${values(body.upperdatums)})`
+  }
+
+  /**
+   * Format a DefElem option.
+   * @param node - DefElem node.
+   * @returns Option text.
+   */
+  defElem(node: any): string {
+    const body = this.tag(node)?.[1]
+    if (!body) return this.expr(node)
+    const name = this.quoteIdentifier(body.defname)
+    if (body.arg === undefined || body.arg === null) return name
+    const value = this.tag(body.arg)?.[1]
+    const type = this.tag(body.arg)?.[0]
+    if (type === 'String') return `${name} = '${String(value.sval ?? '').replace(/'/gu, "''")}'`
+    if (type === 'Integer') return `${name} = ${value.ival}`
+    if (type === 'Float') return `${name} = ${value.fval}`
+    if (type === 'A_Const') return `${name} = ${this.literal(value)}`
+    if (type === 'Boolean') return `${name} = ${value.boolval ? 'true' : 'false'}`
+    return `${name} = ${this.expr(body.arg)}`
+  }
+
+  /**
+   * Format a table or column constraint.
+   * @param body - Constraint body.
+   * @param tableLevel - Whether this is a table constraint.
+   * @returns Constraint text.
+   */
+  constraintText(body: any, tableLevel: boolean): string {
+    const name = body.conname ? `CONSTRAINT ${this.quoteIdentifier(body.conname)} ` : ''
+    const keys = this.identifierList(body.keys ?? [])
+    let text: string
+    switch (body.contype) {
+      case 'CONSTR_PRIMARY': text = tableLevel ? `PRIMARY KEY (${keys})` : 'PRIMARY KEY'; break
+      case 'CONSTR_NOTNULL': text = 'NOT NULL'; break
+      case 'CONSTR_NULL': text = 'NULL'; break
+      case 'CONSTR_DEFAULT': text = `DEFAULT ${this.expr(body.raw_expr)}`; break
+      case 'CONSTR_FOREIGN': {
+        const columns = this.identifierList(body.fk_attrs ?? [])
+        const references = this.identifierList(body.pk_attrs ?? [])
+        const actions: Record<string, string> = {
+          a: 'NO ACTION', c: 'CASCADE', d: 'SET DEFAULT', n: 'SET NULL', r: 'RESTRICT',
+        }
+        const match = body.fk_matchtype === 'f'
+          ? ' MATCH FULL'
+          : body.fk_matchtype === 'p' ? ' MATCH PARTIAL' : ''
+        const update = this.foreignAction('UPDATE', body.fk_upd_action, actions)
+        const del = this.foreignAction('DELETE', body.fk_del_action, actions)
+        text = `${tableLevel ? `FOREIGN KEY (${columns}) ` : ''}REFERENCES ${this.relationName(body.pktable)}` +
+          `${references ? ` (${references})` : ''}${match}${update}${del}`
+        break
+      }
+      case 'CONSTR_UNIQUE': {
+        const distinct = body.nulls_not_distinct ? ' NULLS NOT DISTINCT' : ''
+        text = `UNIQUE${distinct}${tableLevel ? ` (${keys})` : ''}`
+        break
+      }
+      case 'CONSTR_CHECK': text = `CHECK (${this.expr(body.raw_expr)})`; break
+      case 'CONSTR_IDENTITY': {
+        const when = body.generated_when === 'd' ? 'BY DEFAULT' : 'ALWAYS'
+        const options = body.options?.length
+          ? ` (${body.options.map((node: any) => this.defElem(node)).join(', ')})`
+          : ''
+        text = `GENERATED ${when} AS IDENTITY${options}`
+        break
+      }
+      case 'CONSTR_GENERATED': {
+        const when = body.generated_when === 'd' ? 'BY DEFAULT' : 'ALWAYS'
+        const kind = body.generated_kind === 'v' ? 'VIRTUAL' : 'STORED'
+        text = `GENERATED ${when} AS (${this.expr(body.raw_expr)}) ${kind}`
+        break
+      }
+      case 'CONSTR_EXCLUSION': {
+        const method = body.access_method ? ` USING ${body.access_method}` : ''
+        const elements = (body.exclusions ?? []).map((node: any) => this.tag(node)?.[1]?.name ?? '').join(', ')
+        text = `EXCLUDE${method} (${elements})`
+        break
+      }
+      default: text = this.unsupported(body.contype ?? 'Constraint', body)
+    }
+    const suffix: string[] = []
+    if (body.deferrable) suffix.push('DEFERRABLE')
+    if (body.initdeferred) suffix.push('INITIALLY DEFERRED')
+    if (body.is_no_inherit) suffix.push('NO INHERIT')
+    if (body.is_enforced === false) suffix.push('NOT ENFORCED')
+    if (body.initially_valid === false) suffix.push('NOT VALID')
+    if (body.indexname) suffix.push(`USING INDEX ${this.quoteIdentifier(body.indexname)}`)
+    if (body.indexspace) suffix.push(`USING INDEX TABLESPACE ${this.quoteIdentifier(body.indexspace)}`)
+    return `${name}${text}${suffix.length ? ` ${suffix.join(' ')}` : ''}`
+  }
+
+  /**
    * Format a column constraint.
    * @param body - Constraint body.
    * @returns Constraint text.
    */
   columnConstraint(body: any): string {
-    switch (body.contype) {
-      case 'CONSTR_PRIMARY': return 'PRIMARY KEY'
-      case 'CONSTR_NOTNULL': return 'NOT NULL'
-      case 'CONSTR_NULL': return 'NULL'
-      case 'CONSTR_DEFAULT': return `DEFAULT ${this.expr(body.raw_expr)}`
-      case 'CONSTR_FOREIGN': {
-        const keys = this.identifierList(body.pk_attrs ?? [])
-        return `REFERENCES ${this.relationName(body.pktable)}${keys ? ` (${keys})` : ''}`
-      }
-      case 'CONSTR_UNIQUE': return `UNIQUE (${this.identifierList(body.keys ?? [])})`
-      case 'CONSTR_CHECK': return `CHECK (${this.expr(body.raw_expr)})`
-      default: throw new Error(`Unsupported column constraint: ${body.contype}`)
-    }
+    return this.constraintText(body, false)
   }
 
   /**
@@ -1047,17 +1435,7 @@ class LibpgPrinter {
    * @returns Constraint text.
    */
   tableConstraint(body: any): string {
-    switch (body.contype) {
-      case 'CONSTR_PRIMARY': return `PRIMARY KEY (${this.identifierList(body.keys ?? [])})`
-      case 'CONSTR_UNIQUE': return `UNIQUE (${this.identifierList(body.keys ?? [])})`
-      case 'CONSTR_CHECK': return `CHECK (${this.expr(body.raw_expr)})`
-      case 'CONSTR_FOREIGN': {
-        const columns = this.identifierList(body.fk_attrs ?? [])
-        const keys = this.identifierList(body.pk_attrs ?? [])
-        return `FOREIGN KEY (${columns}) REFERENCES ${this.relationName(body.pktable)}${keys ? ` (${keys})` : ''}`
-      }
-      default: return this.columnConstraint(body)
-    }
+    return this.constraintText(body, true)
   }
 
   /**
@@ -1067,21 +1445,62 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   createFunction(body: any, indent: string): string[] {
-    const unsupportedOption = (body.options ?? []).map((node: any) => this.tag(node)?.[1]?.defname)
-      .find((name: string) => name !== 'as' && name !== 'language')
-    if (unsupportedOption) throw new Error(`Unsupported function option: ${unsupportedOption}`)
     const name = (body.funcname ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').join('.')
     const language = this.optionValue(body.options, 'language') ?? 'plpgsql'
     const returnType = this.formatTypeName(body.returnType)
     const parameters = this.parameterList(body.parameters)
+    const options = (body.options ?? [])
+      .map((node: any) => this.tag(node)?.[1])
+      .filter((option: any) => option && option.defname !== 'as' && option.defname !== 'language')
+      .map((option: any) => this.functionOption(option))
+      .filter(Boolean)
     const header = `${indent}CREATE ${body.replace ? 'OR REPLACE ' : ''}FUNCTION ${name}(${parameters})` +
-      ` RETURNS ${returnType} AS $$`
-    const parsed = parsePlPgSQLSync(this.source.slice(this.start, this.end)) as any
-    const func = parsed.plpgsql_funcs?.[0]?.PLpgSQL_function
+      ` RETURNS ${returnType}`
+    const optionLines = options.length > 0
+      ? [`${indent}  ${options.join(`\n${indent}  `)}`]
+      : []
+    const head = options.length > 0 ? header : `${header} AS $$`
     const bodyText = this.optionBody(body.options)
-    const lines = func ? new PlPgSqlPrinter(this.plBodyComments(bodyText), func, this.start, this.end).print() : []
     const terminated = this.source[this.end] === ';' || this.source.slice(this.start, this.end).trimEnd().endsWith(';')
-    return [header, ...lines, `${indent}$$ LANGUAGE ${language}${terminated ? ';' : ''}`]
+    if (language.toLowerCase() === 'plpgsql') {
+      const parsed = parsePlPgSQLSync(this.source.slice(this.start, this.end)) as any
+      const func = parsed.plpgsql_funcs?.[0]?.PLpgSQL_function
+      const lines = func ? new PlPgSqlPrinter(this.plBodyComments(bodyText), func, this.start, this.end).print() : []
+      const as = options.length > 0 ? [`${indent}AS $$`] : []
+      return [head, ...optionLines, ...as, ...lines, `${indent}$$ LANGUAGE ${language}${terminated ? ';' : ''}`]
+    }
+    const bodyLines = bodyText.trim()
+      ? bodyText.trim().split('\n').map(line => `${indent}  ${line.trim()}`)
+      : []
+    const as = options.length > 0 ? [`${indent}AS $$`] : []
+    return [head, ...optionLines, ...as, ...bodyLines, `${indent}$$ LANGUAGE ${language}${terminated ? ';' : ''}`]
+  }
+
+  /**
+   * Format a CREATE FUNCTION option.
+   * @param option - DefElem body.
+   * @returns SQL option text.
+   */
+  functionOption(option: any): string {
+    const value = this.tag(option.arg)?.[1]
+    const type = this.tag(option.arg)?.[0]
+    switch (option.defname) {
+      case 'volatility': return String(value?.sval ?? '').toUpperCase()
+      case 'security': return value?.boolval ? 'SECURITY DEFINER' : 'SECURITY INVOKER'
+      case 'strict': return value?.boolval ? 'STRICT' : 'CALLED ON NULL INPUT'
+      case 'parallel': return `PARALLEL ${String(value?.sval ?? '').toUpperCase()}`
+      case 'cost': return `COST ${value?.ival ?? 0}`
+      case 'rows': return `ROWS ${value?.ival ?? 0}`
+      case 'support': return `SUPPORT ${String(value?.sval ?? '')}`
+      case 'leakproof': return value?.boolval ? 'LEAKPROOF' : 'NOT LEAKPROOF'
+      case 'window': return 'WINDOW'
+      case 'set': {
+        const set = this.tag(option.arg)?.[1]
+        const args = (set?.args ?? []).map((arg: any) => this.expr(arg)).join(', ')
+        return `SET ${set?.name ?? ''}${args ? ` TO ${args}` : ''}`
+      }
+      default: return type ? this.defElem({ DefElem: option }) : option.defname
+    }
   }
 
   /**
@@ -1201,7 +1620,6 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   update(body: any, indent: string): string[] {
-    if (body.withClause || body.fromClause?.length) throw new Error('Unsupported UPDATE clause')
     const relation = this.relationName(this.tag(body.relation)?.[1] ?? body.relation)
     const updates = (body.targetList ?? []).map((node: any) => {
       const target = this.tag(node)?.[1]
@@ -1211,13 +1629,12 @@ class LibpgPrinter {
         : this.quoteIdentifier(target.name)
       return `${name} = ${this.expr(target.val)}`
     }).filter(Boolean)
-    const lines = [`${indent}UPDATE ${relation} SET ${updates.join(', ')}`]
-    if (body.whereClause) {
-      const fromStart = body.fromClause?.length ? this.startLocation(body.fromClause[0]) : this.start
-      const whereStart = this.startLocation(body.whereClause)
-      if (fromStart >= 0 && whereStart >= 0) lines.push(...this.fullLineComments(fromStart, whereStart, indent))
-      lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
-    }
+    const lines = [
+      ...(body.withClause ? this.withClauseLines(body.withClause, indent) : []),
+      `${indent}UPDATE ${relation} SET ${updates.join(', ')}`,
+    ]
+    if (body.fromClause?.length) lines.push(...this.from(body.fromClause, indent))
+    if (body.whereClause) lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
     lines.push(...this.returningLines(body, indent))
     return lines
   }
@@ -1229,15 +1646,16 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   delete(body: any, indent: string): string[] {
-    if (body.withClause || body.usingClause?.length) throw new Error('Unsupported DELETE clause')
     const relation = this.relationName(this.tag(body.relation)?.[1] ?? body.relation)
-    const lines = [`${indent}DELETE FROM ${relation}`]
-    if (body.whereClause) {
-      const fromStart = body.fromClause?.length ? this.startLocation(body.fromClause[0]) : this.start
-      const whereStart = this.startLocation(body.whereClause)
-      if (fromStart >= 0 && whereStart >= 0) lines.push(...this.fullLineComments(fromStart, whereStart, indent))
-      lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
+    const lines = [
+      ...(body.withClause ? this.withClauseLines(body.withClause, indent) : []),
+      `${indent}DELETE FROM ${relation}`,
+    ]
+    if (body.usingClause?.length) {
+      const using = body.usingClause.map((item: any) => this.fromItem(item)).join(', ')
+      lines.push(`${indent}USING ${using}`)
     }
+    if (body.whereClause) lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
     lines.push(...this.returningLines(body, indent))
     return lines
   }
@@ -1280,7 +1698,7 @@ class LibpgPrinter {
       return this.identifierList(items)
     }).join(', ')
     const type = types[body.removeType]
-    if (!type) throw new Error('Unsupported DROP type')
+    if (!type) return [this.unsupported(`DROP ${body.removeType}`, body)]
     const ifExists = body.missing_ok ? ' IF EXISTS' : ''
     const behavior = body.behavior === 'DROP_CASCADE' ? ' CASCADE' : ''
     return [`${indent}DROP ${type}${ifExists} ${names}${behavior}`]
@@ -1293,18 +1711,42 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   index(body: any, indent: string): string[] {
-    if (body.unique || body.whereClause) throw new Error('Unsupported index clause')
-    const params = (body.indexParams ?? []).map((node: any) => {
-      const elem = this.tag(node)?.[1]
-      if (!elem?.name || elem.expr) throw new Error('Unsupported index expression')
-      const name = this.quoteIdentifier(elem.name)
-      const opclass = (elem.opclass ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').filter(Boolean)
-      return `${name}${opclass.length ? ` ${opclass.join(' ')}` : ''}`
-    }).filter(Boolean)
+    const params = (body.indexParams ?? [])
+      .map((node: any) => this.indexElem(this.tag(node)?.[1] ?? node)).filter(Boolean)
+    const unique = body.unique ? 'UNIQUE ' : ''
+    const exists = body.if_not_exists ? 'IF NOT EXISTS ' : ''
+    const nulls = body.nulls_not_distinct ? ' NULLS NOT DISTINCT' : ''
+    const included = (body.indexIncludingParams ?? [])
+      .map((node: any) => this.indexElem(this.tag(node)?.[1] ?? node)).join(', ')
+    const include = included ? ` INCLUDE (${included})` : ''
+    const options = body.options?.length
+      ? ` WITH (${body.options.map((node: any) => this.defElem(node)).join(', ')})`
+      : ''
+    const space = body.tableSpace ? ` TABLESPACE ${this.quoteIdentifier(body.tableSpace)}` : ''
+    const where = body.whereClause ? ` WHERE ${this.expr(body.whereClause)}` : ''
     return [
-      `${indent}CREATE INDEX ${this.quoteIdentifier(body.idxname)} ON ${this.relationName(body.relation)}` +
-        `${body.accessMethod ? ` USING ${body.accessMethod}` : ''}(${params.join(', ')})`,
+      `${indent}CREATE ${unique}INDEX ${exists}${this.quoteIdentifier(body.idxname)}` +
+        ` ON ${this.relationName(body.relation)}` +
+        `${body.accessMethod ? ` USING ${body.accessMethod}` : ''}(${params.join(', ')})` +
+        `${include}${nulls}${options}${space}${where}`,
     ]
+  }
+
+  /**
+   * Format one index element.
+   * @param body - IndexElem body.
+   * @returns Index element text.
+   */
+  indexElem(body: any): string {
+    const value = body.expr ? `(${this.expr(body.expr)})` : this.quoteIdentifier(body.name ?? '')
+    const collate = body.collation?.length ? ` COLLATE ${this.identifierList(body.collation)}` : ''
+    const opclass = (body.opclass ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').filter(Boolean)
+    const op = opclass.length ? ` ${opclass.join(' ')}` : ''
+    const direction = body.ordering === 'SORTBY_DESC' ? ' DESC' : body.ordering === 'SORTBY_ASC' ? ' ASC' : ''
+    const nulls = body.nulls_ordering === 'SORTBY_NULLS_FIRST'
+      ? ' NULLS FIRST'
+      : body.nulls_ordering === 'SORTBY_NULLS_LAST' ? ' NULLS LAST' : ''
+    return `${value}${collate}${op}${direction}${nulls}`
   }
 
   /**
@@ -1345,18 +1787,68 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   alterTable(body: any, indent: string): string[] {
-    const commands: Record<string, string> = Object.fromEntries([
-      ['AT_DisableRowSecurity', 'DISABLE ROW LEVEL SECURITY'],
-      ['AT_EnableRowSecurity', 'ENABLE ROW LEVEL SECURITY'],
-      ['AT_ForceRowSecurity', 'FORCE ROW LEVEL SECURITY'],
-      ['AT_NoForceRowSecurity', 'NO FORCE ROW LEVEL SECURITY'],
-    ])
-    const cmds = (body.cmds ?? []).map((node: any) => {
-      const command = commands[this.tag(node)?.[1]?.subtype]
-      if (!command) throw new Error('Unsupported ALTER TABLE command')
-      return command
-    })
-    return [`${indent}ALTER TABLE ${this.relationName(body.relation)} ${cmds.join(' ')}`]
+    const commands = (body.cmds ?? []).map((node: any) => this.alterCommand(this.tag(node)?.[1], node))
+    return [`${indent}ALTER TABLE ${this.relationName(body.relation)} ${commands.join(`,${'\n'}${indent}`)}`]
+  }
+
+  /**
+   * Format one ALTER TABLE command.
+   * @param body - AlterTableCmd body.
+   * @param node - The original raw command node.
+   * @returns Command text.
+   */
+  alterCommand(body: any, node: any): string {
+    if (!body) return this.unsupported('ALTER TABLE command', node)
+    const behavior = body.behavior === 'DROP_CASCADE' ? ' CASCADE' : ''
+    const missing = body.missing_ok ? ' IF EXISTS' : ''
+    const name = body.name ? this.quoteIdentifier(body.name) : ''
+    const def = this.tag(body.def)?.[1]
+    switch (body.subtype) {
+      case 'AT_AddColumn':
+        return `ADD COLUMN ${def ? this.columnDef(def) : ''}`
+      case 'AT_DropColumn':
+        return `DROP COLUMN${missing} ${name}${behavior}`
+      case 'AT_AlterColumnType': {
+        if (!def) return this.unsupported('ALTER COLUMN TYPE', node)
+        const type = this.formatTypeName(def.typeName)
+        const collate = def.collClause ? ` COLLATE ${this.qualifiedName(def.collClause.collname)}` : ''
+        const using = def.raw_default ? ` USING ${this.expr(def.raw_default)}` : ''
+        return `ALTER COLUMN ${name} TYPE ${type}${collate}${using}`
+      }
+      case 'AT_AddConstraint':
+        return `ADD ${def ? this.constraintText(def, true) : ''}`
+      case 'AT_DropConstraint':
+        return `DROP CONSTRAINT${missing} ${name}${behavior}`
+      case 'AT_ColumnDefault':
+        return body.def
+          ? `ALTER COLUMN ${name} SET DEFAULT ${this.expr(body.def)}`
+          : `ALTER COLUMN ${name} DROP DEFAULT`
+      case 'AT_SetNotNull':
+        return `ALTER COLUMN ${name} SET NOT NULL`
+      case 'AT_DropNotNull':
+        return `ALTER COLUMN ${name} DROP NOT NULL`
+      case 'AT_SetStatistics':
+        return `ALTER COLUMN ${name} SET STATISTICS ${def?.Integer?.ival ?? '0'}`
+      case 'AT_SetRelOptions':
+        return `SET (${(def?.List?.items ?? []).map((item: any) => this.defElem(item)).join(', ')})`
+      case 'AT_ResetRelOptions':
+        return `RESET (${(def?.List?.items ?? []).map((item: any) => this.defElem(item)).join(', ')})`
+      case 'AT_EnableRowSecurity': return 'ENABLE ROW LEVEL SECURITY'
+      case 'AT_DisableRowSecurity': return 'DISABLE ROW LEVEL SECURITY'
+      case 'AT_ForceRowSecurity': return 'FORCE ROW LEVEL SECURITY'
+      case 'AT_NoForceRowSecurity': return 'NO FORCE ROW LEVEL SECURITY'
+      case 'AT_EnableTrig': return `ENABLE TRIGGER ${name}`
+      case 'AT_DisableTrig': return `DISABLE TRIGGER ${name}`
+      case 'AT_EnableAlwaysTrig': return `ENABLE ALWAYS TRIGGER ${name}`
+      case 'AT_EnableReplicaTrig': return `ENABLE REPLICA TRIGGER ${name}`
+      case 'AT_SetTableSpace': return `SET TABLESPACE ${this.quoteIdentifier(body.name)}`
+      case 'AT_ClusterOn': return `CLUSTER ON ${name}`
+      case 'AT_DropOids': return 'SET WITHOUT OIDS'
+      case 'AT_SetLogged': return 'SET LOGGED'
+      case 'AT_SetUnLogged': return 'SET UNLOGGED'
+      case 'AT_ChangeOwner': return `OWNER TO ${name}`
+      default: return this.unsupported(`ALTER TABLE ${body.subtype}`, node)
+    }
   }
 
   /**
@@ -1385,24 +1877,30 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   createTrigger(body: any, indent: string): string[] {
-    if (body.whenClause || body.isconstraint || body.deferrable || body.initdeferred
-      || body.constrrel || body.transitionRels || body.columns) {
-      throw new Error('Unsupported CREATE TRIGGER clause')
-    }
     const timing = body.timing === 2 ? 'BEFORE' : body.timing === 4 ? 'AFTER' : 'INSTEAD OF'
     const eventBits = body.events ?? 0
+    const columns = body.columns?.length ? ` OF ${this.identifierList(body.columns)}` : ''
     const events = [
       eventBits & 4 ? 'INSERT' : '',
       eventBits & 8 ? 'DELETE' : '',
-      eventBits & 16 ? 'UPDATE' : '',
+      eventBits & 16 ? `UPDATE${columns}` : '',
       eventBits & 32 ? 'TRUNCATE' : '',
     ].filter(Boolean).join(' OR ')
-    return [
-      `${indent}CREATE TRIGGER ${this.quoteIdentifier(body.trigname)}`,
+    const lines = [
+      `${indent}CREATE ${body.isconstraint ? 'CONSTRAINT ' : ''}TRIGGER ${this.quoteIdentifier(body.trigname)}`,
       `${indent}${timing} ${events} ON ${this.relationName(body.relation)}`,
-      `${indent}FOR EACH ${body.row ? 'ROW' : 'STATEMENT'}`,
-      `${indent}  EXECUTE FUNCTION ${this.functionReference(body.funcname)}()`,
     ]
+    if (body.constrrel) {
+      lines.push(`${indent}FROM ${this.relationName(this.tag(body.constrrel)?.[1] ?? body.constrrel)}`)
+    }
+    if (body.deferrable) {
+      lines.push(`${indent}DEFERRABLE${body.initdeferred ? ' INITIALLY DEFERRED' : ''}`)
+    }
+    lines.push(`${indent}FOR EACH ${body.row ? 'ROW' : 'STATEMENT'}`)
+    if (body.whenClause) lines.push(`${indent}WHEN (${this.expr(body.whenClause)})`)
+    const args = (body.args ?? []).map((arg: any) => this.literal(this.tag(arg)?.[1] ?? arg)).join(', ')
+    lines.push(`${indent}  EXECUTE FUNCTION ${this.functionReference(body.funcname)}(${args})`)
+    return lines
   }
 
   /**
@@ -1460,11 +1958,10 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   onConflict(body: any, indent: string): string[] {
-    if (body.whereClause || body.infer?.whereClause) throw new Error('Unsupported ON CONFLICT WHERE')
     const target = this.onConflictTarget(body)
     const action = body.action === 'ONCONFLICT_NOTHING' ? 'DO NOTHING' : 'DO UPDATE'
+    const inferCondition = body.infer?.whereClause ? ` WHERE ${this.expr(body.infer.whereClause)}` : ''
     const updates = body.targetList ?? []
-    if (updates.length === 0) return [`${indent}ON CONFLICT${target} ${action}`]
     const formatUpdate = (node: any): string => {
       const update = this.tag(node)?.[1]
       if (!update) return ''
@@ -1473,13 +1970,18 @@ class LibpgPrinter {
         : update.name
       return `${name} = ${this.expr(update.val)}`
     }
-    if (updates.length === 1) {
-      return [`${indent}ON CONFLICT${target} ${action} SET ${formatUpdate(updates[0])}`]
+    const lines: string[] = []
+    if (updates.length === 0) {
+      lines.push(`${indent}ON CONFLICT${target}${inferCondition} ${action}`)
+    } else if (updates.length === 1) {
+      lines.push(`${indent}ON CONFLICT${target}${inferCondition} ${action} SET ${formatUpdate(updates[0])}`)
+    } else {
+      lines.push(`${indent}ON CONFLICT${target}${inferCondition} ${action} SET`)
+      updates.forEach((update: any, index: number) => {
+        lines.push(`${indent}  ${formatUpdate(update)}${index < updates.length - 1 ? ',' : ''}`)
+      })
     }
-    const lines = [`${indent}ON CONFLICT${target} ${action} SET`]
-    updates.forEach((update: any, index: number) => {
-      lines.push(`${indent}  ${formatUpdate(update)}${index < updates.length - 1 ? ',' : ''}`)
-    })
+    if (body.whereClause) lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
     return lines
   }
 
@@ -1531,68 +2033,51 @@ class LibpgPrinter {
   expr(node: any): string {
     const tagged = this.tag(node)
     if (!tagged) return ''
-    const [type, body] = tagged
-    switch (type) {
-      case 'ColumnRef': return this.columnRef(body)
-      case 'A_Const': return this.literal(body)
-      case 'ParamRef': return this.paramRef(body)
-      case 'A_Expr': return this.aExpr(body)
-      case 'BoolExpr': {
-        if (body.boolop === 'NOT_EXPR') return `NOT (${this.expr(body.args?.[0])})`
-        const operator = body.boolop === 'AND_EXPR' ? 'AND' : 'OR'
-        return `(${(body.args ?? []).map((arg: any) => this.expr(arg)).join(` ${operator} `)})`
-      }
-      case 'NullTest':
-        return `${this.group(body.arg)} IS ${body.nulltesttype === 'IS_NOT_NULL' ? 'NOT ' : ''}NULL`
-      case 'BooleanTest': {
-        const negated = body.booltesttype === 'IS_NOT_TRUE' || body.booltesttype === 'IS_NOT_FALSE'
-        const expected = body.booltesttype?.includes('FALSE') ? 'FALSE' : 'TRUE'
-        return `${this.group(body.arg)} IS ${negated ? 'NOT ' : ''}${expected}`
-      }
-      case 'TypeCast': {
-        const typeName = this.tag(body.typeName)?.[1] ?? body.typeName
-        const cast = typeName?.location >= 0 ? this.readTypeName(typeName.location) : this.typeNameText(body.typeName)
-        return `${this.group(body.arg)}::${cast}`
-      }
-      case 'FuncCall': return this.funcCall(body)
-      case 'CoalesceExpr':
-        return `COALESCE(${(body.args ?? []).map((arg: any) => this.expr(arg)).join(', ')})`
-      case 'SubLink': {
-        const subselect = body.subselect?.SelectStmt
-        if (!subselect) throw new Error('Unsupported SubLink')
-        const inner = this.select(subselect, '  ')
-        const inline = inner.map((line: string) => line.trim()).join(' ')
-        const prefix = body.subLinkType === 'EXISTS_SUBLINK'
-          ? 'EXISTS '
-          : body.subLinkType === 'ARRAY_SUBLINK' ? 'ARRAY' : ''
-        if (inline.length + prefix.length + 2 <= 80) return `${prefix}(${inline})`
-        if (body.subLinkType === 'EXISTS_SUBLINK') return `EXISTS (\n${inner.join('\n')}\n)`
-        if (body.subLinkType === 'EXPR_SUBLINK') return `(\n${inner.join('\n')}\n)`
-        if (body.subLinkType === 'ARRAY_SUBLINK') return `ARRAY(\n${inner.join('\n')}\n)`
-        throw new Error(`Unsupported SubLink type: ${body.subLinkType}`)
-      }
-      case 'CaseExpr': return this.caseInline(body)
-      case 'SQLValueFunction': {
-        const names: Record<string, string> = {
-          SVFOP_CURRENT_CATALOG: 'CURRENT_CATALOG',
-          SVFOP_CURRENT_DATE: 'CURRENT_DATE',
-          SVFOP_CURRENT_ROLE: 'CURRENT_ROLE',
-          SVFOP_CURRENT_SCHEMA: 'CURRENT_SCHEMA',
-          SVFOP_CURRENT_TIME: 'CURRENT_TIME',
-          SVFOP_CURRENT_TIMESTAMP: 'CURRENT_TIMESTAMP',
-          SVFOP_CURRENT_USER: 'CURRENT_USER',
-          SVFOP_LOCALTIME: 'LOCALTIME',
-          SVFOP_LOCALTIMESTAMP: 'LOCALTIMESTAMP',
-          SVFOP_SESSION_USER: 'SESSION_USER',
-          SVFOP_SYSTEM_USER: 'SYSTEM_USER',
-          SVFOP_USER: 'USER',
-        }
-        return names[body.op] ?? body.op
-      }
-      case 'A_Star': return '*'
-      case 'String': return body.sval ?? ''
-      default: throw new Error(`Unsupported expression: ${type}`)
+    const printer = this.expressionPrinters.get(tagged[0])
+    return printer ? printer(tagged[1]) : this.unsupportedExpression(tagged[0], tagged[1])
+  }
+
+  /**
+   * Format a SQL value function.
+   * @param body - SQLValueFunction body.
+   * @returns SQL keyword.
+   */
+  sqlValueFunction(body: any): string {
+    const names: Record<string, string> = {
+      SVFOP_CURRENT_CATALOG: 'CURRENT_CATALOG',
+      SVFOP_CURRENT_DATE: 'CURRENT_DATE',
+      SVFOP_CURRENT_ROLE: 'CURRENT_ROLE',
+      SVFOP_CURRENT_SCHEMA: 'CURRENT_SCHEMA',
+      SVFOP_CURRENT_TIME: 'CURRENT_TIME',
+      SVFOP_CURRENT_TIMESTAMP: 'CURRENT_TIMESTAMP',
+      SVFOP_CURRENT_USER: 'CURRENT_USER',
+      SVFOP_LOCALTIME: 'LOCALTIME',
+      SVFOP_LOCALTIMESTAMP: 'LOCALTIMESTAMP',
+      SVFOP_SESSION_USER: 'SESSION_USER',
+      SVFOP_SYSTEM_USER: 'SYSTEM_USER',
+      SVFOP_USER: 'USER',
     }
+    return names[body.op] ?? this.unsupported('SQLValueFunction', body)
+  }
+
+  /**
+   * Format an indirect field or array access.
+   * @param body - A_Indirection body.
+   * @returns Indirect expression.
+   */
+  indirection(body: any): string {
+    return `${this.expr(body.arg)}${(body.indirection ?? []).map((node: any) => {
+      const tagged = this.tag(node)
+      if (tagged?.[0] === 'String') return `.${this.quoteIdentifier(tagged[1].sval)}`
+      if (tagged?.[0] === 'A_Star') return '.*'
+      if (tagged?.[0] === 'A_Indices') {
+        const index = tagged[1]
+        const lower = index.lidx ? this.expr(index.lidx) : ''
+        const upper = index.uidx ? this.expr(index.uidx) : ''
+        return index.is_slice ? `[${lower}:${upper}]` : `[${upper || lower}]`
+      }
+      return this.unsupported(tagged?.[0] ?? 'indirection', node)
+    }).join('')}`
   }
 
   /**
@@ -1654,15 +2139,19 @@ class LibpgPrinter {
       if (part.startsWith('"')) return part
       return builtin ? part.toUpperCase() : part.toLowerCase()
     }).join('.')
-    if (body.over || body.agg_filter || body.agg_within_group || body.func_variadic) {
-      throw new Error('Unsupported function clause')
-    }
     const distinct = body.agg_distinct ? 'DISTINCT ' : ''
     const args = body.agg_star ? '*' : (body.args ?? []).map((arg: any) => this.expr(arg)).join(', ')
     const order = body.agg_order?.length
       ? ` ORDER BY ${body.agg_order.map((item: any) => this.sort(item)).join(', ')}`
       : ''
-    return `${name}(${distinct}${args}${order})`
+    const filter = body.agg_filter ? ` FILTER (WHERE ${this.expr(body.agg_filter)})` : ''
+    const within = body.agg_within_group ? ' WITHIN GROUP' : ''
+    const over = body.over
+      ? body.over.name && !body.over.partitionClause?.length && !body.over.orderClause?.length
+        ? ` OVER ${this.quoteIdentifier(body.over.name)}`
+        : ` OVER (${this.windowDef(body.over)})`
+      : ''
+    return `${name}(${distinct}${args}${order})${filter}${within}${over}`
   }
 
   /**
@@ -1755,14 +2244,22 @@ class PlPgSqlPrinter {
     const block = this.functionNode.action?.PLpgSQL_stmt_block
     if (!block) return []
     const lines: string[] = []
-    const declarations = (this.functionNode.datums ?? [])
-      .map((datum: any) => datum.PLpgSQL_var)
-      .filter((variable: any) => variable?.lineno && variable.refname && variable.datatype && !variable.isconst)
-    if (declarations.length > 0) {
+    const implicit = new Set(['sqlstate', 'sqlerrm'])
+    const variables = (this.functionNode.datums ?? [])
+      .map((datum: any) => datum.PLpgSQL_var ?? datum.PLpgSQL_rec)
+      .filter((variable: any) => (
+        variable?.lineno && variable.refname && variable.datatype && !implicit.has(variable.refname)
+      ))
+    if (variables.length > 0) {
       lines.push('DECLARE')
-      for (const variable of declarations) {
-        const type = variable.datatype.PLpgSQL_type?.typname ?? ''
-        lines.push(`  ${variable.refname} ${String(type).toUpperCase()};`)
+      for (const variable of variables) {
+        const type = String(variable.datatype.PLpgSQL_type?.typname ?? 'record').toUpperCase()
+        const constant = variable.isconst ? ' CONSTANT' : ''
+        const notnull = variable.notnull ? ' NOT NULL' : ''
+        const initializer = variable.default_val?.PLpgSQL_expr?.query
+          ? ` := ${this.expression(variable.default_val.PLpgSQL_expr.query)}`
+          : ''
+        lines.push(`  ${variable.refname}${constant} ${type}${notnull}${initializer};`)
       }
     }
     const inner = (block.body ?? []).find((statement: any) => statement.PLpgSQL_stmt_block)?.PLpgSQL_stmt_block
@@ -1883,9 +2380,113 @@ class PlPgSqlPrinter {
         lines[lines.length - 1] = `${lines[lines.length - 1]};`
         return lines
       }
+      case 'PLpgSQL_stmt_perform': {
+        const query = (body.expr?.PLpgSQL_expr?.query ?? '').replace(/^SELECT\s+/iu, '')
+        return [`${indent}PERFORM ${this.expression(query)};`]
+      }
+      case 'PLpgSQL_stmt_loop': {
+        const lines = [`${indent}LOOP`]
+        for (const statement of body.body ?? []) lines.push(...this.statement(statement, `${indent}  `))
+        lines.push(`${indent}END LOOP;`)
+        return lines
+      }
+      case 'PLpgSQL_stmt_while': {
+        const lines = [`${indent}WHILE ${this.expression(body.cond?.PLpgSQL_expr?.query ?? '')} LOOP`]
+        for (const statement of body.body ?? []) lines.push(...this.statement(statement, `${indent}  `))
+        lines.push(`${indent}END LOOP;`)
+        return lines
+      }
+      case 'PLpgSQL_stmt_fori': {
+        const reverse = body.reverse ? ' REVERSE' : ''
+        const step = body.step ? ` BY ${this.expression(body.step.PLpgSQL_expr?.query ?? '')}` : ''
+        const name = body.var?.PLpgSQL_var?.refname ?? body.var?.refname ?? 'i'
+        const lower = this.expression(body.lower?.PLpgSQL_expr?.query ?? '')
+        const upper = this.expression(body.upper?.PLpgSQL_expr?.query ?? '')
+        const lines = [`${indent}FOR ${name} IN${reverse} ${lower}..${upper}${step} LOOP`]
+        for (const statement of body.body ?? []) lines.push(...this.statement(statement, `${indent}  `))
+        lines.push(`${indent}END LOOP;`)
+        return lines
+      }
+      case 'PLpgSQL_stmt_fors': {
+        const variable = body.var?.PLpgSQL_var?.refname ?? body.var?.PLpgSQL_rec?.refname ?? body.var?.refname ?? 'row'
+        const lines = [`${indent}FOR ${variable} IN ${this.expression(body.query?.PLpgSQL_expr?.query ?? '')} LOOP`]
+        for (const statement of body.body ?? []) lines.push(...this.statement(statement, `${indent}  `))
+        lines.push(`${indent}END LOOP;`)
+        return lines
+      }
+      case 'PLpgSQL_stmt_foreach_a': {
+        const variable = body.var?.PLpgSQL_var?.refname ?? body.var?.refname ?? 'item'
+        const slice = body.slice ? ` SLICE ${body.slice}` : ''
+        const array = this.expression(body.expr?.PLpgSQL_expr?.query ?? '')
+        const lines = [`${indent}FOREACH ${variable}${slice} IN ARRAY ${array} LOOP`]
+        for (const statement of body.body ?? []) lines.push(...this.statement(statement, `${indent}  `))
+        lines.push(`${indent}END LOOP;`)
+        return lines
+      }
+      case 'PLpgSQL_stmt_exit': {
+        const action = body.is_exit ? 'EXIT' : 'CONTINUE'
+        const label = body.label ? ` ${body.label}` : ''
+        const condition = body.cond?.PLpgSQL_expr?.query ? ` WHEN ${this.expression(body.cond.PLpgSQL_expr.query)}` : ''
+        return [`${indent}${action}${label}${condition};`]
+      }
+      case 'PLpgSQL_stmt_case': {
+        const test = body.t_expr?.PLpgSQL_expr?.query
+          ? ` ${this.expression(body.t_expr.PLpgSQL_expr.query)}`
+          : ''
+        const lines = [`${indent}CASE${test}`]
+        for (const item of body.case_when_list ?? []) {
+          const clause = item.PLpgSQL_case_when
+          if (!clause) continue
+          lines.push(`${indent}  WHEN ${this.expression(clause.expr?.PLpgSQL_expr?.query ?? '')} THEN`)
+          for (const statement of clause.stmts ?? []) lines.push(...this.statement(statement, `${indent}    `))
+        }
+        if (body.have_else) {
+          lines.push(`${indent}  ELSE`)
+          for (const statement of body.else_stmts ?? []) lines.push(...this.statement(statement, `${indent}    `))
+        }
+        lines.push(`${indent}END CASE;`)
+        return lines
+      }
+      case 'PLpgSQL_stmt_assert': {
+        const condition = this.expression(body.cond?.PLpgSQL_expr?.query ?? '')
+        const message = body.message?.PLpgSQL_expr?.query ? `, ${this.expression(body.message.PLpgSQL_expr.query)}` : ''
+        return [`${indent}ASSERT ${condition}${message};`]
+      }
+      case 'PLpgSQL_stmt_dynexecute': {
+        const query = this.expression(body.query?.PLpgSQL_expr?.query ?? '')
+        const into = body.into ? ` INTO ${body.into}` : ''
+        const params = (body.params ?? [])
+          .map((param: any) => this.expression(param.PLpgSQL_expr?.query ?? '')).join(', ')
+        return [`${indent}EXECUTE ${query}${into}${params ? ` USING ${params}` : ''};`]
+      }
+      case 'PLpgSQL_stmt_commit':
+        return [`${indent}COMMIT;`]
+      case 'PLpgSQL_stmt_rollback':
+        return [`${indent}ROLLBACK;`]
+      case 'PLpgSQL_stmt_return_query': {
+        const query = this.expression(body.query?.PLpgSQL_expr?.query ?? '')
+        return [`${indent}RETURN QUERY ${query};`]
+      }
+      case 'PLpgSQL_stmt_return_next': {
+        const query = this.expression(body.expr?.PLpgSQL_expr?.query ?? '')
+        return [`${indent}RETURN NEXT ${query};`]
+      }
       default:
-        throw new Error(`Unsupported PL/pgSQL statement: ${type}`)
+        return this.unsupportedPl(type, body, indent)
     }
+  }
+
+  /**
+   * Report an unhandled PL/pgSQL node and emit its raw representation.
+   * @param type - Raw node tag.
+   * @param body - Raw node body.
+   * @param indent - Prefix for this statement.
+   * @returns Unformatted statement lines.
+   */
+  unsupportedPl(type: string, body: any, indent: string): string[] {
+    process.emitWarning(`SQL formatter: unsupported PL/pgSQL node "${type}"`)
+    const text = body?.query ?? body?.sqlstmt?.PLpgSQL_expr?.query ?? JSON.stringify(body)
+    return String(text).split('\n').map(line => `${indent}${line}`)
   }
 
   /**

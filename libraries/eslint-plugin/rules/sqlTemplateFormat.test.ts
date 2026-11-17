@@ -363,27 +363,139 @@ describe('formatSQL', () => {
     })
   })
 
-  describe('unsupported syntax', () => {
-    test('preserves unsupported PL/pgSQL control statements', () => {
-      const sql = 'create function f() returns void as $$ begin perform 1; end $$ language plpgsql'
+  describe('dispatch', () => {
+    test('formats PL/pgSQL control statements', () => {
+      expect(formatSQL(`
+        create function f() returns void as $$ begin perform 1; end $$ language plpgsql
+      `)).toMatchIndented(`
+        CREATE FUNCTION f() RETURNS VOID AS $$
+        BEGIN
+          PERFORM 1;
+        END
+        $$ LANGUAGE plpgsql
+      `)
+    })
+
+    test('formats function options', () => {
+      expect(formatSQL(`
+        create function f() returns integer language plpgsql stable security definer
+        set search_path = pg_catalog as $$ begin return 1; end $$
+      `)).toMatchIndented(`
+        CREATE FUNCTION f() RETURNS INTEGER
+          STABLE
+          SECURITY DEFINER
+          SET search_path TO pg_catalog
+        AS $$
+        BEGIN
+          RETURN 1;
+        END
+        $$ LANGUAGE plpgsql
+      `)
+    })
+
+    test('formats DDL and DML clauses', () => {
+      expect(formatSQL('alter table widgets add column name text')).toMatchIndented(`
+        ALTER TABLE "widgets" ADD COLUMN "name" TEXT
+      `)
+      expect(formatSQL(`
+        update widgets set name = 'x' from other where widgets.id = other.id
+      `)).toMatchIndented(`
+        UPDATE "widgets" SET "name" = 'x'
+        FROM "other"
+        WHERE "widgets"."id" = "other"."id"
+      `)
+      expect(formatSQL(`
+        delete from widgets using other where widgets.id = other.id
+      `)).toMatchIndented(`
+        DELETE FROM "widgets"
+        USING "other"
+        WHERE "widgets"."id" = "other"."id"
+      `)
+      expect(formatSQL(`
+        create trigger trg before insert on widgets for each row
+        when (true) execute function fn()
+      `)).toMatchIndented(`
+        CREATE TRIGGER "trg"
+        BEFORE INSERT ON "widgets"
+        FOR EACH ROW
+        WHEN (true)
+          EXECUTE FUNCTION fn()
+      `)
+      expect(formatSQL(`
+        insert into widgets (id) values (1) on conflict (id) where id > 0 do nothing
+      `)).toMatchIndented(`
+        INSERT INTO "widgets" ("id")
+        VALUES
+          (1)
+        ON CONFLICT ("id") WHERE "id" > 0 DO NOTHING
+      `)
+    })
+
+    test('formats CREATE TABLE clauses', () => {
+      expect(formatSQL('create table child (id int) inherits (parent)')).toMatchIndented(`
+        CREATE TABLE "child" (
+          "id" INT
+        ) INHERITS ("parent")
+      `)
+      expect(formatSQL(`
+        create table events (id int, created_at date) partition by range (created_at)
+      `)).toMatchIndented(`
+        CREATE TABLE "events" (
+          "id" INT,
+          "created_at" DATE
+        )
+        PARTITION BY RANGE ("created_at")
+      `)
+      expect(formatSQL('create table widgets (id int) with (fillfactor=70)')).toMatchIndented(`
+        CREATE TABLE "widgets" (
+          "id" INT
+        )
+        WITH ("fillfactor" = 70)
+      `)
+    })
+
+    test('formats CREATE VIEW options and check options', () => {
+      expect(formatSQL(`
+        create view v with (security_barrier=true) as select 1 as id
+      `)).toMatchIndented(`
+        CREATE VIEW "v" WITH ("security_barrier" = 'true') AS (
+          SELECT 1 AS "id"
+        )
+      `)
+      expect(formatSQL('create view v as select 1 as id with check option')).toMatchIndented(`
+        CREATE VIEW "v" AS (
+          SELECT 1 AS "id"
+        ) WITH CASCADED CHECK OPTION
+      `)
+    })
+
+    test('formats PL/pgSQL declarations with initialization or CONSTANT', () => {
+      expect(formatSQL(`
+        create function f() returns integer as $$
+        declare max_attempts constant integer := 3; counter integer := 1;
+        begin counter := counter + 1; return counter; end $$ language plpgsql
+      `)).toMatchIndented(`
+        CREATE FUNCTION f() RETURNS INTEGER AS $$
+        DECLARE
+          max_attempts CONSTANT INTEGER := 3;
+          counter INTEGER := 1;
+        BEGIN
+          counter := counter + 1;
+          RETURN COUNTER;
+        END
+        $$ LANGUAGE plpgsql
+      `)
+    })
+
+    test('emits an unhandled statement from source and reports it', () => {
+      const sql = 'create policy p on widgets using (true)'
       expect(formatSQL(sql)).toBe(sql)
     })
 
-    test('preserves unsupported function options', () => {
-      const sql = 'create function f() returns integer language plpgsql stable security definer ' +
-        'set search_path = pg_catalog as $$ begin return 1; end $$'
-      expect(formatSQL(sql)).toBe(sql)
-    })
-
-    test('preserves unsupported DDL and DML clauses', () => {
-      const statements = [
-        'alter table widgets add column name text',
-        'update widgets set name = \'x\' from other where widgets.id = other.id',
-        'delete from widgets using other where widgets.id = other.id',
-        'create trigger trg before insert on widgets for each row when (true) execute function fn()',
-        'insert into widgets (id) values (1) on conflict (id) where id > 0 do nothing',
-      ]
-      for (const sql of statements) expect(formatSQL(sql)).toBe(sql)
+    test('formats row expressions', () => {
+      expect(formatSQL('select row(1, 2)')).toMatchIndented(`
+        SELECT ROW(1, 2)
+      `)
     })
   })
 
@@ -671,7 +783,7 @@ describe('parser-backed formatting', () => {
         (1)
     `)
     expect(formatSQL('select widgetId as TABLE from widgetTable')).toMatchIndented(`
-      SELECT "widgetId" AS "TABLE"
+      SELECT "widgetId" AS "table"
       FROM "widgetTable"
     `)
   })
@@ -697,6 +809,49 @@ describe('parser-backed formatting', () => {
       VALUES
         ($1, $2)
       ON CONFLICT ON CONSTRAINT "Memberships_pkey" DO NOTHING
+    `)
+  })
+
+  test('formats DISTINCT ON, USING joins, and array expressions', () => {
+    expect(formatSQL('select distinct on (a) a, b from t order by a, b')).toMatchIndented(`
+      SELECT DISTINCT ON ("a") "a", "b"
+      FROM "t"
+      ORDER BY "a", "b"
+    `)
+    expect(formatSQL('select * from t join u using (id)')).toMatchIndented(`
+      SELECT *
+      FROM "t"
+      JOIN "u" USING ("id")
+    `)
+    expect(formatSQL('select * from t natural join u')).toMatchIndented(`
+      SELECT *
+      FROM "t"
+      NATURAL JOIN "u"
+    `)
+    expect(formatSQL('select array[1, 2], row(1, 2), data->>\'x\' from t')).toMatchIndented(`
+      SELECT ARRAY [1, 2], ROW(1, 2), "data" ->> 'x'
+      FROM "t"
+    `)
+  })
+
+  test('formats window definitions and references', () => {
+    expect(formatSQL('select sum(x) over (partition by y order by z) from t')).toMatchIndented(`
+      SELECT SUM("x") OVER (PARTITION BY "y" ORDER BY "z")
+      FROM "t"
+    `)
+    expect(formatSQL('select sum(x) over w from t window w as (partition by y)')).toMatchIndented(`
+      SELECT SUM("x") OVER "w"
+      FROM "t"
+      WINDOW "w" AS (PARTITION BY "y")
+    `)
+  })
+
+  test('formats unique index predicates and null distinctness', () => {
+    expect(formatSQL('create unique index idx on t using btree (id) where id is not null')).toMatchIndented(`
+      CREATE UNIQUE INDEX "idx" ON "t" USING btree("id") WHERE "id" IS NOT NULL
+    `)
+    expect(formatSQL('create unique index idx on t (id) nulls not distinct')).toMatchIndented(`
+      CREATE UNIQUE INDEX "idx" ON "t" USING btree("id") NULLS NOT DISTINCT
     `)
   })
 

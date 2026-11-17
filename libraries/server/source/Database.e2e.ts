@@ -1723,7 +1723,7 @@ describe('Server database lifecycle', () => {
       DROP INDEX "Pet_guardian_fk_idx"
     `
     await database.sql`
-      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet"("id")
+      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" USING btree("id")
     `
     await expect(installSchema(database.sql, entities))
       .rejects.toThrow('index definition changed: Pet.Pet_guardian_fk_idx')
@@ -1731,8 +1731,7 @@ describe('Server database lifecycle', () => {
       DROP INDEX "Pet_guardian_fk_idx"
     `
     await database.sql`
-      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet"("guardian.id")
-      WHERE FALSE
+      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" USING btree("guardian.id") WHERE FALSE
     `
     await expect(installSchema(database.sql, entities))
       .rejects.toThrow('Migration plan has blocking drift')
@@ -1740,7 +1739,7 @@ describe('Server database lifecycle', () => {
       DROP INDEX "Pet_guardian_fk_idx"
     `
     await database.sql`
-      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet"("guardian.id", LOWER("id"))
+      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" USING btree("guardian.id", (LOWER("id")))
     `
     await expect(installSchema(database.sql, entities))
       .rejects.toThrow('Migration plan has blocking drift')
@@ -1748,7 +1747,7 @@ describe('Server database lifecycle', () => {
       DROP INDEX "Pet_guardian_fk_idx"
     `
     await database.sql`
-      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet"("guardian.id") NULLS NOT DISTINCT
+      CREATE UNIQUE INDEX "Pet_guardian_fk_idx" ON "Pet" USING btree("guardian.id") NULLS NOT DISTINCT
     `
     await expect(installSchema(database.sql, entities))
       .rejects.toThrow('Migration plan has blocking drift')
@@ -2172,8 +2171,12 @@ describe('Server database lifecycle', () => {
     await database.sql`
       INSERT INTO "Note" ("id", "tags", "scores", "payload")
       VALUES
-        (${one}, ARRAY ['urgent', 'important'], ARRAY [1, 2, 2],
-          '{"kind":"note","meta":{"active":true}}'::jsonb),
+        (
+          ${one},
+          ARRAY ['urgent', 'important'],
+          ARRAY [1, 2, 2],
+          '{"kind":"note","meta":{"active":true}}'::jsonb
+        ),
         (${two}, ARRAY ['urgent'], ARRAY [3], '{"kind":"other"}'::jsonb),
         (${three}, ARRAY []::text[], ARRAY []::double PRECISION[], '{}'::jsonb),
         (${four}, ARRAY ['b', 'a'], ARRAY [2, 1, 1], '["a","b"]'::jsonb),
@@ -2318,7 +2321,7 @@ describe('Server database lifecycle', () => {
       )
     `
     await database.sql`
-      CREATE UNIQUE INDEX "Pet_owner_fk_idx" ON "Other"("id")
+      CREATE UNIQUE INDEX "Pet_owner_fk_idx" ON "Other" USING btree("id")
     `
     await expect(installSchema(database.sql, entities))
       .rejects.toThrow('Migration plan has blocking drift')
@@ -2573,11 +2576,11 @@ describe('Server database lifecycle', () => {
     await database.use(entities)
 
     const constraints = await database.sql<{ definition: string }[]>`
-      SELECT pg_get_constraintdef(oid) AS definition
-      FROM pg_constraint
-      WHERE conrelid = '"Post"'::regclass
-        AND contype = 'f'
-      ORDER BY conname collate "C"
+      SELECT PG_GET_CONSTRAINTDEF("oid") AS "definition"
+      FROM "pg_constraint"
+      WHERE "conrelid" = '"Post"'::regclass
+        AND "contype" = 'f'
+      ORDER BY "conname" COLLATE "C"
     `
     expect(constraints).toEqual([
       { definition: 'FOREIGN KEY (id) REFERENCES "Entity"(id) DEFERRABLE' },
@@ -2643,14 +2646,14 @@ describe('Server database lifecycle', () => {
       name: string,
     }[]>`
       SELECT
-        conname AS name,
-        condeferrable AS DEFERRABLE,
-        condeferred AS deferred,
-        pg_get_constraintdef(oid) AS definition
-      FROM pg_constraint
-      WHERE conrelid IN ('"CycleUser"'::regclass, '"CycleCar"'::regclass)
-        AND contype = 'f'
-      ORDER BY conname collate "C"
+        "conname" AS "name",
+        "condeferrable" AS "deferrable",
+        "condeferred" AS "deferred",
+        PG_GET_CONSTRAINTDEF("oid") AS "definition"
+      FROM "pg_constraint"
+      WHERE "conrelid" IN ('"CycleUser"'::regclass, '"CycleCar"'::regclass)
+        AND "contype" = 'f'
+      ORDER BY "conname" COLLATE "C"
     `)
     expect(constraints.map(constraint => ({
       deferrable: constraint.deferrable,
