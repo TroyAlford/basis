@@ -276,6 +276,7 @@ describe('Authorization RLS', () => {
       const changed = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article" SET "title" = 'Leaked'
         WHERE "id" = ${article}
+        RETURNING "id"
       `))
       expect(changed).toHaveLength(0)
 
@@ -334,6 +335,7 @@ describe('Authorization RLS', () => {
       const updated = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article" SET "title" = 'Updated'
         WHERE "id" = ${otherArticle}
+        RETURNING "id"
       `))
       expect(updated).toHaveLength(1)
       await asActor(admin.userId, () => authorization.removeRole(other, editor.id))
@@ -341,10 +343,12 @@ describe('Authorization RLS', () => {
       await expect(asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article" SET "title" = 'Changed'
         WHERE "id" = ${otherArticle}
+        RETURNING "id"
       `))).rejects.toThrow()
       const sameTitle = await asActor(other, () => server.db.tx(async sql => sql`
         UPDATE "Article" SET "title" = 'Updated'
         WHERE "id" = ${otherArticle}
+        RETURNING "id"
       `))
       expect(sameTitle).toHaveLength(1)
 
@@ -727,6 +731,7 @@ describe('Authorization RLS', () => {
         server.db.tx(async sql => sql<{ id: string }[]>`
           UPDATE "Workspace" SET "title" = ${title}
           WHERE "id" = ${id}
+          RETURNING "id"
         `)
       ))
       expect(await update(bob, workspaceA, 'Workspace A edited')).toHaveLength(1)
@@ -922,6 +927,7 @@ describe('Authorization RLS', () => {
         sql<{ id: string }[]>`
           UPDATE "Note" SET "title" = 'Updated'
           WHERE "id" = ${id}
+          RETURNING "id"
         `
       )))
       expect(await update(alice, note)).toHaveLength(1)
@@ -963,6 +969,7 @@ describe('Authorization RLS', () => {
       const remove = (actor: string) => asActor(actor, () => server.db.tx(async sql => sql<{ id: string }[]>`
         DELETE FROM "Note"
         WHERE "id" = ${note}
+        RETURNING "id"
       `))
       expect(await remove(bob)).toHaveLength(0)
       expect(await remove(alice)).toHaveLength(1)

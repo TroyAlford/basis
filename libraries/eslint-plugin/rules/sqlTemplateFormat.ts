@@ -980,15 +980,7 @@ class LibpgPrinter {
     if (select?.valuesLists) lines.push(...this.values(select.valuesLists, indent))
     else if (select) lines.push(...this.select(select, indent))
     if (body.onConflictClause) lines.push(...this.onConflict(body.onConflictClause, indent))
-    const returningList = body.returningClause?.exprs ?? body.returningList ?? []
-    if (returningList.length) {
-      const returning = returningList.map((node: any, index: number) => {
-        const next = returningList[index + 1]
-        const limit = next ? this.startLocation(next) : this.end
-        return this.target(node, limit < 0 ? this.end : limit).join(' ')
-      }).join(', ')
-      lines.push(`${indent}RETURNING ${returning}`)
-    }
+    lines.push(...this.returningLines(body, indent))
     return lines
   }
 
@@ -1206,6 +1198,23 @@ class LibpgPrinter {
   }
 
   /**
+   * Format a RETURNING clause.
+   * @param body - Statement body.
+   * @param indent - Prefix for this block.
+   * @returns Returning line, or empty.
+   */
+  returningLines(body: any, indent: string): string[] {
+    const returningList = body.returningClause?.exprs ?? body.returningList ?? []
+    if (!returningList.length) return []
+    const values = returningList.map((node: any, index: number) => {
+      const next = returningList[index + 1]
+      const limit = next ? this.startLocation(next) : this.end
+      return this.target(node, limit < 0 ? this.end : limit).join(' ')
+    })
+    return [`${indent}RETURNING ${values.join(', ')}`]
+  }
+
+  /**
    * Format an UPDATE statement.
    * @param body - UpdateStmt body.
    * @param indent - Prefix for this block.
@@ -1228,6 +1237,7 @@ class LibpgPrinter {
       if (fromStart >= 0 && whereStart >= 0) lines.push(...this.fullLineComments(fromStart, whereStart, indent))
       lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
     }
+    lines.push(...this.returningLines(body, indent))
     return lines
   }
 
@@ -1246,6 +1256,7 @@ class LibpgPrinter {
       if (fromStart >= 0 && whereStart >= 0) lines.push(...this.fullLineComments(fromStart, whereStart, indent))
       lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
     }
+    lines.push(...this.returningLines(body, indent))
     return lines
   }
 

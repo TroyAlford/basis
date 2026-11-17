@@ -397,6 +397,16 @@ describe('formatSQL', () => {
       expect(formatSQL('set constraints all immediate')).toMatchIndented(`
         SET CONSTRAINTS ALL IMMEDIATE
       `)
+      expect(formatSQL('update widgets set name = \'x\' where id = 1 returning id')).toMatchIndented(`
+        UPDATE "widgets" SET "name" = 'x'
+        WHERE "id" = 1
+        RETURNING "id"
+      `)
+      expect(formatSQL('delete from widgets where id = 1 returning id')).toMatchIndented(`
+        DELETE FROM "widgets"
+        WHERE "id" = 1
+        RETURNING "id"
+      `)
     })
   })
 
