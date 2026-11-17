@@ -1458,7 +1458,7 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   createFunction(body: any, indent: string): string[] {
-    const name = (body.funcname ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').join('.')
+    const name = (body.funcname ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').join('.').toLowerCase()
     const language = this.optionValue(body.options, 'language') ?? 'plpgsql'
     const returnType = this.formatTypeName(body.returnType)
     const parameters = this.parameterList(body.parameters)
@@ -1680,6 +1680,10 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   variableSet(body: any, indent: string): string[] {
+    if (body.kind === 'VAR_RESET_ALL') return [`${indent}RESET ALL`]
+    if (body.kind === 'VAR_RESET') return [`${indent}RESET ${body.name}`]
+    if (body.kind === 'VAR_SET_DEFAULT') return [`${indent}SET ${body.name} TO DEFAULT`]
+    if (body.kind === 'VAR_SET_CURRENT') return [`${indent}SET ${body.name} FROM CURRENT`]
     const values = (body.args ?? []).map((arg: any) => {
       const tagged = this.tag(arg)
       if (tagged?.[0] === 'A_Const') {
@@ -1688,7 +1692,8 @@ class LibpgPrinter {
       }
       return this.expr(arg)
     })
-    return [`${indent}SET ${body.name}${values.length ? ` TO ${values.join(', ')}` : ''}`]
+    const prefix = body.is_local ? 'SET LOCAL' : 'SET'
+    return [`${indent}${prefix} ${body.name}${values.length ? ` TO ${values.join(', ')}` : ''}`]
   }
 
   /**
@@ -1760,7 +1765,7 @@ class LibpgPrinter {
     const value = body.expr ? `(${this.expr(body.expr)})` : this.quoteIdentifier(body.name ?? '')
     const collate = body.collation?.length ? ` COLLATE ${this.identifierList(body.collation)}` : ''
     const opclass = (body.opclass ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').filter(Boolean)
-    const op = opclass.length ? ` ${opclass.join(' ')}` : ''
+    const op = opclass.length ? ` ${opclass.join('.')}` : ''
     const direction = body.ordering === 'SORTBY_DESC' ? ' DESC' : body.ordering === 'SORTBY_ASC' ? ' ASC' : ''
     const nulls = body.nulls_ordering === 'SORTBY_NULLS_FIRST'
       ? ' NULLS FIRST'
@@ -2071,7 +2076,9 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   createSchema(body: any, indent: string): string[] {
-    return [`${indent}CREATE SCHEMA ${this.quoteIdentifier(body.schemaname)}`]
+    return [
+      `${indent}CREATE SCHEMA ${body.if_not_exists ? 'IF NOT EXISTS ' : ''}${this.quoteIdentifier(body.schemaname)}`,
+    ]
   }
 
   /**
@@ -2090,7 +2097,7 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   createTrigger(body: any, indent: string): string[] {
-    const timing = body.timing === 2 ? 'BEFORE' : body.timing === 4 ? 'AFTER' : 'INSTEAD OF'
+    const timing = body.timing === 2 ? 'BEFORE' : body.timing === 64 ? 'INSTEAD OF' : 'AFTER'
     const eventBits = body.events ?? 0
     const columns = body.columns?.length ? ` OF ${this.identifierList(body.columns)}` : ''
     const events = [
@@ -2462,6 +2469,7 @@ class PlPgSqlPrinter {
       .map((datum: any) => datum.PLpgSQL_var ?? datum.PLpgSQL_rec)
       .filter((variable: any) => (
         variable?.lineno && variable.refname && variable.datatype && !implicit.has(variable.refname)
+        && !/^__case__variable_\d+__$/iu.test(variable.refname)
       ))
     if (variables.length > 0) {
       lines.push('DECLARE')
@@ -2659,7 +2667,8 @@ class PlPgSqlPrinter {
         for (const item of body.case_when_list ?? []) {
           const clause = item.PLpgSQL_case_when
           if (!clause) continue
-          lines.push(`${indent}  WHEN ${this.expression(clause.expr?.PLpgSQL_expr?.query ?? '')} THEN`)
+          const when = clause.expr?.PLpgSQL_expr?.query ?? ''
+          lines.push(`${indent}  WHEN ${body.t_expr ? this.caseWhenValue(when) : this.expression(when)} THEN`)
           for (const statement of clause.stmts ?? []) lines.push(...this.statement(statement, `${indent}    `))
         }
         if (body.have_else) {
@@ -2707,6 +2716,16 @@ class PlPgSqlPrinter {
       default:
         return this.unsupportedPl(type, body, indent)
     }
+  }
+
+  /**
+   * Extract a simple CASE branch value from the parser's synthetic comparison.
+   * @param query - Synthetic branch expression.
+   * @returns Branch value.
+   */
+  caseWhenValue(query: string): string {
+    const match = /\bIN\s*\((.*)\)/isu.exec(query)
+    return this.expression(match?.[1] ?? query)
   }
 
   /**

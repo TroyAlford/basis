@@ -1,13 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- TypeScript compiler AST boundary. */
 import { describe, expect, test } from 'bun:test'
+import { loadModule, parseSync } from 'libpg-query'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import type * as TypeScript from 'typescript'
-import { formatSQLResult } from './sqlTemplateFormat'
+import { formatSQL, formatSQLResult } from './sqlTemplateFormat'
 
 const require = createRequire(import.meta.url)
 const ts = require(path.resolve('node_modules/typescript/lib/typescript.js')) as typeof TypeScript
+
+await loadModule()
 
 const ROOTS = ['libraries', 'consumer', 'testing', 'scripts']
 const EXCLUDED = /(?:^|[/.])(?:node_modules|dist|\.cache|generated)(?:[/.]|$)/
@@ -51,13 +54,60 @@ function templateSql(quasi: any): string {
   return sql
 }
 
+/**
+ * Normalize parsed meaning for equivalence checks.
+ * @param value - Parsed AST value.
+ * @returns AST without source metadata.
+ */
+function semantics(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(semantics)
+  if (value && typeof value === 'object') {
+    const result: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'location' || key === 'stmt_location' || key === 'stmt_len'
+        || key.endsWith('_start') || key.endsWith('_end')) continue
+      result[key] = semantics(child)
+    }
+    return result
+  }
+  return value
+}
+
 describe('production SQL corpus', () => {
   test('formats every statically discoverable production statement', () => {
     const unsupported: { construct: string, file: string, sql: string }[] = []
+    const invalid: { file: string, formatted: string, sql: string }[] = []
+    const semanticDiffs: { file: string, sql: string }[] = []
+    const idempotenceDiffs: { file: string, sql: string }[] = []
     const inspect = (file: string, sql: string): void => {
       if (!sql.trim()) return
+      let original: any
+      try {
+        original = parseSync(sql)
+      } catch {
+        return
+      }
       const result = formatSQLResult(sql)
-      if (result.unsupported) unsupported.push({ construct: result.unsupported, file, sql: sql.slice(0, 240) })
+      if (result.unsupported) {
+        unsupported.push({ construct: result.unsupported, file, sql: sql.slice(0, 240) })
+        return
+      }
+      if (formatSQL(result.formatted) !== result.formatted) {
+        idempotenceDiffs.push({ file, sql: sql.slice(0, 240) })
+      }
+      try {
+        const formatted = parseSync(result.formatted)
+        const containsPl = (original.stmts ?? []).some((statement: any) => (
+          statement.stmt?.CreateFunctionStmt || statement.stmt?.DoStmt
+        ))
+        if (!containsPl
+          && JSON.stringify(semantics(original.stmts?.map((statement: any) => statement.stmt))) !==
+            JSON.stringify(semantics(formatted.stmts?.map((statement: any) => statement.stmt)))) {
+          semanticDiffs.push({ file, sql: sql.slice(0, 240) })
+        }
+      } catch {
+        invalid.push({ file, formatted: result.formatted.slice(0, 240), sql: sql.slice(0, 240) })
+      }
     }
     for (const file of ROOTS.flatMap(sourceFiles)) {
       if (file.endsWith('.sql')) {
@@ -84,5 +134,8 @@ describe('production SQL corpus', () => {
       visit(parsed)
     }
     expect(unsupported).toEqual([])
+    expect(invalid).toEqual([])
+    expect(semanticDiffs).toEqual([])
+    expect(idempotenceDiffs).toEqual([])
   })
 })

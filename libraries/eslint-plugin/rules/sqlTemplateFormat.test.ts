@@ -36,7 +36,8 @@ function semantics(sql: string): unknown {
     if (value && typeof value === 'object') {
       const result: Record<string, unknown> = {}
       for (const [key, child] of Object.entries(value)) {
-        if (key === 'location' || key === 'stmt_location' || key === 'stmt_len') continue
+        if (key === 'location' || key === 'stmt_location' || key === 'stmt_len'
+          || key.endsWith('_start') || key.endsWith('_end')) continue
         result[key] = strip(child)
       }
       return result
@@ -624,6 +625,9 @@ describe('formatSQL', () => {
     })
 
     test('formats extension, policy, transaction, and session statements', () => {
+      expect(formatSQL('create schema if not exists basis')).toMatchIndented(`
+        CREATE SCHEMA IF NOT EXISTS "basis"
+      `)
       expect(formatSQL('create extension if not exists pg_trgm with schema public')).toMatchIndented(`
         CREATE EXTENSION IF NOT EXISTS "pg_trgm" WITH SCHEMA "public"
       `)
@@ -643,6 +647,21 @@ describe('formatSQL', () => {
       expect(formatSQL('savepoint x')).toMatchIndented('SAVEPOINT "x"')
       expect(formatSQL('show search_path')).toMatchIndented('SHOW search_path')
       expect(formatSQL('close cursor_name')).toMatchIndented('CLOSE "cursor_name"')
+      expect(formatSQL('reset all')).toMatchIndented('RESET ALL')
+      expect(formatSQL('set local search_path to public')).toMatchIndented('SET LOCAL search_path TO "public"')
+      expect(formatSQL('create index idx on t using gin(name public.gin_trgm_ops)')).toMatchIndented(`
+        CREATE INDEX "idx" ON "t" USING gin("name" public.gin_trgm_ops)
+      `)
+      expect(formatSQL(`
+        create constraint trigger trg after insert on widgets
+        deferrable initially deferred for each row execute function fn()
+      `)).toMatchIndented(`
+        CREATE CONSTRAINT TRIGGER "trg"
+        AFTER INSERT ON "widgets"
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW
+          EXECUTE FUNCTION fn()
+      `)
     })
   })
 
