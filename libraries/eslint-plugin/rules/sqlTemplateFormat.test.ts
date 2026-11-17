@@ -806,7 +806,8 @@ const query = sql\`(
 )\`
     `.trim()
     const output = lint(code)
-    expect(output.fixed).toBe(true)
+    expect(output.fixed).toBe(false)
+    expect(output.messages.some(message => message.messageId === 'parseErrorSql')).toBe(true)
     expect(output.output).toContain("${sql.array(tag.aliases, 'TEXT')}")
     expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
   })

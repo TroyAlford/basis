@@ -52,7 +52,9 @@ function sqlComments(sql: string): SqlComment[] {
  * Result of formatting one SQL template body.
  */
 export interface SqlFormatResult {
+  error?: string,
   formatted: string,
+  status: 'formatted' | 'unsupported' | 'parse-error',
   unsupported?: string,
 }
 
@@ -86,7 +88,7 @@ export function formatSQLResult(sql: string, indent = '', quoteIdentifiers = tru
   }
   try {
     const parsed = parseSync(safeSql) as any
-    if (!parsed.stmts?.length) return { formatted: '' }
+    if (!parsed.stmts?.length) return { formatted: '', status: 'formatted' }
     const comments = sqlComments(safeSql)
     let formatted = parsed.stmts.map((raw: any) => {
       const start = raw.stmt_location ?? 0
@@ -96,15 +98,15 @@ export function formatSQLResult(sql: string, indent = '', quoteIdentifiers = tru
     for (const [safe, original] of placeholders) {
       formatted = formatted.replace(new RegExp(safe, 'giu'), original)
     }
-    return { formatted }
+    return { formatted, status: 'formatted' }
   } catch (error) {
     const lines = sql.split('\n')
     while (lines.length > 0 && (lines[0] as string).trim() === '') lines.shift()
     while (lines.length > 0 && (lines[lines.length - 1] as string).trim() === '') lines.pop()
-    return {
-      formatted: lines.map(line => `${indent}${line}`).join('\n'),
-      ...(error instanceof UnsupportedNodeError ? { unsupported: error.nodeType } : {}),
-    }
+    const formatted = lines.map(line => `${indent}${line}`).join('\n')
+    return error instanceof UnsupportedNodeError
+      ? { formatted, status: 'unsupported', unsupported: error.nodeType }
+      : { error: error instanceof Error ? error.message : String(error), formatted, status: 'parse-error' }
   }
 }
 
@@ -185,6 +187,9 @@ class LibpgPrinter {
     ['RenameStmt', (body, indent) => this.rename(body, indent)],
     ['TransactionStmt', (body, indent) => this.transaction(body, indent)],
     ['VariableShowStmt', (body, indent) => this.variableShow(body, indent)],
+    ['CreateRoleStmt', (body, indent) => this.createRole(body, indent)],
+    ['AlterRoleStmt', (body, indent) => this.alterRole(body, indent)],
+    ['AlterRoleSetStmt', (body, indent) => this.alterRoleSet(body, indent)],
   ])
 
   /* Expression printers keyed by the raw PostgreSQL node tag. */
@@ -1719,6 +1724,7 @@ class LibpgPrinter {
       const value = this.tag(object)?.[1]
       if (value?.items) return this.identifierList(value.items)
       if (value?.objname) return this.objectWithArgs(value)
+      if (value?.sval) return this.quoteIdentifier(value.sval)
       return ''
     }).filter(Boolean).join(', ')
     const type = types[body.removeType]
@@ -2067,6 +2073,67 @@ class LibpgPrinter {
    */
   variableShow(body: any, indent: string): string[] {
     return [`${indent}SHOW ${body.name}`]
+  }
+
+  /**
+   * Format a role option.
+   * @param node - DefElem node.
+   * @returns SQL role option.
+   */
+  roleOption(node: any): string {
+    const option = this.tag(node)?.[1]
+    if (!option) return ''
+    const value = this.tag(option.arg)?.[1]
+    switch (option.defname) {
+      case 'canlogin': return value?.boolval ? 'LOGIN' : 'NOLOGIN'
+      case 'superuser': return value?.boolval ? 'SUPERUSER' : 'NOSUPERUSER'
+      case 'createdb': return value?.boolval ? 'CREATEDB' : 'NOCREATEDB'
+      case 'createrole': return value?.boolval ? 'CREATEROLE' : 'NOCREATEROLE'
+      case 'inherit': return value?.boolval ? 'INHERIT' : 'NOINHERIT'
+      case 'bypassrls': return value?.boolval ? 'BYPASSRLS' : 'NOBYPASSRLS'
+      case 'replication': return value?.boolval ? 'REPLICATION' : 'NOREPLICATION'
+      case 'password': return value?.sval ? `PASSWORD '${String(value.sval).replace(/'/gu, "''")}'` : 'PASSWORD NULL'
+      case 'connectionlimit': return `CONNECTION LIMIT ${value?.ival ?? value?.sval ?? 0}`
+      default: return `${option.defname.toUpperCase()} ${value?.sval ?? ''}`.trim()
+    }
+  }
+
+  /**
+   * Format a CREATE ROLE or CREATE GROUP statement.
+   * @param body - CreateRoleStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  createRole(body: any, indent: string): string[] {
+    const type = body.stmt_type === 'ROLESTMT_GROUP' ? 'GROUP' : 'ROLE'
+    const options = (body.options ?? []).map((node: any) => this.roleOption(node)).filter(Boolean)
+    const suffix = options.length ? ` ${options.join(' ')}` : ''
+    return [`${indent}CREATE ${type} ${this.quoteIdentifier(body.role)}${suffix}`]
+  }
+
+  /**
+   * Format an ALTER ROLE statement.
+   * @param body - AlterRoleStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  alterRole(body: any, indent: string): string[] {
+    const options = (body.options ?? []).map((node: any) => this.roleOption(node)).filter(Boolean)
+    const role = this.roleSpec(this.tag(body.role)?.[1] ?? body.role)
+    const suffix = options.length ? ` ${options.join(' ')}` : ''
+    return [`${indent}ALTER ROLE ${role}${suffix}`]
+  }
+
+  /**
+   * Format an ALTER ROLE ... SET statement.
+   * @param body - AlterRoleSetStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  alterRoleSet(body: any, indent: string): string[] {
+    const role = this.roleSpec(this.tag(body.role)?.[1] ?? body.role)
+    const set = body.setstmt ? this.variableSet(body.setstmt, '').join(' ') : ''
+    return [`${indent}ALTER ROLE ${role} ${set}`]
   }
 
   /**
@@ -2598,9 +2665,11 @@ class PlPgSqlPrinter {
       case 'PLpgSQL_stmt_execsql': {
         const query = body.sqlstmt?.PLpgSQL_expr?.query ?? ''
         if (!query) return []
-        const formatted = formatSQL(query, `${indent}`)
-        if (!formatted) return []
-        const lines = formatted.split('\n')
+        const nested = formatSQLResult(query, `${indent}`)
+        if (nested.status !== 'formatted') {
+          throw new UnsupportedNodeError(nested.unsupported ?? 'PL/pgSQL SQL expression')
+        }
+        const lines = nested.formatted.split('\n')
         if (body.into && body.target) {
           const target = this.plTarget(body.target)
           const from = lines.findIndex(line => /^\s*FROM\b/u.test(line))
@@ -2783,7 +2852,11 @@ class PlPgSqlPrinter {
    */
   expression(query: string): string {
     if (!query.trim()) return ''
-    const formatted = formatSQL(`SELECT ${query}`, '', false).trim()
+    const result = formatSQLResult(`SELECT ${query}`, '', false)
+    if (result.status !== 'formatted') {
+      throw new UnsupportedNodeError(result.unsupported ?? 'PL/pgSQL expression')
+    }
+    const formatted = result.formatted.trim()
     const expression = formatted.startsWith('SELECT ') ? formatted.slice(7) : formatted
     return expression.replace(/\b(new|old)\b/giu, word => word.toUpperCase())
   }
@@ -2838,10 +2911,10 @@ export const sqlTemplateFormat: Rule.RuleModule = {
           line.trim() === '' ? '' : line.startsWith(rawIndent) ? line.slice(rawIndent.length) : line
         )).join('\n')
         const result = formatSQLResult(dedented, `${baseIndent}  `)
-        if (result.unsupported) {
+        if (result.status !== 'formatted') {
           context.report({
-            data: { construct: result.unsupported },
-            messageId: 'unsupportedSql',
+            data: { construct: result.unsupported ?? result.error ?? 'unknown SQL' },
+            messageId: result.status === 'unsupported' ? 'unsupportedSql' : 'parseErrorSql',
             node,
           })
           return
@@ -2867,6 +2940,7 @@ export const sqlTemplateFormat: Rule.RuleModule = {
     fixable: 'code',
     messages: {
       formatSql: 'SQL template is not in canonical format.',
+      parseErrorSql: 'SQL formatting could not verify this SQL: {{construct}}.',
       unsupportedSql: 'SQL formatting is not supported for {{construct}}.',
     },
     schema: [],
