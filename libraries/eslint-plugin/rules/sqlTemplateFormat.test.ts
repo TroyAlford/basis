@@ -101,6 +101,21 @@ describe('formatSQL', () => {
   })
 
   describe('plpgsql', () => {
+    test('preserves function parameters and defaults', () => {
+      expect(formatSQL(`
+        create function add_one(value integer, label text default 'x') returns integer as $$
+        begin
+          return value + 1;
+        end $$ language plpgsql
+      `)).toMatchIndented(`
+        CREATE FUNCTION add_one("value" INTEGER, "label" TEXT DEFAULT 'x') RETURNS INTEGER AS $$
+        BEGIN
+          RETURN value + 1;
+        END
+        $$ LANGUAGE plpgsql
+      `)
+    })
+
     test('formats a trigger body with IF/ELSIF/ELSE', () => {
       expect(formatSQL(`
         create or replace function set_status() returns trigger as $$
@@ -361,6 +376,9 @@ describe('formatSQL', () => {
       `)
       expect(formatSQL('analyze widgets')).toMatchIndented(`
         ANALYZE "widgets"
+      `)
+      expect(formatSQL('vacuum widgets')).toMatchIndented(`
+        VACUUM "widgets"
       `)
       expect(formatSQL('create sequence public.wseq start 1')).toMatchIndented(`
         CREATE SEQUENCE "public"."wseq" START 1

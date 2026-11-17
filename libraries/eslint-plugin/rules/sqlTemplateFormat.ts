@@ -1101,7 +1101,9 @@ class LibpgPrinter {
     const name = (body.funcname ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').join('.')
     const language = this.optionValue(body.options, 'language') ?? 'plpgsql'
     const returnType = this.formatTypeName(body.returnType)
-    const header = `${indent}CREATE ${body.replace ? 'OR REPLACE ' : ''}FUNCTION ${name}() RETURNS ${returnType} AS $$`
+    const parameters = this.parameterList(body.parameters)
+    const header = `${indent}CREATE ${body.replace ? 'OR REPLACE ' : ''}FUNCTION ${name}(${parameters})` +
+      ` RETURNS ${returnType} AS $$`
     const parsed = parsePlPgSQLSync(this.source.slice(this.start, this.end)) as any
     const func = parsed.plpgsql_funcs?.[0]?.PLpgSQL_function
     const bodyText = this.optionBody(body.options)
@@ -1122,6 +1124,29 @@ class LibpgPrinter {
     const bodyText = this.doBody(_body)
     const lines = func ? new PlPgSqlPrinter(this.plBodyComments(bodyText), func, this.start, this.end).print() : []
     return [`${indent}DO $$`, ...lines, `${indent}$$`]
+  }
+
+  /**
+   * Format a CREATE FUNCTION parameter list.
+   * @param parameters - FunctionParameter nodes.
+   * @returns Comma-separated parameters.
+   */
+  parameterList(parameters: readonly any[]): string {
+    return (parameters ?? []).map((node: any) => {
+      const parameter = this.tag(node)?.[1]
+      if (!parameter) return ''
+      const modes: Record<string, string> = {
+        FUNC_PARAM_INOUT: 'INOUT ',
+        FUNC_PARAM_OUT: 'OUT ',
+        FUNC_PARAM_TABLE: 'TABLE ',
+        FUNC_PARAM_VARIADIC: 'VARIADIC ',
+      }
+      const mode = modes[parameter.mode] ?? ''
+      const name = parameter.name ? `${this.quoteIdentifier(parameter.name)} ` : ''
+      const type = this.formatTypeName(parameter.argType)
+      const defaultExpr = parameter.defexpr ? ` DEFAULT ${this.expr(parameter.defexpr)}` : ''
+      return `${mode}${name}${type}${defaultExpr}`
+    }).filter(Boolean).join(', ')
   }
 
   /**
@@ -1293,10 +1318,11 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   vacuum(body: any, indent: string): string[] {
+    const command = body.is_vacuumcmd ? 'VACUUM' : 'ANALYZE'
     const relations = (body.rels ?? []).map((node: any) => (
       this.relationName(this.tag(node)?.[1]?.relation)
     )).filter(Boolean)
-    return [`${indent}ANALYZE${relations.length ? ` ${relations.join(', ')}` : ''}`]
+    return [`${indent}${command}${relations.length ? ` ${relations.join(', ')}` : ''}`]
   }
 
   /**
