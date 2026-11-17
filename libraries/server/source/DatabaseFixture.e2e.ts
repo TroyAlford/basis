@@ -263,10 +263,10 @@ describe('Basis substrate installation', () => {
         triggerFunction: boolean,
       }[]>`
         SELECT
-          TO_REGPROCEDURE('basis.enroll_identity(text,text,text,text)') IS NULL AS "enroll",
-          TO_REGPROCEDURE('basis.resolve_identity(text)') IS NULL AS "resolve",
-          TO_REGPROCEDURE('basis.has_role(text)') IS NULL AS "role",
-          TO_REGPROCEDURE('resolve_invoice_status()') IS NOT NULL AS "triggerFunction"
+          to_regprocedure('basis.enroll_identity(text,text,text,text)') IS NULL AS "enroll",
+          to_regprocedure('basis.resolve_identity(text)') IS NULL AS "resolve",
+          to_regprocedure('basis.has_role(text)') IS NULL AS "role",
+          to_regprocedure('resolve_invoice_status()') IS NOT NULL AS "triggerFunction"
       `).toEqual([{ enroll: true, resolve: true, role: true, triggerFunction: true }])
       expect(await database.sql<{ present: boolean }[]>`
         SELECT EXISTS (SELECT 1 FROM "pg_trigger" "TRIGGER"

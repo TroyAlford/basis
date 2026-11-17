@@ -1523,7 +1523,7 @@ export async function withDatabase<T>(
       await options.setup?.(context())
       await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
       await sql`
-        SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
+        SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
       `
       return callback(context())
     },
@@ -1609,7 +1609,7 @@ async function ensureSchema(
   if (appRole !== undefined) await ensureApplicationRole(database, appRole)
   await database.tx(async sql => {
     await sql`
-      SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
+      SELECT pg_advisory_xact_lock(HASHTEXT(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
       SELECT EXISTS (SELECT 1 FROM "pg_catalog"."pg_namespace" WHERE "nspname" = ${schema}) AS "present"
@@ -1650,7 +1650,7 @@ async function ensureGraphSchema(database: Database): Promise<string> {
   const schema = FIXTURE_SCHEMA
   await database.tx(async sql => {
     await sql`
-      SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
+      SELECT pg_advisory_xact_lock(HASHTEXT(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
       SELECT EXISTS (SELECT 1 FROM "pg_catalog"."pg_namespace" WHERE "nspname" = ${schema}) AS "present"
@@ -1689,7 +1689,7 @@ async function ensureGraphSchema(database: Database): Promise<string> {
         SELECT EXISTS (SELECT 1 FROM "pg_trigger" "TRIGGER"
         JOIN "pg_class" "relation" ON "relation"."oid" = "TRIGGER"."tgrelid"
         JOIN "pg_namespace" "namespace" ON "namespace"."oid" = "relation"."relnamespace" WHERE "namespace"."nspname" =
-          ${schema}   AND ("TRIGGER"."tgname" ILIKE '%enroll%' OR PG_GET_TRIGGERDEF("TRIGGER"."oid") ILIKE
+          ${schema}   AND ("TRIGGER"."tgname" ILIKE '%enroll%' OR pg_get_triggerdef("TRIGGER"."oid") ILIKE
           '%enroll_identity%')) AS "present"
       `
       if (legacy?.present) complete = false

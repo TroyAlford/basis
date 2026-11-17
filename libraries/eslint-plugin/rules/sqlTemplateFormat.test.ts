@@ -158,7 +158,7 @@ describe('formatSQL', () => {
       `)).toMatchIndented(`
         CREATE OR REPLACE FUNCTION compute() RETURNS TRIGGER AS $$
         BEGIN
-          NEW.vectors := COMPUTE_VECTORS(NEW.name, NEW.aliases);
+          NEW.vectors := compute_vectors(NEW.name, NEW.aliases);
           RETURN NEW;
         END
         $$ LANGUAGE plpgsql;

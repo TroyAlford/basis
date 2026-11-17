@@ -701,7 +701,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       END AS "grantee",
       "a"."privilege_type" AS "privilege"
     FROM "pg_namespace" "n"
-    , ACLEXPLODE("n"."nspacl") "a"
+    , aclexplode("n"."nspacl") "a"
     WHERE "n"."nspname" IN ('public', 'basis', CURRENT_SCHEMA())
     ORDER BY "n"."nspname", "grantee", "privilege"
   `
@@ -722,7 +722,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       "a"."privilege_type" AS "privilege"
     FROM "pg_proc" "p"
     JOIN "pg_namespace" "n" ON "n"."oid" = "p"."pronamespace"
-    , ACLEXPLODE("p"."proacl") "a"
+    , aclexplode("p"."proacl") "a"
     WHERE "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
     ORDER BY "function", "grantee", "privilege"
   `

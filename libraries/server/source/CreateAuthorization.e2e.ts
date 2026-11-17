@@ -61,7 +61,7 @@ describe('resource-scoped create authorization', () => {
       const parent = created.record?.id
       expect(parent).toBeDefined()
       await database.sql`
-        SELECT SET_CONFIG('actor.id', ${rows.bob}, TRUE)
+        SELECT set_config('actor.id', ${rows.bob}, TRUE)
       `
       await expect(database.sql`
         INSERT INTO "CreateSibling" ("id")

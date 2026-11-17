@@ -137,6 +137,21 @@ interface SqlComment {
   text: string,
 }
 
+const BUILTIN_FUNCTIONS = new Set([
+  'abs', 'array_agg', 'array_length', 'array_position', 'array_remove', 'array_to_string',
+  'avg', 'cardinality', 'cast', 'chr', 'coalesce', 'count', 'current_database',
+  'current_schema', 'current_schemas', 'current_setting', 'current_user', 'date_part',
+  'date_trunc', 'extract', 'format', 'generate_series', 'gen_random_uuid', 'greatest',
+  'hashtext', 'json_agg', 'json_build_object', 'jsonb_agg', 'jsonb_build_object',
+  'jsonb_set', 'least', 'length', 'lower', 'make_interval', 'max', 'md5', 'min', 'now',
+  'nullif', 'pg_get_constraintdef', 'pg_get_function_identity_arguments', 'pg_get_functiondef',
+  'pg_get_indexdef', 'pg_get_userbyid', 'position', 'random', 'regexp_replace', 'round',
+  'row_to_json', 'session_user', 'setweight', 'split_part', 'string_agg', 'string_to_array',
+  'substring', 'sum', 'to_char', 'to_date', 'to_json', 'to_jsonb', 'to_regclass',
+  'to_timestamp', 'to_tsvector', 'transaction_timestamp', 'trim', 'unaccent', 'unnest',
+  'upper', 'user',
+])
+
 const ALIAS_STOP_WORDS = new Set([
   'from', 'where', 'group', 'having', 'order', 'limit', 'offset', 'union', 'intersect',
   'except', 'join', 'inner', 'left', 'right', 'full', 'cross', 'natural', 'on', 'using',
@@ -1593,7 +1608,11 @@ class LibpgPrinter {
     const raw = typeof body.location === 'number' && body.location >= 0
       ? this.readQualifiedName(body.location, parts.length, false).text
       : parts.join('.')
-    const name = raw.split('.').map(part => (part.startsWith('"') ? part : part.toUpperCase())).join('.')
+    const builtin = BUILTIN_FUNCTIONS.has((raw.split('.').at(-1) ?? '').toLowerCase())
+    const name = raw.split('.').map(part => {
+      if (part.startsWith('"')) return part
+      return builtin ? part.toUpperCase() : part.toLowerCase()
+    }).join('.')
     if (body.over || body.agg_filter || body.agg_within_group || body.func_variadic) {
       throw new Error('Unsupported function clause')
     }

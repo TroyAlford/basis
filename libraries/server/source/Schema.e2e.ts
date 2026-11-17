@@ -1259,7 +1259,7 @@ describe('DDL schema planning', () => {
         superuser: true,
       })
       const [privilege] = await database.sql<{ create: boolean }[]>`
-        SELECT HAS_SCHEMA_PRIVILEGE(${appRole}, 'public', 'CREATE') AS "create"
+        SELECT has_schema_privilege(${appRole}, 'public', 'CREATE') AS "create"
       `
       expect(privilege?.create).toBe(false)
     }, { fresh: true })

@@ -244,7 +244,7 @@ describe('Graph mutation authorization', () => {
       const server = fixtureServer(database)
       const asActor = async <T>(actor: string | null, work: () => T | Promise<T>): Promise<T> => {
         await database.sql`
-          SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
+          SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
         `
         return await work()
       }
@@ -396,7 +396,7 @@ describe('Graph mutation authorization', () => {
       const server = fixtureServer(database)
       const asActor = async <T>(actor: string | null, work: () => T | Promise<T>): Promise<T> => {
         await database.sql`
-          SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
+          SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
         `
         return await work()
       }
