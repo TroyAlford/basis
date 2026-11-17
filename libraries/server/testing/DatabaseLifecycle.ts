@@ -1,6 +1,6 @@
 import type { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
-import type { DatabaseTransaction, QueryOptions } from '../source/Database'
+import type { QueryOptions } from '../source/Database'
 import { queryEntity } from '../source/Database'
 import type { EntityDefinitions } from '../source/EntityDefinitions'
 import type { MutationDatabase, MutationFilter, MutationValues } from '../source/Mutation'
@@ -11,14 +11,14 @@ import { useDatabaseFixture } from './DatabaseFixture'
 type ReservedSQL = Awaited<ReturnType<BunSQL['reserve']>>
 
 /** A transaction-bound database used by an ordinary isolated test. */
-export interface IsolatedDatabase extends MutationDatabase {
+export interface LifecycleDatabase extends MutationDatabase {
   /**
    * Run a callback that is expected to fail, recovering through a savepoint.
    * @param work - Operation expected to throw.
    * @returns The thrown error.
    * @throws {Error} When the operation succeeds or a savepoint operation fails.
    */
-  captureError(work: (database: IsolatedDatabase) => Promise<unknown>): Promise<unknown>,
+  captureError(work: (database: LifecycleDatabase) => Promise<unknown>): Promise<unknown>,
   /** Shared entity definitions attached to the fixture. */
   readonly entities: EntityDefinitions,
   /**
@@ -36,32 +36,11 @@ export interface IsolatedDatabase extends MutationDatabase {
   use(entities: EntityDefinitions): Promise<void>,
 }
 
-/** A committed, unique schema used by a cross-transaction test. */
-export interface DurableDatabase extends MutationDatabase {
-  /** Shared entity definitions attached to the fixture. */
-  readonly entities: EntityDefinitions,
-  /**
-   * Project effective scalar and singular reference paths in a schema-scoped transaction.
-   * @param entity - Exact canonical entity name.
-   * @param options - Query options.
-   * @returns The selected rows.
-   */
-  query<T = Record<string, unknown>>(entity: string, options: QueryOptions): Promise<T[]>,
-  /** Unique schema owned by this test. */
-  readonly schema: string,
-  /**
-   * Run a schema-scoped transaction on the shared production pool.
-   * @param callback - Transaction-scoped work.
-   * @returns The callback result after commit.
-   */
-  tx<T>(callback: BunSQL.TransactionContextCallback<T>): Promise<BunSQL.ContextCallbackResult<T>>,
-}
-
 /** Saved savepoint name prefix. */
 const SAVEPOINT_PREFIX = 'basis_test_savepoint_'
 
-/** Options for one isolated database test. */
-export interface IsolatedDatabaseOptions {
+/** Options for one lifecycle-backed rollback database test. */
+export interface LifecycleDatabaseOptions {
   /** Entity definitions to prepare and query; defaults to the fixture's shared model. */
   readonly entities?: EntityDefinitions,
   /** Allocate a unique schema instead of using the cached fixture schema. */
@@ -79,10 +58,10 @@ export interface IsolatedDatabaseOptions {
  * @param options - Isolation options.
  * @returns The callback result.
  */
-export async function withIsolatedDatabase<T>(
+export async function withLifecycleDatabase<T>(
   label: string,
-  callback: (database: IsolatedDatabase) => Promise<T>,
-  options: IsolatedDatabaseOptions = {},
+  callback: (database: LifecycleDatabase) => Promise<T>,
+  options: LifecycleDatabaseOptions = {},
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
   const entities = options.entities ?? fixture.entities
@@ -96,7 +75,7 @@ export async function withIsolatedDatabase<T>(
       await reserved.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
     }
     await setSearchPath(reserved, schema)
-    return await callback(new IsolatedDatabaseContext(
+    return await callback(new LifecycleDatabaseContext(
       reserved,
       entities,
       schema,
@@ -111,76 +90,8 @@ export async function withIsolatedDatabase<T>(
   }
 }
 
-/**
- * Run a cross-transaction database test in a committed unique schema.
- *
- * The schema is dropped after the callback, including when it fails, so
- * committed resources cannot leak while commit/rollback semantics stay real.
- * @param label - Fixture acquisition label.
- * @param callback - Test work using the durable database.
- * @returns The callback result.
- */
-export async function withDurableDatabase<T>(
-  label: string,
-  callback: (database: DurableDatabase) => Promise<T>,
-): Promise<T> {
-  const fixture = await useDatabaseFixture(label)
-  const schema = schemaName()
-  await fixture.database.sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
-
-  const transaction = <Result>(work: BunSQL.TransactionContextCallback<Result>) => (
-    fixture.database.tx(async sql => {
-      await setSearchPath(sql, schema)
-      return await work(sql)
-    })
-  )
-
-  const mutations = <Result>(
-    work: (mutation: MutationDatabase) => Promise<Result>,
-  ): Promise<Result> => transaction(tx => work(tx as DatabaseTransaction))
-  const database: DurableDatabase = {
-    create: (entity, values) => mutations(mutation => mutation.create(entity, values)),
-    delete: (entity, filter) => mutations(mutation => mutation.delete(entity, filter)),
-    edit: (entity, filter, changes) => mutations(mutation => mutation.edit(entity, filter, changes)),
-    entities: fixture.entities,
-    query: async <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
-      transaction(tx => queryEntity<Result>(tx, fixture.entities, entity, options))
-    ),
-    schema,
-    tx: transaction,
-    upsert: (entity, filter, values) => mutations(mutation => mutation.upsert(entity, filter, values)),
-  }
-
-  const cleanup = async (): Promise<void> => {
-    await fixture.database.sql.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`).simple()
-    const remaining = await fixture.database.sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema} ) AS present
-    `
-    if (remaining[0]?.present) throw new Error(`Database test schema "${schema}" was not removed`)
-  }
-
-  let result!: T
-  try {
-    result = await callback(database)
-  } catch (error) {
-    try {
-      await cleanup()
-    } catch (cleanupError) {
-      throw new AggregateError(
-        [error, cleanupError],
-        'Durable database test and cleanup failed',
-        { cause: cleanupError },
-      )
-    }
-    throw error
-  }
-
-  await cleanup()
-  return result
-}
-
 /** A transaction-bound isolated database context. */
-class IsolatedDatabaseContext implements IsolatedDatabase {
+class LifecycleDatabaseContext implements LifecycleDatabase {
   #entities: EntityDefinitions
   #savepoint = 0
   #schema: string
@@ -268,7 +179,7 @@ class IsolatedDatabaseContext implements IsolatedDatabase {
    * @param work - Operation expected to throw.
    * @returns The thrown error.
    */
-  async captureError(work: (database: IsolatedDatabase) => Promise<unknown>): Promise<unknown> {
+  async captureError(work: (database: LifecycleDatabase) => Promise<unknown>): Promise<unknown> {
     const name = `${SAVEPOINT_PREFIX}${this.#savepoint}`
     this.#savepoint += 1
     await this.connection.unsafe(`savepoint ${quoteIdentifier(name)}`).simple()

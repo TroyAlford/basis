@@ -2,7 +2,7 @@ import Ajv2020 from 'ajv/dist/2020'
 import addFormats from 'ajv-formats'
 import { FieldType, Graph } from 'basis/server'
 import { describe, expect, test } from 'bun:test'
-import { withIsolatedDatabase } from '../../server/testing/DatabaseIsolation'
+import { withLifecycleDatabase } from '../../server/testing/DatabaseLifecycle'
 import { generateJSONSchemas } from '../index'
 
 const graph = new Graph({
@@ -26,7 +26,7 @@ const graph = new Graph({
 
 describe('Codegen output contracts', () => {
   test('match hydrated nullable and non-nullable PostgreSQL values', async () => {
-    await withIsolatedDatabase('codegen-output-contract', async database => {
+    await withLifecycleDatabase('codegen-output-contract', async database => {
       await database.use(graph.definitions)
       await database.create('User', { email: 'owner@example.com', name: 'Owner' })
       const [owner] = await database.query<{ id: string }>('User', { fields: ['id'] })

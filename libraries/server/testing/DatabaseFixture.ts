@@ -1205,31 +1205,109 @@ export async function withDatabase<T>(
   ))
 }
 
-/** A real committed app-role transaction context for commit-boundary proofs. */
+/** A real committed transaction context for commit-boundary proofs. */
 export interface CommittedDatabaseContext extends MutationDatabase {
-  /** Query through the canonical entity compiler under RLS. */
+  /** Entity definitions attached to the committed proof. */
+  readonly entities: EntityDefinitions,
+  /** Query through the canonical entity compiler. */
   query: <T = Record<string, unknown>>(entity: string, options: QueryOptions) => Promise<T[]>,
-  /** Graph-native transaction connection already scoped to the app role. */
+  /** Schema selected for the committed proof. */
+  readonly schema: string,
+  /** Transaction-bound SQL client for the active committed proof. */
   readonly sql: DatabaseTransaction,
+  /** Run one schema-scoped committed transaction. */
+  tx: <T>(callback: (sql: DatabaseTransaction) => T | Promise<T>) => Promise<T>,
+}
+
+/** Options for the internal committed proof helper. */
+export interface CommittedDatabaseOptions extends DatabaseTestOptions {
+  /** Entity definitions for a committed proof; defaults to the fixture model. */
+  readonly entities?: EntityDefinitions,
+  /** Allocate a disposable unique schema instead of the cached fixture schema. */
+  readonly fresh?: boolean,
 }
 
 /**
- * Run one real committed Graph-native transaction on the shared fixture.
+ * Run one real committed transaction on the shared fixture.
+ *
+ * This is an internal lifecycle/concurrency proof helper, not a consumer test
+ * API. `fresh` creates a disposable schema that is dropped after the callback.
+ * @param label - Fixture acquisition label.
+ * @param callback - Work using the committed context.
+ * @param options - Custom Graph, owner-run setup, and fresh-schema selection.
+ * @returns The callback result after commit.
+ */
+export function withCommittedDatabase<T>(
+  label: string,
+  callback: (database: CommittedDatabaseContext) => Promise<T>,
+  options?: CommittedDatabaseOptions,
+): Promise<T>
+/**
+ * Run one real committed app-role transaction on the shared fixture.
  * @param label - Fixture acquisition label.
  * @param actor - Verified actor identity, or null for anonymous.
  * @param callback - Work using the app-role transaction.
  * @param options - Custom Graph and owner-run setup.
  * @returns The callback result after commit.
  */
-export async function withCommittedDatabase<T>(
+export function withCommittedDatabase<T>(
   label: string,
   actor: string | null,
   callback: (database: CommittedDatabaseContext) => Promise<T>,
-  options: DatabaseTestOptions = {},
+  options?: CommittedDatabaseOptions,
+): Promise<T>
+export async function withCommittedDatabase<T>(
+  label: string,
+  actorOrCallback: string | null | ((database: CommittedDatabaseContext) => Promise<T>),
+  callbackOrOptions?: ((database: CommittedDatabaseContext) => Promise<T>) | CommittedDatabaseOptions,
+  maybeOptions: CommittedDatabaseOptions = {},
 ): Promise<T> {
+  const inline = typeof actorOrCallback === 'function'
+  const actor = inline ? null : actorOrCallback
+  const callback = inline
+    ? actorOrCallback
+    : callbackOrOptions as (database: CommittedDatabaseContext) => Promise<T>
+  const options = inline
+    ? (callbackOrOptions as CommittedDatabaseOptions | undefined) ?? {}
+    : maybeOptions
   const fixture = await useDatabaseFixture(label)
+  const entities = options.entities ?? options.graph?.definitions ?? fixtureGraph.definitions
+
+  if (options.fresh) {
+    const schema = committedSchemaName()
+    await fixture.database.sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
+    const transaction = async <Result>(
+      work: (sql: DatabaseTransaction) => Result | Promise<Result>,
+    ): Promise<Result> => (
+      await fixture.database.tx(async sql => {
+        await sql.unsafe(`set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`).simple()
+        return work(sql)
+      }) as Result
+    )
+    const mutations = <Result>(
+      work: (mutation: MutationDatabase) => Promise<Result>,
+    ): Promise<Result> => transaction(tx => work(tx as DatabaseTransaction))
+    const database: CommittedDatabaseContext = {
+      create: (entity, values) => mutations(mutation => mutation.create(entity, values)),
+      delete: (entity, filter) => mutations(mutation => mutation.delete(entity, filter)),
+      edit: (entity, filter, changes) => mutations(mutation => mutation.edit(entity, filter, changes)),
+      entities: fixture.entities,
+      query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
+        transaction(tx => queryEntity<Result>(tx, fixture.entities, entity, queryOptions))
+      ),
+      schema,
+      sql: fixture.database.sql as unknown as DatabaseTransaction,
+      tx: transaction,
+      upsert: (entity, filter, values) => mutations(mutation => mutation.upsert(entity, filter, values)),
+    }
+    try {
+      return await callback(database)
+    } finally {
+      await fixture.database.sql.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`).simple()
+    }
+  }
+
   const custom = options.graph !== undefined
-  const entities = options.graph?.definitions ?? fixtureGraph.definitions
   const appRole = FIXTURE_APP_ROLE
   if (!custom) await ensureGraphSchema(fixture.database)
   const schema = custom
@@ -1260,10 +1338,13 @@ export async function withCommittedDatabase<T>(
       create: (entity, values) => sql.create(entity, values),
       delete: (entity, filter) => sql.delete(entity, filter),
       edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
+      entities,
       query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
         queryEntity<Result>(sql, entities, entity, queryOptions)
       ),
+      schema,
       sql,
+      tx: async work => work(sql),
       upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
     })
   }))
@@ -1388,6 +1469,14 @@ async function ensureGraphSchema(database: Database): Promise<string> {
  */
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`
+}
+
+/**
+ * Create a unique per-proof schema name.
+ * @returns A safe schema identifier.
+ */
+function committedSchemaName(): string {
+  return `basis_test_${randomUUID().replaceAll('-', '')}`
 }
 
 /**

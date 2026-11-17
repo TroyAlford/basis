@@ -69,7 +69,7 @@ const RULE_ALLOWANCES = {
     'libraries/server/source/Migration.e2e.ts',
     'libraries/server/source/Release.e2e.ts',
     'libraries/server/testing/DatabaseFixture.ts',
-    'libraries/server/testing/DatabaseIsolation.ts',
+    'libraries/server/testing/DatabaseLifecycle.ts',
     'libraries/server/testing/DatabaseSeed.ts',
   ],
 }

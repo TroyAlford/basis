@@ -3,9 +3,11 @@ import { runAsync } from 'basis/utilities'
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import type { CommittedDatabaseContext } from '../testing/DatabaseFixture'
 import { accountDefinition, noteDefinition, numberRowDefinition, useDatabaseFixture } from '../testing/DatabaseFixture'
-import type { DurableDatabase, IsolatedDatabase } from '../testing/DatabaseIsolation'
-import { withDurableDatabase, withIsolatedDatabase } from '../testing/DatabaseIsolation'
+import { withCommittedDatabase } from '../testing/DatabaseFixture'
+import type { LifecycleDatabase } from '../testing/DatabaseLifecycle'
+import { withLifecycleDatabase } from '../testing/DatabaseLifecycle'
 import { installSchema } from '../testing/Schema'
 import { compileEntityQuery, queryEntity } from './Database'
 import { EntityDefinitions } from './EntityDefinitions'
@@ -38,10 +40,10 @@ function start(server: Server): Server {
  */
 function isolatedTest(
   name: string,
-  callback: (database: IsolatedDatabase) => Promise<void>,
+  callback: (database: LifecycleDatabase) => Promise<void>,
   timeout = 120_000,
 ): void {
-  test(name, () => withIsolatedDatabase(name, callback), timeout)
+  test(name, () => withLifecycleDatabase(name, callback), timeout)
 }
 
 /**
@@ -52,10 +54,10 @@ function isolatedTest(
  */
 function freshIsolatedTest(
   name: string,
-  callback: (database: IsolatedDatabase) => Promise<void>,
+  callback: (database: LifecycleDatabase) => Promise<void>,
   timeout = 120_000,
 ): void {
-  test(name, () => withIsolatedDatabase(name, callback, { fresh: true }), timeout)
+  test(name, () => withLifecycleDatabase(name, callback, { fresh: true }), timeout)
 }
 
 /**
@@ -66,10 +68,10 @@ function freshIsolatedTest(
  */
 function durableTest(
   name: string,
-  callback: (database: DurableDatabase) => Promise<void>,
+  callback: (database: CommittedDatabaseContext) => Promise<void>,
   timeout = 120_000,
 ): void {
-  test(name, () => withDurableDatabase(name, callback), timeout)
+  test(name, () => withCommittedDatabase(name, callback, { fresh: true }), timeout)
 }
 
 describe('Server database lifecycle', () => {
@@ -2898,7 +2900,7 @@ describe('Server database lifecycle', () => {
 
   test('rolls back successful isolated tests and shares the transaction with db.query', async () => {
     let schema = ''
-    await withIsolatedDatabase('rollback-success', async database => {
+    await withLifecycleDatabase('rollback-success', async database => {
       schema = database.schema
       await database.sql`
         CREATE TABLE "NumberRow" ("id" uuid PRIMARY KEY, "value" double precision NOT NULL)
@@ -2921,7 +2923,7 @@ describe('Server database lifecycle', () => {
 
   test('rolls back failed isolated tests', async () => {
     let schema = ''
-    await expect(withIsolatedDatabase('rollback-failure', async database => {
+    await expect(withLifecycleDatabase('rollback-failure', async database => {
       schema = database.schema
       await database.sql`
         CREATE TABLE "FailureProbe" ("id" uuid PRIMARY KEY)
@@ -2937,7 +2939,7 @@ describe('Server database lifecycle', () => {
 
   test('runs concurrent isolated tests in independent schemas', async () => {
     const schemas = await Promise.all([
-      withIsolatedDatabase('concurrent-a', async database => {
+      withLifecycleDatabase('concurrent-a', async database => {
         await database.sql`
           CREATE TABLE "NumberRow" ("id" uuid PRIMARY KEY, "value" double precision NOT NULL)
         `
@@ -2951,7 +2953,7 @@ describe('Server database lifecycle', () => {
         })).toEqual([{ value: 1 }])
         return database.schema
       }, { fresh: true }),
-      withIsolatedDatabase('concurrent-b', async database => {
+      withLifecycleDatabase('concurrent-b', async database => {
         await database.sql`
           CREATE TABLE "NumberRow" ("id" uuid PRIMARY KEY, "value" double precision NOT NULL)
         `
@@ -2978,7 +2980,7 @@ describe('Server database lifecycle', () => {
 
   test('cleans committed durable schemas after failures', async () => {
     let schema = ''
-    await expect(withDurableDatabase('durable-failure', async database => {
+    await expect(withCommittedDatabase('durable-failure', async database => {
       schema = database.schema
       await database.tx(async sql => {
         await sql`
@@ -2986,7 +2988,7 @@ describe('Server database lifecycle', () => {
         `
       })
       throw new Error('forced durable failure')
-    })).rejects.toThrow('forced durable failure')
+    }, { fresh: true })).rejects.toThrow('forced durable failure')
 
     const { database } = await useDatabaseFixture('durable-failure-check')
     expect(await database.sql<{ present: boolean }[]>`

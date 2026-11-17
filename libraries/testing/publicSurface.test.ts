@@ -8,7 +8,7 @@ describe('basis/testing public database surface', () => {
       'useDatabaseFixture',
       'withCommittedDatabase',
       'withDurableDatabase',
-      'withIsolatedDatabase',
+      'withLifecycleDatabase',
     ]) {
       expect(name in testing).toBe(false)
     }

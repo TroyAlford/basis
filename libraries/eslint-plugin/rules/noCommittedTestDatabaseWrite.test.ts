@@ -54,10 +54,10 @@ describe('noCommittedTestDatabaseWrite', () => {
     ].join('\n'))).toHaveLength(0)
   })
 
-  test('allows withIsolatedDatabase', () => {
+  test('allows the internal rollback lifecycle helper', () => {
     expect(lint([
-      'import { withIsolatedDatabase } from \'basis/testing\'',
-      'await withIsolatedDatabase(\'test\', () => undefined)',
+      'import { withLifecycleDatabase } from \'../testing/DatabaseLifecycle\'',
+      'await withLifecycleDatabase(\'test\', () => undefined)',
     ].join('\n'))).toHaveLength(0)
   })
 
