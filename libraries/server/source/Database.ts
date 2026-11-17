@@ -145,8 +145,8 @@ function prepareEntityQuery(
   entity: string,
   options: QueryOptions,
 ): PreparedEntityQuery {
-  const definition = entities.entity(entity)
-  if (!definition) throw new Error(`Unknown entity "${entity}"`)
+  const definition = entities.entity(entity) ?? entities.relationshipRecord(entity)
+  if (!definition) throw new Error(`Unknown entity or relationship "${entity}"`)
   const compiled = compilePolymorphicQuery(entities, definition, options)
   return {
     hydrate: compiled.hydrate,

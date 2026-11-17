@@ -1752,6 +1752,38 @@ describe('Server database lifecycle', () => {
       where: { id: deckA },
     })
     expect(differentRecord[0]?.memberships.$matched).toBe(0)
+    const rootRecords = await queryEntity<Record<string, unknown>>(
+      database.sql,
+      entities,
+      'DeckMembership',
+      {
+        fields: ['deck', 'user', 'role'],
+        orderBy: 'role',
+        where: { role: 'Owner' },
+      },
+    )
+    expect(rootRecords).toEqual([
+      expect.objectContaining({
+        deck: expect.objectContaining({ id: deckA }),
+        role: 'Owner',
+        user: expect.objectContaining({ id: ada }),
+      }),
+    ])
+    expect(await database.create('DeckMembership', {
+      deck: deckB,
+      role: 'Editor',
+      user: ada,
+    })).toMatchObject({ created: 1, record: { role: 'Editor' } })
+    expect(await database.edit('DeckMembership', { deck: deckB, user: ada }, {
+      role: 'Viewer',
+    })).toMatchObject({ edited: 1, record: { role: 'Viewer' } })
+    expect(await database.upsert('DeckMembership', { deck: deckB, user: grace }, {
+      deck: deckB,
+      role: 'Owner',
+      user: grace,
+    })).toMatchObject({ created: 1, edited: 0, record: { role: 'Owner' } })
+    expect(await database.delete('DeckMembership', { deck: deckB, user: ada }))
+      .toEqual({ deleted: 1 })
     expect(entities.ddl.join('\n')).toContain('create table "DeckMembership"')
     expect(entities.ddl.join('\n')).not.toContain('create table "memberships"')
   })

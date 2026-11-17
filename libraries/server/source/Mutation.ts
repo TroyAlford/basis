@@ -2,6 +2,7 @@ import type { SQL as BunSQL } from 'bun'
 import { randomUUID } from 'node:crypto'
 import type { ArrayFieldDefinition, EffectiveFieldDefinition, EntityDefinition, EntityDefinitions, FieldDefinition, ScalarArrayElementDefinition } from './EntityDefinitions'
 import { FieldType, isCanonicalSnowflake, isCanonicalUUID } from './EntityDefinitions'
+import { Operator } from './Operator'
 import { compileEntityRecordQuery, compilePolymorphicQuery } from './PolymorphicQuery'
 import { postgresScalarType } from './PostgresTypes'
 import type { Filter } from './Predicate'
@@ -239,11 +240,301 @@ const EDIT_READONLY_FIELDS = new Set(['entity', 'id', 'lastUpdatedAt', 'lastUpda
  */
 export function mutationRunner(entities: EntityDefinitions, sql: BunSQL): MutationDatabase {
   return {
-    create: (entity, values) => create({ entities, sql }, entity, values),
-    delete: (entity, filter) => remove({ entities, sql }, entity, filter),
-    edit: (entity, filter, changes) => edit({ entities, sql }, entity, filter, changes),
-    upsert: (entity, filter, values) => upsert({ entities, sql }, entity, filter, values),
+    create: (entity, values) => (entities.relationship(entity)
+      ? relationshipCreate({ entities, sql }, entity, values)
+      : create({ entities, sql }, entity, values)),
+    delete: (entity, filter) => (entities.relationship(entity)
+      ? relationshipDelete({ entities, sql }, entity, filter)
+      : remove({ entities, sql }, entity, filter)),
+    edit: (entity, filter, changes) => (entities.relationship(entity)
+      ? relationshipEdit({ entities, sql }, entity, filter, changes)
+      : edit({ entities, sql }, entity, filter, changes)),
+    upsert: (entity, filter, values) => (entities.relationship(entity)
+      ? relationshipUpsert({ entities, sql }, entity, filter, values)
+      : upsert({ entities, sql }, entity, filter, values)),
   }
+}
+
+/**
+ * Resolve one relationship and its row-shaped projection view.
+ * @param entities - Canonical definitions.
+ * @param name - Relationship name.
+ * @returns The relationship and record view.
+ */
+function relationshipDefinition(
+  entities: EntityDefinitions,
+  name: string,
+): { relationship: NonNullable<ReturnType<EntityDefinitions['relationship']>>, view: EntityDefinition } {
+  const relationship = entities.relationship(name)
+  const view = relationship === undefined ? undefined : entities.relationshipRecord(name)
+  if (relationship === undefined || view === undefined) {
+    throw new MutationError('operation', `Unknown relationship "${name}"`)
+  }
+  return { relationship, view }
+}
+
+/**
+ * Read the required endpoint key values from one relationship mutation filter.
+ * @param relationship - Relationship being addressed.
+ * @param filter - Endpoint key filter.
+ * @returns Endpoint field names mapped to canonical identity strings.
+ */
+function relationshipKeys(
+  relationship: NonNullable<ReturnType<EntityDefinitions['relationship']>>,
+  filter: MutationFilter,
+): Readonly<Record<string, string>> {
+  if (!isPlainRecord(filter)) {
+    throw new MutationError(
+      'filter',
+      `Relationship "${relationship.name}" mutations require endpoint key fields`,
+    )
+  }
+  const keys: Record<string, string> = {}
+  for (const endpoint of relationship.between) {
+    const value = filter[endpoint.field]
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new MutationError('validation', `Field "${endpoint.field}" is required`, {
+        path: `/filter/${pointer(endpoint.field)}`,
+      })
+    }
+    keys[endpoint.field] = value
+  }
+  return keys
+}
+
+/**
+ * Build the SQL predicate and bindings for one relationship endpoint key.
+ * @param relationship - Relationship being addressed.
+ * @param keys - Endpoint values.
+ * @param bindings - Binding sink.
+ * @returns The quoted equality predicate.
+ */
+function relationshipKeyWhere(
+  relationship: NonNullable<ReturnType<EntityDefinitions['relationship']>>,
+  keys: Readonly<Record<string, string>>,
+  bindings: unknown[],
+): string {
+  return relationship.between.map(endpoint => {
+    bindings.push(keys[endpoint.field])
+    return `${quote(`${endpoint.field}.id`)} = $${bindings.length}`
+  }).join(' AND ')
+}
+
+/**
+ * Read one relationship record by its endpoint keys.
+ * @param options - Canonical definitions and transaction client.
+ * @param options.entities - Canonical definitions.
+ * @param options.sql - Transaction-scoped SQL client.
+ * @param view - Relationship record projection view.
+ * @param keys - Endpoint values.
+ * @returns The hydrated record.
+ */
+async function readRelationshipRecord(
+  { entities, sql }: MutationOptions,
+  view: EntityDefinition,
+  keys: Readonly<Record<string, string>>,
+): Promise<MutationRecord> {
+  const fields = view.effectiveFields.map(field => field.name)
+  const entries = Object.entries(keys)
+  let where: Filter
+  if (entries.length === 1) {
+    where = {
+      field: entries[0]?.[0] as string,
+      operator: Operator.Comparison.Equal,
+      value: entries[0]?.[1],
+    }
+  } else {
+    where = {
+      filters: entries.map(([field, value]) => ({
+        field,
+        operator: Operator.Comparison.Equal,
+        value,
+      })),
+      operator: Operator.Logical.And,
+    }
+  }
+  const compiled = compilePolymorphicQuery(entities, view, {
+    fields,
+    limit: 1,
+    projectionBudget: { paths: fields.length, work: Number.MAX_SAFE_INTEGER },
+    where,
+  })
+  try {
+    const rows = await sql.unsafe<Record<string, unknown>[]>(compiled.sql, [...compiled.values])
+    const row = rows[0]
+    if (!row) throw new MutationError('operation', 'Relationship record was not found after mutation')
+    return compiled.hydrate(row) as MutationRecord
+  } catch (error) {
+    if (error instanceof MutationError) throw error
+    throw databaseFailure(error)
+  }
+}
+
+/**
+ * Create one relationship record.
+ * @param options - Canonical definitions and transaction client.
+ * @param name - Relationship name.
+ * @param input - Submitted endpoint and property values.
+ * @returns The created record.
+ */
+async function relationshipCreate(
+  options: MutationOptions,
+  name: string,
+  input: MutationValues | Iterable<MutationValues>,
+): Promise<CreateResult> {
+  const { relationship, view } = relationshipDefinition(options.entities, name)
+  if (!isPlainRecord(input)) {
+    throw new MutationError('validation', 'Relationship create values must be a plain object')
+  }
+  const values = new Map<string, unknown>()
+  for (const [fieldName, value] of Object.entries(input)) {
+    const field = view.effectiveFields.find(candidate => candidate.name === fieldName)
+    if (!field) throw new MutationError('validation', `Unknown field "${fieldName}" on ${name}`, {
+      path: `/values/${pointer(fieldName)}`,
+    })
+    values.set(fieldName, validateValue(view, field, value, `/values/${pointer(fieldName)}`))
+  }
+  for (const endpoint of relationship.between) {
+    if (!values.has(endpoint.field)) {
+      throw new MutationError('validation', `Field "${endpoint.field}" is required`, {
+        path: `/values/${pointer(endpoint.field)}`,
+      })
+    }
+  }
+  for (const field of relationship.fields) {
+    const effective = view.effectiveFields.find(candidate => candidate.name === field.name)
+    if (effective && requiredField(effective) && !values.has(field.name)) {
+      throw new MutationError('validation', `Field "${field.name}" is required`, {
+        path: `/values/${pointer(field.name)}`,
+      })
+    }
+  }
+  const columns: WriteColumn[] = []
+  for (const endpoint of relationship.between) {
+    columns.push({
+      column: `${endpoint.field}.id`,
+      field: view.effectiveFields.find(field => field.name === endpoint.field),
+      value: values.get(endpoint.field),
+    })
+  }
+  for (const field of relationship.fields) {
+    if (values.has(field.name)) {
+      columns.push({
+        column: field.name,
+        field: view.effectiveFields.find(candidate => candidate.name === field.name),
+        value: values.get(field.name),
+      })
+    }
+  }
+  await execute(options.sql, insertStatement(name, columns))
+  const keys = Object.fromEntries(relationship.between.map(endpoint => (
+    [endpoint.field, String(values.get(endpoint.field))]
+  )))
+  return { created: 1, record: await readRelationshipRecord(options, view, keys) }
+}
+
+/**
+ * Edit one relationship record by endpoint keys.
+ * @param options - Canonical definitions and transaction client.
+ * @param name - Relationship name.
+ * @param filter - Endpoint key filter.
+ * @param changes - Relationship property changes.
+ * @returns The edit result.
+ */
+async function relationshipEdit(
+  options: MutationOptions,
+  name: string,
+  filter: MutationFilter,
+  changes: MutationValues,
+): Promise<EditResult> {
+  const { relationship, view } = relationshipDefinition(options.entities, name)
+  const keys = relationshipKeys(relationship, filter)
+  if (!isPlainRecord(changes)) throw new MutationError('validation', 'Relationship changes must be a plain object')
+  const columns: WriteColumn[] = []
+  for (const [fieldName, value] of Object.entries(changes)) {
+    if (relationship.between.some(endpoint => endpoint.field === fieldName)) {
+      throw new MutationError('validation', `Endpoint field "${fieldName}" is immutable`, {
+        path: `/changes/${pointer(fieldName)}`,
+      })
+    }
+    const field = view.effectiveFields.find(candidate => candidate.name === fieldName)
+    if (!field) throw new MutationError('validation', `Unknown field "${fieldName}" on ${name}`, {
+      path: `/changes/${pointer(fieldName)}`,
+    })
+    columns.push({
+      column: field.name,
+      field,
+      value: validateValue(view, field, value, `/changes/${pointer(fieldName)}`),
+    })
+  }
+  if (columns.length === 0) return { edited: 0 }
+  const bindings: unknown[] = []
+  const assignments = columns.map(column => {
+    const placeholder = bindValue(column.value, column.field, bindings)
+    return `${quote(column.column)} = ${placeholder}`
+  }).join(', ')
+  const where = relationshipKeyWhere(relationship, keys, bindings)
+  const rows = await execute(options.sql, {
+    sql: `UPDATE ${quote(name)} SET ${assignments} WHERE ${where} ` +
+      `RETURNING ${quote(`${relationship.between[0]?.field}.id`)}`,
+    values: bindings,
+  })
+  if (rows.length !== 1) return { edited: rows.length }
+  return { edited: 1, record: await readRelationshipRecord(options, view, keys) }
+}
+
+/**
+ * Delete relationship records by endpoint keys.
+ * @param options - Canonical definitions and transaction client.
+ * @param name - Relationship name.
+ * @param filter - Endpoint key filter.
+ * @returns The delete result.
+ */
+async function relationshipDelete(
+  options: MutationOptions,
+  name: string,
+  filter: MutationFilter,
+): Promise<DeleteResult> {
+  const { relationship } = relationshipDefinition(options.entities, name)
+  const keys = relationshipKeys(relationship, filter)
+  const bindings: unknown[] = []
+  const where = relationshipKeyWhere(relationship, keys, bindings)
+  const rows = await execute(options.sql, {
+    sql: `DELETE FROM ${quote(name)} WHERE ${where} RETURNING ${quote(`${relationship.between[0]?.field}.id`)}`,
+    values: bindings,
+  })
+  return { deleted: rows.length }
+}
+
+/**
+ * Edit one relationship record by endpoint keys, or create it.
+ * @param options - Canonical definitions and transaction client.
+ * @param name - Relationship name.
+ * @param filter - Endpoint key filter.
+ * @param values - Values used for the edit or create branch.
+ * @returns The upsert result.
+ */
+async function relationshipUpsert(
+  options: MutationOptions,
+  name: string,
+  filter: MutationFilter,
+  values: MutationValues,
+): Promise<UpsertResult> {
+  const { relationship, view } = relationshipDefinition(options.entities, name)
+  const keys = relationshipKeys(relationship, filter)
+  const existing = await readRelationshipRecord(options, view, keys).catch(error => {
+    if (error instanceof MutationError && error.code === 'operation') return null
+    throw error
+  })
+  if (existing === null) {
+    const created = await relationshipCreate(options, name, { ...keys, ...values })
+    return { created: 1, edited: 0, record: created.record as MutationRecord }
+  }
+  const edited = await relationshipEdit(options, name, keys, values)
+  if (edited.record === undefined) {
+    throw new MutationError('operation', 'Relationship upsert selected no editable record')
+  }
+  return { created: 0, edited: 1, record: edited.record }
 }
 
 /**
