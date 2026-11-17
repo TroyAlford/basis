@@ -19,5 +19,5 @@ export { comparePng } from './snapshots'
 export type { ScreenshotComparison, ScreenshotOptions } from './snapshots'
 
 export { withDatabase } from './withDatabase'
-export type { WithDatabaseOptions } from './withDatabase'
+export type { WithDatabaseContext, WithDatabaseOptions } from './withDatabase'
 export type { DatabaseContext } from '../server/testing/DatabaseFixture'

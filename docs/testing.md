@@ -97,7 +97,7 @@ Application journeys live in `*.e2e.ts` (or `*.e2e.tsx`) and run with `bun run t
 
 ## Consumer database fixtures
 
-`withDatabase` is the only consumer database fixture exported by `basis/testing`. It acquires the single run-scoped PostgreSQL fixture — the same lifecycle model as `useApplication` — and runs one test transaction that always rolls back. Use it for ordinary data tests, custom Graphs, actor-scoped RLS, owner-run setup, savepoints, and expected failures. The public options are `graph` and `setup`; committed writes, owner-proof selection, fresh schemas, and internal entity definitions are not part of the consumer type and cannot be selected through `withDatabase`.
+`withDatabase` is the only consumer database fixture exported by `basis/testing`. It acquires the single run-scoped PostgreSQL fixture — the same lifecycle model as `useApplication` — and runs one test transaction that always rolls back. Use it for ordinary data tests, custom Graphs, actor-scoped RLS, owner-run setup, savepoints, and expected failures. The public options are `graph` and `setup`; committed writes, owner-proof selection, fresh schemas, and internal entity definitions are not part of the consumer type and cannot be selected through `withDatabase`. Owner setup runs inside the same rollback transaction, and the public callback context does not expose privileged owner switching.
 
 ```ts
 import { Graph } from 'basis/server'
