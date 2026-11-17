@@ -1661,8 +1661,8 @@ describe('Server database lifecycle', () => {
       ],
       relationships: [{
         between: [
-          { collection: 'memberships', field: 'deck', target: 'Deck' },
-          { field: 'user', target: 'User' },
+          { collection: 'memberships', field: 'deck', inverse: 'members', target: 'Deck' },
+          { collection: 'deckMemberships', field: 'user', inverse: 'decks', target: 'User' },
         ],
         fields: [{ field: 'role', type: 'String' }],
         name: 'DeckMembership',
