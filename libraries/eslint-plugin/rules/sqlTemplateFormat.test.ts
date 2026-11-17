@@ -252,6 +252,17 @@ describe('formatSQL', () => {
     })
   })
 
+  describe('operators', () => {
+    test('keeps PostgreSQL JSON operators intact', () => {
+      expect(formatSQL('select * from widgets where data @> $1 and tags <@ $2')).toMatchSql(`
+        SELECT *
+        FROM widgets
+        WHERE data @> $1
+          AND tags <@ $2
+      `)
+    })
+  })
+
   describe('nested calls', () => {
     test('breaks long calls and keeps short nested calls inline', () => {
       expect(formatSQL(`

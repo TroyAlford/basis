@@ -181,8 +181,10 @@ function tokenize(sql: string): Token[] {
       index += 1
       continue
     }
-    const operator = [':=', '::', '||', '>=', '<=', '<>', '!=', '->>', '->', '=', '<', '>', '+', '-', '*', '/', '.']
-      .find(candidate => sql.startsWith(candidate, index))
+    const operator = [
+      ':=', '::', '||', '>=', '<=', '<>', '!=', '->>', '->', '=<', '@>', '<@', '@?', '@@', '#>>', '#>',
+      '=', '<', '>', '+', '-', '*', '/', '.',
+    ].find(candidate => sql.startsWith(candidate, index))
     if (operator) {
       tokens.push(token('operator', operator))
       index += operator.length
