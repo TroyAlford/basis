@@ -516,6 +516,43 @@ describe('parser-backed formatting', () => {
     `)
   })
 
+  test('quotes unquoted camelCase identifiers', () => {
+    expect(formatSQL('select widgetId as displayName from widgetTable where widgetId = 1')).toMatchIndented(`
+      SELECT "widgetId" AS "displayName"
+      FROM "widgetTable"
+      WHERE "widgetId" = 1
+    `)
+    expect(formatSQL('insert into widgetTable (widgetId) values (1)')).toMatchIndented(`
+      INSERT INTO "widgetTable" ("widgetId")
+      VALUES
+        (1)
+    `)
+  })
+
+  test('preserves quoted ON CONFLICT index identifiers', () => {
+    expect(formatSQL(`
+      insert into "Memberships" ("campaignId", "userId") values ($1, $2)
+      on conflict ("campaignId", "userId") do update set "updatedAt" = now()
+    `)).toMatchIndented(`
+      INSERT INTO "Memberships" ("campaignId", "userId")
+      VALUES
+        ($1, $2)
+      ON CONFLICT ("campaignId", "userId") DO UPDATE SET "updatedAt" = NOW()
+    `)
+  })
+
+  test('preserves ON CONFLICT ON CONSTRAINT targets', () => {
+    expect(formatSQL(`
+      insert into "Memberships" ("campaignId", "userId") values ($1, $2)
+      on conflict on constraint "Memberships_pkey" do nothing
+    `)).toMatchIndented(`
+      INSERT INTO "Memberships" ("campaignId", "userId")
+      VALUES
+        ($1, $2)
+      ON CONFLICT ON CONSTRAINT "Memberships_pkey" DO NOTHING
+    `)
+  })
+
   test('keeps fallback clauses intact', () => {
     expect(formatSQL('select distinct id from widgets')).toMatchIndented(`
       SELECT DISTINCT id

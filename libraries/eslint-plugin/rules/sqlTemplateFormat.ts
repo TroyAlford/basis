@@ -1239,7 +1239,6 @@ class LibpgPrinter {
       case 'InsertStmt':
         return !body.withClause
           && (!body.override || body.override === 'OVERRIDING_NOT_SET')
-          && (!body.onConflictClause || !body.onConflictClause.constraint)
       case 'ViewStmt':
         return !body.aliases?.length
           && !body.options?.length
@@ -1389,19 +1388,30 @@ class LibpgPrinter {
   }
 
   /**
+   * Quote an unquoted identifier that contains uppercase letters.
+   * @param text - Identifier text.
+   * @returns Identifier text safe for PostgreSQL.
+   */
+  quoteIdentifier(text: string): string {
+    if (!text || text.startsWith('"') || text === '*') return text
+    return /[A-Z]/u.test(text) ? `"${text}"` : text
+  }
+
+  /**
    * Read a dotted identifier from the source.
    * @param index - Start byte.
    * @param count - Number of name parts.
+   * @param quoteIdentifiers - Whether to quote camelCase name parts.
    * @returns Qualified text and end byte.
    */
-  readQualifiedName(index: number, count: number): { end: number, text: string } {
+  readQualifiedName(index: number, count: number, quoteIdentifiers = true): { end: number, text: string } {
     let cursor = index
     const parts: string[] = []
     for (let part = 0; part < count; part += 1) {
       while (/\s/u.test(this.source[cursor] ?? '')) cursor += 1
       const name = this.readName(cursor)
       if (!name.text) break
-      parts.push(name.text)
+      parts.push(quoteIdentifiers ? this.quoteIdentifier(name.text) : name.text)
       cursor = name.end
       if (part < count - 1) {
         while (/\s/u.test(this.source[cursor] ?? '')) cursor += 1
@@ -1593,7 +1603,7 @@ class LibpgPrinter {
     }
     const asIndex = top.findIndex(candidate => candidate.text.toLowerCase() === 'as')
     const candidate = asIndex >= 0 ? top[asIndex + 1] : top[top.length - 1]
-    return candidate ? ` AS ${candidate.text}` : ` AS ${body.name}`
+    return candidate ? ` AS ${this.quoteIdentifier(candidate.text)}` : ` AS ${this.quoteIdentifier(body.name)}`
   }
 
   /**
@@ -1705,7 +1715,7 @@ class LibpgPrinter {
       const cte = this.tag(node)?.[1]
       if (!cte) return
       const location = typeof cte.location === 'number' && cte.location >= 0 ? cte.location : -1
-      const name = location >= 0 ? this.readName(location).text : cte.ctename
+      const name = location >= 0 ? this.quoteIdentifier(this.readName(location).text) : cte.ctename
       const lead = index === 0 ? `${indent}${prefix}` : indent
       lines.push(`${lead} ${name} AS (`)
       lines.push(...this.lines(cte.ctequery, `${indent}  `))
@@ -1850,8 +1860,8 @@ class LibpgPrinter {
     }
     const asIndex = tokens.findIndex(candidate => candidate.text.toLowerCase() === 'as')
     const candidate = asIndex >= 0 ? tokens[asIndex + 1] : tokens[tokens.length - 1]
-    if (!candidate) return `${relation.text} ${body.alias.aliasname}`
-    return `${relation.text}${asIndex >= 0 ? ' AS' : ''} ${candidate.text}`
+    if (!candidate) return `${relation.text} ${this.quoteIdentifier(body.alias.aliasname)}`
+    return `${relation.text}${asIndex >= 0 ? ' AS' : ''} ${this.quoteIdentifier(candidate.text)}`
   }
 
   /**
@@ -1937,7 +1947,7 @@ class LibpgPrinter {
       const column = this.tag(node)?.[1]
       if (!column) return ''
       return typeof column.location === 'number' && column.location >= 0
-        ? this.readName(column.location).text
+        ? this.quoteIdentifier(this.readName(column.location).text)
         : column.name
     }).filter((column: string) => column.length > 0)
     const header = columns.length > 0
@@ -1961,22 +1971,61 @@ class LibpgPrinter {
   }
 
   /**
+   * Reconstruct an ON CONFLICT target from the source so quoting survives.
+   * @param body - OnConflictClause body.
+   * @returns Target clause text, or empty.
+   */
+  onConflictTarget(body: any): string {
+    if (typeof body.location !== 'number' || body.location < 0) return ''
+    const tokens = this.scan(body.location, this.end)
+    const conflict = tokens.findIndex((candidate: any) => candidate.text.toLowerCase() === 'conflict')
+    if (conflict < 0) return ''
+    const next = tokens[conflict + 1]
+    if (!next) return ''
+    if (next.text.toLowerCase() === 'on') {
+      const constraint = tokens.slice(conflict + 2)
+        .findIndex((candidate: any) => candidate.text.toLowerCase() === 'constraint')
+      if (constraint < 0) return ''
+      const name = tokens[conflict + 2 + constraint + 1]
+      return name ? ` ON CONSTRAINT ${this.quoteIdentifier(name.text)}` : ''
+    }
+    if (next.text !== '(') return ''
+    const items: string[] = []
+    let depth = 0
+    let current: string[] = []
+    for (let index = conflict + 1; index < tokens.length; index += 1) {
+      const candidate = tokens[index] as any
+      if (candidate.text === '(') {
+        depth += 1
+        if (depth === 1) continue
+      }
+      if (candidate.text === ')') {
+        depth -= 1
+        if (depth === 0) {
+          if (current.length > 0) items.push(current.join(' '))
+          break
+        }
+      }
+      if (depth === 1) {
+        if (candidate.text === ',') {
+          if (current.length > 0) items.push(current.join(' '))
+          current = []
+          continue
+        }
+        current.push(this.quoteIdentifier(candidate.text))
+      }
+    }
+    return items.length > 0 ? ` (${items.join(', ')})` : ''
+  }
+
+  /**
    * Print an ON CONFLICT clause.
    * @param body - OnConflictClause body.
    * @param indent - Prefix for this block.
    * @returns Formatted lines.
    */
   onConflict(body: any, indent: string): string[] {
-    const indexElems = body.infer?.indexElems ?? body.indexElems ?? []
-    const target = indexElems.length
-      ? ` (${indexElems.map((node: any) => {
-        const elem = this.tag(node)?.[1]
-        if (!elem) return ''
-        return typeof elem.location === 'number' && elem.location >= 0
-          ? this.readName(elem.location).text
-          : elem.name
-      }).filter(Boolean).join(', ')})`
-      : ''
+    const target = this.onConflictTarget(body)
     const action = body.action === 'ONCONFLICT_NOTHING' ? 'DO NOTHING' : 'DO UPDATE'
     const updates = body.targetList ?? []
     if (updates.length === 0) return [`${indent}ON CONFLICT${target} ${action}`]
@@ -1984,7 +2033,7 @@ class LibpgPrinter {
       const update = this.tag(node)?.[1]
       if (!update) return ''
       const name = typeof update.location === 'number' && update.location >= 0
-        ? this.readName(update.location).text
+        ? this.quoteIdentifier(this.readName(update.location).text)
         : update.name
       return `${name} = ${this.expr(update.val)}`
     }
@@ -2063,7 +2112,7 @@ class LibpgPrinter {
     }
     return fields.map((field: any) => {
       const tagged = this.tag(field)
-      return tagged?.[0] === 'A_Star' ? '*' : tagged?.[1]?.sval ?? ''
+      return tagged?.[0] === 'A_Star' ? '*' : this.quoteIdentifier(tagged?.[1]?.sval ?? '')
     }).join('.')
   }
 
@@ -2102,7 +2151,7 @@ class LibpgPrinter {
   funcCall(body: any): string {
     const parts = (body.funcname ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '')
     const raw = typeof body.location === 'number' && body.location >= 0
-      ? this.readQualifiedName(body.location, parts.length).text
+      ? this.readQualifiedName(body.location, parts.length, false).text
       : parts.join('.')
     const name = raw.split('.').map(part => (part.startsWith('"') ? part : part.toUpperCase())).join('.')
     const distinct = body.agg_distinct ? 'DISTINCT ' : ''
