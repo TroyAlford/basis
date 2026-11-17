@@ -1022,11 +1022,12 @@ describe('Server database lifecycle', () => {
       where: { id: ada },
     })).toEqual([{
       articles: {
+        $matched: 2,
+        $total: 2,
         items: [
           { entity: 'Article', id: articleOne, name: 'Article One' },
           { entity: 'Article', id: articleTwo, name: 'Article Two' },
         ],
-        total: 2,
       },
       id: ada,
       name: 'Ada',
@@ -1047,16 +1048,17 @@ describe('Server database lifecycle', () => {
     })).toEqual([{
       id: campaign,
       members: {
+        $matched: 2,
+        $total: 2,
         items: [
           { entity: 'User', id: ada, name: 'Ada' },
           { entity: 'User', id: grace, name: 'Grace' },
         ],
-        total: 2,
       },
     }])
     const projectedMembers = await queryEntity<{
       id: string,
-      members: { items: Record<string, unknown>[], total: number },
+      members: { $matched: number, $total: number, items: Record<string, unknown>[] },
       name: string,
     }>(database.sql, entities, 'Campaign', {
       fields: ['id', 'name', 'members', 'members.name', 'members.role'],
@@ -1064,7 +1066,7 @@ describe('Server database lifecycle', () => {
     })
     expect(projectedMembers).toHaveLength(1)
     expect(projectedMembers[0]?.members.items).toHaveLength(2)
-    expect(projectedMembers[0]?.members.total).toBe(2)
+    expect(projectedMembers[0]?.members.$total).toBe(2)
     expect(projectedMembers[0]?.members.items).toEqual(expect.arrayContaining([
       { entity: 'User', id: ada, name: 'Ada', role: 'GM' },
       { entity: 'User', id: grace, name: 'Grace', role: 'Player' },
@@ -1075,13 +1077,14 @@ describe('Server database lifecycle', () => {
       where: { id: ada },
     })).toEqual([{
       campaigns: {
+        $matched: 1,
+        $total: 1,
         items: [{
           entity: 'Campaign',
           id: campaign,
           name: 'Example Campaign',
           role: 'GM',
         }],
-        total: 1,
       },
       id: ada,
     }])
@@ -1089,7 +1092,7 @@ describe('Server database lifecycle', () => {
       fields: ['id', 'campaigns{$limit:1,$offset:1}'],
       where: { id: linus },
     })).toEqual([{
-      campaigns: { items: [], total: 0 },
+      campaigns: { $matched: 0, $total: 0, items: [] },
       id: linus,
     }])
 
@@ -1103,8 +1106,9 @@ describe('Server database lifecycle', () => {
     })).toEqual([{
       id: campaign,
       members: {
+        $matched: 3,
+        $total: 3,
         items: [{ entity: 'User', id: grace, name: 'Grace' }],
-        total: 3,
       },
     }])
     const multipleRoots = await queryEntity<Record<string, unknown>>(database.sql, entities, 'User', {
@@ -1195,17 +1199,19 @@ describe('Server database lifecycle', () => {
       where: { id: userId },
     })).toEqual([{
       articles: {
+        $matched: 1,
+        $total: 1,
         items: [{ entity: 'Article', id: articleId, name: 'Article One' }],
-        total: 1,
       },
       campaigns: {
+        $matched: 1,
+        $total: 1,
         items: [{
           entity: 'Campaign',
           id: campaignId,
           name: 'Example Campaign',
           role: 'GM',
         }],
-        total: 1,
       },
       id: userId,
     }])
@@ -1278,22 +1284,24 @@ describe('Server database lifecycle', () => {
     })).toEqual([{
       id: user,
       pets: {
+        $matched: 1,
+        $total: 1,
         items: [{
           entity: 'Pet',
           id: pet,
           label: 'Dog',
           name: 'Rex',
           toys: {
+            $matched: 1,
+            $total: 1,
             items: [{
               entity: 'Toy',
               id: toy,
               label: 'Red',
               name: 'Ball',
             }],
-            total: 1,
           },
         }],
-        total: 1,
       },
     }])
   })
@@ -1347,20 +1355,20 @@ describe('Server database lifecycle', () => {
 
     const query = (fields: string[]) => queryEntity<{
       id: string,
-      members: { items: { name: string }[], total: number },
+      members: { $matched: number, $total: number, items: { name: string }[] },
     }>(database.sql, entities, 'Campaign', { fields, where: { id: campaign } })
 
     const defaults = await query(['id', 'members', 'members.name'])
     expect(defaults[0]?.members.items).toHaveLength(3)
-    expect(defaults[0]?.members.total).toBe(5)
+    expect(defaults[0]?.members.$total).toBe(5)
 
     const expanded = await query(['id', 'members{$limit:null}', 'members.name'])
     expect(expanded[0]?.members.items).toHaveLength(5)
-    expect(expanded[0]?.members.total).toBe(5)
+    expect(expanded[0]?.members.$total).toBe(5)
 
     const capped = await query(['id', 'members{$limit:2}', 'members.name'])
     expect(capped[0]?.members.items).toHaveLength(2)
-    expect(capped[0]?.members.total).toBe(5)
+    expect(capped[0]?.members.$total).toBe(5)
 
     const filtered = await query([
       'id',
@@ -1368,7 +1376,8 @@ describe('Server database lifecycle', () => {
       'members.name',
     ])
     expect(filtered[0]?.members.items).toHaveLength(3)
-    expect(filtered[0]?.members.total).toBe(4)
+    expect(filtered[0]?.members.$matched).toBe(4)
+    expect(filtered[0]?.members.$total).toBe(5)
     expect(filtered[0]?.members.items.map(member => member.name)).not.toContain('Ada')
 
     const filteredExpanded = await query([
@@ -1377,7 +1386,8 @@ describe('Server database lifecycle', () => {
       'members.name',
     ])
     expect(filteredExpanded[0]?.members.items).toHaveLength(4)
-    expect(filteredExpanded[0]?.members.total).toBe(4)
+    expect(filteredExpanded[0]?.members.$matched).toBe(4)
+    expect(filteredExpanded[0]?.members.$total).toBe(5)
 
     const paged = await query([
       'id',
@@ -1385,7 +1395,7 @@ describe('Server database lifecycle', () => {
       'members.name',
     ])
     expect(paged[0]?.members.items.map(member => member.name)).toEqual(['Dan', 'Cara'])
-    expect(paged[0]?.members.total).toBe(5)
+    expect(paged[0]?.members.$total).toBe(5)
   })
 
   isolatedTest('enforces the complete collection projection contract', async database => {
@@ -1477,7 +1487,7 @@ describe('Server database lifecycle', () => {
     }
 
     interface Member { id: string, name: string, role: string }
-    interface Envelope { items: Member[], total: number }
+    interface Envelope { $matched: number, $total: number, items: Member[] }
     const query = (campaignId: string, fields: string[]) => queryEntity<{
       id: string,
       members: Envelope,
@@ -1489,7 +1499,8 @@ describe('Server database lifecycle', () => {
       'members.name',
       'members.role',
     ])
-    expect(flattened[0]?.members.total).toBe(12)
+    expect(flattened[0]?.members.$matched).toBe(12)
+    expect(flattened[0]?.members.$total).toBe(30)
     expect(flattened[0]?.members.items).toHaveLength(12)
     expect(flattened[0]?.members.items.every(member => member.role === 'GM')).toBe(true)
 
@@ -1519,7 +1530,8 @@ describe('Server database lifecycle', () => {
       'members[active = true]{$orderBy:name,$offset:5,$limit:4}',
       'members.name',
     ])
-    expect(filtered[0]?.members.total).toBe(12)
+    expect(filtered[0]?.members.$matched).toBe(12)
+    expect(filtered[0]?.members.$total).toBe(30)
     expect(filtered[0]?.members.items.map(member => member.name)).toEqual([
       'M05',
       'M06',
@@ -1583,7 +1595,7 @@ describe('Server database lifecycle', () => {
     }
 
     interface Item { email?: string, id: string, role: string }
-    interface Envelope { items: Item[], total: number }
+    interface Envelope { $matched: number, $total: number, items: Item[] }
     const query = (fields: string[]) => queryEntity<{
       id: string,
       members: Envelope,
@@ -1772,8 +1784,9 @@ describe('Server database lifecycle', () => {
       id: personOne,
       pet: { entity: 'Pet', id: petOne, name: 'Pet One' },
       pets: {
+        $matched: 2,
+        $total: 2,
         items: [{ entity: 'Pet', id: petOne, name: 'Pet One' }],
-        total: 2,
       },
     }])
     expect(await queryEntity<Record<string, unknown>>(database.sql, entities, 'Person', {
@@ -1794,8 +1807,9 @@ describe('Server database lifecycle', () => {
         id: personOne,
         name: 'Ada',
         pets: {
+          $matched: 2,
+          $total: 2,
           items: [{ entity: 'Pet', id: petOne, name: 'Pet One' }],
-          total: 2,
         },
       },
     }])
@@ -2014,7 +2028,7 @@ describe('Server database lifecycle', () => {
     expect(await ids('Campaign', "members $contains (membership.role = 'GM' $and title = 'Linus')"))
       .toEqual([two])
 
-    const projected = await queryEntity<{ id: string, pets: { total: number } }>(
+    const projected = await queryEntity<{ id: string, pets: { $matched: number, $total: number } }>(
       database.sql,
       entities,
       'Person',
@@ -2025,7 +2039,7 @@ describe('Server database lifecycle', () => {
       },
     )
     expect(projected.map(row => row.id)).toEqual([ada, grace])
-    expect(projected[0]?.pets.total).toBe(2)
+    expect(projected[0]?.pets.$total).toBe(2)
   })
 
   isolatedTest('evaluates descendant fields and references inside collection predicates', async database => {
@@ -2499,16 +2513,17 @@ describe('Server database lifecycle', () => {
       {
         id: petOne,
         visits: {
+          $matched: 2,
+          $total: 2,
           items: [
             { entity: 'SpecialVisit', id: '1001', name: 'Special Visit' },
             { entity: 'SpecialVisit', id: '1002', name: 'Second Special Visit' },
           ],
-          total: 2,
         },
       },
       {
         id: petTwo,
-        visits: { items: [], total: 0 },
+        visits: { $matched: 0, $total: 0, items: [] },
       },
     ])
   })

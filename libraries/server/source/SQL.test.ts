@@ -581,7 +581,7 @@ describe('SQL.where', () => {
     expect(compiled.sql).toContain('t."tags" AS "tags"')
     expect(compiled.sql).toContain('t."payload" AS "payload"')
     expect(compiled.sql).toContain('"visits"')
-    expect(compiled.sql).toContain('"visits__total"')
+    expect(compiled.sql).toContain('"visits__matched"')
     expect(compiled.sql).toContain('LIMIT 2 OFFSET 1')
     expect(compiled.values).toEqual([25, 0])
     expect(() => compileEntityQuery(collectionDefinitions, 'Pet', {
@@ -637,7 +637,7 @@ describe('SQL.where', () => {
       fields: ['id', 'members', 'members.name'],
     })
     expect(defaults.sql).toContain('LIMIT 3')
-    expect(defaults.sql).toContain('__total')
+    expect(defaults.sql).toContain('__matched')
 
     const capped = compileEntityQuery(relationshipDefinitions, 'Campaign', {
       fields: ['id', 'members{$limit:50}', 'members.name'],
@@ -649,6 +649,7 @@ describe('SQL.where', () => {
     })
     expect(filtered.sql).not.toContain('LIMIT 3')
     expect(filtered.values).toContain('Ada')
+    expect(filtered.sql).toContain('__matched')
     expect(filtered.sql).toContain('__total')
   })
 

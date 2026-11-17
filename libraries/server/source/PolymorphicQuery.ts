@@ -97,11 +97,17 @@ interface IdentityProjection {
 interface ProjectedCollectionProjection {
   /** SQL column alias carrying the JSON item array. */
   readonly alias: string,
-  /** Convert the JSON items into the `{ items, total }` envelope. */
-  readonly hydrate: (row: Record<string, unknown>) => { items: unknown[], total: number },
+  /** Convert the JSON items into the `{ items, $matched, $total }` envelope. */
+  readonly hydrate: (row: Record<string, unknown>) => {
+    $matched: number,
+    $total: number,
+    items: unknown[],
+  },
+  /** SQL column alias carrying the filtered count. */
+  readonly matchedAlias: string,
   /** Output field name. */
   readonly name: string,
-  /** SQL column alias carrying the full filtered count. */
+  /** SQL column alias carrying the unfiltered count. */
   readonly totalAlias: string,
 }
 
@@ -432,7 +438,7 @@ class QueryProjection {
     const [segment] = segments
     if (segment === undefined) throw new Error(`Invalid filter path "${fullName}"`)
     const rest = segments.slice(1)
-    if (rest.length === 1 && rest[0] === '$count') {
+    if (rest.length === 1 && rest[0] === '$total') {
       const collection = context.collections.get(segment)
       if (collection) {
         const key = fullName.slice(0, -7)
@@ -755,8 +761,8 @@ class QueryProjection {
     const condition = plan.condition
     if (root) {
       this.#countFields.set(
-        `${name}.$count`,
-        this.#collectionCountExpression(plan, `${name}.$count\u0000${resolved.parentAlias}`),
+        `${name}.$total`,
+        this.#collectionCountExpression(plan, `${name}.$total\u0000${resolved.parentAlias}`),
       )
     }
     const context: EntityContext = plan.target === undefined
@@ -929,7 +935,7 @@ class QueryProjection {
    * @returns The scalar field.
    */
   orderField(name: string): QueryFieldDefinition {
-    if (name.endsWith('.$count')) return this.filterField(name)
+    if (name.endsWith('.$total')) return this.filterField(name)
     const field = this.root.effective.get(name)
     if (!field) throw new Error(`Unknown field "${this.root.definition.name}.${name}"`)
     if (field.type === FieldType.Entity) {
@@ -998,21 +1004,21 @@ class QueryProjection {
     if (hasDirectives && rest.length > 0) {
       throw new Error(`Collection directives must end the path "${rawName}"; use separate child paths`)
     }
-    if (rest.length === 1 && rest[0] === '$count') {
+    if (rest.length === 1 && rest[0] === '$total') {
       const collection = node.context.collections.get(name)
       if (collection) {
         const key = collectionKey(node.path, collection.name)
         const plan = this.#collectionPlan(collection, node.context.baseAlias, key)
         this.#consume(plan.work)
         const count = this.#collectionCountExpression(plan, `${path}\u0000${node.context.baseAlias}`)
-        this.#addComputedScalar(node, `${name}.$count`, count.expression)
+        this.#addComputedScalar(node, `${name}.$total`, count.expression)
         return
       }
       const field = node.context.effective.get(name)
       if (field?.type === FieldType.Array) {
         this.#consume()
         const expression = this.#expression(node.context, field, false)
-        this.#addComputedScalar(node, `${name}.$count`, `COALESCE(cardinality(${expression}), 0)`)
+        this.#addComputedScalar(node, `${name}.$total`, `COALESCE(cardinality(${expression}), 0)`)
         return
       }
       throw new Error(`Query count path "${path}" requires a collection or native array field`)
@@ -1415,6 +1421,10 @@ class QueryProjection {
         targetFields: new Set(target.effectiveFields.map(field => field.name)),
       }
     }
+    const correlation = (alias: string): string => (
+      `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
+      `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(alias)}.${quote('id')})`
+    )
     const childAlias = this.#nextAlias('c')
     const child = compilePolymorphicQuery(this.#entities, target, {
       aliasPrefix: `${childAlias}_`,
@@ -1428,9 +1438,7 @@ class QueryProjection {
       limit: null,
       offset: 0,
       orderBy: orderings.map(order => (order.direction === 'DESC' ? `-${order.name}` : order.name)),
-      rawWhere:
-        `EXISTS (SELECT 1 FROM ${plan.relation} WHERE ${plan.condition} ` +
-        `AND ${quote(plan.rootAlias)}.${quote('id')} = ${quote(childAlias)}.${quote('id')})`,
+      rawWhere: correlation(childAlias),
       ...(relationshipOptions === undefined ? {} : { relationship: relationshipOptions }),
       rootAlias: childAlias,
       ...(filter === undefined ? {} : { where: filter }),
@@ -1441,6 +1449,24 @@ class QueryProjection {
     ))
     this.values.push(...child.values)
 
+    let totalSql: string | undefined
+    if (filter !== undefined) {
+      const availableAlias = this.#nextAlias('ca')
+      const availableChild = compilePolymorphicQuery(this.#entities, target, {
+        aliasPrefix: `${availableAlias}_`,
+        fields: ['id'],
+        limit: null,
+        offset: 0,
+        rawWhere: correlation(availableAlias),
+        rootAlias: availableAlias,
+      })
+      const totalBase = this.#valueStart + this.values.length
+      totalSql = availableChild.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+        `$${totalBase + Number(value) - 1}`
+      ))
+      this.values.push(...availableChild.values)
+    }
+
     const edgeFields = [...spec.edgeFields]
     const edgeObject = edgeFields.length === 0
       ? 'NULL'
@@ -1450,7 +1476,8 @@ class QueryProjection {
       `FROM ${plan.relation} WHERE ${plan.condition} ` +
       `AND ${quote(plan.rootAlias)}.${quote('id')} = "__item".${quote('id')})`
     const alias = columnAlias(node.path, spec.collection.name)
-    const totalAlias = `${alias}__total`
+    const matchedAlias = `${alias}__matched`
+    const totalAlias = totalSql === undefined ? matchedAlias : `${alias}__total`
     const lateralAlias = this.#nextAlias('pc')
     const page = [
       ...(limit === null ? [] : [`LIMIT ${limit}`]),
@@ -1459,18 +1486,25 @@ class QueryProjection {
     const aggregateOrder = orderings
       .map(order => `${quote('__item')}.${quote(order.name)} ${order.direction}`)
       .join(', ')
+    const counts = totalSql === undefined
+      ? `(SELECT count(*) FROM (${childSql}) AS "__matched") AS "__matched"`
+      : `(SELECT count(*) FROM (${childSql}) AS "__matched") AS "__matched", ` +
+        `(SELECT count(*) FROM (${totalSql}) AS "__total") AS "__total"`
     this.joins.push(
       'LEFT JOIN LATERAL (SELECT ' +
       'COALESCE((SELECT json_agg(json_build_object(\'item\', row_to_json("__item"), ' +
       `'edge', ${edgeObject}) ORDER BY ${aggregateOrder}) ` +
       `FROM (${childSql}${page === '' ? '' : ` ${page}`}) AS "__item"), ` +
       '\'[]\'::json) AS "__items", ' +
-      `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__total"` +
+      counts +
       `) AS ${quote(lateralAlias)} ON TRUE`,
     )
     this.columns.push(
       `${quote(lateralAlias)}.${quote('__items')} AS ${quote(alias)}`,
-      `${quote(lateralAlias)}.${quote('__total')} AS ${quote(totalAlias)}`,
+      `${quote(lateralAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`,
+      ...(totalSql === undefined
+        ? []
+        : [`${quote(lateralAlias)}.${quote('__total')} AS ${quote(totalAlias)}`]),
     )
     node.projectedCollections.push({
       alias,
@@ -1481,7 +1515,10 @@ class QueryProjection {
           : typeof raw === 'string'
             ? JSON.parse(raw) as unknown[]
             : []
+        const matched = Number(row[matchedAlias] ?? 0)
         return {
+          $matched: matched,
+          $total: totalSql === undefined ? matched : Number(row[totalAlias] ?? 0),
           items: entries.map(entry => {
             const record = entry as {
               readonly edge?: Record<string, unknown> | null,
@@ -1495,9 +1532,9 @@ class QueryProjection {
               Object.entries(merged).filter(([field]) => !orderOnlyFields.has(field)),
             )
           }),
-          total: Number(row[totalAlias] ?? 0),
         }
       },
+      matchedAlias,
       name: spec.collection.name,
       totalAlias,
     })

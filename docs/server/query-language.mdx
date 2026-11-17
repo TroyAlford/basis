@@ -26,7 +26,7 @@ No input form gets its own executor or database path. A query is either compiled
 - Inherited scalars, including fields owned by an MTI ancestor.
 - Descendant-only scalars on abstract queries when their declarations are compatible across the concrete leaves.
 - Stored `Entity` references and their `Inverse` navigations are navigation metadata, not scalar columns. They are never accepted as predicates or sort fields merely because they appear in `fields`.
-- `Array` and `JSON` fields remain value fields with the type-specific operators defined below. `collection.$count` is a read-only intrinsic count pseudo-field, never an authored ontology field.
+- `Array` and `JSON` fields remain value fields with the type-specific operators defined below. `collection.$total` is a read-only intrinsic count pseudo-field, never an authored ontology field.
 - A dotted path may appear only where the current stage explicitly accepts reference or collection traversal.
 - There is no separate identity field such as `ownerId`; identity is the reference's canonical target `id`.
 - Unknown, incompatible, navigation-only, and physical storage names are rejected before SQL execution.
@@ -501,22 +501,22 @@ The gate covers:
 - two-valued NULL behavior, source diagnostic offsets, finite reference depth, array operand bounds, and query work budgets;
 - stable source ordering, pagination, collection-preview bindings, and real PostgreSQL result parity.
 
-`QueryParity.test.ts` owns compiler/error/diagnostic/budget parity; `QueryParity.e2e.ts` owns the real PostgreSQL inherited/abstract, dotted-path, relationship, Array/JSON, NULL, scoped-member, and pagination matrix. Existing stage-specific contract and E2E suites remain the detailed behavior fixtures. Authorization and RLS are deliberately outside this gate; collection `$count` and relational-planning validation are covered by stage 20a, and security deployment by 20b–20e.
+`QueryParity.test.ts` owns compiler/error/diagnostic/budget parity; `QueryParity.e2e.ts` owns the real PostgreSQL inherited/abstract, dotted-path, relationship, Array/JSON, NULL, scoped-member, and pagination matrix. Existing stage-specific contract and E2E suites remain the detailed behavior fixtures. Authorization and RLS are deliberately outside this gate; collection `$total` and relational-planning validation are covered by stage 20a, and security deployment by 20b–20e.
 
-## Stage 20a — collection counts and relational planning (implemented)
+## Stage 20a — collection totals and relational planning (implemented)
 
-Inverse, named-relationship, and native-array collections expose a read-only `$count` intrinsic:
+Inverse, named-relationship, and native-array collections expose a read-only `$total` intrinsic:
 
 ```ts
 const countPredicates = [
-  { structured: { field: 'pets.$count', operator: '$gte', value: 3 }, source: 'pets.$count >= 3' },
-  { structured: { field: 'scores.$count', operator: '$gt', value: 0 }, source: 'scores.$count > 0' },
+  { structured: { field: 'pets.$total', operator: '$gte', value: 3 }, source: 'pets.$total >= 3' },
+  { structured: { field: 'scores.$total', operator: '$gt', value: 0 }, source: 'scores.$total > 0' },
 ]
 ```
 
-- `$count` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references.
+- `$total` is valid in predicates, projections, and supported root collection/array `orderBy` paths. It is rejected on scalars and singular references. A projected collection envelope exposes both `$total` (the authorized population before its filter) and `$matched` (the authorized count after the filter and before paging); `$matched` is envelope metadata, not a predicate/projection field yet.
 - Relationship counts count complete logical member/edge rows, independent of collection preview limit/offset. Native-array counts include duplicates and stored null elements; a NULL array counts as zero.
-- Relationship `collection.$count = 0` canonicalizes to `NOT EXISTS` and `collection.$count > 0` to `EXISTS` when equivalent; native-array counts use `cardinality`. Other count thresholds use the shared grouped count CTE selected by the measured stage-20a renderer.
+- Relationship `collection.$total = 0` canonicalizes to `NOT EXISTS` and `collection.$total > 0` to `EXISTS` when equivalent; native-array counts use `cardinality`. Other count thresholds use the shared grouped count CTE selected by the measured stage-20a renderer.
 - Collection relation planning is shared by predicate scopes, collection previews, counts, and count ordering. Plans are keyed by logical path and physical parent occurrence, so sibling descendant-reference variants do not share the wrong parent alias; emitted subquery work remains charged to the finite compiler budget.
 - The planning benchmark fixture runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over correlated and CTE default/`MATERIALIZED`/`NOT MATERIALIZED` variants at 24-parent/70-child and 120-parent/540-child cardinalities, including selective, nonselective, indexed, and unindexed count conditions. All variants return the same rows; the evidence selects default CTE rendering for count aggregates while correlated rendering remains in use for collection predicates/previews. No blanket `MATERIALIZED` rule is applied.
 - The exported `QueryScope`, `CollectionScope`, `ArrayScope`, and `CountScope` types form the reusable entity/relationship scope boundary for later authorization work. They do not implement permission policies, RLS, or request actor binding in this stage.

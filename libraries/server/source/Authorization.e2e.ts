@@ -1052,7 +1052,7 @@ describe('Authorization RLS', () => {
     }
   })
 
-  test('excludes unauthorized collection rows from items and total', async () => {
+  test('excludes unauthorized collection rows from items and counts', async () => {
     const collectionGraph = new Graph({
       entities: [
         { fields: [{ field: 'email', type: 'String' }], name: 'User' },
@@ -1134,14 +1134,15 @@ describe('Authorization RLS', () => {
       })
       const asActor = <T>(actorId: string | null, work: () => T): T => runAsActor({ id: actorId }, work)
       const query = (actorId: string | null, fields: string[]) => asActor(actorId, () => (
-        server.db.query<{ id: string, items: { items: { title: string }[], total: number } }>(
+        server.db.query<{ id: string, items: { $matched: number, $total: number, items: { title: string }[] } }>(
           'Workspace',
           { fields, where: { id: workspace } },
         )
       ))
 
       const authorized = await query(actor, ['id', 'items{$limit:null}', 'items.title'])
-      expect(authorized[0]?.items.total).toBe(20)
+      expect(authorized[0]?.items.$matched).toBe(20)
+      expect(authorized[0]?.items.$total).toBe(20)
       expect(authorized[0]?.items.items).toHaveLength(20)
 
       const page = await query(actor, [
@@ -1149,7 +1150,8 @@ describe('Authorization RLS', () => {
         "items[title ~= 'Match']{$orderBy:title,$offset:5,$limit:4}",
         'items.title',
       ])
-      expect(page[0]?.items.total).toBe(12)
+      expect(page[0]?.items.$matched).toBe(12)
+      expect(page[0]?.items.$total).toBe(20)
       expect(page[0]?.items.items.map(item => item.title)).toEqual([
         'Match 05',
         'Match 06',
@@ -1158,7 +1160,8 @@ describe('Authorization RLS', () => {
       ])
 
       const administrator = await query(bootstrap.userId, ['id', 'items{$limit:null}', 'items.title'])
-      expect(administrator[0]?.items.total).toBe(30)
+      expect(administrator[0]?.items.$matched).toBe(30)
+      expect(administrator[0]?.items.$total).toBe(30)
     } finally {
       await admin.close()
       await server.shutdown()
