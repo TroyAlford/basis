@@ -1953,35 +1953,6 @@ export interface MigrationApplyOptions {
 export async function installBasis(sql: BunSQL, appRole = 'basis_app'): Promise<void> {
   await sql.unsafe('create schema if not exists basis').simple()
   await sql.unsafe('drop function if exists basis.has_role(text) cascade').simple()
-  await sql.unsafe(`
-    DO $$
-    DECLARE
-      item record;
-    BEGIN
-      FOR item IN
-        SELECT namespace.nspname AS schema_name,
-               relation.relname AS table_name,
-               trigger.tgname AS trigger_name
-        FROM pg_trigger trigger
-        JOIN pg_class relation ON relation.oid = trigger.tgrelid
-        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
-        LEFT JOIN pg_proc procedure ON procedure.oid = trigger.tgfoid
-        WHERE namespace.nspname NOT IN ('pg_catalog', 'information_schema')
-          AND (
-            trigger.tgname ILIKE '%enroll%'
-            OR trigger.tgname ILIKE '%resolve%'
-            OR procedure.proname IN ('enroll_identity', 'resolve_identity')
-            OR pg_get_triggerdef(trigger.oid) ILIKE '%enroll_identity%'
-            OR pg_get_triggerdef(trigger.oid) ILIKE '%resolve_identity%'
-          )
-      LOOP
-        EXECUTE format(
-          'DROP TRIGGER IF EXISTS %I ON %I.%I',
-          item.trigger_name, item.schema_name, item.table_name
-        );
-      END LOOP;
-    END $$;
-  `).simple()
   await sql.unsafe('drop function if exists basis.enroll_identity(text, text, text, text) cascade').simple()
   await sql.unsafe('drop function if exists basis.resolve_identity(text) cascade').simple()
   await sql.unsafe(`
