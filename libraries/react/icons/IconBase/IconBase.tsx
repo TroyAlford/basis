@@ -38,9 +38,6 @@ export abstract class IconBase<
     return typeof ctor === 'function' && ctor.prototype instanceof IconBase
   }
 
-  /** `title` renders an SVG `<title>`, not a native `title` attribute. */
-  static ownedNativeProps = ['title']
-
   static #nextOverlayMask = 0
   #overlayMaskId = `overlay-${IconBase.#nextOverlayMask++}`
 
@@ -53,9 +50,11 @@ export abstract class IconBase<
   get attributes() {
     const { disabled, height, onClick, paintOrder, strokeWidth, width, x, y } = this.props
     const clickable = Boolean(!disabled && onClick !== noop)
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.title
 
     return {
-      ...super.attributes,
+      ...attributes,
       'aria-label': this.props.title,
       'height': height,
       'onClick': clickable ? onClick : undefined,

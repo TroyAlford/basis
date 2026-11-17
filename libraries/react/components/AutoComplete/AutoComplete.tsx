@@ -72,9 +72,6 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
 
   static displayName = 'AutoComplete'
 
-  /** `onClose` and `onSelect` are AutoComplete callbacks, not native root events. */
-  static ownedNativeProps = ['onClose', 'onSelect']
-
   static get defaultProps() {
     return {
       ...super.defaultProps,
@@ -94,8 +91,12 @@ export class AutoComplete<T = unknown> extends Component<Props<T>, HTMLDivElemen
   private unsubscribeBlur?: () => void
 
   get attributes() {
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.onClose
+    delete attributes.onSelect
+
     return {
-      ...super.attributes,
+      ...attributes,
       'data-loading': this.state.loading,
       'data-open': this.isOpen,
     }

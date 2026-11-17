@@ -4,7 +4,7 @@ import type { Component } from '../components/Component/Component'
 /** Type for mixin objects. */
 export interface Mixin<Props = unknown> {
   /** Attributes to apply to the component. */
-  attributes?: (props: Props) => Record<string, boolean | string>,
+  attributes?: (props: Props) => Record<string, boolean | string | undefined>,
   /** Called after component mounts. */
   componentDidMount?<E extends HTMLElement | SVGElement, S>(
     component: Component<Props, E, S>,
@@ -26,11 +26,6 @@ export interface Mixin<Props = unknown> {
   ): T,
   /** Default props for the mixin. */
   defaultProps: Partial<Props>,
-  /**
-   * Native prop names this mixin owns and applies to an inner element, so the
-   * base `Component` does not also forward them to the root element.
-   */
-  ownedNativeProps?: readonly string[],
   /** Whether this mixin should be applied after other mixins (mutative mixins). */
   post?: boolean,
   /** Applies mixin props to a React element. */

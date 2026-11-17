@@ -186,25 +186,30 @@ async function enroll(
 ): Promise<string> {
   await sql`
     INSERT INTO "Entity" ("id", "name", "entity")
-    VALUES (${user}, ${subject}, 'User')
+    VALUES
+      (${user}, ${subject}, 'User')
   `
   await sql`
     INSERT INTO "User" ("id", "email")
-    VALUES (${user}, ${email})
+    VALUES
+      (${user}, ${email})
   `
   const identity = randomUUID()
   await sql`
     INSERT INTO "Entity" ("id", "name", "entity")
-    VALUES (${identity}, ${`${provider}:${subject}`}, 'ExternalIdentity')
+    VALUES
+      (${identity}, ${`${provider}:${subject}`}, 'ExternalIdentity')
   `
   await sql`
     INSERT INTO "ExternalIdentity" ("id", "provider", "subject", "revoked", "user.id")
-    VALUES (${identity}, ${provider}, ${subject}, FALSE, ${user})
+    VALUES
+      (${identity}, ${provider}, ${subject}, FALSE, ${user})
   `
   for (const role of roles) {
     await sql`
       INSERT INTO "UserRole" ("user.id", "role.id")
-      VALUES (${user}, ${role})
+      VALUES
+        (${user}, ${role})
     `
   }
   return user
@@ -221,7 +226,8 @@ function fixtureServer(database: DatabaseContext) {
       assignRole: async (user: string, role: string): Promise<void> => {
         await database.sql`
           INSERT INTO "UserRole" ("user.id", "role.id")
-          VALUES (${user}, ${role})
+          VALUES
+            (${user}, ${role})
         `
       },
       graph,
@@ -238,7 +244,7 @@ describe('Graph mutation authorization', () => {
       const server = fixtureServer(database)
       const asActor = async <T>(actor: string | null, work: () => T | Promise<T>): Promise<T> => {
         await database.sql`
-          SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+          SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
         `
         return await work()
       }
@@ -390,7 +396,7 @@ describe('Graph mutation authorization', () => {
       const server = fixtureServer(database)
       const asActor = async <T>(actor: string | null, work: () => T | Promise<T>): Promise<T> => {
         await database.sql`
-          SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
+          SELECT SET_CONFIG('actor.id', ${actor ?? ''}, TRUE)
         `
         return await work()
       }
@@ -475,7 +481,8 @@ describe('Graph mutation authorization', () => {
       await asActor(administrator, () => server.db.tx(async sql => {
         await sql`
           INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
-          VALUES (${memberProject.id}, ${worker}, ${MembershipRole.Owner})
+          VALUES
+            (${memberProject.id}, ${worker}, ${MembershipRole.Owner})
         `
       }))
 

@@ -13,17 +13,17 @@ interface Props {
 export class Section extends Component<Props> {
   static displayName = 'Section'
 
-  /** `title` is the Section heading, not a native `title` tooltip. */
-  static ownedNativeProps = ['title']
-
   get id(): string | undefined {
     return this.props.title ? kebabCase(this.props.title) : undefined
   }
   override get tag() { return 'section' as const }
 
   override get attributes() {
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.title
+
     return {
-      ...super.attributes,
+      ...attributes,
       'data-has-title': !!this.props.title,
       'id': this.id,
     }

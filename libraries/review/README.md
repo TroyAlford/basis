@@ -21,16 +21,16 @@ Standard reviewers live in `libraries/review/reviewers/` as Markdown documents. 
 
 Front-matter fields:
 
-| Field              | Meaning                                                                               |
-| ------------------ | ------------------------------------------------------------------------------------- |
-| `id`               | stable reviewer id (addressable by overlays)                                          |
-| `title`            | short human-readable title                                                            |
-| `executionProfile` | `deterministic`, `detector-then-adjudicate`, or `semantic` |
-| `detectors`        | `[{ detector, categories }]` selectors that feed the reviewer                         |
-| `context`          | context the runtime must assemble before adjudication                                 |
-| `outcomes`         | `[{ category, disposition, destructive }]` the reviewer may return                    |
-| `threshold`        | `{ minimumConfidence, severity }` reporting gate                                      |
-| `verification`     | optional registered check that proves a repair: `{ detector }`                        |
+| Field              | Meaning                                                            |
+| ------------------ | ------------------------------------------------------------------ |
+| `id`               | stable reviewer id (addressable by overlays)                       |
+| `title`            | short human-readable title                                         |
+| `executionProfile` | `deterministic`, `detector-then-adjudicate`, or `semantic`         |
+| `detectors`        | `[{ detector, categories }]` selectors that feed the reviewer      |
+| `context`          | context the runtime must assemble before adjudication              |
+| `outcomes`         | `[{ category, disposition, destructive }]` the reviewer may return |
+| `threshold`        | `{ minimumConfidence, severity }` reporting gate                   |
+| `verification`     | optional registered check that proves a repair: `{ detector }`     |
 
 `category` is the stable reason code; `disposition` is the portable outcome it projects to.
 
@@ -43,10 +43,10 @@ A `disposition` is one of `finding`, `question`, `no_finding`, or `abstain`:
 
 Every outcome is reported as a binary result plus its category as the reason code. Only `no_finding` passes; `finding`, `question`, and `abstain` are not passes. `reviewResult(disposition)` and `summarizeOutcome(outcome)` expose that projection:
 
-| Reviewer | Result | Reason code |
-| --- | --- | --- |
-| accidental-complexity | PASS | proportionate |
-| test-strategy | FAIL | implementation-coupled-assertion |
+| Reviewer              | Result | Reason code                      |
+| --------------------- | ------ | -------------------------------- |
+| accidental-complexity | PASS   | proportionate                    |
+| test-strategy         | FAIL   | implementation-coupled-assertion |
 
 A report is scannable when every reviewer row carries `Result` and `Reason code`, rather than only the reviewer-specific category.
 

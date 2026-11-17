@@ -60,11 +60,13 @@ test('consumer fixture uses provided entities', async () => {
     setup: async database => {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${id}, 'Consumer', 'ConsumerNote')
+        VALUES
+          (${id}, 'Consumer', 'ConsumerNote')
       `
       await database.sql`
         INSERT INTO "ConsumerNote" ("id", "label")
-        VALUES (${id}, 'isolated')
+        VALUES
+          (${id}, 'isolated')
       `
     },
   })

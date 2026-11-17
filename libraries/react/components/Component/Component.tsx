@@ -79,14 +79,13 @@ const NATIVE_ATTRIBUTES: ReadonlySet<string> = new Set([
 /**
  * Filter component props down to the native attributes the base class forwards.
  * @param props - The component props.
- * @param owned - Native prop names the component or a mixin declares it owns.
  * @returns The native attributes to emit on the root element.
  */
-const nativeAttributes = (props: object, owned: ReadonlySet<string>): Record<string, unknown> => {
+const nativeAttributes = (props: object): Record<string, unknown> => {
   const attributes: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(props)) {
     if (value === undefined) continue
-    if (!NATIVE_ATTRIBUTES.has(key) || owned.has(key)) continue
+    if (!NATIVE_ATTRIBUTES.has(key)) continue
     attributes[key] = value
   }
   return attributes
@@ -109,12 +108,6 @@ export abstract class Component<
 > extends React.Component<P<Element, Props>, State> {
   static get mixins(): Set<Mixin> { return new Set() }
 
-  /**
-   * Native prop names this component owns, suppressing native forwarding for
-   * them. Subclasses compose with `...super.ownedNativeProps`.
-   */
-  static ownedNativeProps: readonly string[] = []
-
   static get defaultProps(): Partial<TProps> {
     return {
       onKeyDown: () => undefined,
@@ -126,40 +119,15 @@ export abstract class Component<
   }
 
   /**
-   * Native prop names the component or its mixins own, composed through the
-   * static inheritance chain.
-   *
-   * Ownership is declared explicitly and never inferred from `defaultProps`, so
-   * a component can intentionally reuse a native name for its own semantics.
-   * @returns The owned native prop names.
-   */
-  get ownedNativePropNames(): ReadonlySet<string> {
-    const owned = new Set<string>()
-
-    for (const mixin of this.mixins) {
-      for (const name of mixin.ownedNativeProps ?? []) owned.add(name)
-    }
-
-    let ctor: unknown = this.constructor
-    while (typeof ctor === 'function') {
-      const declared = (ctor as { ownedNativeProps?: readonly string[] }).ownedNativeProps
-      for (const name of declared ?? []) owned.add(name)
-      ctor = Object.getPrototypeOf(ctor)
-    }
-
-    return owned
-  }
-
-  /**
    * Getter for attributes.
    * @returns a React.HTMLAttributes<Element> object
    * @example get attributes() { return { tabIndex: 0 } }
    */
-  get attributes() {
+  get attributes(): Record<string, unknown> {
     return {
       'data-theme': this.props.theme,
       'style': this.props.style,
-      ...nativeAttributes(this.props, this.ownedNativePropNames),
+      ...nativeAttributes(this.props),
       ...prefixObject('aria-', filterByPrefix('aria-', this.props)),
       ...prefixObject('data-', filterByPrefix('data-', this.props)),
       ...this.mixins.reduce((attributes, mixin) => ({

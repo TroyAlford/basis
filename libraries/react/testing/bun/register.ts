@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it, test } from 'bun:test'
+import { toMatchIndented } from '../../../testing/matchers/toMatchIndented'
 import { toHaveAttribute } from './matchers/toHaveAttribute'
 import { toHaveClass } from './matchers/toHaveClass'
 import { toHaveStyle } from './matchers/toHaveStyle'
@@ -18,5 +19,6 @@ expect.extend({
   toHaveClass,
   toHaveStyle,
   toHaveTextContent,
+  toMatchIndented,
   toRaise,
 })

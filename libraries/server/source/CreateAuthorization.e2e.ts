@@ -61,11 +61,12 @@ describe('resource-scoped create authorization', () => {
       const parent = created.record?.id
       expect(parent).toBeDefined()
       await database.sql`
-        SELECT set_config('actor.id', ${rows.bob}, TRUE)
+        SELECT SET_CONFIG('actor.id', ${rows.bob}, TRUE)
       `
       await expect(database.sql`
         INSERT INTO "CreateSibling" ("id")
-        VALUES (${parent})
+        VALUES
+          (${parent})
       `).rejects.toThrow(/row-level security policy/)
     })
   })
@@ -110,11 +111,13 @@ describe('resource-scoped create authorization', () => {
     const insert = async (database: DatabaseContext, id: string, workspace: string) => {
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${id}, ${`Direct ${id}`}, 'Resource')
+        VALUES
+          (${id}, ${`Direct ${id}`}, 'Resource')
       `
       await database.sql`
         INSERT INTO "Resource" ("id", "title", "workspace.id")
-        VALUES (${id}, ${`Direct ${id}`}, ${workspace})
+        VALUES
+          (${id}, ${`Direct ${id}`}, ${workspace})
       `
     }
 

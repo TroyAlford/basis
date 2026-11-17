@@ -172,11 +172,13 @@ async function seedFixture(
   for (const [index, id] of people.entries()) {
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${id}, ${`person-${String(index).padStart(6, '0')}`}, 'Person')
+      VALUES
+        (${id}, ${`person-${String(index).padStart(6, '0')}`}, 'Person')
     `
     await database.sql`
       INSERT INTO "Person" ("id", "title")
-      VALUES (${id}, ${`Person ${index}`})
+      VALUES
+        (${id}, ${`Person ${index}`})
     `
   }
   const pets = people.flatMap((owner, personIndex) => (
@@ -189,11 +191,13 @@ async function seedFixture(
   for (const pet of pets) {
     await database.sql`
       INSERT INTO "Entity" ("id", "name", "entity")
-      VALUES (${pet.id}, ${pet.title}, 'Pet')
+      VALUES
+        (${pet.id}, ${pet.title}, 'Pet')
     `
     await database.sql`
       INSERT INTO "Pet" ("id", "title", "owner.id")
-      VALUES (${pet.id}, ${pet.title}, ${pet.owner})
+      VALUES
+        (${pet.id}, ${pet.title}, ${pet.owner})
     `
   }
   await database.sql`
@@ -396,47 +400,43 @@ describe('Query planning', () => {
       const petB = '00000000-0000-4000-8000-000000000023'
       await database.sql`
         INSERT INTO "Entity" ("id", "name", "entity")
-        VALUES (${alpha},
-          'Alpha',
-          'Alpha'),
-          (${beta},
-          'Beta',
-          'Beta'),
-          (${targetA},
-          'Target A',
-          'Target'),
-          (${targetB},
-          'Target B',
-          'Target'),
-          (${petA1},
-          'Pet A1',
-          'Pet'),
-          (${petA2},
-          'Pet A2',
-          'Pet'),
-          (${petB},
-          'Pet B',
-          'Pet')
+        VALUES
+          (${alpha}, 'Alpha', 'Alpha'),
+          (${beta}, 'Beta', 'Beta'),
+          (${targetA}, 'Target A', 'Target'),
+          (${targetB}, 'Target B', 'Target'),
+          (${petA1}, 'Pet A1', 'Pet'),
+          (${petA2}, 'Pet A2', 'Pet'),
+          (${petB}, 'Pet B', 'Pet')
       `
       await database.sql`
         INSERT INTO "Source" ("id")
-        VALUES (${alpha}), (${beta})
+        VALUES
+          (${alpha}),
+          (${beta})
       `
       await database.sql`
         INSERT INTO "Target" ("id")
-        VALUES (${targetA}), (${targetB})
+        VALUES
+          (${targetA}),
+          (${targetB})
       `
       await database.sql`
         INSERT INTO "Alpha" ("id", "favorite.id")
-        VALUES (${alpha}, ${targetA})
+        VALUES
+          (${alpha}, ${targetA})
       `
       await database.sql`
         INSERT INTO "Beta" ("id", "favorite.id")
-        VALUES (${beta}, ${targetB})
+        VALUES
+          (${beta}, ${targetB})
       `
       await database.sql`
         INSERT INTO "Pet" ("id", "owner.id")
-        VALUES (${petA1}, ${targetA}), (${petA2}, ${targetA}), (${petB}, ${targetB})
+        VALUES
+          (${petA1}, ${targetA}),
+          (${petA2}, ${targetA}),
+          (${petB}, ${targetB})
       `
 
       const counts = await queryEntity<{

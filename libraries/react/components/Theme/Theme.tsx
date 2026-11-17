@@ -249,11 +249,15 @@ export const DARK_THEME = {
 export class Theme extends Component<Props> {
   static displayName = 'Theme'
 
-  /** `color` is the Theme palette, not a native `color` attribute. */
-  static ownedNativeProps = ['color']
   static defaultProps: Component<Props>['props'] = {
     ...Component.defaultProps,
     ...DEFAULT_THEME,
+  }
+
+  override get attributes() {
+    const attributes = { ...super.attributes } as Record<string, unknown>
+    delete attributes.color
+    return attributes
   }
 
   componentDidMount(): void { this.injectStyles() }

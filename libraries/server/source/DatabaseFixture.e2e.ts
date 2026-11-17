@@ -41,7 +41,9 @@ const options = {
     await database.create('Workspace', { id: workspace, name: 'Workspace' })
     await database.sql`
       INSERT INTO "WorkspaceMembership" ("workspace.id", "user.id", "role")
-      VALUES (${workspace}, ${owner}, 'owner'), (${workspace}, ${viewer}, 'viewer')
+      VALUES
+        (${workspace}, ${owner}, 'owner'),
+        (${workspace}, ${viewer}, 'viewer')
     `
   },
 }
@@ -181,7 +183,10 @@ describe('Basis substrate installation', () => {
   test('preserves unrelated application-owned triggers', async () => {
     await withLifecycleDatabase('substrate-preserve-trigger', async database => {
       await database.sql`
-        CREATE TABLE "Invoice" ("id" text PRIMARY KEY, "status" text)
+        CREATE TABLE "Invoice" (
+          "id" TEXT PRIMARY KEY,
+          "status" TEXT
+        )
       `
       await database.sql.unsafe(`
         CREATE FUNCTION "resolve_invoice_status"() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -191,13 +196,14 @@ describe('Basis substrate installation', () => {
         END $$;
       `).simple()
       await database.sql`
-        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE FUNCTION
-          "resolve_invoice_status"()
+        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE
+          FUNCTION "resolve_invoice_status"()
       `
       await installBasis(database.sql)
       await database.sql`
         INSERT INTO "Invoice" ("id")
-        VALUES ('invoice-1')
+        VALUES
+          ('invoice-1')
       `
       expect(await database.sql<{ status: string }[]>`
         SELECT "status"
@@ -205,10 +211,11 @@ describe('Basis substrate installation', () => {
       `)
         .toEqual([{ status: 'resolved' }])
       expect(await database.sql<{ present: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM pg_trigger trigger JOIN pg_class relation ON relation.oid =
-          trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE
-          namespace.nspname = current_schema() AND relation.relname = 'Invoice' AND trigger.tgname =
-          'resolve_invoice_status' ) AS present
+        SELECT EXISTS(
+  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
+    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
+    current_schema() AND relation.relname = 'Invoice' AND TRIGGER.tgname = 'resolve_invoice_status'
+) AS present
       `).toEqual([{ present: true }])
     })
   })
@@ -216,7 +223,10 @@ describe('Basis substrate installation', () => {
   test('removes only explicitly identified legacy Basis identity objects', async () => {
     await withLifecycleDatabase('substrate-remove-legacy', async database => {
       await database.sql`
-        CREATE TABLE "Invoice" ("id" text PRIMARY KEY, "status" text)
+        CREATE TABLE "Invoice" (
+          "id" TEXT PRIMARY KEY,
+          "status" TEXT
+        )
       `
       await database.sql.unsafe(`
         CREATE FUNCTION "resolve_invoice_status"() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -226,8 +236,8 @@ describe('Basis substrate installation', () => {
         END $$;
       `).simple()
       await database.sql`
-        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE FUNCTION
-          "resolve_invoice_status"()
+        CREATE TRIGGER "resolve_invoice_status" BEFORE INSERT ON "Invoice" FOR EACH ROW EXECUTE
+          FUNCTION "resolve_invoice_status"()
       `
       await database.sql.unsafe(`
         CREATE OR REPLACE FUNCTION basis.enroll_identity(
@@ -252,20 +262,23 @@ describe('Basis substrate installation', () => {
         role: boolean,
         triggerFunction: boolean,
       }[]>`
-        SELECT to_regprocedure('basis.enroll_identity(text,text,text,text)') IS NULL AS "enroll",
-          to_regprocedure('basis.resolve_identity(text)') IS NULL AS "resolve",
-          to_regprocedure('basis.has_role(text)') IS NULL AS "role",
-          to_regprocedure('resolve_invoice_status()') IS NOT NULL AS "triggerFunction"
+        SELECT
+          TO_REGPROCEDURE('basis.enroll_identity(text,text,text,text)') IS NULL AS "enroll",
+          TO_REGPROCEDURE('basis.resolve_identity(text)') IS NULL AS "resolve",
+          TO_REGPROCEDURE('basis.has_role(text)') IS NULL AS "role",
+          TO_REGPROCEDURE('resolve_invoice_status()') IS NOT NULL AS "triggerFunction"
       `).toEqual([{ enroll: true, resolve: true, role: true, triggerFunction: true }])
       expect(await database.sql<{ present: boolean }[]>`
-        SELECT EXISTS (SELECT 1 FROM pg_trigger trigger JOIN pg_class relation ON relation.oid =
-          trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE
-          namespace.nspname = current_schema() AND relation.relname = 'Invoice' AND trigger.tgname =
-          'resolve_invoice_status' ) AS present
+        SELECT EXISTS(
+  SELECT 1 FROM pg_trigger TRIGGER JOIN pg_class relation ON relation.oid = TRIGGER.tgrelid JOIN
+    pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname =
+    current_schema() AND relation.relname = 'Invoice' AND TRIGGER.tgname = 'resolve_invoice_status'
+) AS present
       `).toEqual([{ present: true }])
       await database.sql`
         INSERT INTO "Invoice" ("id")
-        VALUES ('invoice-2')
+        VALUES
+          ('invoice-2')
       `
       expect(await database.sql<{ status: string }[]>`
         SELECT "status"
