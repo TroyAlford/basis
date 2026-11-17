@@ -800,7 +800,7 @@ describe('Server database lifecycle', () => {
       where: { id },
     })).toEqual([{ id, label: 'Selected' }])
     await expect(database.query('Note', { fields: ['id'] }))
-      .rejects.toThrow('Unknown entity "Note"')
+      .rejects.toThrow('Unknown entity or relationship "Note"')
   })
 
   isolatedTest('stores and queries named relationships and inverse references', async database => {

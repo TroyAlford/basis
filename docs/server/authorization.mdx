@@ -103,7 +103,17 @@ roles: {
 }
 ```
 
-Each entity and named relationship owns an action-keyed `security` declaration. An action value is either explicit `Security.Public` or one or more alternative rules combined with OR. Each rule may declare exactly one of `grant` or `role` and/or a non-empty `where`. A where-only rule is a public-conditional rule: it authorizes matching rows without an artificial global capability or role. `Security.Public` remains the only unconditional public form.
+Each entity and named relationship owns an action-keyed `security` declaration. A relationship endpoint may expose its records as an explicit `collection`, and that collection can participate in authorization with the same predicate grammar:
+
+```ts
+Deck: {
+  read: [{ where: 'memberships $contains (user = $me)' }],
+}
+```
+
+Relationship-record authorization remains relationship RLS: the collection predicate resolves against the relationship row and its endpoint fields, never a surrogate relationship `id`.
+
+ An action value is either explicit `Security.Public` or one or more alternative rules combined with OR. Each rule may declare exactly one of `grant` or `role` and/or a non-empty `where`. A where-only rule is a public-conditional rule: it authorizes matching rows without an artificial global capability or role. `Security.Public` remains the only unconditional public form.
 
 ```ts
 security: {

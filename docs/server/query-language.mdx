@@ -242,6 +242,20 @@ const referencePaths = [
 - The path uses the existing single-statement reference joins and finite work budget, including the same eight-reference-hop limit as projection. Runtime row identity is never inspected to detect cycles.
 - Sorting by a dotted reference path remains excluded in stages 16–20; `orderBy` continues to accept only root/effective scalar fields.
 
+### Relationship-record collections
+
+A relationship endpoint may declare `collection` to expose the relationship records themselves. Those records are ordinary query items with endpoint references and relationship fields, but they retain composite identity and are not valid `Entity` reference targets.
+
+```ts
+deck.memberships
+deck.memberships[role = 'Editor']
+deck.memberships[role = 'Editor'].user
+deck.memberships[user = $me $and role = 'Editor']
+deck.memberships $contains (user = $me)
+```
+
+A separate `inverse` endpoint navigation continues to expose related entities (`deck.members`). Relationship records can also be queried as a root (`db.query('DeckMembership', …)`) and addressed by their required endpoint keys for direct `db.create`, `db.edit`, `db.delete`, and `db.upsert`.
+
 ## Stage 18 — collection comparisons (implemented)
 
 Relationship collections use the same model-aware matching idiom that native arrays will use in stage 19. The operator states the intent; the canonical field type selects the physical implementation. `$contains` has the symbolic alias `~=`.

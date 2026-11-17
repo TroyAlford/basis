@@ -194,16 +194,30 @@ Scalar arrays use `type: "Array"` with a scalar `items` descriptor. They map to 
 
 Opaque structured values use `type: "JSON"` and map to a non-null PostgreSQL `jsonb` column. The value shape is intentionally opaque; object and array structure is whatever JSON is written. JSON values are returned whole and can participate in opaque structural `$contains` predicates; they cannot be ordered or traversed as a graph.
 
-A named relationship is a first-class many-to-many declaration in the top-level `relationships` array. There is no `type` discriminator. Every relationship has exactly `name`, `between`, and `fields`:
+A named relationship is a first-class declaration in the top-level `relationships` array. There is no `type` discriminator. Every relationship has exactly `name`, `between`, and `fields`:
 
 - `name` is PascalCase and distinct from all entity and relationship names.
-- `between` has exactly two `{ field, target, inverse }` endpoints in authored order. Both inverses are mandatory, and both endpoint fields and inverses must differ.
+- `between` has two or more `{ field, target, inverse?, collection? }` endpoints in authored order. Endpoint fields and any declared inverse/collection names must be distinct on their target.
+- `inverse` exposes a related-entity collection on the endpoint target. `collection` exposes the relationship records themselves. Either may be omitted; neither is inferred. `inverse` is available only for two-endpoint relationships because a remote entity is otherwise ambiguous.
 - `fields` is required, may be empty, and may contain only scalar, `Array`, or `JSON` fields. It cannot contain `Entity`, `Collection`, `Structured`, or `ValueCollection` fields.
 - Relationship fields are properties of the relationship itself, not target entity fields.
 
-The physical table is named by the relationship. Each endpoint column is the endpoint field's dotted path (`"user.id"`, `"campaign.id"`), is `text not null`, and participates in the composite primary key in authored order. Deferrable foreign keys target the respective entity or supported ancestor `id`, and both endpoint columns receive indexes. Relationship fields are regular non-null columns. There is no surrogate `id`, `name`, `entity`, or root `Entity` row for a relationship.
+The physical table is named by the relationship. Each endpoint column is the endpoint field's dotted path (`"user.id"`, `"campaign.id"`), is `text not null`, and participates in the composite primary key in authored order. Deferrable foreign keys target the respective entity or supported ancestor `id`, and every endpoint column receives an index. Relationship fields are regular non-null columns. There is no surrogate `id`, `name`, `entity`, or root `Entity` row for a relationship.
 
-Duplicate pairs fail with SQLSTATE `23505`; a missing endpoint target fails with `23503`. Relationship tables are unordered sets of pairs and do not have fake `ordered`, `unique`, or `storage` flags. The entity tables, `TableDefinition`, phased foreign-key reconciliation, and query compiler all use the same canonical metadata.
+Duplicate endpoint tuples fail with SQLSTATE `23505`; a missing endpoint target fails with `23503`. Relationship tables are unordered sets of endpoint tuples and do not have fake `ordered`, `unique`, or `storage` flags. The entity tables, `TableDefinition`, phased foreign-key reconciliation, and query compiler all use the same canonical metadata.
+
+An explicit `collection` endpoint navigation makes the relationship records first-class query objects:
+
+```ts
+const [deck] = await server.db.query<{
+  entries: { items: { card: { id: string }, printing: { id: string }, quantity: number }[] },
+}>('Deck', {
+  fields: ['id', 'entries[quantity > 1]', 'entries.card', 'entries.printing'],
+  where: { id: deckId },
+})
+```
+
+Relationship records have composite identity, not universal `Entity.id`, and are not valid `Entity` reference targets. They can be queried as a root (`db.query('DeckMembership', …)`) and written directly through `db.create`, `db.edit`, `db.delete`, and `db.upsert`. Relationship writes require every endpoint key field; endpoint keys identify the record and are immutable on edit. Relationship RLS policies govern the action.
 
 Entity-rooted `db.query` uses the logical field vocabulary. A reference field such as `author` is selectable as a singular projection, but it is not filterable or sortable; its physical `author.id` column is never a logical field. Direct `db.sql` remains physical SQL and may address those quoted dotted names normally.
 
