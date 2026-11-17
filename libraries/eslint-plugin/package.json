@@ -24,7 +24,7 @@
     "eslint-plugin-simple-import-sort": "^14.0.0",
     "eslint-plugin-sort-destructure-keys": "^3.0.0",
     "jsonc-eslint-parser": "^3.3.0",
-    "postgresql-eslint-parser": "^0.6.2",
+    "libpg-query": "^18.2.4",
     "typescript-eslint": "^8.70.0"
   },
   "devDependencies": {

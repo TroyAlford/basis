@@ -163,7 +163,7 @@ describe('Server database lifecycle', () => {
         data_type AS "dataType",
         is_nullable AS "isNullable"
       FROM information_schema.columns
-      WHERE table_schema = current_schema()
+      WHERE table_schema = CURRENT_SCHEMA()
         AND table_name = ${'Note'}
       ORDER BY ordinal_position
     `
@@ -179,7 +179,7 @@ describe('Server database lifecycle', () => {
         data_type AS "dataType",
         is_nullable AS "isNullable"
       FROM information_schema.columns
-      WHERE table_schema = current_schema()
+      WHERE table_schema = CURRENT_SCHEMA()
         AND table_name = ${'Account'}
       ORDER BY ordinal_position
     `
@@ -198,7 +198,7 @@ describe('Server database lifecycle', () => {
       SELECT tc.table_name AS "tableName"
       FROM information_schema.table_constraints tc
       WHERE tc.constraint_type = 'PRIMARY KEY'
-        AND tc.table_schema = current_schema()
+        AND tc.table_schema = CURRENT_SCHEMA()
         AND tc.table_name IN (${'Note'}, ${'Account'})
       ORDER BY tc.table_name
     `
@@ -776,7 +776,7 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
       SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
       FROM information_schema.columns
-      WHERE table_schema = current_schema()
+      WHERE table_schema = CURRENT_SCHEMA()
         AND table_name = 'Entity'
       ORDER BY ordinal_position
     `).toEqual([
@@ -894,7 +894,7 @@ describe('Server database lifecycle', () => {
         is_nullable AS "isNullable",
         udt_name AS "udtName"
       FROM information_schema.columns
-      WHERE table_schema = current_schema()
+      WHERE table_schema = CURRENT_SCHEMA()
         AND table_name = 'Article'
       ORDER BY ordinal_position
     `).toEqual([
@@ -906,7 +906,7 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ columnName: string, dataType: string, isNullable: string }[]>`
       SELECT column_name AS "columnName", data_type AS "dataType", is_nullable AS "isNullable"
       FROM information_schema.columns
-      WHERE table_schema = current_schema()
+      WHERE table_schema = CURRENT_SCHEMA()
         AND table_name = 'Membership'
       ORDER BY ordinal_position
     `).toEqual([
@@ -2881,8 +2881,7 @@ describe('Server database lifecycle', () => {
 
     const { database } = await useDatabaseFixture('durable-failure-check')
     expect(await database.sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS
-        present
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
     `).toEqual([{ present: false }])
   })
 
@@ -2891,7 +2890,7 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ count: number }[]>`
       SELECT COUNT(*)::int AS count
       FROM pg_catalog.pg_namespace
-      WHERE nspname like 'basis_test_%'
+      WHERE nspname LIKE 'basis_test_%'
     `).toEqual([{ count: 0 }])
   })
 

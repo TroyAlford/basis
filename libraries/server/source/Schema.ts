@@ -459,7 +459,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       column_default AS DEFAULT,
       data_type AS type
     FROM information_schema.columns
-    WHERE table_schema IN (current_schema(), 'basis')
+    WHERE table_schema IN (CURRENT_SCHEMA(), 'basis')
     ORDER BY table_schema, table_name, ordinal_position
   `
   const indexRows = await sql<{
@@ -669,7 +669,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
   }[]>`
     SELECT grantee, table_schema AS schema, table_name AS TABLE, privilege_type AS privilege
     FROM information_schema.role_table_grants
-    WHERE table_schema IN (current_schema(), 'basis')
+    WHERE table_schema IN (CURRENT_SCHEMA(), 'basis')
     ORDER BY grantee, table_schema, table_name, privilege_type
   `
   const grants: PhysicalGrant[] = grantRows.map(row => {

@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- AST printer boundary over PostgreSQL nodes. */
 import type { Rule } from 'eslint'
 import type * as ESTree from 'estree'
-import { parse as parsePostgres } from 'postgresql-eslint-parser'
+import { loadModule, parseSync, scanSync } from 'libpg-query'
+
+await loadModule()
 
 /** Token kinds produced by the SQL tokenizer. */
 type TokenKind =
@@ -1137,11 +1139,18 @@ export function formatSQL(sql: string, indent = ''): string {
     index += 1
   }
   try {
-    const ast = parsePostgres(safeSql) as any
-    if ((ast.comments?.length ?? 0) > 0) return formatLegacySQL(sql, indent)
-    if (!ast.body?.length) return ''
-    const printer = new AstPrinter(safeSql, ast.tokens ?? [])
-    let formatted = ast.body.map((node: any) => printer.statement(node, indent)).join(';\n\n')
+    if (hasSqlComments(safeSql)) return formatLegacySQL(sql, indent)
+    const parsed = parseSync(safeSql) as any
+    if (!parsed.stmts?.length) return ''
+    const printer = new LibpgPrinter(safeSql, safeSql.length)
+    if (!parsed.stmts.every((raw: any) => printer.supported(raw.stmt))) {
+      return formatLegacySQL(sql, indent)
+    }
+    let formatted = parsed.stmts.map((raw: any) => {
+      const start = raw.stmt_location ?? 0
+      const end = raw.stmt_len === undefined ? safeSql.length : start + raw.stmt_len
+      return new LibpgPrinter(safeSql, end).statement(raw.stmt, indent)
+    }).join(';\n\n')
     for (const [safe, original] of placeholders) {
       formatted = formatted.replace(new RegExp(safe, 'giu'), original)
     }
@@ -1152,20 +1161,40 @@ export function formatSQL(sql: string, indent = ''): string {
   }
 }
 
-/** Prints PostgreSQL AST nodes in the canonical Basis layout. */
-class AstPrinter {
-  constructor(private readonly source: string, private readonly tokens: readonly any[]) {}
+/**
+ * Detect comments without paying for a full token scan on ordinary SQL.
+ * @param sql - SQL text.
+ * @returns Whether the text contains a SQL comment.
+ */
+function hasSqlComments(sql: string): boolean {
+  if (!/--|\/\*/u.test(sql)) return false
+  try {
+    return scanSync(sql).tokens.some(candidate => (
+      candidate.tokenName === 'SQL_COMMENT' || candidate.tokenName === 'C_COMMENT'
+    ))
+  } catch {
+    return true
+  }
+}
+
+const ALIAS_STOP_WORDS = new Set([
+  'from', 'where', 'group', 'having', 'order', 'limit', 'offset', 'union', 'intersect',
+  'except', 'join', 'inner', 'left', 'right', 'full', 'cross', 'natural', 'on', 'using',
+  'returning', 'set', 'values', 'conflict', 'do', 'for', 'window', 'fetch', 'into', 'select',
+  'update', 'delete', 'insert', 'with',
+])
+
+/** Prints raw libpg-query statements in the canonical Basis layout. */
+class LibpgPrinter {
+  constructor(private readonly source: string, private readonly end: number) {}
 
   /**
    * Print one statement.
-   * @param node - Statement node.
-   * @param indent - Prefix for this statement.
+   * @param node - Raw statement node.
+   * @param indent - Prefix for every line.
    * @returns Formatted SQL.
    */
   statement(node: any, indent: string): string {
-    if (!this.supported(node, new Set())) {
-      return formatLegacySQL(this.text(node) || this.source, indent)
-    }
     return this.lines(node, '')
       .flatMap(line => line.split('\n'))
       .map(line => `${indent}${line}`)
@@ -1178,106 +1207,98 @@ class AstPrinter {
    * @param seen - Nodes already visited.
    * @returns Whether the printer supports the subtree.
    */
-  supported(node: any, seen: Set<object>): boolean {
+  supported(node: any, seen = new Set<object>()): boolean {
     if (!node || typeof node !== 'object') return true
     if (seen.has(node)) return true
     seen.add(node)
     if (Array.isArray(node)) return node.every(item => this.supported(item, seen))
-    if (typeof node.type !== 'string') return true
-    if (!this.supportedType(node)) return false
-    return Object.entries(node).every(([key, value]) => (
-      ['parent', 'loc', 'range', 'type'].includes(key) || this.supported(value, seen)
-    ))
+    const tagged = this.tag(node)
+    if (!tagged) {
+      return Object.entries(node).every(([key, value]) => key === 'location' || this.supported(value, seen))
+    }
+    const [type, body] = tagged
+    if (!this.supportedNode(type, body)) return false
+    return Object.entries(body).every(([key, value]) => key === 'location' || this.supported(value, seen))
   }
 
   /**
    * Check whether one node type is supported.
-   * @param node - Candidate node.
+   * @param type - Raw node tag.
+   * @param body - Raw node body.
    * @returns Whether this node's own fields are supported.
    */
-  supportedType(node: any): boolean {
-    switch (node.type) {
+  supportedNode(type: string, body: any): boolean {
+    switch (type) {
       case 'SelectStmt':
-        return !node.distinctClause?.length
-          && !node.intoClause
-          && !node.windowClause?.length
-          && !node.lockingClause?.length
-          && !node.sampleClause
-          && (!node.limitOption || node.limitOption === 'LIMIT_OPTION_DEFAULT')
+        return !body.distinctClause?.length
+          && !body.intoClause
+          && !body.windowClause?.length
+          && !body.lockingClause?.length
+          && !body.sampleClause
+          && (!body.limitOption || body.limitOption === 'LIMIT_OPTION_DEFAULT')
       case 'InsertStmt':
-        return !node.withClause
-          && !node.relation?.alias
-          && !node.relation?.schemaname
-          && !node.relation?.catalogname
-          && (!node.override || node.override === 'OVERRIDING_NOT_SET')
-          && (!node.onConflictClause || !node.onConflictClause.constraint)
-          && (!node.onConflictClause?.indexElems || node.onConflictClause.indexElems.every((elem: any) => (
-            elem?.type === 'IndexElem' && Boolean(elem.name) && !elem.expr && !elem.collation && !elem.opclass
-            && (!elem.ordering || elem.ordering === 'SORTBY_DEFAULT')
-            && (!elem.nulls_ordering || elem.nulls_ordering === 'SORTBY_NULLS_DEFAULT')
-          )))
+        return !body.withClause
+          && (!body.override || body.override === 'OVERRIDING_NOT_SET')
+          && (!body.onConflictClause || !body.onConflictClause.constraint)
       case 'ViewStmt':
-        return !node.aliases?.length
-          && !node.options?.length
-          && !node.withCheckOption
-          && !node.view?.schemaname
-          && !node.view?.catalogname
+        return !body.aliases?.length
+          && !body.options?.length
+          && (!body.withCheckOption || body.withCheckOption === 'NO_CHECK_OPTION')
       case 'RangeVar':
-        return !node.schemaname
-          && !node.catalogname
-          && !node.alias?.colnames?.length
+        return !body.alias?.colnames?.length
       case 'JoinExpr':
-        return !node.usingClause?.length && !node.isNatural && !node.alias
+        return !body.usingClause?.length && !body.isNatural && !body.alias
       case 'ResTarget':
-        return !node.indirection?.length
+        return !body.indirection?.length
       case 'ColumnRef':
-        return !node.indirection?.length
-          && (node.fields ?? []).every((field: any) => field?.type === 'String' || field?.type === 'A_Star')
+        return !body.indirection?.length
+          && (body.fields ?? []).every((field: any) => ['String', 'A_Star'].includes(this.tag(field)?.[0] ?? ''))
       case 'A_Expr': {
         const kinds = [
           'AEXPR_OP', 'AEXPR_OP_ANY', 'AEXPR_OP_ALL', 'AEXPR_LIKE', 'AEXPR_ILIKE',
           'AEXPR_IN', 'AEXPR_BETWEEN', 'AEXPR_NOT_BETWEEN', 'AEXPR_BETWEEN_SYM',
           'AEXPR_NOT_BETWEEN_SYM', 'AEXPR_DISTINCT', 'AEXPR_NOT_DISTINCT', 'AEXPR_NULLIF',
         ]
-        return kinds.includes(node.kind)
-          && Boolean(node.lexpr && node.rexpr)
-          && Boolean(node.name?.length)
-          && node.lexpr?.type !== 'A_Expr'
-          && node.rexpr?.type !== 'A_Expr'
+        return kinds.includes(body.kind)
+          && Boolean(body.lexpr && body.rexpr)
+          && Boolean(body.name?.length)
+          && this.tag(body.lexpr)?.[0] !== 'A_Expr'
+          && this.tag(body.rexpr)?.[0] !== 'A_Expr'
       }
       case 'BoolExpr':
-        return ['AND_EXPR', 'OR_EXPR', 'NOT_EXPR'].includes(node.boolop)
+        return ['AND_EXPR', 'OR_EXPR', 'NOT_EXPR'].includes(body.boolop)
       case 'FuncCall':
-        return !node.over
-          && !node.agg_order?.length
-          && !node.agg_filter
-          && !node.func_variadic
-          && !node.agg_within_group
-          && Boolean(node.funcname?.length)
+        return !body.over
+          && !body.agg_order?.length
+          && !body.agg_filter
+          && !body.func_variadic
+          && !body.agg_within_group
+          && Boolean(body.funcname?.length)
       case 'SortBy':
-        return node.sortby_dir !== 'SORTBY_USING'
+        return body.sortby_dir !== 'SORTBY_USING' && !body.useOp?.length
       case 'TypeCast':
-        return Boolean(node.typeName?.range)
+        return Boolean(body.typeName)
       case 'BooleanTest':
-        return ['IS_TRUE', 'IS_NOT_TRUE', 'IS_FALSE', 'IS_NOT_FALSE'].includes(node.booltesttype)
+        return ['IS_TRUE', 'IS_NOT_TRUE', 'IS_FALSE', 'IS_NOT_FALSE'].includes(body.booltesttype)
       case 'CommonTableExpr':
-        return (!node.ctematerialized || node.ctematerialized === 'CTEMaterializeDefault')
-          && !node.aliascolnames?.length
-          && !node.search_clause
-          && !node.cycle_clause
+        return (!body.ctematerialized || body.ctematerialized === 'CTEMaterializeDefault')
+          && !body.aliascolnames?.length
+          && !body.search_clause
+          && !body.cycle_clause
+      case 'IndexElem':
+        return Boolean(body.name)
+          && !body.expr
+          && !body.collation
+          && !body.opclass
+          && (!body.ordering || body.ordering === 'SORTBY_DEFAULT')
+          && (!body.nulls_ordering || body.nulls_ordering === 'SORTBY_NULLS_DEFAULT')
       case 'A_Const':
       case 'ParamRef':
       case 'CoalesceExpr':
       case 'NullTest':
       case 'CaseExpr':
       case 'CaseWhen':
-      case 'Alias':
       case 'List':
-      case 'ctes':
-      case 'targetList':
-      case 'names':
-      case 'infer':
-      case 'IndexElem':
       case 'String':
       case 'A_Star':
         return true
@@ -1287,79 +1308,360 @@ class AstPrinter {
   }
 
   /**
-   * Slice the original source for one node.
-   * @param node - AST node.
-   * @returns Source text.
+   * Return the tag and body of a raw PostgreSQL node.
+   * @param node - Candidate node.
+   * @returns Tag and body, or null for a plain object.
    */
-  text(node: any): string {
-    if (!node?.range) return ''
-    return this.source.slice(node.range[0], node.range[1])
+  tag(node: any): [string, any] | null {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return null
+    const keys = Object.keys(node).filter(key => (
+      key !== 'location'
+      && /^[A-Z]/u.test(key)
+      && node[key]
+      && typeof node[key] === 'object'
+      && !Array.isArray(node[key])
+    ))
+    return keys.length === 1 ? [keys[0] as string, node[keys[0] as string]] : null
   }
 
   /**
-   * Format one statement or select node.
-   * @param node - AST node.
-   * @param indent - Prefix for this block.
-   * @returns Formatted lines.
+   * Read a node's byte location.
+   * @param node - Candidate node.
+   * @returns Location, or -1.
    */
-  lines(node: any, indent: string): string[] {
-    const normalized = this.normalizeSelect(node)
-    switch (normalized?.type) {
-      case 'SelectStmt': return this.select(normalized, indent)
-      case 'InsertStmt': return this.insert(normalized, indent)
-      case 'ViewStmt': return this.view(normalized, indent)
-      default: return formatLegacySQL(this.text(normalized) || this.source, indent).split('\n')
+  location(node: any): number {
+    const tagged = this.tag(node)
+    return typeof tagged?.[1]?.location === 'number' ? tagged[1].location : -1
+  }
+
+  /**
+   * Find the first source position in a node.
+   * @param node - Candidate node.
+   * @returns Location, or -1.
+   */
+  startLocation(node: any): number {
+    if (!node) return -1
+    if (Array.isArray(node)) return this.startLocation(node[0])
+    const tagged = this.tag(node)
+    if (!tagged) return -1
+    const [type, body] = tagged
+    if (typeof body.location === 'number' && body.location >= 0) return body.location
+    switch (type) {
+      case 'JoinExpr': return this.startLocation(body.larg)
+      case 'SortBy': return this.startLocation(body.node)
+      case 'TypeCast': return this.startLocation(body.arg)
+      case 'A_Expr': return this.startLocation(body.lexpr)
+      case 'BoolExpr': return this.startLocation(body.args?.[0])
+      case 'NullTest': return this.startLocation(body.arg)
+      case 'BooleanTest': return this.startLocation(body.arg)
+      default: return -1
     }
   }
 
   /**
-   * Repair the parser's flattened set-operation branches.
-   * @param node - Candidate select node.
-   * @returns A normal SelectStmt-shaped node.
+   * Read an identifier or star from the source.
+   * @param index - Start byte.
+   * @returns Token text and end byte.
    */
-  normalizeSelect(node: any): any {
-    if (node?.type !== 'targetList') return node
-    const targetList = Object.keys(node)
-      .filter(key => /^\d+$/u.test(key))
-      .map(key => node[key])
-    return { ...node, targetList, type: 'SelectStmt' }
+  readName(index: number): { end: number, text: string } {
+    let cursor = index
+    const first = this.source[cursor] ?? ''
+    if (first === '"') {
+      cursor += 1
+      while (cursor < this.source.length) {
+        if (this.source[cursor] === '"') {
+          if (this.source[cursor + 1] === '"') {
+            cursor += 2
+            continue
+          }
+          cursor += 1
+          break
+        }
+        cursor += 1
+      }
+      return { end: cursor, text: this.source.slice(index, cursor) }
+    }
+    if (first === '*') return { end: cursor + 1, text: '*' }
+    if (!/[A-Za-z_]/u.test(first)) return { end: cursor, text: '' }
+    cursor += 1
+    while (/[A-Za-z0-9_$]/u.test(this.source[cursor] ?? '')) cursor += 1
+    return { end: cursor, text: this.source.slice(index, cursor) }
   }
 
   /**
-   * Find the boundary after a target list entry.
-   * @param node - SelectStmt.
-   * @param targets - Target-list nodes.
-   * @param index - Target index.
-   * @returns Byte offset where the target's clause ends.
+   * Read a dotted identifier from the source.
+   * @param index - Start byte.
+   * @param count - Number of name parts.
+   * @returns Qualified text and end byte.
    */
-  targetBoundary(node: any, targets: readonly any[], index: number): number {
-    if (index < targets.length - 1) return targets[index + 1].range?.[0] ?? Number.MAX_SAFE_INTEGER
-    const starts = [
-      node.fromClause?.[0],
-      node.whereClause,
-      node.groupClause?.[0],
-      node.havingClause,
-      node.sortClause?.[0],
-      node.limitCount,
-      node.limitOffset,
-    ].map(item => item?.range?.[0]).filter((value: number | undefined): value is number => value !== undefined)
-    return Math.min(...starts, node.range?.[1] ?? Number.MAX_SAFE_INTEGER)
+  readQualifiedName(index: number, count: number): { end: number, text: string } {
+    let cursor = index
+    const parts: string[] = []
+    for (let part = 0; part < count; part += 1) {
+      while (/\s/u.test(this.source[cursor] ?? '')) cursor += 1
+      const name = this.readName(cursor)
+      if (!name.text) break
+      parts.push(name.text)
+      cursor = name.end
+      if (part < count - 1) {
+        while (/\s/u.test(this.source[cursor] ?? '')) cursor += 1
+        if (this.source[cursor] !== '.') break
+        cursor += 1
+      }
+    }
+    return { end: cursor, text: parts.join('.') }
   }
 
   /**
-   * Format a SELECT statement.
-   * @param node - SelectStmt.
+   * Read a type name from the source.
+   * @param index - Start byte.
+   * @returns Type text.
+   */
+  readTypeName(index: number): string {
+    let cursor = index
+    while (/\s/u.test(this.source[cursor] ?? '')) cursor += 1
+    const start = cursor
+    let name = this.readName(cursor)
+    if (!name.text) return ''
+    cursor = name.end
+    let end = cursor
+    while (true) {
+      while (/\s/u.test(this.source[cursor] ?? '')) cursor += 1
+      if (this.source[cursor] !== '.') break
+      cursor += 1
+      name = this.readName(cursor)
+      if (!name.text) break
+      cursor = name.end
+      end = cursor
+    }
+    while (/\s/u.test(this.source[cursor] ?? '')) cursor += 1
+    if (this.source[cursor] === '(') {
+      let depth = 0
+      while (cursor < this.source.length) {
+        if (this.source[cursor] === '(') depth += 1
+        if (this.source[cursor] === ')') depth -= 1
+        cursor += 1
+        if (depth === 0) break
+      }
+      end = cursor
+    }
+    while (this.source[cursor] === '[') {
+      const close = this.source.indexOf(']', cursor + 1)
+      if (close === -1) break
+      cursor = close + 1
+      end = cursor
+    }
+    return this.source.slice(start, end)
+  }
+
+  /**
+   * Read a literal from the source.
+   * @param index - Start byte.
+   * @returns Literal text.
+   */
+  readLiteral(index: number): string {
+    let cursor = index
+    while (/\s/u.test(this.source[cursor] ?? '')) cursor += 1
+    const start = cursor
+    const first = this.source[cursor] ?? ''
+    if (first === "'") {
+      cursor += 1
+      while (cursor < this.source.length) {
+        if (this.source[cursor] === "'") {
+          if (this.source[cursor + 1] === "'") {
+            cursor += 2
+            continue
+          }
+          cursor += 1
+          break
+        }
+        cursor += 1
+      }
+      return this.source.slice(start, cursor)
+    }
+    if ((first === 'B' || first === 'X' || first === 'E') && this.source[cursor + 1] === "'") {
+      cursor += 1
+      const quoted = this.readLiteral(cursor)
+      return `${first}${quoted}`
+    }
+    if (first === '$') {
+      const tag = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/u.exec(this.source.slice(cursor))?.[0]
+      if (tag) {
+        const close = this.source.indexOf(tag, cursor + tag.length)
+        return close === -1 ? this.source.slice(start) : this.source.slice(start, close + tag.length)
+      }
+    }
+    const number = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/u.exec(this.source.slice(cursor))?.[0]
+    if (number) return number
+    const word = /^[A-Za-z_][A-Za-z0-9_$]*/u.exec(this.source.slice(cursor))?.[0]
+    if (word) return word
+    return this.source.slice(cursor, cursor + 1)
+  }
+
+  /**
+   * Scan a small source segment into lightweight tokens.
+   * @param start - Start byte.
+   * @param limit - End byte.
+   * @returns Tokens in source order.
+   */
+  scan(start: number, limit: number): { end: number, start: number, text: string }[] {
+    const tokens: { end: number, start: number, text: string }[] = []
+    let cursor = start
+    while (cursor < limit) {
+      const character = this.source[cursor] ?? ''
+      if (/\s/u.test(character)) {
+        cursor += 1
+        continue
+      }
+      if (character === '-' && this.source[cursor + 1] === '-') {
+        const newline = this.source.indexOf('\n', cursor + 2)
+        cursor = newline === -1 ? limit : newline + 1
+        continue
+      }
+      if (character === '/' && this.source[cursor + 1] === '*') {
+        const close = this.source.indexOf('*/', cursor + 2)
+        cursor = close === -1 ? limit : close + 2
+        continue
+      }
+      if (character === "'" || character === '"') {
+        const quote = character
+        let end = cursor + 1
+        while (end < limit) {
+          if (this.source[end] === quote) {
+            if (this.source[end + 1] === quote) {
+              end += 2
+              continue
+            }
+            end += 1
+            break
+          }
+          end += 1
+        }
+        tokens.push({ end, start: cursor, text: this.source.slice(cursor, end) })
+        cursor = end
+        continue
+      }
+      if (character === '$') {
+        const tag = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/u.exec(this.source.slice(cursor, limit))?.[0]
+        if (tag) {
+          const close = this.source.indexOf(tag, cursor + tag.length)
+          const end = close === -1 ? limit : close + tag.length
+          tokens.push({ end, start: cursor, text: this.source.slice(cursor, end) })
+          cursor = end
+          continue
+        }
+      }
+      if (/[A-Za-z_]/u.test(character)) {
+        let end = cursor + 1
+        while (/[A-Za-z0-9_$]/u.test(this.source[end] ?? '')) end += 1
+        tokens.push({ end, start: cursor, text: this.source.slice(cursor, end) })
+        cursor = end
+        continue
+      }
+      tokens.push({ end: cursor + 1, start: cursor, text: character })
+      cursor += 1
+    }
+    return tokens
+  }
+
+  /**
+   * Find a target alias and preserve its source spelling.
+   * @param body - ResTarget body.
+   * @param limit - End of the search segment.
+   * @returns Alias suffix, or empty.
+   */
+  alias(body: any, limit: number): string {
+    if (!body.name) return ''
+    const start = typeof body.location === 'number' && body.location >= 0 ? body.location : 0
+    const top: { text: string }[] = []
+    let depth = 0
+    for (const current of this.scan(start, limit)) {
+      if (current.text === '(') {
+        depth += 1
+        top.push(current)
+        continue
+      }
+      if (current.text === ')') {
+        if (depth === 0) break
+        depth -= 1
+        top.push(current)
+        continue
+      }
+      if (depth === 0 && (current.text === ',' || current.text === ';')) break
+      if (depth === 0 && ALIAS_STOP_WORDS.has(current.text.toLowerCase())) break
+      top.push(current)
+    }
+    const asIndex = top.findIndex(candidate => candidate.text.toLowerCase() === 'as')
+    const candidate = asIndex >= 0 ? top[asIndex + 1] : top[top.length - 1]
+    return candidate ? ` AS ${candidate.text}` : ` AS ${body.name}`
+  }
+
+  /**
+   * Print a target-list entry.
+   * @param node - ResTarget.
+   * @param limit - End of the search segment.
+   * @returns Target lines without outer indentation.
+   */
+  target(node: any, limit: number): string[] {
+    const body = this.tag(node)?.[1]
+    if (!body) return []
+    const tagged = this.tag(body.val)
+    const alias = this.alias(body, limit)
+    if (tagged?.[0] === 'CaseExpr') return this.caseLines(tagged[1], alias)
+    return [`${this.expr(body.val)}${alias}`]
+  }
+
+  /**
+   * Print a multi-line CASE expression.
+   * @param body - CaseExpr body.
+   * @param alias - Alias suffix.
+   * @returns Formatted lines.
+   */
+  caseLines(body: any, alias: string): string[] {
+    const lines = [`CASE${body.arg ? ` ${this.expr(body.arg)}` : ''}`]
+    for (const when of body.args ?? []) {
+      const clause = this.tag(when)?.[1]
+      if (!clause) continue
+      lines.push(`  WHEN ${this.expr(clause.expr)} THEN ${this.expr(clause.result)}`)
+    }
+    if (body.defresult) lines.push(`  ELSE ${this.expr(body.defresult)}`)
+    lines.push(`END${alias}`)
+    return lines
+  }
+
+  /**
+   * Print one statement or select node.
+   * @param node - Raw node.
    * @param indent - Prefix for this block.
    * @returns Formatted lines.
    */
-  select(node: any, indent: string): string[] {
-    if (node.withClause) return this.withSelect(node, indent)
-    if (node.op && node.op !== 'SETOP_NONE') return this.setOperation(node, indent)
-    if (node.valuesLists) return this.values(node.valuesLists, indent)
-    const targetNodes = node.targetList ?? []
-    const targets = targetNodes.map((target: any, index: number) => (
-      this.target(target, this.targetBoundary(node, targetNodes, index))
-    ))
+  lines(node: any, indent: string): string[] {
+    const tagged = this.tag(node)
+    if (!tagged) return []
+    switch (tagged[0]) {
+      case 'SelectStmt': return this.select(tagged[1], indent)
+      case 'InsertStmt': return this.insert(tagged[1], indent)
+      case 'ViewStmt': return this.view(tagged[1], indent)
+      default: return []
+    }
+  }
+
+  /**
+   * Print a SELECT statement.
+   * @param body - SelectStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  select(body: any, indent: string): string[] {
+    if (body.withClause) return this.withSelect(body, indent)
+    if (body.op && body.op !== 'SETOP_NONE') return this.setOperation(body, indent)
+    if (body.valuesLists) return this.values(body.valuesLists, indent)
+    const nodes = body.targetList ?? []
+    const targets = nodes.map((target: any, index: number) => {
+      const next = nodes[index + 1]
+      const limit = next ? this.startLocation(next) : this.end
+      return this.target(target, limit < 0 ? this.end : limit)
+    })
     const targetText = targets.map((target: string[]) => target.join(' ')).join(', ')
     const multiline = targets.some((target: string[]) => target.length > 1)
       || (`${indent}SELECT ${targetText}`.length > 100)
@@ -1374,85 +1676,130 @@ class AstPrinter {
     } else {
       lines.push(`${indent}SELECT ${targetText}`)
     }
-    if (node.fromClause?.length) lines.push(...this.from(node.fromClause, indent))
-    if (node.whereClause) lines.push(...this.condition(node.whereClause, indent, 'WHERE'))
-    if (node.groupClause?.length) {
-      lines.push(`${indent}GROUP BY ${node.groupClause.map((item: any) => this.expr(item)).join(', ')}`)
+    if (body.fromClause?.length) lines.push(...this.from(body.fromClause, indent))
+    if (body.whereClause) lines.push(...this.condition(body.whereClause, indent, 'WHERE'))
+    if (body.groupClause?.length) {
+      lines.push(`${indent}GROUP BY ${body.groupClause.map((item: any) => this.expr(item)).join(', ')}`)
     }
-    if (node.havingClause) lines.push(...this.condition(node.havingClause, indent, 'HAVING'))
-    if (node.sortClause?.length) {
-      lines.push(`${indent}ORDER BY ${node.sortClause.map((item: any) => this.sort(item)).join(', ')}`)
+    if (body.havingClause) lines.push(...this.condition(body.havingClause, indent, 'HAVING'))
+    if (body.sortClause?.length) {
+      lines.push(`${indent}ORDER BY ${body.sortClause.map((item: any) => this.sort(item)).join(', ')}`)
     }
-    if (node.limitCount) lines.push(`${indent}LIMIT ${this.expr(node.limitCount)}`)
-    if (node.limitOffset) lines.push(`${indent}OFFSET ${this.expr(node.limitOffset)}`)
+    if (body.limitCount) lines.push(`${indent}LIMIT ${this.expr(body.limitCount)}`)
+    if (body.limitOffset) lines.push(`${indent}OFFSET ${this.expr(body.limitOffset)}`)
     return lines
   }
 
   /**
-   * Format a target-list entry.
-   * @param node - ResTarget.
-   * @param boundary - Byte offset where the target's clause ends.
-   * @returns Target lines without the outer indentation.
+   * Print a WITH query.
+   * @param body - SelectStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
    */
-  target(node: any, boundary: number): string[] {
-    const alias = this.alias(node, boundary)
-    if (node.val?.type === 'CaseExpr') return this.caseExpression(node.val, alias)
-    return [`${this.expr(node.val)}${alias}`]
+  withSelect(body: any, indent: string): string[] {
+    const withClause = body.withClause
+    const ctes = withClause.ctes ?? []
+    const lines: string[] = []
+    const prefix = withClause.recursive ? 'WITH RECURSIVE' : 'WITH'
+    ctes.forEach((node: any, index: number) => {
+      const cte = this.tag(node)?.[1]
+      if (!cte) return
+      const location = typeof cte.location === 'number' && cte.location >= 0 ? cte.location : -1
+      const name = location >= 0 ? this.readName(location).text : cte.ctename
+      const lead = index === 0 ? `${indent}${prefix}` : indent
+      lines.push(`${lead} ${name} AS (`)
+      lines.push(...this.lines(cte.ctequery, `${indent}  `))
+      lines.push(`${indent})${index < ctes.length - 1 ? ',' : ''}`)
+    })
+    const rest = { ...body, withClause: undefined }
+    lines.push(...this.select(rest, indent))
+    return lines
   }
 
   /**
-   * Resolve an alias from the tokens after a target expression.
-   * @param node - ResTarget.
-   * @param boundary - Byte offset where the target's clause ends.
-   * @returns ` AS alias`, or empty.
+   * Print a set operation.
+   * @param body - SelectStmt body.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
    */
-  alias(node: any, boundary: number): string {
-    if (!node?.name) return ''
-    const tokens = this.tokens.filter((candidate: any) => (
-      node.range && candidate.range[1] <= boundary && candidate.range[0] >= (node.range?.[1] ?? 0)
-    )).filter((candidate: any) => candidate.value !== ',')
-    const asIndex = tokens.findIndex((candidate: any) => candidate.value.toLowerCase() === 'as')
-    const alias = asIndex >= 0 ? tokens[asIndex + 1] : tokens[tokens.length - 1]
-    return alias ? ` AS ${alias.value}` : ` AS ${node.name}`
+  setOperation(body: any, indent: string): string[] {
+    const operator = body.op === 'SETOP_INTERSECT'
+      ? 'INTERSECT'
+      : body.op === 'SETOP_EXCEPT' ? 'EXCEPT' : 'UNION'
+    const keyword = body.all ? `${operator} ALL` : operator
+    return [
+      ...this.selectNode(body.larg, indent),
+      '',
+      `${indent}${keyword}`,
+      '',
+      ...this.selectNode(body.rarg, indent),
+    ]
   }
 
   /**
-   * Format FROM entries.
+   * Print a SelectStmt body or tagged SelectStmt.
+   * @param node - Select node.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  selectNode(node: any, indent: string): string[] {
+    const tagged = this.tag(node)
+    if (tagged?.[0] === 'SelectStmt') return this.select(tagged[1], indent)
+    if (node?.targetList || node?.fromClause || node?.whereClause || node?.valuesLists || node?.op) {
+      return this.select(node, indent)
+    }
+    return []
+  }
+
+  /**
+   * Print a VALUES query.
+   * @param rows - valuesLists nodes.
+   * @param indent - Prefix for this block.
+   * @returns Formatted lines.
+   */
+  values(rows: readonly any[], indent: string): string[] {
+    const lines = [`${indent}VALUES`]
+    rows.forEach((node: any, index: number) => {
+      const row = this.tag(node)?.[1]
+      const items = (row?.items ?? []).map((item: any) => this.expr(item)).join(', ')
+      lines.push(`${indent}  (${items})${index < rows.length - 1 ? ',' : ''}`)
+    })
+    return lines
+  }
+
+  /**
+   * Print FROM entries.
    * @param items - From-clause nodes.
    * @param indent - Prefix for this block.
    * @returns Formatted lines.
    */
   from(items: readonly any[], indent: string): string[] {
-    const [first, ...rest] = items
-    const firstText = this.fromItem(first).replace(/\n/gu, `\n${indent}`)
-    const lines = [`${indent}FROM ${firstText}`]
-    for (const item of rest) {
+    const lines = [`${indent}FROM ${this.fromItem(items[0]).replace(/\n/gu, `\n${indent}`)}`]
+    for (const item of items.slice(1)) {
       lines.push(`${indent}, ${this.fromItem(item).replace(/\n/gu, `\n${indent}`)}`)
     }
     return lines
   }
 
   /**
-   * Format one FROM item.
+   * Print one FROM item.
    * @param node - RangeVar or JoinExpr.
    * @returns Inline text.
    */
   fromItem(node: any): string {
-    if (node?.type !== 'JoinExpr') {
-      const base = this.expr(node)
-      if (!node?.alias) return base
-      const between = node.range && node.alias.range
-        ? this.source.slice(node.range[1], node.alias.range[0])
-        : ''
-      const as = /\bas\b/iu.test(between) ? ' AS' : ''
-      return `${base}${as} ${this.text(node.alias)}`
+    const tagged = this.tag(node)
+    if (tagged?.[0] === 'JoinExpr') {
+      const body = tagged[1]
+      const cross = !body.quals && !body.usingClause?.length && !body.isNatural
+      const join = cross ? 'CROSS JOIN' : this.joinName(body.jointype)
+      const left = this.fromItem(body.larg)
+      const right = this.fromItem(body.rarg)
+      const on = body.quals ? ` ON ${this.expr(body.quals)}` : ''
+      return `${left}\n${join} ${right}${on}`
     }
-    const cross = !node.quals && !node.usingClause?.length && !node.isNatural
-    const join = cross ? 'CROSS JOIN' : this.joinName(node.jointype)
-    const left = this.fromItem(node.larg)
-    const right = this.fromItem(node.rarg)
-    const on = node.quals ? ` ON ${this.expr(node.quals)}` : ''
-    return `${left}\n${join} ${right}${on}`
+    if (tagged?.[0] === 'RangeVar') return this.rangeVar(tagged[1])
+    if (node?.relname) return this.rangeVar(node)
+    return ''
   }
 
   /**
@@ -1472,270 +1819,183 @@ class AstPrinter {
   }
 
   /**
-   * Format a WHERE/HAVING condition, splitting top-level booleans.
+   * Print a relation name and alias.
+   * @param body - RangeVar body.
+   * @returns Relation text.
+   */
+  rangeVar(body: any): string {
+    const location = typeof body.location === 'number' && body.location >= 0 ? body.location : -1
+    const count = 1 + (body.schemaname ? 1 : 0) + (body.catalogname ? 1 : 0)
+    const relation = location >= 0
+      ? this.readQualifiedName(location, count)
+      : { end: location, text: [body.catalogname, body.schemaname, body.relname].filter(Boolean).join('.') }
+    if (!body.alias) return relation.text
+    const tokens: { text: string }[] = []
+    let depth = 0
+    for (const current of this.scan(relation.end, this.end)) {
+      if (current.text === '(') {
+        depth += 1
+        tokens.push(current)
+        continue
+      }
+      if (current.text === ')') {
+        if (depth === 0) break
+        depth -= 1
+        tokens.push(current)
+        continue
+      }
+      if (depth === 0 && (current.text === ',' || current.text === ';')) break
+      if (depth === 0 && ALIAS_STOP_WORDS.has(current.text.toLowerCase())) break
+      tokens.push(current)
+    }
+    const asIndex = tokens.findIndex(candidate => candidate.text.toLowerCase() === 'as')
+    const candidate = asIndex >= 0 ? tokens[asIndex + 1] : tokens[tokens.length - 1]
+    if (!candidate) return `${relation.text} ${body.alias.aliasname}`
+    return `${relation.text}${asIndex >= 0 ? ' AS' : ''} ${candidate.text}`
+  }
+
+  /**
+   * Print a WHERE/HAVING condition, splitting top-level booleans.
    * @param node - Condition node.
    * @param indent - Prefix for this block.
    * @param keyword - WHERE or HAVING.
    * @returns Formatted lines.
    */
   condition(node: any, indent: string, keyword: string): string[] {
-    if (node?.type !== 'BoolExpr' || (node.boolop !== 'AND_EXPR' && node.boolop !== 'OR_EXPR')) {
+    const tagged = this.tag(node)
+    if (tagged?.[0] !== 'BoolExpr' || (tagged[1].boolop !== 'AND_EXPR' && tagged[1].boolop !== 'OR_EXPR')) {
       return [`${indent}${keyword} ${this.expr(node)}`]
     }
-    const operator = node.boolop === 'AND_EXPR' ? 'AND' : 'OR'
-    const [first, ...rest] = node.args ?? []
+    const body = tagged[1]
+    const operator = body.boolop === 'AND_EXPR' ? 'AND' : 'OR'
+    const [first, ...rest] = body.args ?? []
     const lines = [`${indent}${keyword} ${this.expr(first)}`]
     for (const arg of rest) lines.push(`${indent}  ${operator} ${this.expr(arg)}`)
     return lines
   }
 
   /**
-   * Format a WITH query.
-   * @param node - SelectStmt with withClause.
-   * @param indent - Prefix for this block.
-   * @returns Formatted lines.
+   * Print a sort item.
+   * @param node - SortBy.
+   * @returns Inline text.
    */
-  withSelect(node: any, indent: string): string[] {
-    const withClause = node.withClause
-    const ctes = Object.keys(withClause)
-      .filter(key => /^\d+$/u.test(key))
-      .map(key => withClause[key])
-      .filter((cte: any) => cte?.type === 'CommonTableExpr')
-    const lines: string[] = []
-    const prefix = withClause.recursive ? 'WITH RECURSIVE' : 'WITH'
-    ctes.forEach((cte: any, index: number) => {
-      const name = this.text(cte) || cte.ctename
-      const lead = index === 0 ? `${indent}${prefix}` : indent
-      lines.push(`${lead} ${name} AS (`)
-      lines.push(...this.lines(cte.ctequery, `${indent}  `))
-      lines.push(`${indent})${index < ctes.length - 1 ? ',' : ''}`)
-    })
-    const rest = { ...node, withClause: undefined }
-    lines.push(...this.select(rest, indent))
-    return lines
+  sort(node: any): string {
+    const body = this.tag(node)?.[1]
+    if (!body) return ''
+    let direction = ''
+    if (body.sortby_dir === 'SORTBY_DESC') direction = ' DESC'
+    else if (body.sortby_dir === 'SORTBY_ASC') direction = ' ASC'
+    else if (body.sortby_dir === 'SORTBY_USING') {
+      direction = ` USING ${body.useOp?.map((part: any) => this.expr(part)).join('.')}`
+    }
+    const nulls = body.sortby_nulls === 'SORTBY_NULLS_FIRST' ? ' NULLS FIRST'
+      : body.sortby_nulls === 'SORTBY_NULLS_LAST' ? ' NULLS LAST' : ''
+    return `${this.expr(body.node)}${direction}${nulls}`
   }
 
   /**
-   * Format a set operation.
-   * @param node - SelectStmt with larg/rarg.
+   * Print a relation name without its alias.
+   * @param body - RangeVar body.
+   * @returns Qualified relation name.
+   */
+  relationName(body: any): string {
+    if (!body) return ''
+    const count = 1 + (body.schemaname ? 1 : 0) + (body.catalogname ? 1 : 0)
+    if (typeof body.location === 'number' && body.location >= 0) {
+      return this.readQualifiedName(body.location, count).text
+    }
+    return [body.catalogname, body.schemaname, body.relname].filter(Boolean).join('.')
+  }
+
+  /**
+   * Print a CREATE VIEW statement.
+   * @param body - ViewStmt body.
    * @param indent - Prefix for this block.
    * @returns Formatted lines.
    */
-  setOperation(node: any, indent: string): string[] {
-    const operator = node.op === 'SETOP_INTERSECT'
-      ? 'INTERSECT'
-      : node.op === 'SETOP_EXCEPT' ? 'EXCEPT' : 'UNION'
-    const keyword = node.all ? `${operator} ALL` : operator
+  view(body: any, indent: string): string[] {
+    const view = this.tag(body.view)?.[1] ?? body.view
+    const relation = this.relationName(view)
+    const replace = body.replace ? 'OR REPLACE ' : ''
     return [
-      ...this.lines(this.normalizeSelect(node.larg), indent),
-      '',
-      `${indent}${keyword}`,
-      '',
-      ...this.lines(this.normalizeSelect(node.rarg), indent),
-    ]
-  }
-
-  /**
-   * Format a VALUES query.
-   * @param rows - valuesLists nodes.
-   * @param indent - Prefix for this block.
-   * @returns Formatted lines.
-   */
-  values(rows: readonly any[], indent: string): string[] {
-    const lines = [`${indent}VALUES`]
-    rows.forEach((row: any, index: number) => {
-      const items = (row.items ?? []).map((item: any) => this.expr(item)).join(', ')
-      lines.push(`${indent}  (${items})${index < rows.length - 1 ? ',' : ''}`)
-    })
-    return lines
-  }
-
-  /**
-   * Format a CREATE VIEW statement.
-   * @param node - ViewStmt.
-   * @param indent - Prefix for this block.
-   * @returns Formatted lines.
-   */
-  view(node: any, indent: string): string[] {
-    const name = this.expr(node.view)
-    const replace = node.replace ? 'OR REPLACE ' : ''
-    return [
-      `${indent}CREATE ${replace}VIEW ${name} AS (`,
-      ...this.lines(node.query, `${indent}  `),
+      `${indent}CREATE ${replace}VIEW ${relation} AS (`,
+      ...this.lines(body.query, `${indent}  `),
       `${indent})`,
     ]
   }
 
   /**
-   * Format an INSERT statement.
-   * @param node - InsertStmt.
+   * Print an INSERT statement.
+   * @param body - InsertStmt body.
    * @param indent - Prefix for this block.
    * @returns Formatted lines.
    */
-  insert(node: any, indent: string): string[] {
-    const select = node.selectStmt
-    if (!select?.valuesLists) return formatLegacySQL(this.text(node), indent).split('\n')
-    const relation = this.expr(node.relation)
-    const columns = (node.cols ?? []).map((column: any) => this.text(column) || column.name)
+  insert(body: any, indent: string): string[] {
+    const relation = this.tag(body.relation)?.[1] ?? body.relation
+    const relationText = this.relationName(relation)
+    const columns = (body.cols ?? []).map((node: any) => {
+      const column = this.tag(node)?.[1]
+      if (!column) return ''
+      return typeof column.location === 'number' && column.location >= 0
+        ? this.readName(column.location).text
+        : column.name
+    }).filter((column: string) => column.length > 0)
     const header = columns.length > 0
-      ? `${indent}INSERT INTO ${relation} (${columns.join(', ')})`
-      : `${indent}INSERT INTO ${relation}`
-    const lines = [header, ...this.values(select.valuesLists, indent)]
-    if (node.onConflictClause) lines.push(...this.onConflict(node.onConflictClause, indent))
-    if (node.returningList?.length) {
-      const returning = node.returningList.map((target: any, index: number) => (
-        this.target(target, this.listBoundary(node.returningList, index, node.range?.[1]))
-      )).map((target: string[]) => target.join(' ')).join(', ')
+      ? `${indent}INSERT INTO ${relationText} (${columns.join(', ')})`
+      : `${indent}INSERT INTO ${relationText}`
+    const select = this.tag(body.selectStmt)?.[1]
+    const lines = [header]
+    if (select?.valuesLists) lines.push(...this.values(select.valuesLists, indent))
+    else if (select) lines.push(...this.select(select, indent))
+    if (body.onConflictClause) lines.push(...this.onConflict(body.onConflictClause, indent))
+    const returningList = body.returningClause?.exprs ?? body.returningList ?? []
+    if (returningList.length) {
+      const returning = returningList.map((node: any, index: number) => {
+        const next = returningList[index + 1]
+        const limit = next ? this.startLocation(next) : this.end
+        return this.target(node, limit < 0 ? this.end : limit).join(' ')
+      }).join(', ')
       lines.push(`${indent}RETURNING ${returning}`)
     }
     return lines
   }
 
   /**
-   * Format an ON CONFLICT clause.
-   * @param node - OnConflictClause node.
+   * Print an ON CONFLICT clause.
+   * @param body - OnConflictClause body.
    * @param indent - Prefix for this block.
    * @returns Formatted lines.
    */
-  onConflict(node: any, indent: string): string[] {
-    const target = node.indexElems?.length
-      ? ` (${node.indexElems.map((elem: any) => elem.name).join(', ')})`
+  onConflict(body: any, indent: string): string[] {
+    const indexElems = body.infer?.indexElems ?? body.indexElems ?? []
+    const target = indexElems.length
+      ? ` (${indexElems.map((node: any) => {
+        const elem = this.tag(node)?.[1]
+        if (!elem) return ''
+        return typeof elem.location === 'number' && elem.location >= 0
+          ? this.readName(elem.location).text
+          : elem.name
+      }).filter(Boolean).join(', ')})`
       : ''
-    const action = node.action === 'ONCONFLICT_NOTHING' ? 'DO NOTHING' : 'DO UPDATE'
-    const updates = node.targetList ?? []
+    const action = body.action === 'ONCONFLICT_NOTHING' ? 'DO NOTHING' : 'DO UPDATE'
+    const updates = body.targetList ?? []
     if (updates.length === 0) return [`${indent}ON CONFLICT${target} ${action}`]
+    const formatUpdate = (node: any): string => {
+      const update = this.tag(node)?.[1]
+      if (!update) return ''
+      const name = typeof update.location === 'number' && update.location >= 0
+        ? this.readName(update.location).text
+        : update.name
+      return `${name} = ${this.expr(update.val)}`
+    }
     if (updates.length === 1) {
-      const update = updates[0]
-      const name = this.text(update) || update.name
-      return [`${indent}ON CONFLICT${target} ${action} SET ${name} = ${this.expr(update.val)}`]
+      return [`${indent}ON CONFLICT${target} ${action} SET ${formatUpdate(updates[0])}`]
     }
     const lines = [`${indent}ON CONFLICT${target} ${action} SET`]
     updates.forEach((update: any, index: number) => {
-      const name = this.text(update) || update.name
-      lines.push(`${indent}  ${name} = ${this.expr(update.val)}${index < updates.length - 1 ? ',' : ''}`)
+      lines.push(`${indent}  ${formatUpdate(update)}${index < updates.length - 1 ? ',' : ''}`)
     })
     return lines
-  }
-
-  /**
-   * Find the boundary after an item in a target list.
-   * @param items - Target nodes.
-   * @param index - Item index.
-   * @param end - End of the enclosing statement.
-   * @returns Byte offset where the item ends.
-   */
-  listBoundary(items: readonly any[], index: number, end = Number.MAX_SAFE_INTEGER): number {
-    return index < items.length - 1 ? items[index + 1].range?.[0] ?? end : end
-  }
-
-  /**
-   * Format a CASE expression.
-   * @param node - CaseExpr.
-   * @param alias - Alias suffix.
-   * @returns Formatted lines.
-   */
-  caseExpression(node: any, alias: string): string[] {
-    const lines = [`CASE${node.arg ? ` ${this.expr(node.arg)}` : ''}`]
-    for (const when of node.args ?? []) {
-      lines.push(`  WHEN ${this.expr(when.expr)} THEN ${this.expr(when.result)}`)
-    }
-    if (node.defresult) lines.push(`  ELSE ${this.expr(node.defresult)}`)
-    lines.push(`END${alias}`)
-    return lines
-  }
-
-  /**
-   * Format a sort item.
-   * @param node - SortBy.
-   * @returns Inline text.
-   */
-  sort(node: any): string {
-    const direction = node.sortby_dir === 'SORTBY_DESC' ? ' DESC'
-      : node.sortby_dir === 'SORTBY_ASC' ? ' ASC'
-        : node.sortby_dir === 'SORTBY_USING' ? ` USING ${node.useOp}` : ''
-    const nulls = node.sortby_nulls === 'SORTBY_NULLS_FIRST' ? ' NULLS FIRST'
-      : node.sortby_nulls === 'SORTBY_NULLS_LAST' ? ' NULLS LAST' : ''
-    return `${this.expr(node.node)}${direction}${nulls}`
-  }
-
-  /**
-   * Format an expression inline.
-   * @param node - Expression node.
-   * @returns Inline SQL.
-   */
-  expr(node: any): string {
-    if (!node) return ''
-    switch (node.type) {
-      case 'ColumnRef':
-        return this.columnRef(node)
-      case 'ParamRef':
-        return this.text(node)
-      case 'A_Const':
-        return this.text(node) || this.constant(node)
-      case 'A_Expr': {
-        const operator = node.name?.[0]?.sval ?? ''
-        if (!operator) return this.text(node)
-        const left = this.group(node.lexpr)
-        const right = this.group(node.rexpr)
-        if (node.kind === 'AEXPR_OP_ANY') return `${left} ${operator} ANY (${right})`
-        if (node.kind === 'AEXPR_OP_ALL') return `${left} ${operator} ALL (${right})`
-        if (node.kind === 'AEXPR_LIKE') return `${left} ${operator === '!~~' ? 'NOT LIKE' : 'LIKE'} ${right}`
-        if (node.kind === 'AEXPR_ILIKE') return `${left} ${operator === '!~~*' ? 'NOT ILIKE' : 'ILIKE'} ${right}`
-        if (node.kind === 'AEXPR_IN') {
-          const items = (node.rexpr?.items ?? []).map((item: any) => this.expr(item)).join(', ')
-          return `${left} ${operator === '<>' ? 'NOT IN' : 'IN'} (${items})`
-        }
-        if (node.kind === 'AEXPR_BETWEEN' || node.kind === 'AEXPR_NOT_BETWEEN'
-          || node.kind === 'AEXPR_BETWEEN_SYM' || node.kind === 'AEXPR_NOT_BETWEEN_SYM') {
-          const items = (node.rexpr?.items ?? []).map((item: any) => this.expr(item))
-          const keyword = node.kind === 'AEXPR_BETWEEN' ? 'BETWEEN'
-            : node.kind === 'AEXPR_NOT_BETWEEN' ? 'NOT BETWEEN'
-              : node.kind === 'AEXPR_BETWEEN_SYM' ? 'BETWEEN SYMMETRIC' : 'NOT BETWEEN SYMMETRIC'
-          return `${left} ${keyword} ${items[0]} AND ${items[1]}`
-        }
-        if (node.kind === 'AEXPR_DISTINCT') return `${left} IS DISTINCT FROM ${right}`
-        if (node.kind === 'AEXPR_NOT_DISTINCT') return `${left} IS NOT DISTINCT FROM ${right}`
-        if (node.kind === 'AEXPR_NULLIF') return `NULLIF(${left}, ${right})`
-        return `${left} ${operator} ${right}`
-      }
-      case 'BoolExpr': {
-        if (node.boolop === 'NOT_EXPR') return `NOT (${this.expr(node.args?.[0])})`
-        const operator = node.boolop === 'AND_EXPR' ? 'AND' : 'OR'
-        return `(${(node.args ?? []).map((arg: any) => this.expr(arg)).join(` ${operator} `)})`
-      }
-      case 'NullTest':
-        return `${this.group(node.arg)} IS ${node.nulltesttype === 'IS_NOT_NULL' ? 'NOT ' : ''}NULL`
-      case 'BooleanTest': {
-        const negated = node.booltesttype === 'IS_NOT_TRUE' || node.booltesttype === 'IS_NOT_FALSE'
-        const expected = node.booltesttype?.includes('FALSE') ? 'FALSE' : 'TRUE'
-        return `${this.group(node.arg)} IS ${negated ? 'NOT ' : ''}${expected}`
-      }
-      case 'TypeCast':
-        return `${this.group(node.arg)}::${this.text(node.typeName)}`
-      case 'FuncCall': {
-        const parts = (node.funcname ?? []).map((part: any) => part.sval ?? part.String?.sval ?? '')
-        const name = parts.join('.').toUpperCase()
-        const distinct = node.agg_distinct ? 'DISTINCT ' : ''
-        const args = node.agg_star ? '*' : (node.args ?? []).map((arg: any) => this.expr(arg)).join(', ')
-        return `${name}(${distinct}${args})`
-      }
-      case 'CoalesceExpr':
-        return `COALESCE(${(node.args ?? []).map((arg: any) => this.expr(arg)).join(', ')})`
-      case 'CaseExpr': {
-        const head = `CASE${node.arg ? ` ${this.expr(node.arg)}` : ''}`
-        const whens = (node.args ?? []).map((when: any) => (
-          `WHEN ${this.expr(when.expr)} THEN ${this.expr(when.result)}`
-        ))
-        const otherwise = node.defresult ? ` ELSE ${this.expr(node.defresult)}` : ''
-        return `${head} ${whens.join(' ')}${otherwise} END`
-      }
-      case 'A_ArrayExpr':
-      case 'RowExpr':
-      case 'SubLink':
-        return this.text(node)
-      default:
-        return this.text(node)
-    }
   }
 
   /**
@@ -1745,50 +2005,178 @@ class AstPrinter {
    */
   group(node: any): string {
     const text = this.expr(node)
-    return node?.type === 'A_Expr' || node?.type === 'BoolExpr' ? `(${text})` : text
+    const type = this.tag(node)?.[0]
+    return type === 'A_Expr' || type === 'BoolExpr' ? `(${text})` : text
   }
 
   /**
-   * Reconstruct a column reference from its tokens because the parser's field ranges overlap.
-   * @param node - ColumnRef.
-   * @returns Inline column reference.
+   * Print an expression inline.
+   * @param node - Expression node.
+   * @returns Inline SQL.
    */
-  columnRef(node: any): string {
-    const fields = node.fields ?? []
-    if (fields.length === 0) return this.text(node)
-    const start = node.range?.[0] ?? fields[0]?.range?.[0] ?? 0
-    const tokens = this.tokens.filter((candidate: any) => candidate.range?.[0] >= start)
-    const result: string[] = []
-    let cursor = start
-    for (const field of fields) {
-      if (field.type === 'A_Star') {
-        result.push('*')
-        continue
+  expr(node: any): string {
+    const tagged = this.tag(node)
+    if (!tagged) return ''
+    const [type, body] = tagged
+    switch (type) {
+      case 'ColumnRef': return this.columnRef(body)
+      case 'A_Const': return this.literal(body)
+      case 'ParamRef': return this.paramRef(body)
+      case 'A_Expr': return this.aExpr(body)
+      case 'BoolExpr': {
+        if (body.boolop === 'NOT_EXPR') return `NOT (${this.expr(body.args?.[0])})`
+        const operator = body.boolop === 'AND_EXPR' ? 'AND' : 'OR'
+        return `(${(body.args ?? []).map((arg: any) => this.expr(arg)).join(` ${operator} `)})`
       }
-      const current = tokens.find((candidate: any) => (
-        candidate.range?.[0] >= cursor && candidate.value !== '.' && candidate.value !== ','
-      ))
-      if (!current) {
-        result.push(field.sval)
-        continue
+      case 'NullTest':
+        return `${this.group(body.arg)} IS ${body.nulltesttype === 'IS_NOT_NULL' ? 'NOT ' : ''}NULL`
+      case 'BooleanTest': {
+        const negated = body.booltesttype === 'IS_NOT_TRUE' || body.booltesttype === 'IS_NOT_FALSE'
+        const expected = body.booltesttype?.includes('FALSE') ? 'FALSE' : 'TRUE'
+        return `${this.group(body.arg)} IS ${negated ? 'NOT ' : ''}${expected}`
       }
-      result.push(current.value)
-      cursor = (current.range?.[1] ?? cursor) + 1
+      case 'TypeCast': {
+        const typeName = this.tag(body.typeName)?.[1] ?? body.typeName
+        const cast = typeName?.location >= 0 ? this.readTypeName(typeName.location) : this.typeNameText(body.typeName)
+        return `${this.group(body.arg)}::${cast}`
+      }
+      case 'FuncCall': return this.funcCall(body)
+      case 'CoalesceExpr':
+        return `COALESCE(${(body.args ?? []).map((arg: any) => this.expr(arg)).join(', ')})`
+      case 'CaseExpr': return this.caseInline(body)
+      case 'A_Star': return '*'
+      case 'String': return body.sval ?? ''
+      default: return ''
     }
-    return result.join('.')
   }
 
   /**
-   * Format a literal without source range.
-   * @param node - A_Const.
+   * Print a column reference and preserve quoting.
+   * @param body - ColumnRef body.
+   * @returns Column text.
+   */
+  columnRef(body: any): string {
+    const fields = body.fields ?? []
+    if (body.location >= 0) {
+      const name = this.readQualifiedName(body.location, fields.length)
+      if (name.text) return name.text
+    }
+    return fields.map((field: any) => {
+      const tagged = this.tag(field)
+      return tagged?.[0] === 'A_Star' ? '*' : tagged?.[1]?.sval ?? ''
+    }).join('.')
+  }
+
+  /**
+   * Print a literal and preserve its source spelling.
+   * @param body - A_Const body.
+   * @returns Literal text.
+   */
+  literal(body: any): string {
+    if (body.isnull) return 'NULL'
+    if (typeof body.location === 'number' && body.location >= 0) {
+      const text = this.readLiteral(body.location)
+      if (text) return text
+    }
+    return this.constant(body)
+  }
+
+  /**
+   * Print a parameter reference.
+   * @param body - ParamRef body.
+   * @returns Parameter text.
+   */
+  paramRef(body: any): string {
+    if (typeof body.location === 'number' && body.location >= 0) {
+      const parameter = /^\$\d+/u.exec(this.source.slice(body.location))?.[0]
+      if (parameter) return parameter
+    }
+    return `$${body.number}`
+  }
+
+  /**
+   * Print a function call.
+   * @param body - FuncCall body.
+   * @returns Function call text.
+   */
+  funcCall(body: any): string {
+    const parts = (body.funcname ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '')
+    const raw = typeof body.location === 'number' && body.location >= 0
+      ? this.readQualifiedName(body.location, parts.length).text
+      : parts.join('.')
+    const name = raw.split('.').map(part => (part.startsWith('"') ? part : part.toUpperCase())).join('.')
+    const distinct = body.agg_distinct ? 'DISTINCT ' : ''
+    const args = body.agg_star ? '*' : (body.args ?? []).map((arg: any) => this.expr(arg)).join(', ')
+    return `${name}(${distinct}${args})`
+  }
+
+  /**
+   * Print an A_Expr node.
+   * @param body - A_Expr body.
+   * @returns Inline expression.
+   */
+  aExpr(body: any): string {
+    const operator = body.name?.[0]?.String?.sval ?? ''
+    if (!operator) return ''
+    const left = this.group(body.lexpr)
+    const right = this.group(body.rexpr)
+    const items = (): string[] => (this.tag(body.rexpr)?.[1]?.items ?? []).map((item: any) => this.expr(item))
+    if (body.kind === 'AEXPR_OP_ANY') return `${left} ${operator} ANY (${right})`
+    if (body.kind === 'AEXPR_OP_ALL') return `${left} ${operator} ALL (${right})`
+    if (body.kind === 'AEXPR_LIKE') return `${left} ${operator === '!~~' ? 'NOT LIKE' : 'LIKE'} ${right}`
+    if (body.kind === 'AEXPR_ILIKE') return `${left} ${operator === '!~~*' ? 'NOT ILIKE' : 'ILIKE'} ${right}`
+    if (body.kind === 'AEXPR_IN') return `${left} ${operator === '<>' ? 'NOT IN' : 'IN'} (${items().join(', ')})`
+    if (body.kind === 'AEXPR_BETWEEN' || body.kind === 'AEXPR_NOT_BETWEEN'
+      || body.kind === 'AEXPR_BETWEEN_SYM' || body.kind === 'AEXPR_NOT_BETWEEN_SYM') {
+      const bounds = items()
+      const keyword = body.kind === 'AEXPR_BETWEEN' ? 'BETWEEN'
+        : body.kind === 'AEXPR_NOT_BETWEEN' ? 'NOT BETWEEN'
+          : body.kind === 'AEXPR_BETWEEN_SYM' ? 'BETWEEN SYMMETRIC' : 'NOT BETWEEN SYMMETRIC'
+      return `${left} ${keyword} ${bounds[0]} AND ${bounds[1]}`
+    }
+    if (body.kind === 'AEXPR_DISTINCT') return `${left} IS DISTINCT FROM ${right}`
+    if (body.kind === 'AEXPR_NOT_DISTINCT') return `${left} IS NOT DISTINCT FROM ${right}`
+    if (body.kind === 'AEXPR_NULLIF') return `NULLIF(${left}, ${right})`
+    return `${left} ${operator} ${right}`
+  }
+
+  /**
+   * Print a CASE expression inline.
+   * @param body - CaseExpr body.
+   * @returns Inline CASE.
+   */
+  caseInline(body: any): string {
+    const head = `CASE${body.arg ? ` ${this.expr(body.arg)}` : ''}`
+    const whens = (body.args ?? []).map((node: any) => {
+      const clause = this.tag(node)?.[1]
+      return clause ? `WHEN ${this.expr(clause.expr)} THEN ${this.expr(clause.result)}` : ''
+    }).filter(Boolean)
+    const otherwise = body.defresult ? ` ELSE ${this.expr(body.defresult)}` : ''
+    return `${head} ${whens.join(' ')}${otherwise} END`
+  }
+
+  /**
+   * Print a TypeName without a usable source location.
+   * @param body - TypeName body.
+   * @returns Type text.
+   */
+  typeNameText(body: any): string {
+    const names = (body.names ?? []).map((name: any) => this.tag(name)?.[1]?.sval ?? '')
+    return names[names.length - 1] ?? ''
+  }
+
+  /**
+   * Print a literal without source location.
+   * @param body - A_Const body.
    * @returns Inline literal.
    */
-  constant(node: any): string {
-    if (node.ival) return String(node.ival.ival)
-    if (node.fval) return String(node.fval.fval)
-    if (node.sval) return `'${node.sval.sval}'`
-    if (node.boolval) return node.boolval.boolval ? 'true' : 'false'
-    if (node.isnull) return 'NULL'
+  constant(body: any): string {
+    if (body.ival) return String(body.ival.ival)
+    if (body.fval) return String(body.fval.fval)
+    if (body.sval) return `'${body.sval.sval}'`
+    if (body.bsval) return `B'${body.bsval.bsval}'`
+    if (body.boolval) return body.boolval.boolval ? 'true' : 'false'
+    if (body.isnull) return 'NULL'
     return ''
   }
 }

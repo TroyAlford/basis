@@ -1220,8 +1220,7 @@ async function ensureSchema(
       SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS
-        present
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
     `
     if (present[0]?.present) return
 
@@ -1263,8 +1262,7 @@ async function ensureGraphSchema(database: Database): Promise<string> {
       SELECT PG_ADVISORY_XACT_LOCK(HASHTEXT(${schema}))
     `
     const present = await sql<{ present: boolean }[]>`
-      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS
-        present
+      SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = ${schema}) AS present
     `
     let complete = Boolean(present[0]?.present)
     if (complete) {
@@ -1283,10 +1281,8 @@ async function ensureGraphSchema(database: Database): Promise<string> {
     }
     if (complete) {
       const [seeded] = await sql<{ seeded: boolean }[]>`
-        SELECT EXISTS(
-  SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" =
-    ${fixtureRows.alice}
-) AS seeded
+        SELECT EXISTS (SELECT 1 FROM ${sql(schema)}.${sql('Entity')} WHERE "id" =
+          ${fixtureRows.alice}) AS seeded
       `
       complete = Boolean(seeded?.seeded)
     }
