@@ -1469,6 +1469,86 @@ class QueryProjection {
   }
 
   /**
+   * Add one explicit relationship-record collection as a correlated child query.
+   * @param node - Projection occurrence owning the collection.
+   * @param spec - Relationship-record collection request.
+   */
+  #addProjectedRelationshipRecords(node: ProjectionNode, spec: ProjectedCollectionSpec): void {
+    if (spec.collection.kind !== 'relationship-records') {
+      throw new Error('Relationship-record projection requires a relationship-record collection')
+    }
+    const collection = spec.collection
+    const relationship = collection.relationship
+    const target = this.#entities.relationshipRecord(relationship.name)
+    if (!target) throw new Error(`Unknown relationship "${relationship.name}"`)
+    const limit = spec.limit === undefined ? 3 : spec.limit
+    const offset = spec.offset ?? 0
+    const endpoint = relationship.between[collection.endpoint]
+    if (!endpoint) throw new Error(`Unknown endpoint ${collection.endpoint} for "${relationship.name}"`)
+    const childAlias = this.#nextAlias('cr')
+    const child = compilePolymorphicQuery(this.#entities, target, {
+      aliasPrefix: `${childAlias}_`,
+      fields: [...new Set([
+        ...relationship.between.map(item => item.field),
+        ...relationship.fields.map(field => field.name),
+        ...spec.fields,
+      ])],
+      limit: null,
+      offset: 0,
+      rawWhere:
+        `${quote(childAlias)}.${quote(`${endpoint.field}.id`)} = ` +
+        `${quote(node.context.baseAlias)}.${quote('id')}`,
+      rootAlias: childAlias,
+      ...(spec.filters.size === 0
+        ? {}
+        : { where: [...spec.filters].map(value => `(${value})`).join(' $and ') }),
+    })
+    const base = this.#valueStart + this.values.length
+    const childSql = child.sql.replace(/\$(\d+)\b/gu, (_match, value: string) => (
+      `$${base + Number(value) - 1}`
+    ))
+    this.values.push(...child.values)
+    const alias = columnAlias(node.path, collection.name)
+    const matchedAlias = `${alias}__matched`
+    const totalAlias = matchedAlias
+    const lateralAlias = this.#nextAlias('pr')
+    const page = [
+      ...(limit === null ? [] : [`LIMIT ${limit}`]),
+      ...(limit === null && offset === 0 ? [] : [`OFFSET ${offset}`]),
+    ].join(' ')
+    this.joins.push(
+      'LEFT JOIN LATERAL (SELECT ' +
+      'COALESCE((SELECT json_agg(row_to_json("__item")) ' +
+      `FROM (${childSql}${page === '' ? '' : ` ${page}`}) AS "__item"), '[]'::json) AS "__items", ` +
+      `(SELECT count(*) FROM (${childSql}) AS "__count") AS "__matched"` +
+      `) AS ${quote(lateralAlias)} ON TRUE`,
+    )
+    this.columns.push(
+      `${quote(lateralAlias)}.${quote('__items')} AS ${quote(alias)}`,
+      `${quote(lateralAlias)}.${quote('__matched')} AS ${quote(matchedAlias)}`,
+    )
+    node.projectedCollections.push({
+      alias,
+      hydrate: row => {
+        const raw = row[alias]
+        const entries = Array.isArray(raw)
+          ? raw
+          : typeof raw === 'string'
+            ? JSON.parse(raw) as unknown[]
+            : []
+        return {
+          $matched: Number(row[matchedAlias] ?? 0),
+          $total: Number(row[totalAlias] ?? 0),
+          items: entries.map(entry => child.hydrate(entry as Record<string, unknown>)),
+        }
+      },
+      matchedAlias,
+      name: collection.name,
+      totalAlias,
+    })
+  }
+
+  /**
    * Add one root collection envelope projection.
    * @param node - Projection occurrence.
    * @param collection - Derived collection navigation.
@@ -1479,6 +1559,10 @@ class QueryProjection {
    * @param spec - Requested target and edge fields.
    */
   #addProjectedCollection(node: ProjectionNode, spec: ProjectedCollectionSpec): void {
+    if (spec.collection.kind === 'relationship-records') {
+      this.#addProjectedRelationshipRecords(node, spec)
+      return
+    }
     const key = collectionKey(node.path, spec.collection.name)
     const plan = this.#collectionPlan(spec.collection, node.context.baseAlias, key)
     this.#consume(plan.work)

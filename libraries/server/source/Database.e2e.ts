@@ -1653,6 +1653,80 @@ describe('Server database lifecycle', () => {
     }
   })
 
+  isolatedTest('projects explicit relationship-record collections', async database => {
+    const entities = EntityDefinitions.load(JSON.stringify({
+      entities: [
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'Deck' },
+        { fields: [{ field: 'id', format: 'UUID' }], name: 'User' },
+      ],
+      relationships: [{
+        between: [
+          { collection: 'memberships', field: 'deck', target: 'Deck' },
+          { field: 'user', target: 'User' },
+        ],
+        fields: [{ field: 'role', type: 'String' }],
+        name: 'DeckMembership',
+      }],
+    }))
+    await database.use(entities)
+    const deckA = '00000000-0000-4000-8000-000000000b01'
+    const deckB = '00000000-0000-4000-8000-000000000b02'
+    const ada = '00000000-0000-4000-8000-000000000b11'
+    const grace = '00000000-0000-4000-8000-000000000b12'
+    await database.sql`
+      INSERT INTO "Entity" ("id", "name", "entity")
+      VALUES
+        (${deckA}, 'Deck A', 'Deck'),
+        (${deckB}, 'Deck B', 'Deck'),
+        (${ada}, 'Ada', 'User'),
+        (${grace}, 'Grace', 'User')
+    `
+    await database.sql`
+      INSERT INTO "Deck" ("id")
+      VALUES
+        (${deckA}),
+        (${deckB})
+    `
+    await database.sql`
+      INSERT INTO "User" ("id")
+      VALUES
+        (${ada}),
+        (${grace})
+    `
+    await database.sql`
+      INSERT INTO "DeckMembership" ("deck.id", "user.id", "role")
+      VALUES
+        (${deckA}, ${ada}, 'Owner'),
+        (${deckA}, ${grace}, 'Viewer')
+    `
+    const records = await queryEntity<{
+      id: string,
+      memberships: { $matched: number, $total: number, items: Record<string, unknown>[] },
+    }>(database.sql, entities, 'Deck', {
+      fields: ['id', 'memberships'],
+      orderBy: 'id',
+    })
+    expect(records).toEqual([
+      {
+        id: deckA,
+        memberships: {
+          $matched: 2,
+          $total: 2,
+          items: expect.arrayContaining([
+            expect.objectContaining({ role: 'Owner', user: expect.objectContaining({ id: ada }) }),
+            expect.objectContaining({ role: 'Viewer', user: expect.objectContaining({ id: grace }) }),
+          ]),
+        },
+      },
+      {
+        id: deckB,
+        memberships: { $matched: 0, $total: 0, items: [] },
+      },
+    ])
+    expect(entities.ddl.join('\n')).toContain('create table "DeckMembership"')
+    expect(entities.ddl.join('\n')).not.toContain('create table "memberships"')
+  })
+
   freshIsolatedTest('supports reciprocal One and Many navigation with unique ownership', async database => {
     const entities = EntityDefinitions.load(JSON.stringify({
       entities: [

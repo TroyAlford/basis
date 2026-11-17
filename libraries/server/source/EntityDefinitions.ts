@@ -1005,6 +1005,16 @@ export class EntityDefinitions {
   }
 
   /**
+   * Build the row-shaped entity view for one relationship type.
+   * @param name - Exact relationship name.
+   * @returns The relationship record view, or undefined when absent.
+   */
+  relationshipRecord(name: string): EntityDefinition | undefined {
+    const relationship = this.relationship(name)
+    return relationship === undefined ? undefined : relationshipEntity(relationship)
+  }
+
+  /**
    * Deterministic PostgreSQL DDL for the identity root and declared entities.
    *
    * Every table, column and index is listed first, in declaration order;
