@@ -500,6 +500,21 @@ class OwnerDatabaseContext implements DatabaseContext {
     return work(this)
   }
 
+  /** Begin the outer owner test transaction. */
+  async begin(): Promise<void> {
+    await this.connection.unsafe('begin').simple()
+    this.#transaction = this.connection
+    await this.connection.unsafe(
+      `set local search_path to ${quoteIdentifier(this.#schema)}`,
+    ).simple()
+  }
+
+  /** Roll back the outer owner test transaction. */
+  async rollback(): Promise<void> {
+    this.#transaction = null
+    await this.connection.unsafe('rollback').simple()
+  }
+
   async captureError(work: (database: DatabaseContext) => Promise<unknown>): Promise<unknown> {
     const name = `${OWNER_SAVEPOINT_PREFIX}${this.#savepoint}`
     this.#savepoint += 1
@@ -1385,6 +1400,58 @@ export async function withDatabase<T>(
       return callback(context())
     },
   ))
+}
+
+/** Entity and schema options for one internal owner proof. */
+export interface OwnerDatabaseOptions {
+  /** Entity definitions to prepare and query; defaults to the fixture model. */
+  readonly entities?: EntityDefinitions,
+  /** Allocate a disposable unique schema for the proof. */
+  readonly fresh?: boolean,
+}
+
+/**
+ * Run one internal owner-role proof inside the fixture transaction.
+ *
+ * This is the fixture/engine proof path. It does not select the app role and it
+ * does not publish a second consumer testing API.
+ * @param label - Fixture acquisition label.
+ * @param callback - Work using the owner transaction context.
+ * @param options - Entity definitions and disposable-schema selection.
+ * @returns The callback result after rollback.
+ */
+export async function withOwnerDatabase<T>(
+  label: string,
+  callback: (database: DatabaseContext) => Promise<T>,
+  options: OwnerDatabaseOptions = {},
+): Promise<T> {
+  const fixture = await useDatabaseFixture(label)
+  const entities = options.entities ?? fixture.entities
+  const schema = options.fresh ? committedSchemaName() : await fixture.schemaFor(entities)
+  const connection = await fixture.database.sql.reserve()
+  const context = new OwnerDatabaseContext(
+    connection,
+    schema,
+    entities,
+    nextEntities => fixture.schemaFor(nextEntities),
+  )
+  try {
+    await connection.unsafe('reset role').simple()
+    if (options.fresh) {
+      await connection.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
+    }
+    await context.begin()
+    return await callback(context)
+  } finally {
+    await context.rollback().catch(() => undefined)
+    await connection.unsafe('reset role').simple().catch(() => undefined)
+    await connection.unsafe('reset search_path').simple().catch(() => undefined)
+    if (options.fresh) {
+      await connection.unsafe(`drop schema if exists ${quoteIdentifier(schema)} cascade`)
+        .simple().catch(() => undefined)
+    }
+    connection.release()
+  }
 }
 
 /** A real committed transaction context for commit-boundary proofs. */
