@@ -1398,7 +1398,7 @@ class QueryProjection {
       this.#filterContexts.set(key, context)
     }
     const child = this.#node(context, path)
-    this.#identity(child)
+    this.#identity(child, `${sourceAlias}.${quote(field.column)}`)
     return child
   }
 
@@ -1694,8 +1694,9 @@ class QueryProjection {
   /**
    * Select the default identity for a reference target.
    * @param node - Reference target occurrence.
+   * @param idExpression - Source reference column when the identity ID is already local.
    */
-  #identity(node: ProjectionNode): void {
+  #identity(node: ProjectionNode, idExpression?: string): void {
     if (node.identity) return
     this.#consume(3)
     const prefix = node.path.join('__')
@@ -1704,7 +1705,7 @@ class QueryProjection {
     const name = `${prefix}__name`
     this.columns.push(
       `${node.context.rootAlias}.${quote('entity')} AS ${quote(entity)}`,
-      `${node.context.rootAlias}.${quote('id')} AS ${quote(id)}`,
+      `${idExpression ?? `${node.context.rootAlias}.${quote('id')}`} AS ${quote(id)}`,
       `${node.context.rootAlias}.${quote('name')} AS ${quote(name)}`,
     )
     node.identity = { entity, id, name }

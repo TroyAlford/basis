@@ -1059,6 +1059,7 @@ describe('Authorization RLS', () => {
         {
           fields: [
             { field: 'title', type: 'String' },
+            { field: 'createdBy', target: 'User', type: 'Entity' },
             {
               cardinality: 'Many',
               field: 'items',
@@ -1118,8 +1119,8 @@ describe('Authorization RLS', () => {
           VALUES (${workspace}, 'Visible Workspace', 'Workspace')
         `
         await tx`
-          INSERT INTO "Workspace" ("id", "title")
-          VALUES (${workspace}, 'Visible Workspace')
+          INSERT INTO "Workspace" ("id", "title", "createdBy.id")
+          VALUES (${workspace}, 'Visible Workspace', ${bootstrap.userId})
         `
         for (const item of items) {
           await tx`
@@ -1143,6 +1144,16 @@ describe('Authorization RLS', () => {
       const authorized = await query(actor, ['id', 'items{$limit:null}', 'items.title'])
       expect(authorized[0]?.items.$matched).toBe(20)
       expect(authorized[0]?.items.$total).toBe(20)
+
+      const [ownership] = await asActor(actor, () => server.db.query<{
+        createdBy: { entity: string | null, id: string, name: string | null } | null,
+      }>('Workspace', {
+        fields: ['id', 'createdBy.id'],
+        where: { id: workspace },
+      }))
+      expect(ownership?.createdBy).toMatchObject({ id: bootstrap.userId })
+      expect(ownership?.createdBy?.entity).toBeNull()
+      expect(ownership?.createdBy?.name).toBeNull()
       expect(authorized[0]?.items.items).toHaveLength(20)
 
       const page = await query(actor, [

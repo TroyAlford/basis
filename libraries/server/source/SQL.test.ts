@@ -554,6 +554,7 @@ describe('SQL.where', () => {
     })
     expect(compiled.sql).toContain('LEFT JOIN "User"')
     expect(compiled.sql).toContain('"owner__id"')
+    expect(compiled.sql).toMatch(/t\."owner\.id" AS "owner__id"/u)
     expect(compiled.sql).toContain('"owner__permissions"')
     expect(compiled.sql).toContain('"owner__manager__v0__name"')
     expect(compiled.sql).not.toContain('"owner.permissions"')
