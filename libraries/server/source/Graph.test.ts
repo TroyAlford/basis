@@ -787,6 +787,46 @@ describe('Graph', () => {
     ))?.sql).toContain('TRUE')
   })
 
+  test('compiles relationship membership policies against composite endpoint columns', () => {
+    const relationshipSecurity = new Graph({
+      entities: [
+        { fields: [], name: 'Deck' },
+        { fields: [], name: 'User' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [
+        {
+          between: [
+            { field: 'deck', inverse: 'members', target: 'Deck' },
+            { field: 'user', inverse: 'decks', target: 'User' },
+          ],
+          fields: [],
+          name: 'DeckMembership',
+        },
+        {
+          between: [
+            { field: 'deck', inverse: 'printings', target: 'Deck' },
+            { field: 'printing', inverse: 'decks', target: 'Printing' },
+          ],
+          fields: [{ field: 'quantity', type: 'Number' }],
+          name: 'DeckPrinting',
+          security: {
+            [Action.Read]: [{ where: 'deck.members $contains (id = $me)' }],
+          },
+        },
+      ],
+    })
+    const schema = relationshipSecurity.physicalSchema('basis_app', true)
+    const read = schema.policies.find(policy => (
+      policy.table === 'DeckPrinting' && policy.command === 'SELECT'
+    ))
+    expect(read?.sql).toContain('"DeckMembership"')
+    expect(read?.sql).toContain('"DeckPrinting"."deck.id"')
+    expect(read?.sql).not.toContain('basis.policy_')
+    expect(schema.functions.some(fn => fn.sql.includes('FROM "DeckPrinting" AS "__row"')))
+      .toBe(false)
+  })
+
   test('rejects unknown capabilities, roles, and actions in security declarations', () => {
     const base = {
       grants: { Known: { description: 'Known' } },

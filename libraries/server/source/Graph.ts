@@ -1271,6 +1271,7 @@ export class Graph {
   }
 
   #requiresHelper(grant: GraphGrant, table: string): boolean {
+    if (this.definitions.relationship(grant.target)) return false
     if (grant.target !== table || !grant.predicate) return grant.target !== table
     const entity = grant.target === 'Entity' ? identityDefinition() : this.#policyEntity(grant.target)
     if (!entity) return true
