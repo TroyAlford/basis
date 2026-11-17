@@ -63,10 +63,12 @@ export const createComplianceConfig = (): Linter.Config[] => ([
     rules: {
       '@basis/no-alternative-screenshots': 'error',
       '@basis/no-alternative-test-renderer': 'error',
+      '@basis/no-committed-test-database-write': 'error',
       '@basis/no-custom-database-fixture': 'error',
       '@basis/no-custom-test-lifecycle': 'error',
       '@basis/no-custom-test-server': 'error',
       '@basis/no-custom-test-temp-root': 'error',
+      '@basis/no-direct-application-navigation': 'error',
       '@basis/no-direct-browser-lifecycle': 'error',
       '@basis/no-test-database-isolation-framework': 'error',
     },

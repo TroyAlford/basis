@@ -26,6 +26,12 @@ const RULE_ALLOWANCES = {
     'testing/server/WithAsset.tsx',
     'testing/walkthrough/Application.tsx',
   ],
+  '@basis/no-committed-test-database-write': [
+    'libraries/server/source/ConstraintValidation.e2e.ts',
+    'libraries/server/source/CreateAuthorization.e2e.ts',
+    'libraries/server/source/Database.e2e.ts',
+    'libraries/server/source/Mutation.e2e.ts',
+  ],
   '@basis/no-custom-database-fixture': [
     'libraries/server/source/ReleaseRecovery.e2e.ts',
     'libraries/server/testing/DatabaseFixture.ts',
@@ -44,6 +50,9 @@ const RULE_ALLOWANCES = {
   '@basis/no-custom-test-temp-root': [
     'libraries/testing/tempDirectory.test.ts',
     'libraries/testing/tempDirectory.ts',
+  ],
+  '@basis/no-direct-application-navigation': [
+    'libraries/testing/application.ts',
   ],
   '@basis/no-direct-process-spawn': [
     'consumer/test/react-runtime.ts',

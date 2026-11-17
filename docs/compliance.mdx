@@ -23,8 +23,10 @@ Compliance covers:
 | `@basis/component-architecture` | React function components, hooks, `React.FC` types, and direct `React.Component` subclasses in application source | Classes extending the Basis `Component` or `Editor` hierarchy |
 | `@basis/no-direct-process-spawn` | `Bun.spawn`, `Bun.spawnSync`, Node `child_process` spawn/exec variants, and common wrappers that duplicate one-shot process execution | `run`, `runAsync` from `basis/utilities` |
 | `@basis/no-custom-test-server` | Direct `Bun.serve`, `http.createServer`, and manual server subprocess setup in test infrastructure | `useApplication` |
-| `@basis/no-custom-database-fixture` | Consumer-owned PostgreSQL containers, test DB provisioning, and homemade database fixtures | `useDatabaseFixture` |
-| `@basis/no-test-database-isolation-framework` | Custom schemas, independent test databases, and alternative per-test database managers | The single Basis fixture and its prescribed test data/seeding API |
+| `@basis/no-direct-application-navigation` | `page.goto`, `page.reload`, `page.goBack`, and `page.goForward` in browser-backed tests | `useApplication(...).visit(path, fn)` |
+| `@basis/no-custom-database-fixture` | Consumer-owned PostgreSQL containers, test DB provisioning, and homemade database fixtures | `withDatabase` |
+| `@basis/no-committed-test-database-write` | Durable/committed-write helpers such as `withDurableDatabase` and `withCommittedDatabase` in tests | `withDatabase`; every test transaction auto-rolls back |
+| `@basis/no-test-database-isolation-framework` | Custom schemas, independent test databases, and alternative per-test database managers | `withDatabase` and the single run-scoped Basis fixture |
 | `@basis/no-direct-browser-lifecycle` | `chromium.launch`, `firefox.launch`, `chromium.connect`, Playwright run-server, and manual browser/context ownership | Basis-managed browser via `useApplication().visit()` |
 | `@basis/no-alternative-test-renderer` | `@testing-library/react`, `react-test-renderer`, Enzyme, and equivalent custom mounted-render utilities | `render`, `Simulate`, `waitFor` from `basis/testing` |
 | `@basis/no-alternative-screenshots` | `page.screenshot()`, `locator.screenshot()`, custom PNG/baseline comparators, and Playwright screenshot assertions | `matchScreenshot` |
