@@ -412,6 +412,22 @@ const fixtureGraph = new Graph({
 /** The one canonical fixture model. */
 export const sharedEntities = fixtureGraph.definitions
 
+/** Schema installation options for a custom-Graph fixture. */
+export interface FixtureSchemaOptions {
+  /** Restricted application role whose RLS policies should be installed. */
+  readonly appRole?: string,
+  /** Canonical Graph whose security policies should be installed. */
+  readonly graph?: Graph,
+}
+
+/** Options for a custom-Graph actor-aware database fixture. */
+export interface DatabaseTestOptions {
+  /** Consumer Graph to install with Basis's restricted fixture role. */
+  readonly graph?: Graph,
+  /** Seed or prepare data as the trusted owner before entering the app role. */
+  readonly setup?: (database: DatabaseContext) => Promise<void>,
+}
+
 /** The one shared-fixture transaction context. */
 export interface DatabaseContext {
   /** Run one Graph-native mutation; validation runs before the savepoint releases. */
@@ -581,7 +597,7 @@ export interface DatabaseFixture {
   /** Installation whose seeded service is shared. */
   readonly install: string,
   /** Resolve or create the schema for one exact entity definition set. */
-  readonly schemaFor: (entities: EntityDefinitions) => Promise<string>,
+  readonly schemaFor: (entities: EntityDefinitions, options?: FixtureSchemaOptions) => Promise<string>,
   /** Fixture service name used for cleanup and activity evidence. */
   readonly service: string,
   /** Run explicit definitions in one rolled-back transaction. */
@@ -700,11 +716,14 @@ async function startFixture(scope: DatabaseFixtureRegistry): Promise<DatabaseFix
     await database.connect()
 
     const schemas = new Map<string, Promise<string>>()
-    const schemaFor = (entities: EntityDefinitions): Promise<string> => {
-      const schema = fixtureSchemaName(entities)
+    const schemaFor = (
+      entities: EntityDefinitions,
+      options: FixtureSchemaOptions = {},
+    ): Promise<string> => {
+      const schema = fixtureSchemaName(entities, options.appRole, options.graph)
       let pending = schemas.get(schema)
       if (!pending) {
-        pending = ensureSchema(database as FixtureDatabase, schema, entities)
+        pending = ensureSchema(database as FixtureDatabase, schema, entities, options)
         schemas.set(schema, pending)
         void pending.catch(() => schemas.delete(schema))
       }
@@ -859,11 +878,16 @@ function fixtureInstall(): string {
 /**
  * Derive the schema name for one exact entity definition set.
  * @param entities - Canonical definitions.
+ * @param appRole - Restricted application role, when policies are installed.
+ * @param graph - Canonical Graph whose security should be installed.
  * @returns A stable schema identifier.
  */
-function fixtureSchemaName(entities: EntityDefinitions): string {
+function fixtureSchemaName(entities: EntityDefinitions, appRole?: string, graph?: Graph): string {
   const hash = createHash('sha256')
-    .update(`${entities.ddl.join('\n')}\nreviewed-install-v1`)
+    .update(
+      `${entities.ddl.join('\n')}\nreviewed-install-v1\n${appRole ?? ''}\n` +
+      `${graph ? JSON.stringify(graph.toJSON()) : ''}`,
+    )
     .digest('hex')
     .slice(0, 16)
   return `basis_fixture_${hash}`
@@ -872,16 +896,21 @@ function fixtureSchemaName(entities: EntityDefinitions): string {
 /**
  * Ensure the restricted role used by the fixture graph exists.
  * @param database - Connected fixture pool.
+ * @param roleName - Application role to create or normalize.
  */
-async function ensureApplicationRole(database: Database): Promise<void> {
+async function ensureApplicationRole(
+  database: Database,
+  roleName = FIXTURE_APP_ROLE,
+): Promise<void> {
+  const role = quoteIdentifier(roleName)
   await database.sql.unsafe(`
     DO $$
     BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${FIXTURE_APP_ROLE}') THEN
-        CREATE ROLE "${FIXTURE_APP_ROLE}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${roleName}') THEN
+        CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
           NOINHERIT NOBYPASSRLS;
       ELSE
-        ALTER ROLE "${FIXTURE_APP_ROLE}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+        ALTER ROLE ${role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
           NOINHERIT NOBYPASSRLS;
       END IF;
     END $$;
@@ -1116,53 +1145,62 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
 }
 
 /**
- * Run one test on the single shared fixture.
+ * Run one test on the shared fixture with an optional custom Graph and actor.
  * @param label - Fixture acquisition label.
  * @param actor - Verified actor identity, or null for anonymous.
  * @param callback - Work using the app-role transaction.
+ * @param options - Custom Graph and owner-run setup.
  * @returns The callback result after rollback.
  */
 export async function withDatabase<T>(
   label: string,
   actor: string | null,
   callback: (database: DatabaseContext) => Promise<T>,
+  options: DatabaseTestOptions = {},
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
-  await ensureGraphSchema(fixture.database)
+  const custom = options.graph !== undefined
+  const entities = options.graph?.definitions ?? fixtureGraph.definitions
+  const appRole = FIXTURE_APP_ROLE
+  if (!custom) await ensureGraphSchema(fixture.database)
+  const schema = custom
+    ? await fixture.schemaFor(entities, { appRole, graph: options.graph })
+    : fixture.fixtureSchema
   return runAsActor({ id: actor }, () => fixture.testWith(
-    fixtureGraph.definitions,
+    entities,
     async sql => {
       await sql.unsafe(
-        `set local search_path to ${quoteIdentifier(fixture.fixtureSchema)}, public, basis, pg_temp`,
+        `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
       ).simple()
-      await sql.unsafe(`set local role ${quoteIdentifier(FIXTURE_APP_ROLE)}`).simple()
+      const context = (): DatabaseContext => {
+        const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
+          const savepoint = sql.savepoint as unknown as <Value>(
+            callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
+          ) => Promise<Value>
+          return savepoint(async savepointSql => {
+            const result = await work(savepointSql)
+            await validateTransactionState(entities, transactionClient(savepointSql))
+            return result
+          })
+        }
+        return {
+          create: (entity, values) => tx(savepoint => savepoint.create(entity, values)),
+          delete: (entity, filter) => tx(savepoint => savepoint.delete(entity, filter)),
+          edit: (entity, filter, changes) => tx(savepoint => savepoint.edit(entity, filter, changes)),
+          query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
+            queryEntity<Result>(sql, entities, entity, queryOptions)
+          ),
+          sql,
+          tx,
+          upsert: (entity, filter, values) => tx(savepoint => savepoint.upsert(entity, filter, values)),
+        }
+      }
+      await options.setup?.(context())
+      await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
       await sql`
         SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
       `
-      const tx = async <Result>(work: (sql: MutationDatabase) => Result | Promise<Result>) => {
-        const savepoint = sql.savepoint as unknown as <Value>(
-          callback: (sql: DatabaseTransaction) => Value | Promise<Value>,
-        ) => Promise<Value>
-        return savepoint(async savepointSql => {
-          const result = await work(savepointSql)
-          await validateTransactionState(
-            fixtureGraph.definitions,
-            transactionClient(savepointSql),
-          )
-          return result
-        })
-      }
-      return callback({
-        create: (entity, values) => tx(savepoint => savepoint.create(entity, values)),
-        delete: (entity, filter) => tx(savepoint => savepoint.delete(entity, filter)),
-        edit: (entity, filter, changes) => tx(savepoint => savepoint.edit(entity, filter, changes)),
-        query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
-          queryEntity<Result>(sql, fixtureGraph.definitions, entity, options)
-        ),
-        sql,
-        tx,
-        upsert: (entity, filter, values) => tx(savepoint => savepoint.upsert(entity, filter, values)),
-      })
+      return callback(context())
     },
   ))
 }
@@ -1180,20 +1218,41 @@ export interface CommittedDatabaseContext extends MutationDatabase {
  * @param label - Fixture acquisition label.
  * @param actor - Verified actor identity, or null for anonymous.
  * @param callback - Work using the app-role transaction.
+ * @param options - Custom Graph and owner-run setup.
  * @returns The callback result after commit.
  */
 export async function withCommittedDatabase<T>(
   label: string,
   actor: string | null,
   callback: (database: CommittedDatabaseContext) => Promise<T>,
+  options: DatabaseTestOptions = {},
 ): Promise<T> {
   const fixture = await useDatabaseFixture(label)
-  await ensureGraphSchema(fixture.database)
+  const custom = options.graph !== undefined
+  const entities = options.graph?.definitions ?? fixtureGraph.definitions
+  const appRole = FIXTURE_APP_ROLE
+  if (!custom) await ensureGraphSchema(fixture.database)
+  const schema = custom
+    ? await fixture.schemaFor(entities, { appRole, graph: options.graph })
+    : fixture.fixtureSchema
   return runAsActor({ id: actor }, () => fixture.database.tx(async sql => {
     await sql.unsafe(
-      `set local search_path to ${quoteIdentifier(fixture.fixtureSchema)}, public, basis, pg_temp`,
+      `set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`,
     ).simple()
-    await sql.unsafe(`set local role ${quoteIdentifier(FIXTURE_APP_ROLE)}`).simple()
+    if (options.setup) {
+      await options.setup({
+        create: (entity, values) => sql.create(entity, values),
+        delete: (entity, filter) => sql.delete(entity, filter),
+        edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
+        query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
+          queryEntity<Result>(sql, entities, entity, queryOptions)
+        ),
+        sql,
+        tx: async work => work(sql),
+        upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
+      })
+    }
+    await sql.unsafe(`set local role ${quoteIdentifier(appRole)}`).simple()
     await sql`
       SELECT set_config('actor.id', ${actor ?? ''}, TRUE)
     `
@@ -1201,8 +1260,8 @@ export async function withCommittedDatabase<T>(
       create: (entity, values) => sql.create(entity, values),
       delete: (entity, filter) => sql.delete(entity, filter),
       edit: (entity, filter, changes) => sql.edit(entity, filter, changes),
-      query: <Result = Record<string, unknown>>(entity: string, options: QueryOptions) => (
-        queryEntity<Result>(sql, fixtureGraph.definitions, entity, options)
+      query: <Result = Record<string, unknown>>(entity: string, queryOptions: QueryOptions) => (
+        queryEntity<Result>(sql, entities, entity, queryOptions)
       ),
       sql,
       upsert: (entity, filter, values) => sql.upsert(entity, filter, values),
@@ -1215,13 +1274,17 @@ export async function withCommittedDatabase<T>(
  * @param database - Connected fixture pool.
  * @param schema - Stable schema name.
  * @param entities - Canonical definitions.
+ * @param options - Schema installation options.
  * @returns The schema identifier once initialization is complete.
  */
 async function ensureSchema(
   database: FixtureDatabase,
   schema: string,
   entities: EntityDefinitions,
+  options: FixtureSchemaOptions = {},
 ): Promise<string> {
+  const appRole = options.appRole
+  if (appRole !== undefined) await ensureApplicationRole(database, appRole)
   await database.tx(async sql => {
     await sql`
       SELECT pg_advisory_xact_lock(hashtext(${schema}))
@@ -1233,7 +1296,24 @@ async function ensureSchema(
 
     await sql.unsafe(`create schema ${quoteIdentifier(schema)}`).simple()
     await sql.unsafe(`set local search_path to ${quoteIdentifier(schema)}, public, basis, pg_temp`).simple()
-    await installSchema(sql, entities, { version: `fixture:${schema}` })
+    const desired = options.graph === undefined
+      ? entities
+      : new Graph({ ...options.graph.toJSON(), schema })
+    await installSchema(sql, desired, {
+      appRole,
+      schema,
+      superuser: appRole === undefined ? undefined : true,
+      version: `fixture:${schema}`,
+    })
+    if (appRole !== undefined) {
+      await sql.unsafe(
+        `grant usage on schema ${quoteIdentifier(schema)} to ${quoteIdentifier(appRole)}`,
+      ).simple()
+      await sql.unsafe(
+        `grant select, insert, update, delete on all tables in schema ${quoteIdentifier(schema)} ` +
+        `to ${quoteIdentifier(appRole)}`,
+      ).simple()
+    }
     record(`schema ${schema}`)
   })
   return schema

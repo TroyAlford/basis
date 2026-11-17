@@ -18,8 +18,8 @@ export type { ScreenshotSubject } from './matchScreenshot'
 export { comparePng } from './snapshots'
 export type { ScreenshotComparison, ScreenshotOptions } from './snapshots'
 
-export { useDatabaseFixture } from '../server/testing/DatabaseFixture'
-export type { DatabaseFixture } from '../server/testing/DatabaseFixture'
+export { useDatabaseFixture, withDatabase } from '../server/testing/DatabaseFixture'
+export type { DatabaseContext, DatabaseFixture, DatabaseTestOptions } from '../server/testing/DatabaseFixture'
 export { withDurableDatabase, withIsolatedDatabase } from '../server/testing/DatabaseIsolation'
 export type {
   DurableDatabase,
