@@ -619,6 +619,101 @@ describe('EntityDefinitions', () => {
     expect(invalid('DeckCardPrinting[deck = @]{$unknown:1}')).toThrow(/unknown collection option/i)
   })
 
+  test('validates Collection fields as typed non-physical Graph paths', () => {
+    const entities = load({
+      entities: [
+        {
+          fields: [
+            { field: 'entries', target: 'DeckCardPrinting', type: 'Collection', via: 'DeckCardPrinting[deck = @]' },
+            { field: 'cards', target: 'Card', type: 'Collection', via: 'entries.card' },
+          ],
+          name: 'Deck',
+        },
+        {
+          fields: [{ field: 'decks', target: 'Deck', type: 'Collection', via: 'DeckCardPrinting[card = @].deck' }],
+          name: 'Card',
+        },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })
+    expect(entities.entity('Deck')?.collections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'entries', target: 'DeckCardPrinting' }),
+      expect.objectContaining({ name: 'cards', target: 'Card' }),
+    ]))
+    expect(entities.entity('Card')?.collections).toEqual([
+      expect.objectContaining({ name: 'decks', target: 'Deck' }),
+    ])
+    expect(entities.entity('Printing')?.collections).toEqual([])
+    expect(entities.entity('DeckCardPrinting')).toBeUndefined()
+    expect(entities.relationshipRecord('DeckCardPrinting')).toBeDefined()
+    expect(entities.entity('Deck')?.effectiveFields.some(field => field.name === 'entries')).toBe(false)
+    expect(entities.ddl.join('\n')).not.toContain('"entries"')
+
+    const base = {
+      entities: [
+        {
+          fields: [{
+            field: 'entries',
+            target: 'DeckCardPrinting',
+            type: 'Collection',
+            via: 'DeckCardPrinting[deck = @]',
+          }],
+          name: 'Deck',
+        },
+        { fields: [], name: 'Card' },
+        { fields: [], name: 'Printing' },
+      ],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    }
+    expect(() => load({
+      ...base,
+      entities: [{
+        ...base.entities[0],
+        fields: [{
+          field: 'entries',
+          target: 'DeckCardPrinting',
+          type: 'Collection',
+          via: 'DeckCardPrinting[deck = @].missing',
+        }],
+      }, ...base.entities.slice(1)],
+    })).toThrow('projects unknown endpoint')
+    expect(() => load({
+      entities: [{
+        fields: [
+          { field: 'first', target: 'DeckCardPrinting', type: 'Collection', via: 'second' },
+          { field: 'second', target: 'DeckCardPrinting', type: 'Collection', via: 'first' },
+        ],
+        name: 'Deck',
+      }, { fields: [], name: 'Card' }, { fields: [], name: 'Printing' }],
+      relationships: [{
+        between: [
+          { field: 'deck', target: 'Deck' },
+          { field: 'card', target: 'Card' },
+          { field: 'printing', target: 'Printing' },
+        ],
+        fields: [],
+        name: 'DeckCardPrinting',
+      }],
+    })).toThrow('cyclic via path')
+  })
+
   test('allows inherited Collection owners and rejects incompatible aliases', () => {
     const definitions = load({
       entities: [
