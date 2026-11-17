@@ -2,8 +2,16 @@
 import type { Rule } from 'eslint'
 import type * as ESTree from 'estree'
 import { loadModule, parsePlPgSQLSync, parseSync, scanSync } from 'libpg-query'
+import { concat as docConcat, group as docGroup, hardline as docHardline, join as docJoin, line as docLine, nest as docNest, render as renderDoc, text as docText } from './sqlLayout'
 
 await loadModule()
+
+/** Raised when a nested AST node has no faithful printer. */
+class UnsupportedNodeError extends Error {
+  constructor(readonly nodeType: string) {
+    super(`SQL formatter: unsupported AST node "${nodeType}"`)
+  }
+}
 
 /**
  * Check whether a tag expression is a recognized SQL tag.
@@ -81,7 +89,10 @@ export function formatSQL(sql: string, indent = '', quoteIdentifiers = true): st
       formatted = formatted.replace(new RegExp(safe, 'giu'), original)
     }
     return formatted
-  } catch {
+  } catch (error) {
+    if (error instanceof UnsupportedNodeError) {
+      process.emitWarning(`${error.message}; preserving the original SQL`)
+    }
     const lines = sql.split('\n')
     while (lines.length > 0 && (lines[0] as string).trim() === '') lines.shift()
     while (lines.length > 0 && (lines[lines.length - 1] as string).trim() === '') lines.pop()
@@ -227,42 +238,13 @@ class LibpgPrinter {
   }
 
   /**
-   * Report an unhandled node and return its source text.
+   * Reject a node without a faithful printer.
    * @param type - Raw node tag.
-   * @param node - Raw node body.
-   * @param limit - End of the source range.
-   * @returns Source text for the node.
+   * @param _args - Unsupported call arguments.
    */
-  unsupported(type: string, node: any, limit = this.end): string {
-    const start = this.startLocation(node)
-    const key = `${type}:${start}`
-    if (!this.#warned.has(key)) {
-      this.#warned.add(key)
-      process.emitWarning(`SQL formatter: unsupported AST node "${type}" at ${start >= 0 ? start : 'unknown location'}`)
-    }
-    if (start < 0) return JSON.stringify(node)
-    let end = start
-    let depth = 0
-    let quote: string | null = null
-    while (end < limit) {
-      const character = this.source[end] ?? ''
-      if (quote) {
-        if (character === quote && this.source[end + 1] === quote) end += 1
-        else if (character === quote) quote = null
-      } else if (character === "'" || character === '"') {
-        quote = character
-      } else if (character === '(' || character === '[') {
-        depth += 1
-      } else if (character === ')' || character === ']') {
-        if (depth === 0) break
-        depth -= 1
-      } else if (depth === 0 && (character === ',' || character === ';')) {
-        break
-      }
-      end += 1
-    }
-    const text = this.source.slice(start, Math.min(end, limit)).trim()
-    return text || JSON.stringify(node)
+  unsupported(type: string, ..._args: any[]): never {
+    void _args
+    throw new UnsupportedNodeError(type)
   }
 
   /**
@@ -291,8 +273,8 @@ class LibpgPrinter {
       const where = location >= 0 ? location : 'unknown location'
       process.emitWarning(`SQL formatter: unsupported AST statement "${type}" at ${where}`)
     }
-    const start = this.start
-    const text = this.source.slice(start, this.end).trim() || JSON.stringify(node)
+    const text = this.source.slice(this.start, this.end).trim()
+    if (!text) throw new UnsupportedNodeError(type)
     return text.split('\n').map(line => `${indent}${line}`)
   }
 
@@ -750,32 +732,44 @@ class LibpgPrinter {
     const targets = nodes.map((target: any, index: number) => (
       this.target(target, this.targetLimit(body, nodes, index))
     ))
-    const targetText = targets.map((target: string[]) => target.join(' ')).join(', ')
     const distinctTargets = (body.distinctClause ?? []).filter((item: any) => item && Object.keys(item).length > 0)
     const distinct = distinctTargets.length > 0
       ? `DISTINCT ON (${distinctTargets.map((item: any) => this.expr(item)).join(', ')}) `
       : body.distinctClause?.length ? 'DISTINCT ' : ''
-    const multiline = targets.some((target: string[]) => target.length > 1)
-      || targets.some((target: string[]) => target.some(line => line.includes('--')))
-      || (`${indent}SELECT ${targetText}`.length > 100)
-    const lines: string[] = []
-    if (multiline && targets.length === 1) {
-      const [first, ...rest] = targets[0] as string[]
-      lines.push(`${indent}SELECT ${distinct}${first}`)
-      for (const line of rest) lines.push(`${indent}${line}`)
-    } else if (multiline) {
-      lines.push(`${indent}SELECT${distinct ? ` ${distinct.trim()}` : ''}`)
-      targets.forEach((target: string[], index: number) => {
-        const copy = target.map(line => `${indent}  ${line}`)
-        if (index < targets.length - 1 && copy.length > 0) {
-          const last = copy[copy.length - 1]
-          copy[copy.length - 1] = last.includes(' --') ? last.replace(' --', ', --') : `${last},`
-        }
-        lines.push(...copy)
-      })
+    const targetDocs = targets.map((target: string[], targetIndex: number) => {
+      const targetLines = [...target]
+      if (targetIndex < targets.length - 1 && targetLines.length > 0) {
+        const last = targetLines[targetLines.length - 1] as string
+        targetLines[targetLines.length - 1] = last.includes(' --')
+          ? last.replace(' --', ', --')
+          : `${last},`
+      }
+      return targetLines.length === 1
+        ? docText(targetLines[0] as string)
+        : docJoin(docHardline(), targetLines.map(line => docText(line)))
+    })
+    const firstTarget = targets[0] ?? []
+    const forceBreak = targets.some((target: string[]) => (
+      target.length > 1 || target.some(line => line.includes('--'))
+    ))
+    let selectDoc
+    if (targets.length === 1) {
+      selectDoc = docConcat(
+        docText(`SELECT ${distinct}${firstTarget[0] ?? ''}`),
+        firstTarget.length > 1
+          ? docConcat(docHardline(), docJoin(docHardline(), firstTarget.slice(1).map(line => docText(line))))
+          : docText(''),
+      )
     } else {
-      lines.push(`${indent}SELECT ${distinct}${targetText}`)
+      selectDoc = docConcat(
+        docText(`SELECT${distinct ? ` ${distinct.trim()}` : ''}`),
+        docGroup(docNest(docConcat(
+          docLine(),
+          docJoin(forceBreak ? docHardline() : docLine(), targetDocs),
+        ))),
+      )
     }
+    const lines = renderDoc(selectDoc, 100).split('\n').map(line => `${indent}${line}`)
     if (body.fromClause?.length) lines.push(...this.from(body.fromClause, indent))
     if (body.whereClause) {
       const fromStart = body.fromClause?.length ? this.startLocation(body.fromClause[0]) : this.start
@@ -2471,22 +2465,55 @@ class PlPgSqlPrinter {
         const query = this.expression(body.expr?.PLpgSQL_expr?.query ?? '')
         return [`${indent}RETURN NEXT ${query};`]
       }
+      case 'PLpgSQL_stmt_getdiag': {
+        const items = (body.diag_items ?? []).map((item: any) => {
+          const diag = item.PLpgSQL_diag_item
+          if (!diag) throw new UnsupportedNodeError('PLpgSQL_diag_item')
+          const datum = this.functionNode.datums?.[diag.target]
+          const name = datum?.PLpgSQL_var?.refname ?? datum?.PLpgSQL_rec?.refname
+          if (!name) throw new UnsupportedNodeError('PLpgSQL_diag_item_target')
+          return `${name} = ${this.diagKind(diag.kind)}`
+        })
+        return [`${indent}GET${body.is_stacked ? ' STACKED' : ''} DIAGNOSTICS ${items.join(', ')};`]
+      }
       default:
         return this.unsupportedPl(type, body, indent)
     }
   }
 
   /**
-   * Report an unhandled PL/pgSQL node and emit its raw representation.
-   * @param type - Raw node tag.
-   * @param body - Raw node body.
-   * @param indent - Prefix for this statement.
-   * @returns Unformatted statement lines.
+   * Map a PL/pgSQL diagnostics kind to SQL.
+   * @param kind - Raw diagnostics kind.
+   * @returns Diagnostics keyword.
    */
-  unsupportedPl(type: string, body: any, indent: string): string[] {
-    process.emitWarning(`SQL formatter: unsupported PL/pgSQL node "${type}"`)
-    const text = body?.query ?? body?.sqlstmt?.PLpgSQL_expr?.query ?? JSON.stringify(body)
-    return String(text).split('\n').map(line => `${indent}${line}`)
+  diagKind(kind: string): string {
+    const names: Record<string, string> = {
+      COLUMN_NAME: 'COLUMN_NAME',
+      CONSTRAINT_NAME: 'CONSTRAINT_NAME',
+      EXCEPTION_DETAIL: 'PG_EXCEPTION_DETAIL',
+      EXCEPTION_HINT: 'PG_EXCEPTION_HINT',
+      MESSAGE_TEXT: 'MESSAGE_TEXT',
+      PG_CONTEXT: 'PG_CONTEXT',
+      PG_DATATYPE_NAME: 'PG_DATATYPE_NAME',
+      PG_ROUTINE_OID: 'PG_ROUTINE_OID',
+      RETURNED_SQLSTATE: 'RETURNED_SQLSTATE',
+      ROW_COUNT: 'ROW_COUNT',
+      SCHEMA_NAME: 'SCHEMA_NAME',
+      TABLE_NAME: 'TABLE_NAME',
+    }
+    const value = names[kind]
+    if (!value) throw new UnsupportedNodeError(`PLpgSQL diagnostic ${kind}`)
+    return value
+  }
+
+  /**
+   * Reject a PL/pgSQL node without a faithful printer.
+   * @param type - Raw node tag.
+   * @param _args - Unsupported call arguments.
+   */
+  unsupportedPl(type: string, ..._args: any[]): never {
+    void _args
+    throw new UnsupportedNodeError(type)
   }
 
   /**

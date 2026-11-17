@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Linter } from 'eslint'
+import { parseSync } from 'libpg-query'
 import { formatSQL, sqlTemplateFormat } from './sqlTemplateFormat'
 
 /**
@@ -22,6 +23,27 @@ function lint(code: string) {
  */
 function templateBody(output: string): string {
   return output.slice(output.indexOf('`') + 1, output.lastIndexOf('`'))
+}
+
+/**
+ * Normalize a SQL statement's parsed meaning for equivalence checks.
+ * @param sql - SQL text.
+ * @returns Parsed statements without source locations.
+ */
+function semantics(sql: string): unknown {
+  const strip = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(strip)
+    if (value && typeof value === 'object') {
+      const result: Record<string, unknown> = {}
+      for (const [key, child] of Object.entries(value)) {
+        if (key === 'location' || key === 'stmt_location' || key === 'stmt_len') continue
+        result[key] = strip(child)
+      }
+      return result
+    }
+    return value
+  }
+  return strip(parseSync(sql).stmts.map(statement => statement.stmt))
 }
 
 describe('formatSQL', () => {
@@ -487,6 +509,51 @@ describe('formatSQL', () => {
       `)
     })
 
+    test('formats GET DIAGNOSTICS statements', () => {
+      expect(formatSQL(`
+        create function f() returns void as $$
+        declare n integer;
+        begin
+          get diagnostics n = row_count;
+          get stacked diagnostics n = pg_context;
+        end $$ language plpgsql
+      `)).toMatchIndented(`
+        CREATE FUNCTION f() RETURNS VOID AS $$
+        DECLARE
+          n INTEGER;
+        BEGIN
+          GET DIAGNOSTICS n = ROW_COUNT;
+          GET STACKED DIAGNOSTICS n = PG_CONTEXT;
+        END
+        $$ LANGUAGE plpgsql
+      `)
+    })
+
+    test('preserves a statement with an unhandled nested node', () => {
+      const sql = 'select a, count(*) from t group by grouping sets ((a), ())'
+      const formatted = formatSQL(sql)
+      expect(formatted).toBe(sql)
+      expect(() => parseSync(formatted)).not.toThrow()
+    })
+
+    test('preserves meaning across representative formatted statements', () => {
+      const statements = [
+        'select id, name from widgets where active = true and owner_id = $1',
+        'insert into widgets (id, name) values (1, \'a\') ' +
+          'on conflict (id) do update set name = excluded.name returning id',
+        'create table widgets (id uuid primary key default gen_random_uuid(), ' +
+          'owner_id text not null references accounts(id), unique(owner_id))',
+        'create view active_widgets as select id from widgets where active = true',
+        'update widgets set name = \'x\' from other where widgets.id = other.id returning id',
+        'delete from widgets using other where widgets.id = other.id returning id',
+      ]
+      for (const sql of statements) {
+        const formatted = formatSQL(sql)
+        expect(semantics(formatted)).toEqual(semantics(sql))
+        expect(formatSQL(formatted)).toBe(formatted)
+      }
+    })
+
     test('emits an unhandled statement from source and reports it', () => {
       const sql = 'create policy p on widgets using (true)'
       expect(formatSQL(sql)).toBe(sql)
@@ -675,6 +742,13 @@ const query = sql\`(
     const output = lint(code)
     expect(output.fixed).toBe(true)
     expect(output.output).toContain(`\${${expression}}`)
+    expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
+  })
+
+  test('does not emit a partial fix for an unhandled nested node', () => {
+    const sql = 'select a, count(*) from t group by grouping sets ((a), ())'
+    const output = lint(`sql\`${sql}\``)
+    expect(output.output).toContain(sql)
     expect(lint(output.output).messages.filter(message => message.fatal)).toEqual([])
   })
 

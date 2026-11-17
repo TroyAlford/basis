@@ -738,7 +738,9 @@ describe('Server database lifecycle', () => {
     const failure = await database.tx(async sql => installSchema(sql, entities)).catch((error: unknown) => error)
     expect(failure).toMatchObject({ message: expect.stringContaining('Migration plan has blocking drift') })
     expect(await database.tx(async sql => sql<{ entity: boolean, good: boolean }[]>`
-      SELECT TO_REGCLASS('"Entity"') IS NOT NULL AS "entity", TO_REGCLASS('"Good"') IS NOT NULL AS "good"
+      SELECT
+        TO_REGCLASS('"Entity"') IS NOT NULL AS "entity",
+        TO_REGCLASS('"Good"') IS NOT NULL AS "good"
     `)).toEqual([{ entity: false, good: false }])
   })
 
