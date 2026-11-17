@@ -35,7 +35,7 @@ describe('formatSQL', () => {
         SELECT 1;
         
         SELECT 2
-        `)
+      `)
     })
   })
 
@@ -49,7 +49,7 @@ describe('formatSQL', () => {
         WHERE "active" = true
           AND "owner_id" = $1
         ORDER BY "name"
-        `)
+      `)
     })
   })
 
@@ -68,7 +68,7 @@ describe('formatSQL', () => {
           FROM "widgets"
           WHERE "active" = true
         )
-        `)
+      `)
     })
   })
 
@@ -96,7 +96,7 @@ describe('formatSQL', () => {
         )
         SELECT *
         FROM "widget_tree"
-        `)
+      `)
     })
   })
 
@@ -125,7 +125,7 @@ describe('formatSQL', () => {
           RETURN NEW;
         END
         $$ LANGUAGE plpgsql;
-        `)
+      `)
     })
 
     test('wraps long RETURN chains', () => {
@@ -145,7 +145,7 @@ describe('formatSQL', () => {
             || SETWEIGHT(TO_TSVECTOR('english', COALESCE(NEW.body, '')), 'C');
         END
         $$ LANGUAGE plpgsql;
-        `)
+      `)
     })
 
     test('preserves PL/pgSQL assignment operators and array types', () => {
@@ -162,7 +162,7 @@ describe('formatSQL', () => {
           RETURN NEW;
         END
         $$ LANGUAGE plpgsql;
-        `)
+      `)
     })
 
     test('formats a standalone DO block with comments', () => {
@@ -183,7 +183,7 @@ describe('formatSQL', () => {
           END IF;
         END
         $$
-        `)
+      `)
       expect(formatSQL(once)).toBe(once)
     })
 
@@ -213,7 +213,7 @@ describe('formatSQL', () => {
             RETURN NULL;
         END
         $$ LANGUAGE plpgsql;
-        `)
+      `)
     })
   })
 
@@ -224,7 +224,7 @@ describe('formatSQL', () => {
         FROM "widgets"
         WHERE "data" @> $1
           AND "tags" <@ $2
-        `)
+      `)
     })
   })
 
@@ -247,7 +247,7 @@ describe('formatSQL', () => {
           0
         ) AS "word_count"
         FROM "posts"
-        `)
+      `)
     })
   })
 
@@ -263,7 +263,7 @@ describe('formatSQL', () => {
           END AS "rank",
           "name"
         FROM "widgets"
-        `)
+      `)
     })
 
     test('formats a case expression in a select list', () => {
@@ -284,7 +284,7 @@ describe('formatSQL', () => {
             ELSE 0
           END AS "rank"
         FROM "widgets"
-        `)
+      `)
     })
   })
 
@@ -303,7 +303,7 @@ describe('formatSQL', () => {
         FROM "widgets"
         -- only active widgets
         WHERE "active" = true
-        `)
+      `)
     })
   })
 
@@ -327,11 +327,11 @@ describe('formatSQL', () => {
       expect(formatSQL('select count(*)::int as count from widgets')).toMatchIndented(`
         SELECT COUNT(*)::int AS "count"
         FROM "widgets"
-        `)
+      `)
       expect(formatSQL('select id as "someKeyword", name as keyword from widgets')).toMatchIndented(`
         SELECT "id" AS "someKeyword", "name" AS "keyword"
         FROM "widgets"
-        `)
+      `)
     })
   })
 
@@ -344,7 +344,7 @@ describe('formatSQL', () => {
         VALUES
           ('1', 'User', 'SystemUser'),
           ('2', 'Novel', 'Novel')
-        `)
+      `)
     })
   })
 
@@ -391,7 +391,7 @@ describe('formatSQL', () => {
           "tags" TEXT[] NOT NULL DEFAULT '{}',
           "ids" UUID[]
         )
-        `)
+      `)
     })
 
     test('puts one column or constraint per line', () => {
@@ -409,7 +409,7 @@ describe('formatSQL', () => {
           "owner_id" VARCHAR(255) NOT NULL REFERENCES "accounts" ("id"),
           UNIQUE ("owner_id", "name")
         )
-        `)
+      `)
     })
   })
 })
@@ -433,13 +433,13 @@ describe('sqlTemplateFormat', () => {
     expect(lineComment.fixed).toBe(true)
     expect(templateBody(lineComment.output)).toMatchIndented(`
       SELECT 1 -- where false
-      `)
+    `)
 
     const blockComment = lint('sql`select 1 /* where false */`')
     expect(blockComment.fixed).toBe(true)
     expect(templateBody(blockComment.output)).toMatchIndented(`
       SELECT 1 /* where false */
-      `)
+    `)
   })
 
   test('formats SQL around a dollar-quoted body and preserves the body', () => {
@@ -448,7 +448,7 @@ describe('sqlTemplateFormat', () => {
     expect(templateBody(output.output)).toMatchIndented(`
       SELECT $$a
         b$$
-      `)
+    `)
   })
 
   test('does not reformat interpolated expressions while wrapping SQL', () => {
@@ -524,7 +524,7 @@ describe('parser-backed formatting', () => {
       WHERE "name" LIKE 'a%'
         AND "id" IN (1, 2)
         AND "id" BETWEEN 1 AND 3
-      `)
+    `)
   })
 
   test('emits CROSS JOIN when a join has no condition', () => {
@@ -532,7 +532,7 @@ describe('parser-backed formatting', () => {
       SELECT *
       FROM "widgets" "w"
       CROSS JOIN "other" "o"
-      `)
+    `)
   })
 
   test('keeps ON CONFLICT and RETURNING clauses', () => {
@@ -547,7 +547,7 @@ describe('parser-backed formatting', () => {
         (1, 'a')
       ON CONFLICT ("id") DO UPDATE SET "name" = "excluded"."name"
       RETURNING "id", "name"
-      `)
+    `)
   })
 
   test('quotes unquoted camelCase identifiers', () => {
@@ -555,16 +555,16 @@ describe('parser-backed formatting', () => {
       SELECT "widgetId" AS "displayName"
       FROM "widgetTable"
       WHERE "widgetId" = 1
-      `)
+    `)
     expect(formatSQL('insert into widgetTable (widgetId) values (1)')).toMatchIndented(`
       INSERT INTO "widgetTable" ("widgetId")
       VALUES
         (1)
-      `)
+    `)
     expect(formatSQL('select widgetId as TABLE from widgetTable')).toMatchIndented(`
       SELECT "widgetId" AS "TABLE"
       FROM "widgetTable"
-      `)
+    `)
   })
 
   test('preserves quoted ON CONFLICT index identifiers', () => {
@@ -576,7 +576,7 @@ describe('parser-backed formatting', () => {
       VALUES
         ($1, $2)
       ON CONFLICT ("campaignId", "userId") DO UPDATE SET "updatedAt" = NOW()
-      `)
+    `)
   })
 
   test('preserves ON CONFLICT ON CONSTRAINT targets', () => {
@@ -588,17 +588,17 @@ describe('parser-backed formatting', () => {
       VALUES
         ($1, $2)
       ON CONFLICT ON CONSTRAINT "Memberships_pkey" DO NOTHING
-      `)
+    `)
   })
 
   test('keeps fallback clauses intact', () => {
     expect(formatSQL('select distinct id from widgets')).toMatchIndented(`
       SELECT DISTINCT "id"
       FROM "widgets"
-      `)
+    `)
     expect(formatSQL('select * from public.widgets')).toMatchIndented(`
       SELECT *
       FROM "public"."widgets"
-      `)
+    `)
   })
 })
