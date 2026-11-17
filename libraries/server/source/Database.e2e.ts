@@ -259,8 +259,13 @@ describe('Server database lifecycle', () => {
       await sql`
         INSERT INTO "SystemUser" ("id", "label", "email", "permissions", "favorite.id")
         VALUES
-          (${userId}, ${'User'}, ${'user@example.test'}, ${'admin'},
-            ${novelId})
+          (
+            ${userId},
+            ${'User'},
+            ${'user@example.test'},
+            ${'admin'},
+            ${novelId}
+          )
       `
       await sql`
         INSERT INTO "Book" ("id", "title")
@@ -293,8 +298,13 @@ describe('Server database lifecycle', () => {
       await sql`
         INSERT INTO "SystemUser" ("id", "label", "email", "permissions", "manager.id")
         VALUES
-          (${invalidId}, ${'Invalid user'}, ${'invalid@example.test'},
-            ${'admin'}, ${randomUUID()})
+          (
+            ${invalidId},
+            ${'Invalid user'},
+            ${'invalid@example.test'},
+            ${'admin'},
+            ${randomUUID()}
+          )
       `
       await sql`
         SET CONSTRAINTS ALL IMMEDIATE
@@ -367,7 +377,12 @@ describe('Server database lifecycle', () => {
       await sql`
         INSERT INTO "SystemUser" ("id", "permissions", "status", "manager.id")
         VALUES
-          (${systemUserId}, ${'admin'}, ${'active'}, ${clientManagerId})
+          (
+            ${systemUserId},
+            ${'admin'},
+            ${'active'},
+            ${clientManagerId}
+          )
       `
       await sql`
         INSERT INTO "Client" ("id", "company", "status")
@@ -1692,8 +1707,9 @@ describe('Server database lifecycle', () => {
     expect(await database.sql<{ indexName: string, isUnique: boolean }[]>`
       SELECT "indexname" AS "indexName", "indisunique" AS "isUnique"
       FROM "pg_indexes"
-      JOIN "pg_class" ON ("pg_class"."relname" = "indexname" AND "pg_class"."relnamespace" =
-        CURRENT_SCHEMA()::regnamespace)
+      JOIN "pg_class"
+        ON "pg_class"."relname" = "indexname"
+          AND "pg_class"."relnamespace" = CURRENT_SCHEMA()::regnamespace
       JOIN "pg_index" ON "pg_index"."indexrelid" = "pg_class"."oid"
       WHERE "schemaname" = CURRENT_SCHEMA()
         AND "tablename" = 'Pet'
@@ -1780,7 +1796,11 @@ describe('Server database lifecycle', () => {
       await db.sql`
         INSERT INTO "Pet" ("id", "owner.id", "guardian.id")
         VALUES
-          (${'00000000-0000-4000-8000-000000000014'}, ${personOne}, ${personOne})
+          (
+            ${'00000000-0000-4000-8000-000000000014'},
+            ${personOne},
+            ${personOne}
+          )
       `
     })).toMatchObject({ errno: '23505' })
 

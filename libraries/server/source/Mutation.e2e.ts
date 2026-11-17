@@ -495,8 +495,12 @@ describe('Graph mutations', () => {
         await sql`
           INSERT INTO "Article" ("id", "title", "owner.id", "score")
           VALUES
-            ('00000000-0000-4000-8000-000000000001', 'SQL', (SELECT "id" FROM "Person" WHERE "email" =
-              'commit@example.com'), 0)
+            (
+              '00000000-0000-4000-8000-000000000001',
+              'SQL',
+              (SELECT "id" FROM "Person" WHERE "email" = 'commit@example.com'),
+              0
+            )
         `
       })
       const committed = await database.tx(async sql => sql<{ count: number }[]>`
@@ -516,8 +520,12 @@ describe('Graph mutations', () => {
         await sql`
           INSERT INTO "Article" ("id", "title", "owner.id", "score")
           VALUES
-            ('00000000-0000-4000-8000-000000000002', 'Rollback', (SELECT "id" FROM "Person" WHERE "email" =
-              'rollback@example.com'), 0)
+            (
+              '00000000-0000-4000-8000-000000000002',
+              'Rollback',
+              (SELECT "id" FROM "Person" WHERE "email" = 'rollback@example.com'),
+              0
+            )
         `
         throw new Error('rollback')
       })).rejects.toThrow('rollback')

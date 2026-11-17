@@ -495,7 +495,9 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       (
         SELECT ARRAY_AGG("a"."attname" ORDER BY "u"."ordinality")
         FROM UNNEST("i"."indkey") WITH ORDINALITY "u" ("attnum", "ordinality")
-        JOIN "pg_attribute" "a" ON ("a"."attrelid" = "i"."indrelid" AND "a"."attnum" = "u"."attnum")
+        JOIN "pg_attribute" "a"
+          ON "a"."attrelid" = "i"."indrelid"
+            AND "a"."attnum" = "u"."attnum"
       ) AS "columns"
     FROM "pg_index" "i"
     JOIN "pg_class" "c" ON "c"."oid" = "i"."indexrelid"
@@ -537,7 +539,9 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
     JOIN "pg_class" "c" ON "c"."oid" = "con"."conrelid"
     JOIN "pg_namespace" "n" ON "n"."oid" = "c"."relnamespace"
     JOIN UNNEST("con"."conkey") WITH ORDINALITY "u" ("attnum", "ordinality") ON TRUE
-    JOIN "pg_attribute" "a" ON ("a"."attrelid" = "c"."oid" AND "a"."attnum" = "u"."attnum")
+    JOIN "pg_attribute" "a"
+      ON "a"."attrelid" = "c"."oid"
+        AND "a"."attnum" = "u"."attnum"
     WHERE "con"."contype" = 'p'
       AND "n"."nspname" IN (CURRENT_SCHEMA(), 'basis')
     GROUP BY "n"."nspname", "c"."relname"
@@ -636,7 +640,9 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       (
         SELECT ARRAY_AGG("a"."attname" ORDER BY "u"."ordinality")
         FROM UNNEST("t"."tgattr"::smallint[]) WITH ORDINALITY "u" ("attnum", "ordinality")
-        JOIN "pg_attribute" "a" ON ("a"."attrelid" = "t"."tgrelid" AND "a"."attnum" = "u"."attnum")
+        JOIN "pg_attribute" "a"
+          ON "a"."attrelid" = "t"."tgrelid"
+            AND "a"."attnum" = "u"."attnum"
       ) AS "columns"
     FROM "pg_trigger" "t"
     JOIN "pg_class" "c" ON "c"."oid" = "t"."tgrelid"

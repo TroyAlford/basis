@@ -1373,9 +1373,27 @@ async function seedFixtureRows(sql: BunSQL): Promise<void> {
     INSERT INTO "Document" ("id", "flag", "note", "owner.id", "revision.id")
     VALUES
       (${row.validDocument}, TRUE, 'note', ${row.ownerA}, ${row.revisionA}),
-      (${row.invalidChildDocument}, FALSE, 'note', ${row.ownerA}, ${row.revisionA}),
-      (${row.invalidParentDocument}, TRUE, 'note', ${row.ownerA}, ${row.revisionA}),
-      (${row.orphanDocument}, TRUE, 'note', ${row.ownerA}, ${row.orphanRevision})
+      (
+        ${row.invalidChildDocument},
+        FALSE,
+        'note',
+        ${row.ownerA},
+        ${row.revisionA}
+      ),
+      (
+        ${row.invalidParentDocument},
+        TRUE,
+        'note',
+        ${row.ownerA},
+        ${row.revisionA}
+      ),
+      (
+        ${row.orphanDocument},
+        TRUE,
+        'note',
+        ${row.ownerA},
+        ${row.orphanRevision}
+      )
   `
   await sql`
     INSERT INTO "GuardedWorkspace" ("id", "flag", "title")

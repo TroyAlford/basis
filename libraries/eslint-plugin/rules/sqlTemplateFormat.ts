@@ -41,53 +41,6 @@ function sqlComments(sql: string): SqlComment[] {
 }
 
 /**
- * Break formatted SQL lines at safe whitespace boundaries.
- * @param sql - Formatted SQL.
- * @returns SQL with lines no longer than 120 characters where possible.
- */
-function wrapLongLines(sql: string): string {
-  return sql.split('\n').flatMap(line => {
-    if (line.length <= 120 || line.includes('--') || line.includes('/*')) return [line]
-    const indent = line.match(/^\s*/u)?.[0] ?? ''
-    const lines: string[] = []
-    let current = line
-    while (current.length > 120) {
-      let quote: string | null = null
-      let split = -1
-      const limit = Math.min(current.length, 120)
-      for (let index = 0; index < limit; index += 1) {
-        const character = current[index] ?? ''
-        if (quote) {
-          if (character === quote && current[index + 1] === quote) {
-            index += 1
-          } else if (character === quote) {
-            quote = null
-          }
-        } else if (character === "'" || character === '"') {
-          quote = character
-        } else if (character === ' ') {
-          split = index
-        }
-      }
-      if (split <= indent.length) split = current.indexOf(' ', 120)
-      while (split > indent.length && /^AS\b/u.test(current.slice(split + 1).trimStart())) {
-        const previous = current.lastIndexOf(' ', split - 1)
-        if (previous <= indent.length) {
-          split = -1
-          break
-        }
-        split = previous
-      }
-      if (split <= 0) break
-      lines.push(current.slice(0, split))
-      current = `${indent}  ${current.slice(split + 1)}`
-    }
-    lines.push(current)
-    return lines
-  }).join('\n')
-}
-
-/**
  * Format one SQL template body through the PostgreSQL AST.
  * @param sql - SQL text with expression placeholders.
  * @param indent - Prefix for every formatted line.
@@ -124,7 +77,6 @@ export function formatSQL(sql: string, indent = '', quoteIdentifiers = true): st
       const end = raw.stmt_len === undefined ? safeSql.length : start + raw.stmt_len
       return new LibpgPrinter(safeSql, end, comments, start, quoteIdentifiers).statement(raw.stmt, indent)
     }).join(';\n\n')
-    formatted = wrapLongLines(formatted)
     for (const [safe, original] of placeholders) {
       formatted = formatted.replace(new RegExp(safe, 'giu'), original)
     }
@@ -784,8 +736,18 @@ class LibpgPrinter {
     const lines = [`${indent}VALUES`]
     rows.forEach((node: any, index: number) => {
       const row = this.tag(node)?.[1]
-      const items = (row?.items ?? []).map((item: any) => this.expr(item)).join(', ')
-      lines.push(`${indent}  (${items})${index < rows.length - 1 ? ',' : ''}`)
+      const values = (row?.items ?? []).map((item: any) => this.expr(item))
+      const inline = `(${values.join(', ')})`
+      const comma = index < rows.length - 1 ? ',' : ''
+      if (inline.length > 100 || (row?.items ?? []).some((item: any) => this.tag(item)?.[0] === 'SubLink')) {
+        lines.push(`${indent}  (`)
+        values.forEach((value: string, valueIndex: number) => {
+          lines.push(`${indent}    ${value}${valueIndex < values.length - 1 ? ',' : ''}`)
+        })
+        lines.push(`${indent}  )${comma}`)
+      } else {
+        lines.push(`${indent}  ${inline}${comma}`)
+      }
     })
     return lines
   }
@@ -818,7 +780,12 @@ class LibpgPrinter {
       const join = cross ? 'CROSS JOIN' : this.joinName(body.jointype)
       const left = this.fromItem(body.larg)
       const right = this.fromItem(body.rarg)
-      const on = body.quals ? ` ON ${this.expr(body.quals)}` : ''
+      const on = body.quals
+        ? this.tag(body.quals)?.[0] === 'BoolExpr'
+          ? `\n${this.condition(body.quals, '  ', 'ON').join('\n')}`
+          : ` ON ${this.expr(body.quals)}`
+        : ''
+
       return `${left}\n${join} ${right}${on}`
     }
     if (tagged?.[0] === 'RangeVar') return this.rangeVar(tagged[1])
@@ -1100,6 +1067,9 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   createFunction(body: any, indent: string): string[] {
+    const unsupportedOption = (body.options ?? []).map((node: any) => this.tag(node)?.[1]?.defname)
+      .find((name: string) => name !== 'as' && name !== 'language')
+    if (unsupportedOption) throw new Error(`Unsupported function option: ${unsupportedOption}`)
     const name = (body.funcname ?? []).map((part: any) => this.tag(part)?.[1]?.sval ?? '').join('.')
     const language = this.optionValue(body.options, 'language') ?? 'plpgsql'
     const returnType = this.formatTypeName(body.returnType)
@@ -1231,6 +1201,7 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   update(body: any, indent: string): string[] {
+    if (body.withClause || body.fromClause?.length) throw new Error('Unsupported UPDATE clause')
     const relation = this.relationName(this.tag(body.relation)?.[1] ?? body.relation)
     const updates = (body.targetList ?? []).map((node: any) => {
       const target = this.tag(node)?.[1]
@@ -1258,6 +1229,7 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   delete(body: any, indent: string): string[] {
+    if (body.withClause || body.usingClause?.length) throw new Error('Unsupported DELETE clause')
     const relation = this.relationName(this.tag(body.relation)?.[1] ?? body.relation)
     const lines = [`${indent}DELETE FROM ${relation}`]
     if (body.whereClause) {
@@ -1307,8 +1279,11 @@ class LibpgPrinter {
       const items = this.tag(object)?.[1]?.items ?? []
       return this.identifierList(items)
     }).join(', ')
+    const type = types[body.removeType]
+    if (!type) throw new Error('Unsupported DROP type')
+    const ifExists = body.missing_ok ? ' IF EXISTS' : ''
     const behavior = body.behavior === 'DROP_CASCADE' ? ' CASCADE' : ''
-    return [`${indent}DROP ${types[body.removeType] ?? body.removeType} ${names}${behavior}`]
+    return [`${indent}DROP ${type}${ifExists} ${names}${behavior}`]
   }
 
   /**
@@ -1376,9 +1351,11 @@ class LibpgPrinter {
       ['AT_ForceRowSecurity', 'FORCE ROW LEVEL SECURITY'],
       ['AT_NoForceRowSecurity', 'NO FORCE ROW LEVEL SECURITY'],
     ])
-    const cmds = (body.cmds ?? []).map((node: any) => (
-      commands[this.tag(node)?.[1]?.subtype] ?? ''
-    )).filter(Boolean)
+    const cmds = (body.cmds ?? []).map((node: any) => {
+      const command = commands[this.tag(node)?.[1]?.subtype]
+      if (!command) throw new Error('Unsupported ALTER TABLE command')
+      return command
+    })
     return [`${indent}ALTER TABLE ${this.relationName(body.relation)} ${cmds.join(' ')}`]
   }
 
@@ -1408,6 +1385,10 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   createTrigger(body: any, indent: string): string[] {
+    if (body.whenClause || body.isconstraint || body.deferrable || body.initdeferred
+      || body.constrrel || body.transitionRels || body.columns) {
+      throw new Error('Unsupported CREATE TRIGGER clause')
+    }
     const timing = body.timing === 2 ? 'BEFORE' : body.timing === 4 ? 'AFTER' : 'INSTEAD OF'
     const eventBits = body.events ?? 0
     const events = [
@@ -1479,6 +1460,7 @@ class LibpgPrinter {
    * @returns Formatted lines.
    */
   onConflict(body: any, indent: string): string[] {
+    if (body.whereClause || body.infer?.whereClause) throw new Error('Unsupported ON CONFLICT WHERE')
     const target = this.onConflictTarget(body)
     const action = body.action === 'ONCONFLICT_NOTHING' ? 'DO NOTHING' : 'DO UPDATE'
     const updates = body.targetList ?? []
@@ -1902,7 +1884,7 @@ class PlPgSqlPrinter {
         return lines
       }
       default:
-        return []
+        throw new Error(`Unsupported PL/pgSQL statement: ${type}`)
     }
   }
 

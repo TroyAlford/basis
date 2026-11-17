@@ -363,6 +363,30 @@ describe('formatSQL', () => {
     })
   })
 
+  describe('unsupported syntax', () => {
+    test('preserves unsupported PL/pgSQL control statements', () => {
+      const sql = 'create function f() returns void as $$ begin perform 1; end $$ language plpgsql'
+      expect(formatSQL(sql)).toBe(sql)
+    })
+
+    test('preserves unsupported function options', () => {
+      const sql = 'create function f() returns integer language plpgsql stable security definer ' +
+        'set search_path = pg_catalog as $$ begin return 1; end $$'
+      expect(formatSQL(sql)).toBe(sql)
+    })
+
+    test('preserves unsupported DDL and DML clauses', () => {
+      const statements = [
+        'alter table widgets add column name text',
+        'update widgets set name = \'x\' from other where widgets.id = other.id',
+        'delete from widgets using other where widgets.id = other.id',
+        'create trigger trg before insert on widgets for each row when (true) execute function fn()',
+        'insert into widgets (id) values (1) on conflict (id) where id > 0 do nothing',
+      ]
+      for (const sql of statements) expect(formatSQL(sql)).toBe(sql)
+    })
+  })
+
   describe('ddl and control statements', () => {
     test('formats DDL and SET statements through the AST', () => {
       expect(formatSQL('create index idx on widgets using btree(name text_pattern_ops)')).toMatchIndented(`
@@ -373,6 +397,9 @@ describe('formatSQL', () => {
       `)
       expect(formatSQL('drop index idx')).toMatchIndented(`
         DROP INDEX "idx"
+      `)
+      expect(formatSQL('drop index if exists idx')).toMatchIndented(`
+        DROP INDEX IF EXISTS "idx"
       `)
       expect(formatSQL('analyze widgets')).toMatchIndented(`
         ANALYZE "widgets"
@@ -604,6 +631,31 @@ describe('parser-backed formatting', () => {
           AND "w"."owner_id" = $1
           AND "w"."name" = 'x'
       ) AS "present"
+    `)
+  })
+
+  test('breaks long joins and VALUES rows at semantic boundaries', () => {
+    expect(formatSQL(`
+      select 1 from widgets w join other o on w.id = o.id and w.active = true
+    `)).toMatchIndented(`
+      SELECT 1
+      FROM "widgets" "w"
+      JOIN "other" "o"
+        ON "w"."id" = "o"."id"
+          AND "w"."active" = true
+    `)
+    expect(formatSQL(`
+      insert into widgets (id, name, owner, rank)
+      values ('1', 'SQL', (select id from people where email = 'a@b.c'), 0)
+    `)).toMatchIndented(`
+      INSERT INTO "widgets" ("id", "name", "owner", "rank")
+      VALUES
+        (
+          '1',
+          'SQL',
+          (SELECT "id" FROM "people" WHERE "email" = 'a@b.c'),
+          0
+        )
     `)
   })
 
