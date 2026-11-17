@@ -622,7 +622,7 @@ export async function introspect(sql: BunSQL): Promise<PhysicalSchema> {
       t.tginitdeferred AS "initDeferred",
       t.tgconstraint AS CONSTRAINT,
       p.proname AS "functionName",
-      (SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(t.tgattr::smallint [ ]) WITH
+      (SELECT array_agg(a.attname ORDER BY u.ordinality) FROM unnest(t.tgattr::smallint[]) WITH
         ORDINALITY u(attnum,
         ordinality) JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = u.attnum) AS
         columns

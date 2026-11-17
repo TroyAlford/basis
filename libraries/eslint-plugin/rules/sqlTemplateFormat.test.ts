@@ -109,6 +109,11 @@ describe('formatSQL', () => {
   })
 
   describe('create view', () => {
+    test('formatting a formatted view is a no-op', () => {
+      const once = formatSQL('create view active_widgets as select id from widgets')
+      expect(formatSQL(once)).toBe(once)
+    })
+
     test('wraps the query body in indented parentheses', () => {
       expect(formatSQL(`
         create view active_widgets as select id, name from widgets where active = true
@@ -172,6 +177,23 @@ describe('formatSQL', () => {
             NEW.status = LOWER(NEW.status);
           END IF;
 
+          RETURN NEW;
+        END
+        $$ LANGUAGE plpgsql;
+      `)
+    })
+
+    test('preserves PL/pgSQL assignment operators and array types', () => {
+      expect(formatSQL(`
+        create or replace function compute() returns trigger as $$
+        begin
+          new.vectors := compute_vectors(new.name, new.aliases);
+          return new;
+        end $$ language plpgsql;
+      `)).toMatchSql(`
+        CREATE OR REPLACE FUNCTION compute() RETURNS TRIGGER AS $$
+        BEGIN
+          NEW.vectors := compute_vectors(NEW.name, NEW.aliases);
           RETURN NEW;
         END
         $$ LANGUAGE plpgsql;
@@ -311,6 +333,17 @@ describe('formatSQL', () => {
   })
 
   describe('create table', () => {
+    test('preserves array types', () => {
+      expect(formatSQL(`
+        create table widgets (tags text[] not null default '{}', ids uuid[])
+      `)).toMatchSql(`
+        CREATE TABLE widgets (
+          tags TEXT[] NOT NULL DEFAULT '{}',
+          ids UUID[]
+        )
+      `)
+    })
+
     test('puts one column or constraint per line', () => {
       expect(formatSQL(`
         create table if not exists widgets (

@@ -939,8 +939,8 @@ describe('Server database lifecycle', () => {
     `
     await database.sql`
       INSERT INTO "Article"("id", "author.id", "tags", "payload")
-      VALUES (${articleOne}, ${ada}, ARRAY [ 'one', 'two' ], '{"kind":"note"}'::jsonb),
-        (${articleTwo}, ${ada}, ARRAY [ 'three' ], '{"kind":"memo"}'::jsonb)
+      VALUES (${articleOne}, ${ada}, ARRAY ['one', 'two'], '{"kind":"note"}'::jsonb),(${articleTwo},
+        ${ada}, ARRAY ['three'], '{"kind":"memo"}'::jsonb)
     `
     await database.sql`
       INSERT INTO "Membership"("user.id", "campaign.id", "role", "favorites")
@@ -1613,12 +1613,12 @@ describe('Server database lifecycle', () => {
     `
     await database.sql`
       INSERT INTO "Note"("id", "tags", "scores", "payload")
-      VALUES (${one}, ARRAY [ 'urgent', 'important' ], ARRAY [ 1, 2, 2 ],
-        '{"kind":"note","meta":{"active":true}}'::jsonb),(${two}, ARRAY [ 'urgent' ], ARRAY [ 3 ],
-        '{"kind":"other"}'::jsonb),(${three}, ARRAY [ ]::text [ ], ARRAY [ ]::double PRECISION [ ],
-        '{}'::jsonb),(${four}, ARRAY [ 'b', 'a' ], ARRAY [ 2, 1, 1 ], '["a","b"]'::jsonb),(${five},
-        ARRAY [ 'a', 'b' ], ARRAY [ 1, 2 ], '{"kind":"note"}'::jsonb),(${six}, ARRAY [ 'c' ],
-        ARRAY [ 4 ], '{"kind":null}'::jsonb)
+      VALUES (${one}, ARRAY ['urgent', 'important'], ARRAY [1, 2, 2],
+        '{"kind":"note","meta":{"active":true}}'::jsonb),(${two}, ARRAY ['urgent'], ARRAY [3],
+        '{"kind":"other"}'::jsonb),(${three}, ARRAY []::text[], ARRAY []::double PRECISION[],
+        '{}'::jsonb),(${four}, ARRAY ['b', 'a'], ARRAY [2, 1, 1], '["a","b"]'::jsonb),(${five},
+        ARRAY ['a', 'b'], ARRAY [1, 2], '{"kind":"note"}'::jsonb),(${six}, ARRAY ['c'], ARRAY [4],
+        '{"kind":null}'::jsonb)
     `
 
     const ids = async (where: string): Promise<unknown[]> => (

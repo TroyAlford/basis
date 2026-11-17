@@ -176,12 +176,12 @@ function tokenize(sql: string): Token[] {
         continue
       }
     }
-    if ('(),;'.includes(character)) {
+    if ('(),;[]'.includes(character)) {
       tokens.push(token('punctuation', character))
       index += 1
       continue
     }
-    const operator = ['::', '||', '>=', '<=', '<>', '!=', '->>', '->', '=', '<', '>', '+', '-', '*', '/', '.']
+    const operator = [':=', '::', '||', '>=', '<=', '<>', '!=', '->>', '->', '=', '<', '>', '+', '-', '*', '/', '.']
       .find(candidate => sql.startsWith(candidate, index))
     if (operator) {
       tokens.push(token('operator', operator))
@@ -352,7 +352,11 @@ function formatCreateView(tokens: readonly Token[], indent: string): string[] {
   const asIndex = findTopLevel(tokens, candidate => candidate.upper === 'as')
   if (asIndex === -1) return formatQuery(tokens, indent)
   const header = formatInline(tokens.slice(0, asIndex + 1))
-  const body = formatQuery(tokens.slice(asIndex + 1), `${indent}  `)
+  const open = asIndex + 1
+  const alreadyWrapped = tokens[open]?.text === '(' && matchingParen(tokens, open) === tokens.length - 1
+  const body = alreadyWrapped
+    ? formatQuery(tokens.slice(open + 1, tokens.length - 1), `${indent}  `)
+    : formatQuery(tokens.slice(open), `${indent}  `)
   return [`${indent}${header} (`, ...body, `${indent})`]
 }
 
@@ -964,8 +968,9 @@ function append(line: string, next: Token, previous: Token | undefined, indent: 
  */
 function needsSpace(previous: Token | undefined, next: Token): boolean {
   if (!previous) return false
-  if ([',', ';', ')', '::', '.'].includes(next.text)) return false
-  if (['(', '::', '.'].includes(previous.text)) return false
+  if ([',', ';', ')', ']', '::', '.'].includes(next.text)) return false
+  if (['(', '[', '::', '.'].includes(previous.text)) return false
+  if (next.text === '[') return previous.upper === 'array'
   if (next.text === '(') return SPACE_BEFORE_PAREN.has(previous.upper)
   if (next.text === '*') return true
   if (previous.kind === 'operator' || next.kind === 'operator') return previous.text !== '::' && next.text !== '::'
