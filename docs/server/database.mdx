@@ -575,9 +575,18 @@ Docker is required for managed mode. An unavailable Docker daemon or failed conn
 
 ## Managed backup, restore, and major upgrades
 
-Managed PostgreSQL exposes host-run operations through `ManagedPostgresOperations`. Operations never create a scheduler, daemon, or second migration authority. They use the existing administrative owner for `pg_dump`, `pg_restore`, and recovery work, while application traffic remains on the restricted `basis_app` role. Owner and application passwords remain under `.basis/database/` with owner-only permissions.
+Managed PostgreSQL exposes host-run operations through the Basis CLI and the `ManagedPostgresOperations` library. Operations never create a scheduler, daemon, or second migration authority. They use the existing administrative owner for `pg_dump`, `pg_restore`, and recovery work, while application traffic remains on the restricted `basis_app` role. Owner and application passwords remain under `.basis/database/` with owner-only permissions.
 
-Pass the same approved migration artifact that the deployment supplies to `server.migration()`. The artifact records the schema version, expected physical structure, RLS policies, grants, and ownership that the backup must preserve.
+The CLI resolves the application's `graph.ts` and `migrations/` from the current directory; `graph.ts` may default-export the Graph or export it as `graph`. Each command prints the returned JSON:
+
+```bash
+bunx basis db backup
+bunx basis db restore .basis/backups/<archive>.dump --image postgres:17-alpine
+bunx basis db upgrade postgres:17-alpine
+bunx basis db rollback .basis/backups/<archive>.dump --image postgres:17-alpine
+```
+
+Pass the same approved migration artifact that the deployment supplies to `server.migration()`. The artifact records the schema version, expected physical structure, RLS policies, grants, and ownership that the backup must preserve. Programmatic callers can use the library directly:
 
 ```ts
 import { ManagedPostgresOperations } from 'basis/server'
@@ -603,7 +612,7 @@ const result = await operations.upgrade('postgres:17-alpine')
 
 The caller must stop application pools before `upgrade()`. Basis first takes a verified recovery point, proves the restore under the target image in disposable storage, copies the current durable volume to an independently restartable recovery volume, and only then detaches the source and stages the verified target. Cutover verifies the restored schema and canonical data again before accepting the target. If cutover fails, Basis restores the recovery volume and the previous image before reporting the failure; unrecoverable failures preserve the recovery and candidate volumes for diagnosis. After a committed cutover, a cleanup failure is returned as `warnings` with the leftover resource names instead of being reported as a failed upgrade; the new database remains active and verified. `rollback(backup.path, previousImage)` is available for an explicit operator rollback through the same safe cutover path and returns the same cleanup warnings.
 
-Use ordinary host facilities for scheduling and retention, such as a cron entry or systemd timer that runs a short operator script and prunes old files under `.basis/backups/`. Do not add a Basis-managed scheduler or process manager.
+Use ordinary host facilities for scheduling and retention, such as a cron entry or systemd timer that runs `basis db backup` and prunes old files under `.basis/backups/`. Do not add a Basis-managed scheduler or process manager.
 
 ## Versioned releases
 
@@ -611,7 +620,14 @@ A checked-in `migrations/` directory contains a `manifest.json` with the applica
 
 The application root's `graph.ts` is the authored Graph. A deterministic generated `graph.json` is committed beside it for CI; regenerate it with `bun run graph:generate` and verify freshness with `bun run graph:check`. State and backups resolve under the process working directory's `.basis/` directory; do not pass a separate installation root.
 
-`DatabaseRelease` is the host-run release coordinator. The caller first takes the application offline, then calls `apply()`:
+`DatabaseRelease` is the host-run release coordinator. The caller first takes the application offline, then applies the release. The CLI wraps the coordinator for the application in the current directory:
+
+```bash
+bunx basis db plan
+bunx basis db release
+```
+
+Programmatic callers can use the same coordinator directly:
 
 ```ts
 import { DatabaseRelease } from 'basis/server'
